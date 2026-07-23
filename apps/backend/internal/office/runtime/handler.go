@@ -47,7 +47,10 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.POST("/runtime/comments", h.postComment)
 	group.POST("/runtime/tasks/:id/status", h.updateTaskStatus)
 	group.POST("/runtime/tasks/:id/subtasks", h.createSubtask)
+	group.POST("/runtime/tasks", h.createTask)
 	group.POST("/runtime/agents", h.createAgent)
+	group.GET("/runtime/projects", h.listProjects)
+	group.POST("/runtime/projects", h.createProject)
 	group.PATCH("/runtime/agents/:id", h.modifyAgent)
 	group.POST("/runtime/agents/:id/runs", h.spawnAgentRun)
 	group.POST("/runtime/approvals", h.requestApproval)
@@ -55,6 +58,59 @@ func RegisterRoutes(group *gin.RouterGroup, h *Handler) {
 	group.PUT("/runtime/memory/*path", h.putMemory)
 	group.GET("/runtime/skills", h.listSkills)
 	group.DELETE("/runtime/skills/:id", h.deleteSkill)
+}
+
+func (h *Handler) createTask(c *gin.Context) {
+	runCtx, _, ok := h.contextFromRequest(c)
+	if !ok {
+		return
+	}
+	var req CreateTaskInput
+	if !bindJSON(c, &req) {
+		return
+	}
+	if field := req.unsupportedField(); field != "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": field + " is not supported by Office runtime task create"})
+		return
+	}
+	taskID, err := h.actions.CreateTask(c.Request.Context(), runCtx, req)
+	if err != nil {
+		h.respondRuntimeError(c, runCtx, "create_task", "task", req.ParentTaskID, err)
+		return
+	}
+	h.appendActionRunEvent(c.Request.Context(), runCtx, "create_task", "task", taskID)
+	c.JSON(http.StatusCreated, gin.H{"task_id": taskID})
+}
+
+func (h *Handler) listProjects(c *gin.Context) {
+	runCtx, _, ok := h.contextFromRequest(c)
+	if !ok {
+		return
+	}
+	projects, err := h.actions.ListProjects(c.Request.Context(), runCtx)
+	if err != nil {
+		h.respondRuntimeError(c, runCtx, "list_projects", "projects", runCtx.WorkspaceID, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"projects": projects})
+}
+
+func (h *Handler) createProject(c *gin.Context) {
+	runCtx, _, ok := h.contextFromRequest(c)
+	if !ok {
+		return
+	}
+	var req CreateProjectInput
+	if !bindJSON(c, &req) {
+		return
+	}
+	project, err := h.actions.CreateProject(c.Request.Context(), runCtx, req)
+	if err != nil {
+		h.respondRuntimeError(c, runCtx, "create_project", "project", req.LeadAgentProfileID, err)
+		return
+	}
+	h.appendActionRunEvent(c.Request.Context(), runCtx, "create_project", "project", project.ID)
+	c.JSON(http.StatusCreated, gin.H{"project": project})
 }
 
 func (h *Handler) postComment(c *gin.Context) {
@@ -97,7 +153,7 @@ func (h *Handler) updateTaskStatus(c *gin.Context) {
 		req.Status,
 		req.Comment,
 	); err != nil {
-		h.respondRuntimeError(c, runCtx, "update_task_status", "task", c.Param("id"), err)
+		h.respondTaskStatusError(c, runCtx, c.Param("id"), err)
 		return
 	}
 	h.appendActionRunEvent(c.Request.Context(), runCtx, "update_task_status", "task", c.Param("id"))
@@ -352,12 +408,62 @@ func (h *Handler) respondRuntimeError(
 	targetID string,
 	err error,
 ) {
+	if errors.Is(err, errTaskTitleRequired) {
+		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if errors.Is(err, shared.ErrForbidden) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+}
+
+func (h *Handler) respondTaskStatusError(c *gin.Context, runCtx RunContext, taskID string, err error) {
+	if errors.Is(err, shared.ErrForbidden) {
+		h.respondRuntimeError(c, runCtx, "update_task_status", "task", taskID, err)
+		return
+	}
+	var pending PendingApprovalsError
+	if errors.As(err, &pending) {
+		h.appendActionRunEvent(c.Request.Context(), runCtx, "update_task_status", "task", taskID)
+		c.JSON(http.StatusConflict, gin.H{
+			"error":             err.Error(),
+			"pending_approvers": h.resolvePendingApprovers(c.Request.Context(), pending.PendingApproverIDs()),
+			"status":            "in_review",
+		})
+		return
+	}
+	var validation StatusValidationError
+	if errors.As(err, &validation) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	h.respondRuntimeError(c, runCtx, "update_task_status", "task", taskID, err)
+}
+
+type pendingApproverResponse struct {
+	AgentProfileID string `json:"agent_profile_id"`
+	Name           string `json:"name,omitempty"`
+}
+
+func (h *Handler) resolvePendingApprovers(ctx context.Context, ids []string) []pendingApproverResponse {
+	approvers := make([]pendingApproverResponse, len(ids))
+	for i, id := range ids {
+		approvers[i] = pendingApproverResponse{AgentProfileID: id, Name: id}
+		if h.agentSvc == nil || id == "" {
+			continue
+		}
+		agent, err := h.agentSvc.GetAgentInstance(ctx, id)
+		if err == nil && agent != nil && agent.ID == id {
+			if name := strings.TrimSpace(agent.Name); name != "" {
+				approvers[i].Name = name
+			}
+		}
+	}
+	return approvers
 }
 
 func (h *Handler) appendDeniedRunEvent(

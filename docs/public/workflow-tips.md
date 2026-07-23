@@ -87,7 +87,7 @@ Workflow-level settings include the name and default agent profile. A step can o
 | Allow manual move | Allows board drag/drop into the step. It is a product-UI rule, not a security boundary for API clients. |
 | Show in command panel | Includes tasks in this step in the command panel. |
 | Auto-archive | Archives eligible tasks after the configured number of hours. `0` disables it; the background sweep runs every five minutes and uses task `updated_at`, so timing is approximate. |
-| Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent or UI fallback to emit `step_complete_kandev`. Without it, a normal turn end counts as completion. Default is off. |
+| Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent to call `step_complete_kandev`. A halt without the signal leaves the task on the current step; retry or reconnect the agent, or move the task through the normal workflow UI. Without this setting, a normal turn end counts as completion. Default is off. |
 | WIP limit | Maximum active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. A full target rejects manual and automated moves. |
 | Pull from | Optional feeder step. When a WIP-limited step is vacated, Kandev moves candidates from the feeder until capacity is full. Self-references, cross-workflow references, and pull cycles are rejected. |
 
@@ -113,7 +113,7 @@ Keep one transition action per event. A “next” action on the last step or �
 1. Start with manual transitions and verify prompts in a disposable task.
 2. Add `auto_start_agent` only to steps that always have an effective agent profile.
 3. Add turn-complete transitions after the prompt has an unambiguous stop condition.
-4. Enable the explicit completion signal for agents that can call `step_complete_kandev`; otherwise the step can wait indefinitely.
+4. Enable the explicit completion signal for agents that can discover and call `step_complete_kandev`; otherwise the step can wait indefinitely. If the tool is not already visible, the agent should search the active tool catalog for its canonical name.
 5. Add WIP limits before pull rules, then test a full target and a vacated slot.
 6. Export the workflow before a large edit. Workflow deletion is permanent; when it contains tasks, the UI asks you to migrate them or archive them.
 

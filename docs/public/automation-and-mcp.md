@@ -12,6 +12,7 @@ Kandev has several mechanisms that can act without repeated manual setup. Their 
 | Workflow events and actions | React to an existing task entering a step, receiving a message, or completing an agent turn. |
 | Workspace automations | Create task-backed work from a schedule, GitHub pull request, webhook, or manual trigger. |
 | Task MCP | Give an active Kandev session task, plan, conversation, and coordination tools. |
+| Office MCP and runtime CLI | Give an Office run a restricted coordination surface and permission-checked commands for Office state changes. |
 | Profile MCP | Add third-party MCP servers to one agent profile, subject to executor policy. |
 | External MCP | Let a client outside a task configure Kandev and create or manage work through the backend. |
 
@@ -131,6 +132,10 @@ Deleting one run also deletes its associated task. **Delete all runs** deletes a
 
 Kandev automatically injects a task-aware MCP server into supported agent sessions. You do not need to add it to the profile. It lets the active agent use current IDs and structured operations instead of inferring board state from text.
 
+Names ending in `_kandev` are the canonical MCP protocol tool names. Some agent clients show or register a server-qualified alias instead. For example, a client may expose canonical `step_complete_kandev` as `mcp__kandev__step_complete_kandev`. That qualified form is client-specific, not a second tool or a universal name; use the form exposed by the active client.
+
+Task tools use normal client discovery. When `step_complete_kandev` is required but is not already visible, the agent should search the active tool catalog for its canonical name. Kandev does not request eager loading through client-specific metadata.
+
 Task mode currently registers these tool groups:
 
 | Group | Available operations |
@@ -155,9 +160,49 @@ After an accepted stop, Kandev attempts to move an unarchived, non-Office task f
 
 `add_branch_to_task_kandev` works only with the Worktree executor. It can add another branch of the same repository or a second repository entirely. Select at most one of `repository_id`, `repository_url`, or `local_path`; `repository_url` accepts a GitHub repository URL, while the URL/path forms find or create that repository in the task's workspace. A locator is optional for a single-repository task and required to disambiguate a multi-repository task. The new repository/branch receives its own worktree. `update_repository_base_branch_kandev` changes the base used for Kandev's diff, not a pull request's target branch.
 
-`step_complete_kandev` matters only for an auto-advance action configured to require an explicit signal. A user message arriving before transition can cancel that automatic move.
+`step_complete_kandev` is registered and discoverable in every task-mode session. Kandev includes its completion instruction, and acts on its signal, only on Kanban steps whose auto-advance action explicitly requires that signal. A user message arriving before transition can cancel that automatic move.
 
 The task server runs inside agentctl's local runtime boundary. Its MCP routes do not use a separate bearer token. Do not expose agentctl ports; rely on the executor's process/network isolation and Kandev's session scoping.
+
+## Office MCP and runtime CLI
+
+Office runs use a smaller MCP surface than regular task-mode sessions. The built-in Office server registers exactly these tools:
+
+- `ask_user_question_kandev`;
+- `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`;
+- `list_related_tasks_kandev`;
+- `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`.
+
+These tools cover human questions, the current task plan, related-task discovery, and task documents. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools and `step_complete_kandev` are task-mode only and are not registered in Office mode.
+
+An Office run can inspect the projects in its current workspace:
+
+```bash
+$KANDEV_CLI kandev projects list
+```
+
+An agent with the `can_create_projects` permission can create a project. CEO agents receive this permission by default; other roles do not unless it is explicitly granted. `--name` is required, and `--repository` can be repeated for every repository URL or local path owned by the project:
+
+```bash
+$KANDEV_CLI kandev projects create \
+  --name "Payments" \
+  --description "Payment services and checkout" \
+  --repository "https://github.com/acme/payments" \
+  --repository "/workspace/checkout"
+```
+
+The optional project flags are `--lead-agent-profile-id`, `--color`, `--budget-cents`, and `--executor-config`.
+
+Use the returned project ID when creating work in that project:
+
+```bash
+$KANDEV_CLI kandev task create \
+  --title "Add payment retry policy" \
+  --project "$PROJECT_ID" \
+  --assignee "$AGENT_ID"
+```
+
+Project list and create operations are forced to the workspace in the validated Office run token; the agent cannot select another workspace in these commands. Office runs cannot create or administer workspaces. Create additional workspaces through Kandev's user-facing setup and settings surfaces.
 
 ## Profile and executor MCP
 

@@ -1,13 +1,8 @@
 name: OpenCode Code Review
 
-# Dual triggers:
-#   - pull_request: same-repo PRs run automatically.
-#   - pull_request_target: fork PRs can run only after maintainer opt-in.
-# The fork path checks out the PR head but only lets OpenCode read files and
-# post review comments through narrow `gh` permissions.
+# Runs from the base-controlled workflow only. Both same-repository and fork
+# paths inspect the immutable PR head without executing PR-owned workflow code.
 on:
-  pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
   pull_request_target:
     # `labeled` is needed so a maintainer applying `safe-to-review` to a fork
     # PR triggers a review against the current head SHA. Subsequent fork pushes
@@ -25,14 +20,17 @@ jobs:
   opencode-review-same-repo:
     if: >
       vars.OPENCODE_REVIEW_ENABLED == 'true' &&
-      github.event_name == 'pull_request' &&
+      github.event_name == 'pull_request_target' &&
       github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      vars.OPENCODE_REVIEW_APP_CLIENT_ID != '' &&
+      vars.OPENCODE_REVIEW_APP_SLUG != ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    environment: opencode-review-trusted
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
 
     steps:
       - name: Checkout PR head
@@ -42,12 +40,16 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Assert immutable PR head checkout
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
+
       - name: Build review inputs
         id: review-inputs
         env:
-          ACTION: ${{ github.event.action }}
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.event.after }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -57,16 +59,8 @@ jobs:
           rm -rf "$REVIEW_DIR"
           mkdir -p "$REVIEW_DIR"
 
-          if [[ "$ACTION" == "synchronize" ]] &&
-             [[ -n "${BEFORE:-}" ]] &&
-             [[ "$BEFORE" != "0000000000000000000000000000000000000000" ]] &&
-             git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            RANGE="$BEFORE..${AFTER:-$HEAD_SHA}"
-            MODE="incremental"
-          else
-            RANGE="$BASE_SHA...$HEAD_SHA"
-            MODE="full-pr"
-          fi
+          RANGE="$BASE_SHA...$HEAD_SHA"
+          MODE="full-pr"
 
           git diff --find-renames --find-copies --unified=80 "$RANGE" > "$REVIEW_DIR/review.patch"
           git diff --name-only "$RANGE" > "$REVIEW_DIR/files.txt"
@@ -189,12 +183,32 @@ jobs:
             echo "Output files are preserved under \`$REVIEW_DIR/\`."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Create dedicated OpenCode review App token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.OPENCODE_REVIEW_APP_CLIENT_ID }}
+          private-key: ${{ secrets.OPENCODE_REVIEW_ENV_APP_PRIVATE_KEY }}
+          permission-pull-requests: write
+
+      - name: Assert dedicated OpenCode review App identity
+        env:
+          EXPECTED_APP_SLUG: ${{ vars.OPENCODE_REVIEW_APP_SLUG }}
+          ACTUAL_APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+        run: |
+          set -euo pipefail
+          test -n "$EXPECTED_APP_SLUG"
+          test -n "$ACTUAL_APP_SLUG"
+          test "$ACTUAL_APP_SLUG" = "$EXPECTED_APP_SLUG"
+
       - name: Post OpenCode findings
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           OPENCODE_MODEL: ${{ env.OPENCODE_MODEL }}
         run: |
@@ -234,7 +248,7 @@ jobs:
       contains(github.event.pull_request.labels.*.name, 'safe-to-review')
     runs-on: ubuntu-latest
     permissions:
-      pull-requests: write
+      issues: write
     steps:
       - uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
@@ -276,18 +290,20 @@ jobs:
       - name: Checkout PR head
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          # pull_request_target checks out the base branch by default; explicitly
-          # check out the contributor's head via the base repository PR ref.
-          ref: refs/pull/${{ github.event.pull_request.number }}/head
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Assert immutable PR head checkout
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$HEAD_SHA"
 
       - name: Build review inputs
         id: review-inputs
         env:
-          ACTION: ${{ github.event.action }}
-          BEFORE: ${{ github.event.before }}
-          AFTER: ${{ github.event.after }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -298,16 +314,8 @@ jobs:
           mkdir -p "$REVIEW_DIR"
           git fetch --no-tags --prune origin "$BASE_SHA"
 
-          if [[ "$ACTION" == "synchronize" ]] &&
-             [[ -n "${BEFORE:-}" ]] &&
-             [[ "$BEFORE" != "0000000000000000000000000000000000000000" ]] &&
-             git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            RANGE="$BEFORE..${AFTER:-$HEAD_SHA}"
-            MODE="incremental"
-          else
-            RANGE="$BASE_SHA...$HEAD_SHA"
-            MODE="full-pr"
-          fi
+          RANGE="$BASE_SHA...$HEAD_SHA"
+          MODE="full-pr"
 
           git diff --find-renames --find-copies --unified=80 "$RANGE" > "$REVIEW_DIR/review.patch"
           git diff --name-only "$RANGE" > "$REVIEW_DIR/files.txt"
@@ -432,10 +440,13 @@ jobs:
 
       - name: Post OpenCode findings
         env:
+          # Advisory fork evidence is deliberately nonqualifying.
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           OPENCODE_MODEL: ${{ env.OPENCODE_MODEL }}
         run: |

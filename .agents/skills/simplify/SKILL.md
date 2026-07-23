@@ -9,17 +9,16 @@ Post-implementation simplification pass. Review recently changed code and active
 
 ## Planner Entry
 
-The user-started primary session delegates this
-procedure to the registered `simplify` worker and assigns verification to the
-`verify` worker afterward. It does not edit or verify the code directly. An
-explicitly assigned simplify worker continues below and does not spawn workers.
+The planner may simplify small localized changes directly; delegate larger or
+cross-component work. Code/test/config changes still require final Spark
+`verify`. A simplify worker owns one packet and does not spawn workers.
 
 The best code is code you don't have to write. The second best is code anyone can read.
 
 ## Available skills and subagents
 
-- **`verify` worker** — The planner runs this after simplification to ensure all
-  tests, lints, and typechecks still pass.
+- **`verify` worker** — After simplification is accepted and committed through
+  hooks, the planner runs this post-commit gate before push.
 
 ## Steps
 
@@ -62,7 +61,7 @@ Report any verification concerns or focused checks the planner should delegate.
 
 ### 3. Verify
 
-Report the required full verification and any focused concerns to the planner;
+Report the required final change-aware verification and any focused concerns to the planner;
 do not run verification yourself. The planner delegates it to the `verify`
 worker. If anything breaks, the simplification changed behavior and the
 planner assigns the correction to a worker.

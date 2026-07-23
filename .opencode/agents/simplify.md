@@ -13,4 +13,4 @@ Review recently changed files and simplify while preserving behavior. Remove one
 
 Verify after meaningful simplifications. If behavior changes, revert that simplification. Report modified files, what changed, and verification.
 
-Do not spawn subagents. Report required full verification to the planner.
+Do not spawn subagents. Report required change-aware verification to the planner.

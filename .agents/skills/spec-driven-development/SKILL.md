@@ -1,6 +1,6 @@
 ---
 name: spec-driven-development
-description: "Single planner entrypoint for Kandev spec-driven implementation. Use when developing a feature or behavior-changing fix through the full flow: clarify intent, create/update specs, create a plan, split independent verifiable tasks, delegate every execution step to workers, verify, and report progress."
+description: "Single planner entrypoint for Kandev spec-driven implementation. Use when developing a feature or behavior-changing fix through the full flow: clarify intent, create/update specs, plan substantial delegated implementation, verify, and report progress."
 ---
 
 # Spec-Driven Development
@@ -9,15 +9,19 @@ Use this as the default development workflow for non-trivial features and behavi
 
 ## Planner And Workers
 
-The user-started primary session owns planning,
-delegation, progress, approvals, and user communication. It does not implement,
-test, integrate, verify, or ship code. Workers do not spawn other workers.
+The user-started primary session owns architecture, planning, integration
+judgment, delegation, and user
+communication. Large feature-plan implementation stays worker-driven; small
+scoped work may be direct under `/planner-orchestration`. Workers do not spawn.
 
 - **`architect`** - optional frontier-model design reviewer for unusually risky architecture; it is not the default planner.
 - **`implementer`** - implements one assigned task with TDD in the current worktree or an assigned git worktree.
 - **`test-engineer`** - designs or adds focused tests when coverage is unclear, a bug needs a Prove-It regression, or a task is test-heavy.
-- **`qa`** - validates integrated waves against the spec/plan, checks wiring, tests edge cases, and reports readiness.
-- **`security-auditor`** - reviews security-sensitive changes such as auth, workspace isolation, filesystem/process execution, integrations, webhooks, secrets, or agent/tool permissions.
+- **`qa`** - exceptional independent validation for unusually complex multi-component behavior or an important boundary lacking faithful tests.
+- **`code-review`** - exceptional local frontier review; qualifying current-head PR AI evidence is the default semantic path for PR delivery.
+- **`security-auditor`** - exceptional audit for high-impact new/changed security boundaries or concrete security concerns.
+- **`spark-explorer`** - Codex-only opt-in read-only specialist for bounded call-path tracing and evidence gathering; never use it for architecture, security, final review, implementation, or edits.
+- **`spark-implementer`** - Codex-only opt-in specialist for explicit localized low-risk UI or code edits; use the normal implementer for work outside its stop conditions.
 
 If a required worker cannot be launched, stop and report the unavailable role.
 Never execute that worker's phase in the planner session.
@@ -25,7 +29,7 @@ Never execute that worker's phase in the planner session.
 ## Core Flow
 
 ```text
-Intent -> Planner artifacts -> User approval -> Workers by wave -> QA -> Verify -> Report
+Intent -> Planner artifacts -> User approval -> Workers by wave -> Risk-routed evidence -> Commit -> Verify -> Report
 ```
 
 Do not skip from intent to code unless the user explicitly asks to bypass the process.
@@ -125,7 +129,7 @@ Each task needs:
 - **Verification:** exact targeted command(s).
 - **Files:** specific paths, not broad directories.
 - **Inputs:** spec section, plan section, relevant patterns, and dependencies.
-- **Output contract:** summary of changes, tests run, files touched, blockers, and follow-up risks.
+- **Output contract:** compact handoff capsule: intent/acceptance; base/head SHA when applicable; changed files and entry points; named spec/ADR sections; risk tags; exact targeted commands/results; uncertainties.
 - **Dependencies:** task IDs that must complete first, or `None`.
 
 Independence test:
@@ -161,8 +165,8 @@ Parallelize only when safe:
 
 If the active harness's native subagent tools and git worktrees are available,
 the planner may request one worktree per independent task. Worktree creation,
-branch operations, and integration are bounded implementer assignments; the
-planner does not run Git commands itself.
+branch operations, and integration are delegated when their isolation benefit
+is material; the planner may handle a small routine Git step directly.
 
 The assigned setup worker may use:
 
@@ -190,7 +194,12 @@ For each task:
   `plan.md` unless the work packet explicitly owns that shared file and the
   update is serialized outside parallel execution.
 
-Assign every independent task to an `implementer` worker. Launch implementers in parallel only for tasks in the same wave that do not share mutable files. Use this prompt shape:
+Assign every independent task to the normal `implementer` worker by default.
+Codex may use `spark-implementer` only for an explicit, localized low-risk UI
+or code edit when none of its documented stop conditions apply; if there is
+doubt, use the normal `implementer`. Keep the same file-ownership, wave, TDD,
+and output rules for either role. Launch workers in parallel only for tasks in
+the same wave that do not share mutable files. Use this prompt shape:
 
 ```text
 Task: <title>
@@ -208,27 +217,50 @@ Constraints:
 - Update only the assigned task file; do not edit `plan.md` without explicit,
   serialized shared-plan ownership.
 Output:
-- Summary, files changed, tests run, blockers, risks, and task file status update.
+- Compact handoff capsule (intent/acceptance; base/head SHA when applicable;
+  changed files/entry points; named spec/ADR sections; risk tags; exact
+  targeted commands/results; uncertainties) and task file status update.
 ```
 
-The planner coordinates waves and keeps progress state. Conflict resolution,
-branch integration, and follow-up fixes are new bounded `implementer`
-assignments. The planner never handles them inline.
+The planner coordinates waves and keeps progress state. Delegate substantial
+conflict resolution, integration, and follow-up fixes; handle only small scoped
+ones directly under `/planner-orchestration`.
 
 ## Phase 7: Integrate And Verify
 
+Per-task versus per-wave checks are distinct:
+
+- Each assigned `implementer` or `spark-implementer` owns and runs its task's
+  targeted verification. The planner checks the reported evidence; it does not
+  duplicate those tests after every wave.
+- Derive risk tags from worker reports plus planner inspection and apply the
+  `/planner-orchestration` evidence contract. Ordinary integration with
+  faithful tests does not automatically require `qa`.
+
 After each wave:
-- Delegate targeted tests for changed backend packages or frontend modules.
 - Delegate conflict resolution and rerun affected tests through an implementer.
 - Update the plan if the task files or wave graph changed.
 
 At the end:
 - Run the `test-engineer` worker when coverage is disputed, missing, or hard to place at the right test level.
-- Run the `qa` worker for integration and behavior verification.
-- Run the `security-auditor` subagent for security-sensitive changes before declaring readiness.
 - Run the `simplify` worker if implementation grew speculative abstractions.
-- Run the `verify` worker for full format, typecheck, tests, and lint.
+- For PR delivery, defer routine semantic review until one qualifying
+  current-head PR AI review; use local `code-review` only for the central
+  exceptional routes.
+- Run `qa` and `security-auditor` only for their central exceptional routes.
+- Commit through active hooks, then run mandatory final change-aware `verify`
+  before push; pass the hook receipt and use full mode when triggered.
 - Use `/record` for ADR/spec updates if implementation discovered a durable decision or behavior change.
+
+When PR delivery is in scope, PR AI review may be deferred, but do not claim
+readiness until qualifying current-head semantic-review evidence exists.
+
+Route every finding to a new bounded implementer packet. For a small,
+scope-preserving PR remediation, use the finding, focused regression, final
+Spark `verify`, and fresh qualifying exact-head PR AI review; do not relaunch
+local gates unless the fix meets a central exceptional route. Reuse the same
+native thread when role, change, and file scope remain materially the same;
+otherwise launch a fresh worker for independent judgment or stale/noisy context.
 
 ## Stop Conditions
 
@@ -246,4 +278,5 @@ Report:
 - Task waves completed and any tasks left.
 - Subagent/worktree branches used, if any.
 - Tests and verification commands run.
+- Semantic-review evidence, risk tags, and QA decision/reason.
 - Known pending checks or risks.

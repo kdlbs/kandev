@@ -1407,14 +1407,12 @@ func (s *Service) autoStartStepPrompt(
 	// history. For CREATED sessions the agent has not started yet, so this is
 	// the first prompt of the task — wrap with the Kandev MCP system block
 	// before persisting (and before passing downstream) so the DB row matches
-	// what the agent receives. StartCreatedSession's wrap is idempotent
-	// (HasKandevContext guard) so the pre-wrap doesn't double.
-	// The HasKandevContext check on `agentPrompt` also guards against any future
-	// caller that ever pre-wraps before reaching here (none today).
+	// what the agent receives. The mode-aware injectors canonicalize any
+	// pre-wrapped runtime context from current server state.
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim.
 	recordedPrompt := agentPrompt
-	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (agentPrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(agentPrompt) {
+	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (agentPrompt != "" || len(attachments) > 0) {
 		isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 		if err != nil {
 			requeueTaken()
@@ -1422,10 +1420,15 @@ func (s *Service) autoStartStepPrompt(
 		}
 		configMode, _ := session.Metadata["config_mode"].(bool)
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
-		recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, agentPrompt, sysprompt.KandevContextOptions{
-			RequiresCompletionSignal:       requiresSignal,
-			IncludeCoordinatorTaskControls: !isOfficeTask && !configMode,
-		})
+		referenceContext := EntityReferenceContext(references)
+		if isOfficeTask {
+			recordedPrompt = sysprompt.InjectOfficeContext(taskID, sessionID, agentPrompt, referenceContext)
+		} else {
+			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, agentPrompt, sysprompt.KandevContextOptions{
+				RequiresCompletionSignal:       requiresSignal,
+				IncludeCoordinatorTaskControls: !configMode,
+			}, referenceContext)
+		}
 	}
 	userMsgRecorded := s.recordAutoStartMessage(ctx, taskID, sessionID, recordedPrompt, planMode, origin, references)
 
@@ -1438,7 +1441,10 @@ func (s *Service) autoStartStepPrompt(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		_, err := s.StartCreatedSession(ctx, taskID, sessionID, session.AgentProfileID, recordedPrompt, true, planMode, true, attachments)
+		_, err := s.StartCreatedSession(
+			ctx, taskID, sessionID, session.AgentProfileID,
+			recordedPrompt, true, planMode, true, attachments, references,
+		)
 		if err != nil {
 			requeueTaken()
 		}
@@ -1463,7 +1469,9 @@ func (s *Service) autoStartStepPrompt(
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName))
-			return s.fallbackFreshLaunchOnMissingExecution(ctx, taskID, sessionID, agentPrompt, planMode, takenMsg, attachments)
+			return s.fallbackFreshLaunchOnMissingExecution(
+				ctx, taskID, sessionID, agentPrompt, planMode, takenMsg, attachments, references,
+			)
 		}
 
 		// "already has an agent running" means the execution store still tracks
@@ -1524,6 +1532,7 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	planMode bool,
 	takenMsg *messagequeue.QueuedMessage,
 	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
 ) error {
 	requeue := func() {
 		if takenMsg != nil {
@@ -1545,7 +1554,10 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 		return err
 	}
 
-	if _, err := s.StartCreatedSession(ctx, taskID, sessionID, fresh.AgentProfileID, prompt, true, planMode, true, attachments); err != nil {
+	if _, err := s.StartCreatedSession(
+		ctx, taskID, sessionID, fresh.AgentProfileID,
+		prompt, true, planMode, true, attachments, references,
+	); err != nil {
 		s.logger.Error("auto-start fallback: fresh launch failed",
 			zap.String("session_id", sessionID), zap.Error(err))
 		requeue()

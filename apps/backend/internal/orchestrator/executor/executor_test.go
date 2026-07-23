@@ -2070,12 +2070,11 @@ func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsOnFailedSessionReadError(t 
 	}
 }
 
-func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsOfficeTask(t *testing.T) {
+func TestWriteTaskReviewStateIfNoWorkingSessionsSkipsUnassignedOfficeTask(t *testing.T) {
 	repo := newMockRepository()
 	repo.tasks["task-123"] = &models.Task{
-		ID:                     "task-123",
-		IsFromOffice:           true,
-		AssigneeAgentProfileID: "agent-profile-123",
+		ID:           "task-123",
+		IsFromOffice: true,
 	}
 	repo.sessions["session-123"] = &models.TaskSession{
 		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateFailed,
@@ -2144,9 +2143,9 @@ func TestStartAgentProcessOnResumePromotesTaskAfterSuccess(t *testing.T) {
 	}
 }
 
-func TestStartAgentProcessOnResumeSkipsOfficeTaskPromotion(t *testing.T) {
+func TestStartAgentProcessOnResumeSkipsUnassignedOfficeTaskPromotion(t *testing.T) {
 	repo := newMockRepository()
-	repo.tasks["task-123"] = &models.Task{ID: "task-123", IsFromOffice: true, AssigneeAgentProfileID: "agent-profile-123"}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", IsFromOffice: true}
 	session := &models.TaskSession{
 		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
 	}

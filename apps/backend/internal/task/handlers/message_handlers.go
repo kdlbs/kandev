@@ -29,7 +29,7 @@ import (
 type OrchestratorService interface {
 	PromptTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error)
 	ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error
-	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) error
+	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) error
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 	StepRequiresCompletionSignal(ctx context.Context, taskID string) bool
 }
@@ -314,14 +314,14 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// the agent" path. Wrap with the Kandev MCP system block before persisting
 	// so the DB row matches what the agent receives (and "Show formatted"
 	// reveals it). The orchestrator's wrap in StartCreatedSession is
-	// idempotent (HasKandevContext guard), so passing the wrapped content
-	// through dispatchPromptAsync does not double-wrap downstream.
-	// NOTE: req.Content is user-controlled — do NOT guard this wrap on
-	// HasKandevContext. A malicious or naive client could craft a body
+	// mode-aware and canonicalizing, so passing the wrapped content through
+	// dispatchPromptAsync does not double-wrap downstream.
+	// NOTE: req.Content is user-controlled. A
+	// malicious or naive client could craft a body
 	// containing a fake "<kandev-system>KANDEV MCP TOOLS</kandev-system>"
 	// block and bypass server-side injection of the canonical task/session/
-	// tool context. Wrap unconditionally; the orchestrator's own guard sees
-	// our wrap downstream and skips its second pass.
+	// tool context. The injector replaces it with server-generated context here
+	// and canonicalizes it again from server state downstream.
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
@@ -334,10 +334,15 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
-		storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
-			RequiresCompletionSignal:       requiresSignal,
-			IncludeCoordinatorTaskControls: !task.IsOfficeOwnedAndAssigned() && !configMode,
-		})
+		referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
+		if task.IsFromOffice {
+			storedContent = sysprompt.InjectOfficeContext(req.TaskID, req.TaskSessionID, storedContent, referenceContext)
+		} else {
+			storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
+				RequiresCompletionSignal:       requiresSignal,
+				IncludeCoordinatorTaskControls: !configMode,
+			}, referenceContext)
+		}
 	}
 	req.Content = storedContent
 
@@ -496,7 +501,10 @@ func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMess
 	attachments := req.Attachments
 	go func() {
 		promptCtx := context.WithoutCancel(ctx)
-		h.forwardMessageAsPrompt(promptCtx, taskID, sessionID, agentProfileID, content, model, planMode, attachments, isCreatedSession)
+		h.forwardMessageAsPrompt(
+			promptCtx, taskID, sessionID, agentProfileID,
+			content, model, planMode, attachments, req.EntityReferences, isCreatedSession,
+		)
 	}()
 }
 
@@ -508,11 +516,15 @@ func (h *MessageHandlers) forwardMessageAsPrompt(
 	taskID, sessionID, agentProfileID, content, model string,
 	planMode bool,
 	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
 	startCreated bool,
 ) {
 	// For CREATED sessions, start the agent with this message as the initial prompt
 	if startCreated {
-		if err := h.orchestrator.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, content, true, planMode, false, attachments); err != nil {
+		if err := h.orchestrator.StartCreatedSession(
+			ctx, taskID, sessionID, agentProfileID,
+			content, true, planMode, false, attachments, references,
+		); err != nil {
 			h.logger.Warn("failed to start created session from message",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),

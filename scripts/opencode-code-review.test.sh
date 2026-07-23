@@ -94,6 +94,35 @@ if [[ "$explicit_model_env_count" != "2" ]]; then
 fi
 pass "OpenCode posting steps explicitly pass OPENCODE_MODEL"
 
+run_id_env_count="$(count_occurrences 'GITHUB_RUN_ID: ${{ github.run_id }}')"
+run_attempt_env_count="$(count_occurrences 'GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}')"
+if [[ "$run_id_env_count" -ne 2 || "$run_attempt_env_count" -ne 2 ]]; then
+  fail "Dedicated terminal posting passes immutable workflow run identity"
+fi
+pass "Dedicated terminal posting passes immutable workflow run identity"
+
+trusted_environment_count="$(count_occurrences 'environment: opencode-review-trusted')"
+if [[ "$trusted_environment_count" -ne 1 ]]; then
+  fail "Same-repository trusted review uses the protected environment"
+fi
+if grep -q 'OPENCODE_REVIEW_APP_PRIVATE_KEY' "$WORKFLOW" || ! grep -q 'OPENCODE_REVIEW_ENV_APP_PRIVATE_KEY' "$WORKFLOW"; then
+  fail "Trusted review uses only the environment-scoped App private key"
+fi
+pass "Same-repository trusted review isolates App credentials in the protected environment"
+
+for harness_file in \
+  .agents/agents/pr-poller.md \
+  .codex/agents/pr-poller.toml \
+  .cursor/agents/pr-poller.md \
+  .opencode/agents/pr-poller.md \
+  .agents/skills/pr-fixup/SKILL.md \
+  .agents/skills/planner-orchestration/SKILL.md; do
+  if ! grep -q 'OpenCode App.*trusted_producer=true\|trusted_producer=true.*OpenCode App\|OpenCode producer.*trusted_producer=true' "$ROOT_DIR/$harness_file"; then
+    fail "Harness requires trusted producer only for the dedicated OpenCode App"
+  fi
+done
+pass "Harness preserves generic selected-reviewer qualification without App provenance"
+
 patch_capability_count="$(count_occurrences 'post-findings --help | grep -q -- "--patch"')"
 if [[ "$patch_capability_count" != "2" ]]; then
   fail "OpenCode posting steps check trusted parser support before passing review.patch"
@@ -126,3 +155,60 @@ if [[ -n "$invalid_artifact_upload_refs" ]]; then
   fail "OpenCode review artifact uploads use immutable action refs"
 fi
 pass "OpenCode review artifact uploads use immutable action refs"
+
+if rg -q '^  pull_request:' "$WORKFLOW"; then
+  fail "OpenCode review runs only from pull_request_target base workflow"
+fi
+pass "OpenCode review runs only from pull_request_target base workflow"
+
+app_token_action='actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0'
+if [[ "$(count_occurrences "$app_token_action")" != "1" ]]; then
+  fail "Only same-repository trusted review mints a pinned dedicated App token"
+fi
+pass "Only same-repository trusted review mints a pinned dedicated App token"
+
+if [[ "$(count_occurrences 'permission-pull-requests: write')" != "1" ]]; then
+  fail "Dedicated App tokens explicitly request pull-request write permission"
+fi
+pass "Dedicated App tokens explicitly request pull-request write permission"
+
+if [[ "$(count_occurrences 'GH_TOKEN: ${{ steps.app-token.outputs.token }}')" != "1" ]]; then
+  fail "Only dedicated App tokens are supplied to terminal posting"
+fi
+pass "Only dedicated App tokens are supplied to terminal posting"
+
+if [[ "$(count_occurrences 'GH_TOKEN: ${{ github.token }}')" != "1" ]]; then
+  fail "Only advisory fork posting uses github.token"
+fi
+pass "Only advisory fork posting uses github.token"
+
+if [[ "$(count_occurrences 'ref: ${{ github.event.pull_request.head.sha }}')" != "2" ]] || [[ "$(count_occurrences 'git rev-parse HEAD')" != "2" ]]; then
+  fail "Both review paths use and assert immutable PR head SHA checkouts"
+fi
+pass "Both review paths use and assert immutable PR head SHA checkouts"
+
+if [[ "$(count_occurrences 'RANGE="$BASE_SHA...$HEAD_SHA"')" != "2" ]] || rg -q 'incremental|BEFORE|AFTER' "$WORKFLOW"; then
+  fail "Both review paths always review the full base-to-head PR range"
+fi
+pass "Both review paths always review the full base-to-head PR range"
+
+if [[ "$(count_matches regex '^[[:space:]]+pull-requests: read$')" != "1" ]] || [[ "$(count_matches regex '^[[:space:]]+pull-requests: write$')" != "1" ]]; then
+  fail "Same-repository token is read-only and advisory fork publishing is the only write job"
+fi
+pass "Same-repository token is read-only and advisory fork publishing is the only write job"
+
+model_steps="$(awk '/- name: Run OpenCode review/{in_run=1} /- name: Create dedicated OpenCode review App token/{in_run=0} in_run' "$WORKFLOW")"
+if rg -q '(OPENCODE_REVIEW_APP_PRIVATE_KEY|steps\.app-token\.outputs\.token)' <<<"$model_steps"; then
+  fail "OpenCode model step must not receive dedicated App credentials"
+fi
+pass "OpenCode model step does not receive dedicated App credentials"
+
+if ! rg -A 10 '^  strip-safe-to-review:' "$WORKFLOW" | rg -q 'issues: write'; then
+  fail "Fork safe-to-review cleanup has issues write permission"
+fi
+pass "Fork safe-to-review cleanup has issues write permission"
+
+if [[ "$(count_occurrences "$app_token_action")" != "1" ]]; then
+  fail "Only same-repository review mints the dedicated App token"
+fi
+pass "Only same-repository review mints the dedicated App token"

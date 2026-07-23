@@ -483,15 +483,19 @@ func TestPersistInPlaceModelSwitch_DoesNotRestoreStaleActiveStateAfterCancellati
 
 func TestSwitchModelFallback_PreservesRestrictedMCPMode(t *testing.T) {
 	tests := []struct {
-		name     string
-		metadata map[string]interface{}
-		wantMode string
+		name         string
+		isFromOffice bool
+		assignee     string
+		metadata     map[string]interface{}
+		wantMode     string
 	}{
-		{name: "Office task", wantMode: McpModeOffice},
+		{name: "unassigned Office task", isFromOffice: true, wantMode: McpModeOffice},
+		{name: "assigned Kanban task", assignee: "assigned-agent", wantMode: ""},
 		{
-			name:     "Config session takes precedence for Office task",
-			metadata: map[string]interface{}{"config_mode": true},
-			wantMode: McpModeConfig,
+			name:         "Config session takes precedence for Office task",
+			isFromOffice: true,
+			metadata:     map[string]interface{}{"config_mode": true},
+			wantMode:     McpModeConfig,
 		},
 	}
 
@@ -502,8 +506,8 @@ func TestSwitchModelFallback_PreservesRestrictedMCPMode(t *testing.T) {
 				ID:                     "task-office",
 				WorkspaceID:            "workspace-1",
 				Title:                  "Office task",
-				IsFromOffice:           true,
-				AssigneeAgentProfileID: "office-agent",
+				IsFromOffice:           tt.isFromOffice,
+				AssigneeAgentProfileID: tt.assignee,
 			}
 			repo.sessions["session-office"] = &models.TaskSession{
 				ID:             "session-office",

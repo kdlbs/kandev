@@ -83,11 +83,9 @@ export function RepoChipsRow({
   // No early returns above hooks. URL mode and started-state checks happen below.
   if (isTaskStarted) return null;
 
-  // Multi-branch support: the same repo can appear multiple times on a task
-  // when each row picks a different branch. Uniqueness is enforced on the
-  // (repository_id, checkout_branch) pair at submit time by the backend, so
-  // the dropdown never filters repos out — picking "frontend" twice and
-  // assigning two different branches is a supported flow.
+  // Multi-branch support keeps repository options selectable across rows. The
+  // picker marks selections already made elsewhere so users can intentionally
+  // choose the same repository for another branch without doing so by mistake.
   const hasDiscovered = fs.discoveredRepositories.length > 0;
   const canAddMore = repositories.length > 0 || hasDiscovered;
   const addHint = computeAddHint(canAddMore, repositories.length);
