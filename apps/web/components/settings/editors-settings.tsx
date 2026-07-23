@@ -26,6 +26,7 @@ import {
   getCustomEditorSummary,
 } from "@/components/settings/editor-form";
 import { LSP_DEFAULT_CONFIGS } from "@/lib/lsp/lsp-client-manager";
+import { LSP_LANGUAGE_OPTIONS } from "@/lib/lsp/lsp-language-options";
 import type { EditorOption } from "@/lib/types/http";
 import type { RequestStatus } from "@/lib/http/use-request";
 import {
@@ -41,40 +42,6 @@ import {
   type EditorsSettingsState,
 } from "@/components/settings/editors-settings-state";
 import { isDraftEntryDirty, isEditorsSettingsDirty } from "./settings-dirty";
-
-const LSP_LANGUAGE_OPTIONS = [
-  {
-    id: "typescript",
-    label: "TypeScript / JavaScript",
-    binary: "typescript-language-server",
-    docsUrl:
-      "https://github.com/typescript-language-server/typescript-language-server#workspace-configuration",
-    installHint:
-      "Installs typescript-language-server and typescript via npm into ~/.kandev/lsp-servers/",
-  },
-  {
-    id: "go",
-    label: "Go",
-    binary: "gopls",
-    docsUrl: "https://github.com/golang/tools/blob/master/gopls/doc/settings.md",
-    installHint: 'Runs "go install golang.org/x/tools/gopls@latest". Requires Go to be installed.',
-  },
-  {
-    id: "rust",
-    label: "Rust",
-    binary: "rust-analyzer",
-    docsUrl: "https://rust-analyzer.github.io/book/configuration.html",
-    installHint:
-      "Downloads the rust-analyzer binary from GitHub releases into ~/.kandev/lsp-servers/",
-  },
-  {
-    id: "python",
-    label: "Python",
-    binary: "pyright-langserver",
-    docsUrl: "https://microsoft.github.io/pyright/#/settings",
-    installHint: "Installs pyright via npm into ~/.kandev/lsp-servers/",
-  },
-];
 
 type LspLanguageCardsProps = {
   lspAutoStartLanguages: string[];
@@ -99,7 +66,8 @@ function LspLanguageCards({
         <div className="text-sm font-medium text-foreground">Language Servers</div>
         <div className="text-xs text-muted-foreground">
           Auto-start language servers when opening files to get diagnostics, hover info, and
-          go-to-definition. You can also toggle each server on/off per file.
+          go-to-definition. You can also toggle each server on/off per file. Language servers run in
+          desktop file editors; the mobile file viewer does not start them.
           <br />
           When enabled, install your project&apos;s dependencies (e.g.{" "}
           <code className="text-[11px] bg-muted px-1 rounded">npm install</code> via repository
@@ -108,15 +76,18 @@ function LspLanguageCards({
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         {LSP_LANGUAGE_OPTIONS.map((lang) => {
+          const autoInstallSupported = lang.autoInstallSupported;
           const autoStartDirty =
             lspAutoStartLanguages.includes(lang.id) !== baselineLspAutoStart.includes(lang.id);
           const autoInstallDirty =
+            autoInstallSupported &&
             lspAutoInstallLanguages.includes(lang.id) !== baselineLspAutoInstall.includes(lang.id);
           return (
             <div
               key={lang.id}
               className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
               data-settings-dirty={autoStartDirty || autoInstallDirty}
+              data-testid={`lsp-language-card-${lang.id}`}
             >
               <div>
                 <div className="text-sm font-medium text-foreground">{lang.label}</div>
@@ -128,22 +99,31 @@ function LspLanguageCards({
                   checked={lspAutoStartLanguages.includes(lang.id)}
                   onCheckedChange={(checked) => toggleAutoStart(lang.id, checked === true)}
                   data-settings-dirty={autoStartDirty}
+                  data-testid={`lsp-auto-start-${lang.id}`}
+                  aria-label={`Auto-start ${lang.label} language server`}
                 />
               </div>
               <div className="flex items-center gap-2">
-                <Checkbox
-                  id={`lsp-install-${lang.id}`}
-                  checked={lspAutoInstallLanguages.includes(lang.id)}
-                  onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
-                  className="h-3.5 w-3.5"
-                  data-settings-dirty={autoInstallDirty}
-                />
-                <label
-                  htmlFor={`lsp-install-${lang.id}`}
-                  className="text-xs text-muted-foreground cursor-pointer"
-                >
-                  Auto-install if not found
-                </label>
+                {autoInstallSupported && (
+                  <Checkbox
+                    id={`lsp-install-${lang.id}`}
+                    checked={lspAutoInstallLanguages.includes(lang.id)}
+                    onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
+                    className="h-3.5 w-3.5"
+                    data-settings-dirty={autoInstallDirty}
+                    data-testid={`lsp-auto-install-${lang.id}`}
+                  />
+                )}
+                {autoInstallSupported ? (
+                  <label
+                    htmlFor={`lsp-install-${lang.id}`}
+                    className="text-xs text-muted-foreground cursor-pointer"
+                  >
+                    Auto-install if not found
+                  </label>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Manual install required</span>
+                )}
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
@@ -153,6 +133,14 @@ function LspLanguageCards({
                   </TooltipContent>
                 </Tooltip>
               </div>
+              {!autoInstallSupported && (
+                <p
+                  className="text-[11px] leading-relaxed text-muted-foreground"
+                  data-testid={`lsp-install-guidance-${lang.id}`}
+                >
+                  {lang.installHint}
+                </p>
+              )}
             </div>
           );
         })}

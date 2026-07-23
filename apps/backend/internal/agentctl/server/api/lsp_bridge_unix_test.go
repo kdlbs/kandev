@@ -1,0 +1,363 @@
+//go:build !windows
+
+package api
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
+)
+
+var errForcedWebSocketWrite = errors.New("forced WebSocket write failure")
+
+type writeFailingConn struct {
+	net.Conn
+	failWrites atomic.Bool
+}
+
+func (c *writeFailingConn) Write(data []byte) (int, error) {
+	if c.failWrites.Load() {
+		return 0, errForcedWebSocketWrite
+	}
+	return c.Conn.Write(data)
+}
+
+type writeFailingListener struct {
+	net.Listener
+	accepted chan *writeFailingConn
+}
+
+type writeDeadlineObservation struct {
+	deadline   time.Time
+	observedAt time.Time
+}
+
+type closeReleasesWriteConn struct {
+	net.Conn
+	blockWrites     atomic.Bool
+	writeStarted    chan struct{}
+	writeReleased   chan struct{}
+	writeDeadline   chan writeDeadlineObservation
+	closed          chan struct{}
+	writeOnce       sync.Once
+	releaseOnce     sync.Once
+	deadlineSetOnce sync.Once
+	closeOnce       sync.Once
+}
+
+func newCloseReleasesWriteConn(conn net.Conn) *closeReleasesWriteConn {
+	return &closeReleasesWriteConn{
+		Conn: conn, writeStarted: make(chan struct{}), writeReleased: make(chan struct{}),
+		writeDeadline: make(chan writeDeadlineObservation, 1), closed: make(chan struct{}),
+	}
+}
+
+func (c *closeReleasesWriteConn) Write(data []byte) (int, error) {
+	if !c.blockWrites.Load() {
+		return c.Conn.Write(data)
+	}
+	c.writeOnce.Do(func() { close(c.writeStarted) })
+	<-c.closed
+	c.releaseOnce.Do(func() { close(c.writeReleased) })
+	return 0, net.ErrClosed
+}
+
+func (c *closeReleasesWriteConn) SetWriteDeadline(deadline time.Time) error {
+	if c.blockWrites.Load() {
+		c.deadlineSetOnce.Do(func() {
+			c.writeDeadline <- writeDeadlineObservation{deadline: deadline, observedAt: time.Now()}
+		})
+	}
+	return c.Conn.SetWriteDeadline(deadline)
+}
+
+func (c *closeReleasesWriteConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return c.Conn.Close()
+}
+
+type closeReleasesWriteListener struct {
+	net.Listener
+	accepted chan *closeReleasesWriteConn
+}
+
+func (l *closeReleasesWriteListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	wrapped := newCloseReleasesWriteConn(conn)
+	l.accepted <- wrapped
+	return wrapped, nil
+}
+
+func (l *writeFailingListener) Accept() (net.Conn, error) {
+	conn, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	wrapped := &writeFailingConn{Conn: conn}
+	l.accepted <- wrapped
+	return wrapped, nil
+}
+
+func TestHandleLSPStreamBridgesFramesAndStopsOwnedProcess(t *testing.T) {
+	binDir := t.TempDir()
+	workDir := t.TempDir()
+	home := t.TempDir()
+	serverPath := filepath.Join(binDir, "kotlin-lsp")
+	if err := os.WriteFile(serverPath, []byte("#!/bin/sh\nexec /bin/cat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", binDir)
+
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: workDir, SessionID: "session-1"}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
+	s := NewServer(cfg, procMgr, nil, nil, log)
+	ts := httptest.NewServer(s.router)
+	t.Cleanup(ts.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(ts.URL, "http")+"/api/v1/lsp/stream?language=kotlin",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("dial lsp stream: %v", err)
+	}
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, ready, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read ready: %v", err)
+	}
+	var status struct {
+		Status       string   `json:"status"`
+		Workspace    string   `json:"workspacePath"`
+		WorkspaceURI string   `json:"workspaceUri"`
+		RepoSubpaths []string `json:"repoSubpaths"`
+	}
+	if err := json.Unmarshal(ready, &status); err != nil {
+		t.Fatalf("decode ready: %v", err)
+	}
+	if status.Status != "ready" || status.Workspace != workDir || status.WorkspaceURI != workspaceFileURI(workDir) || status.RepoSubpaths == nil {
+		t.Fatalf("ready status = %v", status)
+	}
+
+	payload := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
+	if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+		t.Fatalf("write LSP payload: %v", err)
+	}
+	_, echoed, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read LSP payload: %v", err)
+	}
+	if string(echoed) != string(payload) {
+		t.Fatalf("echoed payload = %s, want %s", echoed, payload)
+	}
+
+	_ = conn.Close()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if len(procMgr.ListProcesses("session-1")) == 0 {
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatalf("LSP process remains tracked after WebSocket close: %v", procMgr.ListProcesses("session-1"))
+}
+
+func TestHandleLSPStreamStopsProcessWhenForwardingToWebSocketFails(t *testing.T) {
+	binDir := t.TempDir()
+	serverPath := filepath.Join(binDir, "kotlin-lsp")
+	script := "#!/bin/sh\nIFS= read -r _\nprintf 'Content-Length: 2\\r\\n\\r\\n{}'\nexec /bin/cat >/dev/null\n"
+	if err := os.WriteFile(serverPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", binDir)
+
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-write-failure"}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
+	server := NewServer(cfg, procMgr, nil, nil, log)
+	handlerReturned := make(chan struct{})
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		server.router.ServeHTTP(writer, request)
+		close(handlerReturned)
+	})
+	httpServer := httptest.NewUnstartedServer(handler)
+	listener := &writeFailingListener{
+		Listener: httpServer.Listener,
+		accepted: make(chan *writeFailingConn, 1),
+	}
+	httpServer.Listener = listener
+	httpServer.Start()
+	t.Cleanup(httpServer.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+"/api/v1/lsp/stream?language=kotlin",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("dial lsp stream: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	serverConn := <-listener.accepted
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read ready: %v", err)
+	}
+	serverConn.failWrites.Store(true)
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{}`)); err != nil {
+		t.Fatalf("write trigger payload: %v", err)
+	}
+
+	select {
+	case <-handlerReturned:
+	case <-time.After(5 * time.Second):
+		t.Fatal("LSP handler remained blocked after the stdout forwarder exited")
+	}
+	if processes := procMgr.ListProcesses(cfg.SessionID); len(processes) != 0 {
+		t.Fatalf("LSP process remains tracked after forwarder exit: %v", processes)
+	}
+}
+
+func TestHandleLSPStreamPeerCloseReleasesBlockedForwarderWrite(t *testing.T) {
+	binDir := t.TempDir()
+	serverPath := filepath.Join(binDir, "kotlin-lsp")
+	script := "#!/bin/sh\nIFS= read -r _\nprintf 'Content-Length: 2\\r\\n\\r\\n{}'\nexec /bin/cat >/dev/null\n"
+	if err := os.WriteFile(serverPath, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("PATH", binDir)
+
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-blocked-write"}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
+	server := NewServer(cfg, procMgr, nil, nil, log)
+	handlerReturned := make(chan struct{})
+	handler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		server.router.ServeHTTP(writer, request)
+		close(handlerReturned)
+	})
+	httpServer := httptest.NewUnstartedServer(handler)
+	listener := &closeReleasesWriteListener{
+		Listener: httpServer.Listener,
+		accepted: make(chan *closeReleasesWriteConn, 1),
+	}
+	httpServer.Listener = listener
+	httpServer.Start()
+	t.Cleanup(httpServer.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+"/api/v1/lsp/stream?language=kotlin",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("dial lsp stream: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	serverConn := <-listener.accepted
+	t.Cleanup(func() { _ = serverConn.Close() })
+
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, _, err := conn.ReadMessage(); err != nil {
+		t.Fatalf("read ready: %v", err)
+	}
+	serverConn.blockWrites.Store(true)
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{}`)); err != nil {
+		t.Fatalf("write trigger payload: %v", err)
+	}
+	select {
+	case <-serverConn.writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("LSP forwarder did not enter the blocked write")
+	}
+	_ = conn.Close()
+
+	select {
+	case <-serverConn.writeReleased:
+	case <-time.After(2 * time.Second):
+		t.Fatal("server connection close did not release the blocked writer")
+	}
+	select {
+	case observation := <-serverConn.writeDeadline:
+		duration := observation.deadline.Sub(observation.observedAt)
+		if duration <= 0 || duration > lspWebSocketWriteTimeout+time.Second {
+			t.Fatalf("forwarder write deadline has unexpected duration %v", duration)
+		}
+	default:
+		t.Fatal("forwarder write did not set a deadline")
+	}
+	select {
+	case <-handlerReturned:
+	case <-time.After(7 * time.Second):
+		t.Fatal("LSP handler remained blocked after its peer closed and released the writer")
+	}
+	if processes := procMgr.ListProcesses(cfg.SessionID); len(processes) != 0 {
+		t.Fatalf("LSP process remains tracked after peer close: %v", processes)
+	}
+}
+
+func TestStopLSPServerClosesCallerOwnedStdoutWithoutForwarder(t *testing.T) {
+	serverPath := filepath.Join(t.TempDir(), "kotlin-lsp")
+	if err := os.WriteFile(serverPath, []byte("#!/bin/sh\nexec /bin/cat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-close-stdout"}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
+	server := NewServer(cfg, procMgr, nil, nil, log)
+	lspProcess, err := server.startLSPServer("kotlin", serverPath)
+	if err != nil {
+		t.Fatalf("startLSPServer() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = lspProcess.stdin.Close()
+		_ = lspProcess.stdout.Close()
+	})
+
+	server.stopLSPServer(lspProcess)
+	if err := lspProcess.stdout.Close(); !errors.Is(err, os.ErrClosed) {
+		t.Fatalf("stdout.Close() after stop = %v, want already closed", err)
+	}
+}

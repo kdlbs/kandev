@@ -6,7 +6,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
-	"github.com/kandev/kandev/internal/lsp/installer"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -47,8 +46,8 @@ func (g *Gateway) SetLifecycleManager(lifecycleMgr *lifecycle.Manager, userServi
 }
 
 // SetLSPHandler enables the LSP WebSocket handler.
-func (g *Gateway) SetLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService, installerRegistry *installer.Registry) {
-	g.LSPHandler = NewLSPHandler(lifecycleMgr, userService, installerRegistry, g.logger)
+func (g *Gateway) SetLSPHandler(lifecycleMgr *lifecycle.Manager, userService LSPUserService) {
+	g.LSPHandler = NewLSPHandler(lifecycleMgr, userService, g.logger)
 }
 
 // SetVscodeProxy enables the VS Code reverse proxy handler.

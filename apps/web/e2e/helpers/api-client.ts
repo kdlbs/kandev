@@ -719,6 +719,9 @@ export class ApiClient {
     default_utility_model?: string;
     sidebar_views?: unknown[];
     saved_layouts?: unknown[];
+    lsp_auto_start_languages?: string[];
+    lsp_auto_install_languages?: string[];
+    lsp_server_configs?: Record<string, Record<string, unknown>>;
     kanban_view_mode?: string;
     tasks_list_sort?: string;
     tasks_list_group?: string;

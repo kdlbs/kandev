@@ -115,6 +115,9 @@ export const dockerTest = backendFixture.extend<
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
+      lsp_auto_start_languages: [],
+      lsp_auto_install_languages: [],
+      lsp_server_configs: {},
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",

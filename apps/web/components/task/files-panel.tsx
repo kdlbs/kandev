@@ -26,7 +26,11 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
       null
     );
   });
-  const activeFilePath = useDockviewStore((s) => s.activeFilePath);
+  const activeTreePath = useDockviewStore((state) =>
+    state.activeFilePath && state.activeFileRepo
+      ? `${state.activeFileRepo}/${state.activeFilePath}`
+      : state.activeFilePath,
+  );
   const isArchived = useIsTaskArchived();
   const { createFile, deleteFile, renameFile, downloadFile } = useFileOperations(
     activeSessionId ?? null,
@@ -68,7 +72,7 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
             onDeleteFile={deleteFile}
             onRenameFile={renameFile}
             onDownloadFile={downloadFile}
-            activeFilePath={activeFilePath}
+            activeFilePath={activeTreePath}
           />
         ) : (
           <div className="flex items-center justify-center h-full text-muted-foreground text-xs">

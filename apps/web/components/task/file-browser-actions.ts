@@ -13,6 +13,11 @@ export type FetchAndOpenFileOptions = {
   signal?: AbortSignal;
 };
 
+export type LoadNodeChildrenOptions = {
+  force?: boolean;
+  shouldApply?: () => boolean;
+};
+
 /** Hook for scroll position persistence in the file browser. */
 export function useScrollPersistence(
   sessionId: string,
@@ -64,22 +69,28 @@ export async function loadNodeChildren(
   node: FileTreeNode,
   sessionId: string,
   treeState: ReturnType<typeof useFileBrowserTree>,
-) {
-  if (node.children && node.children.length > 0) return;
+  options: LoadNodeChildrenOptions = {},
+): Promise<boolean> {
+  if (!options.force && node.children && node.children.length > 0) return true;
   // Dedupe in-flight fetches so rapid double-clicks don't issue two WS round-trips.
-  if (treeState.isLoading(node.path)) return;
+  if (treeState.isLoading(node.path)) return false;
   treeState.showLoading(node.path);
   try {
     const client = getWebSocketClient();
-    if (!client) return;
+    if (!client) return false;
     const response = await requestFileTree(client, sessionId, node.path, 1);
     const updateNode = (n: FileTreeNode): FileTreeNode => {
       if (n.path === node.path) return { ...n, children: response.root.children };
       return n.children ? { ...n, children: n.children.map(updateNode) } : n;
     };
-    if (treeState.tree) treeState.setTree(updateNode(treeState.tree));
+    treeState.setTree((currentTree) => {
+      if (options.shouldApply && !options.shouldApply()) return currentTree;
+      return currentTree ? updateNode(currentTree) : currentTree;
+    });
+    return true;
   } catch (error) {
     console.error("Failed to load children:", error);
+    return false;
   } finally {
     treeState.hideLoading(node.path);
   }

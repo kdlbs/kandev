@@ -170,6 +170,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       data-testid="file-tree-node"
       data-path={node.path}
       data-is-dir={node.is_dir ? "true" : "false"}
+      data-active={isActive ? "true" : "false"}
       data-selected={isSelected ? "true" : "false"}
       aria-selected={isSelected}
       role="treeitem"

@@ -3,9 +3,11 @@ import type { editor as monacoEditor } from "monaco-editor";
 import { useAppStore } from "@/components/state-provider";
 import { useLsp } from "@/hooks/use-lsp";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
+import { getLspUnavailableSetupHint } from "@/lib/lsp/lsp-json-rpc";
 import { computeLineDiffStats } from "@/lib/diff";
 import { useToast } from "@/components/toast-provider";
 import { diffLines } from "diff";
+import { filePathToUri, joinFileUri, modelUriForDocument } from "@/lib/lsp/file-uri";
 
 // ---------------------------------------------------------------------------
 // Diff gutter decorations (pure function)
@@ -170,43 +172,77 @@ function computePatchGutterDecorations(diffText: string): monacoEditor.IModelDel
 type UseMonacoLspOpts = {
   sessionId?: string;
   worktreePath?: string;
+  repo?: string;
   language: string;
   path: string;
   contentRef: RefObject<string>;
   editorRef: RefObject<monacoEditor.IStandaloneCodeEditor | null>;
+  editorReady: boolean;
 };
 
 export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
-  const { sessionId, worktreePath, language, path, contentRef, editorRef } = opts;
+  const { sessionId, worktreePath, repo, language, path, contentRef, editorRef, editorReady } =
+    opts;
   const { toast } = useToast();
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const lspSessionId = sessionId ?? activeSessionId ?? null;
   const { status: lspStatus, lspLanguage, toggle: toggleLsp } = useLsp(lspSessionId, language);
   const hasLspActive = lspStatus.state === "ready";
-  const monacoPath = worktreePath ? `${worktreePath}/${path}` : path;
-  const documentUri = `file://${monacoPath}`;
+  const lspWorkspaceUri = lspSessionId
+    ? lspClientManager.getWorkspaceUriForSession(lspSessionId)
+    : null;
+  let fallbackWorkspaceUri: string | null = null;
+  try {
+    fallbackWorkspaceUri = worktreePath ? filePathToUri(worktreePath) : null;
+  } catch {
+    fallbackWorkspaceUri = null;
+  }
+  const effectiveWorkspaceUri = lspWorkspaceUri ?? fallbackWorkspaceUri;
+  let documentUri: string | null = null;
+  try {
+    documentUri = effectiveWorkspaceUri ? joinFileUri(effectiveWorkspaceUri, repo, path) : null;
+  } catch {
+    documentUri = null;
+  }
+  const monacoPath =
+    documentUri && lspSessionId ? modelUriForDocument(documentUri, lspSessionId) : path;
+
+  // A definition/reference placeholder may be adopted by any real file tab,
+  // including a language with no active LSP. Promote it before document sync.
+  useEffect(() => {
+    if (!documentUri || !editorReady || !lspSessionId) return;
+    lspClientManager.promoteDocumentModel(lspSessionId, documentUri, contentRef.current);
+  }, [documentUri, editorReady, lspSessionId, contentRef]);
 
   // Open/close document
   useEffect(() => {
-    if (!hasLspActive || !lspSessionId || !lspLanguage) return;
-    lspClientManager.openDocument(
-      lspSessionId,
-      lspLanguage,
-      documentUri,
-      language,
-      contentRef.current,
-    );
+    if (!documentUri || !editorReady || !hasLspActive || !lspSessionId || !lspLanguage) return;
+    lspClientManager.openDocument(lspSessionId, lspLanguage, {
+      uri: documentUri,
+      languageId: language,
+      text: contentRef.current,
+      repo,
+    });
     return () => {
       lspClientManager.closeDocument(lspSessionId, lspLanguage, documentUri);
     };
-  }, [hasLspActive, lspSessionId, lspLanguage, documentUri, language, contentRef]);
+  }, [
+    editorReady,
+    hasLspActive,
+    lspSessionId,
+    lspLanguage,
+    documentUri,
+    language,
+    contentRef,
+    repo,
+  ]);
 
   // Document change sync
   const changeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || !hasLspActive || !lspSessionId || !lspLanguage) return;
+    if (!documentUri || !editor || !hasLspActive || !lspSessionId || !lspLanguage) return;
     const model = editor.getModel();
     if (!model) return;
     const disposable = model.onDidChangeContent(() => {
@@ -224,18 +260,21 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
   // LSP status toasts
   const lspStateForToast = lspStatus.state;
   const lspReasonForToast = "reason" in lspStatus ? lspStatus.reason : null;
+  const lspSetupHintForToast = getLspUnavailableSetupHint(lspStatus, lspLanguage);
   useEffect(() => {
     if (lspStateForToast === "installing") {
       toast({ title: "Installing language server", description: "This may take a moment..." });
     } else if (lspStateForToast === "unavailable" && lspReasonForToast) {
       toast({
-        title: "Language server not found",
-        description: `${lspReasonForToast}. Enable auto-install in Settings \u2192 Editors.`,
+        title: "Language server unavailable",
+        description: lspSetupHintForToast
+          ? `${lspReasonForToast}. ${lspSetupHintForToast}`
+          : lspReasonForToast,
       });
     } else if (lspStateForToast === "error" && lspReasonForToast) {
       toast({ title: "LSP error", description: lspReasonForToast });
     }
-  }, [lspStateForToast, lspReasonForToast, toast]);
+  }, [lspStateForToast, lspReasonForToast, lspSetupHintForToast, toast]);
 
   return { lspStatus, lspLanguage, toggleLsp, monacoPath };
 }

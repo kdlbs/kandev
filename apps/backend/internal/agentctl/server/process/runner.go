@@ -134,14 +134,16 @@ func (b *ringBuffer) snapshot() []ProcessOutputChunk {
 
 // commandProcess represents a single running background process and its state.
 type commandProcess struct {
-	info       ProcessInfo   // Process metadata and current status
-	cmd        *exec.Cmd     // Underlying OS process (nil after completion)
+	info       ProcessInfo // Process metadata and current status
+	cmd        *exec.Cmd   // Underlying OS process (nil after completion)
+	stdin      io.WriteCloser
 	buffer     *ringBuffer   // Memory-bounded output storage
 	stopOnce   sync.Once     // Ensures stopSignal is only closed once
 	stopSignal chan struct{} // Signals output readers to exit before process termination
 	done       chan struct{} // Closed after cmd.Wait returns and lifecycle cleanup finishes
 	pgid       int
 	lifecycle  processLifecycleHandle
+	waitErr    error
 	reapErr    error
 	mu         sync.Mutex // Protects info fields during updates
 }
@@ -309,7 +311,7 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 
 	r.publishStatus(proc)
 
-	if err := r.startAndActivate(proc, cmd, id, stdout, stderr); err != nil {
+	if err := r.startAndActivate(proc, cmd, id, stdout, stderr, true, true); err != nil {
 		return nil, err
 	}
 
@@ -319,8 +321,17 @@ func (r *ProcessRunner) Start(ctx context.Context, req StartProcessRequest) (*Pr
 
 // startAndActivate starts the command and transitions the process to running state.
 // On failure, marks the process as failed and removes it from tracking.
-func (r *ProcessRunner) startAndActivate(proc *commandProcess, cmd *exec.Cmd, id string, stdout, stderr io.ReadCloser) error {
+func (r *ProcessRunner) startAndActivate(
+	proc *commandProcess,
+	cmd *exec.Cmd,
+	id string,
+	stdout, stderr io.ReadCloser,
+	consumeStdout, consumeStderr bool,
+) error {
 	if err := cmd.Start(); err != nil {
+		if proc.stdin != nil {
+			_ = proc.stdin.Close()
+		}
 		_ = stdout.Close()
 		_ = stderr.Close()
 		proc.mu.Lock()
@@ -336,6 +347,9 @@ func (r *ProcessRunner) startAndActivate(proc *commandProcess, cmd *exec.Cmd, id
 	}
 	lifecycle, err := installProcessLifecycle(cmd)
 	if err != nil {
+		if proc.stdin != nil {
+			_ = proc.stdin.Close()
+		}
 		_ = stdout.Close()
 		_ = stderr.Close()
 		reapErr := killAndWaitStartedCommand(cmd)
@@ -357,8 +371,12 @@ func (r *ProcessRunner) startAndActivate(proc *commandProcess, cmd *exec.Cmd, id
 	proc.info.UpdatedAt = time.Now().UTC()
 	proc.mu.Unlock()
 	r.publishStatus(proc)
-	go r.readOutput(proc, stdout, "stdout")
-	go r.readOutput(proc, stderr, "stderr")
+	if consumeStdout {
+		go r.readOutput(proc, stdout, "stdout")
+	}
+	if consumeStderr {
+		go r.readOutput(proc, stderr, "stderr")
+	}
 	go r.wait(proc)
 	return nil
 }
@@ -408,6 +426,9 @@ func (r *ProcessRunner) stopProcess(ctx context.Context, proc *commandProcess) e
 	proc.stopOnce.Do(func() {
 		close(proc.stopSignal)
 	})
+	if proc.stdin != nil {
+		_ = proc.stdin.Close()
+	}
 
 	// Attempt graceful shutdown, then escalate to force-kill
 	if proc.cmd != nil && proc.cmd.Process != nil {
@@ -640,6 +661,7 @@ func (r *ProcessRunner) wait(proc *commandProcess) {
 
 	// Update process info with final status
 	proc.mu.Lock()
+	proc.waitErr = err
 	proc.info.Status = status
 	proc.info.ExitCode = &exitCode
 	proc.info.UpdatedAt = time.Now().UTC()

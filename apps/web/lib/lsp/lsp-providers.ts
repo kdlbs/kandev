@@ -22,7 +22,8 @@ type JsonRpcConnection = {
 };
 
 type GetDocumentUri = (model: monacoEditor.ITextModel) => string | null;
-type EnsureModelsExist = (uris: string[], connectionKey: string) => void;
+type GetModelUri = (documentUri: string) => string | null;
+type EnsureModelsExist = (uris: string[]) => void;
 
 /** Shared context for all provider registration functions. */
 type ProviderCtx = {
@@ -30,8 +31,8 @@ type ProviderCtx = {
   lang: string;
   rpc: JsonRpcConnection;
   getDocumentUri: GetDocumentUri;
+  getModelUri: GetModelUri;
   ensureModelsExist: EnsureModelsExist;
-  connectionKey: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -196,7 +197,7 @@ function registerHoverProvider(ctx: ProviderCtx): IDisposable {
 }
 
 function registerDefinitionProvider(ctx: ProviderCtx): IDisposable {
-  const { monaco, lang, rpc, getDocumentUri, ensureModelsExist, connectionKey } = ctx;
+  const { monaco, lang, rpc, getDocumentUri, getModelUri, ensureModelsExist } = ctx;
   return monaco.languages.registerDefinitionProvider(lang, {
     provideDefinition: async (model, position, token) => {
       const uri = getDocumentUri(model);
@@ -208,14 +209,13 @@ function registerDefinitionProvider(ctx: ProviderCtx): IDisposable {
         });
         if (token.isCancellationRequested || !result) return null;
         const defs = Array.isArray(result) ? result : [result];
-        ensureModelsExist(
-          defs.map((d: { uri: string }) => d.uri),
-          connectionKey,
-        );
-        return defs.map((d: { uri: string; range: LspRange }) => ({
-          uri: monaco.Uri.parse(d.uri),
-          range: toMonacoRange(d.range),
-        }));
+        ensureModelsExist(defs.map((d: { uri: string }) => d.uri));
+        return defs.flatMap((d: { uri: string; range: LspRange }) => {
+          const modelUri = getModelUri(d.uri);
+          return modelUri
+            ? [{ uri: monaco.Uri.parse(modelUri), range: toMonacoRange(d.range) }]
+            : [];
+        });
       } catch {
         return null;
       }
@@ -224,7 +224,7 @@ function registerDefinitionProvider(ctx: ProviderCtx): IDisposable {
 }
 
 function registerReferenceProvider(ctx: ProviderCtx): IDisposable {
-  const { monaco, lang, rpc, getDocumentUri, ensureModelsExist, connectionKey } = ctx;
+  const { monaco, lang, rpc, getDocumentUri, getModelUri, ensureModelsExist } = ctx;
   return monaco.languages.registerReferenceProvider(lang, {
     provideReferences: async (model, position, context, token) => {
       const uri = getDocumentUri(model);
@@ -237,14 +237,13 @@ function registerReferenceProvider(ctx: ProviderCtx): IDisposable {
         });
         if (token.isCancellationRequested || !result) return null;
         const refs = Array.isArray(result) ? result : [];
-        ensureModelsExist(
-          refs.map((r: { uri: string }) => r.uri),
-          connectionKey,
-        );
-        return refs.map((r: { uri: string; range: LspRange }) => ({
-          uri: monaco.Uri.parse(r.uri),
-          range: toMonacoRange(r.range),
-        }));
+        ensureModelsExist(refs.map((r: { uri: string }) => r.uri));
+        return refs.flatMap((r: { uri: string; range: LspRange }) => {
+          const modelUri = getModelUri(r.uri);
+          return modelUri
+            ? [{ uri: monaco.Uri.parse(modelUri), range: toMonacoRange(r.range) }]
+            : [];
+        });
       } catch {
         return null;
       }
@@ -368,10 +367,10 @@ function registerSemanticTokensProvider(
 export interface RegisterLspProvidersOptions {
   rpc: JsonRpcConnection;
   lspLanguage: string;
-  connectionKey: string;
   serverCapabilities: Record<string, unknown> | null;
   semanticRefreshCallbacks: (() => void)[];
   getDocumentUri: GetDocumentUri;
+  getModelUri: GetModelUri;
   ensureModelsExist: EnsureModelsExist;
 }
 
@@ -388,8 +387,8 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
       lang,
       rpc: opts.rpc,
       getDocumentUri: opts.getDocumentUri,
+      getModelUri: opts.getModelUri,
       ensureModelsExist: opts.ensureModelsExist,
-      connectionKey: opts.connectionKey,
     };
     disposables.push(registerCompletionProvider(ctx));
     disposables.push(registerHoverProvider(ctx));
@@ -412,7 +411,7 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
 // Language mapping
 // ---------------------------------------------------------------------------
 
-function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
+export function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
   switch (lspLanguage) {
     case "typescript":
       return ["typescript", "javascript", "typescriptreact", "javascriptreact"];
@@ -422,6 +421,8 @@ function getMonacoLanguagesForLsp(lspLanguage: string): string[] {
       return ["rust"];
     case "python":
       return ["python"];
+    case "kotlin":
+      return ["kotlin"];
     default:
       return [];
   }
