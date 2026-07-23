@@ -39,6 +39,83 @@ func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
 }
 
+// Field names shared by every session.state_changed publish in this file —
+// extracted to satisfy goconst without borrowing unrelated constants.
+const (
+	sessionEventFieldTaskID    = "task_id"
+	sessionEventFieldSessionID = "session_id"
+	sessionEventFieldUpdatedAt = "updated_at"
+	sessionEventFieldName      = "name"
+)
+
+// publishSessionsCancelled publishes a session.state_changed event for each
+// session ID in cancelledIDs. The event's old_state is a best-effort hint
+// from snapshot (the pre-cancellation session list a caller already had in
+// hand) — used only for logging/diagnostics — but every other field,
+// including new_state, is read back from the DB via GetTaskSession so an ID
+// CancelActiveTaskSessionsByTaskID returns that wasn't in snapshot (it
+// re-snapshots active sessions itself, inside its own transaction, so its
+// result can outrun a caller-supplied list taken moments earlier) still gets
+// a correct, non-fabricated event instead of being silently dropped.
+//
+// CancelActiveTaskSessionsByTaskID is a repository-level DB write with no
+// event of its own; without this, any client cache kept fresh exclusively by
+// session.state_changed (e.g. an Office task list's "is running" indicator)
+// never learns the session left RUNNING/WAITING_FOR_INPUT and spins forever.
+func (s *Service) publishSessionsCancelled(
+	ctx context.Context,
+	taskID string,
+	snapshot []*models.TaskSession,
+	cancelledIDs []string,
+	reason string,
+	cancelledAt time.Time,
+) {
+	if s.eventBus == nil {
+		return
+	}
+	oldStateByID := make(map[string]models.TaskSessionState, len(snapshot))
+	for _, sess := range snapshot {
+		if sess != nil {
+			oldStateByID[sess.ID] = sess.State
+		}
+	}
+	updatedAt := cancelledAt.Format(time.RFC3339Nano)
+	for _, sessionID := range cancelledIDs {
+		sess, err := s.sessions.GetTaskSession(ctx, sessionID)
+		if err != nil || sess == nil {
+			s.logger.Warn("cancelled session vanished before state_changed publish",
+				zap.String(sessionEventFieldTaskID, taskID), zap.String(sessionEventFieldSessionID, sessionID), zap.Error(err))
+			continue
+		}
+		data := map[string]interface{}{
+			sessionEventFieldTaskID:    taskID,
+			sessionEventFieldSessionID: sessionID,
+			"old_state":                string(oldStateByID[sessionID]),
+			"new_state":                string(sess.State),
+			"error_message":            reason,
+			"agent_profile_id":         sess.AgentProfileID,
+			"agent_profile_snapshot":   sess.AgentProfileSnapshot,
+			"is_passthrough":           sess.IsPassthrough,
+			sessionEventFieldUpdatedAt: updatedAt,
+			sessionEventFieldName:      sess.Name,
+		}
+		if sess.ReviewStatus != models.ReviewStatusNone {
+			data["review_status"] = string(sess.ReviewStatus)
+		}
+		if len(sess.Metadata) > 0 {
+			data["session_metadata"] = sess.Metadata
+		}
+		if sess.TaskEnvironmentID != "" {
+			data["task_environment_id"] = sess.TaskEnvironmentID
+		}
+		event := bus.NewEvent(events.TaskSessionStateChanged, "task-service", data)
+		if err := s.eventBus.Publish(ctx, events.TaskSessionStateChanged, event); err != nil {
+			s.logger.Error("failed to publish session cancellation event",
+				zap.String(sessionEventFieldTaskID, taskID), zap.String(sessionEventFieldSessionID, sessionID), zap.Error(err))
+		}
+	}
+}
+
 // publishTaskEvent publishes task events to the event bus
 func (s *Service) publishTaskEvent(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, oldWorkflowIDs ...string) {
 	s.publishTaskEventWithExtra(ctx, eventType, task, oldState, nil, oldWorkflowIDs...)

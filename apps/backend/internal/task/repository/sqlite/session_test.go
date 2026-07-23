@@ -1023,9 +1023,9 @@ func assertReapedSession(t *testing.T, repo *Repository, sessionID string, reape
 
 // TestCancelActiveTaskSessionsByTaskID verifies the archive reaper transitions
 // only the target task's still-active sessions to CANCELLED, leaves terminal
-// sessions and other tasks untouched, and reports the rows changed. It also
-// confirms the repo-delete guard reports the repository as free afterward —
-// the end-to-end purpose of the reap.
+// sessions and other tasks untouched, and reports exactly the sessions it
+// changed. It also confirms the repo-delete guard reports the repository as
+// free afterward — the end-to-end purpose of the reap.
 func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -1041,14 +1041,18 @@ func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	seedRepoLink(t, repo, "ws-r", "repo-other", "task-other", "sess-o1", "RUNNING")
 
 	reapedAfter := time.Now().UTC()
-	reaped, err := repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
+	ids, cancelledAt, err := repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if reaped != 4 {
-		t.Errorf("expected 4 active sessions reaped, got %d", reaped)
+	wantIDs := []string{"sess-r1", "sess-r2", "sess-r3", "sess-r4"}
+	if got := append([]string(nil), ids...); !sameStringSet(got, wantIDs) {
+		t.Errorf("cancelled ids = %v, want %v", got, wantIDs)
 	}
-	for _, sessionID := range []string{"sess-r1", "sess-r2", "sess-r3", "sess-r4"} {
+	if cancelledAt.Before(reapedAfter) {
+		t.Errorf("cancelledAt = %s, want >= %s", cancelledAt, reapedAfter)
+	}
+	for _, sessionID := range wantIDs {
 		assertReapedSession(t, repo, sessionID, reapedAfter)
 	}
 	if got := sessionState(t, repo, "sess-r5"); got != "COMPLETED" {
@@ -1069,11 +1073,30 @@ func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	}
 
 	// Idempotent: a second call changes nothing.
-	reaped, err = repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
+	ids, _, err = repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
 	if err != nil {
 		t.Fatalf("unexpected error on second call: %v", err)
 	}
-	if reaped != 0 {
-		t.Errorf("expected 0 rows on idempotent re-run, got %d", reaped)
+	if len(ids) != 0 {
+		t.Errorf("expected 0 sessions on idempotent re-run, got %v", ids)
 	}
+}
+
+func sameStringSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	set := make(map[string]int, len(want))
+	for _, s := range want {
+		set[s]++
+	}
+	for _, s := range got {
+		set[s]--
+	}
+	for _, count := range set {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }

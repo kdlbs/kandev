@@ -1178,15 +1178,21 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 3b. Finalize active sessions in the DB. The async cleanup below tears down
 	// the agent processes; this records the terminal session state, which
-	// process teardown does not persist on its own.
-	if reaped, rerr := s.sessions.CancelActiveTaskSessionsByTaskID(ctx, id, "task archived"); rerr != nil {
+	// process teardown does not persist on its own. Publish a
+	// session.state_changed event per session actually cancelled — the DB
+	// write alone is invisible to any client cache (e.g. an Office task
+	// list's "is running" indicator) that's kept fresh exclusively by that
+	// event, and would otherwise show a live spinner forever after archive.
+	cancelledIDs, cancelledAt, cancelErr := s.sessions.CancelActiveTaskSessionsByTaskID(ctx, id, "task archived")
+	if cancelErr != nil {
 		s.logger.Warn("failed to reap active sessions on archive",
 			zap.String("task_id", id),
-			zap.Error(rerr))
-	} else if reaped > 0 {
+			zap.Error(cancelErr))
+	} else if len(cancelledIDs) > 0 {
 		s.logger.Info("reaped active sessions on archive",
 			zap.String("task_id", id),
-			zap.Int64("count", reaped))
+			zap.Int("count", len(cancelledIDs)))
+		s.publishSessionsCancelled(ctx, id, activeSessions, cancelledIDs, "task archived", cancelledAt)
 	}
 
 	// 4. Re-read task for updated archived_at field

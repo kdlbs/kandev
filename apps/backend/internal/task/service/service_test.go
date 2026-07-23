@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
@@ -1865,6 +1866,140 @@ func TestService_ArchiveTaskStopsExecutorRunningForTerminalSession(t *testing.T)
 	waitForCleanupDone(t, svc)
 	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session-completed"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
 		t.Fatalf("executor row should be removed after successful stop, got %v", err)
+	}
+}
+
+// TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions is the
+// regression test for the stuck-spinner bug: archiving a task with an active
+// session cancels that session in the DB (verified elsewhere), but any client
+// cache kept fresh exclusively by session.state_changed — e.g. an Office task
+// list's "is running" indicator — never learns about it unless ArchiveTask
+// also publishes the event. Without the fix, the archived task's session
+// would sit at RUNNING in every client cache forever.
+func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-running", TaskID: "task-1", State: models.TaskSessionStateRunning,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	var found *bus.Event
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if !ok || data["session_id"] != "session-running" {
+			continue
+		}
+		found = evt
+	}
+	if found == nil {
+		t.Fatal("expected a session.state_changed event for session-running, got none")
+	}
+	data := found.Data.(map[string]interface{})
+	if got := data["old_state"]; got != string(models.TaskSessionStateRunning) {
+		t.Errorf("old_state = %v, want RUNNING", got)
+	}
+	if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
+		t.Errorf("new_state = %v, want CANCELLED", got)
+	}
+	if got := data["task_id"]; got != "task-1" {
+		t.Errorf("task_id = %v, want task-1", got)
+	}
+	if got := data["agent_profile_id"]; got != "agent-1" {
+		t.Errorf("agent_profile_id = %v, want agent-1", got)
+	}
+	updatedAtStr, _ := data["updated_at"].(string)
+	if _, err := time.Parse(time.RFC3339Nano, updatedAtStr); err != nil {
+		t.Errorf("updated_at %q not parseable as RFC3339Nano: %v", updatedAtStr, err)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "session-running")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.State != models.TaskSessionStateCancelled {
+		t.Errorf("session state = %q, want CANCELLED", session.State)
+	}
+}
+
+// TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot is the
+// regression test for a race in the fix above: CancelActiveTaskSessionsByTaskID
+// re-snapshots active sessions itself, inside its own transaction, so it can
+// return an ID that wasn't in a caller-supplied snapshot taken moments
+// earlier. publishSessionsCancelled must not silently drop that ID — it must
+// re-read the session from the DB and still publish a correct event.
+func TestService_PublishSessionsCancelledCoversSessionsMissingFromSnapshot(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-race", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	// Session already CANCELLED in the DB (as if CancelActiveTaskSessionsByTaskID
+	// just ran), but the caller's pre-cancel snapshot is empty — the exact
+	// shape of the race.
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-not-in-snapshot", TaskID: "task-race",
+		State: models.TaskSessionStateCancelled, AgentProfileID: "agent-1",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	svc.publishSessionsCancelled(ctx, "task-race", nil, []string{"session-not-in-snapshot"}, "task archived", time.Now().UTC())
+
+	var found *bus.Event
+	for _, evt := range eventBus.GetPublishedEvents() {
+		if evt.Type != events.TaskSessionStateChanged {
+			continue
+		}
+		data, ok := evt.Data.(map[string]interface{})
+		if ok && data["session_id"] == "session-not-in-snapshot" {
+			found = evt
+		}
+	}
+	if found == nil {
+		t.Fatal("expected a session.state_changed event for the snapshot-missing session, got none")
+	}
+	data := found.Data.(map[string]interface{})
+	if got := data["new_state"]; got != string(models.TaskSessionStateCancelled) {
+		t.Errorf("new_state = %v, want CANCELLED", got)
+	}
+	if got := data["old_state"]; got != "" {
+		t.Errorf("old_state = %v, want empty (no snapshot hint available)", got)
+	}
+	if got := data["agent_profile_id"]; got != "agent-1" {
+		t.Errorf("agent_profile_id = %v, want agent-1 (must come from the DB re-read, not the snapshot)", got)
 	}
 }
 
