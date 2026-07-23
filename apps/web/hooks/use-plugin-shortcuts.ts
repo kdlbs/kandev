@@ -37,6 +37,15 @@ import {
  * listener registered) before `usePluginShortcuts()` — see
  * `components/global-commands.tsx`. Keep that ordering when adding new core
  * dispatchers.
+ *
+ * Plugin bindings in turn win over per-component core shortcuts registered
+ * via `useKeyboardShortcut`: this hook's dispatcher runs in the capture phase
+ * (before `useKeyboardShortcut`'s bubble-phase listener) and calls
+ * `event.preventDefault()` whenever it invokes a plugin handler (see
+ * `dispatchMatchingPluginShortcuts` below), and `useKeyboardShortcut` bails
+ * out when `event.defaultPrevented` is already true. So the full chain —
+ * central core shortcuts > plugin keybindings > per-component core shortcuts
+ * — always resolves to exactly one action per combo.
  */
 export function usePluginShortcuts(): void {
   const appStore = useAppStoreApi();

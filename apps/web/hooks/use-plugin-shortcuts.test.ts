@@ -23,6 +23,8 @@ vi.mock("@/hooks/domains/plugins/use-plugins", () => ({
 
 import { usePluginShortcuts } from "./use-plugin-shortcuts";
 import { useAppShortcuts } from "./use-app-shortcuts";
+import { useKeyboardShortcut } from "./use-keyboard-shortcut";
+import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 
 const PLUGIN_ID = "session-cost";
 
@@ -263,5 +265,36 @@ describe("core vs plugin shortcut precedence", () => {
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(mockToggleAppSidebar).not.toHaveBeenCalled();
+  });
+
+  it("fires only the plugin action when a combo matches both a plugin keybinding and a per-component core shortcut bound via useKeyboardShortcut", () => {
+    // Regression for Greptile P1 (PR #1895, comment 3638620657): a
+    // per-component core shortcut registered through `useKeyboardShortcut`
+    // runs in the bubble phase, after this capture-phase plugin dispatcher.
+    // Without `useKeyboardShortcut` respecting `event.defaultPrevented`, the
+    // plugin handler AND the core action would both fire for the same combo.
+    mockItems = [withToggleKeybinding()];
+    const pluginHandler = vi.fn();
+    pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", pluginHandler);
+
+    const coreShortcut: KeyboardShortcut = {
+      key: "k",
+      modifiers: { ctrlOrCmd: true, shift: true },
+    };
+    const coreCallback = vi.fn();
+
+    renderHook(() => {
+      // usePluginShortcuts registers its capture-phase listener on mount,
+      // which — like the real app (`components/global-commands.tsx`) —
+      // fires before the bubble-phase useKeyboardShortcut listener below.
+      usePluginShortcuts();
+      useKeyboardShortcut(coreShortcut, coreCallback);
+    });
+
+    const event = pressKey("k", { ctrlKey: true, shiftKey: true });
+
+    expect(pluginHandler).toHaveBeenCalledTimes(1);
+    expect(coreCallback).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(true);
   });
 });

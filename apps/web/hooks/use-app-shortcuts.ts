@@ -23,6 +23,13 @@ import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
  * therefore runs — first. `usePluginShortcuts` bails out on
  * `event.defaultPrevented`, so a combo bound to both a core shortcut here and a
  * plugin keybinding fires only the core action.
+ *
+ * Full precedence chain (a matching combo fires exactly one action):
+ * central `useAppShortcuts` (this hook, capture phase, mounted first) wins
+ * over plugin keybindings (`usePluginShortcuts`, capture phase, mounted
+ * second), which win over per-component core shortcuts registered via
+ * `useKeyboardShortcut` (bubble phase) — that hook also bails out on
+ * `event.defaultPrevented`.
  */
 export function useAppShortcuts() {
   const appStore = useAppStoreApi();
