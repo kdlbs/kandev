@@ -356,6 +356,18 @@ export function CommandPanelView({
         filter={scoreCommandSearch}
         shouldFilter={mode === MODE_COMMANDS}
         loop
+        // cmdk's built-in vim bindings intercept Ctrl/Cmd+K, +P, +J, +N as
+        // list-navigation shortcuts and call `event.preventDefault()` on the
+        // React (bubble) dispatch, which runs before this event reaches our
+        // `window`-level `useKeyboardShortcut` listeners. That collided with
+        // the app's own COMMAND_PANEL-open (Ctrl/Cmd+K) and COMMAND_PANEL
+        // (Ctrl/Cmd+P) shortcuts: once `useKeyboardShortcut` started bailing
+        // on `event.defaultPrevented` (see that hook's core-vs-plugin
+        // precedence guard), cmdk's vim-binding preventDefault silently
+        // suppressed the panel's own close/reopen toggle. Disable vim
+        // bindings here so this palette's Ctrl/Cmd+K and +P always reach the
+        // app-level toggle instead of cmdk's internal navigation.
+        vimBindings={false}
         value={selectedValue}
         onValueChange={setSelectedValue}
       >
