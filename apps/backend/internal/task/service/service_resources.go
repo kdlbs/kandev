@@ -78,13 +78,27 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		DefaultConfigAgentProfileID: normalizeOptionalID(req.DefaultConfigAgentProfileID),
 	}
 
-	if err := s.workspaces.CreateWorkspace(ctx, workspace); err != nil {
+	var kanbanWorkflow *models.Workflow
+	if req.BootstrapKanbanWorkflow {
+		if s.workspaceBootstrapper == nil {
+			return nil, errors.New("workspace bootstrapper is not configured")
+		}
+		workflow, err := s.workspaceBootstrapper.CreateWorkspaceWithKanban(ctx, workspace)
+		if err != nil {
+			return nil, err
+		}
+		kanbanWorkflow = workflow
+	} else if err := s.workspaces.CreateWorkspace(ctx, workspace); err != nil {
 		s.logger.Error("failed to create workspace", zap.Error(err))
 		return nil, err
 	}
 
 	s.publishWorkspaceEvent(ctx, events.WorkspaceCreated, workspace)
 	s.logger.Info("workspace created", zap.String("workspace_id", workspace.ID), zap.String("name", workspace.Name))
+	if kanbanWorkflow != nil {
+		s.publishWorkflowEvent(ctx, events.WorkflowCreated, kanbanWorkflow)
+		s.logger.Info("workflow created", zap.String("workflow_id", kanbanWorkflow.ID), zap.String("name", kanbanWorkflow.Name))
+	}
 	return workspace, nil
 }
 

@@ -5,8 +5,12 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
 
 func TestDeleteWorkspaceCascadeWithNameDeletesWorkspaceChildren(t *testing.T) {
@@ -122,6 +126,295 @@ func TestDeleteWorkspaceCascadeWithNameRollsBackWhenChildDeleteFails(t *testing.
 	if _, err := repo.GetWorkflow(ctx, "wf-delete"); err != nil {
 		t.Fatalf("workspace workflow should roll back: %v", err)
 	}
+}
+
+func TestCreateWorkspaceWithKanbanRollsBackAllRowsWhenStepInsertFails(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	if _, err := workflowrepo.NewWithDB(repo.db, repo.db, nil); err != nil {
+		t.Fatalf("initialize workflow repository: %v", err)
+	}
+	if _, err := repo.db.Exec(`
+		CREATE TRIGGER fail_kanban_step
+		BEFORE INSERT ON workflow_steps
+		WHEN NEW.name = 'In Progress'
+		BEGIN
+			SELECT RAISE(ABORT, 'step insert blocked');
+		END
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+	stepsBefore := countWorkflowSteps(t, repo)
+
+	_, err := repo.CreateWorkspaceWithKanban(ctx, &models.Workspace{ID: "ws-bootstrap", Name: "Bootstrap"})
+	if err == nil {
+		t.Fatal("CreateWorkspaceWithKanban succeeded despite step insert failure")
+	}
+	assertBootstrapRowsAbsent(t, repo, "ws-bootstrap", stepsBefore)
+}
+
+func TestCreateWorkspaceWithKanbanRollsBackWhenContextCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	repo := newRepoForHealTests(t)
+	if _, err := workflowrepo.NewWithDB(repo.db, repo.db, nil); err != nil {
+		t.Fatalf("initialize workflow repository: %v", err)
+	}
+
+	_, err := repo.CreateWorkspaceWithKanban(ctx, &models.Workspace{ID: "ws-cancelled", Name: "Cancelled"})
+	if err == nil {
+		t.Fatal("CreateWorkspaceWithKanban succeeded with a cancelled context")
+	}
+	assertBootstrapRowsAbsent(t, repo, "ws-cancelled", countWorkflowSteps(t, repo))
+}
+
+func TestCreateWorkspaceWithKanbanUsesSimpleTemplate(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	workflowStore := newWorkflowStore(t, repo)
+
+	workflow, err := repo.CreateWorkspaceWithKanban(ctx, &models.Workspace{ID: "ws-kanban", Name: "Kanban"})
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithKanban: %v", err)
+	}
+	if workflow.WorkflowTemplateID == nil || *workflow.WorkflowTemplateID != kanbanTemplateID {
+		t.Fatalf("workflow template = %v, want %q", workflow.WorkflowTemplateID, kanbanTemplateID)
+	}
+	steps, err := workflowStore.ListStepsByWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	if len(steps) != 4 {
+		t.Fatalf("Kanban steps = %d, want 4", len(steps))
+	}
+	template, err := kanbanTemplate()
+	if err != nil {
+		t.Fatalf("kanbanTemplate: %v", err)
+	}
+	if len(template.Steps) != 4 {
+		t.Fatalf("simple template steps = %d, want 4", len(template.Steps))
+	}
+	byName := workflowStepsByName(t, steps)
+	if len(byName) != len(template.Steps) {
+		t.Fatalf("unique Kanban step names = %d, want %d", len(byName), len(template.Steps))
+	}
+	for _, definition := range template.Steps {
+		assertKanbanStep(t, byName[definition.Name], workflow.ID, definition)
+	}
+
+	reviewID := byName["Review"].ID
+	if got := stepIDFromTurnComplete(t, byName["Backlog"], wfmodels.OnTurnCompleteMoveToStep); got != reviewID {
+		t.Fatalf("Backlog move target = %q, want Review ID %q", got, reviewID)
+	}
+	if got := stepIDFromTurnComplete(t, byName["In Progress"], wfmodels.OnTurnCompleteMoveToStep); got != reviewID {
+		t.Fatalf("In Progress move target = %q, want Review ID %q", got, reviewID)
+	}
+	if got := stepIDFromTurnStart(t, byName["Done"], wfmodels.OnTurnStartMoveToStep); got != byName["In Progress"].ID {
+		t.Fatalf("Done move target = %q, want In Progress ID %q", got, byName["In Progress"].ID)
+	}
+	assertKanbanEventTypes(t, byName)
+}
+
+func TestInsertTemplateStepsPreservesOptionalFieldsAndRemapsReferences(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	workflowStore := newWorkflowStore(t, repo)
+	workspace := &models.Workspace{ID: "ws-synthetic", Name: "Synthetic"}
+	if err := repo.CreateWorkspace(ctx, workspace); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	workflow := &models.Workflow{ID: "wf-synthetic", WorkspaceID: workspace.ID, Name: "Synthetic"}
+	if err := repo.CreateWorkflow(ctx, workflow); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	template := &wfmodels.WorkflowTemplate{Steps: []wfmodels.StepDefinition{
+		{
+			ID:                        "source",
+			Name:                      "Source",
+			Position:                  4,
+			Color:                     "bg-purple-500",
+			Prompt:                    "keep every field",
+			AllowManualMove:           false,
+			IsStartStep:               true,
+			ShowInCommandPanel:        false,
+			AutoArchiveAfterHours:     72,
+			AgentProfileID:            "agent-profile",
+			StageType:                 wfmodels.StageTypeReview,
+			AutoAdvanceRequiresSignal: true,
+			WIPLimit:                  3,
+			PullFromStepID:            "target",
+			Events: wfmodels.StepEvents{
+				OnEnter:        []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+				OnTurnStart:    []wfmodels.OnTurnStartAction{{Type: wfmodels.OnTurnStartMoveToStep, Config: map[string]any{"step_id": "target"}}},
+				OnTurnComplete: []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToStep, Config: map[string]any{"step_id": "target"}}},
+				OnComment:      []wfmodels.GenericAction{{Type: wfmodels.GenericActionMoveToStep, Config: map[string]any{"step_id": "target"}}},
+			},
+		},
+		{ID: "target", Name: "Target", Position: 5, Color: "bg-green-500"},
+	}}
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := repo.insertTemplateSteps(ctx, tx, workflow.ID, template); err != nil {
+		t.Fatalf("insertTemplateSteps: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit template steps: %v", err)
+	}
+	steps, err := workflowStore.ListStepsByWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	byName := workflowStepsByName(t, steps)
+	source := byName["Source"]
+	target := byName["Target"]
+	if source.ID == "source" || target.ID == "target" || source.ID == target.ID {
+		t.Fatalf("generated IDs = source:%q target:%q, want distinct non-template IDs", source.ID, target.ID)
+	}
+	for _, step := range []*wfmodels.WorkflowStep{source, target} {
+		if _, err := uuid.Parse(step.ID); err != nil {
+			t.Fatalf("step ID %q is not a UUID: %v", step.ID, err)
+		}
+	}
+	if source.Prompt != "keep every field" || source.Color != "bg-purple-500" || source.Position != 4 ||
+		source.AllowManualMove || !source.IsStartStep || source.ShowInCommandPanel ||
+		source.AutoArchiveAfterHours != 72 || source.AgentProfileID != "agent-profile" ||
+		source.StageType != wfmodels.StageTypeReview || !source.AutoAdvanceRequiresSignal || source.WIPLimit != 3 {
+		t.Fatalf("optional fields were not persisted faithfully: %#v", source)
+	}
+	if source.PullFromStepID != target.ID {
+		t.Fatalf("pull source = %q, want remapped target ID %q", source.PullFromStepID, target.ID)
+	}
+	if got := stepIDFromTurnStart(t, source, wfmodels.OnTurnStartMoveToStep); got != target.ID {
+		t.Fatalf("on_turn_start target = %q, want %q", got, target.ID)
+	}
+	if got := stepIDFromTurnComplete(t, source, wfmodels.OnTurnCompleteMoveToStep); got != target.ID {
+		t.Fatalf("on_turn_complete target = %q, want %q", got, target.ID)
+	}
+	if got := stepIDFromComment(t, source); got != target.ID {
+		t.Fatalf("on_comment target = %q, want %q", got, target.ID)
+	}
+}
+
+func newWorkflowStore(t *testing.T, repo *Repository) *workflowrepo.Repository {
+	t.Helper()
+	store, err := workflowrepo.NewWithDB(repo.db, repo.db, nil)
+	if err != nil {
+		t.Fatalf("initialize workflow repository: %v", err)
+	}
+	return store
+}
+
+func workflowStepsByName(t *testing.T, steps []*wfmodels.WorkflowStep) map[string]*wfmodels.WorkflowStep {
+	t.Helper()
+	byName := make(map[string]*wfmodels.WorkflowStep, len(steps))
+	for _, step := range steps {
+		byName[step.Name] = step
+	}
+	return byName
+}
+
+func assertKanbanStep(t *testing.T, step *wfmodels.WorkflowStep, workflowID string, definition wfmodels.StepDefinition) {
+	t.Helper()
+	if step == nil {
+		t.Fatal("expected Kanban step is missing")
+	}
+	if step.WorkflowID != workflowID || step.Position != definition.Position || step.Color != definition.Color ||
+		step.Prompt != definition.Prompt || step.AllowManualMove != definition.AllowManualMove ||
+		step.IsStartStep != definition.IsStartStep || step.ShowInCommandPanel != definition.ShowInCommandPanel ||
+		step.AutoArchiveAfterHours != definition.AutoArchiveAfterHours || step.AgentProfileID != definition.AgentProfileID ||
+		step.StageType != wfmodels.StageType(normalizeBootstrapStageType(definition.StageType)) ||
+		step.AutoAdvanceRequiresSignal != definition.AutoAdvanceRequiresSignal || step.WIPLimit != definition.WIPLimit ||
+		step.PullFromStepID != definition.PullFromStepID {
+		t.Fatalf("Kanban step %q was not persisted faithfully: %#v", step.Name, step)
+	}
+	if _, err := uuid.Parse(step.ID); err != nil {
+		t.Fatalf("Kanban step %q ID %q is not a UUID: %v", step.Name, step.ID, err)
+	}
+}
+
+func assertKanbanEventTypes(t *testing.T, steps map[string]*wfmodels.WorkflowStep) {
+	t.Helper()
+	backlog := steps["Backlog"]
+	inProgress := steps["In Progress"]
+	review := steps["Review"]
+	if len(backlog.Events.OnTurnStart) != 1 || backlog.Events.OnTurnStart[0].Type != wfmodels.OnTurnStartMoveToNext {
+		t.Fatalf("Backlog on_turn_start = %#v, want move_to_next", backlog.Events.OnTurnStart)
+	}
+	if len(inProgress.Events.OnEnter) != 1 || inProgress.Events.OnEnter[0].Type != wfmodels.OnEnterAutoStartAgent {
+		t.Fatalf("In Progress on_enter = %#v, want auto_start_agent", inProgress.Events.OnEnter)
+	}
+	if len(review.Events.OnTurnStart) != 1 || review.Events.OnTurnStart[0].Type != wfmodels.OnTurnStartMoveToPrevious {
+		t.Fatalf("Review on_turn_start = %#v, want move_to_previous", review.Events.OnTurnStart)
+	}
+}
+
+func stepIDFromTurnStart(t *testing.T, step *wfmodels.WorkflowStep, expected wfmodels.OnTurnStartActionType) string {
+	t.Helper()
+	if len(step.Events.OnTurnStart) != 1 {
+		t.Fatalf("%s on_turn_start actions = %d, want 1", step.Name, len(step.Events.OnTurnStart))
+	}
+	if step.Events.OnTurnStart[0].Type != expected {
+		t.Fatalf("%s on_turn_start type = %q, want %q", step.Name, step.Events.OnTurnStart[0].Type, expected)
+	}
+	return configStepID(t, step.Name, step.Events.OnTurnStart[0].Config)
+}
+
+func stepIDFromTurnComplete(t *testing.T, step *wfmodels.WorkflowStep, expected wfmodels.OnTurnCompleteActionType) string {
+	t.Helper()
+	if len(step.Events.OnTurnComplete) != 1 {
+		t.Fatalf("%s on_turn_complete actions = %d, want 1", step.Name, len(step.Events.OnTurnComplete))
+	}
+	if step.Events.OnTurnComplete[0].Type != expected {
+		t.Fatalf("%s on_turn_complete type = %q, want %q", step.Name, step.Events.OnTurnComplete[0].Type, expected)
+	}
+	return configStepID(t, step.Name, step.Events.OnTurnComplete[0].Config)
+}
+
+func stepIDFromComment(t *testing.T, step *wfmodels.WorkflowStep) string {
+	t.Helper()
+	if len(step.Events.OnComment) != 1 {
+		t.Fatalf("%s on_comment actions = %d, want 1", step.Name, len(step.Events.OnComment))
+	}
+	if step.Events.OnComment[0].Type != wfmodels.GenericActionMoveToStep {
+		t.Fatalf("%s on_comment type = %q, want move_to_step", step.Name, step.Events.OnComment[0].Type)
+	}
+	return configStepID(t, step.Name, step.Events.OnComment[0].Config)
+}
+
+func configStepID(t *testing.T, stepName string, config map[string]interface{}) string {
+	t.Helper()
+	stepID, ok := config["step_id"].(string)
+	if !ok {
+		t.Fatalf("%s step_id config = %#v, want string", stepName, config)
+	}
+	return stepID
+}
+
+func assertBootstrapRowsAbsent(t *testing.T, repo *Repository, workspaceID string, stepsBefore int) {
+	t.Helper()
+	var workspaces, workflows int
+	if err := repo.db.QueryRow(`SELECT COUNT(*) FROM workspaces WHERE id = ?`, workspaceID).Scan(&workspaces); err != nil {
+		t.Fatalf("count workspaces: %v", err)
+	}
+	if err := repo.db.QueryRow(`SELECT COUNT(*) FROM workflows WHERE workspace_id = ?`, workspaceID).Scan(&workflows); err != nil {
+		t.Fatalf("count workflows: %v", err)
+	}
+	stepsAfter := countWorkflowSteps(t, repo)
+	if workspaces != 0 || workflows != 0 || stepsAfter != stepsBefore {
+		t.Fatalf("bootstrap rows = workspace:%d workflow:%d total-steps:%d, want workspace/workflow zero and steps unchanged at %d", workspaces, workflows, stepsAfter, stepsBefore)
+	}
+}
+
+func countWorkflowSteps(t *testing.T, repo *Repository) int {
+	t.Helper()
+	var steps int
+	if err := repo.db.QueryRow(`SELECT COUNT(*) FROM workflow_steps`).Scan(&steps); err != nil {
+		t.Fatalf("count workflow steps: %v", err)
+	}
+	return steps
 }
 
 func seedWorkspaceCascadeRows(t *testing.T, repo *Repository, workspaceID string) {

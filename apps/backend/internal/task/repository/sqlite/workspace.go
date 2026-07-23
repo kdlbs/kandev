@@ -16,6 +16,11 @@ import (
 
 // CreateWorkspace creates a new workspace
 func (r *Repository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
+	r.prepareWorkspace(workspace)
+	return r.insertWorkspace(ctx, r.db, workspace)
+}
+
+func (r *Repository) prepareWorkspace(workspace *models.Workspace) {
 	if workspace.ID == "" {
 		workspace.ID = uuid.New().String()
 	}
@@ -25,8 +30,10 @@ func (r *Repository) CreateWorkspace(ctx context.Context, workspace *models.Work
 	if workspace.TaskPrefix == "" {
 		workspace.TaskPrefix = "KAN"
 	}
+}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, workspace *models.Workspace) error {
+	_, err := exec.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workspaces (
 			id,
 			name,

@@ -83,6 +83,58 @@ func TestTaskCreatorAdapterPersistsOriginByCreationPath(t *testing.T) {
 	}
 }
 
+func TestOfficeWorkspaceCreatorDoesNotBootstrapKanbanWorkflow(t *testing.T) {
+	_, taskSvc := newOfficeTaskAdapterHarness(t)
+	adapter := &taskWorkspaceCreatorAdapter{taskSvc: taskSvc}
+	ctx := context.Background()
+
+	if err := adapter.CreateWorkspace(ctx, "Office workspace", "Created by Office onboarding"); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	workspaceID, err := adapter.FindWorkspaceIDByName(ctx, "Office workspace")
+	if err != nil {
+		t.Fatalf("FindWorkspaceIDByName: %v", err)
+	}
+	workflows, err := taskSvc.ListWorkflows(ctx, workspaceID, false)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	if len(workflows) != 0 {
+		t.Fatalf("Office workspace workflows = %d, want 0 before Office onboarding materializes them", len(workflows))
+	}
+}
+
+func TestCreateWorkspaceKanbanBootstrapCreatesUsableSteps(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+
+	workspace, err := harness.taskSvc.CreateWorkspace(ctx, &taskservice.CreateWorkspaceRequest{
+		Name:                    "Kanban workspace",
+		BootstrapKanbanWorkflow: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspace.ID, false)
+	if err != nil {
+		t.Fatalf("ListWorkflows: %v", err)
+	}
+	if len(workflows) != 1 {
+		t.Fatalf("visible workflows = %d, want 1", len(workflows))
+	}
+	workflow := workflows[0]
+	if workflow.Name != "Kanban" || workflow.WorkflowTemplateID == nil || *workflow.WorkflowTemplateID != "simple" {
+		t.Fatalf("workflow = %+v, want visible Kanban workflow from simple template", workflow)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflow.ID)
+	if err != nil {
+		t.Fatalf("ListStepsByWorkflow: %v", err)
+	}
+	if len(steps) == 0 {
+		t.Fatal("Kanban workflow has no usable steps")
+	}
+}
+
 func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservice.Service) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "office-adapter.db"))

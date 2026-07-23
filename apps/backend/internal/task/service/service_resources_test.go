@@ -18,6 +18,25 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+func TestService_CreateWorkspaceKanbanBootstrapPublishesParentBeforeWorkflow(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+
+	_, err := svc.CreateWorkspace(context.Background(), &CreateWorkspaceRequest{
+		Name:                    "Kanban",
+		BootstrapKanbanWorkflow: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 2 {
+		t.Fatalf("published events = %d, want 2", len(published))
+	}
+	if published[0].Type != events.WorkspaceCreated || published[1].Type != events.WorkflowCreated {
+		t.Fatalf("event order = %q, %q; want workspace.created, workflow.created", published[0].Type, published[1].Type)
+	}
+}
+
 func TestService_CreateRepositoryCanonicalizesExplicitLocalPath(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

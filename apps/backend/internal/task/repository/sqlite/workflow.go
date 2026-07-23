@@ -33,6 +33,11 @@ func (r *Repository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflo
 
 // CreateWorkflow creates a new workflow
 func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workflow) error {
+	r.prepareWorkflow(workflow)
+	return r.insertWorkflow(ctx, r.db, workflow)
+}
+
+func (r *Repository) prepareWorkflow(workflow *models.Workflow) {
 	if workflow.ID == "" {
 		workflow.ID = uuid.New().String()
 	}
@@ -40,10 +45,13 @@ func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workfl
 	workflow.CreatedAt = now
 	workflow.UpdatedAt = now
 
+}
+
+func (r *Repository) insertWorkflow(ctx context.Context, exec sqlx.ExtContext, workflow *models.Workflow) error {
 	// Auto-assign sort_order as max+1 within the workspace.
-	// Use writer connection (r.db) to avoid stale reads under concurrent creation.
+	// The caller's transaction keeps the read and insert coherent.
 	var maxOrder int
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(
+	err := exec.QueryRowxContext(ctx, r.db.Rebind(
 		`SELECT COALESCE(MAX(sort_order), -1) FROM workflows WHERE workspace_id = ?`,
 	), workflow.WorkspaceID).Scan(&maxOrder)
 	if err != nil {
@@ -51,7 +59,7 @@ func (r *Repository) CreateWorkflow(ctx context.Context, workflow *models.Workfl
 	}
 	workflow.SortOrder = maxOrder + 1
 
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = exec.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflows (id, workspace_id, name, description, agent_profile_id, workflow_template_id, sort_order, hidden, style, source, source_path, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), workflow.ID, workflow.WorkspaceID, workflow.Name, workflow.Description, workflow.AgentProfileID, workflow.WorkflowTemplateID, workflow.SortOrder, dialect.BoolToInt(workflow.Hidden), normalizeWorkflowStyle(workflow.Style), normalizeWorkflowSource(workflow.Source), workflow.SourcePath, workflow.CreatedAt, workflow.UpdatedAt)
