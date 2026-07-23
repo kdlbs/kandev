@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/app-status-bar.md
 created: 2026-07-23
-status: verifying
+status: complete
 ---
 
 # Implementation Plan: Simplified Resource Metrics Display
