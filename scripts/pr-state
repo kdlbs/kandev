@@ -296,11 +296,25 @@ review_evidence_json() {
           submitted_at: (.submitted_at // null),
           html_url: (.html_url // null)
         });
+      def markdown_prose_lines:
+        reduce (split("\n")[]) as $line (
+          {fence: null, lines: []};
+          ($line | (capture("^[[:space:]]*(?<marker>`{3,}|~{3,})")? // {marker: null}) | .marker) as $marker
+          | if .fence == null then
+              if $marker == null then .lines += [$line]
+              else .fence = ($marker[0:1])
+              end
+            elif $marker != null and ($marker[0:1]) == .fence then
+              .fence = null
+            else .
+            end
+        )
+        | .lines;
       def has_positive_blocker_label:
-        split("\n")
+        markdown_prose_lines
         | any(. | gsub("\\*\\*|__|_|\\*"; "") | test("^[[:space:]]*(?:>\\s*)?(?:(?:[-*+]\\s+)|(?:[0-9]+\\.\\s+))?blockers?[[:space:]]*:[[:space:]]*(?!0\\b|none\\b|no\\b)\\S"; "i"));
       def has_explicit_blocker_statement:
-        split("\n")
+        markdown_prose_lines
         | any(
             .
             | gsub("^[[:space:]]*(?:(?:[-*+]\\s+)|(?:[0-9]+\\.\\s+))?(?:\\*\\*|__|_|\\*)?"; "")
@@ -342,7 +356,16 @@ review_evidence_json() {
           blocked_exact_current_head_reviews: [$exact[] | select(.eligibility == "blocked")],
           active_changes_requested: (if $complete then
             [$all[] | select(.commit_id == $opening_head_oid)] | group_by(.author)
-            | map(map(select(.state == "approved" or .state == "changes_requested" or .state == "dismissed")) | sort_by(.submitted_at // "") | last)
+            | map(
+                map(select(
+                  .state == "approved"
+                  or .state == "changes_requested"
+                  or .state == "dismissed"
+                  or (.state == "commented" and (.body | test("<!-- kandev-review: clean -->"; "i")))
+                ))
+                | sort_by(.submitted_at // "")
+                | last
+              )
             | map(select(.state == "changes_requested"))
             else [] end)
         }

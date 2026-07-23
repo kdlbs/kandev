@@ -429,6 +429,13 @@ if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "-X" && "$4" == "GET" && 
     ]'
     exit 0
   fi
+  if [[ "${GH_REVIEW_SCENARIO:-default}" == "changes-current-clean" ]]; then
+    printf '%s\n' '[
+      {"user":{"login":"cubic-dev-ai[bot]"},"state":"CHANGES_REQUESTED","commit_id":"abc123","submitted_at":"2026-06-01T13:30:00Z"},
+      {"user":{"login":"cubic-dev-ai[bot]"},"state":"COMMENTED","commit_id":"abc123","body":"<!-- kandev-review: clean -->\nNo findings.","submitted_at":"2026-06-01T13:45:00Z"}
+    ]'
+    exit 0
+  fi
   if [[ "${GH_REVIEW_SCENARIO:-default}" == "old-change-current-clean" ]]; then
     printf '%s\n' '[
       {"user":{"login":"cubic-dev-ai[bot]"},"state":"CHANGES_REQUESTED","commit_id":"old-head-sha","submitted_at":"2026-06-01T13:30:00Z"},
@@ -446,6 +453,12 @@ if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "-X" && "$4" == "GET" && 
   if [[ "${GH_REVIEW_SCENARIO:-default}" == "quoted-blocker" ]]; then
     printf '%s\n' '[
       {"user":{"login":"greptile-apps[bot]"},"state":"COMMENTED","commit_id":"abc123","body":"<!-- kandev-review: clean -->\\nPrior review quoted: please fix the race before merge.","submitted_at":"2026-06-01T13:30:00Z"}
+    ]'
+    exit 0
+  fi
+  if [[ "${GH_REVIEW_SCENARIO:-default}" == "fenced-blocker-example" ]]; then
+    printf '%s\n' '[
+      {"user":{"login":"greptile-apps[bot]"},"state":"COMMENTED","commit_id":"abc123","body":"<!-- kandev-review: clean -->\nNo findings.\n\n```text\nplease fix the example\nBlocker: illustrative only\n```","submitted_at":"2026-06-01T13:30:00Z"}
     ]'
     exit 0
   fi
@@ -980,6 +993,11 @@ test_latest_decisive_review_state_controls_active_change_requests() {
   cleared_json="$(<"$tmp/cleared.json")"
   assert_jq "later decisive dismissal clears change request" '.review_evidence.active_changes_requested_count == 0' "$cleared_json"
 
+  local clean_json
+  GH_REVIEW_SCENARIO=changes-current-clean PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/clean.json"
+  clean_json="$(<"$tmp/clean.json")"
+  assert_jq "later clean current-head review clears change request" '.review_evidence.active_changes_requested_count == 0' "$clean_json"
+
   local old_change_current_clean_json
   GH_REVIEW_SCENARIO=old-change-current-clean PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/old-change-current-clean.json"
   old_change_current_clean_json="$(<"$tmp/old-change-current-clean.json")"
@@ -1003,6 +1021,19 @@ test_quoted_blocker_language_does_not_block_clean_review() {
 
   assert_jq "quoted blocker text preserves explicit clean review" '.review_evidence.exact_current_head_reviews[0].eligibility == "eligible" and .review_evidence.blocked_exact_current_head_review_count == 0' "$json"
   pass "quoted blocker language does not block clean review"
+}
+
+test_fenced_blocker_examples_do_not_block_clean_review() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REVIEW_SCENARIO=fenced-blocker-example PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "fenced blocker examples preserve explicit clean review" '.review_evidence.exact_current_head_reviews[0].eligibility == "eligible" and .review_evidence.blocked_exact_current_head_review_count == 0' "$json"
+  pass "fenced blocker examples do not block clean review"
 }
 
 test_partial_failure_records_error_but_keeps_other_data() {
@@ -1251,6 +1282,7 @@ test_explicit_clean_commented_review_is_eligible
 test_zero_blocker_summaries_remain_clean_with_explicit_marker
 test_positive_blocker_evidence_overrides_clean_marker
 test_exact_head_blockers_from_any_author_are_aggregated
+test_fenced_blocker_examples_do_not_block_clean_review
 test_latest_decisive_review_state_controls_active_change_requests
 test_quoted_blocker_language_does_not_block_clean_review
 test_partial_failure_records_error_but_keeps_other_data
