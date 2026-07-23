@@ -80,6 +80,9 @@ type CreateAgentProfileRequest struct {
 	// by default) so a fresh profile opens with the agent's suggestions.
 	CLIFlags []dto.CLIFlagDTO
 	EnvVars  []dto.ProfileEnvVarDTO
+	// CommandPrefix is an optional launcher prefix prepended to the agent
+	// command (e.g. "greywall --"). Shell-tokenised at launch time.
+	CommandPrefix string
 }
 
 func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*dto.AgentDTO, error) {
@@ -180,6 +183,9 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 		if err := validateProfileEnvVarDTOs(profileReq.EnvVars); err != nil {
 			return nil, err
 		}
+		if err := validateCommandPrefix(profileReq.CommandPrefix); err != nil {
+			return nil, err
+		}
 		cliFlags := cliFlagsFromDTO(profileReq.CLIFlags)
 		if profileReq.CLIFlags == nil {
 			cliFlags = seedCLIFlags(agentConfig)
@@ -192,6 +198,7 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			Mode:             profileReq.Mode,
 			CLIFlags:         cliFlags,
 			EnvVars:          envVarsFromDTO(profileReq.EnvVars),
+			CommandPrefix:    strings.TrimSpace(profileReq.CommandPrefix),
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err

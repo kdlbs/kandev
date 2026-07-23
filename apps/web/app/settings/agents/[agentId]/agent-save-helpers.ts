@@ -318,6 +318,7 @@ async function saveExistingProfiles(
           ...permissionsToProfilePatch(profile),
           cli_passthrough: profile.cliPassthrough ?? false,
           cli_flags: profile.cliFlags ?? [],
+          command_prefix: profile.commandPrefix ?? "",
           env_vars: profile.envVars ?? [],
         });
         profileIds.set(profile.id, createdProfile.id);

@@ -212,6 +212,23 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
 		require.Equal(t, "copilot --acp", cmds.initial)
 	})
+
+	t.Run("prefix also wraps the continue-session command", func(t *testing.T) {
+		// One-shot agents (e.g. Amp) build a separate continue command; it must
+		// carry the launcher prefix too, after any cli flags.
+		continueAgent := &cliFlagTestAgent{testAgent{runtimeConfig: &agents.RuntimeConfig{
+			SessionConfig: agents.SessionConfig{
+				ContinueSessionCmd: agents.NewCommand("amp", "threads", "continue"),
+			},
+		}}}
+		profile := &AgentProfileInfo{
+			ProfileID:     "p5",
+			CommandPrefix: "greywall --",
+			CLIFlags:      []settingsmodels.CLIFlag{{Flag: "--allow-all-tools", Enabled: true}},
+		}
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, continueAgent, false)
+		require.Equal(t, "greywall -- amp threads continue --allow-all-tools", cmds.continue_)
+	})
 }
 
 func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {

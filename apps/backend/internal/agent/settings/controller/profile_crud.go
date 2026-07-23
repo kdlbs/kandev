@@ -239,10 +239,10 @@ func validateCommandPrefix(prefix string) error {
 	}
 	tokens, err := cliflags.Tokenise(prefix)
 	if err != nil {
-		return fmt.Errorf("command_prefix: %w", err)
+		return fmt.Errorf("%w: %v", ErrInvalidCommandPrefix, err)
 	}
 	if len(tokens) == 0 || tokens[0] == "" {
-		return fmt.Errorf("command_prefix must start with a launcher command")
+		return fmt.Errorf("%w: must start with a launcher command", ErrInvalidCommandPrefix)
 	}
 	return nil
 }

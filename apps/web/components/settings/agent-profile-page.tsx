@@ -478,6 +478,7 @@ function ProfileEditorBody({
         permissionSettings={{ allow_indexing: draft.allowIndexing }}
         cliPassthrough={draft.cliPassthrough}
         cliFlags={draft.cliFlags ?? []}
+        commandPrefix={draft.commandPrefix}
         envVars={draft.envVars}
         secrets={secrets}
       />

@@ -224,6 +224,7 @@ export type CommandPreviewRequest = {
   permission_settings: Record<string, boolean>;
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
+  command_prefix?: string;
 };
 
 export type CommandPreviewResponse = {

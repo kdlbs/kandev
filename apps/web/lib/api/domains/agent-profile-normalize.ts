@@ -22,6 +22,11 @@ function pickBool(raw: RawProfile, camel: string, snake: string, fallback = fals
   return typeof value === "boolean" ? value : fallback;
 }
 
+function pickOptionalString(raw: RawProfile, camel: string, snake: string): string | undefined {
+  const value = raw[camel] ?? raw[snake];
+  return typeof value === "string" ? value : undefined;
+}
+
 function pickFlags(raw: RawProfile): CLIFlag[] {
   const value = raw.cliFlags ?? raw.cli_flags;
   return Array.isArray(value) ? (value as CLIFlag[]) : [];
@@ -60,7 +65,7 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     allowIndexing: pickBool(profile, "allowIndexing", "allow_indexing"),
     autoApprove: pickBool(profile, "autoApprove", "auto_approve"),
     cliFlags: pickFlags(profile),
-    commandPrefix: (profile.commandPrefix ?? profile.command_prefix) as string | undefined,
+    commandPrefix: pickOptionalString(profile, "commandPrefix", "command_prefix"),
     envVars: pickEnvVars(profile),
     cliPassthrough: pickBool(profile, "cliPassthrough", "cli_passthrough"),
     userModified: (profile.userModified ?? profile.user_modified) as boolean | undefined,

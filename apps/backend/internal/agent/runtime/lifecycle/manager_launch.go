@@ -210,37 +210,47 @@ type agentCommands struct {
 	continue_ string // continue command for one-shot agents (empty if not applicable)
 }
 
+// resolveProfileLaunchTokens resolves the user-configured cli_flags argv tokens
+// and the launcher command_prefix tokens for a profile. Both must be applied on
+// every command build — the initial launch AND fresh restarts (context reset) —
+// or a sandboxed profile would silently relaunch without its wrapper. Malformed
+// values are logged and dropped rather than aborting the launch, mirroring the
+// tolerance the settings layer already applies at save time.
+func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo) (cliFlagTokens, commandPrefixTokens []string) {
+	if profileInfo == nil {
+		return nil, nil
+	}
+	if tokens, err := cliflags.Resolve(profileInfo.CLIFlags); err != nil {
+		m.logger.Warn("failed to resolve cli_flags for profile, launching without user-configured flags",
+			zap.String("profile_id", profileInfo.ProfileID),
+			zap.Error(err))
+	} else {
+		cliFlagTokens = tokens
+	}
+	if tokens, err := cliflags.Tokenise(profileInfo.CommandPrefix); err != nil {
+		m.logger.Warn("failed to tokenise command_prefix for profile, launching without launcher prefix",
+			zap.String("profile_id", profileInfo.ProfileID),
+			zap.Error(err))
+	} else {
+		commandPrefixTokens = tokens
+	}
+	return cliFlagTokens, commandPrefixTokens
+}
+
 // buildAgentCommand builds the agent command strings for the execution.
 // Returns both the initial command and the continue command (for one-shot agents like Amp).
 func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent, preferNative bool) agentCommands {
 	model := ""
 	autoApprove := false
 	permissionValues := make(map[string]bool)
-	var cliFlagTokens []string
-	var commandPrefixTokens []string
 	if profileInfo != nil {
 		model = profileInfo.Model
 		autoApprove = profileInfo.AutoApprove
 		permissionValues[agents.PermissionKeyAutoApprove] = profileInfo.AutoApprove
 		permissionValues["allow_indexing"] = profileInfo.AllowIndexing
 		permissionValues["dangerously_skip_permissions"] = profileInfo.DangerouslySkipPermissions
-		tokens, err := cliflags.Resolve(profileInfo.CLIFlags)
-		if err != nil {
-			m.logger.Warn("failed to resolve cli_flags for profile, launching without user-configured flags",
-				zap.String("profile_id", profileInfo.ProfileID),
-				zap.Error(err))
-		} else {
-			cliFlagTokens = tokens
-		}
-		prefixTokens, err := cliflags.Tokenise(profileInfo.CommandPrefix)
-		if err != nil {
-			m.logger.Warn("failed to tokenise command_prefix for profile, launching without launcher prefix",
-				zap.String("profile_id", profileInfo.ProfileID),
-				zap.Error(err))
-		} else {
-			commandPrefixTokens = prefixTokens
-		}
 	}
+	cliFlagTokens, commandPrefixTokens := m.resolveProfileLaunchTokens(profileInfo)
 	// Allow model override from request (for dynamic model switching)
 	if req.ModelOverride != "" {
 		model = req.ModelOverride

@@ -14,6 +14,7 @@ type CommandPreviewCardProps = {
   permissionSettings: Record<string, boolean>;
   cliPassthrough: boolean;
   cliFlags: CLIFlag[];
+  commandPrefix?: string;
   envVars?: ProfileEnvVar[];
   secrets?: { id: string; name: string }[];
 };
@@ -136,6 +137,7 @@ export function CommandPreviewCard({
   permissionSettings,
   cliPassthrough,
   cliFlags,
+  commandPrefix,
   envVars,
   secrets,
 }: CommandPreviewCardProps) {
@@ -145,8 +147,8 @@ export function CommandPreviewCard({
   const [error, setError] = useState<string | null>(null);
 
   const settingsKey = useMemo(
-    () => JSON.stringify({ model, permissionSettings, cliPassthrough, cliFlags }),
-    [model, permissionSettings, cliPassthrough, cliFlags],
+    () => JSON.stringify({ model, permissionSettings, cliPassthrough, cliFlags, commandPrefix }),
+    [model, permissionSettings, cliPassthrough, cliFlags, commandPrefix],
   );
 
   useEffect(() => {
@@ -160,6 +162,7 @@ export function CommandPreviewCard({
           permission_settings: permissionSettings,
           cli_passthrough: cliPassthrough,
           cli_flags: cliFlags,
+          command_prefix: commandPrefix,
         });
         setPreview(response);
         setError(null);
@@ -172,7 +175,7 @@ export function CommandPreviewCard({
     }, 300);
 
     return () => clearTimeout(timeoutId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- settingsKey already includes model, permissionSettings, cliPassthrough, cliFlags
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- settingsKey already includes model, permissionSettings, cliPassthrough, cliFlags, commandPrefix
   }, [agentName, settingsKey]);
 
   return (

@@ -184,11 +184,12 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name     string                 `json:"name"`
-	Model    string                 `json:"model"`
-	Mode     string                 `json:"mode,omitempty"`
-	CLIFlags []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars  []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	Name          string                 `json:"name"`
+	Model         string                 `json:"model"`
+	Mode          string                 `json:"mode,omitempty"`
+	CLIFlags      []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars       []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -208,11 +209,12 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			return
 		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
-			Name:     profile.Name,
-			Model:    profile.Model,
-			Mode:     profile.Mode,
-			CLIFlags: profile.CLIFlags,
-			EnvVars:  profile.EnvVars,
+			Name:          profile.Name,
+			Model:         profile.Model,
+			Mode:          profile.Mode,
+			CLIFlags:      profile.CLIFlags,
+			EnvVars:       profile.EnvVars,
+			CommandPrefix: profile.CommandPrefix,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
@@ -400,7 +402,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		CommandPrefix:  body.CommandPrefix,
 	})
 	if err != nil {
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -458,7 +460,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 			return
 		}
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -511,6 +513,7 @@ type commandPreviewRequest struct {
 	PermissionSettings map[string]bool  `json:"permission_settings"`
 	CLIPassthrough     bool             `json:"cli_passthrough"`
 	CLIFlags           []dto.CLIFlagDTO `json:"cli_flags"`
+	CommandPrefix      string           `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -531,6 +534,7 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 		PermissionSettings: body.PermissionSettings,
 		CLIPassthrough:     body.CLIPassthrough,
 		CLIFlags:           body.CLIFlags,
+		CommandPrefix:      body.CommandPrefix,
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))

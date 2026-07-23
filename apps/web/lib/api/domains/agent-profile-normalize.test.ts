@@ -86,6 +86,21 @@ describe("normalizeAgentProfile", () => {
     const result = normalizeAgentProfile({ id: "x", name: "y" });
     expect(result.commandPrefix).toBeUndefined();
   });
+
+  it("ignores a non-string command_prefix instead of propagating the raw value", () => {
+    const nullResult = normalizeAgentProfile({ id: "x", name: "y", command_prefix: null });
+    expect(nullResult.commandPrefix).toBeUndefined();
+
+    const numberResult = normalizeAgentProfile({ id: "x", name: "y", command_prefix: 42 });
+    expect(numberResult.commandPrefix).toBeUndefined();
+
+    const objectResult = normalizeAgentProfile({
+      id: "x",
+      name: "y",
+      commandPrefix: { flag: "greywall" },
+    });
+    expect(objectResult.commandPrefix).toBeUndefined();
+  });
 });
 
 describe("toAgentProfilePayload", () => {

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -140,8 +141,14 @@ func TestValidateCommandPrefix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validateCommandPrefix(tc.prefix)
-			if tc.wantErr && err == nil {
-				t.Error("expected error, got nil")
+			if tc.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if !errors.Is(err, ErrInvalidCommandPrefix) {
+					// The handlers map only ErrInvalidCommandPrefix to HTTP 400;
+					// an unwrapped error would fall through to a 500.
+					t.Errorf("error does not wrap ErrInvalidCommandPrefix: %v", err)
+				}
 			}
 			if !tc.wantErr && err != nil {
 				t.Errorf("unexpected error: %v", err)

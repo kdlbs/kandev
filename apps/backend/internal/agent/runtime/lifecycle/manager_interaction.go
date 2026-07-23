@@ -1515,11 +1515,18 @@ func (m *Manager) buildFreshAgentCommand(ctx context.Context, execution *AgentEx
 		model = override
 	}
 
+	// Preserve the profile's cli_flags and command_prefix across restarts. A
+	// context reset that dropped the launcher prefix would relaunch a
+	// sandboxed agent unwrapped — the exact protection the prefix exists for.
+	cliFlagTokens, commandPrefixTokens := m.resolveProfileLaunchTokens(profileInfo)
+
 	opts := agents.CommandOptions{
-		Model:            model,
-		SessionID:        "", // Fresh start — no resume flags
-		AutoApprove:      autoApprove,
-		PermissionValues: permissionValues,
+		Model:               model,
+		SessionID:           "", // Fresh start — no resume flags
+		AutoApprove:         autoApprove,
+		PermissionValues:    permissionValues,
+		CLIFlagTokens:       cliFlagTokens,
+		CommandPrefixTokens: commandPrefixTokens,
 		// Runtime is "standalone" / "docker" / "sprites" — MockAgent
 		// reads this to pick a bare name (container PATH lookup) vs.
 		// an absolute host path.

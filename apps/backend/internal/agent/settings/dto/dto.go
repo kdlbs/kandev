@@ -276,6 +276,7 @@ type CommandPreviewRequest struct {
 	Model              string          `json:"model"`
 	PermissionSettings map[string]bool `json:"permission_settings"`
 	CLIPassthrough     bool            `json:"cli_passthrough"`
+	CommandPrefix      string          `json:"command_prefix,omitempty"`
 }
 
 // CommandPreviewResponse is the response for the command preview endpoint
