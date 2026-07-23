@@ -224,7 +224,15 @@ extract_checks_json() {
       items: sort_by((.run_id | tonumber? // -1), (.job_id | tonumber? // -1), ._index)
     })
     | sort_by(.first_index)
-    | map(.items | last)
+    | map(
+        .items as $items
+        | ($items | last) as $latest
+        | if ($latest.conclusion == "cancelled" or $latest.conclusion == "skipped" or $latest.conclusion == "neutral") then
+            ([$items[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "error" or .conclusion == "action_required")] | last) // $latest
+          else
+            $latest
+          end
+      )
     | map(del(._index))
   '
 }
@@ -240,9 +248,14 @@ extract_issue_comments_json() {
       body: (.body // ""),
       created_at: (.createdAt // .created_at // null),
       url: (.url // null),
-      actionable: (((((.author.login // "unknown") == "github-actions") or ((.author.login // "unknown") == "github-actions[bot]"))
-        and (((.body // "") | gsub("^[[:space:]]+|[[:space:]]+$"; ""))
-          | test("^<!-- opencode-review:no-findings -->\\n\\*\\*OpenCode review complete\\*\\*\\n\\nOpenCode model: `[^`\\n]+`\\n\\nNo suggestions found for commit `[0-9A-Fa-f]{7,40}`\\.$"))) | not)
+      actionable: (
+        (((.author.login // "unknown") == "github-actions") or ((.author.login // "unknown") == "github-actions[bot]"))
+        and (
+          (((.body // "") | gsub("^[[:space:]]+|[[:space:]]+$"; ""))
+            | test("^<!-- opencode-review:no-findings -->\\n\\*\\*OpenCode review complete\\*\\*\\n\\nOpenCode model: `[^`\\n]+`\\n\\nNo suggestions found for commit `[0-9A-Fa-f]{7,40}`\\.$")
+            | not)
+        )
+      )
     })
   '
 }
@@ -286,8 +299,15 @@ review_evidence_json() {
       def has_positive_blocker_label:
         split("\n")
         | any(. | gsub("\\*\\*|__|_|\\*"; "") | test("^[[:space:]]*(?:>\\s*)?(?:(?:[-*+]\\s+)|(?:[0-9]+\\.\\s+))?blockers?[[:space:]]*:[[:space:]]*(?!0\\b|none\\b|no\\b)\\S"; "i"));
+      def has_explicit_blocker_statement:
+        split("\n")
+        | any(
+            .
+            | gsub("^[[:space:]]*(?:(?:[-*+]\\s+)|(?:[0-9]+\\.\\s+))?(?:\\*\\*|__|_|\\*)?"; "")
+            | test("^(?:blocked|changes[ _-]?requested|action required|must fix|required fix|please fix)\\b"; "i")
+          );
       def review_eligibility:
-        if ((.body | test("\\|\\s*blocker\\s*\\|\\s*[1-9][0-9]*\\s*\\||\\b(blocked|changes[ _-]?requested|action required|must fix|required fix|please fix)\\b|\\b(critical|blocking)\\s*:"; "i")) or (.body | has_positive_blocker_label)) then {eligibility: "blocked", verdict: "blocker"}
+        if ((.body | test("\\|\\s*blocker\\s*\\|\\s*[1-9][0-9]*\\s*\\|"; "i")) or (.body | has_positive_blocker_label) or (.body | has_explicit_blocker_statement)) then {eligibility: "blocked", verdict: "blocker"}
         elif .state == "approved" then {eligibility: "eligible", verdict: "approved"}
         elif .state == "commented" and (.body | test("<!-- kandev-review: clean -->"; "i")) then {eligibility: "eligible", verdict: "clean"}
         elif .state == "commented" then {eligibility: "unknown", verdict: "unknown"}
@@ -321,7 +341,7 @@ review_evidence_json() {
           trusted_default_producer_exact_current_head_reviews: [$exact[] | select(.trusted_default_producer)],
           blocked_exact_current_head_reviews: [$exact[] | select(.eligibility == "blocked")],
           active_changes_requested: (if $complete then
-            $all | group_by(.author)
+            [$all[] | select(.commit_id == $opening_head_oid)] | group_by(.author)
             | map(map(select(.state == "approved" or .state == "changes_requested" or .state == "dismissed")) | sort_by(.submitted_at // "") | last)
             | map(select(.state == "changes_requested"))
             else [] end)

@@ -247,6 +247,22 @@ if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
       "detailsUrl": "https://github.com/kdlbs/kandev/actions/runs/27340000007/job/55150000007"
     },
     {
+      "__typename": "CheckRun",
+      "name": "late-cancelled-failure",
+      "workflowName": "CI",
+      "status": "COMPLETED",
+      "conclusion": "FAILURE",
+      "detailsUrl": "https://github.com/kdlbs/kandev/actions/runs/27340000008/job/55150000008"
+    },
+    {
+      "__typename": "CheckRun",
+      "name": "late-cancelled-failure",
+      "workflowName": "CI",
+      "status": "COMPLETED",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/kdlbs/kandev/actions/runs/27340000009/job/55150000009"
+    },
+    {
       "__typename": "StatusContext",
       "context": "external pending",
       "state": "PENDING",
@@ -410,6 +426,26 @@ if [[ "$1" == "api" && "$2" == "--paginate" && "$3" == "-X" && "$4" == "GET" && 
     printf '%s\n' '[
       {"user":{"login":"cubic-dev-ai[bot]"},"state":"CHANGES_REQUESTED","commit_id":"abc123","submitted_at":"2026-06-01T13:30:00Z"},
       {"user":{"login":"cubic-dev-ai[bot]"},"state":"DISMISSED","commit_id":"abc123","submitted_at":"2026-06-01T13:45:00Z"}
+    ]'
+    exit 0
+  fi
+  if [[ "${GH_REVIEW_SCENARIO:-default}" == "old-change-current-clean" ]]; then
+    printf '%s\n' '[
+      {"user":{"login":"cubic-dev-ai[bot]"},"state":"CHANGES_REQUESTED","commit_id":"old-head-sha","submitted_at":"2026-06-01T13:30:00Z"},
+      {"user":{"login":"cubic-dev-ai[bot]"},"state":"COMMENTED","commit_id":"abc123","body":"<!-- kandev-review: clean -->\\nNo findings.","submitted_at":"2026-06-01T13:45:00Z"}
+    ]'
+    exit 0
+  fi
+  if [[ "${GH_REVIEW_SCENARIO:-default}" == "current-change-old-approval" ]]; then
+    printf '%s\n' '[
+      {"user":{"login":"cubic-dev-ai[bot]"},"state":"CHANGES_REQUESTED","commit_id":"abc123","submitted_at":"2026-06-01T13:30:00Z"},
+      {"user":{"login":"cubic-dev-ai[bot]"},"state":"APPROVED","commit_id":"old-head-sha","submitted_at":"2026-06-01T13:45:00Z"}
+    ]'
+    exit 0
+  fi
+  if [[ "${GH_REVIEW_SCENARIO:-default}" == "quoted-blocker" ]]; then
+    printf '%s\n' '[
+      {"user":{"login":"greptile-apps[bot]"},"state":"COMMENTED","commit_id":"abc123","body":"<!-- kandev-review: clean -->\\nPrior review quoted: please fix the race before merge.","submitted_at":"2026-06-01T13:30:00Z"}
     ]'
     exit 0
   fi
@@ -609,12 +645,13 @@ test_snapshot_happy_path() {
   assert_jq "pr number" '.pr.number == 123' "$json"
   assert_jq "branch" '.pr.branch == "feat/pr-state"' "$json"
   assert_jq "since timestamp" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
-  assert_jq "checks collapse duplicate workflow attempts" '.checks | length < 9' "$json"
+  assert_jq "checks collapse duplicate workflow attempts" '.checks | length < 10' "$json"
   assert_jq "latest duplicate check uses newest attempt" '[.checks[] | select(.name == "web lint")][0] | .conclusion == "success" and .run_id == "27340000001"' "$json"
   assert_jq "failed check preserved" '.checks[] | select(.name == "e2e") | .conclusion == "failure"' "$json"
   assert_jq "check run id" '.checks[] | select(.name == "e2e") | .run_id == "27340000002"' "$json"
   assert_jq "nested workflow name" '.checks[] | select(.name == "e2e") | .workflow == "CI"' "$json"
   assert_jq "duplicate check prefers non-skipped first" '[.checks[] | select(.name == "opencode-review-same-repo")][0] | .conclusion == "success" and .run_id == "27340000005"' "$json"
+  assert_jq "duplicate cancellation retains prior failure" '[.checks[] | select(.name == "late-cancelled-failure")][0] | .conclusion == "failure" and .run_id == "27340000008"' "$json"
   assert_jq "pending status context conclusion normalized" '.checks[] | select(.name == "external pending") | .status == "pending" and .conclusion == null' "$json"
   assert_jq "threads count" '.review_threads | length == 1' "$json"
   assert_jq "total unresolved count includes historical unresolved thread" '.unresolved_review_thread_count == 2' "$json"
@@ -625,8 +662,8 @@ test_snapshot_happy_path() {
   assert_jq "review author" '.reviews[] | select(.author == "cubic-dev-ai[bot]") | .author == "cubic-dev-ai[bot]"' "$json"
   assert_jq "issue comments count" '.issue_comments | length == 7' "$json"
   assert_jq "issue comment author" 'any(.issue_comments[]; .author == "github-actions" and (.body | contains("Verdict")))' "$json"
-  assert_jq "only canonical historical OpenCode no-findings issue comment is nonactionable" '([.issue_comments[] | select(.actionable == false)] | length) == 1 and .actionable_issue_comment_count == 6' "$json"
-  assert_jq "wrong author quoted marker mixed blocker diagnostic and fallback remain actionable" 'all(.issue_comments[] | select(.body | test("wrong|quotes|Blocker: real|diagnostic|fallback"; "i")); .actionable == true)' "$json"
+  assert_jq "only GitHub Actions noncanonical output is actionable" '([.issue_comments[] | select(.actionable == false)] | length) == 2 and .actionable_issue_comment_count == 5' "$json"
+  assert_jq "non-GitHub-Actions canonical marker is nonactionable while workflow diagnostic and fallback remain actionable" 'any(.issue_comments[]; .author == "other-bot[bot]" and .actionable == false) and all(.issue_comments[] | select(.body | test("Blocker: real|diagnostic|fallback"; "i")); .actionable == true)' "$json"
   assert_jq "no errors" '.errors == []' "$json"
   assert_jq "raw review evidence is complete" '.review_evidence.complete == true and .review_evidence.current_head_sha == "abc123"' "$json"
   assert_jq "active change request surfaced" '.review_evidence.active_changes_requested_count == 1' "$json"
@@ -942,7 +979,30 @@ test_latest_decisive_review_state_controls_active_change_requests() {
   GH_REVIEW_SCENARIO=changes-dismissed PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/cleared.json"
   cleared_json="$(<"$tmp/cleared.json")"
   assert_jq "later decisive dismissal clears change request" '.review_evidence.active_changes_requested_count == 0' "$cleared_json"
+
+  local old_change_current_clean_json
+  GH_REVIEW_SCENARIO=old-change-current-clean PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/old-change-current-clean.json"
+  old_change_current_clean_json="$(<"$tmp/old-change-current-clean.json")"
+  assert_jq "old-head change request does not block a clean current head" '.review_evidence.exact_current_head_reviews[0].eligibility == "eligible" and .review_evidence.active_changes_requested_count == 0' "$old_change_current_clean_json"
+
+  local current_change_old_approval_json
+  GH_REVIEW_SCENARIO=current-change-old-approval PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/current-change-old-approval.json"
+  current_change_old_approval_json="$(<"$tmp/current-change-old-approval.json")"
+  assert_jq "old-head approval cannot clear a current-head change request" '.review_evidence.active_changes_requested_count == 1 and .review_evidence.active_changes_requested[0].commit_id == "abc123"' "$current_change_old_approval_json"
   pass "latest decisive review state controls active change requests"
+}
+
+test_quoted_blocker_language_does_not_block_clean_review() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_REVIEW_SCENARIO=quoted-blocker PATH="$tmp/bin:$PATH" "$SCRIPT" 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "quoted blocker text preserves explicit clean review" '.review_evidence.exact_current_head_reviews[0].eligibility == "eligible" and .review_evidence.blocked_exact_current_head_review_count == 0' "$json"
+  pass "quoted blocker language does not block clean review"
 }
 
 test_partial_failure_records_error_but_keeps_other_data() {
@@ -1061,9 +1121,10 @@ test_summary_mode_returns_compact_fixup_state() {
 
   assert_jq "summary keeps pr" '.pr.number == 123' "$json"
   assert_jq "summary keeps since" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
-  assert_jq "summary failed check count" '.failed_checks | length == 2' "$json"
+  assert_jq "summary failed check count" '.failed_checks | length == 3' "$json"
   assert_jq "summary failed check" '.failed_checks[] | select(.name == "e2e") | .conclusion == "failure" and .run_id == "27340000002"' "$json"
   assert_jq "summary reports failed duplicate over skipped" '.failed_checks[] | select(.name == "opencode-review-fork") | .conclusion == "failure" and .run_id == "27340000007"' "$json"
+  assert_jq "summary retains failure before a duplicate cancellation" '.failed_checks[] | select(.name == "late-cancelled-failure") | .conclusion == "failure" and .run_id == "27340000008"' "$json"
   assert_jq "summary ignores cancelled duplicate check" '[.failed_checks[] | select(.name == "web lint")] | length == 0' "$json"
   assert_jq "summary dedupes skipped duplicate check" '[.failed_checks[], .pending_checks[] | select(.name == "opencode-review-same-repo")] | length == 0' "$json"
   assert_jq "summary pending check count" '.pending_checks | length == 2' "$json"
@@ -1191,6 +1252,7 @@ test_zero_blocker_summaries_remain_clean_with_explicit_marker
 test_positive_blocker_evidence_overrides_clean_marker
 test_exact_head_blockers_from_any_author_are_aggregated
 test_latest_decisive_review_state_controls_active_change_requests
+test_quoted_blocker_language_does_not_block_clean_review
 test_partial_failure_records_error_but_keeps_other_data
 test_pr_view_failure_with_non_numeric_ref_keeps_schema
 test_repo_failure_skips_review_threads

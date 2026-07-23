@@ -21,10 +21,9 @@ In the user-started primary session:
 3. Delegate the minimal production patch to an `implementer` worker. It
    preserves or completes the diagnosis regression test and runs green targeted
    verification without duplicating that test unnecessarily.
-4. Apply `/planner-orchestration` risk routing: obtain local `code-review` or
-   qualifying current-head PR AI semantic-review evidence, run risk-triggered
-   QA, always run final `verify`, and delegate `security-auditor` for sensitive
-   fixes.
+4. Apply `/planner-orchestration` risk routing: for PR delivery, obtain
+   qualifying current-head PR AI semantic evidence, always run final `verify`,
+   and use local QA/review/security agents only for exceptional routes.
 
 Stop after dispatching and coordinating these assignments. Do not continue into
 the direct fix procedure below. A diagnostic worker performs phases 0-2 and
@@ -65,8 +64,8 @@ Create these tasks immediately (use your task/todo tracking tool if available):
 1. **Reproduce the bug** — Write a test or find a reliable reproduction case
 2. **Find the root cause** — Trace the code path, narrow the scope, state the cause clearly
 3. **Fix with TDD** — Minimal fix with regression test, no surrounding refactors
-4. **Review and verify** — Planner delegates risk-routed semantic review and
-   QA, mandatory final verification, and conditional security audit; assigns any remediation
+4. **Review and verify** — Planner obtains PR-first semantic evidence,
+   mandatory final verification, and only exceptional local gates; assigns remediation
 5. **Record** — Planner updates durable artifacts when worker evidence exposes a requirement or architecture gap
 
 Then start with task 0 when the bug is issue-sourced, otherwise task 1. Mark each task in_progress when you begin it and completed when you finish it. Do not skip ahead — fixing without reading the source issue (when one exists) or reproducing leads to patches that don't address the real problem. Fixing without understanding the root cause leads to whack-a-mole.
@@ -172,25 +171,25 @@ This is a planner coordination phase. After the fix implementer reports its
 targeted test results and compact handoff capsule (intent/acceptance; base/head
 SHA when applicable; changed files and entry points; named spec/ADR sections;
 risk tags; exact targeted commands/results; uncertainties), apply
-`/planner-orchestration` risk routing. Qualifying PR AI semantic-review
-evidence may cover routine work; without complete exact-current-head evidence,
-launch local `code-review`. Require `qa` for integration, public contracts,
-persistence, concurrency, important error/recovery behavior, cross-component
-wiring, or missing faithful independent behavior evidence. A user-flow may skip
-QA only when faithfully tested with no integration boundary; record the skip and
-reason. Always run final `verify`, and launch
-`security-auditor` for auth, workspace isolation, filesystem/process
-execution, integrations, webhooks, secrets, or agent/tool permissions. PR AI
-review never replaces verification or security audit. The planner's acceptance
-check is not a substitute for required gates.
+`/planner-orchestration` risk routing. For PR delivery, defer routine semantic
+review to qualifying exact-current-head PR AI evidence; do not launch local
+`code-review` by default. Use `qa` only for unusually large/complex
+multi-component behavior or an important integration boundary without faithful
+tests. Use `security-auditor` only for high-impact new/changed authz,
+workspace-isolation, secrets, untrusted-execution, or credential-trust
+boundaries, an explicit request, or concrete automated security concerns.
+Always run final `verify`. The planner's acceptance check is not a substitute
+for the required evidence.
 
 Route every finding to a bounded implementer packet. Reuse the same native
 thread when role, change, and file scope remain materially the same; use a new
 thread after major redesign, unrelated scope, stale/noisy context, or when
 independent judgment is needed. Rerun only affected semantic, QA, and security
-checks after remediation; qualifying PR AI evidence must cover the new head.
-Always rerun final `verify`. The fix worker only reports targeted results, its
-handoff capsule, and any similar patterns it noticed.
+gates only when the remediation meets their exceptional route. For a small,
+scope-preserving PR fix, use the finding, focused regression, final Spark
+`verify`, and fresh qualifying exact-head PR AI review. The fix worker only
+reports targeted results, its handoff capsule, and any similar patterns it
+noticed.
 
 Mark task 4 as completed.
 

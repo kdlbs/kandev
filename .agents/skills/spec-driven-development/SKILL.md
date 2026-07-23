@@ -16,9 +16,9 @@ test, integrate, verify, or ship code. Workers do not spawn other workers.
 - **`architect`** - optional frontier-model design reviewer for unusually risky architecture; it is not the default planner.
 - **`implementer`** - implements one assigned task with TDD in the current worktree or an assigned git worktree.
 - **`test-engineer`** - designs or adds focused tests when coverage is unclear, a bug needs a Prove-It regression, or a task is test-heavy.
-- **`qa`** - risk-triggered independent validation for integration boundaries, wiring, and edge cases.
-- **`code-review`** - local frontier semantic review when required by `/planner-orchestration`; qualifying current-head PR AI evidence may cover routine work.
-- **`security-auditor`** - reviews security-sensitive changes such as auth, workspace isolation, filesystem/process execution, integrations, webhooks, secrets, or agent/tool permissions.
+- **`qa`** - exceptional independent validation for unusually complex multi-component behavior or an important boundary lacking faithful tests.
+- **`code-review`** - exceptional local frontier review; qualifying current-head PR AI evidence is the default semantic path for PR delivery.
+- **`security-auditor`** - exceptional audit for high-impact new/changed security boundaries or concrete security concerns.
 - **`spark-explorer`** - Codex-only opt-in read-only specialist for bounded call-path tracing and evidence gathering; never use it for architecture, security, final review, implementation, or edits.
 - **`spark-implementer`** - Codex-only opt-in specialist for explicit localized low-risk UI or code edits; use the normal implementer for work outside its stop conditions.
 
@@ -233,9 +233,8 @@ Per-task versus per-wave checks are distinct:
   targeted verification. The planner checks the reported evidence; it does not
   duplicate those tests after every wave.
 - Derive risk tags from worker reports plus planner inspection and apply the
-  `/planner-orchestration` evidence contract. Delegate per-wave `qa` when its
-  risk criteria require independent behavior evidence; record a QA skip and
-  reason for fully covered localized work.
+  `/planner-orchestration` evidence contract. Ordinary integration with
+  faithful tests does not automatically require `qa`.
 
 After each wave:
 - Delegate conflict resolution and rerun affected tests through an implementer.
@@ -244,22 +243,22 @@ After each wave:
 At the end:
 - Run the `test-engineer` worker when coverage is disputed, missing, or hard to place at the right test level.
 - Run the `simplify` worker if implementation grew speculative abstractions.
-- Obtain semantic-review evidence after simplification: local `code-review` for architecture/cross-cutting risk or unavailable, stale, conflicting, or incomplete external evidence; otherwise a qualifying current-head PR AI review may satisfy routine work.
-- Run `qa` only when the central risk criteria require it; record any skip and reason.
-- Run `security-auditor` before declaring readiness when changes are security-sensitive; PR AI review does not replace it.
+- For PR delivery, defer routine semantic review until one qualifying
+  current-head PR AI review; use local `code-review` only for the central
+  exceptional routes.
+- Run `qa` and `security-auditor` only for their central exceptional routes.
 - Run mandatory final `verify` for full format, typecheck, tests, and lint.
 - Use `/record` for ADR/spec updates if implementation discovered a durable decision or behavior change.
 
 When PR delivery is in scope, PR AI review may be deferred, but do not claim
 readiness until qualifying current-head semantic-review evidence exists.
 
-Route every review, QA, security, or verification finding to a new bounded
-implementer packet. Reuse the same native thread when its role, change, and
-file scope remain materially the same; otherwise launch a fresh worker for
-independent judgment or stale/noisy context. Rerun only affected semantic,
-QA, and security checks after remediation, require PR AI evidence for the new
-head, and always run final `verify`; the planner's acceptance check is not a
-substitute for these gates.
+Route every finding to a new bounded implementer packet. For a small,
+scope-preserving PR remediation, use the finding, focused regression, final
+Spark `verify`, and fresh qualifying exact-head PR AI review; do not relaunch
+local gates unless the fix meets a central exceptional route. Reuse the same
+native thread when role, change, and file scope remain materially the same;
+otherwise launch a fresh worker for independent judgment or stale/noisy context.
 
 ## Stop Conditions
 

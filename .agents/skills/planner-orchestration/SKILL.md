@@ -124,14 +124,14 @@ uses the stronger applicable gate.
 
 | Evidence or risk | Required route |
 | --- | --- |
-| Routine `localized` work | Semantic-review evidence and final `verify`. |
-| `user-flow` with faithful targeted E2E/tests and no integration boundary | Semantic-review evidence and final `verify`; record why QA is skipped. |
-| `integration`, `public-contract`, `persistence`, `concurrency`, important error/recovery behavior, cross-component wiring, or missing faithful independent behavior evidence | `qa`, semantic-review evidence, and final `verify`. |
-| `architecture`, cross-cutting change, or stale, conflicting, incomplete, or unavailable external review evidence | Local frontier `code-review`, plus the applicable QA and final `verify` gates. |
-| `security` | `security-auditor`, local frontier `code-review` when otherwise required, applicable QA, and final `verify`. Generic PR AI review never replaces security audit. |
+| Routine work, including ordinary integration with faithful targeted tests | Qualifying PR AI semantic evidence and final `verify` when PR delivery is in scope. |
+| Unusually large/complex multi-component behavior or an important integration boundary lacking faithful tests | Add `qa`, semantic evidence, and final `verify`. |
+| Unusually large/complex/cross-cutting architecture; terminal readiness cannot wait for contradictory or repeatedly unavailable PR evidence; explicit request; or a deep automated-review gap | Add local frontier `code-review`. |
+| High-impact new/changed authz, workspace-isolation, secrets, untrusted-execution, or credential-trust boundary; explicit request; or concrete automated security concern | Add `security-auditor`, applicable review/QA, and final `verify`. |
 
-Semantic-review evidence is either local `code-review` or one qualifying AI PR
-review for routine/non-high-risk work. A qualifying external review: names the
+When PR delivery is in scope, one qualifying automated AI PR review is the
+default semantic evidence; defer routine local `code-review` until that review.
+Use local review only for the exceptional routes above. A qualifying review names the
 selected/configured reviewer; has known, complete review and head evidence with
 matching PR-view checks/opening/closing SHA and a complete check snapshot; has
 an API review `commit_id` exactly equal to the stable evidence head (timestamps
@@ -142,16 +142,16 @@ for the configured dedicated `${OPENCODE_REVIEW_APP_SLUG}[bot]` OpenCode App, re
 other explicitly selected reviewers retain the generic exact-head eligibility and blocker gates without App provenance;
 and has no active `CHANGES_REQUESTED`, unresolved blocker, actionable review
 thread, or blocked exact-current-head review from any author. Dismissed,
-pending, unknown, blocked, or ambiguous commented reviews
-never qualify. Do not wait for every configured bot, but do not ignore any
-actionable finding that has arrived. A head change makes prior PR review stale.
-Without a PR, selected reviewer, or complete exact-current-head evidence,
-launch local `code-review`.
+pending, unknown, blocked, or ambiguous commented reviews never qualify; nor
+does arbitrary bot prose. Do not wait for every configured bot, but do not
+ignore any actionable finding that has arrived. A head change makes prior PR
+review stale. Without PR delivery, use local review only when semantic review
+is needed by the exceptional routes above.
 
-`qa` is not universal. Require it when acceptance crosses a meaningful
-integration boundary or the risk matrix says independent behavior evidence is
-needed. It may be skipped only for localized work fully covered by faithful
-targeted tests/E2E with no such tag; record the decision and reason.
+`qa` is exceptional, not a consequence of an ordinary integration tag. Use it
+only for unusually large/complex multi-component behavior or important
+integration behavior without faithful tests. A routine fix preserving an
+existing security boundary does not require `security-auditor`.
 
 The planner accepts a worker result only after checking that its file scope,
 acceptance criteria, and reported verification match the assignment. Any
@@ -171,9 +171,11 @@ gate. Keep responsibilities separate:
   commands.
 
 For every final remediation affecting code, tests, or config, final `verify`
-is mandatory. Route each finding to a bounded implementer packet, rerun only
-the affected semantic/QA/security checks, and always run final `verify` again.
-PR AI evidence must cover the new head. A focused affected-scenario QA rerun
-is sufficient when it covers the changed risk; do not require a fresh full QA
-pass. Simplification, when used, happens before semantic review so its edits
-are covered.
+is mandatory. A small, scope-preserving PR remediation uses the reviewer
+finding, focused tests, final Spark `verify`, and fresh qualifying exact-head
+automated review; it almost never relaunches QA, code-review, or
+security-auditor just because original tags remain. Relaunch one only if the
+fix becomes large/complex, changes a contract or trust boundary, invalidates
+prior evidence, or exposes a gap that gate must assess. A bug fix preserving
+an existing ADR or invariant is not by itself a new boundary. Simplification,
+when used, happens before semantic review so its edits are covered.

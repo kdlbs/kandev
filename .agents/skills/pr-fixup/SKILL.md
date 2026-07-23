@@ -270,6 +270,15 @@ Mark task 4 as in_progress.
 The same bounded remediation implementer addresses only the assigned threads
 and reports its edits, replies, and targeted checks.
 
+For a small remediation that preserves the established scope and boundary, use
+the reviewer finding, focused regression, final Spark `verify`, and a fresh
+qualifying exact-head automated review. Retain completed QA, local review, and
+security evidence: original risk tags alone do not require relaunching them.
+Almost never relaunch a named gate; do so only if the fix becomes large/complex,
+changes a contract or trust boundary, invalidates prior evidence, or exposes a
+gap that gate must assess. A bug fix preserving an existing ADR or invariant is
+not by itself a new boundary.
+
 Every comment must get a response — either a fix or a reply explaining why it was skipped.
 
 **Per-thread engagement is mandatory. Do not take shortcuts:**
