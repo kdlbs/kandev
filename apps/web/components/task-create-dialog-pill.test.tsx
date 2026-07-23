@@ -38,6 +38,8 @@ import {
   Pill,
 } from "./task-create-dialog-pill";
 
+const CREATE_REPOSITORY = "Create new repository";
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -194,5 +196,47 @@ describe("Pill popover", () => {
     const content = document.body.querySelector('[data-slot="popover-content"]');
     expect(content).not.toBeNull();
     expect(screen.getByTestId("clipping-host").contains(content)).toBe(false);
+  });
+
+  it("activates an optional toolbar action with a pointer", () => {
+    const onAction = vi.fn();
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value=""
+        placeholder="repository"
+        options={[]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search repositories..."
+        emptyMessage="No repositories"
+        action={{ label: CREATE_REPOSITORY, onSelect: onAction }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("repository"));
+    fireEvent.click(screen.getByRole("button", { name: CREATE_REPOSITORY }));
+
+    expect(onAction).toHaveBeenCalledOnce();
+  });
+
+  it("renders an optional toolbar action outside the option list", () => {
+    const onAction = vi.fn();
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value=""
+        placeholder="repository"
+        options={[]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search repositories..."
+        emptyMessage="No repositories"
+        action={{ label: CREATE_REPOSITORY, onSelect: onAction }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("repository"));
+    expect(screen.getByRole("button", { name: CREATE_REPOSITORY })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: CREATE_REPOSITORY })).toBeNull();
+    expect(onAction).not.toHaveBeenCalled();
   });
 });

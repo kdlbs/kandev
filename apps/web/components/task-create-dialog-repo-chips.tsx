@@ -1,5 +1,6 @@
 "use client";
 
+import { useRef, useState } from "react";
 import { IconGitFork } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -9,6 +10,8 @@ import { RemoteRepoChipsRow } from "@/components/task-create-dialog-remote-repo-
 import { FolderPicker } from "@/components/folder-picker";
 import { SourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
+import { CreateLocalRepositorySurface } from "@/components/create-local-repository-surface";
+import type { DirectLocalExecutorSelection } from "@/components/task-create-dialog-handlers";
 
 type RepoChipsRowProps = {
   fs: DialogFormState;
@@ -49,6 +52,12 @@ type RepoChipsRowProps = {
   onWorkspacePathChange?: (value: string) => void;
   lastUsedBranch?: string | null;
   userSettingsLoaded?: boolean;
+  localRepositoryCreation?: {
+    executorSelection: DirectLocalExecutorSelection | null;
+    onCreated: (rowKey: string, repository: Repository) => void;
+  };
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
 };
 
 export function RepoChipsRow({
@@ -67,7 +76,23 @@ export function RepoChipsRow({
   onWorkspacePathChange,
   lastUsedBranch,
   userSettingsLoaded,
+  localRepositoryCreation,
+  onRefreshRepositories,
+  repositoriesRefreshing,
 }: RepoChipsRowProps) {
+  const chipRowRef = useRef<HTMLDivElement>(null);
+  const [creatingForRowKey, setCreatingForRowKey] = useState<string | null>(null);
+  const handleCreationOpenChange = (open: boolean) => {
+    if (open || creatingForRowKey === null) return;
+    const rowKey = creatingForRowKey;
+    setCreatingForRowKey(null);
+    requestAnimationFrame(() => {
+      const row = Array.from(
+        chipRowRef.current?.querySelectorAll<HTMLElement>("[data-repo-row-key]") ?? [],
+      ).find((candidate) => candidate.dataset.repoRowKey === rowKey);
+      row?.querySelector<HTMLElement>("[data-testid='repo-chip-trigger']")?.focus();
+    });
+  };
   // Local executor branch behavior:
   //   - chip is clickable (user can switch to any existing branch on disk)
   //   - row.branch seeds from the workspace's current branch (currentLocalBranch)
@@ -95,7 +120,11 @@ export function RepoChipsRow({
     // modal doesn't jump when the user toggles between Repo / URL / None
     // (None renders a single pill, Repo can render chips + branch + add and
     // sometimes wraps when the segmented control crowds the row).
-    <div className="flex min-h-9 flex-wrap items-center gap-2" data-testid="repo-chips-row">
+    <div
+      ref={chipRowRef}
+      className="flex min-h-9 flex-wrap items-center gap-2"
+      data-testid="repo-chips-row"
+    >
       <ModeBody
         fs={fs}
         repositories={repositories}
@@ -112,6 +141,9 @@ export function RepoChipsRow({
         onWorkspacePathChange={onWorkspacePathChange}
         lastUsedBranch={lastUsedBranch}
         userSettingsLoaded={userSettingsLoaded}
+        onCreateRepository={localRepositoryCreation ? setCreatingForRowKey : undefined}
+        onRefreshRepositories={onRefreshRepositories}
+        repositoriesRefreshing={repositoriesRefreshing}
       />
       <SourceModeSwitch
         useRemote={fs.useRemote}
@@ -119,6 +151,17 @@ export function RepoChipsRow({
         onToggleRemote={onToggleRemote}
         onToggleNoRepository={onToggleNoRepository}
       />
+      {localRepositoryCreation ? (
+        <CreateLocalRepositorySurface
+          open={creatingForRowKey !== null}
+          onOpenChange={handleCreationOpenChange}
+          workspaceId={workspaceId}
+          executorSelection={localRepositoryCreation.executorSelection}
+          onCreated={(repository) => {
+            if (creatingForRowKey) localRepositoryCreation.onCreated(creatingForRowKey, repository);
+          }}
+        />
+      ) : null}
     </div>
   );
 }
@@ -139,6 +182,9 @@ function ModeBody({
   onWorkspacePathChange,
   lastUsedBranch,
   userSettingsLoaded,
+  onCreateRepository,
+  onRefreshRepositories,
+  repositoriesRefreshing,
 }: {
   fs: DialogFormState;
   repositories: Repository[];
@@ -155,6 +201,9 @@ function ModeBody({
   onWorkspacePathChange?: (value: string) => void;
   lastUsedBranch?: string | null;
   userSettingsLoaded?: boolean;
+  onCreateRepository?: (key: string) => void;
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
 }) {
   if (fs.noRepository) {
     return (
@@ -195,6 +244,9 @@ function ModeBody({
       onRowBranchChange={onRowBranchChange}
       lastUsedBranch={lastUsedBranch}
       userSettingsLoaded={userSettingsLoaded}
+      onCreateRepository={onCreateRepository}
+      onRefreshRepositories={onRefreshRepositories}
+      repositoriesRefreshing={repositoriesRefreshing}
       freshBranchToggle={
         // Multi-repo runs use worktrees, so the existing-vs-fork choice
         // is irrelevant — only surface the toggle for single-repo flows.

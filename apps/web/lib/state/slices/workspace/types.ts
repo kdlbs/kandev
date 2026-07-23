@@ -50,6 +50,7 @@ export type WorkspaceSliceActions = {
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState["items"]) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
+  upsertRepository: (workspaceId: string, repository: Repository) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;
   setRepositoryBranches: (
     repositoryId: string,
