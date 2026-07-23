@@ -2,12 +2,13 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 // Regression for a transcript bug: some providers capture shell output via a
-// real terminal session whose input echo is concatenated directly onto the
-// real output, so the persisted stdout opens with a verbatim repeat of the
-// command the chat already renders above the Output disclosure. The ACP
-// shell-output normalizer strips that leading echo (unit-tested in
-// shell_output_test.go); this file drives the mock-agent through the real
-// ACP pipeline and asserts the chat UI never shows the command twice.
+// real terminal session whose input echo - rendered behind a "$ " shell
+// prompt - is concatenated directly onto the real output, so the persisted
+// stdout opens with a verbatim repeat of the command the chat already
+// renders above the Output disclosure. The ACP shell-output normalizer
+// strips that leading echo (unit-tested in shell_output_test.go); this file
+// drives the mock-agent through the real ACP pipeline and asserts the chat
+// UI never shows the command twice.
 test.describe("shell command output echo stripping", () => {
   test("does not repeat the command inside the expanded Output disclosure", async ({
     testPage,
@@ -15,7 +16,7 @@ test.describe("shell command output echo stripping", () => {
     seedData,
   }) => {
     const command = "cat file.txt";
-    const echoedOutput = `${command}=== marker ===\n`;
+    const echoedOutput = `$ ${command}=== marker ===\n`;
 
     const script = [
       `e2e:shell_result("${command}", "${echoedOutput.replace(/\n/g, "\\n")}")`,

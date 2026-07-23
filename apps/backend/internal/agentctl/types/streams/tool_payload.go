@@ -205,6 +205,12 @@ type ShellExecOutput struct {
 	// Internal stream state keeps the serialized combined flag accurate across replacements.
 	StdoutTruncated bool `json:"-"`
 	StderrTruncated bool `json:"-"`
+	// RawTerminalOutput mirrors Stdout's own bounded cumulative-append
+	// bookkeeping but is never echo-stripped. Cumulative terminal_output
+	// frames must be prefix-compared against the provider's own raw view of
+	// what it has sent so far, not against Stdout, which may already have
+	// had a leading command echo stripped for display.
+	RawTerminalOutput string `json:"-"`
 }
 
 // CodeSearchOutput contains the result of a code search operation.
