@@ -503,7 +503,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
   }, [setMobileSearchOpen]);
 
   return (
-    <div className="h-screen w-full flex flex-col bg-background">
+    <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <KanbanHeader
         workspaceId={s.activeWorkspaceId ?? undefined}
         currentPage="tasks"

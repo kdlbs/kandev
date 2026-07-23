@@ -8,6 +8,7 @@ import {
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
 import { REVIEW_WATCH_PLACEHOLDERS } from "@/components/github/review-watch-placeholders";
+import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 
 // Pulled out of review-watch-dialog.tsx to keep that file under the 600-line
 // linter cap; the prompt editor + its placeholder help bubble are co-owned by
@@ -43,6 +44,7 @@ export function ReviewWatchPromptField({
   value: string;
   onChange: (v: string) => void;
 }) {
+  const { prompts } = useCustomPrompts();
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
@@ -50,7 +52,9 @@ export function ReviewWatchPromptField({
         <PlaceholdersHelp />
       </div>
       <p className="text-xs text-muted-foreground">
-        The prompt sent to the agent for each new PR. Type {"{{"} to insert placeholders.
+        The prompt sent to the agent for each new PR. Type {"{{"} to insert placeholders, or {"@"}{" "}
+        to reference a saved prompt by name — it expands the same way it does in workflow step
+        prompts, since this prompt becomes the task description passed through that same assembly.
       </p>
       <div className="rounded-md border border-border overflow-hidden">
         <ScriptEditor
@@ -60,6 +64,7 @@ export function ReviewWatchPromptField({
           height={computeEditorHeight(value)}
           lineNumbers="off"
           placeholders={REVIEW_WATCH_PLACEHOLDERS}
+          mentionPrompts={prompts}
         />
       </div>
       <p className="text-xs text-muted-foreground/70">

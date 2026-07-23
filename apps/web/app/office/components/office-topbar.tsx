@@ -1,6 +1,7 @@
 "use client";
 
 import { usePathname } from "@/lib/routing/client-router";
+import { AppStatusDrawerTrigger } from "@/components/app-status-bar/app-status-surface-provider";
 
 const PAGE_TITLES: Record<string, string> = {
   "/office": "Dashboard",
@@ -46,13 +47,14 @@ export function OfficeTopbar() {
   return (
     <div
       data-testid="office-topbar"
-      className="flex items-center gap-2 px-4 h-10 border-b border-border bg-background shrink-0"
+      className="flex h-10 min-h-11 shrink-0 items-center gap-2 border-b border-border bg-background px-4 md:min-h-10"
     >
       {detail ? (
         <div id="office-topbar-slot" className="flex items-center gap-2 flex-1 min-w-0" />
       ) : (
         title && <h1 className="truncate text-sm font-medium text-foreground">{title}</h1>
       )}
+      <AppStatusDrawerTrigger className="ml-auto" />
     </div>
   );
 }

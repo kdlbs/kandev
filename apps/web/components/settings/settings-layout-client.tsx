@@ -5,7 +5,8 @@ import { usePathname } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@kandev/ui/sheet";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { IconHome, IconMenu2 } from "@tabler/icons-react";
+import { IconActivity, IconHome, IconMenu2 } from "@tabler/icons-react";
+import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
 import { PageTopbar } from "@/components/page-topbar";
 import Link from "@/components/routing/app-link";
 import { SettingsTree } from "@/components/app-sidebar/sections/settings/settings-tree";
@@ -142,11 +143,16 @@ function IntegrationCopyConfigAction() {
 
 function SettingsMobileMenu({ pathname }: { pathname: string }) {
   const [open, setOpen] = useState(false);
+  const { enabled: statusDrawerEnabled, openStatusDrawer } = useAppStatusDrawer();
 
   const closeOnLinkClick = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target instanceof Element && event.target.closest("a[href]")) {
       setOpen(false);
     }
+  };
+  const openStatus = () => {
+    setOpen(false);
+    requestAnimationFrame(openStatusDrawer);
   };
 
   return (
@@ -156,7 +162,7 @@ function SettingsMobileMenu({ pathname }: { pathname: string }) {
           type="button"
           variant="ghost"
           size="icon"
-          className="h-8 w-8 cursor-pointer md:hidden"
+          className="h-11 w-11 cursor-pointer md:hidden"
           aria-label="Open settings menu"
           data-testid="settings-mobile-menu-button"
         >
@@ -172,6 +178,18 @@ function SettingsMobileMenu({ pathname }: { pathname: string }) {
           <SheetTitle>Settings</SheetTitle>
         </SheetHeader>
         <nav className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+          {statusDrawerEnabled && (
+            <Button
+              type="button"
+              variant="ghost"
+              className="h-11 cursor-pointer justify-start gap-2.5 px-2.5"
+              onClick={openStatus}
+              data-testid="settings-mobile-status-button"
+            >
+              <IconActivity className="h-4 w-4 shrink-0" />
+              <span>Status</span>
+            </Button>
+          )}
           <Link
             href="/"
             className="flex h-10 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
@@ -224,6 +242,7 @@ function SettingsShell({
             backLabel={backLabel}
             parents={parents}
             leading={<SettingsMobileMenu pathname={pathname} />}
+            showStatusTrigger={false}
             className="h-10"
             actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
           />

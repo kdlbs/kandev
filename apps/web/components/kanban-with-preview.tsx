@@ -350,7 +350,7 @@ export function KanbanWithPreview({ initialTaskId, initialSessionId }: KanbanWit
   // On mobile, skip the preview panel entirely — card clicks navigate directly
   if (isMobile) {
     return (
-      <div className="h-dvh w-full flex flex-col bg-background">
+      <div className="flex h-full min-h-0 w-full flex-col bg-background">
         <KanbanBoard />
       </div>
     );
@@ -385,7 +385,7 @@ function DesktopPreviewSurface({
   isOpen: boolean;
 }) {
   return (
-    <div ref={containerRef} className="h-screen w-full flex flex-col bg-background relative">
+    <div ref={containerRef} className="relative flex h-full min-h-0 w-full flex-col bg-background">
       {shouldFloat ? <FloatingPreviewLayout {...props} /> : <InlinePreviewLayout {...props} />}
     </div>
   );
@@ -443,7 +443,7 @@ function FloatingPreviewLayout({
         aria-label="Close preview"
       />
       <div
-        className="fixed right-0 top-0 bottom-0 z-40 shadow-2xl bg-background flex"
+        className="fixed top-0 right-0 bottom-[var(--app-status-bar-height)] z-40 flex bg-background shadow-2xl"
         style={{
           width: `${previewWidthPx}px`,
           maxWidth: `${PREVIEW_PANEL.MAX_WIDTH_VW}vw`,

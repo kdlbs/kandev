@@ -77,7 +77,9 @@ describe("TaskDetailRoute", () => {
 
     expect(screen.queryByTestId("kanban-task-shell")).toBeNull();
     expect(screen.getByRole("status").textContent).toContain("Loading task");
-    expect(screen.getByRole("status").parentElement?.className).toContain("h-dvh");
+    expect(screen.getByRole("status").parentElement?.className).toContain("h-full");
+    expect(screen.getByRole("status").parentElement?.className).toContain("min-h-0");
+    expect(screen.getByRole("status").parentElement?.className).not.toContain("h-dvh");
     expect(screen.getByRole("status").parentElement?.className).not.toContain("h-screen");
 
     routeData.resolve(makeFetchedData());

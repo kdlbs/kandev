@@ -54,7 +54,7 @@ export function SettingsFloatingSave({
       className={cn(
         "pointer-events-none z-40 max-w-[calc(100vw_-_2rem_-_env(safe-area-inset-left)_-_env(safe-area-inset-right))]",
         !isHostedByConfigChat &&
-          "fixed right-[calc(1rem_+_env(safe-area-inset-right))] bottom-[calc(5.25rem_+_env(safe-area-inset-bottom))]",
+          "fixed right-[calc(1rem_+_env(safe-area-inset-right))] bottom-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]",
       )}
       data-testid="settings-floating-save"
       data-dirty-contributors={dirtyContributorIds}

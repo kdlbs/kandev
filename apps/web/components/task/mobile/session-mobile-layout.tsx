@@ -18,6 +18,7 @@ import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
 import { useToast } from "@/components/toast-provider";
+import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
 import { useAppStore } from "@/components/state-provider";
 import { fetchAndOpenFile } from "../file-browser-hooks";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
@@ -385,9 +386,51 @@ function useMobileMRSelection(
   return { mrs, selectedMR, handlePanelChange };
 }
 
+type SessionMobileFooterProps = {
+  sessionId: string | null;
+  activePanel: MobileSessionPanel;
+  onPanelChange: (panel: MobileSessionPanel) => void;
+  planBadge: boolean;
+  changesBadge: number;
+  hasReview: boolean;
+  showStatus: boolean;
+  onOpenStatus: () => void;
+};
+
+function SessionMobileFooter({
+  sessionId,
+  activePanel,
+  onPanelChange,
+  planBadge,
+  changesBadge,
+  hasReview,
+  showStatus,
+  onOpenStatus,
+}: SessionMobileFooterProps) {
+  return (
+    <>
+      <MobileTerminalKeybar
+        sessionId={sessionId}
+        visible={activePanel === "terminal"}
+        baseBottomOffset={BOTTOM_NAV_HEIGHT}
+      />
+      <SessionMobileBottomNav
+        activePanel={activePanel}
+        onPanelChange={onPanelChange}
+        planBadge={planBadge}
+        changesBadge={changesBadge}
+        hasReview={hasReview}
+        showStatus={showStatus}
+        onOpenStatus={onOpenStatus}
+      />
+    </>
+  );
+}
+
 export const SessionMobileLayout = memo(function SessionMobileLayout(
   props: SessionMobileLayoutProps,
 ) {
+  const { enabled: statusDrawerEnabled, openStatusDrawer } = useAppStatusDrawer();
   const {
     activeTaskId,
     effectiveSessionId,
@@ -404,10 +447,8 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handleMenuClick,
     setMobileSessionTaskSwitcherOpen,
   } = useSessionLayoutState({ sessionId: props.sessionId });
-
   const { selectedFile, handleOpenFileFromChat, handleOpenFile, handlePanelChangeAndClearSheet } =
     useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
-
   const mobileMR = useMobileMRSelection(
     activeTaskId,
     effectiveSessionId,
@@ -444,19 +485,15 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         mrKey={mobileMR.selectedMR ? mrTaskKey(mobileMR.selectedMR) : undefined}
       />
 
-      <MobileTerminalKeybar
+      <SessionMobileFooter
         sessionId={effectiveSessionId ?? null}
-        visible={effectiveMobilePanel === "terminal"}
-        baseBottomOffset={BOTTOM_NAV_HEIGHT}
-      />
-
-      {/* Fixed Bottom Navigation */}
-      <SessionMobileBottomNav
         activePanel={effectiveMobilePanel}
         onPanelChange={mobileMR.handlePanelChange}
         planBadge={hasUnseenPlanUpdate}
         changesBadge={totalChangesCount}
         hasReview={mobileMR.mrs.length > 0}
+        showStatus={statusDrawerEnabled}
+        onOpenStatus={openStatusDrawer}
       />
 
       {/* Task Switcher Sheet */}

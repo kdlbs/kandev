@@ -11,21 +11,21 @@ test.describe("Mobile kanban view", () => {
     });
   });
 
-  test("metrics match the height of the mobile topbar actions", async ({ testPage, apiClient }) => {
+  test("Status drawer replaces a persistent phone metrics footer", async ({
+    testPage,
+    apiClient,
+  }) => {
     await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
       system_metrics_display: { show_in_topbar: true },
     });
     const mobile = new MobileKanbanPage(testPage);
     await mobile.goto();
 
-    const metrics = testPage.getByTestId("mobile-topbar-metrics");
-    await expect(metrics).toBeVisible();
-    await expect(mobile.mobileSearchToggle).toBeVisible();
-    const metricsBox = await metrics.boundingBox();
-    const actionBox = await mobile.mobileSearchToggle.boundingBox();
-    if (!metricsBox || !actionBox) throw new Error("topbar action has no bounding box");
-
-    expect(metricsBox.height).toBe(actionBox.height);
+    await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
+    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByTestId("mobile-home-status-button").click();
+    await expect(testPage.getByTestId("app-status-drawer")).toBeVisible();
+    await expect(testPage.getByTestId("app-status-metrics")).toBeVisible();
   });
 
   test("renders focused mobile layout with step navigation", async ({
