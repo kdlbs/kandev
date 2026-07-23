@@ -456,18 +456,18 @@ func (a *Adapter) codexSubagentUpdateTargetLocked(
 	meta map[string]any,
 	title string,
 	rawInput any,
-) (*streams.NormalizedPayload, string, string) {
+) (*streams.NormalizedPayload, string, string, bool) {
 	payload := a.activeToolCalls[wireToolCallID]
 	if a.agentID != codexAgentID {
-		return payload, wireToolCallID, ""
+		return payload, wireToolCallID, "", false
 	}
 	signal := codexSubagentSignalFromMeta(meta)
 	if signal == codexSubagentSignalNone {
-		return payload, wireToolCallID, ""
+		return payload, wireToolCallID, "", false
 	}
 	frame, ok := parseCodexSubagentFrame(meta, title, rawInput)
 	if !ok {
-		return payload, wireToolCallID, ""
+		return nil, "", "", true
 	}
 	_, correlation, found := a.findCodexSubagentCorrelationLocked(
 		sessionID,
@@ -475,11 +475,16 @@ func (a *Adapter) codexSubagentUpdateTargetLocked(
 		frame.result.ChildSessionID,
 	)
 	if !found {
-		return payload, wireToolCallID, ""
+		// A recognized Codex subagent update must never fall back to the bare
+		// wire ID. codex-acp may reuse that ID for several sibling children;
+		// without a unique child identity, mutating the active wire entry would
+		// arbitrarily patch or complete the first sibling. Suppress the frame
+		// until it can be correlated coherently.
+		return nil, "", "", true
 	}
 	a.touchCodexSubagentCorrelationLocked(correlation, signal)
 	a.pruneCodexCompletedCorrelationsLocked()
-	return correlation.payload, correlation.emittedToolCallID, correlation.parentToolCallID
+	return correlation.payload, correlation.emittedToolCallID, correlation.parentToolCallID, false
 }
 
 func (a *Adapter) clearCodexSubagentCorrelationsLocked(sessionID string) {
@@ -611,13 +616,17 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	if tcu.Title != nil {
 		updateTitle = *tcu.Title
 	}
-	payload, emittedToolCallID, codexParentToolCallID := a.codexSubagentUpdateTargetLocked(
+	payload, emittedToolCallID, codexParentToolCallID, suppressCodexUpdate := a.codexSubagentUpdateTargetLocked(
 		sessionID,
 		toolCallID,
 		tcu.Meta,
 		updateTitle,
 		tcu.RawInput,
 	)
+	if suppressCodexUpdate {
+		a.mu.Unlock()
+		return nil
+	}
 	monitorCommand := ""
 	if payload != nil && (tcu.RawInput != nil || len(tcu.Locations) > 0) {
 		a.normalizer.UpdatePayloadInput(payload, tcu.RawInput, supplemental)

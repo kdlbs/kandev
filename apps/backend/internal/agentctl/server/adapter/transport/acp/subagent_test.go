@@ -592,6 +592,108 @@ func TestCodexCorrelationSameToolIDDifferentChildCreatesNewCard(t *testing.T) {
 	}
 }
 
+func TestCodexAmbiguousChildlessResultsAreSuppressed(t *testing.T) {
+	a := newCodexCorrelationTestAdapter()
+	first := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("reused", "child-a", "running"))
+	second := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("reused", "child-b", "running"))
+	if first.ToolCallID == second.ToolCallID {
+		t.Fatalf("persistence-facing sibling IDs collide at %q", first.ToolCallID)
+	}
+	firstBefore := mustMarshalPayload(t, a.activeToolCalls[first.ToolCallID])
+	secondBefore := mustMarshalPayload(t, a.activeToolCalls[second.ToolCallID])
+
+	running := a.convertToolCallResultUpdate(
+		"session-1",
+		codexChildlessCollaborationResultUpdate("reused", toolStatusInProgress),
+	)
+	if running != nil {
+		t.Fatalf("ambiguous running update emitted persistence event %+v", running)
+	}
+	terminal := a.convertToolCallResultUpdate(
+		"session-1",
+		codexChildlessCollaborationResultUpdate("reused", toolStatusCompleted),
+	)
+	if terminal != nil {
+		t.Fatalf("ambiguous terminal update emitted persistence event %+v", terminal)
+	}
+	lateReplay := a.convertToolCallResultUpdate(
+		"session-1",
+		codexChildlessCollaborationResultUpdate("reused", toolStatusCompleted),
+	)
+	if lateReplay != nil {
+		t.Fatalf("ambiguous late replay emitted persistence event %+v", lateReplay)
+	}
+
+	assertActivePayloadUnchanged(t, a, first.ToolCallID, firstBefore)
+	assertActivePayloadUnchanged(t, a, second.ToolCallID, secondBefore)
+
+	firstResult := a.convertToolCallResultUpdate(
+		"session-1",
+		codexCollaborationResultUpdate("reused", "child-a", toolStatusCompleted),
+	)
+	if firstResult == nil || firstResult.ToolCallID != first.ToolCallID {
+		t.Fatalf("known child-a result = %+v, want emitted ID %q", firstResult, first.ToolCallID)
+	}
+	if a.activeToolCalls[first.ToolCallID] != nil {
+		t.Fatal("known terminal child-a result did not delete child-a active state")
+	}
+	assertActivePayloadUnchanged(t, a, second.ToolCallID, secondBefore)
+
+	// Both sibling correlations still exist, so a childless replay remains
+	// ambiguous even though only child-b is active. It must not complete or
+	// delete child-b by falling back to the bare wire ID.
+	lateAfterFirstCompletion := a.convertToolCallResultUpdate(
+		"session-1",
+		codexChildlessCollaborationResultUpdate("reused", toolStatusCompleted),
+	)
+	if lateAfterFirstCompletion != nil {
+		t.Fatalf("post-completion ambiguous replay emitted event %+v", lateAfterFirstCompletion)
+	}
+	assertActivePayloadUnchanged(t, a, second.ToolCallID, secondBefore)
+
+	secondResult := a.convertToolCallResultUpdate(
+		"session-1",
+		codexCollaborationResultUpdate("reused", "child-b", toolStatusCompleted),
+	)
+	if secondResult == nil || secondResult.ToolCallID != second.ToolCallID {
+		t.Fatalf("known child-b result = %+v, want emitted ID %q", secondResult, second.ToolCallID)
+	}
+	if a.activeToolCalls[second.ToolCallID] != nil {
+		t.Fatal("known terminal child-b result did not delete child-b active state")
+	}
+	if got := mustMarshalPayload(t, first.NormalizedPayload); got != firstBefore {
+		t.Fatalf("persisted first event snapshot mutated:\nbefore: %s\nafter:  %s", firstBefore, got)
+	}
+	if got := mustMarshalPayload(t, second.NormalizedPayload); got != secondBefore {
+		t.Fatalf("persisted second event snapshot mutated:\nbefore: %s\nafter:  %s", secondBefore, got)
+	}
+}
+
+func TestCodexSoleChildlessResultReplayUsesCompletedCorrelation(t *testing.T) {
+	a := newCodexCorrelationTestAdapter()
+	start := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("sole", "child-a", "running"))
+	a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild("sole", "child-a"))
+	completed := a.convertToolCallResultUpdate(
+		"session-1",
+		codexCollaborationResultUpdate("sole", "child-a", toolStatusCompleted),
+	)
+	if completed == nil || completed.ToolCallID != start.ToolCallID {
+		t.Fatalf("known completion = %+v, want ID %q", completed, start.ToolCallID)
+	}
+	completedSnapshot := mustMarshalPayload(t, completed.NormalizedPayload)
+
+	replay := a.convertToolCallResultUpdate(
+		"session-1",
+		codexChildlessCollaborationResultUpdate("sole", toolStatusCompleted),
+	)
+	if replay == nil || replay.ToolCallID != start.ToolCallID {
+		t.Fatalf("sole childless replay = %+v, want ID %q", replay, start.ToolCallID)
+	}
+	if got := mustMarshalPayload(t, completed.NormalizedPayload); got != completedSnapshot {
+		t.Fatalf("completed event snapshot mutated:\nbefore: %s\nafter:  %s", completedSnapshot, got)
+	}
+}
+
 func TestCodexCorrelationMissingChildFallbackIsUnambiguousOnly(t *testing.T) {
 	a := newCodexCorrelationTestAdapter()
 	a.convertToolCallUpdate("session-1", codexCollaborationToolCall("fallback", "child-a", "running"))
@@ -856,6 +958,36 @@ func codexCollaborationResultUpdate(toolCallID, childID, status string) *acp.Ses
 			},
 		},
 		Meta: codexCollaborationMeta(codexCollaborationSpawnAgent, []any{childID}),
+	}
+}
+
+func codexChildlessCollaborationResultUpdate(toolCallID, status string) *acp.SessionToolCallUpdate {
+	toolStatus := acp.ToolCallStatus(status)
+	return &acp.SessionToolCallUpdate{
+		ToolCallId: acp.ToolCallId(toolCallID),
+		Status:     &toolStatus,
+		RawInput:   map[string]any{"prompt": "Unknown child"},
+		Meta:       codexCollaborationMeta(codexCollaborationSpawnAgent, nil),
+	}
+}
+
+func mustMarshalPayload(t *testing.T, payload *streams.NormalizedPayload) string {
+	t.Helper()
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	return string(encoded)
+}
+
+func assertActivePayloadUnchanged(t *testing.T, a *Adapter, emittedID, want string) {
+	t.Helper()
+	payload := a.activeToolCalls[emittedID]
+	if payload == nil {
+		t.Fatalf("active payload %q was deleted", emittedID)
+	}
+	if got := mustMarshalPayload(t, payload); got != want {
+		t.Fatalf("active payload %q mutated:\nbefore: %s\nafter:  %s", emittedID, want, got)
 	}
 }
 
