@@ -7,11 +7,12 @@ description: Verify a feature works after implementation. Actively try to break 
 
 ## Planner Entry
 
-The user-started primary session delegates this
-entire procedure to the registered `qa` worker, reviews its report, and creates
-new implementer assignments for any fixes. It does not run QA or fix findings
-directly. An explicitly assigned `qa` worker continues below and does not spawn
-other workers.
+The planner performs focused QA directly for ordinary changes, using targeted
+tests and current-head PR AI review as the normal second opinion. Delegate to
+the registered `qa` worker only for unusually complex multi-component behavior,
+an important boundary lacking faithful tests, or an explicit request for
+adversarial validation. An explicitly assigned `qa` worker continues below and
+does not spawn other workers.
 
 Verify that a feature works as intended after implementation. Assume bugs exist and hunt for them.
 

@@ -392,8 +392,18 @@ func (e *Executor) transitionSessionState(
 	state models.TaskSessionState,
 	errorMessage string,
 ) (bool, models.TaskSessionState, error) {
+	return e.transitionSessionStateWithHook(ctx, taskID, sessionID, state, errorMessage, nil)
+}
+
+func (e *Executor) transitionSessionStateWithHook(
+	ctx context.Context,
+	taskID, sessionID string,
+	state models.TaskSessionState,
+	errorMessage string,
+	onChanged func(),
+) (bool, models.TaskSessionState, error) {
 	if e.onSessionStateTransition != nil {
-		return e.onSessionStateTransition(ctx, taskID, sessionID, state, errorMessage)
+		return e.onSessionStateTransition(ctx, taskID, sessionID, state, errorMessage, onChanged)
 	}
 
 	current, err := e.repo.GetTaskSession(ctx, sessionID)
@@ -418,6 +428,9 @@ func (e *Executor) transitionSessionState(
 	}
 	if refreshed.State != state {
 		return false, refreshed.State, nil
+	}
+	if onChanged != nil {
+		onChanged()
 	}
 	return true, refreshed.State, nil
 }
@@ -976,20 +989,26 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID, r
 	e.logger.Error("failed to launch agent",
 		zap.String("task_id", taskID),
 		zap.Error(launchErr))
-	// Call onLaunchFailed before state updates so it can set the suppressToast
-	// flag that updateSessionState will propagate to the frontend.
+	var onChanged func()
 	if e.onLaunchFailed != nil {
-		e.onLaunchFailed(failCtx, taskID, sessionID, repositoryID, launchErr)
+		onChanged = func() {
+			e.onLaunchFailed(failCtx, taskID, sessionID, repositoryID, launchErr)
+		}
 	}
-	if updateErr := e.updateSessionState(failCtx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error()); updateErr != nil {
+	changed, _, updateErr := e.transitionSessionStateWithHook(
+		failCtx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), onChanged,
+	)
+	if updateErr != nil {
 		e.logger.Warn("failed to mark session as failed after launch error",
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
 	}
-	if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
-		e.logger.Warn("failed to mark task as failed after launch error",
-			zap.String("task_id", taskID),
-			zap.Error(updateErr))
+	if changed {
+		if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
+			e.logger.Warn("failed to mark task as failed after launch error",
+				zap.String("task_id", taskID),
+				zap.Error(updateErr))
+		}
 	}
 	return launchErr
 }

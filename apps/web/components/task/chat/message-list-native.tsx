@@ -4,10 +4,9 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, memo } from "
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { Message } from "@/lib/types/http";
-import { AgentStatus } from "@/components/task/chat/messages/agent-status";
-import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
+import { MessageListFooter } from "./message-list-footer";
 import {
   type MessageListProps,
   MessageListStatus,
@@ -256,10 +255,12 @@ export const NativeMessageList = memo(function NativeMessageList({
         );
       })}
 
-      <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
-      {(footerActionMessages ?? []).map((msg: Message) => (
-        <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
-      ))}
+      <MessageListFooter
+        sessionState={sessionState}
+        sessionId={sessionId}
+        messages={messages}
+        footerActionMessages={footerActionMessages}
+      />
 
       {/* Bottom anchor — browser keeps scroll pinned here when new content appends */}
       <div style={{ overflowAnchor: "auto", height: 1 }} />

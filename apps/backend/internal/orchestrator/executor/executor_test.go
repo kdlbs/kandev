@@ -1510,6 +1510,7 @@ func TestHandleAgentProcessStartFailure_CancellationDuringCallbackStopsUnclaimed
 		string,
 		models.TaskSessionState,
 		string,
+		func(),
 	) (bool, models.TaskSessionState, error) {
 		transitionCalls.Add(1)
 		return false, models.TaskSessionStateCancelled, nil

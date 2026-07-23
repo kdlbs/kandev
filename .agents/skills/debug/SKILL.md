@@ -10,8 +10,8 @@ Diagnose efficiently and safely. Debugging produces evidence and a root-cause hy
 
 ## Planner Entry
 
-The planner may diagnose a small, bounded issue directly. Delegate broad or
-unknown exploration and long/noisy debugging to one `implementer` with
+The planner performs first-pass triage directly. Delegate only a concrete broad
+or long/noisy debugging question after local triage to one `implementer` with
 production edits forbidden; then decide whether `/fix` is needed.
 
 An explicitly assigned worker follows the remaining procedure, cleans up its

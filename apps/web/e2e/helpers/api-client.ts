@@ -114,6 +114,7 @@ type CreateTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
   agent_profile_id?: string;
+  executor_profile_id?: string;
   repository_ids?: string[];
   repositories?: TaskRepositoryInput[];
   plan_mode?: boolean;
@@ -128,6 +129,7 @@ type TaskRepositoryInput = {
   repository_id?: string;
   base_branch?: string;
   checkout_branch?: string;
+  pr_number?: number;
   remote_url?: string;
   provider?: string;
   provider_repo_id?: string;
@@ -156,6 +158,8 @@ function buildCreateTaskBody(
   };
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
+  setIf(body, "agent_profile_id", options.agent_profile_id);
+  setIf(body, "executor_profile_id", options.executor_profile_id);
   setIf(body, "metadata", buildTaskMetadata(options));
   setIf(
     body,
@@ -344,9 +348,11 @@ export class ApiClient {
       workflow_step_id?: string;
       /** Stored in task.Metadata so auto_start_agent can pick it up on on_enter. */
       agent_profile_id?: string;
+      /** Executor profile used when the task session is prepared. */
+      executor_profile_id?: string;
       /** Repository IDs to associate with the task (required for agent execution). */
       repository_ids?: string[];
-      /** Full repository entries with optional checkout_branch / base_branch. */
+      /** Full repository entries with optional checkout_branch / base_branch / pr_number. */
       repositories?: TaskRepositoryInput[];
       /** When true, task is placed at position 0 regardless of is_start_step. */
       plan_mode?: boolean;
@@ -496,7 +502,7 @@ export class ApiClient {
       workflow_id?: string;
       workflow_step_id?: string;
       repository_ids?: string[];
-      /** Full repository entries with optional checkout_branch / base_branch. */
+      /** Full repository entries with optional checkout_branch / base_branch / pr_number. */
       repositories?: TaskRepositoryInput[];
       executor_id?: string;
       executor_profile_id?: string;

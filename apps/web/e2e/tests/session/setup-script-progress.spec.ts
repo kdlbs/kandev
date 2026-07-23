@@ -104,7 +104,7 @@ test.describe("Setup script progress UX", () => {
     }
   });
 
-  test("stays expanded on setup script failure with output visible", async ({
+  test("keeps setup script failure details collapsed until requested", async ({
     testPage,
     apiClient,
     seedData,
@@ -150,21 +150,24 @@ test.describe("Setup script progress UX", () => {
 
       // Setup script failures are non-fatal (agent still starts), so the panel
       // transitions preparing → completed_with_error rather than the fatal
-      // `failed` state — and stays expanded so the error is readable.
+      // `failed` state. The concise error state is visible immediately while
+      // command output remains collapsed until the user requests it.
       await expect(panel).toBeVisible({ timeout: 15_000 });
       await expect(panel).toHaveAttribute("data-status", "completed_with_error", {
         timeout: 30_000,
       });
-      await expect(panel).toHaveAttribute("data-expanded", "true");
-
-      // Both stdout and stderr from the failing script must remain visible so
-      // the user can diagnose — this is the core fix of this change.
-      await expect(panel).toContainText("[setup] starting install");
-      await expect(panel).toContainText("ENOENT: package-lock.json missing");
-
-      // User can click the card header to collapse it.
-      await panel.getByTestId("prepare-progress-toggle").click();
       await expect(panel).toHaveAttribute("data-expanded", "false");
+
+      const output = panel.locator("pre").filter({ hasText: /^\[setup\] starting install/ });
+      await expect(panel.getByRole("button", { name: "Show preparation details" })).toBeVisible();
+      await expect(output).toBeHidden();
+
+      // Both streams remain available after the user opens the disclosure.
+      await panel.getByRole("button", { name: "Show preparation details" }).click();
+      await expect(panel).toHaveAttribute("data-expanded", "true");
+      await expect(output).toBeVisible();
+      await expect(output).toContainText("[setup] starting install");
+      await expect(output).toContainText("ENOENT: package-lock.json missing");
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});
     }

@@ -223,6 +223,78 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestSetSessionMetadataKeyIfAbsentIfStateSQLiteRequiresFailedSession(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-recovery", "session-recovery", "turn-recovery")
+	ctx := context.Background()
+
+	stored, err := repo.SetSessionMetadataKeyIfAbsentIfState(
+		ctx, "session-recovery", "missing_pr_branch_recovery_claimed", true, models.TaskSessionStateFailed,
+	)
+	if err != nil {
+		t.Fatalf("claim before failed state: %v", err)
+	}
+	if stored {
+		t.Fatal("claim should reject a session that is not FAILED")
+	}
+	if err := repo.UpdateTaskSessionState(ctx, "session-recovery", models.TaskSessionStateFailed, "missing branch"); err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentIfState(
+		ctx, "session-recovery", "missing_pr_branch_recovery_claimed", true, models.TaskSessionStateFailed,
+	)
+	if err != nil {
+		t.Fatalf("claim after failed state: %v", err)
+	}
+	if !stored {
+		t.Fatal("claim should store after FAILED state")
+	}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentIfState(
+		ctx, "session-recovery", "missing_pr_branch_recovery_claimed", true, models.TaskSessionStateFailed,
+	)
+	if err != nil {
+		t.Fatalf("repeat claim: %v", err)
+	}
+	if stored {
+		t.Fatal("repeat claim should not overwrite")
+	}
+}
+
+func TestRemoveSessionMetadataKeyIfStateSQLiteRequiresFailedSession(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-recovery", "session-recovery", "turn-recovery")
+	ctx := context.Background()
+	const key = "missing_pr_branch_recovery_claimed"
+
+	if err := repo.SetSessionMetadataKey(ctx, "session-recovery", key, true); err != nil {
+		t.Fatalf("seed claim: %v", err)
+	}
+	removed, err := repo.RemoveSessionMetadataKeyIfState(ctx, "session-recovery", key, models.TaskSessionStateFailed)
+	if err != nil {
+		t.Fatalf("remove before failed state: %v", err)
+	}
+	if removed {
+		t.Fatal("remove should reject a session that is not FAILED")
+	}
+	if err := repo.UpdateTaskSessionState(ctx, "session-recovery", models.TaskSessionStateFailed, "missing branch"); err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	removed, err = repo.RemoveSessionMetadataKeyIfState(ctx, "session-recovery", key, models.TaskSessionStateFailed)
+	if err != nil {
+		t.Fatalf("remove after failed state: %v", err)
+	}
+	if !removed {
+		t.Fatal("remove should delete the failed-session claim")
+	}
+	session, err := repo.GetTaskSession(ctx, "session-recovery")
+	if err != nil {
+		t.Fatalf("get session after remove: %v", err)
+	}
+	if _, exists := session.Metadata[key]; exists {
+		t.Fatal("removed claim remains in session metadata")
+	}
+}
+
 // TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB verifies the
 // Postgres dialect's write-once query uses jsonb_set/jsonb_extract_path
 // rather than SQLite's json_set/json_type/json functions.

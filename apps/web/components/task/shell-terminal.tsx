@@ -20,6 +20,7 @@ import { TerminalSearchBar } from "./terminal-search-bar";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { suppressIOSKeyboardAssists } from "@/lib/terminal/suppress-ios-keyboard-assists";
 import { sendShellInput } from "@/lib/terminal/send-shell-input";
+import { WorkspaceUnavailable } from "./workspace-unavailable";
 
 type ShellTerminalProps = {
   sessionId?: string;
@@ -498,12 +499,7 @@ export function ShellTerminal({
     );
   }
   if (isSessionFailed) {
-    return (
-      <div className="h-full p-4 w-full bg-transparent flex flex-col gap-2">
-        <div className="text-sm text-destructive/80">Session failed</div>
-        {errorMessage && <div className="text-xs text-muted-foreground">{errorMessage}</div>}
-      </div>
-    );
+    return <WorkspaceUnavailable error={errorMessage} />;
   }
   return (
     <div

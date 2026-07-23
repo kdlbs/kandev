@@ -952,6 +952,56 @@ func (r *Repository) SetSessionMetadataKeyIfAbsent(
 	return rows > 0, nil
 }
 
+// SetSessionMetadataKeyIfAbsentIfState atomically claims a metadata key only
+// while the session remains in expectedState. It is used when a terminal
+// transition owns a one-time side effect that must not be emitted by a stale
+// launch callback.
+func (r *Repository) SetSessionMetadataKeyIfAbsentIfState(
+	ctx context.Context,
+	sessionID, key string,
+	value interface{},
+	expectedState models.TaskSessionState,
+) (bool, error) {
+	valueJSON, err := json.Marshal(value)
+	if err != nil {
+		return false, fmt.Errorf("failed to serialize metadata value: %w", err)
+	}
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	path := key
+	if !dialect.IsPostgres(driver) {
+		path = "$." + key
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(setSessionMetadataKeyIfAbsentIfStateQuery(driver)), path, string(valueJSON), now, sessionID, path, expectedState)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
+// RemoveSessionMetadataKeyIfState removes a claimed metadata key only while
+// the session remains in expectedState. It releases one-time side-effect
+// claims when their downstream write fails, allowing a later retry.
+func (r *Repository) RemoveSessionMetadataKeyIfState(
+	ctx context.Context,
+	sessionID, key string,
+	expectedState models.TaskSessionState,
+) (bool, error) {
+	now := time.Now().UTC()
+	driver := r.db.DriverName()
+	path := key
+	if !dialect.IsPostgres(driver) {
+		path = "$." + key
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(removeSessionMetadataKeyIfStateQuery(driver)), path, now, sessionID, path, expectedState)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	return rows > 0, nil
+}
+
 func setSessionMetadataKeyIfAbsentQuery(driver string) string {
 	if dialect.IsPostgres(driver) {
 		return `
@@ -976,6 +1026,37 @@ func setSessionMetadataKeyIfAbsentQuery(driver string) string {
 			updated_at = ?
 		WHERE id = ?
 			AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NULL
+	`
+}
+
+func setSessionMetadataKeyIfAbsentIfStateQuery(driver string) string {
+	return setSessionMetadataKeyIfAbsentQuery(driver) + " AND state = ?"
+}
+
+func removeSessionMetadataKeyIfStateQuery(driver string) string {
+	if dialect.IsPostgres(driver) {
+		return `
+			UPDATE task_sessions
+			SET metadata = (
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END
+				#- ARRAY[?]::text[]
+			)::text,
+				updated_at = ?
+			WHERE id = ?
+				AND jsonb_extract_path(
+					CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+					?
+				) IS NOT NULL
+				AND state = ?
+		`
+	}
+	return `
+		UPDATE task_sessions
+		SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?),
+			updated_at = ?
+		WHERE id = ?
+			AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NOT NULL
+			AND state = ?
 	`
 }
 

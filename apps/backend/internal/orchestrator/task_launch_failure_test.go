@@ -102,6 +102,14 @@ func TestHandleSessionLaunchFailed_UnavailablePRStateCreatesNeutralFetchGuidance
 
 	err := errors.New("environment preparation failed: branch \"feature/foo\" not found locally or on remote: fatal: couldn't find remote ref feature/foo")
 	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "repo-a", err)
+	if len(mc.sessionMessages) != 0 {
+		t.Fatalf("launch callback created guidance before the FAILED transition: %d messages", len(mc.sessionMessages))
+	}
+	if err := repo.UpdateTaskSessionState(ctx, "session1", models.TaskSessionStateFailed, err.Error()); err != nil {
+		t.Fatalf("mark session failed: %v", err)
+	}
+	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "repo-a", err)
+	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "repo-a", err)
 
 	if len(mc.sessionMessages) != 1 {
 		t.Fatalf("expected 1 session message, got %d", len(mc.sessionMessages))
@@ -134,7 +142,7 @@ func TestHandleSessionLaunchFailed_UnavailablePRStateCreatesNeutralFetchGuidance
 func TestHandleSessionLaunchFailed_OpenMatchingPRDoesNotCreateMissingBranchGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
 	mc := &mockMessageCreator{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -157,7 +165,7 @@ func TestHandleSessionLaunchFailed_OpenMatchingPRDoesNotCreateMissingBranchGuida
 func TestHandleSessionLaunchFailed_SecondaryOpenPRDoesNotUsePrimaryTerminalPR(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
 	mc := &mockMessageCreator{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -177,7 +185,7 @@ func TestHandleSessionLaunchFailed_SecondaryOpenPRDoesNotUsePrimaryTerminalPR(t 
 
 func TestHandleSessionLaunchFailed_BoundsBlockingPRStateLookup(t *testing.T) {
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
 	mc := &mockMessageCreator{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -213,7 +221,7 @@ func TestHandleSessionLaunchFailed_BoundsBlockingPRStateLookup(t *testing.T) {
 func TestHandleSessionLaunchFailed_ConflictingSameBranchPRStatesCreateNeutralGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
 	mc := &mockMessageCreator{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -244,7 +252,7 @@ func TestHandleSessionLaunchFailed_ConflictingSameBranchPRStatesCreateNeutralGui
 func TestHandleSessionLaunchFailed_MultipleTerminalMatchingPRsCreateNeutralGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
 	mc := &mockMessageCreator{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -277,7 +285,7 @@ func TestHandleSessionLaunchFailed_ClosedOrMergedMatchingPRCreatesMissingBranchG
 		t.Run(prState, func(t *testing.T) {
 			ctx := context.Background()
 			repo := setupTestRepo(t)
-			seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+			seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
 			mc := &mockMessageCreator{}
 			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -310,7 +318,7 @@ func TestHandleSessionLaunchFailed_ClosedOrMergedMatchingPRCreatesMissingBranchG
 func TestHandleSessionLaunchFailed_UnrelatedOpenPRDoesNotSuppressNeutralGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
 	mc := &mockMessageCreator{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -337,7 +345,7 @@ func TestHandleSessionLaunchFailed_UnrelatedOpenPRDoesNotSuppressNeutralGuidance
 func TestHandleSessionLaunchFailed_ClosedPRInAnotherRepositoryCreatesNeutralGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
 	mc := &mockMessageCreator{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -367,7 +375,7 @@ func TestHandleSessionLaunchFailed_ClosedPRInAnotherRepositoryCreatesNeutralGuid
 func TestHandleSessionLaunchFailed_SingleRepositoryLegacyPRCreatesMissingBranchGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 	if err := repo.CreateRepository(ctx, &models.Repository{
 		ID: "repo-a", WorkspaceID: "ws1", Name: "repo-a", SourceType: "local",
 	}); err != nil {
@@ -404,7 +412,7 @@ func TestHandleSessionLaunchFailed_SingleRepositoryLegacyPRCreatesMissingBranchG
 func TestHandleSessionLaunchFailed_LegacyPRForDifferentRepositoryCreatesNeutralGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 	if err := repo.CreateRepository(ctx, &models.Repository{
 		ID: "repo-a", WorkspaceID: "ws1", Name: "repo-a", SourceType: "local",
 	}); err != nil {
@@ -441,7 +449,7 @@ func TestHandleSessionLaunchFailed_LegacyPRForDifferentRepositoryCreatesNeutralG
 func TestHandleSessionLaunchFailed_MultipleRepositoriesLegacyPRCreatesNeutralGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 	for position, repositoryID := range []string{"repo-a", "repo-b"} {
 		if err := repo.CreateRepository(ctx, &models.Repository{
 			ID: repositoryID, WorkspaceID: "ws1", Name: repositoryID, SourceType: "local",
@@ -480,7 +488,7 @@ func TestHandleSessionLaunchFailed_MultipleRepositoriesLegacyPRCreatesNeutralGui
 func TestHandleSessionLaunchFailed_EmptyRepositoryIDCreatesNeutralGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
 	mc := &mockMessageCreator{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -507,10 +515,46 @@ func TestHandleSessionLaunchFailed_EmptyRepositoryIDCreatesNeutralGuidance(t *te
 	}
 }
 
+func TestHandleSessionLaunchFailed_RetriesAfterGuidanceMessageWriteFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	writeErr := errors.New("message store unavailable")
+	mc := &mockMessageCreator{sessionMessageErr: writeErr}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+	err := errors.New("environment preparation failed: fatal: couldn't find remote ref feature/foo")
+
+	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "", err)
+	if len(mc.sessionMessages) != 0 {
+		t.Fatalf("failed message write persisted %d messages", len(mc.sessionMessages))
+	}
+	if _, suppressed := svc.suppressToast.Load("session1"); suppressed {
+		t.Fatal("failed message write suppressed the fallback toast")
+	}
+	failed, getErr := repo.GetTaskSession(ctx, "session1")
+	if getErr != nil {
+		t.Fatalf("get failed session: %v", getErr)
+	}
+	if _, claimed := failed.Metadata[missingPRBranchRecoveryClaimKey]; claimed {
+		t.Fatal("failed message write left the recovery claim persisted")
+	}
+
+	mc.sessionMessageErr = nil
+	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "", err)
+	if len(mc.sessionMessages) != 1 {
+		t.Fatalf("retry created %d messages, want 1", len(mc.sessionMessages))
+	}
+	if _, suppressed := svc.suppressToast.Load("session1"); !suppressed {
+		t.Fatal("successful recovery message did not suppress the fallback toast")
+	}
+}
+
 func TestHandleSessionLaunchFailed_IgnoresUnrelatedErrors(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateStarting)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
 
 	mc := &mockMessageCreator{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -520,5 +564,47 @@ func TestHandleSessionLaunchFailed_IgnoresUnrelatedErrors(t *testing.T) {
 
 	if len(mc.sessionMessages) != 0 {
 		t.Fatalf("expected no session messages for unrelated error, got %d", len(mc.sessionMessages))
+	}
+}
+
+func TestHandleSessionLaunchFailed_IgnoresMissingBranchWrapperAroundTransportError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	err := errors.New("environment preparation failed: branch \"codex/enhance-prompt-result-delivery\" not found locally or on remote: fatal: unable to access 'https://github.com/kdlbs/kandev.git/': Could not resolve host: github.com")
+	if isMissingBranchError(err) {
+		t.Fatal("expected transport failure not to be classified as a missing PR branch")
+	}
+
+	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "", err)
+
+	if len(mc.sessionMessages) != 0 {
+		t.Fatalf("expected no guidance message for transport failure, got %d", len(mc.sessionMessages))
+	}
+}
+
+func TestHandleSessionLaunchFailed_IgnoresPathspecAfterFetchFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+
+	mc := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = mc
+
+	err := errors.New("environment preparation failed: checkout branch: git command failed: fetch branch failed: exit status 128: fatal: unable to access 'https://github.com/kdlbs/kandev.git/': Could not resolve host: github.com\ncheckout branch failed: error: pathspec 'codex/enhance-prompt-result-delivery' did not match any file(s) known to git")
+	if isMissingBranchError(err) {
+		t.Fatal("expected pathspec after fetch failure not to be classified as a missing PR branch")
+	}
+
+	svc.handleSessionLaunchFailed(ctx, "task1", "session1", "", err)
+
+	if len(mc.sessionMessages) != 0 {
+		t.Fatalf("expected no guidance message after fetch failure, got %d", len(mc.sessionMessages))
 	}
 }

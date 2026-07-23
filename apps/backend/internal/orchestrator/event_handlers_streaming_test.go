@@ -266,6 +266,7 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 		"s1",
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -291,6 +292,7 @@ func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
 		"s1",
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
+		nil,
 	)
 
 	require.ErrorIs(t, err, writeFailure)
