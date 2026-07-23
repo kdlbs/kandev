@@ -772,7 +772,14 @@ func completedAtForTaskSessionState(status models.TaskSessionState, now time.Tim
 // is archived.
 func (r *Repository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]string, time.Time, error) {
 	now := time.Now().UTC()
-	writeCtx := context.WithoutCancel(ctx)
+	// Detach from ctx via WithoutCancel: this write must survive a client
+	// disconnect (see the doc comment above) so the CANCELLED transition and
+	// its returned IDs are never lost to a caller that hung up mid-request.
+	// Bound it with a timeout so a locked SQLite UPDATE can't block forever
+	// on a request-independent DB stall just because the deadline was
+	// dropped.
+	writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	var ids []string
 	if err := r.db.SelectContext(writeCtx, &ids, r.db.Rebind(`
 		UPDATE task_sessions
