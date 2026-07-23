@@ -327,6 +327,49 @@ func TestLocalPreparer_CheckoutFailureSurfaces(t *testing.T) {
 	}
 }
 
+func TestLocalPreparer_PreservesFetchFailureWhenCheckoutAlsoFails(t *testing.T) {
+	const token = "github-token-that-must-not-leak"
+	fakeBin := t.TempDir()
+	fakeGit := filepath.Join(fakeBin, "git")
+	script := `#!/bin/sh
+case "$1" in
+fetch)
+  echo "fatal: unable to access 'https://oauth2:github-token-that-must-not-leak@github.com/kdlbs/kandev.git/': Could not resolve host: github.com" >&2
+  exit 128
+  ;;
+checkout)
+  echo "error: pathspec '$2' did not match any file(s) known to git; token=github-token-that-must-not-leak" >&2
+  exit 1
+  ;;
+esac
+`
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", fakeBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	preparer := NewLocalPreparer(newTestLocalLogger())
+	result, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		TaskID:         "task-1",
+		RepositoryPath: t.TempDir(),
+		CheckoutBranch: "feature/missing",
+		Env:            map[string]string{"GITHUB_TOKEN": token},
+	}, nil)
+	if err == nil {
+		t.Fatal("expected Prepare() to fail")
+	}
+	for _, want := range []string{"fetch branch failed", "Could not resolve host: github.com", "pathspec 'feature/missing' did not match", "[REDACTED]"} {
+		if !strings.Contains(result.ErrorMessage, want) || !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected result and error to contain %q\nresult: %s\nerror: %v", want, result.ErrorMessage, err)
+		}
+	}
+	for _, secret := range []string{"oauth2", token} {
+		if strings.Contains(result.ErrorMessage, secret) || strings.Contains(err.Error(), secret) {
+			t.Fatalf("checkout failure leaked %q\nresult: %s\nerror: %v", secret, result.ErrorMessage, err)
+		}
+	}
+}
+
 func TestLocalPreparer_RunsSetupScriptWithoutCheckout(t *testing.T) {
 	isolateGitEnv(t)
 	log := newTestLocalLogger()
