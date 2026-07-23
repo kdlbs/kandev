@@ -7,17 +7,6 @@ description: Discover and choose the right Kandev agent skill for a task. Use wh
 
 Use this as the routing map for Kandev's local skills. Prefer the repo's existing skills over importing adjacent upstream names.
 
-## Session Role
-
-The root `AGENTS.md` (also supplied to Claude through `CLAUDE.md`) is the
-authoritative role boundary. The planner is the default architect and may apply
-execution skills directly to small scoped work; workers provide bounded
-isolation or independent evidence when their ROI is positive. Never use Kandev
-MCP task/session APIs as worker delegation or as a fallback.
-
-Load `/planner-orchestration` only when its detailed work-packet, model-tier,
-or completion rules are needed. Execution skills do not each need to load it.
-
 ## Skill Map
 
 ```text
