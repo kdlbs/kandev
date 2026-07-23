@@ -28,7 +28,7 @@ func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
 	}
 	output := ensureShellOutput(payload)
 	if normalized.hasStdout {
-		output.Stdout = normalized.stdout
+		output.Stdout = stripLeadingCommandEcho(payload.Command, normalized.stdout)
 		output.StdoutTruncated = normalized.stdoutTruncated
 	}
 	if normalized.hasStderr {
@@ -41,6 +41,52 @@ func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
 	if normalized.exitCode != nil {
 		output.ExitCode = normalized.exitCode
 	}
+}
+
+// stripLeadingCommandEcho removes a leading echo of the tool call's command
+// from captured shell output. Some providers capture command output via a
+// real terminal session whose input echo (optionally rendered behind a "$ "
+// shell prompt) is concatenated directly onto the actual output, duplicating
+// the command the UI already renders above the output disclosure. Stripping
+// is an exact-prefix match, so output that merely mentions the command text
+// elsewhere - rather than opening with a verbatim echo of it - is untouched.
+//
+// Used for final/terminal results, where the buffer is known to be complete:
+// a stdout consisting of nothing but the echoed command commits to an empty
+// result rather than leaving the redundant echo visible.
+func stripLeadingCommandEcho(command, stdout string) string {
+	return stripCommandEcho(command, stdout, true)
+}
+
+// stripPendingCommandEcho is the live-update counterpart of
+// stripLeadingCommandEcho. Incremental terminal_output/terminal_output_delta
+// chunks can split exactly between the echoed command and the separator that
+// precedes real output (read() boundaries are arbitrary), so a buffer that
+// currently equals nothing but the echo is left untouched - the separator or
+// real output may still be in flight - instead of collapsing to empty and
+// orphaning a later chunk's leading newline.
+func stripPendingCommandEcho(command, stdout string) string {
+	return stripCommandEcho(command, stdout, false)
+}
+
+func stripCommandEcho(command, stdout string, commitExactMatch bool) string {
+	if command == "" || stdout == "" {
+		return stdout
+	}
+	for _, prefix := range [2]string{"$ " + command, command} {
+		rest, ok := strings.CutPrefix(stdout, prefix)
+		if !ok {
+			continue
+		}
+		if rest == "" && !commitExactMatch {
+			return stdout
+		}
+		if trimmed, ok := strings.CutPrefix(rest, "\r\n"); ok {
+			return trimmed
+		}
+		return strings.TrimPrefix(rest, "\n")
+	}
+	return stdout
 }
 
 // NormalizeShellToolUpdate merges live and final ACP shell result fields into
@@ -81,6 +127,10 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 	if exitCode, ok := terminalExitCode(meta); ok {
 		ensureShellOutput(shell).ExitCode = intPtr(exitCode)
 		recognized = true
+	}
+
+	if shell.Output != nil {
+		shell.Output.Stdout = stripPendingCommandEcho(shell.Command, shell.Output.Stdout)
 	}
 
 	return recognized

@@ -289,6 +289,89 @@ func TestNormalizeShellToolUpdateCumulativeOutputRemainsCorrectAfterTruncation(t
 	require.True(t, payload.ShellExec().Output.Truncated)
 }
 
+func TestNormalizeShellToolResultStripsLeadingCommandEcho(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		command    string
+		result     any
+		wantStdout string
+	}{
+		{
+			name:       "echoed command directly precedes output with no separator",
+			command:    "cat file.txt",
+			result:     "cat file.txt=== marker ===\n",
+			wantStdout: "=== marker ===\n",
+		},
+		{
+			name:       "echoed command with shell prompt and newline separator",
+			command:    "ls -la",
+			result:     "$ ls -la\ntotal 0\n",
+			wantStdout: "total 0\n",
+		},
+		{
+			name:       "multi-line command echoed verbatim before output",
+			command:    "for i in 1 2; do\n  echo $i\ndone",
+			result:     "for i in 1 2; do\n  echo $i\ndone\n1\n2\n",
+			wantStdout: "1\n2\n",
+		},
+		{
+			name:       "command text appearing later in output is preserved",
+			command:    "echo hi",
+			result:     "unrelated preamble\necho hi appears mid-output\n",
+			wantStdout: "unrelated preamble\necho hi appears mid-output\n",
+		},
+		{
+			name:       "output starting with a different command is preserved",
+			command:    "echo hi",
+			result:     "echo bye\n",
+			wantStdout: "echo bye\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			normalizer := NewNormalizer("")
+			payload := normalizer.NormalizeToolCall("execute", map[string]any{
+				"kind":      "execute",
+				"raw_input": map[string]any{"command": tt.command},
+			})
+
+			normalizer.NormalizeToolResult(payload, tt.result)
+
+			require.Equal(t, tt.wantStdout, payload.ShellExec().Output.Stdout)
+		})
+	}
+}
+
+func TestNormalizeShellToolUpdateStripsLeadingCommandEchoFromLiveOutput(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "tail -f log.txt"},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output_delta": map[string]any{"data": "tail -f log.txt"}},
+		nil,
+		nil,
+	)
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output_delta": map[string]any{"data": "\nline one\n"}},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, "line one\n", payload.ShellExec().Output.Stdout)
+}
+
 func shellOutputJSON(t *testing.T, output any) map[string]any {
 	t.Helper()
 	require.NotNil(t, output)
