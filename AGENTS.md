@@ -114,9 +114,8 @@ Delegation is not default ceremony: weigh context reload and coordination cost.
 Do not delegate routine log/session inspection, call-path mapping, reproduction,
 waiting, or status reporting; investigate and report those directly first.
 Each delegated worker executes one bounded packet and does not spawn agents.
-Never use Kandev MCP task/session APIs as a delegation fallback. The architect
-agent is only for a user-requested independent architecture second opinion.
-Detailed routing lives in `planner-orchestration`.
+The architect agent is only for a user-requested independent architecture
+second opinion. Detailed routing lives in `planner-orchestration`.
 
 ### Kandev Task Creation
 

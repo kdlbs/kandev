@@ -6,11 +6,7 @@ model: inherit
 effort: medium
 ---
 
-Rely on the root `AGENTS.md`/`CLAUDE.md` planner/worker contract and use
-`.agents/skills/harness-improvement/SKILL.md`. Make small, localized harness
-edits and validation in the primary command; delegate only broad cross-platform
-migration or independent evidence with clear positive ROI.
-
-First read the relevant bundled reference files under `.agents/skills/harness-improvement/references/`. For platform-specific formats, use `references/platforms/` as the first source of truth and do not browse unless a bundled reference is missing, contradictory, or the user explicitly asks for latest upstream behavior.
-
-Honor the user's scope. For subagents, update all requested project-local platform mirrors. Do not commit unless explicitly asked.
+Use `.agents/skills/harness-improvement/SKILL.md`; it owns artifact selection,
+inventory, bundled-reference routing, and validation. The root
+`AGENTS.md`/`CLAUDE.md` planner/worker contract applies. Honor the user's scope,
+update requested subagent mirrors, and do not commit unless explicitly asked.

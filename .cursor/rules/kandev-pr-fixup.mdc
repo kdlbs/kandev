@@ -6,20 +6,13 @@ alwaysApply: false
 
 # Kandev PR Fixup
 
-Use `.agents/skills/pr-fixup/SKILL.md` for PR fixups. In a user-started primary
-session, directly triage small thread sets and scope-preserving fixes. Delegate
-only genuinely long polling or broad remediation; post-commit `verify` remains
-the separate final gate.
+Use `.agents/skills/pr-fixup/SKILL.md` for the workflow. In a user-started
+primary session, directly handle small triage and scope-preserving fixes; use
+`pr-poller` only for long waits, an implementer for broad remediation, and
+post-commit `verify` as the separate final gate.
 
 If `pr-poller` reports that GitHub access requires approval, surface that gate
 to the user and stop. Do not relaunch polling after approval is denied,
-cancelled, or interrupted; use the shared skill's bounded retry behavior only
-for actual fetch failures after access was approved.
-
-The helper scripts are at `<worktree>/scripts/...`, not under the skill directory. Prefer:
-
-- `scripts/pr-state --summary <PR>` for state.
-- `scripts/pr-resolve list <PR>` for actionable review threads.
-- `scripts/pr-resolve reply <PR> <comment_id> <thread_id> <body>` for replies.
-
-After pushing fixes, re-check with `scripts/pr-state --summary <PR>`. If there are no failed checks and `unresolved_review_thread_count` is `0` but checks are queued or in progress, report the exact pending state instead of waiting indefinitely unless the user explicitly asks to wait.
+cancelled, or interrupted; the shared skill's bounded retry behavior applies
+only to actual fetch failures after access was approved. Its helper scripts are
+at `<worktree>/scripts/...`, not under the skill directory.
