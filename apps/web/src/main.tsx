@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "@/app/globals.css";
+import { PluginModalHost } from "@/components/plugins/plugin-modal-host";
 import { StateProvider } from "@/components/state-provider";
 import { PluginBootBridge } from "@/lib/plugins/plugin-boot-bridge";
 import { AppShell } from "./app-shell";
@@ -12,6 +13,7 @@ function App({ payload }: { payload: BootPayload }) {
   return (
     <StateProvider initialState={payload.initialState ?? {}}>
       <PluginBootBridge plugins={payload.plugins} />
+      <PluginModalHost />
       <AppShell>
         <SpaRoutes routeData={payload.routeData} />
       </AppShell>

@@ -16,6 +16,7 @@
  * tab must reuse the cached registration instead of relying on re-import.
  */
 import { getBackendConfig } from "@/lib/config";
+import { pluginModalManager } from "./modal-manager";
 import { pluginRegistry } from "./registry";
 import type { ActivePlugin, KandevPlugin, PluginHostApi } from "./types";
 
@@ -195,6 +196,7 @@ export function unloadPlugin(id: string, options?: { evictCache?: boolean }): vo
     console.error(`[plugins] error destroying plugin "${id}"`, error);
   } finally {
     pluginRegistry.unregisterPlugin(id);
+    pluginModalManager.closeAllForPlugin(id);
     removeStyles(id);
     if (options?.evictCache) {
       registeredPlugins.delete(id);

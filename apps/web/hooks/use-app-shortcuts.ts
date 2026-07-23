@@ -2,16 +2,8 @@
 
 import { useEffect } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
-import { matchesShortcut } from "@/lib/keyboard/utils";
+import { isEditableKeydownTarget, matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
-
-/** Returns true if the active element is a text input or contenteditable. */
-function isEditableTarget(e: KeyboardEvent): boolean {
-  const tag = (e.target as HTMLElement)?.tagName;
-  return (
-    tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable === true
-  );
-}
 
 /**
  * App-root keyboard shortcuts that must fire on every route — not just inside
@@ -31,7 +23,7 @@ export function useAppShortcuts() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (isEditableTarget(e)) return;
+      if (isEditableKeydownTarget(e)) return;
 
       const overrides = appStore.getState().userSettings.keyboardShortcuts;
       if (matchesShortcut(e, getShortcut("TOGGLE_SIDEBAR", overrides))) {

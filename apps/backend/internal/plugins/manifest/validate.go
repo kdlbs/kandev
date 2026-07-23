@@ -30,6 +30,58 @@ var validUISurfaces = map[string]bool{
 	"main-nav":   true,
 }
 
+// keybindingIDPattern matches the required UIKeybinding.ID shape: lowercase
+// alphanumerics and hyphens, starting with a lowercase letter or digit. IDs
+// are plugin-local (unique within the plugin's own keybindings list, not
+// globally), so this is deliberately simpler than idPattern.
+var keybindingIDPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// keybindingModifiers are the accepted modifier tokens in a keybinding combo
+// (case-insensitive; matched after lowercasing). "mod" is the
+// platform-agnostic primary modifier (Cmd on macOS, Ctrl elsewhere) that the
+// frontend dispatcher resolves at runtime; the rest are explicit aliases.
+var keybindingModifiers = map[string]bool{
+	"mod":     true,
+	"ctrl":    true,
+	"control": true,
+	"cmd":     true,
+	"meta":    true,
+	"super":   true,
+	"alt":     true,
+	"option":  true,
+	"shift":   true,
+}
+
+// keybindingKeys are the accepted non-modifier key tokens in a keybinding
+// combo (case-insensitive; matched after lowercasing). This is a
+// conservative, documented vocabulary — not an exhaustive KeyboardEvent.key
+// mirror — covering: single alphanumeric characters, function keys F1-F12,
+// and the common named keys plugins are expected to bind.
+var keybindingKeys = buildKeybindingKeySet()
+
+func buildKeybindingKeySet() map[string]bool {
+	keys := map[string]bool{
+		"enter": true, "escape": true, "esc": true, "tab": true, "space": true,
+		"backspace": true, "delete": true, "insert": true,
+		"arrowup": true, "arrowdown": true, "arrowleft": true, "arrowright": true,
+		"up": true, "down": true, "left": true, "right": true,
+		"home": true, "end": true, "pageup": true, "pagedown": true,
+		"comma": true, "period": true, "slash": true, "backslash": true,
+		"semicolon": true, "quote": true, "minus": true, "equal": true,
+		"bracketleft": true, "bracketright": true, "backquote": true,
+	}
+	for c := 'a'; c <= 'z'; c++ {
+		keys[string(c)] = true
+	}
+	for c := '0'; c <= '9'; c++ {
+		keys[string(c)] = true
+	}
+	for i := 1; i <= 12; i++ {
+		keys[fmt.Sprintf("f%d", i)] = true
+	}
+	return keys
+}
+
 // Validate checks the manifest against the plugin registration rules
 // described in docs/specs/plugins/spec.md. It returns nil if the manifest
 // is well-formed, or a joined error describing every violation found.
@@ -47,6 +99,7 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateRepoURL()...)
 	errs = append(errs, m.validateUIPages()...)
 	errs = append(errs, m.validateUIBundle()...)
+	errs = append(errs, m.validateUIKeybindings()...)
 	errs = append(errs, m.validateWebhooks()...)
 	return errors.Join(errs...)
 }
@@ -220,6 +273,83 @@ func (m *Manifest) validateUIBundle() []error {
 		}
 	}
 	return errs
+}
+
+// validateUIKeybindings checks each declared ui.keybindings entry: id is a
+// non-empty slug unique within the plugin, description is non-empty, and
+// default parses as a valid combo (see parseKeybindingCombo). Keybindings
+// are optional, but when present they require ui.bundle — kandev dispatches
+// the combo as an event the plugin's JS bundle handles, so a keybinding
+// without a bundle can never do anything.
+func (m *Manifest) validateUIKeybindings() []error {
+	var errs []error
+	if len(m.UI.Keybindings) > 0 && m.UI.Bundle == "" {
+		errs = append(errs, errors.New("ui.keybindings requires ui.bundle to be set"))
+	}
+	seen := make(map[string]bool, len(m.UI.Keybindings))
+	for _, kb := range m.UI.Keybindings {
+		errs = append(errs, validateKeybindingID(kb.ID, seen)...)
+		if strings.TrimSpace(kb.Description) == "" {
+			errs = append(errs, fmt.Errorf("ui.keybindings[%q]: description must not be empty", kb.ID))
+		}
+		if err := parseKeybindingCombo(kb.Default); err != nil {
+			errs = append(errs, fmt.Errorf("ui.keybindings[%q]: %w", kb.ID, err))
+		}
+	}
+	return errs
+}
+
+// validateKeybindingID checks a single keybinding id against the slug
+// pattern and records it in seen, reporting a duplicate-id error on repeat.
+func validateKeybindingID(id string, seen map[string]bool) []error {
+	var errs []error
+	if !keybindingIDPattern.MatchString(id) {
+		errs = append(errs, fmt.Errorf("invalid ui.keybindings id %q: must match %s", id, keybindingIDPattern.String()))
+		return errs
+	}
+	if seen[id] {
+		errs = append(errs, fmt.Errorf("duplicate ui.keybindings id %q", id))
+		return errs
+	}
+	seen[id] = true
+	return errs
+}
+
+// parseKeybindingCombo validates a keybinding combo string such as
+// "mod+shift+k": tokens are split on "+", trimmed of surrounding whitespace,
+// and lowercased. Every token but exactly one must be a recognized modifier
+// (keybindingModifiers); the remaining single token must be a recognized key
+// (keybindingKeys). It returns an error describing the first problem found;
+// it does not return a normalized struct because validation is currently the
+// only caller.
+func parseKeybindingCombo(combo string) error {
+	if strings.TrimSpace(combo) == "" {
+		return errors.New("default combo must not be empty")
+	}
+	rawTokens := strings.Split(combo, "+")
+	var keyToken string
+	keyCount := 0
+	for _, raw := range rawTokens {
+		token := strings.ToLower(strings.TrimSpace(raw))
+		if token == "" {
+			return fmt.Errorf("default combo %q has an empty token", combo)
+		}
+		if keybindingModifiers[token] {
+			continue
+		}
+		if !keybindingKeys[token] {
+			return fmt.Errorf("default combo %q: unknown token %q (not a recognized modifier or key)", combo, token)
+		}
+		keyToken = token
+		keyCount++
+	}
+	if keyCount == 0 {
+		return fmt.Errorf("default combo %q must include exactly one non-modifier key", combo)
+	}
+	if keyCount > 1 {
+		return fmt.Errorf("default combo %q must include exactly one non-modifier key, found more than one (last: %q)", combo, keyToken)
+	}
+	return nil
 }
 
 // validateWebhooks checks for duplicate webhook keys.

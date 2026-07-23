@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { IconRotate, IconX } from "@tabler/icons-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { IconAlertTriangle, IconRotate, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Kbd } from "@kandev/ui/kbd";
 import type { Key, KeyboardShortcut } from "@/lib/keyboard/constants";
-import { formatShortcut } from "@/lib/keyboard/utils";
+import { formatShortcut, isMac } from "@/lib/keyboard/utils";
 import {
   CONFIGURABLE_SHORTCUTS,
   UNBOUND_SHORTCUT,
@@ -15,29 +15,43 @@ import {
   type ConfigurableShortcutId,
   type StoredShortcutOverrides,
 } from "@/lib/keyboard/shortcut-overrides";
+import {
+  coreShortcutEntries,
+  resolveShortcutEntry,
+  type ShortcutEntry,
+} from "@/lib/keyboard/plugin-shortcuts";
+import {
+  findShortcutConflicts,
+  type ShortcutConflictGroup,
+} from "@/lib/keyboard/shortcut-conflicts";
 import { SettingsCard } from "./settings-card";
 
 type ShortcutRecorderProps = {
-  shortcutId: ConfigurableShortcutId;
+  shortcutId: string;
+  label: string;
+  defaultShortcut: KeyboardShortcut;
   current: KeyboardShortcut;
-  onChange: (id: ConfigurableShortcutId, shortcut: KeyboardShortcut) => void;
-  onReset: (id: ConfigurableShortcutId) => void;
+  onChange: (id: string, shortcut: KeyboardShortcut) => void;
+  onReset: (id: string) => void;
   // Optional: callers that don't support an explicit "unbind" (e.g. the voice
   // settings recorder) omit this, and the Clear button is hidden for them.
-  onClear?: (id: ConfigurableShortcutId) => void;
+  onClear?: (id: string) => void;
   isDirty?: boolean;
+  conflictsWith?: string[];
 };
 
 export function ShortcutRecorder({
   shortcutId,
+  label,
+  defaultShortcut,
   current,
   onChange,
   onReset,
   onClear,
   isDirty = false,
+  conflictsWith,
 }: ShortcutRecorderProps) {
   const [recording, setRecording] = useState(false);
-  const defaultShortcut = CONFIGURABLE_SHORTCUTS[shortcutId].default;
   const isDefault = JSON.stringify(current) === JSON.stringify(defaultShortcut);
   const isUnbound = isUnboundShortcut(current);
   const defaultIsUnbound = isUnboundShortcut(defaultShortcut);
@@ -84,7 +98,7 @@ export function ShortcutRecorder({
 
   return (
     <div className="flex items-center justify-between py-2">
-      <span className="text-sm">{CONFIGURABLE_SHORTCUTS[shortcutId].label}</span>
+      <ShortcutRecorderLabel label={label} conflictsWith={conflictsWith} />
       <div className="flex items-center gap-2">
         <button
           data-testid={`shortcut-recorder-${shortcutId}`}
@@ -98,32 +112,83 @@ export function ShortcutRecorder({
         >
           {renderRecorderLabel({ recording, current, isUnbound })}
         </button>
-        {onClear && !isUnbound && !defaultIsUnbound && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 cursor-pointer"
-            onClick={() => onClear(shortcutId)}
-            aria-label="Clear shortcut"
-            title="Clear shortcut"
-          >
-            <IconX className="size-3.5" />
-          </Button>
-        )}
-        {!isDefault && (
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 cursor-pointer"
-            onClick={() => onReset(shortcutId)}
-            aria-label={defaultIsUnbound ? "Reset (clear shortcut)" : "Reset to default"}
-            title={defaultIsUnbound ? "Reset (clear shortcut)" : "Reset to default"}
-          >
-            <IconRotate className="size-3.5" />
-          </Button>
-        )}
+        <ShortcutRecorderActions
+          shortcutId={shortcutId}
+          isDefault={isDefault}
+          isUnbound={isUnbound}
+          defaultIsUnbound={defaultIsUnbound}
+          onReset={onReset}
+          onClear={onClear}
+        />
       </div>
     </div>
+  );
+}
+
+function ShortcutRecorderLabel({
+  label,
+  conflictsWith,
+}: {
+  label: string;
+  conflictsWith?: string[];
+}) {
+  return (
+    <span className="text-sm flex items-center gap-1.5">
+      {label}
+      {conflictsWith && conflictsWith.length > 0 && (
+        <span
+          className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-500"
+          title={`Same shortcut as: ${conflictsWith.join(", ")}`}
+        >
+          <IconAlertTriangle className="size-3.5" />
+        </span>
+      )}
+    </span>
+  );
+}
+
+function ShortcutRecorderActions({
+  shortcutId,
+  isDefault,
+  isUnbound,
+  defaultIsUnbound,
+  onReset,
+  onClear,
+}: {
+  shortcutId: string;
+  isDefault: boolean;
+  isUnbound: boolean;
+  defaultIsUnbound: boolean;
+  onReset: (id: string) => void;
+  onClear?: (id: string) => void;
+}) {
+  return (
+    <>
+      {onClear && !isUnbound && !defaultIsUnbound && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 cursor-pointer"
+          onClick={() => onClear(shortcutId)}
+          aria-label="Clear shortcut"
+          title="Clear shortcut"
+        >
+          <IconX className="size-3.5" />
+        </Button>
+      )}
+      {!isDefault && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 cursor-pointer"
+          onClick={() => onReset(shortcutId)}
+          aria-label={defaultIsUnbound ? "Reset (clear shortcut)" : "Reset to default"}
+          title={defaultIsUnbound ? "Reset (clear shortcut)" : "Reset to default"}
+        >
+          <IconRotate className="size-3.5" />
+        </Button>
+      )}
+    </>
   );
 }
 
@@ -141,27 +206,54 @@ function renderRecorderLabel({
   return <Kbd>{formatShortcut(current)}</Kbd>;
 }
 
+/** Builds a `shortcutId -> conflicting labels` lookup from conflict groups. */
+function buildConflictLabels(groups: ShortcutConflictGroup[]): Map<string, string[]> {
+  const labels = new Map<string, string[]>();
+  for (const group of groups) {
+    for (const entry of group.entries) {
+      labels.set(
+        entry.id,
+        group.entries.filter((other) => other.id !== entry.id).map((other) => other.label),
+      );
+    }
+  }
+  return labels;
+}
+
 export function KeyboardShortcutsCard({
   overrides,
   baselineOverrides = {},
   onChange,
+  pluginEntries = [],
 }: {
   overrides: StoredShortcutOverrides;
   baselineOverrides?: StoredShortcutOverrides;
   onChange: (overrides: StoredShortcutOverrides) => void;
+  /** Dynamic plugin-declared shortcuts (see `lib/keyboard/plugin-shortcuts.ts`). */
+  pluginEntries?: ShortcutEntry[];
 }) {
   const shortcuts = resolveAllShortcuts(overrides);
   const baselineShortcuts = resolveAllShortcuts(baselineOverrides);
 
+  const allEntries = useMemo(() => [...coreShortcutEntries(), ...pluginEntries], [pluginEntries]);
+
+  const conflictLabels = useMemo(() => {
+    const resolved = allEntries.map((entry) => ({
+      entry,
+      shortcut: resolveShortcutEntry(entry, overrides),
+    }));
+    return buildConflictLabels(findShortcutConflicts(resolved, isMac()));
+  }, [allEntries, overrides]);
+
   const handleChange = useCallback(
-    (id: ConfigurableShortcutId, shortcut: KeyboardShortcut) => {
+    (id: string, shortcut: KeyboardShortcut) => {
       onChange({ ...overrides, [id]: shortcut });
     },
     [onChange, overrides],
   );
 
   const handleReset = useCallback(
-    (id: ConfigurableShortcutId) => {
+    (id: string) => {
       const next = { ...overrides };
       delete next[id];
       onChange(next);
@@ -170,7 +262,7 @@ export function KeyboardShortcutsCard({
   );
 
   const handleClear = useCallback(
-    (id: ConfigurableShortcutId) => {
+    (id: string) => {
       onChange({ ...overrides, [id]: UNBOUND_SHORTCUT });
     },
     [onChange, overrides],
@@ -189,14 +281,41 @@ export function KeyboardShortcutsCard({
             <ShortcutRecorder
               key={id}
               shortcutId={id}
+              label={CONFIGURABLE_SHORTCUTS[id].label}
+              defaultShortcut={CONFIGURABLE_SHORTCUTS[id].default}
               current={shortcuts[id]}
               onChange={handleChange}
               onReset={handleReset}
               onClear={handleClear}
               isDirty={JSON.stringify(shortcuts[id]) !== JSON.stringify(baselineShortcuts[id])}
+              conflictsWith={conflictLabels.get(id)}
             />
           ))}
         </div>
+        {pluginEntries.length > 0 && (
+          <div className="mt-4">
+            <p className="text-xs font-medium text-muted-foreground mb-1">Plugin Shortcuts</p>
+            <div className="divide-y divide-border">
+              {pluginEntries.map((entry) => (
+                <ShortcutRecorder
+                  key={entry.id}
+                  shortcutId={entry.id}
+                  label={entry.label}
+                  defaultShortcut={entry.default}
+                  current={resolveShortcutEntry(entry, overrides)}
+                  onChange={handleChange}
+                  onReset={handleReset}
+                  onClear={handleClear}
+                  isDirty={
+                    JSON.stringify(resolveShortcutEntry(entry, overrides)) !==
+                    JSON.stringify(resolveShortcutEntry(entry, baselineOverrides))
+                  }
+                  conflictsWith={conflictLabels.get(entry.id)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
         <p className="text-xs text-muted-foreground mt-3">
           Click a shortcut to record a new key combination.
         </p>

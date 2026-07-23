@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { Window as HappyDOMWindow } from "happy-dom";
 import { loadPlugins, unloadPlugin } from "./host";
+import { pluginModalManager } from "./modal-manager";
 import { pluginRegistry } from "./registry";
 import type { ActivePlugin, PluginHostApi, PluginRegistry } from "./types";
 
@@ -34,6 +35,7 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     ui: {},
     theme: "light",
     navigate: () => {},
+    openModal: () => ({ close: () => {} }),
   };
 }
 
@@ -328,6 +330,40 @@ describe("unloadPlugin", () => {
 
     expect(document.head.querySelector("link[href='/plugin-unload-style-a.css']")).toBeNull();
     happyDOMWindow.happyDOM.settings.disableCSSFileLoading = false;
+  });
+});
+
+describe("unloadPlugin — plugin modal cleanup", () => {
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_UNLOAD_A_ID);
+  });
+
+  it("closes every modal opened by the unloaded plugin", async () => {
+    const importer = fakeImporterFor({
+      [BUNDLE_JS_URL]: (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_UNLOAD_A_ID, {
+          initialize: () => {},
+        }),
+    });
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_UNLOAD_A_ID, bundleUrl: BUNDLE_JS_URL })],
+      makeHostFactory,
+      importer,
+    );
+
+    const before = pluginModalManager.getSnapshot().length;
+    pluginModalManager.openModal(PLUGIN_UNLOAD_A_ID, { content: () => null });
+    const otherHandle = pluginModalManager.openModal("some-other-plugin", { content: () => null });
+    expect(pluginModalManager.getSnapshot()).toHaveLength(before + 2);
+
+    unloadPlugin(PLUGIN_UNLOAD_A_ID);
+
+    const snapshot = pluginModalManager.getSnapshot();
+    expect(snapshot).toHaveLength(before + 1);
+    expect(snapshot.some((m) => m.pluginId === PLUGIN_UNLOAD_A_ID)).toBe(false);
+    expect(snapshot.some((m) => m.pluginId === "some-other-plugin")).toBe(true);
+
+    otherHandle.close();
   });
 });
 

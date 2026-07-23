@@ -92,9 +92,10 @@ type Webhook struct {
 // optional/secondary when a bundle is declared: native routes come from the
 // bundle at runtime.
 type UISection struct {
-	Pages  []UIPage `yaml:"pages,omitempty" json:"pages,omitempty"`
-	Bundle string   `yaml:"bundle,omitempty" json:"bundle,omitempty"`
-	Styles []string `yaml:"styles,omitempty" json:"styles,omitempty"`
+	Pages       []UIPage       `yaml:"pages,omitempty" json:"pages,omitempty"`
+	Bundle      string         `yaml:"bundle,omitempty" json:"bundle,omitempty"`
+	Styles      []string       `yaml:"styles,omitempty" json:"styles,omitempty"`
+	Keybindings []UIKeybinding `yaml:"keybindings,omitempty" json:"keybindings,omitempty"`
 }
 
 // UIPage is a single UI page contributed by the plugin.
@@ -103,6 +104,18 @@ type UIPage struct {
 	Title   string `yaml:"title" json:"title"`
 	Path    string `yaml:"path" json:"path"`
 	Surface string `yaml:"surface" json:"surface"`
+}
+
+// UIKeybinding is a single keyboard shortcut a plugin's UI bundle wants
+// kandev to register and dispatch on its behalf. ID is plugin-local (unique
+// within the plugin, not globally); Default is a combo like "mod+shift+k"
+// (see parseKeybindingCombo in validate.go for the accepted grammar).
+// Keybindings are only meaningful alongside ui.bundle, since the plugin's JS
+// bundle is what handles the dispatched event.
+type UIKeybinding struct {
+	ID          string `yaml:"id" json:"id"`
+	Default     string `yaml:"default" json:"default"`
+	Description string `yaml:"description" json:"description"`
 }
 
 // Parse decodes a plugin manifest from YAML bytes. It does not validate the

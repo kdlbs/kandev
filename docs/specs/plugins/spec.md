@@ -494,6 +494,20 @@ Mattermost-webapp model), not iframes. The full contract lives in
   bundle/`initialize` is caught and never breaks boot; slot components render behind
   error boundaries. Plugin JS otherwise runs with full in-origin store access —
   hard sandboxing (workers/realms) is future work (see Out of scope).
+- **Keybindings:** a plugin declares `ui.keybindings: [{ id, default, description }]`
+  in its manifest (`default` is a combo string like `mod+shift+k`, validated at
+  registration time). `registry.registerKeybinding(id, handler)` binds a JS handler
+  to a declared id; the host resolves the effective combo (a user override from
+  Settings > Keyboard Shortcuts if set, else the manifest `default`) and dispatches
+  it globally, skipping editable targets the same way core app shortcuts do. User
+  overrides are namespaced `plugin:{pluginId}:{id}` so they survive independently
+  per plugin.
+- **Modals:** `host.openModal({ title?, content, size?, dismissible? })` imperatively
+  opens a modal rendered by the host's `<PluginModalHost/>` (mounted once at the app
+  root, isolated behind its own error boundary) and returns `{ close() }` to close
+  that instance. `content` reuses the slot-component contract (rendered with the
+  host React instance). Independent of keybindings — any plugin code path may call
+  it, including a keybinding handler.
 
 ## State machine
 

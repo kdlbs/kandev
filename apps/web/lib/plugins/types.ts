@@ -96,6 +96,24 @@ export type SlotComponent = ReactType.ComponentType<{ slotProps?: unknown }>;
 /** WS action payload handler registered by a plugin. */
 export type WsHandler = (payload: unknown) => void;
 
+/** Options accepted by `host.openModal(...)`. */
+export interface PluginModalOptions {
+  /** Modal title, rendered in a `DialogHeader`/`DialogTitle`. Omit to render no header title. */
+  title?: string;
+  /** Component rendered inside the modal body — reuses the slot-component contract. */
+  content: SlotComponent;
+  /** Modal width, mapped to the host's Dialog size classes. Default: "md". */
+  size?: "sm" | "md" | "lg" | "xl";
+  /** Whether the modal can be dismissed via overlay click or Escape. Default: true. */
+  dismissible?: boolean;
+}
+
+/** Handle returned by `host.openModal(...)`, used to close that modal instance. */
+export interface PluginModalHandle {
+  /** Closes this modal instance. No-op if already closed. */
+  close(): void;
+}
+
 /**
  * API surface passed as the second argument to `KandevPlugin.initialize`.
  * Plugins must render with `host.React` / `host.jsx` — no bundled React.
@@ -127,6 +145,12 @@ export interface PluginHostApi {
   theme: "light" | "dark";
   /** Soft SPA navigation (history push/replace + re-render), same as the app's router. */
   navigate(href: string, options?: { replace?: boolean }): void;
+  /**
+   * Imperatively opens a modal window rendered by the host's `<PluginModalHost/>`
+   * (mounted once at the app root). Independent of keybindings — a keybinding
+   * handler may call it, but it works from any plugin code path.
+   */
+  openModal(options: PluginModalOptions): PluginModalHandle;
 }
 
 /**
@@ -154,6 +178,16 @@ export interface PluginRegistry {
   registerComponent(slot: PluginSlotName, Component: SlotComponent): void;
   /** WS action handler, bridged into the existing `lib/ws` dispatch. */
   registerWsHandler(action: string, handler: WsHandler): void;
+  /**
+   * Bind a handler to a keybinding declared in this plugin's manifest
+   * (`ui.keybindings[].id`). The host resolves the effective combo (user
+   * override if set, else the manifest `default`) and dispatches globally,
+   * skipping editable targets the same way core app shortcuts do. Binding an
+   * `id` the manifest didn't declare still stores the handler (a console
+   * warning is logged) since the dispatcher's effective-shortcut resolution
+   * still keys off the manifest list.
+   */
+  registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
 }
 
 /** Shape every plugin bundle registers via `window.registerKandevPlugin(id, plugin)`. */
