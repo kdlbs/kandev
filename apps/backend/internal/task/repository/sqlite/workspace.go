@@ -200,6 +200,16 @@ func (r *Repository) deleteWorkspaceCascade(
 		return nil, nil, err
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM workflow_steps
+		WHERE workflow_id IN (
+			SELECT id
+			FROM workflows
+			WHERE workspace_id = ?
+		)
+	`), id); err != nil {
+		return nil, nil, err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM workflows
 		WHERE workspace_id = ?
 	`), id); err != nil {

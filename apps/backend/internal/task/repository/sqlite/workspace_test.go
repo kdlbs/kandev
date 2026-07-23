@@ -77,6 +77,45 @@ func TestDeleteWorkspaceCascadeDeletesWorkspaceChildren(t *testing.T) {
 	assertNoWorkspaceCascadeDependents(t, repo)
 }
 
+func TestDeleteWorkspaceCascadeDeletesBootstrappedWorkflowSteps(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	if _, err := workflowrepo.NewWithDB(repo.db, repo.db, nil); err != nil {
+		t.Fatalf("initialize workflow repository: %v", err)
+	}
+
+	workspace := &models.Workspace{ID: "ws-kanban-delete", Name: "Delete Kanban"}
+	workflow, err := repo.CreateWorkspaceWithKanban(ctx, workspace)
+	if err != nil {
+		t.Fatalf("CreateWorkspaceWithKanban: %v", err)
+	}
+	var steps int
+	if err := repo.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM workflow_steps
+		WHERE workflow_id = ?
+	`, workflow.ID).Scan(&steps); err != nil {
+		t.Fatalf("count bootstrapped steps: %v", err)
+	}
+	if steps != 4 {
+		t.Fatalf("bootstrapped steps = %d, want 4", steps)
+	}
+
+	if _, _, err := repo.DeleteWorkspaceCascade(ctx, workspace.ID); err != nil {
+		t.Fatalf("DeleteWorkspaceCascade: %v", err)
+	}
+	if err := repo.db.QueryRow(`
+		SELECT COUNT(*)
+		FROM workflow_steps
+		WHERE workflow_id = ?
+	`, workflow.ID).Scan(&steps); err != nil {
+		t.Fatalf("count remaining steps: %v", err)
+	}
+	if steps != 0 {
+		t.Fatalf("remaining workflow steps = %d, want 0", steps)
+	}
+}
+
 func TestDeleteWorkspaceCascadeWithNameRejectsMismatchedName(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForHealTests(t)
