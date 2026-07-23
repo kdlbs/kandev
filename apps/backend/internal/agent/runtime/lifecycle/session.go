@@ -560,13 +560,26 @@ func (sm *SessionManager) buildEffectivePrompt(execution *AgentExecution, prompt
 }
 
 // waitForPromptDone waits for the prompt to complete, checking for stalls periodically.
-func (sm *SessionManager) waitForPromptDone(ctx context.Context, execution *AgentExecution) (*PromptResult, error) {
+func (sm *SessionManager) waitForPromptDone(
+	ctx context.Context,
+	execution *AgentExecution,
+	promptGeneration uint64,
+) (*PromptResult, error) {
 	stallTicker := time.NewTicker(30 * time.Second)
 	defer stallTicker.Stop()
 
 	for {
 		select {
 		case signal := <-execution.promptDoneCh:
+			if signal.PromptGeneration != 0 &&
+				promptGeneration != 0 &&
+				signal.PromptGeneration != promptGeneration {
+				sm.logger.Debug("ignoring completion signal for superseded prompt generation",
+					zap.String("execution_id", execution.ID),
+					zap.Uint64("signal_prompt_generation", signal.PromptGeneration),
+					zap.Uint64("active_prompt_generation", promptGeneration))
+				continue
+			}
 			if signal.IsError {
 				sm.logger.Error("prompt completed with error",
 					zap.String("execution_id", execution.ID),
@@ -691,14 +704,11 @@ func (sm *SessionManager) SendPrompt(
 		promptGeneration = beginExecutionPrompt(execution)
 	}
 
-	// Clear buffers and streaming state before starting prompt
-	// This ensures each prompt starts fresh and doesn't append to previous message
-	execution.messageMu.Lock()
-	execution.messageBuffer.Reset()
-	execution.thinkingBuffer.Reset()
-	execution.currentMessageID = ""  // Clear streaming message ID for new turn
-	execution.currentThinkingID = "" // Clear streaming thinking ID for new turn
-	execution.messageMu.Unlock()
+	// A disconnect can release the prior SendPrompt before its disconnect
+	// callback has persisted a partial assistant response. Drain that history
+	// segment before resetting the streaming state; the callback uses the same
+	// locked drain, so the segment is persisted at most once.
+	resetStreamingStateWithHistory(execution, sm.historyManager, sm.logger)
 
 	// Apply resume context injection if needed (first prompt after resume)
 	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
@@ -740,7 +750,7 @@ func (sm *SessionManager) SendPrompt(
 	}
 
 	// Wait for completion signal from handleAgentEvent(complete) or stream disconnect.
-	return sm.waitForPromptDone(ctx, execution)
+	return sm.waitForPromptDone(ctx, execution, promptGeneration)
 }
 
 func (sm *SessionManager) dispatchPrompt(

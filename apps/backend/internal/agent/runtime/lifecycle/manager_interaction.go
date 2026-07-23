@@ -210,8 +210,9 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 
 	select {
 	case execution.promptDoneCh <- PromptCompletionSignal{
-		IsError: true,
-		Error:   "cancel escalated: agent did not complete turn within timeout",
+		IsError:          true,
+		Error:            "cancel escalated: agent did not complete turn within timeout",
+		PromptGeneration: execution.promptGenerationSnapshot(),
 	}:
 	default:
 		// Channel already has a pending signal; SendPrompt will pick that up instead.
@@ -451,12 +452,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		exec.needsResumeContext = false
 		exec.resumeContextInjected = false
 
-		exec.messageMu.Lock()
-		exec.messageBuffer.Reset()
-		exec.thinkingBuffer.Reset()
-		exec.currentMessageID = ""
-		exec.currentThinkingID = ""
-		exec.messageMu.Unlock()
+		m.resetStreamingStateWithHistory(exec)
 
 		// Drain any stale prompt completion signal
 		select {
@@ -669,12 +665,7 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		exec.AgentCommand = freshCmd
 		exec.ContinueCommand = freshContinueCmd
 
-		exec.messageMu.Lock()
-		exec.messageBuffer.Reset()
-		exec.thinkingBuffer.Reset()
-		exec.currentMessageID = ""
-		exec.currentThinkingID = ""
-		exec.messageMu.Unlock()
+		m.resetStreamingStateWithHistory(exec)
 
 		// Drain any stale prompt completion signal
 		select {

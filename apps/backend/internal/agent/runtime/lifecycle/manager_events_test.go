@@ -2,6 +2,8 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -114,6 +116,713 @@ func TestHandleAgentEvent_UserMessageChunkNotBufferedAsAssistant(t *testing.T) {
 	if streamedText != "Hello." {
 		t.Fatalf("streamed assistant text = %q, want %q", streamedText, "Hello.")
 	}
+}
+
+func TestHandleAgentEvent_ProtocolMessageResumesAcrossToolCall(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "message_chunk",
+		Text:              "before tool",
+		ProtocolMessageID: "acp-message-1",
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:       "tool_call",
+		ToolCallID: "tool-1",
+		ToolName:   "read_file",
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "message_chunk",
+		Text:              "after tool",
+		ProtocolMessageID: "acp-message-1",
+	})
+
+	messageEvents := streamEventsOfType(eventBus, "message_streaming")
+	if len(messageEvents) != 2 {
+		t.Fatalf("message event count = %d, want 2", len(messageEvents))
+	}
+	first, second := messageEvents[0].Data, messageEvents[1].Data
+	if first.MessageID == "" || second.MessageID != first.MessageID {
+		t.Fatalf("Kandev message IDs = (%q, %q), want same non-empty ID", first.MessageID, second.MessageID)
+	}
+	if first.IsAppend || !second.IsAppend {
+		t.Fatalf("append flags = (%t, %t), want (false, true)", first.IsAppend, second.IsAppend)
+	}
+}
+
+func TestHandleAgentEvent_InterleavedProtocolMessagesRemainDistinct(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	for _, event := range []agentctl.AgentEvent{
+		{Type: "message_chunk", Text: "a1", ProtocolMessageID: "message-a"},
+		{Type: "message_chunk", Text: "b1", ProtocolMessageID: "message-b"},
+		{Type: "message_chunk", Text: "a2", ProtocolMessageID: "message-a"},
+	} {
+		mgr.handleAgentEvent(execution, event)
+	}
+
+	messageEvents := streamEventsOfType(eventBus, "message_streaming")
+	if len(messageEvents) != 3 {
+		t.Fatalf("message event count = %d, want 3", len(messageEvents))
+	}
+	first, second, third := messageEvents[0].Data, messageEvents[1].Data, messageEvents[2].Data
+	if first.Text != "a1" || second.Text != "b1" || third.Text != "a2" {
+		t.Fatalf("event order = (%q, %q, %q), want (a1, b1, a2)", first.Text, second.Text, third.Text)
+	}
+	if first.MessageID == second.MessageID || third.MessageID != first.MessageID {
+		t.Fatalf("Kandev message IDs = (%q, %q, %q), want A != B and A stable",
+			first.MessageID, second.MessageID, third.MessageID)
+	}
+	if first.IsAppend || second.IsAppend || !third.IsAppend {
+		t.Fatalf("append flags = (%t, %t, %t), want (false, false, true)",
+			first.IsAppend, second.IsAppend, third.IsAppend)
+	}
+}
+
+func TestHandleAgentEvent_ProtocolThoughtAndMessageIDsUseSeparateNamespaces(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "message_chunk",
+		Text:              "answer",
+		ProtocolMessageID: "shared-source-id",
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "reasoning",
+		ReasoningText:     "thought",
+		ProtocolMessageID: "shared-source-id",
+	})
+
+	messageEvents := streamEventsOfType(eventBus, "message_streaming")
+	thinkingEvents := streamEventsOfType(eventBus, "thinking_streaming")
+	if len(messageEvents) != 1 || len(thinkingEvents) != 1 {
+		t.Fatalf("event counts = message:%d thinking:%d, want 1 each", len(messageEvents), len(thinkingEvents))
+	}
+	if messageEvents[0].Data.MessageID == thinkingEvents[0].Data.MessageID {
+		t.Fatalf("assistant and thought mapped to the same Kandev ID %q", messageEvents[0].Data.MessageID)
+	}
+}
+
+func TestHandleAgentEvent_CompleteClearsProtocolMessageCorrelation(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "message_chunk",
+		Text:              "turn one",
+		ProtocolMessageID: "reused-source-id",
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "message_chunk",
+		Text:              "turn two",
+		ProtocolMessageID: "reused-source-id",
+	})
+
+	messageEvents := streamEventsOfType(eventBus, "message_streaming")
+	if len(messageEvents) != 2 {
+		t.Fatalf("message event count = %d, want 2", len(messageEvents))
+	}
+	if messageEvents[0].Data.MessageID == messageEvents[1].Data.MessageID {
+		t.Fatalf("protocol correlation leaked across completion: Kandev ID %q was reused",
+			messageEvents[0].Data.MessageID)
+	}
+	if messageEvents[1].Data.IsAppend {
+		t.Fatal("first chunk after completion was marked as append")
+	}
+}
+
+func TestHandleAgentEvent_LegacyAssistantFlushesBeforeProtocolMessage(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "message_chunk", Text: "legacy first"})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "message_chunk",
+		Text:              "protocol second",
+		ProtocolMessageID: "protocol-message",
+	})
+
+	events := streamEventsOfType(eventBus, "message_streaming")
+	if len(events) != 2 {
+		t.Fatalf("message event count = %d, want 2", len(events))
+	}
+	if events[0].Data.Text != "legacy first" || events[1].Data.Text != "protocol second" {
+		t.Fatalf("message order = (%q, %q), want legacy then protocol",
+			events[0].Data.Text, events[1].Data.Text)
+	}
+	if events[0].Data.MessageID == events[1].Data.MessageID {
+		t.Fatalf("mixed legacy and protocol chunks shared Kandev ID %q", events[0].Data.MessageID)
+	}
+}
+
+func TestHandleAgentEvent_ProtocolToLegacyTransitionCreatesBoundary(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	for _, event := range []agentctl.AgentEvent{
+		{Type: "message_chunk", Text: "protocol first", ProtocolMessageID: "protocol-message"},
+		{Type: "message_chunk", Text: "legacy second\n"},
+		{Type: "message_chunk", Text: "protocol third", ProtocolMessageID: "protocol-message"},
+		{Type: "message_chunk", Text: "legacy fourth\n"},
+	} {
+		mgr.handleAgentEvent(execution, event)
+	}
+
+	events := streamEventsOfType(eventBus, "message_streaming")
+	if len(events) != 4 {
+		t.Fatalf("message event count = %d, want 4", len(events))
+	}
+	texts := []string{events[0].Data.Text, events[1].Data.Text, events[2].Data.Text, events[3].Data.Text}
+	wantTexts := []string{"protocol first", "legacy second\n", "protocol third", "legacy fourth\n"}
+	for i := range wantTexts {
+		if texts[i] != wantTexts[i] {
+			t.Fatalf("event %d text = %q, want %q", i, texts[i], wantTexts[i])
+		}
+	}
+	protocolID := events[0].Data.MessageID
+	if events[2].Data.MessageID != protocolID || !events[2].Data.IsAppend {
+		t.Fatalf("resumed protocol event = id:%q append:%t, want id:%q append:true",
+			events[2].Data.MessageID, events[2].Data.IsAppend, protocolID)
+	}
+	if events[1].Data.MessageID == protocolID || events[3].Data.MessageID == protocolID {
+		t.Fatal("legacy chunks merged into protocol record")
+	}
+	if events[1].Data.MessageID == events[3].Data.MessageID {
+		t.Fatal("legacy chunks on opposite sides of a protocol chunk shared a record")
+	}
+}
+
+func TestHandleAgentEvent_LegacyThinkingFlushesBeforeProtocolThinking(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "reasoning", ReasoningText: "legacy thought"})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "reasoning",
+		ReasoningText:     "protocol thought",
+		ProtocolMessageID: "thought-message",
+	})
+
+	events := streamEventsOfType(eventBus, "thinking_streaming")
+	if len(events) != 2 {
+		t.Fatalf("thinking event count = %d, want 2", len(events))
+	}
+	if events[0].Data.Text != "legacy thought" || events[1].Data.Text != "protocol thought" {
+		t.Fatalf("thinking order = (%q, %q), want legacy then protocol",
+			events[0].Data.Text, events[1].Data.Text)
+	}
+	if events[0].Data.MessageID == events[1].Data.MessageID {
+		t.Fatalf("mixed legacy and protocol thinking shared Kandev ID %q", events[0].Data.MessageID)
+	}
+}
+
+func TestHandleAgentEvent_ProtocolAssistantHistoryPersistedOnceInWireOrder(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	for _, event := range []agentctl.AgentEvent{
+		{Type: "message_chunk", Text: "first", ProtocolMessageID: "message-a"},
+		{Type: "message_chunk", Text: " second", ProtocolMessageID: "message-b"},
+		{Type: "message_chunk", Text: " third", ProtocolMessageID: "message-a"},
+	} {
+		mgr.handleAgentEvent(execution, event)
+	}
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	var agentEntries []HistoryEntry
+	for _, entry := range entries {
+		if entry.Type == "agent_message" {
+			agentEntries = append(agentEntries, entry)
+		}
+	}
+	if len(agentEntries) != 1 {
+		t.Fatalf("agent history entry count = %d, want 1", len(agentEntries))
+	}
+	if agentEntries[0].Content != "first second third" {
+		t.Fatalf("agent history content = %q, want wire-order transcript", agentEntries[0].Content)
+	}
+	execution.messageMu.Lock()
+	historyBufferLen := execution.assistantHistoryBuffer.Len()
+	execution.messageMu.Unlock()
+	if historyBufferLen != 0 {
+		t.Fatalf("assistant history accumulator length = %d after completion, want 0", historyBufferLen)
+	}
+}
+
+func TestStreamDisconnect_PersistsPartialAssistantHistoryExactlyOnce(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:              "message_chunk",
+		Text:              "partial response",
+		ProtocolMessageID: "message-a",
+	})
+	mgr.handleStreamDisconnect(execution, errors.New("connection lost"), 0)
+
+	// A later prompt or reset must not discard or duplicate the segment.
+	flushAssistantHistory(execution, history, mgr.logger)
+	execution.messageMu.Lock()
+	execution.resetStreamingStateLocked()
+	execution.messageMu.Unlock()
+	mgr.flushAssistantHistory(execution)
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Type != "agent_message" ||
+		entries[0].Content != "partial response" {
+		t.Fatalf("disconnect history = %+v, want one partial assistant message", entries)
+	}
+
+	messageEvents := streamEventsOfType(eventBus, "message_streaming")
+	if len(messageEvents) != 1 || messageEvents[0].Data.Text != "partial response" {
+		t.Fatalf("visible messages = %+v, want the original chunk exactly once", messageEvents)
+	}
+}
+
+func TestPromptResetWinsDisconnectRaceWithoutDroppingHistory(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "response before disconnect callback",
+	})
+
+	// connectUpdatesStream signals promptDoneCh before invoking the disconnect
+	// callback. Model a next prompt claiming the buffer first.
+	flushAssistantHistory(execution, history, mgr.logger)
+	execution.messageMu.Lock()
+	execution.resetStreamingStateLocked()
+	execution.messageMu.Unlock()
+	mgr.handleStreamDisconnect(execution, errors.New("connection lost"), 0)
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Content != "response before disconnect callback" {
+		t.Fatalf("disconnect-race history = %+v, want one partial assistant message", entries)
+	}
+}
+
+func TestDelayedDisconnectCannotAffectReplacementGeneration(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	originalGeneration, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin original prompt: %v", err)
+	}
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "message_chunk", Text: "old partial"})
+
+	callbackReached := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	callbackDone := make(chan struct{})
+	streamManager := NewStreamManager(mgr.logger, StreamCallbacks{
+		OnStreamDisconnect: func(exec *AgentExecution, disconnectErr error, generation uint64) {
+			close(callbackReached)
+			<-releaseCallback
+			mgr.handleStreamDisconnect(exec, disconnectErr, generation)
+			close(callbackDone)
+		},
+	}, nil, nil)
+	go streamManager.handleUpdatesDisconnect(execution, errors.New("old stream lost"))
+
+	<-callbackReached
+	signal := <-execution.promptDoneCh
+	if signal.PromptGeneration != originalGeneration {
+		t.Fatalf("disconnect signal generation = %d, want %d", signal.PromptGeneration, originalGeneration)
+	}
+
+	replacementGeneration, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin replacement prompt: %v", err)
+	}
+	if replacementGeneration == originalGeneration {
+		t.Fatal("replacement prompt did not advance generation")
+	}
+	resetStreamingStateWithHistory(execution, history, mgr.logger)
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "message_chunk", Text: "replacement text"})
+
+	close(releaseCallback)
+	<-callbackDone
+
+	if execution.Status != v1.AgentStatusRunning {
+		t.Fatalf("replacement status = %s, want %s", execution.Status, v1.AgentStatusRunning)
+	}
+	execution.messageMu.Lock()
+	assistantHistory := execution.assistantHistoryBuffer.String()
+	messageBuffer := execution.messageBuffer.String()
+	execution.messageMu.Unlock()
+	if assistantHistory != "replacement text" || messageBuffer != "replacement text" {
+		t.Fatalf("replacement buffers changed: history=%q message=%q", assistantHistory, messageBuffer)
+	}
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Content != "old partial" {
+		t.Fatalf("history = %+v, want only the original partial response", entries)
+	}
+	for _, published := range eventBus.PublishedEvents {
+		if published.Subject == events.AgentctlError {
+			t.Fatal("superseded disconnect published AgentctlError")
+		}
+	}
+}
+
+func TestResetStreamingStateWithHistory_HasNoDrainResetGap(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	execution.assistantHistoryBuffer.WriteString("old partial")
+	execution.messageBuffer.WriteString("old partial")
+
+	// Hold persistence so the test can force a chunk to arrive after history
+	// detaches. With split drain/reset locks, that chunk was accepted in the
+	// gap and then erased by reset. The atomic helper resets before blocking
+	// on history I/O, so the late chunk belongs to the post-reset buffer.
+	history.mu.Lock()
+	historyLocked := true
+	defer func() {
+		if historyLocked {
+			history.mu.Unlock()
+		}
+	}()
+	resetDone := make(chan struct{})
+	go func() {
+		resetStreamingStateWithHistory(execution, history, mgr.logger)
+		close(resetDone)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		execution.messageMu.Lock()
+		detached := execution.assistantHistoryBuffer.Len() == 0
+		execution.messageMu.Unlock()
+		if detached {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("assistant history did not detach")
+		}
+		runtime.Gosched()
+	}
+	mgr.handleMessageChunkEvent(execution, agentctl.AgentEvent{Type: "message_chunk", Text: "late chunk"})
+
+	history.mu.Unlock()
+	historyLocked = false
+	<-resetDone
+
+	execution.messageMu.Lock()
+	assistantHistory := execution.assistantHistoryBuffer.String()
+	messageBuffer := execution.messageBuffer.String()
+	execution.messageMu.Unlock()
+	if assistantHistory != "late chunk" || messageBuffer != "late chunk" {
+		t.Fatalf("late chunk lost across reset: history=%q message=%q", assistantHistory, messageBuffer)
+	}
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Content != "old partial" {
+		t.Fatalf("detached history = %+v, want only old partial", entries)
+	}
+}
+
+func TestStreamDisconnect_DiscardsHistoryWhenRecordingUnavailable(t *testing.T) {
+	tests := []struct {
+		name           string
+		historyManager bool
+		historyEnabled bool
+		sessionID      string
+	}{
+		{name: "history manager unavailable", historyEnabled: true, sessionID: "session-1"},
+		{name: "history disabled", historyManager: true, sessionID: "session-1"},
+		{name: "session unavailable", historyManager: true, historyEnabled: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mgr, _ := createTestManagerWithTracking()
+			mgr.historyManager = nil
+			if test.historyManager {
+				history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+				if err != nil {
+					t.Fatalf("create history manager: %v", err)
+				}
+				mgr.historyManager = history
+			}
+			execution := createTestExecution("exec-1", "task-1", test.sessionID)
+			execution.historyEnabled = test.historyEnabled
+			execution.assistantHistoryBuffer.WriteString("discard me")
+			if err := mgr.executionStore.Add(execution); err != nil {
+				t.Fatalf("add execution: %v", err)
+			}
+
+			mgr.handleStreamDisconnect(execution, errors.New("connection lost"), 0)
+
+			execution.messageMu.Lock()
+			buffered := execution.assistantHistoryBuffer.Len()
+			execution.messageMu.Unlock()
+			if buffered != 0 {
+				t.Fatalf("assistant history buffer length = %d, want discarded", buffered)
+			}
+		})
+	}
+}
+
+func TestHandleAgentEvent_ProtocolAssistantAndToolHistoryFollowWireOrder(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	for _, event := range []agentctl.AgentEvent{
+		{Type: "message_chunk", Text: "before tool", ProtocolMessageID: "message-a"},
+		{Type: "tool_call", ToolCallID: "tool-1", ToolName: "read_file", ToolStatus: "started"},
+		{Type: "message_chunk", Text: "during tool", ProtocolMessageID: "message-a"},
+		{Type: "tool_update", ToolCallID: "tool-1", ToolName: "read_file", ToolStatus: toolStatusComplete},
+		{Type: "message_chunk", Text: "after result", ProtocolMessageID: "message-a"},
+		{Type: "complete"},
+	} {
+		mgr.handleAgentEvent(execution, event)
+	}
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 5 {
+		t.Fatalf("history entry count = %d, want 5: %+v", len(entries), entries)
+	}
+	wantTypes := []string{"agent_message", historyEntryTypeToolCall, "agent_message", "tool_result", "agent_message"}
+	wantContent := []string{"before tool", "", "during tool", "", "after result"}
+	for i := range wantTypes {
+		if entries[i].Type != wantTypes[i] || entries[i].Content != wantContent[i] {
+			t.Fatalf("entry %d = type:%q content:%q, want type:%q content:%q",
+				i, entries[i].Type, entries[i].Content, wantTypes[i], wantContent[i])
+		}
+	}
+}
+
+func TestHandleAgentEvent_MixedAssistantHistoryPreservesAllTextAroundTool(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	for _, event := range []agentctl.AgentEvent{
+		{Type: "message_chunk", Text: "legacy before "},
+		{Type: "message_chunk", Text: "protocol before", ProtocolMessageID: "message-a"},
+		{Type: "tool_call", ToolCallID: "tool-1", ToolName: "read_file"},
+		{Type: "message_chunk", Text: "legacy after "},
+		{Type: "message_chunk", Text: "protocol after", ProtocolMessageID: "message-a"},
+		{Type: "complete"},
+	} {
+		mgr.handleAgentEvent(execution, event)
+	}
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("history entry count = %d, want 3: %+v", len(entries), entries)
+	}
+	if entries[0].Type != "agent_message" || entries[0].Content != "legacy before protocol before" {
+		t.Fatalf("first history segment = %+v, want complete mixed pre-tool text", entries[0])
+	}
+	if entries[1].Type != historyEntryTypeToolCall {
+		t.Fatalf("second history entry type = %q, want %q", entries[1].Type, historyEntryTypeToolCall)
+	}
+	if entries[2].Type != "agent_message" || entries[2].Content != "legacy after protocol after" {
+		t.Fatalf("final history segment = %+v, want complete mixed post-tool text", entries[2])
+	}
+
+	messageEvents := streamEventsOfType(eventBus, "message_streaming")
+	if len(messageEvents) != 4 {
+		t.Fatalf("visible message event count = %d, want 4", len(messageEvents))
+	}
+	wantVisible := []string{"legacy before", "protocol before", "legacy after", "protocol after"}
+	for i, want := range wantVisible {
+		if messageEvents[i].Data.Text != want {
+			t.Fatalf("visible event %d text = %q, want %q", i, messageEvents[i].Data.Text, want)
+		}
+	}
+}
+
+func TestHandleAgentEvent_HistoryDisabledDoesNotPersistOrLeakAssistantText(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	for _, event := range []agentctl.AgentEvent{
+		{Type: "message_chunk", Text: "legacy"},
+		{Type: "message_chunk", Text: " protocol", ProtocolMessageID: "message-a"},
+		{Type: "tool_call", ToolCallID: "tool-1", ToolName: "read_file"},
+		{Type: "message_chunk", Text: "after", ProtocolMessageID: "message-a"},
+		{Type: "complete"},
+	} {
+		mgr.handleAgentEvent(execution, event)
+	}
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("history-disabled execution persisted entries: %+v", entries)
+	}
+	execution.messageMu.Lock()
+	historyBufferLen := execution.assistantHistoryBuffer.Len()
+	execution.messageMu.Unlock()
+	if historyBufferLen != 0 {
+		t.Fatalf("assistant history accumulator length = %d after completion, want 0", historyBufferLen)
+	}
+}
+
+func TestHandleAgentEvent_EmptyHistoryBoundariesDoNotDuplicateAssistant(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	for _, event := range []agentctl.AgentEvent{
+		{Type: "message_chunk", Text: "only once", ProtocolMessageID: "message-a"},
+		{Type: "tool_call", ToolCallID: "tool-1", ToolName: "read_file"},
+		{Type: "tool_update", ToolCallID: "tool-1", ToolName: "read_file", ToolStatus: toolStatusComplete},
+		{Type: "complete"},
+		{Type: "complete"},
+	} {
+		mgr.handleAgentEvent(execution, event)
+	}
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 3 {
+		t.Fatalf("history entry count = %d, want assistant/tool/result only: %+v", len(entries), entries)
+	}
+	if entries[0].Type != "agent_message" || entries[0].Content != "only once" {
+		t.Fatalf("assistant history entry = %+v, want one exact segment", entries[0])
+	}
+	if entries[1].Type != historyEntryTypeToolCall || entries[2].Type != "tool_result" {
+		t.Fatalf("history boundary entries = (%q, %q), want tool_call/tool_result",
+			entries[1].Type, entries[2].Type)
+	}
+}
+
+func streamEventsOfType(eventBus *MockEventBusWithTracking, eventType string) []AgentStreamEventPayload {
+	var matching []AgentStreamEventPayload
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && event.Data.Type == eventType {
+			matching = append(matching, event)
+		}
+	}
+	return matching
 }
 
 // TestHandleAgentEvent_StreamingThenComplete tests the normal flow:

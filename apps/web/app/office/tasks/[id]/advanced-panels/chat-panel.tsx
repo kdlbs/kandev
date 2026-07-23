@@ -8,6 +8,7 @@ import { Input } from "@kandev/ui/input";
 import { useSessionMessages } from "@/hooks/domains/session/use-session-messages";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useSessionLaunch } from "@/hooks/domains/session/use-session-launch";
+import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { getWebSocketClient } from "@/lib/ws/connection";
@@ -63,6 +64,7 @@ function MessageList({
   sessionId,
   worktreePath,
   onOpenFile,
+  activeTurnId,
   scrollRef,
 }: {
   messages: Message[];
@@ -71,6 +73,7 @@ function MessageList({
   sessionId: string | null;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
+  activeTurnId: string | null;
   scrollRef: React.RefObject<HTMLDivElement | null>;
 }) {
   if (isLoading && messages.length === 0) {
@@ -94,6 +97,7 @@ function MessageList({
             sessionId={sessionId ?? undefined}
             worktreePath={worktreePath}
             onOpenFile={onOpenFile}
+            isContainingTurnActive={Boolean(activeTurnId && msg.turn_id === activeTurnId)}
           />
         ))}
       </div>
@@ -140,6 +144,7 @@ export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChat
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const { session } = useSession(sessionId);
+  const { activeTurnId } = useSessionTurn(sessionId);
   const { messages, isLoading } = useSessionMessages(sessionId);
   const { openFile } = useFileEditors();
   const agentProfiles = useAppStore((s) => s.agentProfiles.items ?? []);
@@ -207,6 +212,7 @@ export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChat
         sessionId={sessionId}
         worktreePath={session?.worktree_path}
         onOpenFile={openFile}
+        activeTurnId={activeTurnId}
         scrollRef={scrollRef}
       />
       {!hideInput && (

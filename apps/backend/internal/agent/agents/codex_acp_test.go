@@ -25,7 +25,7 @@ func TestCodexACP_PermissionSettings_NoBridgeCLIFlags(t *testing.T) {
 }
 
 func TestCodexACP_BuildCommand_NoCodexCLIFlags(t *testing.T) {
-	want := []string{"npx", "-y", codexACPPkg}
+	want := []string{"npx", "-y", codexACPPackageSpec}
 	cmd := NewCodexACP().BuildCommand(CommandOptions{
 		PermissionValues: map[string]bool{PermissionKeyAutoApprove: true},
 	})
@@ -36,7 +36,7 @@ func TestCodexACP_BuildCommand_NoCodexCLIFlags(t *testing.T) {
 
 func TestCodexACP_UsesAgentClientProtocolBridge(t *testing.T) {
 	a := NewCodexACP()
-	want := []string{"npx", "-y", "@agentclientprotocol/codex-acp"}
+	want := []string{"npx", "-y", "@agentclientprotocol/codex-acp@1.1.5"}
 
 	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
 		t.Fatalf("BuildCommand = %#v, want %#v", got, want)
@@ -47,8 +47,9 @@ func TestCodexACP_UsesAgentClientProtocolBridge(t *testing.T) {
 	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
 		t.Fatalf("Inference Command = %#v, want %#v", got, want)
 	}
-	if got := a.InstallScript(); !strings.Contains(got, "@agentclientprotocol/codex-acp") {
-		t.Fatalf("InstallScript = %q, want agentclientprotocol bridge package", got)
+	wantInstall := "npm install -g @openai/codex @agentclientprotocol/codex-acp@1.1.5"
+	if got := a.InstallScript(); got != wantInstall {
+		t.Fatalf("InstallScript = %q, want %q", got, wantInstall)
 	}
 }
 

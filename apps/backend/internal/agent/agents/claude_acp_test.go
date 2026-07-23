@@ -1,26 +1,27 @@
 package agents
 
 import (
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
 
-func TestClaudeACPCommandsUseUnversionedBridgePackage(t *testing.T) {
-	want := []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp"}
-	agent := NewClaudeACP()
+func TestClaudeACPUsesPinnedBridge(t *testing.T) {
+	a := NewClaudeACP()
+	want := []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp@0.61.0"}
 
-	if got := agent.BuildCommand(CommandOptions{}).Args(); !reflect.DeepEqual(got, want) {
-		t.Errorf("BuildCommand() = %q, want %q", got, want)
+	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
+		t.Fatalf("BuildCommand = %#v, want %#v", got, want)
 	}
-	if got := agent.Runtime().Cmd.Args(); !reflect.DeepEqual(got, want) {
-		t.Errorf("Runtime().Cmd = %q, want %q", got, want)
+	if got := a.Runtime().Cmd.Args(); !slices.Equal(got, want) {
+		t.Fatalf("Runtime Cmd = %#v, want %#v", got, want)
 	}
-	if got := agent.InferenceConfig().Command.Args(); !reflect.DeepEqual(got, want) {
-		t.Errorf("InferenceConfig().Command = %q, want %q", got, want)
+	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
+		t.Fatalf("Inference Command = %#v, want %#v", got, want)
 	}
-	if got := agent.InstallScript(); got != "npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp" {
-		t.Errorf("InstallScript() = %q, want unversioned Claude ACP package", got)
+	wantInstall := "npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp@0.61.0"
+	if got := a.InstallScript(); got != wantInstall {
+		t.Fatalf("InstallScript = %q, want %q", got, wantInstall)
 	}
 }
 

@@ -49,9 +49,11 @@ test.describe("mobile: repeated tool activity", () => {
     const chat = session.activeChat();
     const groupToggle = chat.getByRole("button", { name: /6\s+tool calls/i });
     await expect(groupToggle).toBeVisible({ timeout: 15_000 });
+    const repeatedToolSummary = chat.getByTestId("repeated-tool-summary");
+    await expect(repeatedToolSummary).toHaveCount(0);
     await groupToggle.click();
 
-    await expect(chat.getByTestId("repeated-tool-summary")).toContainText(
+    await expect(repeatedToolSummary).toContainText(
       "4 repeated identical terminal commands hidden",
     );
   });

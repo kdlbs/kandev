@@ -8,6 +8,7 @@ import type { Message } from "@/lib/types/http";
 import type { TurnGroup } from "@/hooks/use-processed-messages";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
+import { isSubagentEffectivelyActive } from "@/components/task/chat/messages/tool-subagent-message";
 
 type TurnGroupMessageProps = {
   group: TurnGroup;
@@ -92,12 +93,16 @@ const TOOL_MESSAGE_TYPES = new Set([
  * Check if any tool or subagent in the group is still running.
  * A tool/subagent is considered running if it's not in a terminal state.
  */
-function hasRunningTool(messages: Message[]): boolean {
+function hasRunningTool(messages: Message[], isContainingTurnActive: boolean): boolean {
   for (const msg of messages) {
     const metadata = msg.metadata as ToolCallMetadata | undefined;
     const isToolMessage = msg.type && TOOL_MESSAGE_TYPES.has(msg.type);
     const isSubagent = metadata?.normalized?.kind === "subagent_task";
     if (!isToolMessage && !isSubagent) continue;
+    if (isSubagent) {
+      if (isSubagentEffectivelyActive(metadata, isContainingTurnActive)) return true;
+      continue;
+    }
     const status = metadata?.status;
     if (status !== "complete" && status !== "error" && status !== "cancelled") return true;
   }
@@ -280,6 +285,7 @@ function renderMessageEntry(message: Message, props: MessageRenderProps) {
       worktreePath={props.worktreePath}
       sessionId={props.sessionId ?? undefined}
       isTurnActive={props.isTurnActive && message.id === props.streamingMessageId}
+      isContainingTurnActive={props.isTurnActive}
       onOpenFile={props.onOpenFile}
       onScrollToMessage={props.onScrollToMessage}
     />
@@ -374,7 +380,7 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
   streamingMessageId,
   onScrollToMessage,
 }: TurnGroupMessageProps) {
-  const isGroupRunning = hasRunningTool(group.messages);
+  const isGroupRunning = hasRunningTool(group.messages, isTurnActive);
   const hasPending = hasPendingPermission(group.messages, permissionsByToolCallId);
 
   const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);

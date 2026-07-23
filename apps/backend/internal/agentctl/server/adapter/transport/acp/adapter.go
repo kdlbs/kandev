@@ -170,6 +170,16 @@ type Adapter struct {
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
 	activeToolCalls map[string]*streams.NormalizedPayload
+	// codexSubagentCorrelations deduplicates the collaboration and activity
+	// tool_call frames codex-acp emits for one logical child, keyed by session,
+	// wire tool-call ID, and child session ID. Incomplete entries are retained
+	// until completion or session cleanup so delayed lifecycle frames cannot
+	// split a live card; only completed tombstones are bounded. Emitted-ID
+	// reservations are intentionally retained for the session so a pruned
+	// tombstone's ID cannot be reused by a later card.
+	codexSubagentCorrelations map[codexSubagentCorrelationKey]*codexSubagentCorrelation
+	codexEmittedToolCallIDs   map[string]map[string]*codexSubagentCorrelation
+	codexSubagentSequence     uint64
 
 	// Active Monitor tools, keyed by sessionID -> taskID -> toolCallID.
 	// Claude-acp's Monitor tool runs a background script that streams events
@@ -202,13 +212,12 @@ type Adapter struct {
 	// Used by SetModel to validate the requested model exists.
 	availableModels []modelInfo
 
-	// usageDelta tracks the running cumulative `usage_update.used` and
-	// the most recent USD cost reported per session. codex-acp emits no
-	// per-turn usage frame; the prompt-complete handler consumes the
-	// delta here when resp.Usage is empty and flags the row estimated.
+	// usageBySession tracks the latest and previously consumed cumulative
+	// `usage_update` samples. codex-acp emits no per-turn usage frame, so the
+	// prompt-complete handler uses nonnegative context-occupancy growth as an
+	// estimated input count and derives true deltas from cumulative USD cost.
 	// claude-acp / opencode-acp report a real `result.usage` so this
-	// cache is only ever read for codex-acp turns. Reset to 0 once
-	// consumed so the next turn starts from a fresh delta.
+	// cache contributes only their provider-reported cost delta.
 	usageBySession map[string]*usageTracker
 
 	// Available auth methods captured from the ACP initialize response.
@@ -531,6 +540,10 @@ func (a *Adapter) Close() error {
 	// handleACPUpdate may call sendUpdate, so updatesCh must remain open
 	// until the worker is gone.
 	a.workerWg.Wait()
+	a.mu.Lock()
+	a.clearCodexSubagentCorrelationsLocked("")
+	clear(a.usageBySession)
+	a.mu.Unlock()
 
 	// Clean up any saved attachments
 	a.attachMgr.Cleanup()

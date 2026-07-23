@@ -184,11 +184,11 @@ func (a *Adapter) sendPrompt(
 		zap.String("stop_reason", stopReason))
 	a.cancelAsyncTurnComplete(sessionID)
 	usage := a.dialect.promptUsage(extractUsage(&resp), resp.Meta)
-	// codex-acp emits no per-turn usage frame, only cumulative
-	// usage_update.used. Fall back to the inferred delta so the office
-	// cost subscriber sees at least an approximate input count. The
-	// resulting cost is off (no input/output split) — flagged via
-	// PromptUsage.Estimated so downstream rows carry estimated=true.
+	// codex-acp emits no per-turn usage frame, only cumulative context
+	// occupancy. Fall back to nonnegative occupancy growth so the office cost
+	// subscriber sees an approximate input count. It has no input/output split,
+	// so Estimated remains true. usage_update cost is cumulative session cost;
+	// consumeUsageDelta converts it to the current turn's nonnegative delta.
 	delta, costSubcents := a.consumeUsageDelta(sessionID)
 	if usage == nil {
 		if delta > 0 || costSubcents > 0 {
@@ -199,8 +199,8 @@ func (a *Adapter) sendPrompt(
 			}
 		}
 	} else if costSubcents > 0 {
-		// claude-acp: usage_update.cost.amount carries the authoritative
-		// USD cost — attach it to the typed usage frame so Layer A wins
+		// claude-acp: usage_update.cost.amount carries authoritative cumulative
+		// USD cost — attach the derived turn delta so Layer A wins
 		// downstream and the office cost subscriber stores the row
 		// verbatim instead of falling back to models.dev. claude-acp's
 		// model id is a logical alias (sonnet / haiku) that won't match

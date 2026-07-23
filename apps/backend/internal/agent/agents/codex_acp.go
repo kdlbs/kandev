@@ -16,7 +16,11 @@ var codexACPLogoLight []byte
 //go:embed logos/codex_dark.svg
 var codexACPLogoDark []byte
 
-const codexACPPkg = "@agentclientprotocol/codex-acp"
+const (
+	codexACPPackage     = "@agentclientprotocol/codex-acp"
+	codexACPVersion     = "1.1.5"
+	codexACPPackageSpec = codexACPPackage + "@" + codexACPVersion
+)
 
 var (
 	_ Agent            = (*CodexACP)(nil)
@@ -95,7 +99,7 @@ func (a *CodexACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *CodexACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", codexACPPkg).Build()
+	return Cmd("npx", "-y", codexACPPackageSpec).Build()
 }
 
 func (a *CodexACP) Runtime() *RuntimeConfig {
@@ -103,7 +107,7 @@ func (a *CodexACP) Runtime() *RuntimeConfig {
 	return &RuntimeConfig{
 		Image:       "kandev/multi-agent",
 		Tag:         "latest",
-		Cmd:         Cmd("npx", "-y", codexACPPkg).Build(),
+		Cmd:         Cmd("npx", "-y", codexACPPackageSpec).Build(),
 		WorkingDir:  "{workspace}",
 		RequiredEnv: []string{"OPENAI_API_KEY"},
 		Env:         map[string]string{},
@@ -162,7 +166,7 @@ func (a *CodexACP) LoginCommand() *LoginCommand {
 // Install both the user-facing OpenAI codex CLI (which `codex login` runs
 // against) and the ACP bridge package used for chat sessions.
 func (a *CodexACP) InstallScript() string {
-	return "npm install -g @openai/codex " + codexACPPkg
+	return "npm install -g @openai/codex " + codexACPPackageSpec
 }
 
 func (a *CodexACP) BillingType() usage.BillingType { return codexBillingType() }
@@ -175,6 +179,6 @@ func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 func (a *CodexACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("npx", "-y", codexACPPkg),
+		Command:   NewCommand("npx", "-y", codexACPPackageSpec),
 	}
 }

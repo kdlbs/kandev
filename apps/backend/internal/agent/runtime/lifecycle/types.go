@@ -105,10 +105,20 @@ type AgentExecution struct {
 	thinkingBuffer strings.Builder
 	messageMu      sync.Mutex
 
-	// Streaming message tracking - IDs of the current in-progress messages being streamed
-	// These are set when we create a streaming message and cleared on tool_call/complete
+	// Legacy streaming message tracking for agents that omit protocol message IDs.
+	// These are set when we create a streaming message and cleared on tool_call/complete.
 	currentMessageID  string
 	currentThinkingID string
+
+	// Protocol message correlation maps source-protocol IDs to Kandev message
+	// record IDs. Assistant and thought IDs use separate namespaces so an agent
+	// reusing the same source ID cannot merge visible and reasoning content.
+	protocolMessageIDs  map[string]string
+	protocolThinkingIDs map[string]string
+	// assistantHistoryBuffer accumulates assistant chunks in wire order for
+	// history-context injection. Tool and completion boundaries persist it as
+	// one segment before recording the boundary event.
+	assistantHistoryBuffer strings.Builder
 
 	// History-based context injection for agents without native session resume (e.g. Auggie).
 	// historyEnabled gates recording and injection; set from SessionConfig.HistoryContextInjection.
@@ -174,9 +184,16 @@ func (e *AgentExecution) officeProfileID() string {
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
 type PromptCompletionSignal struct {
-	StopReason string
-	IsError    bool
-	Error      string
+	StopReason       string
+	IsError          bool
+	Error            string
+	PromptGeneration uint64
+}
+
+func (e *AgentExecution) promptGenerationSnapshot() uint64 {
+	e.promptLifecycleMu.Lock()
+	defer e.promptLifecycleMu.Unlock()
+	return e.promptGeneration
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution

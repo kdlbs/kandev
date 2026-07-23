@@ -221,6 +221,9 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	exec.thinkingBuffer.WriteString("old-thinking")
 	exec.currentMessageID = "msg-1"
 	exec.currentThinkingID = "th-1"
+	exec.protocolMessageIDs = map[string]string{"source-message": "msg-1"}
+	exec.protocolThinkingIDs = map[string]string{"source-thought": "th-1"}
+	exec.assistantHistoryBuffer.WriteString("old response")
 	exec.needsResumeContext = true
 	exec.resumeContextInjected = true
 	exec.promptDoneCh <- PromptCompletionSignal{StopReason: "stale"}
@@ -245,6 +248,12 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	}
 	if exec.currentMessageID != "" || exec.currentThinkingID != "" {
 		t.Fatalf("expected streaming message IDs to be reset")
+	}
+	if exec.protocolMessageIDs != nil || exec.protocolThinkingIDs != nil {
+		t.Fatalf("expected protocol message correlation to be reset")
+	}
+	if exec.assistantHistoryBuffer.Len() != 0 {
+		t.Fatalf("expected assistant history accumulator to be reset")
 	}
 	if exec.needsResumeContext || exec.resumeContextInjected {
 		t.Fatalf("expected resume context flags to be reset")
@@ -441,6 +450,9 @@ func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
 		CurrentModeID:  "acceptEdits",
 		AvailableModes: []streams.SessionModeInfo{{ID: "default"}, {ID: "acceptEdits"}},
 	})
+	exec.protocolMessageIDs = map[string]string{"source-message": "msg-1"}
+	exec.protocolThinkingIDs = map[string]string{"source-thought": "th-1"}
+	exec.assistantHistoryBuffer.WriteString("old response")
 	require.NoError(t, mgr.executionStore.Add(exec))
 
 	require.NoError(t, mgr.ResetAgentContext(ctx, exec.ID))
@@ -451,6 +463,9 @@ func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
 		"fast-path reset must re-apply the previously-active session mode")
 	require.NotNil(t, exec.GetModeState())
 	require.Equal(t, "acceptEdits", exec.GetModeState().CurrentModeID)
+	require.Nil(t, exec.protocolMessageIDs)
+	require.Nil(t, exec.protocolThinkingIDs)
+	require.Zero(t, exec.assistantHistoryBuffer.Len())
 }
 
 // TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache is the

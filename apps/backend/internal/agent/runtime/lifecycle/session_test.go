@@ -1166,6 +1166,60 @@ func TestSendPrompt_DispatchOnlyReturnsWithoutWaiting(t *testing.T) {
 	}
 }
 
+func TestSendPrompt_PersistsPartialAssistantHistoryBeforeReset(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+
+	log := newSessionTestLogger()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", log)
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	sm := NewSessionManager(log, make(chan struct{}))
+	sm.SetDependencies(nil, nil, nil, history)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:             "test-exec",
+		TaskID:         "test-task",
+		SessionID:      "test-session",
+		WorkspacePath:  "/workspace",
+		Status:         v1.AgentStatusReady,
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+		historyEnabled: true,
+	}
+	execution.assistantHistoryBuffer.WriteString("partial prior response")
+
+	if _, err := sm.SendPrompt(ctx, execution, "next prompt", true, nil, true); err != nil {
+		t.Fatalf("SendPrompt: %v", err)
+	}
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("history entry count = %d, want assistant then user: %+v", len(entries), entries)
+	}
+	if entries[0].Type != "agent_message" || entries[0].Content != "partial prior response" {
+		t.Fatalf("first history entry = %+v, want partial assistant response", entries[0])
+	}
+	if entries[1].Type != "user_message" || entries[1].Content != "next prompt" {
+		t.Fatalf("second history entry = %+v, want next user prompt", entries[1])
+	}
+	if execution.assistantHistoryBuffer.Len() != 0 {
+		t.Fatal("assistant history buffer was not reset after prompt dispatch")
+	}
+}
+
 func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
 	mock := newMockAgentServer(t)
 	t.Cleanup(mock.Close)
@@ -1270,12 +1324,37 @@ func TestWaitForPromptDone_TreatsPromptAbandonedAfterCancelAsCancelEscalated(t *
 		Error:   "prompt abandoned after cancel",
 	}
 
-	_, err := sm.waitForPromptDone(context.Background(), execution)
+	_, err := sm.waitForPromptDone(context.Background(), execution, 0)
 	if !errors.Is(err, ErrCancelEscalated) {
 		t.Fatalf("expected ErrCancelEscalated, got: %v", err)
 	}
 	if !errors.Is(err, ErrAgentReported) {
 		t.Fatalf("expected ErrAgentReported wrapper, got: %v", err)
+	}
+}
+
+func TestWaitForPromptDone_IgnoresSupersededGenerationSignal(t *testing.T) {
+	sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		promptDoneCh: make(chan PromptCompletionSignal, 2),
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		IsError:          true,
+		Error:            "old stream disconnected",
+		PromptGeneration: 1,
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "end_turn",
+		PromptGeneration: 2,
+	}
+
+	result, err := sm.waitForPromptDone(context.Background(), execution, 2)
+	if err != nil {
+		t.Fatalf("waitForPromptDone: %v", err)
+	}
+	if result == nil || result.StopReason != "end_turn" {
+		t.Fatalf("result = %+v, want replacement completion", result)
 	}
 }
 
