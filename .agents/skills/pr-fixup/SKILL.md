@@ -45,7 +45,7 @@ requests task tracking:
 2. **Fix failing CI checks** — Read failing run logs (via `scripts/run-quiet gh-run -- gh run view ...`), fix issues, run E2E tests locally if needed
 3. **Triage review comments** — Classify each comment as valid, already addressed, nitpick, or wrong
 4. **Address each comment** — Fix or reply with reasoning, resolve threads
-5. **Verify, commit, push** — Delegate verification, then separate bounded commit/push delivery
+5. **Verify, commit, push** — Delegate verification; deliver directly unless delegation has positive ROI
 6. **Re-check** — Delegate to `pr-poller` again; if new failures, loop back to task 2
 7. **Summary** — Report what was done
 
@@ -140,9 +140,10 @@ Mark task 1 as completed.
 
 Mark task 2 as in_progress.
 
-The planner assigns this section to a remediation implementer with the poller
-report, failed run IDs, owned files, and acceptance criteria. The implementer
-does not invoke other workers.
+The planner may handle a small, localized CI fix directly. Delegate broad,
+cross-component, or noisy remediation with the poller report, failed run IDs,
+owned files, and acceptance criteria. An assigned implementer does not invoke
+other workers.
 
 **Sanity-check the poller's `ci_failed` before fixing anything.** Confirm each reported check `name` actually appears in `gh pr checks <PR>` output and its `run_id` resolves (`gh run view <run_id>` must not 404). If the report cites checks the repo doesn't have, discard it and re-gather state directly before touching code.
 
@@ -190,8 +191,9 @@ Mark task 2 as completed.
 
 Mark task 3 as in_progress.
 
-The planner assigns this section to a remediation implementer with the compact
-thread list and relevant diff scope.
+The planner may triage a small thread set directly. Delegate only when the
+thread set or required investigation is broad enough to justify a fresh
+context, supplying the compact thread list and relevant diff scope.
 
 Use the report's `unresolved_review_threads` and `actionable_issue_comments_from_bots` counts to know whether there's anything to triage. If both are 0, mark this step completed and move on.
 
@@ -265,8 +267,8 @@ Mark task 3 as completed.
 
 Mark task 4 as in_progress.
 
-The same bounded remediation implementer addresses only the assigned threads
-and reports its edits, replies, and targeted checks.
+The planner or assigned remediation implementer addresses only the selected
+threads and records edits, replies, and targeted checks.
 
 For a small remediation that preserves the established scope and boundary, use
 the reviewer finding, focused regression, final Spark `verify`, and a fresh
@@ -396,8 +398,9 @@ Mark task 5 as in_progress.
    without changing source/test logic.
 2. If verification fails, the planner creates a new bounded remediation packet,
    then launches a fresh verification assignment. Do not deliver until green.
-3. After a green report, the planner delegates commit and push as bounded
-   delivery assignments using `/commit` and `/push`. Supply the verification
+3. After a green report, the planner normally commits and pushes the routine
+   fix directly using `/commit` and `/push`. Delegate delivery only when
+   isolation or coordination provides positive ROI, supplying the verification
    result and exact intended paths. Workers do not invoke one another.
 
 Mark task 5 as completed after the delivery worker reports the pushed commit.
