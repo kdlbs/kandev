@@ -15,6 +15,13 @@ test.describe("SSH executor — attach workspace sources", () => {
     test.setTimeout(240_000);
     const fixture = await startHTTPGitFixture(backend.tmpDir, "ssh-second-source");
     try {
+      const fixtureProfile = await apiClient.createExecutorProfile(seedData.sshExecutorId, {
+        name: "E2E SSH HTTP Git fixture",
+        config: {},
+        prepare_script: "",
+        cleanup_script: "",
+        env_vars: fixture.gitConfigEnvVars,
+      });
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "SSH remote workspace source",
@@ -24,10 +31,22 @@ test.describe("SSH executor — attach workspace sources", () => {
           workflow_id: seedData.workflowId,
           workflow_step_id: seedData.startStepId,
           repository_ids: [seedData.repositoryId],
-          executor_profile_id: seedData.sshExecutorProfileId,
+          executor_profile_id: fixtureProfile.id,
         },
       );
       await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for SSH task");
+      await testPage.goto(`/t/${task.id}`);
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await session.clickTab("Files");
+      await testPage.getByTestId("files-workspace-actions").click();
+      await testPage.getByRole("menuitem", { name: "Add sources" }).click();
+      const dialog = testPage.getByTestId("add-workspace-sources-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("source-mode-local")).toBeVisible();
+      await expect(dialog.getByTestId("source-mode-remote")).toBeVisible();
+      await expect(dialog.getByRole("button", { name: "Local folder" })).toHaveCount(0);
+      await dialog.getByRole("button", { name: "Cancel" }).click();
       const response = await apiClient.rawRequest(
         "POST",
         `/api/v1/tasks/${task.id}/workspace-sources`,
@@ -59,9 +78,6 @@ test.describe("SSH executor — attach workspace sources", () => {
       );
       expect(agentctlLog).not.toContain(fs.readFileSync(seedData.sshTarget.identityFile, "utf8"));
 
-      await testPage.goto(`/t/${task.id}`);
-      const session = new SessionPage(testPage);
-      await session.waitForLoad();
       await session.clickTab("Files");
       await expect(
         session.files.getByTestId("file-tree-node").filter({ hasText: "ssh-second-source-main" }),

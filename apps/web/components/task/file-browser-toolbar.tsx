@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode, Ref } from "react";
+import { useCallback, useEffect, useRef, type ReactNode, type Ref, type RefObject } from "react";
 import {
   IconSearch,
   IconListTree,
@@ -11,7 +11,14 @@ import {
   IconPlus,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { Skeleton } from "@kandev/ui/skeleton";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "./panel-primitives";
 
@@ -89,6 +96,117 @@ function CopyWorkspacePathButton({
   );
 }
 
+function useMobileDrawerFocusRestoration(triggerRef: RefObject<HTMLButtonElement | null>) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const restoreAfterDrawerCloseRef = useRef(false);
+
+  useEffect(() => {
+    const restoreFocus = (event: AnimationEvent) => {
+      if (!restoreAfterDrawerCloseRef.current) return;
+      const drawer = event.target;
+      if (
+        !(drawer instanceof HTMLElement) ||
+        drawer.dataset.testid !== "add-workspace-sources-drawer" ||
+        drawer.dataset.state !== "closed"
+      )
+        return;
+      restoreAfterDrawerCloseRef.current = false;
+      requestAnimationFrame(() => {
+        if (triggerRef.current?.isConnected && !triggerRef.current.disabled) {
+          triggerRef.current.focus();
+        }
+      });
+    };
+    document.addEventListener("animationend", restoreFocus, true);
+    return () => document.removeEventListener("animationend", restoreFocus, true);
+  }, [triggerRef]);
+
+  return useCallback(() => {
+    restoreAfterDrawerCloseRef.current = isMobile;
+  }, [isMobile]);
+}
+
+function WorkspaceActionsMenu({
+  onAddSources,
+  onOpenFolder,
+  addSourcesButtonRef,
+  addSourcesDisabledReason,
+}: Pick<
+  FileBrowserToolbarProps,
+  "onAddSources" | "onOpenFolder" | "addSourcesButtonRef" | "addSourcesDisabledReason"
+>) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const openSourcesAfterCloseRef = useRef(false);
+  const restoreMobileFocusAfterDrawerClose = useMobileDrawerFocusRestoration(triggerRef);
+  const setTriggerRef = useCallback(
+    (node: HTMLButtonElement | null) => {
+      triggerRef.current = node;
+      if (typeof addSourcesButtonRef === "function") {
+        addSourcesButtonRef(node);
+      } else if (addSourcesButtonRef) {
+        (addSourcesButtonRef as { current: HTMLButtonElement | null }).current = node;
+      }
+    },
+    [addSourcesButtonRef],
+  );
+  const disabledReason =
+    addSourcesDisabledReason ??
+    (onAddSources ? undefined : "This task needs a repository before sources can be added.");
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          ref={setTriggerRef}
+          type="button"
+          aria-label="Workspace actions"
+          data-testid="files-workspace-actions"
+          className="inline-flex min-h-11 min-w-11 items-center gap-1 rounded px-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer sm:min-h-8 sm:min-w-0"
+        >
+          <IconFolderShare className="h-3.5 w-3.5" />
+          <span>Workspace actions</span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        className="w-56"
+        onCloseAutoFocus={(event) => {
+          if (!openSourcesAfterCloseRef.current) return;
+          event.preventDefault();
+          openSourcesAfterCloseRef.current = false;
+          if (triggerRef.current && onAddSources) onAddSources(triggerRef.current);
+        }}
+      >
+        <DropdownMenuItem
+          disabled={Boolean(disabledReason)}
+          className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+          onSelect={() => {
+            openSourcesAfterCloseRef.current = true;
+            restoreMobileFocusAfterDrawerClose();
+          }}
+        >
+          <IconPlus className="h-3.5 w-3.5" />
+          <span className="min-w-0">
+            <span className="block">Add sources</span>
+            {disabledReason && (
+              <span className="block text-[10px] text-muted-foreground normal-case">
+                {disabledReason}
+              </span>
+            )}
+          </span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+          onSelect={onOpenFolder}
+        >
+          <IconFolderOpen className="h-3.5 w-3.5" />
+          Open workspace folder
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function FileBrowserToolbar({
   displayPath,
   fullPath,
@@ -135,33 +253,11 @@ export function FileBrowserToolbar({
               icon={<IconPlus className="h-3.5 w-3.5" />}
             />
           )}
-          {onAddSources && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span tabIndex={addSourcesDisabledReason ? 0 : -1} className="inline-flex">
-                  <button
-                    type="button"
-                    aria-label="Add sources"
-                    data-testid="files-add-sources"
-                    ref={addSourcesButtonRef}
-                    disabled={Boolean(addSourcesDisabledReason)}
-                    onClick={(event) => onAddSources(event.currentTarget)}
-                    className="inline-flex min-h-11 min-w-11 items-center gap-1 rounded px-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer sm:min-h-8 sm:min-w-0"
-                  >
-                    <IconPlus className="h-3.5 w-3.5" />
-                    <span>Add sources</span>
-                  </button>
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                {addSourcesDisabledReason ?? "Add repositories or folders"}
-              </TooltipContent>
-            </Tooltip>
-          )}
-          <ToolbarButton
-            onClick={onOpenFolder}
-            label="Open workspace folder"
-            icon={<IconFolderShare className="h-3.5 w-3.5" />}
+          <WorkspaceActionsMenu
+            onAddSources={onAddSources}
+            onOpenFolder={onOpenFolder}
+            addSourcesButtonRef={addSourcesButtonRef}
+            addSourcesDisabledReason={addSourcesDisabledReason}
           />
           <ToolbarButton
             onClick={onStartSearch}

@@ -1,15 +1,6 @@
 "use client";
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type Dispatch,
-  type RefObject,
-  type ReactNode,
-  type SetStateAction,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject, type ReactNode } from "react";
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -29,6 +20,7 @@ import {
 } from "@kandev/ui/drawer";
 import { Input } from "@kandev/ui/input";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { ControlledSourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
@@ -142,8 +134,16 @@ export function AddWorkspaceSourcesDialog({
       onDrawerCloseAnimationEnd={restoreOpenerFocus}
       error={submitError}
       form={
-        <WorkspaceSourcesForm
-          {...{ rows, workspaceId, errors, repositories, capabilities, add, update, setRows }}
+        <SourceForm
+          rows={rows}
+          workspaceId={workspaceId}
+          errors={errors}
+          repositories={selectableRepositories(repositories, capabilities)}
+          capabilities={capabilities}
+          onAdd={add}
+          onRemove={(key) => setRows((current) => removeWorkspaceSourceRow(current, key))}
+          onUpdate={update}
+          isMobile={isMobile}
         />
       }
       submitting={submitting}
@@ -153,43 +153,13 @@ export function AddWorkspaceSourcesDialog({
   );
 }
 
-type WorkspaceSourcesFormProps = {
-  rows: WorkspaceSourceRow[];
-  workspaceId: string | null;
-  errors: Record<string, string>;
-  repositories: Parameters<typeof WorkspaceRepoChips>[0]["repositories"];
-  capabilities: ReturnType<typeof getWorkspaceSourceCapabilities>;
-  add: (kind: NonNullable<WorkspaceSourceRow["sourceType"]>) => void;
-  update: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
-  setRows: Dispatch<SetStateAction<WorkspaceSourceRow[]>>;
-};
-
-function WorkspaceSourcesForm({
-  rows,
-  workspaceId,
-  errors,
-  repositories,
-  capabilities,
-  add,
-  update,
-  setRows,
-}: WorkspaceSourcesFormProps) {
-  return (
-    <SourceForm
-      rows={rows}
-      workspaceId={workspaceId}
-      errors={errors}
-      repositories={
-        capabilities.requiresCloneableLocalRepository
-          ? repositories.filter(hasCloneableSavedRepository)
-          : repositories
-      }
-      capabilities={capabilities}
-      onAdd={add}
-      onRemove={(key) => setRows((current) => removeWorkspaceSourceRow(current, key))}
-      onUpdate={update}
-    />
-  );
+function selectableRepositories(
+  repositories: Parameters<typeof WorkspaceRepoChips>[0]["repositories"],
+  capabilities: ReturnType<typeof getWorkspaceSourceCapabilities>,
+) {
+  return capabilities.requiresCloneableLocalRepository
+    ? repositories.filter(hasCloneableSavedRepository)
+    : repositories;
 }
 
 type AddWorkspaceSourcesSurfaceProps = {
@@ -297,6 +267,7 @@ function SourceForm({
   onAdd,
   onRemove,
   onUpdate,
+  isMobile,
 }: {
   rows: WorkspaceSourceRow[];
   repositories: Parameters<typeof WorkspaceRepoChips>[0]["repositories"];
@@ -306,16 +277,35 @@ function SourceForm({
   onAdd: (kind: NonNullable<WorkspaceSourceRow["sourceType"]>) => void;
   onRemove: (key: string) => void;
   onUpdate: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
+  isMobile: boolean;
 }) {
+  const [mode, setMode] = useState<"local" | "remote">("local");
   return (
     <div className="space-y-3 py-2" data-testid="add-workspace-sources-form">
-      <div className="flex flex-wrap gap-2">
-        <AddButton label="Saved repository" onClick={() => onAdd("saved_repository")} />
-        <AddButton label="Local Git repository" onClick={() => onAdd("local_repository")} />
-        <AddButton label="Remote Git repository" onClick={() => onAdd("remote_repository")} />
-        {capabilities.canAddFolders && (
-          <AddButton label="Local folder" onClick={() => onAdd("folder")} />
-        )}
+      <div className="flex flex-wrap items-center gap-2">
+        <ControlledSourceModeSwitch
+          mode={mode}
+          onModeChange={setMode}
+          touchSized={isMobile}
+          options={[
+            { value: "local", label: "Local", testId: "source-mode-local" },
+            { value: "remote", label: "Remote", testId: "source-mode-remote" },
+          ]}
+        />
+        <div className="flex flex-wrap gap-2">
+          {mode === "local" && (
+            <>
+              <AddButton label="Saved repository" onClick={() => onAdd("saved_repository")} />
+              <AddButton label="Local Git repository" onClick={() => onAdd("local_repository")} />
+              {capabilities.canAddFolders && (
+                <AddButton label="Local folder" onClick={() => onAdd("folder")} />
+              )}
+            </>
+          )}
+          {mode === "remote" && (
+            <AddButton label="Remote Git repository" onClick={() => onAdd("remote_repository")} />
+          )}
+        </div>
       </div>
       {capabilities.requiresCloneableLocalRepository && (
         <p className="text-sm text-muted-foreground">

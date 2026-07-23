@@ -5,6 +5,11 @@ import path from "node:path";
 
 type HTTPGitFixture = {
   remoteURL: string;
+  /**
+   * Test-executor-only Git configuration that rewrites the trusted public
+   * origin to this fixture's bridge-reachable HTTP server.
+   */
+  gitConfigEnvVars: Array<{ key: string; value: string }>;
   close: () => Promise<void>;
 };
 
@@ -32,10 +37,18 @@ export async function startHTTPGitFixture(root: string, name: string): Promise<H
 
   const server = createStaticGitServer(root);
   const port = await listen(server);
+  const fixtureOrigin = `http://${dockerBridgeGateway()}:${port}/`;
   return {
-    // The service validates remote URLs through the GitLab-compatible provider
-    // parser, which requires a namespace + repository path.
-    remoteURL: `http://${dockerBridgeGateway()}:${port}/fixture/${name}.git`,
+    // The source endpoint must receive the real GitLab identity so the
+    // production trusted-origin validation remains exercised. Only the
+    // disposable executor profile rewrites Git's clone transport to this
+    // local HTTP server.
+    remoteURL: `https://gitlab.com/fixture/${name}.git`,
+    gitConfigEnvVars: [
+      { key: "GIT_CONFIG_COUNT", value: "1" },
+      { key: "GIT_CONFIG_KEY_0", value: `url.${fixtureOrigin}.insteadOf` },
+      { key: "GIT_CONFIG_VALUE_0", value: "https://gitlab.com/" },
+    ],
     close: () => closeServer(server),
   };
 }

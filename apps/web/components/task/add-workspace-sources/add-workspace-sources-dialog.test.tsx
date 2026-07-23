@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AddWorkspaceSourcesDialog } from "./add-workspace-sources-dialog";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/http";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 let isMobile = false;
 
@@ -87,6 +88,27 @@ afterEach(() => {
 });
 
 describe("AddWorkspaceSourcesDialog", () => {
+  it("uses touch-sized Local and Remote modes without discarding mixed source rows", async () => {
+    isMobile = true;
+    render(
+      <TooltipProvider>
+        <Harness />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Add sources" }));
+    const local = await screen.findByTestId("source-mode-local");
+    expect(local.className).toContain("min-h-11");
+    fireEvent.click(screen.getByRole("button", { name: "Local folder" }));
+    fireEvent.click(screen.getByTestId("source-mode-remote"));
+    fireEvent.click(screen.getByRole("button", { name: "Remote Git repository" }));
+    fireEvent.click(local);
+
+    expect(screen.getByText("Folder")).toBeTruthy();
+    expect(screen.getByText("Remote Repository")).toBeTruthy();
+    expect(screen.getByText("Choose a repository and base branch.")).toBeTruthy();
+  });
+
   it.each([
     ["desktop", false, "add-workspace-sources-dialog"],
     ["mobile", true, "add-workspace-sources-drawer"],

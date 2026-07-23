@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/docker-test-base";
+import { E2E_IMAGE_TAG } from "../../fixtures/docker-probe";
 import { dockerInspectExists } from "../../helpers/docker";
 import { startHTTPGitFixture } from "../../helpers/http-git-server";
 import { waitForLatestSessionDone, waitForSessionDone } from "../../helpers/session";
@@ -27,6 +28,16 @@ test.describe("Docker executor — attach workspace sources", () => {
     test.setTimeout(240_000);
     const fixture = await startHTTPGitFixture(backend.tmpDir, "docker-second-source");
     try {
+      const { executors } = await apiClient.listExecutors();
+      const dockerExecutor = executors.find((executor) => executor.type === "local_docker");
+      expect(dockerExecutor).toBeTruthy();
+      const fixtureProfile = await apiClient.createExecutorProfile(dockerExecutor!.id, {
+        name: "E2E Docker HTTP Git fixture",
+        config: { image_tag: E2E_IMAGE_TAG },
+        prepare_script: "",
+        cleanup_script: "",
+        env_vars: fixture.gitConfigEnvVars,
+      });
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "Docker remote workspace sources",
@@ -36,7 +47,7 @@ test.describe("Docker executor — attach workspace sources", () => {
           workflow_id: seedData.workflowId,
           workflow_step_id: seedData.startStepId,
           repository_ids: [seedData.repositoryId],
-          executor_profile_id: seedData.dockerExecutorProfileId,
+          executor_profile_id: fixtureProfile.id,
         },
       );
       await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for Docker task");
@@ -47,9 +58,12 @@ test.describe("Docker executor — attach workspace sources", () => {
       const session = new SessionPage(testPage);
       await session.waitForLoad();
       await session.clickTab("Files");
-      await testPage.getByTestId("files-add-sources").click();
+      await testPage.getByTestId("files-workspace-actions").click();
+      await testPage.getByRole("menuitem", { name: "Add sources" }).click();
       const dialog = testPage.getByTestId("add-workspace-sources-dialog");
       await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("source-mode-local")).toBeVisible();
+      await expect(dialog.getByTestId("source-mode-remote")).toBeVisible();
       await expect(dialog.getByRole("button", { name: "Local folder" })).toHaveCount(0);
       await dialog.getByRole("button", { name: "Cancel" }).click();
 
@@ -96,7 +110,7 @@ test.describe("Docker executor — attach workspace sources", () => {
       const relaunched = await apiClient.launchSession({
         task_id: task.id,
         agent_profile_id: seedData.agentProfileId,
-        executor_profile_id: seedData.dockerExecutorProfileId,
+        executor_profile_id: fixtureProfile.id,
         workflow_step_id: seedData.startStepId,
         prompt: "/e2e:simple-message",
       });
@@ -136,6 +150,16 @@ test.describe("Docker executor — attach workspace sources", () => {
     test.setTimeout(180_000);
     const fixture = await startHTTPGitFixture(backend.tmpDir, "docker-rollback-source");
     try {
+      const { executors } = await apiClient.listExecutors();
+      const dockerExecutor = executors.find((executor) => executor.type === "local_docker");
+      expect(dockerExecutor).toBeTruthy();
+      const fixtureProfile = await apiClient.createExecutorProfile(dockerExecutor!.id, {
+        name: "E2E Docker rollback HTTP Git fixture",
+        config: { image_tag: E2E_IMAGE_TAG },
+        prepare_script: "",
+        cleanup_script: "",
+        env_vars: fixture.gitConfigEnvVars,
+      });
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "Docker source rollback",
@@ -145,7 +169,7 @@ test.describe("Docker executor — attach workspace sources", () => {
           workflow_id: seedData.workflowId,
           workflow_step_id: seedData.startStepId,
           repository_ids: [seedData.repositoryId],
-          executor_profile_id: seedData.dockerExecutorProfileId,
+          executor_profile_id: fixtureProfile.id,
         },
       );
       await waitForLatestSessionDone(apiClient, task.id, 1, "Waiting for Docker rollback task");

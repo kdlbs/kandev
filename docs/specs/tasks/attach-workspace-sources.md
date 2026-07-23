@@ -1,5 +1,5 @@
 ---
-status: implemented
+status: building
 created: 2026-07-22
 owner: kandev
 ---
@@ -14,13 +14,18 @@ manually moving files into the task workspace.
 
 ## What
 
-- A repository-backed task exposes an **Add sources** action in the Files panel on desktop and
-  mobile.
-- Subject to the task executor's capabilities, one submission can add one or more mixed sources:
-  - a repository already saved in the Kandev workspace;
-  - an explicitly selected local Git repository;
-  - a provider-backed or pasted remote Git repository URL;
-  - an arbitrary local folder that is not required to be a Git repository.
+- A repository-backed task exposes one **Workspace actions** menu in the Files panel on desktop and
+  mobile. The menu contains **Add sources** and **Open workspace folder** rather than separate
+  toolbar controls.
+- **Add sources** uses the same repository-selection language as task creation, with **Local** and
+  **Remote** modes instead of separate saved-repository, local-Git, and remote-Git choice cards.
+- Subject to the task executor's capabilities, one submission can add one or more mixed sources.
+  **Local** combines saved workspace repositories and discovered local Git repositories in the
+  shared repository selector and offers an arbitrary local folder affordance when supported.
+  **Remote** reuses the provider-backed and pasted-URL repository selector from task creation.
+- Switching between **Local** and **Remote** changes only the available selector. Rows already added
+  to the batch remain visible and are not discarded, so one submission can still mix local,
+  remote, and folder sources.
 - Repository rows include a base branch and may select an existing checkout branch, matching the
   repository and branch controls used by task creation.
 - A successful submission makes every added source visible as a named top-level entry in the Files
@@ -37,6 +42,9 @@ manually moving files into the task workspace.
 - Kandev may re-root or restart an idle task environment when its executor cannot safely change the
   agent working directory in place. The action is unavailable while a turn or tool call is active,
   and the backend independently rejects that race with a conflict response.
+- When **Add sources** is unavailable, the combined Files action remains reachable so **Open
+  workspace folder** still works. The **Add sources** menu item is disabled and shows the reason in
+  touch-visible text rather than relying on a tooltip.
 - Existing conversations, task state, plan, sessions, and repository attachments remain intact.
 - Agents receive a batch `add_workspace_sources_kandev` MCP tool that uses the same validation and
   materialization path. The existing `add_branch_to_task_kandev` tool remains as a compatibility
@@ -135,27 +143,38 @@ must be retried.
 
 ## Scenarios
 
-- **GIVEN** a running worktree task with one repository and no active turn, **WHEN** the user adds a
-  saved workspace repository and branch from the Files panel, **THEN** the new worktree appears as a
-  top-level Files entry and in repository-aware Changes surfaces without recreating the task.
+- **GIVEN** a repository-backed task with the Files tree loaded, **WHEN** the user opens the
+  workspace-actions control, **THEN** one menu exposes **Add sources** and **Open workspace folder**.
+- **GIVEN** a running worktree task with one repository and no active turn, **WHEN** the user opens
+  **Add sources**, selects **Local**, and adds a saved or discovered repository and branch with the
+  shared task-create selector, **THEN** the new worktree appears as a top-level Files entry and in
+  repository-aware Changes surfaces without recreating the task.
+- **GIVEN** an Add sources batch with a local row already configured, **WHEN** the user switches to
+  **Remote** and adds a provider-backed or pasted-URL repository, **THEN** both rows remain in the
+  batch and submit atomically.
 - **GIVEN** a repository-backed local task, **WHEN** the user adds a local Git repository and an
   arbitrary folder in one submission, **THEN** both live sources appear under one task workspace and
   the folder does not appear in Git-only controls.
-- **GIVEN** a Docker, SSH, or Sprites task, **WHEN** the user opens Add sources, **THEN** local and
-  remote repository choices are available and the arbitrary-folder choice is not offered.
+- **GIVEN** a Docker, SSH, or Sprites task, **WHEN** the user opens **Add sources**, **THEN** the
+  shared **Local** and **Remote** repository selectors are available and the local-folder affordance
+  is not offered.
 - **GIVEN** a Docker, SSH, or Sprites task, **WHEN** a client submits a forged folder source,
   **THEN** the backend returns `422` and leaves the task and executor filesystem unchanged.
 - **GIVEN** a mixed three-source submission whose second source cannot be cloned, **WHEN**
   materialization fails, **THEN** none of the three new attachments remain in the database, Files
   tree, or executor workspace.
 - **GIVEN** an active agent turn, **WHEN** the user attempts to add sources, **THEN** no source is
-  attached and the UI explains that the task must be idle first.
+  attached, the **Add sources** menu item explains that the task must be idle first, and **Open
+  workspace folder** remains available.
 - **GIVEN** the same repository/branch or canonical folder is already attached, **WHEN** it is
   submitted again, **THEN** the request returns a conflict naming the duplicate and leaves the task
   unchanged.
-- **GIVEN** a phone viewport on the Files tab, **WHEN** the user opens Add sources, adds two sources,
-  and submits, **THEN** a touch-usable full-height picker completes the same operation without
-  horizontal document overflow.
+- **GIVEN** a phone viewport on the Files tab, **WHEN** the user opens the 44px workspace-actions
+  control, **THEN** an inset bottom-sheet menu exposes both actions with touch-sized rows.
+- **GIVEN** that phone action menu, **WHEN** the user selects **Add sources**, switches between
+  **Local** and **Remote**, adds two sources, and submits, **THEN** a touch-usable full-height picker
+  completes the same operation without horizontal document overflow and returns focus to the
+  workspace-actions control.
 - **GIVEN** an agent calls `add_workspace_sources_kandev` for its current idle task, **WHEN** all
   inputs materialize, **THEN** the UI receives the same task and session updates as the human flow.
 
@@ -166,6 +185,8 @@ must be retried.
 - Copying, mounting, or synchronizing arbitrary host folders into container or remote executors.
 - Attaching sources while an agent turn or tool call is running.
 - Reordering sources after attachment.
+- Sharing task-creation state or its **None**/scratch semantics with Add sources; only the controlled
+  selector presentation and repository picker leaves are shared.
 - Making the unimplemented remote Docker executor runnable; its source-materializer capability is
   required when that executor becomes available.
 

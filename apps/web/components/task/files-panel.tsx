@@ -124,6 +124,9 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
     addSourcesDisabledReason,
   } = sourceDialog;
   const hasRepository = Boolean(activeTask?.repositoryId ?? activeTask?.repositories?.length);
+  const resolvedAddSourcesDisabledReason = hasRepository
+    ? addSourcesDisabledReason
+    : "This task needs a repository before sources can be added.";
   const { createFile, deleteFile, renameFile, downloadFile } = useFileOperations(
     activeSessionId ?? null,
   );
@@ -173,7 +176,7 @@ const FilesPanel = memo(function FilesPanel({ onOpenFile }: FilesPanelProps) {
                   }
                 : undefined
             }
-            addSourcesDisabledReason={addSourcesDisabledReason}
+            addSourcesDisabledReason={resolvedAddSourcesDisabledReason}
             addSourcesButtonRef={addSourcesButtonRef}
           />
         ) : (

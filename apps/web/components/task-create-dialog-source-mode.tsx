@@ -17,6 +17,59 @@ type SourceModeSwitchProps = {
   onToggleNoRepository?: () => void;
 };
 
+type ControlledSourceModeOption<T extends string> = {
+  value: T;
+  label: string;
+  testId: string;
+  legacyTestId?: string;
+};
+
+type ControlledSourceModeSwitchProps<T extends string> = {
+  mode: T;
+  options: readonly ControlledSourceModeOption<T>[];
+  onModeChange: (mode: T) => void;
+  touchSized?: boolean;
+};
+
+export function ControlledSourceModeSwitch<T extends string>({
+  mode,
+  options,
+  onModeChange,
+  touchSized = false,
+}: ControlledSourceModeSwitchProps<T>) {
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Source"
+      className="inline-flex items-center rounded-md border border-border/60 bg-muted/20 p-0.5"
+    >
+      {options.map((option) => {
+        const isActive = mode === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            role="radio"
+            aria-checked={isActive}
+            data-testid={option.testId}
+            data-legacy-testid={option.legacyTestId}
+            onClick={() => onModeChange(option.value)}
+            className={cn(
+              "rounded-sm px-2 text-[11px] font-medium transition-colors cursor-pointer",
+              touchSized ? "min-h-11" : "py-0.5",
+              isActive
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {option.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
  * Three-mode segmented control rendered at the right edge of the chip row:
  *   - Repo   : pick a workspace repository (default)
@@ -43,18 +96,27 @@ export function SourceModeSwitch({
       onToggleNoRepository,
     });
   return (
-    <div
-      role="radiogroup"
-      aria-label="Source"
-      className="ml-auto inline-flex items-center rounded-md border border-border/60 bg-muted/20 p-0.5"
-    >
-      <ModeButton label="Repo" mode="workspace" active={mode} onSelect={setMode} />
-      {onToggleRemote && (
-        <ModeButton label="Remote" mode="remote" active={mode} onSelect={setMode} />
-      )}
-      {onToggleNoRepository && (
-        <ModeButton label="None" mode="scratch" active={mode} onSelect={setMode} />
-      )}
+    <div className="ml-auto">
+      <ControlledSourceModeSwitch
+        mode={mode}
+        onModeChange={setMode}
+        options={[
+          { value: "workspace", label: "Repo", testId: "source-mode-workspace" },
+          ...(onToggleRemote
+            ? [
+                {
+                  value: "remote" as const,
+                  label: "Remote",
+                  testId: "source-mode-remote",
+                  legacyTestId: "toggle-github-url",
+                },
+              ]
+            : []),
+          ...(onToggleNoRepository
+            ? [{ value: "scratch" as const, label: "None", testId: "source-mode-scratch" }]
+            : []),
+        ]}
+      />
     </div>
   );
 }
@@ -84,40 +146,4 @@ function switchMode({
   // workspace
   if (from === "remote") onToggleRemote?.();
   else if (from === "scratch") onToggleNoRepository?.();
-}
-
-function ModeButton({
-  label,
-  mode,
-  active,
-  onSelect,
-}: {
-  label: string;
-  mode: SourceMode;
-  active: SourceMode;
-  onSelect: (m: SourceMode) => void;
-}) {
-  const isActive = active === mode;
-  // The Remote button carries `data-legacy-testid="toggle-github-url"` so the older
-  // create-task-github-url.spec.ts and subtask.spec.ts can keep selecting it during
-  // the migration; the primary `data-testid` follows the source-mode-<mode> convention.
-  const legacyTestId = mode === "remote" ? "toggle-github-url" : undefined;
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={isActive}
-      data-testid={`source-mode-${mode}`}
-      data-legacy-testid={legacyTestId}
-      onClick={() => onSelect(mode)}
-      className={cn(
-        "rounded-sm px-2 py-0.5 text-[11px] font-medium transition-colors cursor-pointer",
-        isActive
-          ? "bg-background text-foreground shadow-sm"
-          : "text-muted-foreground hover:text-foreground",
-      )}
-    >
-      {label}
-    </button>
-  );
 }
