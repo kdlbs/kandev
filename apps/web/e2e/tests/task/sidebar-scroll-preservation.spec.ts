@@ -9,7 +9,67 @@ import { SessionPage } from "../../pages/session-page";
  * position. usePortalSlot now snapshots scroll positions inside each portal
  * via a capturing scroll listener and restores them after every reattach.
  */
-test.describe("sidebar scroll preservation across task switch", () => {
+test.describe("sidebar scrolling", () => {
+  test("fades overflowing tasks and reveals the scrollbar on hover", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+
+    const taskCount = 25;
+    const taskIds: string[] = [];
+    for (let index = 0; index < taskCount; index++) {
+      const task = await apiClient.createTask(
+        seedData.workspaceId,
+        `Overflow Task ${String(index).padStart(2, "0")}`,
+        {
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      taskIds.push(task.id);
+    }
+
+    await testPage.goto(`/t/${taskIds.at(-1)!}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const scrollContainer = testPage.getByTestId("task-sidebar-scroll");
+    await expect(scrollContainer).toBeVisible();
+    await expect(session.sidebar.getByTestId("sidebar-task-item")).toHaveCount(taskCount, {
+      timeout: 10_000,
+    });
+
+    await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "true");
+    const restingStyles = await scrollContainer.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        maskImage: styles.maskImage,
+        scrollbarColor: styles.getPropertyValue("scrollbar-color"),
+      };
+    });
+    expect(restingStyles.maskImage).toContain("linear-gradient");
+    expect(restingStyles.scrollbarColor).toContain("rgba(0, 0, 0, 0)");
+
+    await scrollContainer.hover();
+    const hoverStyles = await scrollContainer.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        maskImage: styles.maskImage,
+        scrollbarColor: styles.getPropertyValue("scrollbar-color"),
+      };
+    });
+    expect(hoverStyles.maskImage).toBe("none");
+    expect(hoverStyles.scrollbarColor).not.toBe(restingStyles.scrollbarColor);
+
+    await scrollContainer.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "false");
+  });
+
   test("clicking another task does not reset the sidebar scroll position", async ({
     testPage,
     apiClient,

@@ -358,6 +358,38 @@
   background-clip: padding-box;
 }
 
+.task-sidebar-scroll[data-can-scroll-down="true"] {
+  mask-image: linear-gradient(to bottom, black 0, black calc(100% - 3.5rem), transparent 100%);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black calc(100% - 3.5rem),
+    transparent 100%
+  );
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .task-sidebar-scroll {
+    scrollbar-color: transparent transparent;
+  }
+
+  .task-sidebar-scroll:is(:hover, :focus-within) {
+    mask-image: none;
+    -webkit-mask-image: none;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+  }
+
+  .task-sidebar-scroll::-webkit-scrollbar-track,
+  .task-sidebar-scroll::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
+
+  .task-sidebar-scroll:is(:hover, :focus-within)::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    background-clip: padding-box;
+  }
+}
+
 /* xterm.js scrollbar styling */
 .xterm .xterm-scrollable-element > .scrollbar {
   width: 10px !important;
