@@ -688,6 +688,7 @@ type workspaceWorktreeKey struct {
 type workspaceRepositoryProjection struct {
 	taskRepository *models.TaskRepository
 	repository     *models.Repository
+	repoName       string
 }
 
 func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID string, sessionWorktrees []*models.TaskSessionWorktree, info *lifecycle.WorkspaceInfo) error {
@@ -713,7 +714,7 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 	for index, projection := range projections {
 		taskRepository, repository := projection.taskRepository, projection.repository
 		spec := lifecycle.WorkspaceRepositorySpec{
-			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: repository.Name,
+			RepositoryID: taskRepository.RepositoryID, RepositoryPath: repository.LocalPath, RepoName: projection.repoName,
 			BaseBranch: taskRepository.BaseBranch, DefaultBranch: repository.DefaultBranch,
 			CheckoutBranch: taskRepository.CheckoutBranch, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
@@ -745,7 +746,11 @@ func (s *Service) workspaceRepositoryProjections(ctx context.Context, taskID str
 		if repository == nil {
 			return nil, fmt.Errorf("workspace repository %q not found", taskRepository.RepositoryID)
 		}
-		projections = append(projections, workspaceRepositoryProjection{taskRepository: taskRepository, repository: repository})
+		repoName := worktree.SanitizeRepoDirName(repository.Name)
+		if repoName == "" || repository.LocalPath == "" {
+			continue
+		}
+		projections = append(projections, workspaceRepositoryProjection{taskRepository: taskRepository, repository: repository, repoName: repoName})
 	}
 	return projections, nil
 }
