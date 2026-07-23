@@ -984,14 +984,19 @@ func (s *Service) ListRepositories(ctx context.Context, workspaceID string) ([]*
 
 // repositoryIdentityKey returns a stable dedup key for repo: local_path when
 // set (a local checkout is identified by where it lives on disk), otherwise
-// the provider identity tuple (a provider-backed repo is identified by where
-// it lives upstream), otherwise the row's own ID so repositories with
-// neither (unusable placeholder rows) never collide with one another.
+// the provider identity tuple when host/owner/name are all present (a
+// provider-backed repo is identified by where it lives upstream), otherwise
+// the row's own ID. A missing provider_host (legacy rows, or self-managed
+// providers we've never normalized a host for) means we cannot tell two
+// same-namespace repos on different unknown hosts apart, so those rows fail
+// closed to their own ID instead of risking a false-positive collapse.
+// Placeholder rows with neither local_path nor provider also fall back to ID
+// so they never collide with one another.
 func repositoryIdentityKey(repo *models.Repository) string {
 	if repo.LocalPath != "" {
 		return "local\x00" + repo.LocalPath
 	}
-	if repo.Provider != "" {
+	if repo.Provider != "" && repo.ProviderHost != "" && repo.ProviderOwner != "" && repo.ProviderName != "" {
 		return "provider\x00" + repo.Provider + "\x00" + repo.ProviderHost + "\x00" + repo.ProviderOwner + "\x00" + repo.ProviderName
 	}
 	return "id\x00" + repo.ID
@@ -1000,14 +1005,16 @@ func repositoryIdentityKey(repo *models.Repository) string {
 // dedupeRepositoriesByIdentity collapses rows that share a
 // repositoryIdentityKey — e.g. two rows for the same local_path left behind
 // by a resolver race, or the same provider repo registered twice — down to
-// one. Keeps the earliest-created row per key, matching the winner
-// FindOrCreateRepository / FindOrCreateRepositoryByLocalPath resolve future
-// references to, so callers do not add a task_repositories link the UI would
-// then de-list. This is a read-time safety net: it hides pre-existing
-// duplicate rows from callers without touching the underlying table, so a
-// caller that still deletes by ID (e.g. DeleteRepository) must use the ID
-// this function returned, not one filtered out. Preserves the relative order
-// of first occurrence.
+// one. Keeps the earliest-created row per key (ties broken by the smaller
+// ID), matching the winner FindOrCreateRepository /
+// FindOrCreateRepositoryByLocalPath resolve future references to via
+// GetRepositoryByProviderInfo / GetRepositoryByLocalPath's
+// `ORDER BY created_at ASC, id ASC` — so callers do not add a
+// task_repositories link the UI would then de-list. This is a read-time
+// safety net: it hides pre-existing duplicate rows from callers without
+// touching the underlying table, so a caller that still deletes by ID (e.g.
+// DeleteRepository) must use the ID this function returned, not one filtered
+// out. Preserves the relative order of first occurrence.
 func dedupeRepositoriesByIdentity(repos []*models.Repository) []*models.Repository {
 	winners := make(map[string]*models.Repository, len(repos))
 	for _, repo := range repos {
@@ -1015,7 +1022,9 @@ func dedupeRepositoriesByIdentity(repos []*models.Repository) []*models.Reposito
 			continue
 		}
 		key := repositoryIdentityKey(repo)
-		if current, ok := winners[key]; !ok || repo.CreatedAt.Before(current.CreatedAt) {
+		current, ok := winners[key]
+		if !ok || repo.CreatedAt.Before(current.CreatedAt) ||
+			(repo.CreatedAt.Equal(current.CreatedAt) && repo.ID < current.ID) {
 			winners[key] = repo
 		}
 	}

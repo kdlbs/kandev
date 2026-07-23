@@ -69,6 +69,26 @@ func TestDedupeRepositoriesByIdentity(t *testing.T) {
 	}
 }
 
+// TestDedupeRepositoriesByIdentity_EmptyProviderHostNeverCollapses guards the
+// Codex-flagged gap: two provider rows sharing owner/name but with an empty
+// provider_host (legacy rows, or a self-managed provider we've never
+// normalized a host for) must NOT be treated as the same identity, since an
+// empty host cannot distinguish which upstream they actually point at.
+// dedupeRepositoriesByIdentity must fail closed to per-row IDs here instead
+// of collapsing them.
+func TestDedupeRepositoriesByIdentity_EmptyProviderHostNeverCollapses(t *testing.T) {
+	same := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	unknownHostA := &models.Repository{ID: "repo-unknown-a", Provider: "gitlab", ProviderOwner: "group", ProviderName: "project", CreatedAt: same}
+	unknownHostB := &models.Repository{ID: "repo-unknown-b", Provider: "gitlab", ProviderOwner: "group", ProviderName: "project", CreatedAt: same}
+
+	deduped := dedupeRepositoriesByIdentity([]*models.Repository{unknownHostA, unknownHostB})
+
+	if len(deduped) != 2 {
+		t.Fatalf("dedupeRepositoriesByIdentity collapsed %d empty-provider_host rows into %d, want both preserved: %#v",
+			2, len(deduped), deduped)
+	}
+}
+
 // TestService_ListRepositoriesDedupesByLocalPath is the integration path for
 // the local-path case: it exercises the real Service.ListRepositories (so
 // pruning/filtering runs before dedupe), asserting the duplicate pair
