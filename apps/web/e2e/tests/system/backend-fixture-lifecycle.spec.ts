@@ -7,6 +7,7 @@ import path from "node:path";
 import { test } from "@playwright/test";
 
 import { runOwnedBackendFixture, waitForHealth } from "../../fixtures/backend";
+import { stopSSHServer, type SSHServerHandle } from "../../helpers/ssh";
 
 test.describe("backend fixture lifecycle", () => {
   test("fails fast when the backend exited before health polling began", async () => {
@@ -118,5 +119,35 @@ test.describe("backend fixture lifecycle", () => {
         return true;
       },
     );
+  });
+
+  test("returns the SSH bind mount to the host owner before removing the container", () => {
+    const workDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-ssh-cleanup-test-"));
+    const owner = fs.statSync(workDir);
+    const commands: string[][] = [];
+    const handle = {
+      containerName: "kandev-sshd-e2e-7",
+      workDir,
+    } as SSHServerHandle;
+
+    try {
+      stopSSHServer(handle, (args) => {
+        commands.push(args);
+      });
+    } finally {
+      fs.rmSync(workDir, { recursive: true, force: true });
+    }
+
+    assert.deepEqual(commands, [
+      [
+        "exec",
+        handle.containerName,
+        "chown",
+        "-R",
+        `${owner.uid}:${owner.gid}`,
+        "/home/kandev/.kandev",
+      ],
+      ["rm", "-f", handle.containerName],
+    ]);
   });
 });
