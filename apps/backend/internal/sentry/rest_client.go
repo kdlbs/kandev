@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -174,26 +175,52 @@ const listOrganizationsMaxPages = 100
 // SentryOrganization's json tags match the API payload, so the response decodes
 // straight into it.
 func (c *RESTClient) ListOrganizations(ctx context.Context) ([]SentryOrganization, error) {
+	organizations, _, err := c.listOrganizations(ctx, 0)
+	return organizations, err
+}
+
+// ListOrganizationsLimited returns at most limit organizations and reports
+// whether another accessible organization exists beyond that bound.
+func (c *RESTClient) ListOrganizationsLimited(
+	ctx context.Context,
+	limit int,
+) ([]SentryOrganization, bool, error) {
+	if limit < 1 {
+		return nil, false, errors.New("organization limit must be positive")
+	}
+	return c.listOrganizations(ctx, limit)
+}
+
+func (c *RESTClient) listOrganizations(
+	ctx context.Context,
+	limit int,
+) ([]SentryOrganization, bool, error) {
 	out := make([]SentryOrganization, 0, 32)
 	cursor := ""
 	for page := 0; page < listOrganizationsMaxPages; page++ {
 		q := url.Values{}
+		if limit > 0 {
+			q.Set("per_page", strconv.Itoa(min(limit-len(out)+1, 100)))
+		}
 		if cursor != "" {
 			q.Set("cursor", cursor)
 		}
 		var nodes []SentryOrganization
 		resp, err := c.do(ctx, "/organizations/", q, &nodes)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		out = append(out, nodes...)
 		next, hasNext := parseNextCursor(resp.Header.Get("Link"))
+		if limit > 0 && (len(out) > limit || len(out) == limit && hasNext) {
+			return out[:limit], true, nil
+		}
 		if !hasNext {
-			break
+			return out, false, nil
 		}
 		cursor = next
 	}
-	return out, nil
+	return out, limit > 0, nil
 }
 
 // --- projects ---
@@ -333,10 +360,35 @@ func issueNodeToIssue(n *issueNode) SentryIssue {
 // newly created issues appear on page one. The issue watcher relies on this to
 // detect new issues in a single bounded page read per poll tick.
 func (c *RESTClient) SearchIssues(ctx context.Context, filter SearchFilter, cursor string) (*SearchResult, error) {
+	return c.searchIssues(ctx, filter, cursor, 0)
+}
+
+// SearchIssuesLimited requests and retains at most limit issues.
+func (c *RESTClient) SearchIssuesLimited(
+	ctx context.Context,
+	filter SearchFilter,
+	cursor string,
+	limit int,
+) (*SearchResult, error) {
+	if limit < 1 {
+		return nil, errors.New("issue limit must be positive")
+	}
+	return c.searchIssues(ctx, filter, cursor, limit)
+}
+
+func (c *RESTClient) searchIssues(
+	ctx context.Context,
+	filter SearchFilter,
+	cursor string,
+	limit int,
+) (*SearchResult, error) {
 	if filter.OrgSlug == "" {
 		return nil, &APIError{StatusCode: http.StatusBadRequest, Message: "orgSlug required"}
 	}
 	q := url.Values{}
+	if limit > 0 {
+		q.Set("per_page", strconv.Itoa(limit))
+	}
 	// Sort by first-seen descending so the newest issues land on page one.
 	// The issue watcher reads only a single page per tick; this ensures newly
 	// created issues are not buried behind older frequently-occurring ones.
@@ -359,12 +411,16 @@ func (c *RESTClient) SearchIssues(ctx context.Context, filter SearchFilter, curs
 		return nil, err
 	}
 	next, hasNext := parseNextCursor(resp.Header.Get("Link"))
+	count := len(nodes)
+	if limit > 0 {
+		count = min(count, limit)
+	}
 	out := &SearchResult{
-		Issues:        make([]SentryIssue, 0, len(nodes)),
+		Issues:        make([]SentryIssue, 0, count),
 		NextPageToken: next,
 		IsLast:        !hasNext,
 	}
-	for i := range nodes {
+	for i := 0; i < count; i++ {
 		out.Issues = append(out.Issues, issueNodeToIssue(&nodes[i]))
 	}
 	return out, nil

@@ -2,12 +2,12 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { searchHistory, type SearchHit } from "./message-history";
+import { searchHistory, type MessageHistoryEntry, type SearchHit } from "./message-history";
 import { HitRow } from "./message-history-search-row";
 
 type MessageHistorySearchProps = {
   /** Newest-first list of the user's previous messages for this session. */
-  history: readonly string[];
+  history: readonly MessageHistoryEntry[];
   /** True while older messages are still being paginated in from the backend
    *  (overlay-driven drain). The list updates live as more arrive. */
   isLoadingOlder?: boolean;
@@ -30,7 +30,7 @@ function clampSelectedIndex(prev: number, hitCount: number): number {
   return prev;
 }
 
-function useHits(history: readonly string[], query: string): SearchHit[] {
+function useHits(history: readonly MessageHistoryEntry[], query: string): SearchHit[] {
   return useMemo(() => searchHistory(history, query), [history, query]);
 }
 

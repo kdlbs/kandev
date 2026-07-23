@@ -396,6 +396,30 @@ func TestCloudClient_ServerMode_SearchTickets_StartAtPagination(t *testing.T) {
 	}
 }
 
+func TestCloudClient_SearchTickets_PreservesImmutableIssueID(t *testing.T) {
+	ts := newMockServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"issues": [{
+				"id": "10042",
+				"key": "ENG-42",
+				"fields": {"summary": "Fix auth", "status": {}, "project": {}, "issuetype": {}}
+			}],
+			"isLast": true
+		}`))
+	})
+
+	result, err := clientTo(ts, AuthMethodAPIToken, "token").SearchTickets(
+		context.Background(), "summary ~ auth", "", 5,
+	)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(result.Tickets) != 1 || result.Tickets[0].ID != "10042" {
+		t.Fatalf("tickets = %#v, want immutable issue ID", result.Tickets)
+	}
+}
+
 // Jira Server can return fewer issues than maxResults on a non-terminal page
 // (rate limits, filtered results). The pager must still advance — IsLast is
 // driven by total, not by len(issues) < maxResults.

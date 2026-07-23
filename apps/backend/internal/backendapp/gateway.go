@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/scripts"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
@@ -111,6 +112,7 @@ func provideGateway(
 	terminalRepo *terminalrepo.Repository,
 	githubSvc *github.Service,
 	gitlabSvc *gitlab.Service,
+	referenceValidator entityrefs.SubmissionValidator,
 	dataDir string,
 ) (*gateways.Gateway, *notificationservice.Service, *notificationcontroller.Controller, *terminalservice.Service, error) {
 	gateway, err := gateways.Provide(log)
@@ -146,7 +148,13 @@ func provideGateway(
 	orchestratorHandlers.RegisterHandlers(gateway.Dispatcher)
 
 	// Register message queue handlers
-	queueHandlers := orchestratorhandlers.NewQueueHandlers(orchestratorSvc.GetMessageQueue(), orchestratorSvc.GetEventBus(), log, orchestratorSvc)
+	queueHandlers := orchestratorhandlers.NewQueueHandlers(
+		orchestratorSvc.GetMessageQueue(),
+		orchestratorSvc.GetEventBus(),
+		log,
+		orchestratorSvc,
+		referenceValidator,
+	)
 	queueHandlers.RegisterHandlers(gateway.Dispatcher)
 
 	if lifecycleMgr != nil && agentRegistry != nil {

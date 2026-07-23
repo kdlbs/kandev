@@ -4,8 +4,13 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatInputBody, type ChatInputBodyProps } from "./chat-input-body";
 
+const tipTapPropsMock = vi.hoisted(() => vi.fn());
+
 vi.mock("./tiptap-input", () => ({
-  TipTapInput: () => <div data-testid="mock-tiptap-input" />,
+  TipTapInput: (props: unknown) => {
+    tipTapPropsMock(props);
+    return <div data-testid="mock-tiptap-input" />;
+  },
 }));
 
 vi.mock("./chat-input-toolbar", () => ({
@@ -18,6 +23,7 @@ vi.mock("./context-items/context-zone", () => ({
 
 afterEach(() => {
   cleanup();
+  tipTapPropsMock.mockClear();
 });
 
 function props(overrides: Partial<ChatInputBodyProps> = {}): ChatInputBodyProps {
@@ -74,6 +80,18 @@ function props(overrides: Partial<ChatInputBodyProps> = {}): ChatInputBodyProps 
 }
 
 describe("ChatInputBody", () => {
+  it("keeps entity references explicitly disabled unless the chat surface enables them", () => {
+    render(
+      <TooltipProvider>
+        <ChatInputBody {...props()} />
+      </TooltipProvider>,
+    );
+
+    expect(tipTapPropsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ entityReferencesEnabled: false }),
+    );
+  });
+
   it("reserves right-side editable space while the focus hint is visible", () => {
     render(
       <TooltipProvider>

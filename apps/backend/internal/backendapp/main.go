@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/httpmw"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"go.uber.org/zap"
 
 	// Common packages
@@ -645,10 +646,15 @@ func startGatewayAndServe(
 	// WEBSOCKET GATEWAY
 	// ============================================
 	log.Info("Initializing WebSocket Gateway...")
+	var referenceValidator entityrefs.SubmissionValidator
+	if services.Mentions != nil {
+		referenceValidator = services.Mentions.Submission
+	}
 	gateway, _, notificationCtrl, terminalSvc, err := provideGateway(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
 		repos.Notification, repos.Task, repos.Terminal, services.GitHub, services.GitLab,
+		referenceValidator,
 		cfg.ResolvedHomeDir(),
 	)
 	if terminalSvc != nil {

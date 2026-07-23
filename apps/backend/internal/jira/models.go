@@ -87,6 +87,7 @@ type TestConnectionResult struct {
 // and surface a few familiar fields (assignee, reporter, priority) in the
 // popover so users don't have to switch tabs to Jira.
 type JiraTicket struct {
+	ID             string            `json:"id"`
 	Key            string            `json:"key"`
 	Summary        string            `json:"summary"`
 	Description    string            `json:"description"`
