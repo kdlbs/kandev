@@ -14,7 +14,7 @@ import (
 // StreamCallbacks defines callbacks for stream events
 type StreamCallbacks struct {
 	OnAgentEvent       func(execution *AgentExecution, event agentctl.AgentEvent)
-	OnStreamDisconnect func(execution *AgentExecution, err error)
+	OnStreamDisconnect func(execution *AgentExecution, err error, promptGeneration uint64)
 	OnGitStatus        func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
 	OnGitCommit        func(execution *AgentExecution, commit *agentctl.GitCommitNotification)
 	OnGitReset         func(execution *AgentExecution, reset *agentctl.GitResetNotification)
@@ -283,20 +283,8 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			sm.callbacks.OnAgentEvent(execution, event)
 		}
 	}, sm.mcpHandler, func(disconnectErr error) {
-		// WebSocket dropped — signal promptDoneCh so SendPrompt doesn't hang forever.
-		// Only signal on unexpected errors (not normal close).
 		if disconnectErr != nil {
-			select {
-			case execution.promptDoneCh <- PromptCompletionSignal{
-				IsError: true,
-				Error:   "agent stream disconnected: " + disconnectErr.Error(),
-			}:
-			default:
-			}
-			// Notify lifecycle manager so it can proactively update execution status
-			if sm.callbacks.OnStreamDisconnect != nil {
-				sm.callbacks.OnStreamDisconnect(execution, disconnectErr)
-			}
+			sm.handleUpdatesDisconnect(execution, disconnectErr)
 		}
 	})
 
@@ -311,6 +299,23 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		sm.logger.Error("failed to connect to updates stream",
 			zap.String("instance_id", execution.ID),
 			zap.Error(err))
+	}
+}
+
+func (sm *StreamManager) handleUpdatesDisconnect(execution *AgentExecution, disconnectErr error) {
+	// Capture prompt ownership before signaling the waiter. A replacement may
+	// advance the generation before the lifecycle callback runs.
+	promptGeneration := execution.promptGenerationSnapshot()
+	select {
+	case execution.promptDoneCh <- PromptCompletionSignal{
+		IsError:          true,
+		Error:            "agent stream disconnected: " + disconnectErr.Error(),
+		PromptGeneration: promptGeneration,
+	}:
+	default:
+	}
+	if sm.callbacks.OnStreamDisconnect != nil {
+		sm.callbacks.OnStreamDisconnect(execution, disconnectErr, promptGeneration)
 	}
 }
 

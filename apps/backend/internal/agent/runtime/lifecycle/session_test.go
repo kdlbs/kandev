@@ -1324,12 +1324,37 @@ func TestWaitForPromptDone_TreatsPromptAbandonedAfterCancelAsCancelEscalated(t *
 		Error:   "prompt abandoned after cancel",
 	}
 
-	_, err := sm.waitForPromptDone(context.Background(), execution)
+	_, err := sm.waitForPromptDone(context.Background(), execution, 0)
 	if !errors.Is(err, ErrCancelEscalated) {
 		t.Fatalf("expected ErrCancelEscalated, got: %v", err)
 	}
 	if !errors.Is(err, ErrAgentReported) {
 		t.Fatalf("expected ErrAgentReported wrapper, got: %v", err)
+	}
+}
+
+func TestWaitForPromptDone_IgnoresSupersededGenerationSignal(t *testing.T) {
+	sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		promptDoneCh: make(chan PromptCompletionSignal, 2),
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		IsError:          true,
+		Error:            "old stream disconnected",
+		PromptGeneration: 1,
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "end_turn",
+		PromptGeneration: 2,
+	}
+
+	result, err := sm.waitForPromptDone(context.Background(), execution, 2)
+	if err != nil {
+		t.Fatalf("waitForPromptDone: %v", err)
+	}
+	if result == nil || result.StopReason != "end_turn" {
+		t.Fatalf("result = %+v, want replacement completion", result)
 	}
 }
 

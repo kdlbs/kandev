@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -405,7 +406,7 @@ func TestStreamDisconnect_PersistsPartialAssistantHistoryExactlyOnce(t *testing.
 		Text:              "partial response",
 		ProtocolMessageID: "message-a",
 	})
-	mgr.handleStreamDisconnect(execution, errors.New("connection lost"))
+	mgr.handleStreamDisconnect(execution, errors.New("connection lost"), 0)
 
 	// A later prompt or reset must not discard or duplicate the segment.
 	flushAssistantHistory(execution, history, mgr.logger)
@@ -453,7 +454,7 @@ func TestPromptResetWinsDisconnectRaceWithoutDroppingHistory(t *testing.T) {
 	execution.messageMu.Lock()
 	execution.resetStreamingStateLocked()
 	execution.messageMu.Unlock()
-	mgr.handleStreamDisconnect(execution, errors.New("connection lost"))
+	mgr.handleStreamDisconnect(execution, errors.New("connection lost"), 0)
 
 	entries, err := history.ReadHistory(execution.SessionID)
 	if err != nil {
@@ -461,6 +462,144 @@ func TestPromptResetWinsDisconnectRaceWithoutDroppingHistory(t *testing.T) {
 	}
 	if len(entries) != 1 || entries[0].Content != "response before disconnect callback" {
 		t.Fatalf("disconnect-race history = %+v, want one partial assistant message", entries)
+	}
+}
+
+func TestDelayedDisconnectCannotAffectReplacementGeneration(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	originalGeneration, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin original prompt: %v", err)
+	}
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "message_chunk", Text: "old partial"})
+
+	callbackReached := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	callbackDone := make(chan struct{})
+	streamManager := NewStreamManager(mgr.logger, StreamCallbacks{
+		OnStreamDisconnect: func(exec *AgentExecution, disconnectErr error, generation uint64) {
+			close(callbackReached)
+			<-releaseCallback
+			mgr.handleStreamDisconnect(exec, disconnectErr, generation)
+			close(callbackDone)
+		},
+	}, nil, nil)
+	go streamManager.handleUpdatesDisconnect(execution, errors.New("old stream lost"))
+
+	<-callbackReached
+	signal := <-execution.promptDoneCh
+	if signal.PromptGeneration != originalGeneration {
+		t.Fatalf("disconnect signal generation = %d, want %d", signal.PromptGeneration, originalGeneration)
+	}
+
+	replacementGeneration, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin replacement prompt: %v", err)
+	}
+	if replacementGeneration == originalGeneration {
+		t.Fatal("replacement prompt did not advance generation")
+	}
+	resetStreamingStateWithHistory(execution, history, mgr.logger)
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "message_chunk", Text: "replacement text"})
+
+	close(releaseCallback)
+	<-callbackDone
+
+	if execution.Status != v1.AgentStatusRunning {
+		t.Fatalf("replacement status = %s, want %s", execution.Status, v1.AgentStatusRunning)
+	}
+	execution.messageMu.Lock()
+	assistantHistory := execution.assistantHistoryBuffer.String()
+	messageBuffer := execution.messageBuffer.String()
+	execution.messageMu.Unlock()
+	if assistantHistory != "replacement text" || messageBuffer != "replacement text" {
+		t.Fatalf("replacement buffers changed: history=%q message=%q", assistantHistory, messageBuffer)
+	}
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Content != "old partial" {
+		t.Fatalf("history = %+v, want only the original partial response", entries)
+	}
+	for _, published := range eventBus.PublishedEvents {
+		if published.Subject == events.AgentctlError {
+			t.Fatal("superseded disconnect published AgentctlError")
+		}
+	}
+}
+
+func TestResetStreamingStateWithHistory_HasNoDrainResetGap(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	execution.assistantHistoryBuffer.WriteString("old partial")
+	execution.messageBuffer.WriteString("old partial")
+
+	// Hold persistence so the test can force a chunk to arrive after history
+	// detaches. With split drain/reset locks, that chunk was accepted in the
+	// gap and then erased by reset. The atomic helper resets before blocking
+	// on history I/O, so the late chunk belongs to the post-reset buffer.
+	history.mu.Lock()
+	historyLocked := true
+	defer func() {
+		if historyLocked {
+			history.mu.Unlock()
+		}
+	}()
+	resetDone := make(chan struct{})
+	go func() {
+		resetStreamingStateWithHistory(execution, history, mgr.logger)
+		close(resetDone)
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		execution.messageMu.Lock()
+		detached := execution.assistantHistoryBuffer.Len() == 0
+		execution.messageMu.Unlock()
+		if detached {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("assistant history did not detach")
+		}
+		runtime.Gosched()
+	}
+	mgr.handleMessageChunkEvent(execution, agentctl.AgentEvent{Type: "message_chunk", Text: "late chunk"})
+
+	history.mu.Unlock()
+	historyLocked = false
+	<-resetDone
+
+	execution.messageMu.Lock()
+	assistantHistory := execution.assistantHistoryBuffer.String()
+	messageBuffer := execution.messageBuffer.String()
+	execution.messageMu.Unlock()
+	if assistantHistory != "late chunk" || messageBuffer != "late chunk" {
+		t.Fatalf("late chunk lost across reset: history=%q message=%q", assistantHistory, messageBuffer)
+	}
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Content != "old partial" {
+		t.Fatalf("detached history = %+v, want only old partial", entries)
 	}
 }
 
@@ -494,7 +633,7 @@ func TestStreamDisconnect_DiscardsHistoryWhenRecordingUnavailable(t *testing.T) 
 				t.Fatalf("add execution: %v", err)
 			}
 
-			mgr.handleStreamDisconnect(execution, errors.New("connection lost"))
+			mgr.handleStreamDisconnect(execution, errors.New("connection lost"), 0)
 
 			execution.messageMu.Lock()
 			buffered := execution.assistantHistoryBuffer.Len()

@@ -184,9 +184,16 @@ func (e *AgentExecution) officeProfileID() string {
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
 type PromptCompletionSignal struct {
-	StopReason string
-	IsError    bool
-	Error      string
+	StopReason       string
+	IsError          bool
+	Error            string
+	PromptGeneration uint64
+}
+
+func (e *AgentExecution) promptGenerationSnapshot() uint64 {
+	e.promptLifecycleMu.Lock()
+	defer e.promptLifecycleMu.Unlock()
+	return e.promptGeneration
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution

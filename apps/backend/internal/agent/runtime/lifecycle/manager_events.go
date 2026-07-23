@@ -24,6 +24,10 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	if event.Role == "user" || event.Text == "" {
 		return
 	}
+	// ACP message chunks do not carry the lifecycle prompt generation. The
+	// messageMu acquisition is therefore the only reliable turn boundary: a
+	// chunk observed before an atomic reset is detached with the old turn,
+	// while one observed after reset is retained for the replacement turn.
 	m.appendAssistantHistoryChunk(execution, event.Text)
 	if event.ProtocolMessageID != "" {
 		m.flushPendingLegacyMessage(execution)
@@ -166,9 +170,10 @@ func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentE
 	}
 	select {
 	case execution.promptDoneCh <- PromptCompletionSignal{
-		StopReason: stopReason,
-		IsError:    isError,
-		Error:      errorMsg,
+		StopReason:       stopReason,
+		IsError:          isError,
+		Error:            errorMsg,
+		PromptGeneration: event.PromptGeneration,
 	}:
 	default:
 		// Channel full or no one waiting — that's fine (e.g., initial prompt in goroutine)
@@ -501,11 +506,49 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 // handleStreamDisconnect handles unexpected updates stream disconnections.
 // It proactively updates execution status and publishes an error event so the
 // orchestrator can transition the session state without waiting for a future prompt.
-func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
+func (m *Manager) handleStreamDisconnect(
+	execution *AgentExecution,
+	err error,
+	promptGeneration uint64,
+) {
 	m.logger.Warn("agent updates stream disconnected",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
+		zap.Uint64("prompt_generation", promptGeneration),
 		zap.Error(err))
+
+	if promptGeneration != 0 {
+		execution.promptLifecycleMu.Lock()
+		defer execution.promptLifecycleMu.Unlock()
+
+		var claimed bool
+		var updated *AgentExecution
+		statusErr := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+			if current != execution || current.promptGeneration != promptGeneration {
+				return
+			}
+			current.Status = v1.AgentStatusFailed
+			updated = current
+			claimed = true
+		})
+		if statusErr != nil {
+			m.logger.Warn("failed to persist stream disconnect failed status",
+				zap.String("execution_id", execution.ID),
+				zap.Error(statusErr))
+			return
+		}
+		if !claimed {
+			m.logger.Debug("ignoring stream disconnect for superseded prompt generation",
+				zap.String("execution_id", execution.ID),
+				zap.Uint64("disconnect_prompt_generation", promptGeneration))
+			return
+		}
+
+		m.flushAssistantHistory(execution)
+		m.persistExecutorRunning(context.Background(), updated)
+		m.publishStreamDisconnectError(execution, err)
+		return
+	}
 
 	// The stream callback may race with the caller starting another prompt
 	// after promptDoneCh is signaled. Drain the partial assistant transcript
@@ -519,6 +562,10 @@ func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
 			zap.Error(err))
 	}
 
+	m.publishStreamDisconnectError(execution, err)
+}
+
+func (m *Manager) publishStreamDisconnectError(execution *AgentExecution, err error) {
 	m.eventPublisher.PublishAgentctlEvent(
 		context.Background(), events.AgentctlError, execution,
 		"agent stream disconnected: "+err.Error(),

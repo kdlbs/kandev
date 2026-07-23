@@ -62,6 +62,10 @@ func (m *Manager) flushAssistantHistory(execution *AgentExecution) {
 	flushAssistantHistory(execution, m.historyManager, m.logger)
 }
 
+func (m *Manager) resetStreamingStateWithHistory(execution *AgentExecution) {
+	resetStreamingStateWithHistory(execution, m.historyManager, m.logger)
+}
+
 // flushAssistantHistory drains the pending assistant segment exactly once.
 // Draining also deliberately discards the segment when history recording is
 // unavailable or disabled, so stale text cannot leak into a later prompt.
@@ -71,10 +75,40 @@ func flushAssistantHistory(
 	log *logger.Logger,
 ) {
 	execution.messageMu.Lock()
-	content := execution.assistantHistoryBuffer.String()
-	execution.assistantHistoryBuffer.Reset()
+	content := execution.detachAssistantHistoryLocked()
 	execution.messageMu.Unlock()
 
+	persistAssistantHistory(content, execution, historyManager, log)
+}
+
+// resetStreamingStateWithHistory atomically detaches the prior assistant
+// transcript and resets every streaming buffer/correlation under messageMu.
+// Persistence happens afterward so filesystem I/O never blocks incoming chunks.
+func resetStreamingStateWithHistory(
+	execution *AgentExecution,
+	historyManager *SessionHistoryManager,
+	log *logger.Logger,
+) {
+	execution.messageMu.Lock()
+	content := execution.detachAssistantHistoryLocked()
+	execution.resetStreamingStateLocked()
+	execution.messageMu.Unlock()
+
+	persistAssistantHistory(content, execution, historyManager, log)
+}
+
+func (e *AgentExecution) detachAssistantHistoryLocked() string {
+	content := e.assistantHistoryBuffer.String()
+	e.assistantHistoryBuffer.Reset()
+	return content
+}
+
+func persistAssistantHistory(
+	content string,
+	execution *AgentExecution,
+	historyManager *SessionHistoryManager,
+	log *logger.Logger,
+) {
 	if content == "" || historyManager == nil || !execution.historyEnabled || execution.SessionID == "" {
 		return
 	}
