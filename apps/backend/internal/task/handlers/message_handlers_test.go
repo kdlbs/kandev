@@ -342,6 +342,10 @@ func (o *firstTurnCaptureOrchestrator) StepRequiresCompletionSignal(context.Cont
 	return false
 }
 
+func (*firstTurnCaptureOrchestrator) ForegroundActivity(string) v1.ForegroundActivity {
+	return ""
+}
+
 func TestWSAddMessage_CreatedSessionPreservesReferencesThroughCanonicalizationAndDispatch(t *testing.T) {
 	now := time.Now().UTC()
 	reference := v1.EntityReference{
@@ -882,7 +886,7 @@ func (o fgActivityOrchestrator) PromptTask(context.Context, string, string, stri
 	return &orchestrator.PromptResult{}, nil
 }
 func (o fgActivityOrchestrator) ResumeTaskSession(context.Context, string, string) error { return nil }
-func (o fgActivityOrchestrator) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment) error {
+func (o fgActivityOrchestrator) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) error {
 	return nil
 }
 func (o fgActivityOrchestrator) ProcessOnTurnStart(context.Context, string, string) error { return nil }
@@ -903,7 +907,7 @@ func (o *recordingAdmissionOrchestrator) PromptTask(_ context.Context, _ string,
 func (*recordingAdmissionOrchestrator) ResumeTaskSession(context.Context, string, string) error {
 	return nil
 }
-func (*recordingAdmissionOrchestrator) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment) error {
+func (*recordingAdmissionOrchestrator) StartCreatedSession(context.Context, string, string, string, string, bool, bool, bool, []v1.MessageAttachment, []v1.EntityReference) error {
 	return nil
 }
 func (*recordingAdmissionOrchestrator) ProcessOnTurnStart(context.Context, string, string) error {
