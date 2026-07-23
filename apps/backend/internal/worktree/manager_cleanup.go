@@ -86,6 +86,12 @@ const (
 	worktreeRegistrationCompeting
 )
 
+type worktreeRegistration struct {
+	path   string
+	head   string
+	branch string
+}
+
 func inspectWorktreeRegistrationOwnership(
 	ctx context.Context, repoPath, worktreePath, branchRef, headOID string,
 ) (worktreeRegistrationOwnership, error) {
@@ -99,46 +105,53 @@ func inspectWorktreeRegistrationOwnership(
 	if err != nil {
 		return worktreeRegistrationAbsent, err
 	}
-	var exactTarget, branchElsewhere, targetClaimed bool
-	var normalizationErr error
-	var currentPath, currentHead, currentBranch string
-	inspectRegistration := func() {
-		if currentPath == "" || normalizationErr != nil {
-			return
-		}
-		currentPathKey, normalizeErr := normalizedWorktreeTargetPath(currentPath)
-		if normalizeErr != nil {
-			normalizationErr = normalizeErr
-			return
-		}
-		if currentPathKey != wantPath {
-			if currentBranch == branchRef {
-				branchElsewhere = true
-			}
-			return
-		}
-		if currentBranch == branchRef && currentHead == headOID {
-			exactTarget = true
-			return
-		}
-		targetClaimed = true
-	}
-	for _, field := range strings.Split(string(output), "\x00") {
+	return classifyWorktreeRegistrationOwnership(
+		parseWorktreeRegistrations(string(output)), wantPath, branchRef, headOID,
+	)
+}
+
+func parseWorktreeRegistrations(output string) []worktreeRegistration {
+	var registrations []worktreeRegistration
+	current := -1
+	for _, field := range strings.Split(output, "\x00") {
 		switch {
 		case strings.HasPrefix(field, "worktree "):
-			inspectRegistration()
-			currentPath = strings.TrimPrefix(field, "worktree ")
-			currentHead = ""
-			currentBranch = ""
-		case strings.HasPrefix(field, "HEAD "):
-			currentHead = strings.TrimPrefix(field, "HEAD ")
-		case strings.HasPrefix(field, "branch "):
-			currentBranch = strings.TrimPrefix(field, "branch ")
+			registrations = append(registrations, worktreeRegistration{
+				path: strings.TrimPrefix(field, "worktree "),
+			})
+			current = len(registrations) - 1
+		case current >= 0 && strings.HasPrefix(field, "HEAD "):
+			registrations[current].head = strings.TrimPrefix(field, "HEAD ")
+		case current >= 0 && strings.HasPrefix(field, "branch "):
+			registrations[current].branch = strings.TrimPrefix(field, "branch ")
 		}
 	}
-	inspectRegistration()
-	if normalizationErr != nil {
-		return worktreeRegistrationAbsent, normalizationErr
+	return registrations
+}
+
+func classifyWorktreeRegistrationOwnership(
+	registrations []worktreeRegistration, wantPath, branchRef, headOID string,
+) (worktreeRegistrationOwnership, error) {
+	var exactTarget, branchElsewhere, targetClaimed bool
+	for _, registration := range registrations {
+		if registration.path == "" {
+			continue
+		}
+		currentPath, err := normalizedWorktreeTargetPath(registration.path)
+		if err != nil {
+			return worktreeRegistrationAbsent, err
+		}
+		if currentPath != wantPath {
+			if registration.branch == branchRef {
+				branchElsewhere = true
+			}
+			continue
+		}
+		if registration.branch == branchRef && registration.head == headOID {
+			exactTarget = true
+			continue
+		}
+		targetClaimed = true
 	}
 	if exactTarget && !branchElsewhere && !targetClaimed {
 		return worktreeRegistrationOwned, nil
