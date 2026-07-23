@@ -121,10 +121,14 @@ type WorkflowStepGetter interface {
 }
 
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in
-// an effective prompt and appends a hidden expansion block. Implemented by
-// promptservice.Service.
+// an effective prompt and returns both the expanded prompt and the exact
+// server-generated block content. Implemented by promptservice.Service.
 type PromptReferenceExpander interface {
-	AppendReferenceExpansions(ctx context.Context, prompt string, log *zap.Logger) string
+	AppendReferenceExpansionsWithContext(
+		ctx context.Context,
+		prompt string,
+		log *zap.Logger,
+	) (expandedPrompt, trustedContext string)
 }
 
 // repoStore is the repository interface accepted by NewService.

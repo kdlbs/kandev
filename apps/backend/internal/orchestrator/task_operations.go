@@ -430,7 +430,10 @@ func (s *Service) StartCreatedSession(
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload task after on_turn_start: %w", err)
 	}
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID, planMode, task.IsEphemeral, session.IsPassthrough)
+	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
+		ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
+		planMode, task.IsEphemeral, session.IsPassthrough,
+	)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -449,12 +452,15 @@ func (s *Service) StartCreatedSession(
 	if (effectivePrompt != "" || len(attachments) > 0) && !session.IsPassthrough {
 		referenceContext := EntityReferenceContext(references)
 		if isOfficeTask {
-			effectivePrompt = sysprompt.InjectOfficeContext(taskID, sessionID, effectivePrompt, referenceContext)
+			effectivePrompt = sysprompt.InjectOfficeContext(
+				taskID, sessionID, effectivePrompt,
+				referenceContext, promptReferenceContext,
+			)
 		} else {
 			effectivePrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 				IncludeCoordinatorTaskControls: !configMode,
-			}, referenceContext)
+			}, referenceContext, promptReferenceContext)
 		}
 	}
 
@@ -708,7 +714,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// a real passthrough session's PTY.
 	isPassthrough := s.resolveIsPassthroughForLaunch(ctx, sessionID)
 
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode, task.IsEphemeral, isPassthrough)
+	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
+		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
+		planMode, task.IsEphemeral, isPassthrough,
+	)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -735,12 +744,14 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// while the task is already bound to a signal-gated step in the DB.
 	if (effectivePrompt != "" || len(attachments) > 0) && !skipKandevMCPWrap {
 		if isOfficeTask {
-			effectivePrompt = sysprompt.InjectOfficeContext(task.ID, sessionID, effectivePrompt)
+			effectivePrompt = sysprompt.InjectOfficeContext(
+				task.ID, sessionID, effectivePrompt, promptReferenceContext,
+			)
 		} else {
 			effectivePrompt = sysprompt.InjectKandevContextWithOptions(task.ID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, task.ID),
 				IncludeCoordinatorTaskControls: !configMode,
-			})
+			}, promptReferenceContext)
 		}
 	}
 
@@ -972,8 +983,9 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
 // Returns the effective prompt and whether plan mode is active (from either the step or the caller).
 // For ephemeral tasks (quick chat), workflow step processing is skipped since they have no workflow.
-func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, sessionID string, workflowStepID string, planMode bool, isEphemeral bool, isPassthrough bool) (string, bool) {
+func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, sessionID string, workflowStepID string, planMode bool, isEphemeral bool, isPassthrough bool) (string, bool, string) {
 	effectivePrompt := prompt
+	promptReferenceContext := ""
 
 	stepHasPlanMode := false
 	// Skip workflow step prompt injection for ephemeral tasks - they don't have workflows
@@ -985,7 +997,9 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 				zap.Error(err))
 		} else {
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-			effectivePrompt = s.buildWorkflowPrompt(ctx, effectivePrompt, step, taskID, sessionID, isPassthrough)
+			effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithContext(
+				ctx, effectivePrompt, step, taskID, sessionID, isPassthrough,
+			)
 		}
 	}
 
@@ -996,7 +1010,7 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 		effectivePrompt = strings.Join(parts, "\n\n")
 	}
 
-	return effectivePrompt, planMode || stepHasPlanMode
+	return effectivePrompt, planMode || stepHasPlanMode, promptReferenceContext
 }
 
 // backfillInitialUserMessageIfMissing records the task's description as the
@@ -1048,6 +1062,18 @@ func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, p
 // If the step has enable_plan_mode in on_enter events, plan mode prefix is also prepended.
 // Only true internal instructions are wrapped in <kandev-system> tags so they can be stripped from the visible chat.
 func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string, isPassthrough bool) string {
+	prompt, _ := s.buildWorkflowPromptWithContext(ctx, basePrompt, step, taskID, sessionID, isPassthrough)
+	return prompt
+}
+
+func (s *Service) buildWorkflowPromptWithContext(
+	ctx context.Context,
+	basePrompt string,
+	step *wfmodels.WorkflowStep,
+	taskID string,
+	sessionID string,
+	isPassthrough bool,
+) (string, string) {
 	_ = sessionID
 	var parts []string
 
@@ -1068,7 +1094,7 @@ func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, st
 	}
 
 	joined := strings.Join(parts, "\n\n")
-	return s.expandPromptReferences(ctx, joined, isPassthrough)
+	return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
 }
 
 // expandPromptReferences resolves "@name" saved-prompt references in prompt
@@ -1078,14 +1104,23 @@ func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, st
 // the expansion's hidden wrapper block would be typed into the terminal
 // verbatim instead of staying hidden.
 func (s *Service) expandPromptReferences(ctx context.Context, prompt string, isPassthrough bool) string {
+	expanded, _ := s.expandPromptReferencesWithContext(ctx, prompt, isPassthrough)
+	return expanded
+}
+
+func (s *Service) expandPromptReferencesWithContext(
+	ctx context.Context,
+	prompt string,
+	isPassthrough bool,
+) (string, string) {
 	if s.promptExpander == nil || isPassthrough {
-		return prompt
+		return prompt, ""
 	}
 	var zapLogger *zap.Logger
 	if s.logger != nil {
 		zapLogger = s.logger.Zap()
 	}
-	return s.promptExpander.AppendReferenceExpansions(ctx, prompt, zapLogger)
+	return s.promptExpander.AppendReferenceExpansionsWithContext(ctx, prompt, zapLogger)
 }
 
 // ResumeTaskSession restarts a specific task session using its stored worktree.
