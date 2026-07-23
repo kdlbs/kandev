@@ -30,11 +30,12 @@ func TestScanRepositorySubdirs_AcceptsRegisteredRepositoryLink(t *testing.T) {
 	taskRoot := t.TempDir()
 	source := t.TempDir()
 	initGitRepoAt(t, source)
+	canonicalSource := canonicalSourceRoot(t, source)
 	if err := os.Symlink(source, filepath.Join(taskRoot, "linked-repository")); err != nil {
 		t.Skip("symlinks not supported")
 	}
 
-	children := scanRepositorySubdirs(taskRoot, []string{source})
+	children := scanRepositorySubdirs(taskRoot, []string{canonicalSource})
 	if len(children) != 1 || children[0].name != "linked-repository" {
 		t.Fatalf("registered repository links = %+v, want linked-repository", children)
 	}
@@ -48,6 +49,7 @@ func TestRebindWorkspaceWithSourceRoots_PinsRegisteredRepositoryLinkTarget(t *te
 	secondSource := t.TempDir()
 	initGitRepoAt(t, firstSource)
 	initGitRepoAt(t, secondSource)
+	canonicalFirstSource := canonicalSourceRoot(t, firstSource)
 	link := filepath.Join(newRoot, "linked-repository")
 	if err := os.Symlink(firstSource, link); err != nil {
 		t.Skip("symlinks not supported")
@@ -65,8 +67,8 @@ func TestRebindWorkspaceWithSourceRoots_PinsRegisteredRepositoryLinkTarget(t *te
 	if err := os.Symlink(secondSource, link); err != nil {
 		t.Fatal(err)
 	}
-	if len(m.repoTrackers) != 1 || m.repoTrackers[0].workDir != firstSource {
-		t.Fatalf("repository tracker after link swap = %+v, want pinned target %q", m.repoTrackers, firstSource)
+	if len(m.repoTrackers) != 1 || m.repoTrackers[0].workDir != canonicalFirstSource {
+		t.Fatalf("repository tracker after link swap = %+v, want pinned target %q", m.repoTrackers, canonicalFirstSource)
 	}
 }
 
@@ -76,6 +78,7 @@ func TestRebindWorkspaceWithSourceRoots_UsesProposedRootsForDiscovery(t *testing
 	newRoot := t.TempDir()
 	source := t.TempDir()
 	initGitRepoAt(t, source)
+	canonicalSource := canonicalSourceRoot(t, source)
 	if err := os.Symlink(source, filepath.Join(newRoot, "linked-repository")); err != nil {
 		t.Skip("symlinks not supported")
 	}
@@ -89,8 +92,8 @@ func TestRebindWorkspaceWithSourceRoots_UsesProposedRootsForDiscovery(t *testing
 	if len(m.repoTrackers) != 1 || m.repoTrackers[0].RepositoryName() != "linked-repository" {
 		t.Fatalf("rebind repository trackers = %+v, want linked-repository", m.repoTrackers)
 	}
-	if len(m.workspaceSourceRoots) != 1 || m.workspaceSourceRoots[0] != source {
-		t.Fatalf("rebind source roots = %q, want %q", m.workspaceSourceRoots, source)
+	if len(m.workspaceSourceRoots) != 1 || m.workspaceSourceRoots[0] != canonicalSource {
+		t.Fatalf("rebind source roots = %q, want %q", m.workspaceSourceRoots, canonicalSource)
 	}
 }
 
@@ -101,6 +104,7 @@ func TestRescanRepositoriesWithSourceRoots_ReplacesRepointedRepositoryLink(t *te
 	initGitRepoAt(t, workspace)
 	initGitRepoAt(t, firstSource)
 	initGitRepoAt(t, secondSource)
+	canonicalSecondSource := canonicalSourceRoot(t, secondSource)
 	link := filepath.Join(workspace, "linked-repository")
 	if err := os.Symlink(firstSource, link); err != nil {
 		t.Skip("symlinks not supported")
@@ -123,8 +127,8 @@ func TestRescanRepositoriesWithSourceRoots_ReplacesRepointedRepositoryLink(t *te
 	if err := m.RescanRepositoriesWithSourceRoots(context.Background(), "", []string{secondSource}); err != nil {
 		t.Fatalf("repointed source-root rescan: %v", err)
 	}
-	if len(m.repoTrackers) != 1 || m.repoTrackers[0] == oldTracker || m.repoTrackers[0].workDir != secondSource {
-		t.Fatalf("repointed tracker = %+v, want replacement pinned to %q", m.repoTrackers, secondSource)
+	if len(m.repoTrackers) != 1 || m.repoTrackers[0] == oldTracker || m.repoTrackers[0].workDir != canonicalSecondSource {
+		t.Fatalf("repointed tracker = %+v, want replacement pinned to %q", m.repoTrackers, canonicalSecondSource)
 	}
 	select {
 	case <-oldTracker.stopCh:
@@ -629,4 +633,13 @@ func initGitRepoAt(t *testing.T, dir string) {
 	runIn("git", "config", "user.name", "Test User")
 	runIn("git", "config", "commit.gpgsign", "false")
 	runIn("git", "commit", "--allow-empty", "-m", "initial")
+}
+
+func canonicalSourceRoot(t *testing.T, source string) string {
+	t.Helper()
+	roots := canonicalWorkspaceSourceRoots([]string{source})
+	if len(roots) != 1 {
+		t.Fatalf("canonical source roots for %q = %q, want one root", source, roots)
+	}
+	return roots[0]
 }
