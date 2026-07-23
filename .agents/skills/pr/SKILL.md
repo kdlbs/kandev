@@ -102,8 +102,9 @@ explicitly requests task tracking.
    commit=$(git commit-tree "$tree" -m "media: screenshots for PR #<N>")
    git push origin "$commit:refs/heads/media/pr-<N>-screenshots"
    ```
-   (A quoting glitch can make the first push report failure — retry with the literal commit SHA.) Reference each image in the PR body under a `## Screenshots` section using dash-named files (no spaces):
-   `https://raw.githubusercontent.com/<owner>/<repo>/<media-commit-sha>/shot.png`
+   (A quoting glitch can make the first push report failure — retry with the literal commit SHA.) Reference each image in the PR body under a `## Screenshots` section using GitHub-Flavored Markdown image syntax and dash-named files (no spaces):
+   `![Short descriptive caption](https://raw.githubusercontent.com/<owner>/<repo>/<media-commit-sha>/shot.png)`
+   Bare image URLs render as clickable links instead of previews, so never add a screenshot URL without the surrounding `![alt text](...)` wrapper.
 
    Append the section to the PR body:
    ```bash
@@ -114,6 +115,8 @@ explicitly requests task tracking.
    jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
    gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input /tmp/pr-body-payload.json
    ```
+
+   Before treating screenshot publication as complete, inspect the submitted body and verify every screenshot entry is a Markdown image embed (`![...](https://raw.githubusercontent.com/.../*.png)`) rather than a bare URL. Use `gh pr view <PR_NUMBER> --json body --jq .body` for this check.
 
    Never commit the screenshot binaries to the PR branch itself — only to the throwaway `media/pr-<N>-screenshots` ref (`git rm` them from the PR branch tip if they were committed there earlier; with squash-merge, deleting at tip is enough). The `docs/screenshots/` directory is for product/docs imagery that is meant to merge — don't confuse the two. The media branch must survive branch-cleanup sweeps; deleting it 404s the images in the PR body, so don't treat "unmerged branch" as automatically safe to delete.
 
