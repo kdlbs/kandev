@@ -247,30 +247,8 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
   });
 });
 
-describe("useDefaultSelectionsEffect - multi-repo guard counts Remote rows", () => {
-  it("prefers the saved worktree profile when multi-repo mode needs a switch", async () => {
-    const fs = makeDefaultSelFs({
-      executorId: EXECUTOR_DOCKER,
-      executorProfileId: PROFILE_DOCKER,
-      useRemote: true,
-      remoteRepos: [
-        { key: "remote-0", url: REMOTE_URL_A, branch: "", source: "paste" },
-        { key: "remote-1", url: REMOTE_URL_B, branch: "", source: "paste" },
-      ] as DialogFormState["remoteRepos"],
-    });
-    const sel = makeSel({
-      executors: [dockerExecutor(), worktreeExecutor()],
-      lastUsedExecutorProfileId: PROFILE_WORKTREE_B,
-    });
-
-    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
-
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE_B));
-  });
-
-  it("swaps a non-worktree profile to worktree when 2+ Remote URL rows are set", async () => {
-    // Regression: the guard used to count only workspace/local rows, so 2
-    // Remote rows slipped past it with an already-selected non-worktree profile.
+describe("useDefaultSelectionsEffect - multi-repo executor selection", () => {
+  it("keeps Local Docker selected when 2+ Remote URL rows are set", async () => {
     const fs = makeDefaultSelFs({
       executorId: EXECUTOR_DOCKER,
       executorProfileId: PROFILE_DOCKER,
@@ -284,7 +262,8 @@ describe("useDefaultSelectionsEffect - multi-repo guard counts Remote rows", () 
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
   });
 
   it("leaves a worktree profile alone when 2+ Remote rows are set", async () => {

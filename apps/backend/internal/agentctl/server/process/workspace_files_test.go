@@ -8,7 +8,9 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/logger"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
+	"go.uber.org/zap"
 )
 
 func TestResolveNonExistentPath(t *testing.T) {
@@ -127,6 +129,61 @@ func TestResolveNonExistentPath(t *testing.T) {
 		}
 	})
 }
+
+func TestWorkspaceFileOperationsAllowRegisteredLinkedSource(t *testing.T) {
+	workspace := t.TempDir()
+	source := t.TempDir()
+	if err := os.Symlink(source, filepath.Join(workspace, "linked")); err != nil {
+		t.Skip("symlinks not supported")
+	}
+
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt := &WorkspaceTracker{workDir: workspace, logger: log}
+	wt.SetAllowedSourceRoots([]string{source})
+	resolved, err := wt.resolveSafePath(filepath.Join("linked", "created.txt"))
+	if err != nil {
+		t.Fatalf("resolveSafePath through registered link: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved != filepath.Join(want, "created.txt") {
+		t.Errorf("resolved path = %q, want %q", resolved, filepath.Join(want, "created.txt"))
+	}
+	if err := wt.CreateFile(filepath.Join("linked", "created.txt")); err != nil {
+		t.Fatalf("CreateFile through registered link: %v", err)
+	}
+	if _, _, err := wt.ApplyFileDiff(context.Background(), filepath.Join("linked", "created.txt"), "", "not a diff", stringPtr("updated")); err != nil {
+		t.Fatalf("ApplyFileDiff through registered link: %v", err)
+	}
+	content, _, _, _, err := wt.GetFileContent(filepath.Join("linked", "created.txt"))
+	if err != nil || content != "updated" {
+		t.Fatalf("GetFileContent through registered link = %q, %v", content, err)
+	}
+	if err := wt.RenameFile(filepath.Join("linked", "created.txt"), filepath.Join("linked", "renamed.txt")); err != nil {
+		t.Fatalf("RenameFile through registered link: %v", err)
+	}
+	if err := wt.DeleteFile(filepath.Join("linked", "renamed.txt")); err != nil {
+		t.Fatalf("DeleteFile through registered link: %v", err)
+	}
+
+	escape := t.TempDir()
+	if err := os.Remove(filepath.Join(workspace, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(escape, filepath.Join(workspace, "linked")); err != nil {
+		t.Fatal(err)
+	}
+	if err := wt.CreateFile(filepath.Join("linked", "escape.txt")); err == nil {
+		t.Fatal("CreateFile through mutated link unexpectedly succeeded")
+	}
+}
+
+func stringPtr(value string) *string { return &value }
 
 // requireChild finds a child node by name in the tree, failing the test if not found.
 func requireChild(t *testing.T, node *types.FileTreeNode, name string) *types.FileTreeNode {

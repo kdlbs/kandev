@@ -74,6 +74,7 @@
       ],
       "mcpTools": [
         "add_branch_to_task_kandev",
+        "add_workspace_sources_kandev",
         "archive_task_kandev",
         "create_task_kandev",
         "delete_task_kandev",

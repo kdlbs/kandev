@@ -62,6 +62,21 @@ func TestResolveTaskRepoInfo_BackfillsDefaultBranchAfterClone(t *testing.T) {
 	}
 }
 
+func TestEnsureRepositoryCloned_ReturnsOnlyLocalPath(t *testing.T) {
+	clonePath := filepath.Join(t.TempDir(), "clone")
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetRepoCloner(&fakeRepoCloner{returnPath: clonePath}, &recordingRepoUpdater{})
+	repository := &models.Repository{ID: "repo-1", Provider: "github", ProviderOwner: "acme", ProviderName: "thing"}
+
+	path, err := exec.EnsureRepositoryCloned(context.Background(), repository)
+	if err != nil {
+		t.Fatalf("EnsureRepositoryCloned: %v", err)
+	}
+	if path != clonePath || repository.LocalPath != clonePath {
+		t.Fatalf("path = %q, repository.LocalPath = %q; want %q", path, repository.LocalPath, clonePath)
+	}
+}
+
 // TestResolveTaskRepoInfo_BackfillsDefaultBranchForAlreadyClonedRepo guards
 // against the second-launch regression: a previous failed attempt populated
 // repositories.local_path but left default_branch empty (because the backfill

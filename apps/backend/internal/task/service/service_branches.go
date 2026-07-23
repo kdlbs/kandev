@@ -6,8 +6,8 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/worktree"
 )
@@ -55,8 +55,13 @@ type AddBranchToTaskRequest struct {
 //     LocalPath / GitHubURL flows; for the RepositoryID fast path the
 //     workspace-membership check happens in resolveBranchRepo below.
 func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskRequest) (*models.TaskRepository, error) {
+	unlock := s.lockWorkspaceSources(req.TaskID)
+	defer unlock()
 	task, existing, cleanupOrphanRepo, err := s.prepareBranchAdd(ctx, &req)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.workspaceSourcesIdle(ctx, task.ID); err != nil {
 		return nil, err
 	}
 	repo, err := s.resolveBranchRepo(ctx, task, req.RepositoryID)
@@ -78,56 +83,51 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 		return nil, fmt.Errorf("cannot resolve base_branch for repository %q: pass base_branch explicitly", repoLabelOrID(repo, req.RepositoryID))
 	}
 	checkoutBranch := resolveCheckoutBranchOrAutoName(req.CheckoutBranch, existing, req.RepositoryID, baseBranch)
+	if err := validateWorkspaceSourceBranches(baseBranch, checkoutBranch); err != nil {
+		cleanupOrphanRepo()
+		return nil, err
+	}
 
-	nextPosition, dupErr := scanForBranchAddDuplicate(existing, req.RepositoryID, baseBranch, checkoutBranch, repo)
+	_, dupErr := scanForBranchAddDuplicate(existing, req.RepositoryID, baseBranch, checkoutBranch, repo)
 	if dupErr != nil {
 		cleanupOrphanRepo()
 		return nil, dupErr
 	}
 
 	taskRepo := &models.TaskRepository{
-		TaskID:         req.TaskID,
 		RepositoryID:   req.RepositoryID,
 		BaseBranch:     baseBranch,
 		CheckoutBranch: checkoutBranch,
-		Position:       nextPosition,
 		Metadata:       map[string]interface{}{},
 	}
-	if err := s.taskRepos.CreateTaskRepository(ctx, taskRepo); err != nil {
-		s.logger.Error("AddBranchToTask: failed to create task repository",
-			zap.String("task_id", req.TaskID),
-			zap.String("repository_id", req.RepositoryID),
-			zap.String("checkout_branch", req.CheckoutBranch),
-			zap.Error(err))
-		cleanupOrphanRepo()
-		return nil, fmt.Errorf("create task repository: %w", err)
-	}
-
-	if err := s.materializeBranch(ctx, req.TaskID, taskRepo.ID); err != nil {
-		// Roll back the task_repositories row so a failed materialize doesn't
-		// leave a dangling association the user can't see on disk. Pre-launch
-		// tasks short-circuit inside materializeBranch and never reach this
-		// branch — their worktree is built at next session launch.
-		//
-		// Detach from ctx via WithoutCancel: a caller-side timeout or cancel
-		// can fire mid-materialize, and the rollback must still run on the
-		// now-dead ctx or we'd leak the row we tried to delete.
-		rollbackCtx := context.WithoutCancel(ctx)
-		if delErr := s.taskRepos.DeleteTaskRepository(rollbackCtx, taskRepo.ID); delErr != nil {
-			s.logger.Error("AddBranchToTask: failed to roll back task repository after materialize failure",
-				zap.String("task_repository_id", taskRepo.ID),
-				zap.Error(delErr))
-		}
+	batch := &models.WorkspaceSourceBatch{TaskID: task.ID, Sources: []models.WorkspaceSource{{Repository: taskRepo}}}
+	if err := s.rejectRuntimeNameCollisions(ctx, append(existing, taskRepo), batch); err != nil {
 		cleanupOrphanRepo()
 		return nil, err
 	}
-
-	// Publish task.updated only after the row is durable AND the worktree
-	// materialized. Emitting before materialize would push a phantom row to
-	// WS clients on the rollback path; emitting after keeps event truthiness
-	// aligned with persisted state.
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	materialize := s.materializeLegacyBranch
+	if s.workspaceSourceMaterializer != nil {
+		materialize = s.materializeWorkspaceSources
+	}
+	_, err = s.commitWorkspaceSourceBatch(ctx, task, batch, func(context.Context) { cleanupOrphanRepo() }, materialize)
+	if err != nil {
+		return nil, err
+	}
 	return taskRepo, nil
+}
+
+// materializeLegacyBranch adapts the legacy one-row worktree capability to
+// the batch commit path. The existing materializer owns its live/pre-launch
+// distinction, preserving add_branch's historical no-op-before-launch rule.
+func (s *Service) materializeLegacyBranch(ctx context.Context, taskID string, batch *models.WorkspaceSourceBatch) (*WorkspaceSourceMaterializationResult, error) {
+	for _, source := range batch.Sources {
+		if source.Repository != nil {
+			if err := s.materializeBranch(ctx, taskID, source.Repository.ID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return &WorkspaceSourceMaterializationResult{}, nil
 }
 
 // prepareBranchAdd runs the input validation, executor-shield check, and
@@ -197,7 +197,7 @@ func (s *Service) resolveBranchRepo(ctx context.Context, task *models.Task, repo
 		return nil, fmt.Errorf("get repository: %w", err)
 	}
 	if repo == nil || repo.WorkspaceID != task.WorkspaceID {
-		return nil, fmt.Errorf("repository %q does not belong to task's workspace", repositoryID)
+		return nil, fmt.Errorf("%w: repository %q does not belong to task's workspace", taskrepository.ErrRepositoryNotFound, repositoryID)
 	}
 	return repo, nil
 }

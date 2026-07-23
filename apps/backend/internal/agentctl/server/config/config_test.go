@@ -149,6 +149,19 @@ func TestApplyOverrides_BaseBranches(t *testing.T) {
 // (empty AuthToken) the server must bind loopback only; when a token is
 // configured it binds all interfaces (empty host → ":port").
 func TestListenHost(t *testing.T) {
+	t.Run("explicit override wins when token is configured", func(t *testing.T) {
+		cfg := &Config{AuthToken: "secret", ListenHostOverride: "127.0.0.1"}
+		if got := cfg.ListenHost(); got != "127.0.0.1" {
+			t.Fatalf("ListenHost() = %q, want explicit loopback override", got)
+		}
+	})
+	t.Run("loads explicit override from launch environment", func(t *testing.T) {
+		t.Setenv("AGENTCTL_BOOTSTRAP_NONCE", "nonce")
+		t.Setenv("AGENTCTL_LISTEN_HOST", "127.0.0.1")
+		if got := Load().ListenHost(); got != "127.0.0.1" {
+			t.Fatalf("Load().ListenHost() = %q, want loopback override", got)
+		}
+	})
 	t.Run("no token binds loopback only", func(t *testing.T) {
 		cfg := &Config{AuthToken: ""}
 		if got := cfg.ListenHost(); got != "127.0.0.1" {

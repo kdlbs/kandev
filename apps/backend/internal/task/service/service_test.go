@@ -131,20 +131,21 @@ func createTestServiceWithSessionsRepo(
 	eventBus := NewMockEventBus()
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
 	svc := NewService(Repos{
-		Workspaces:       repo,
-		Tasks:            repo,
-		TaskRepos:        repo,
-		Workflows:        repo,
-		Messages:         repo,
-		Turns:            repo,
-		Sessions:         wrapSessions(repo),
-		GitSnapshots:     repo,
-		RepoEntities:     repo,
-		Executors:        repo,
-		Environments:     repo,
-		TaskEnvironments: repo,
-		Reviews:          repo,
-		ResourceCleanups: repo,
+		Workspaces:        repo,
+		Tasks:             repo,
+		TaskRepos:         repo,
+		Workflows:         repo,
+		Messages:          repo,
+		Turns:             repo,
+		Sessions:          wrapSessions(repo),
+		GitSnapshots:      repo,
+		RepoEntities:      repo,
+		RepositoryCleanup: repo,
+		Executors:         repo,
+		Environments:      repo,
+		TaskEnvironments:  repo,
+		Reviews:           repo,
+		ResourceCleanups:  repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	svc.SetWorkspaceBootstrapper(repo)
 	if err := svc.StartTaskResourceCleanupWorker(context.Background()); err != nil {
@@ -2482,12 +2483,14 @@ func TestService_CleanupTaskResourcesFailsClosedWhenRuntimeInventoryFails(t *tes
 
 func TestService_ListTasks(t *testing.T) {
 	svc, _, repo := createTestService(t)
+	svc.workspaceFolders = repo
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-123", WorkspaceID: "ws-1", Name: "Workflow"})
 	_ = repo.CreateTask(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 1", Priority: "medium"})
 	_ = repo.CreateTask(ctx, &models.Task{ID: "task-2", WorkspaceID: "ws-1", WorkflowID: "wf-123", WorkflowStepID: "step-123", Title: "Task 2", Priority: "medium"})
+	_ = repo.CreateWorkspaceSourceBatch(ctx, &models.WorkspaceSourceBatch{TaskID: "task-1", Sources: []models.WorkspaceSource{{Folder: &models.TaskWorkspaceFolder{LocalPath: "/canonical/docs", DisplayName: "docs"}}}})
 
 	tasks, err := svc.ListTasks(ctx, "wf-123")
 	if err != nil {
@@ -2495,6 +2498,9 @@ func TestService_ListTasks(t *testing.T) {
 	}
 	if len(tasks) != 2 {
 		t.Errorf("expected 2 tasks, got %d", len(tasks))
+	}
+	if len(tasks[0].WorkspaceFolders) != 1 || tasks[0].WorkspaceFolders[0].DisplayName != "docs" {
+		t.Fatalf("list workspace folders = %#v, want hydrated docs folder", tasks[0].WorkspaceFolders)
 	}
 }
 

@@ -280,6 +280,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   userShells: { byEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
   sessionPollMode: { bySessionId: {} },
+  workspaceFilesRefresh: { bySessionId: {} },
 };
 
 type ImmerSet = Parameters<typeof createSessionRuntimeSlice>[0];
@@ -533,6 +534,11 @@ export const createSessionRuntimeSlice: StateCreator<
       const envKey = draft.environmentIdBySessionId[sessionId] ?? sessionId;
       delete draft.gitStatus.byEnvironmentId[envKey];
       delete draft.gitStatus.byEnvironmentRepo[envKey];
+    }),
+  bumpWorkspaceFilesRefresh: (sessionId) =>
+    set((draft) => {
+      draft.workspaceFilesRefresh.bySessionId[sessionId] =
+        (draft.workspaceFilesRefresh.bySessionId[sessionId] ?? 0) + 1;
     }),
   clearLegacyGitStatusEntry: (sessionId) =>
     set((draft) => {

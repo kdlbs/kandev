@@ -688,6 +688,11 @@ func (s *Service) createRepository(
 	if resolveProvider {
 		resolveRepositoryProviderIdentity(repository)
 	}
+	if repository.LocalPath != "" && repository.RemoteURL == "" {
+		if origin := canonicalCloneOrigin(repository.LocalPath); origin != "" {
+			repository.RemoteURL = origin
+		}
+	}
 
 	if err := s.repoEntities.CreateRepository(ctx, repository); err != nil {
 		s.logger.Error("failed to create repository", zap.Error(err))
@@ -713,6 +718,21 @@ func resolveRepositoryProviderIdentity(repository *models.Repository) {
 		repository.ProviderOwner = o
 		repository.ProviderName = n
 	}
+}
+
+// canonicalCloneOrigin returns a credential-free clone URL for a local
+// checkout's origin. Invalid and unsupported origins deliberately remain
+// empty so host-local-only repositories cannot leak credentials into storage.
+func canonicalCloneOrigin(localPath string) string {
+	raw, err := readGitRemoteOriginURL(localPath)
+	if err != nil || raw == "" {
+		return ""
+	}
+	_, _, _, canonical, err := parseRemoteRepositoryURL(raw, "")
+	if err != nil {
+		return ""
+	}
+	return canonical
 }
 
 func (s *Service) GetRepository(ctx context.Context, id string) (*models.Repository, error) {

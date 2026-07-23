@@ -426,6 +426,8 @@ func startAgentInfrastructure(
 		zap.Bool("enabled", cfg.Worktree.Enabled))
 
 	services.Task.SetBranchMaterializer(newBranchMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log))
+	workspaceSourceMaterializer := newWorkspaceSourceMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
+	services.Task.SetWorkspaceSourceMaterializer(workspaceSourceMaterializer)
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
@@ -526,6 +528,9 @@ func startAgentInfrastructure(
 		addCleanup(func() error { glPoller.Stop(); return nil })
 		log.Info("GitLab poller started")
 	}
+	// Bind only the path-returning orchestrator seam after its clone pipeline
+	// and workspace-scoped GitLab credential resolver are both configured.
+	workspaceSourceMaterializer.SetHostRepositoryCloner(orchestratorSvc)
 
 	// Azure DevOps v1 owns only connection-health polling. PR summaries are
 	// refreshed explicitly through their task association routes.

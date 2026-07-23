@@ -61,6 +61,12 @@ Agent CLIs can also discover authentication from their normal home-directory fil
 
 See [Agents and profiles](agents-and-profiles.md) for exact profile fields and [Automation and MCP](automation-and-mcp.md) for unattended and external-client boundaries.
 
+## Treat workspace sources as access grants
+
+Adding a repository or folder gives the task access to that source. A local folder is a live host-path grant, not an upload: Kandev does not copy, move, delete, or add marker files to it. Folder sources are therefore limited to Local/Local PC and Worktree tasks and are never sent to Docker, SSH, Sprites, or Remote Docker.
+
+Remote repository locators and clone credentials can reveal authority. Kandev does not persist credential-bearing URLs or include credentials in source metadata or logs. Use provider credentials or a safe cloneable locator, and never paste tokens into a repository URL, task prompt, or source display name.
+
 ## Protect stored secrets
 
 Secrets created through Kandev are encrypted in the database with the AES-256 master key at `<home>/data/master.key`. Protect both files:

@@ -19,7 +19,8 @@ const errKey = "error"
 // primary worktree". When empty, the manager rescans its current WorkDir
 // in place.
 type RescanWorkspaceRequest struct {
-	WorkDir string `json:"work_dir"`
+	WorkDir              string   `json:"work_dir"`
+	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
 }
 
 // handleRescanWorkspace re-runs repo discovery and reconciles trackers.
@@ -42,7 +43,60 @@ func (s *Server) handleRescanWorkspace(c *gin.Context) {
 			return
 		}
 	}
-	s.procMgr.RescanRepositories(c.Request.Context(), req.WorkDir)
+	if err := s.procMgr.RescanRepositories(c.Request.Context(), req.WorkDir); err != nil {
+		s.logger.Warn("workspace rescan failed", zap.Error(err), zap.String("work_dir", req.WorkDir))
+		c.JSON(http.StatusUnprocessableEntity, gin.H{errKey: err.Error()})
+		return
+	}
+	// Install durable-source policy only after the tracker reconciliation has
+	// succeeded. A failed rescan must leave the active tracker graph and its
+	// existing allowlist untouched; on success this also covers any trackers
+	// that the rescan created or replaced.
+	if req.WorkspaceSourceRoots != nil {
+		s.procMgr.SetWorkspaceSourceRoots(req.WorkspaceSourceRoots)
+	}
 	s.logger.Debug("workspace rescan completed", zap.String("work_dir", req.WorkDir))
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// handleReconcileWorkspace prunes tracker state after rollback has removed
+// newly-created checkouts. It deliberately has no work_dir: changing roots is
+// a host-rebind concern, while rollback must retain the current root tracker
+// and its existing workspace-stream subscriptions.
+func (s *Server) handleReconcileWorkspace(c *gin.Context) {
+	var req RescanWorkspaceRequest
+	if c.Request.ContentLength != 0 && c.Request.Body != http.NoBody {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "invalid JSON body"})
+			return
+		}
+	}
+	if err := s.procMgr.ReconcileRepositories(c.Request.Context()); err != nil {
+		s.logger.Warn("workspace reconcile failed", zap.Error(err))
+		c.JSON(http.StatusUnprocessableEntity, gin.H{errKey: err.Error()})
+		return
+	}
+	if req.WorkspaceSourceRoots != nil {
+		s.procMgr.SetWorkspaceSourceRoots(req.WorkspaceSourceRoots)
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// handleRebindWorkspace performs the authenticated, destructive tracker
+// replacement used only after lifecycle has stopped a native host child.
+func (s *Server) handleRebindWorkspace(c *gin.Context) {
+	var req RescanWorkspaceRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.WorkDir == "" {
+		c.JSON(http.StatusBadRequest, gin.H{errKey: "work_dir is required"})
+		return
+	}
+	if err := s.procMgr.RebindWorkspace(c.Request.Context(), req.WorkDir); err != nil {
+		s.logger.Warn("workspace rebind failed", zap.Error(err), zap.String("work_dir", req.WorkDir))
+		c.JSON(http.StatusUnprocessableEntity, gin.H{errKey: err.Error()})
+		return
+	}
+	if req.WorkspaceSourceRoots != nil {
+		s.procMgr.SetWorkspaceSourceRoots(req.WorkspaceSourceRoots)
+	}
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

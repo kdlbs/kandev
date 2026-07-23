@@ -37,6 +37,35 @@ func seedWorkspace(t *testing.T, repo *Repository, id string) {
 	}
 }
 
+func TestDeleteRepositoryIfUnreferenced_PreservesTaskAdoptedRepository(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-cleanup-reference")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-cleanup-reference", WorkspaceID: "ws-cleanup-reference", Name: "WF"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-cleanup-reference", WorkspaceID: "ws-cleanup-reference", Name: "app"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-cleanup-reference", WorkspaceID: "ws-cleanup-reference", WorkflowID: "wf-cleanup-reference", Title: "Task"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "tr-cleanup-reference", TaskID: "task-cleanup-reference", RepositoryID: "repo-cleanup-reference", BaseBranch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := repo.DeleteRepositoryIfUnreferenced(ctx, "repo-cleanup-reference")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted {
+		t.Fatal("cleanup deleted repository adopted by a task")
+	}
+	if _, err := repo.GetRepository(ctx, "repo-cleanup-reference"); err != nil {
+		t.Fatalf("repository after rejected cleanup: %v", err)
+	}
+}
+
 // TestRepositoryCopyFiles_RoundTrip writes a repository with a non-empty
 // CopyFiles, fetches it back via GetRepository and ListRepositories, and
 // asserts the value survived both code paths.

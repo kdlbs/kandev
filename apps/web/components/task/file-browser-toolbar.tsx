@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import {
   IconSearch,
   IconListTree,
@@ -51,7 +51,43 @@ type FileBrowserToolbarProps = {
   onStartSearch: () => void;
   onCollapseAll: () => void;
   showCreateButton: boolean;
+  onAddSources?: (opener: HTMLButtonElement) => void;
+  addSourcesButtonRef?: Ref<HTMLButtonElement>;
+  addSourcesDisabledReason?: string;
 };
+
+function CopyWorkspacePathButton({
+  fullPath,
+  copied,
+  onCopyPath,
+}: Pick<FileBrowserToolbarProps, "fullPath" | "copied" | "onCopyPath">) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          className="relative shrink-0 cursor-pointer"
+          aria-label="Copy workspace path"
+          onClick={() => {
+            if (fullPath) void onCopyPath(fullPath);
+          }}
+        >
+          <IconFolderOpen
+            className={cn(
+              "h-3.5 w-3.5 text-muted-foreground transition-opacity",
+              copied ? "opacity-0" : "group-hover/header:opacity-0",
+            )}
+          />
+          {copied ? (
+            <IconCheck className="absolute inset-0 h-3.5 w-3.5 text-green-600/70" />
+          ) : (
+            <IconCopy className="absolute inset-0 h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover/header:opacity-100 hover:text-foreground transition-opacity" />
+          )}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent>Copy workspace path</TooltipContent>
+    </Tooltip>
+  );
+}
 
 export function FileBrowserToolbar({
   displayPath,
@@ -64,36 +100,16 @@ export function FileBrowserToolbar({
   onStartSearch,
   onCollapseAll,
   showCreateButton,
+  onAddSources,
+  addSourcesButtonRef,
+  addSourcesDisabledReason,
 }: FileBrowserToolbarProps) {
   return (
     <PanelHeaderBarSplit
       className="group/header"
       left={
         <>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                className="relative shrink-0 cursor-pointer"
-                aria-label="Copy workspace path"
-                onClick={() => {
-                  if (fullPath) void onCopyPath(fullPath);
-                }}
-              >
-                <IconFolderOpen
-                  className={cn(
-                    "h-3.5 w-3.5 text-muted-foreground transition-opacity",
-                    copied ? "opacity-0" : "group-hover/header:opacity-0",
-                  )}
-                />
-                {copied ? (
-                  <IconCheck className="absolute inset-0 h-3.5 w-3.5 text-green-600/70" />
-                ) : (
-                  <IconCopy className="absolute inset-0 h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover/header:opacity-100 hover:text-foreground transition-opacity" />
-                )}
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>Copy workspace path</TooltipContent>
-          </Tooltip>
+          <CopyWorkspacePathButton fullPath={fullPath} copied={copied} onCopyPath={onCopyPath} />
           {displayPath ? (
             <Tooltip>
               <TooltipTrigger asChild>
@@ -118,6 +134,29 @@ export function FileBrowserToolbar({
               label="New file"
               icon={<IconPlus className="h-3.5 w-3.5" />}
             />
+          )}
+          {onAddSources && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span tabIndex={addSourcesDisabledReason ? 0 : -1} className="inline-flex">
+                  <button
+                    type="button"
+                    aria-label="Add sources"
+                    data-testid="files-add-sources"
+                    ref={addSourcesButtonRef}
+                    disabled={Boolean(addSourcesDisabledReason)}
+                    onClick={(event) => onAddSources(event.currentTarget)}
+                    className="inline-flex min-h-11 min-w-11 items-center gap-1 rounded px-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer sm:min-h-8 sm:min-w-0"
+                  >
+                    <IconPlus className="h-3.5 w-3.5" />
+                    <span>Add sources</span>
+                  </button>
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                {addSourcesDisabledReason ?? "Add repositories or folders"}
+              </TooltipContent>
+            </Tooltip>
           )}
           <ToolbarButton
             onClick={onOpenFolder}

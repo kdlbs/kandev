@@ -357,6 +357,7 @@ export type SessionRuntimeSliceState = {
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
   sessionPollMode: SessionPollModeState;
+  workspaceFilesRefresh: { bySessionId: Record<string, number> };
 };
 
 export type SessionRuntimeSliceActions = {
@@ -375,6 +376,7 @@ export type SessionRuntimeSliceActions = {
    *  can invalidate derived caches without repeating the deep comparison). */
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => boolean;
   clearGitStatus: (sessionId: string) => void;
+  bumpWorkspaceFilesRefresh: (sessionId: string) => void;
   /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a
    *  freshly-multi-branch session doesn't surface a stale snapshot from the
    *  workspace tracker that was replaced on the backend during rescan. */

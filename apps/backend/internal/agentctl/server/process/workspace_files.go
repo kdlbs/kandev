@@ -238,21 +238,65 @@ func (wt *WorkspaceTracker) resolveSafePath(reqPath string) (string, error) {
 		}
 	}
 
-	// Check that the real path is within the workspace
-	relPath, err := filepath.Rel(realWorkDir, realPath)
-	if err != nil {
-		return "", fmt.Errorf("invalid path: %w", err)
-	}
-
-	// Ensure the relative path doesn't escape the workspace
-	if strings.HasPrefix(relPath, ".."+string(os.PathSeparator)) || relPath == ".." {
-		return "", fmt.Errorf("%w: %s", errPathTraversal, reqPath)
+	// A path may leave the workspace only through a durable source link whose
+	// canonical target was registered by lifecycle. Re-resolving every request
+	// rejects stale or later-mutated links instead of trusting their old name.
+	root := realWorkDir
+	relPath, err := filepath.Rel(root, realPath)
+	if err != nil || pathEscapesRoot(relPath) {
+		root, relPath, err = wt.allowedSourcePath(realPath)
+		if err != nil {
+			return "", fmt.Errorf("%w: %s", errPathTraversal, reqPath)
+		}
 	}
 
 	// Reconstruct the absolute path from the trusted workspace root and the
 	// validated relative path. This ensures the returned path is provably
 	// inside the workspace, satisfying static-analysis taint checks.
-	return filepath.Join(realWorkDir, relPath), nil
+	return filepath.Join(root, relPath), nil
+}
+
+func pathEscapesRoot(relPath string) bool {
+	return relPath == ".." || strings.HasPrefix(relPath, ".."+string(os.PathSeparator))
+}
+
+func (wt *WorkspaceTracker) allowedSourcePath(realPath string) (string, string, error) {
+	wt.mu.RLock()
+	roots := append([]string(nil), wt.allowedSourceRoots...)
+	wt.mu.RUnlock()
+	for _, root := range roots {
+		rel, err := filepath.Rel(root, realPath)
+		if err == nil && !pathEscapesRoot(rel) {
+			return root, rel, nil
+		}
+	}
+	return "", "", errPathTraversal
+}
+
+// SetAllowedSourceRoots replaces the durable-source allowlist. Each root is
+// canonicalized now and requests resolve their target again before matching,
+// so a stale or mutated workspace link cannot inherit access to a new target.
+func (wt *WorkspaceTracker) SetAllowedSourceRoots(roots []string) {
+	canonical := make([]string, 0, len(roots))
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		resolved, err := filepath.EvalSymlinks(filepath.Clean(root))
+		if err != nil {
+			continue
+		}
+		info, err := os.Stat(resolved)
+		if err != nil || !info.IsDir() {
+			continue
+		}
+		if _, ok := seen[resolved]; ok {
+			continue
+		}
+		seen[resolved] = struct{}{}
+		canonical = append(canonical, resolved)
+	}
+	wt.mu.Lock()
+	wt.allowedSourceRoots = canonical
+	wt.mu.Unlock()
 }
 
 // resolveNonExistentPath walks up from path until it finds an existing
@@ -735,7 +779,11 @@ func (wt *WorkspaceTracker) validateWorkspacePaths(paths ...string) error {
 	cleanWorkDir := wt.resolvedWorkDir()
 	workDirPrefix := cleanWorkDir + string(os.PathSeparator)
 	for _, p := range paths {
-		if !strings.HasPrefix(p, workDirPrefix) {
+		if strings.HasPrefix(p, workDirPrefix) {
+			continue
+		}
+		root, rel, err := wt.allowedSourcePath(p)
+		if err != nil || rel == "." || p == root {
 			return fmt.Errorf("path outside workspace")
 		}
 	}

@@ -240,6 +240,26 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 	return localPath, nil
 }
 
+// EnsureRepositoryCloned is the host-materialization seam for provider-backed
+// repositories. Authentication and clone-url construction deliberately remain
+// inside Executor so callers never receive credentials or construct git calls.
+func (e *Executor) EnsureRepositoryCloned(ctx context.Context, repo *models.Repository) (string, error) {
+	if repo == nil {
+		return "", errors.New("repository is required")
+	}
+	if repo.LocalPath != "" {
+		return repo.LocalPath, nil
+	}
+	path, err := e.ensureRepoCloned(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	if path != "" {
+		repo.LocalPath = path
+	}
+	return path, nil
+}
+
 // backfillRepoDefaultBranch populates repo.DefaultBranch from the local clone
 // (in memory + DB) when it's empty. Best-effort: on any failure we log and
 // continue, since the launch still has the legacy worktree-manager fallback
@@ -625,6 +645,15 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 
 	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
 	e.injectGitLabWorkspaceCredentials(ctx, req)
+	if folders, folderErr := e.repo.ListTaskWorkspaceFolders(ctx, task.ID); folderErr != nil {
+		return nil, "", execConfig, existingEnv, nil, folderErr
+	} else {
+		for _, f := range folders {
+			if f != nil {
+				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{Name: f.DisplayName, LocalPath: f.LocalPath})
+			}
+		}
+	}
 
 	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
 }

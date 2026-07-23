@@ -502,6 +502,15 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     >;
     "session.agentctl_ready": BackendMessage<"session.agentctl_ready", TaskSessionAgentctlPayload>;
     "session.agentctl_error": BackendMessage<"session.agentctl_error", TaskSessionAgentctlPayload>;
+    "session.workspace_sources.updated": BackendMessage<
+      "session.workspace_sources.updated",
+      {
+        task_id: string;
+        session_id: string;
+        workspace_path: string;
+        adopted_session_ids?: string[];
+      }
+    >;
     "session.turn.started": BackendMessage<"session.turn.started", TurnEventPayload>;
     "session.turn.completed": BackendMessage<"session.turn.completed", TurnEventPayload>;
     "session.available_commands": BackendMessage<

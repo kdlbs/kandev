@@ -99,26 +99,26 @@ Open **Settings > Voice Mode** (`/settings/voice-mode`). Voice Mode inserts a tr
 
 Defaults are:
 
-| Setting | Default |
-|---|---|
-| Enabled | On |
-| Engine | Automatic |
-| Language | Auto-detect |
-| Activation | Click to toggle |
-| Auto-send | Off |
+| Setting           | Default                   |
+| ----------------- | ------------------------- |
+| Enabled           | On                        |
+| Engine            | Automatic                 |
+| Language          | Auto-detect               |
+| Activation        | Click to toggle           |
+| Auto-send         | Off                       |
 | Whisper Web model | Base, approximately 75 MB |
-| Shortcut | `Cmd/Ctrl+Shift+M` |
+| Shortcut          | `Cmd/Ctrl+Shift+M`        |
 
 The shortcut is also configurable under **Settings > General > Keyboard Shortcuts**. Hold-to-talk applies on a fine-pointer device. On touch/coarse-pointer devices, Kandev uses toggle behavior while preserving the stored preference. With auto-send enabled, a successful transcript is sent as soon as it is inserted.
 
 ### Choose an engine
 
-| Engine | Where recognition happens | Requirements and data flow |
-|---|---|---|
-| **Automatic** | First available engine | Selects the first currently available capability in this order: Web Speech, Whisper Web, then Whisper Server. A pinned engine that is unavailable is resolved through the same capability order. |
-| **Web Speech** | Browser-provided implementation | No audio is sent to the Kandev backend. Browser/vendor behavior and privacy policy still apply, and some implementations require a network service. |
-| **Whisper Web** | In the browser | Downloads and caches an ONNX model from Hugging Face, then runs local inference in a worker. Tiny is about 40 MB, Base about 75 MB, and Small about 240 MB. |
-| **Whisper Server** | Kandev backend and OpenAI | The browser uploads audio to Kandev; Kandev sends it to OpenAI's `whisper-1` transcription API. Configure `KANDEV_VOICE_OPENAI_API_KEY` on the backend. |
+| Engine             | Where recognition happens       | Requirements and data flow                                                                                                                                                                       |
+| ------------------ | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Automatic**      | First available engine          | Selects the first currently available capability in this order: Web Speech, Whisper Web, then Whisper Server. A pinned engine that is unavailable is resolved through the same capability order. |
+| **Web Speech**     | Browser-provided implementation | No audio is sent to the Kandev backend. Browser/vendor behavior and privacy policy still apply, and some implementations require a network service.                                              |
+| **Whisper Web**    | In the browser                  | Downloads and caches an ONNX model from Hugging Face, then runs local inference in a worker. Tiny is about 40 MB, Base about 75 MB, and Small about 240 MB.                                      |
+| **Whisper Server** | Kandev backend and OpenAI       | The browser uploads audio to Kandev; Kandev sends it to OpenAI's `whisper-1` transcription API. Configure `KANDEV_VOICE_OPENAI_API_KEY` on the backend.                                          |
 
 Whisper Server accepts at most 10 MiB per request and has a 60-second backend timeout. It returns an unavailable error when the key is not configured, a payload-too-large error above the limit, and an upstream error when transcription fails. Automatic selection can choose this unconfigured server when both browser capabilities are unavailable.
 
@@ -127,6 +127,8 @@ Engine choice is capability selection, not runtime failover. Once recognition or
 Microphone capture requires browser permission and normally HTTPS or localhost. Whisper Web also needs `getUserMedia`, `MediaRecorder`, workers, enough browser storage, and a first-use network download. The UI mentions common Chrome, Edge, and Safari versions, but Kandev does not enforce a browser/version allow-list; runtime availability is determined from the required APIs. If recording fails, check site permission, input device, secure context, model download/cache, browser support, and network access. The composer must remain enabled; switching tasks or disabling the input cancels recording.
 
 ## Files and editor integrations
+
+For an idle, non-archived repository-backed task, **Files → Add sources** adds saved workspace repositories, local or remote Git repositories, and (on Local/Worktree only) arbitrary local folders. Every repository has a base branch; Worktree, Docker, SSH, and Sprites can use an optional existing checkout branch for repository rows, while Local/Local PC uses the current checkout without switching it. Desktop uses a dialog; phones use a full-height drawer. A mixed submission is atomic, and repository additions refresh repository-aware tools while folders remain Files-only. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
 The task **Files** panel browses, searches, opens, and edits task-worktree files. Kandev rejects file paths that escape the resolved worktree. A session with one worktree opens that worktree directly in a host editor. When a session has several worktrees, the editor button asks which repository or worktree to open, and each configured editor in the adjacent menu expands to the same repository-and-branch picker. Check that selection before launching an editor from a multi-repository task. Older API clients that omit `worktree_id` retain the first-worktree fallback.
 
@@ -194,15 +196,15 @@ If no terminal can be created, wait for the task environment to become ready and
 
 ## Choose the right surface
 
-| Need | Use |
-|---|---|
-| Disposable question or experiment | Quick Chat |
-| Board history, branch, review, dependency, or PR | A normal task and workflow |
-| Small generated title, summary, or description | Utility agent |
-| Reusable task-chat instructions | Saved prompt |
-| Dictate into chat | Voice Mode |
-| Browse or edit task files | Files and editor integration |
-| Diagnostics for supported languages | Language server |
-| Run a command in the task runtime | Integrated terminal |
+| Need                                             | Use                          |
+| ------------------------------------------------ | ---------------------------- |
+| Disposable question or experiment                | Quick Chat                   |
+| Board history, branch, review, dependency, or PR | A normal task and workflow   |
+| Small generated title, summary, or description   | Utility agent                |
+| Reusable task-chat instructions                  | Saved prompt                 |
+| Dictate into chat                                | Voice Mode                   |
+| Browse or edit task files                        | Files and editor integration |
+| Diagnostics for supported languages              | Language server              |
+| Run a command in the task runtime                | Integrated terminal          |
 
 Related: [Use Kandev](use-kandev.md), [Sessions and review](sessions-and-review.md), [Agents and profiles](agents-and-profiles.md), and [Integrations](integrations.md).

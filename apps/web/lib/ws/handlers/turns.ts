@@ -7,6 +7,22 @@ import { maybeEmitEmptyTurnNotice } from "@/lib/ws/handlers/empty-turn-notice";
 
 const debug = createDebugLogger("session:turns");
 
+function completePendingToolCalls(store: StoreApi<AppState>, sessionId: string): void {
+  const messages = store.getState().messages.bySession[sessionId];
+  if (!messages) return;
+
+  for (const message of messages) {
+    if (message.type === "permission_request") continue;
+    const metadata = message.metadata as Record<string, unknown> | undefined;
+    if (metadata?.tool_call_id && metadata.status !== "complete" && metadata.status !== "error") {
+      store.getState().updateMessage({
+        ...message,
+        metadata: { ...metadata, status: "complete" },
+      });
+    }
+  }
+}
+
 export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "session.turn.started": (message) => {
@@ -43,6 +59,16 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
         turnId: payload.id,
         completedAt: payload.completed_at ?? "-",
       });
+      store.getState().addTurn({
+        id: payload.id,
+        session_id: sessionId(payload.session_id),
+        task_id: taskId(payload.task_id),
+        started_at: payload.started_at,
+        completed_at: payload.completed_at || new Date().toISOString(),
+        metadata: payload.metadata,
+        created_at: payload.created_at,
+        updated_at: payload.updated_at,
+      });
       store
         .getState()
         .completeTurn(
@@ -53,8 +79,6 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
         );
       // Surface a notice when the turn finished with no agent output.
       maybeEmitEmptyTurnNotice(store, payload);
-      // Clear the active turn when it completes
-      store.getState().setActiveTurn(payload.session_id, null);
 
       // Safety net: mark any tool calls still in a non-terminal state as "complete".
       // This handles edge cases where tool_update events were dropped or not processed.
@@ -62,19 +86,7 @@ export function registerTurnsHandlers(store: StoreApi<AppState>): WsHandlers {
       // `status` represents the user's approve/reject decision — not the tool call
       // state — so they must be excluded from the sweep. Forcing them to "complete"
       // wipes "approved"/"rejected" and re-shows the prompt buttons in the UI.
-      const messages = store.getState().messages.bySession[payload.session_id];
-      if (messages) {
-        for (const msg of messages) {
-          if (msg.type === "permission_request") continue;
-          const meta = msg.metadata as Record<string, unknown> | undefined;
-          if (meta?.tool_call_id && meta?.status !== "complete" && meta?.status !== "error") {
-            store.getState().updateMessage({
-              ...msg,
-              metadata: { ...meta, status: "complete" },
-            });
-          }
-        }
-      }
+      completePendingToolCalls(store, payload.session_id);
     },
   };
 }

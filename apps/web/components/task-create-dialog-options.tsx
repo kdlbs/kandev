@@ -221,8 +221,8 @@ export type ExecutorProfileOptionItem = OptionItem & {
 export type ExecutorProfileOptionsConfig = {
   /**
    * Returns a tooltip string when the given profile should render disabled.
-   * Used by the kanban task-create dialog to gate non-worktree executors
-   * (only worktree-based execution is currently supported there).
+   * Used by the kanban task-create dialog for repository-mode executor
+   * capability gates.
    */
   disabledReasonFor?: (profile: ExecutorProfile) => string | null;
 };

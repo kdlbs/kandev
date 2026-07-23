@@ -32,6 +32,12 @@ export type TaskLike = {
     checkout_branch?: string;
     position?: number;
   }>;
+  workspace_folders?: Array<{
+    id: string;
+    local_path: string;
+    display_name: string;
+    position: number;
+  }>;
   repository_id?: string;
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
@@ -90,6 +96,10 @@ function pickRepositories(source: TaskLike): KanbanTaskRepository[] | undefined 
   }));
 }
 
+function pickWorkspaceFolders(source: TaskLike): KanbanTask["workspaceFolders"] | undefined {
+  return source.workspace_folders?.map((folder) => ({ ...folder }));
+}
+
 /**
  * Build a canonical {@link KanbanTask} from either an HTTP DTO or a WebSocket
  * payload. Both paths share this helper so a single publisher change can never
@@ -106,6 +116,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     state: source.state,
     repositoryId: pickRepositoryId(source),
     repositories: pickRepositories(source),
+    workspaceFolders: pickWorkspaceFolders(source),
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),

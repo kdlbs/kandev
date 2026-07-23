@@ -102,6 +102,18 @@ func TestPublishTaskUpdated_FallbackRepositoryID(t *testing.T) {
 	}
 }
 
+func TestPublishWorkspaceSourcesAdoptedPublishesSessionScopedPayload(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+	eventBus.ClearEvents()
+
+	svc.PublishWorkspaceSourcesAdopted(context.Background(), "task-1", "/workspaces/task-1", []string{"session-1"})
+
+	data := singlePublishedEventData(t, eventBus)
+	if data["task_id"] != "task-1" || data["session_id"] != "session-1" || data["workspace_path"] != "/workspaces/task-1" {
+		t.Fatalf("unexpected source-adoption payload: %#v", data)
+	}
+}
+
 func TestPublishTaskUpdated_EmitsEmptyRepositories(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
@@ -123,6 +135,33 @@ func TestPublishTaskUpdated_EmitsEmptyRepositories(t *testing.T) {
 	}
 	if len(repos) != 0 {
 		t.Fatalf("expected empty repositories payload, got %#v", repos)
+	}
+}
+
+func TestPublishTaskUpdated_EmitsWorkspaceFolders(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	createTaskWithoutRepositories(t, ctx, repo)
+	if err := repo.CreateWorkspaceSourceBatch(ctx, &models.WorkspaceSourceBatch{TaskID: "task-1", Sources: []models.WorkspaceSource{{Folder: &models.TaskWorkspaceFolder{
+		LocalPath: "/canonical/docs", DisplayName: "docs",
+	}}}}); err != nil {
+		t.Fatalf("create workspace folder: %v", err)
+	}
+	svc.workspaceFolders = repo
+	eventBus.ClearEvents()
+
+	svc.PublishTaskUpdated(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+	})
+
+	data := singlePublishedEventData(t, eventBus)
+	folders, ok := data["workspace_folders"].([]map[string]interface{})
+	if !ok {
+		t.Fatalf("workspace_folders missing from payload or wrong type: %#v", data["workspace_folders"])
+	}
+	if len(folders) != 1 || folders[0]["local_path"] != "/canonical/docs" {
+		t.Fatalf("workspace_folders = %#v, want canonical docs folder", folders)
 	}
 }
 
