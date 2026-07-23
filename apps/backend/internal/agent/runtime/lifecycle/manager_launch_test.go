@@ -175,6 +175,45 @@ func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 	})
 }
 
+func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
+	mgr := newTestManager(t)
+	ag := &cliFlagTestAgent{}
+
+	t.Run("prefix is prepended before the agent command", func(t *testing.T) {
+		profile := &AgentProfileInfo{
+			ProfileID:     "p1",
+			CommandPrefix: "greywall --",
+		}
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		require.Equal(t, "greywall -- copilot --acp", cmds.initial)
+	})
+
+	t.Run("prefix precedes appended cli flags", func(t *testing.T) {
+		profile := &AgentProfileInfo{
+			ProfileID:     "p2",
+			CommandPrefix: "greywall --",
+			CLIFlags:      []settingsmodels.CLIFlag{{Flag: "--allow-all-tools", Enabled: true}},
+		}
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		require.Equal(t, "greywall -- copilot --acp --allow-all-tools", cmds.initial)
+	})
+
+	t.Run("empty prefix leaves the command unwrapped", func(t *testing.T) {
+		profile := &AgentProfileInfo{ProfileID: "p3"}
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		require.Equal(t, "copilot --acp", cmds.initial)
+	})
+
+	t.Run("malformed prefix does not abort launch", func(t *testing.T) {
+		profile := &AgentProfileInfo{
+			ProfileID:     "p4",
+			CommandPrefix: `greywall "unterminated`,
+		}
+		cmds := mgr.buildAgentCommand(&LaunchRequest{}, profile, ag, false)
+		require.Equal(t, "copilot --acp", cmds.initial)
+	})
+}
+
 func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
 	store := newInMemorySecretStore()
 	if err := store.Create(context.Background(), &secrets.SecretWithValue{

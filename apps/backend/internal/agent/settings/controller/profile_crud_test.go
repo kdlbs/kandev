@@ -121,6 +121,35 @@ func TestValidateCLIFlagDTOs(t *testing.T) {
 	}
 }
 
+// TestValidateCommandPrefix accepts an empty prefix (run unwrapped) and
+// well-formed launcher strings, and rejects malformed shell tokens.
+func TestValidateCommandPrefix(t *testing.T) {
+	cases := []struct {
+		name    string
+		prefix  string
+		wantErr bool
+	}{
+		{name: "empty accepted", prefix: ""},
+		{name: "whitespace accepted", prefix: "   "},
+		{name: "simple launcher accepted", prefix: "greywall --"},
+		{name: "quoted arg accepted", prefix: `sandbox-exec -f "my profile.sb"`},
+		{name: "unterminated quote rejected", prefix: `greywall "unterminated`, wantErr: true},
+		{name: "trailing backslash rejected", prefix: `greywall foo\`, wantErr: true},
+		{name: "only-empty-quotes rejected", prefix: `""`, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateCommandPrefix(tc.prefix)
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateProfileEnvVarDTOs(t *testing.T) {
 	cases := []struct {
 		name    string

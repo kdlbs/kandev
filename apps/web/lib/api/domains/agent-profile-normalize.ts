@@ -60,6 +60,7 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     allowIndexing: pickBool(profile, "allowIndexing", "allow_indexing"),
     autoApprove: pickBool(profile, "autoApprove", "auto_approve"),
     cliFlags: pickFlags(profile),
+    commandPrefix: (profile.commandPrefix ?? profile.command_prefix) as string | undefined,
     envVars: pickEnvVars(profile),
     cliPassthrough: pickBool(profile, "cliPassthrough", "cli_passthrough"),
     userModified: (profile.userModified ?? profile.user_modified) as boolean | undefined,
@@ -96,6 +97,7 @@ export function toAgentProfilePayload(
   setPayloadField(payload, "allow_indexing", profile.allowIndexing);
   setPayloadField(payload, "auto_approve", profile.autoApprove);
   setPayloadField(payload, "cli_flags", profile.cliFlags);
+  setPayloadField(payload, "command_prefix", profile.commandPrefix);
   setPayloadField(payload, "env_vars", profile.envVars);
   setPayloadField(payload, "cli_passthrough", profile.cliPassthrough);
   setPayloadField(payload, "user_modified", profile.userModified);

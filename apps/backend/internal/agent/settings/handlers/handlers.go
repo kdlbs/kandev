@@ -373,6 +373,7 @@ type createProfileRequest struct {
 	CLIPassthrough bool                   `json:"cli_passthrough"`
 	CLIFlags       []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars        []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix  string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -396,6 +397,7 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
+		CommandPrefix:  body.CommandPrefix,
 	})
 	if err != nil {
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
@@ -425,6 +427,7 @@ type updateProfileRequest struct {
 	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
 	CLIFlags       *[]dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars        *[]dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix  *string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -448,6 +451,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
+		CommandPrefix:  body.CommandPrefix,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {

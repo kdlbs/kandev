@@ -30,6 +30,9 @@ type CreateProfileRequest struct {
 	// default unless the curated entry specifies Default: true).
 	CLIFlags []dto.CLIFlagDTO
 	EnvVars  []dto.ProfileEnvVarDTO
+	// CommandPrefix is an optional launcher prefix prepended to the agent
+	// command (e.g. "greywall --"). Shell-tokenised at launch time.
+	CommandPrefix string
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -57,6 +60,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if err := validateProfileEnvVarDTOs(req.EnvVars); err != nil {
 		return nil, err
 	}
+	if err := validateCommandPrefix(req.CommandPrefix); err != nil {
+		return nil, err
+	}
 	profile := &models.AgentProfile{
 		AgentID:          req.AgentID,
 		Name:             req.Name,
@@ -69,6 +75,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		CLIPassthrough:   req.CLIPassthrough,
 		CLIFlags:         cliFlags,
 		EnvVars:          envVarsFromDTO(req.EnvVars),
+		CommandPrefix:    strings.TrimSpace(req.CommandPrefix),
 		UserModified:     true,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
@@ -131,6 +138,9 @@ type UpdateProfileRequest struct {
 	CLIFlags *[]dto.CLIFlagDTO
 	// EnvVars replaces the entire list when non-nil.
 	EnvVars *[]dto.ProfileEnvVarDTO
+	// CommandPrefix replaces the value when non-nil. Nil means "leave
+	// unchanged" — the UI always sends the desired value on save.
+	CommandPrefix *string
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -176,6 +186,12 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
 	}
+	if req.CommandPrefix != nil {
+		if err := validateCommandPrefix(*req.CommandPrefix); err != nil {
+			return nil, err
+		}
+		profile.CommandPrefix = strings.TrimSpace(*req.CommandPrefix)
+	}
 	profile.UserModified = true
 	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
 		return nil, err
@@ -208,6 +224,25 @@ func validateCLIFlagDTOs(in []dto.CLIFlagDTO) error {
 		if len(tokens) == 0 || tokens[0] == "" {
 			return fmt.Errorf("cli_flags[%d].flag is required", i)
 		}
+	}
+	return nil
+}
+
+// validateCommandPrefix rejects a launcher prefix with malformed shell tokens
+// (unterminated quotes, trailing backslash). An empty/whitespace-only prefix is
+// valid — it means "run the agent command unwrapped". Tokenising here keeps the
+// launch path's cliflags.Tokenise error branch unreachable in practice, so a
+// bad prefix surfaces at save time rather than silently dropping at task start.
+func validateCommandPrefix(prefix string) error {
+	if strings.TrimSpace(prefix) == "" {
+		return nil
+	}
+	tokens, err := cliflags.Tokenise(prefix)
+	if err != nil {
+		return fmt.Errorf("command_prefix: %w", err)
+	}
+	if len(tokens) == 0 || tokens[0] == "" {
+		return fmt.Errorf("command_prefix must start with a launcher command")
 	}
 	return nil
 }
@@ -403,6 +438,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
 		EnvVars:          envVarsToDTO(profile.EnvVars),
 		CLIPassthrough:   profile.CLIPassthrough,
+		CommandPrefix:    profile.CommandPrefix,
 		UserModified:     profile.UserModified,
 		WorkspaceID:      profile.WorkspaceID,
 		CreatedAt:        profile.CreatedAt,

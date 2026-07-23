@@ -217,6 +217,7 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 	autoApprove := false
 	permissionValues := make(map[string]bool)
 	var cliFlagTokens []string
+	var commandPrefixTokens []string
 	if profileInfo != nil {
 		model = profileInfo.Model
 		autoApprove = profileInfo.AutoApprove
@@ -231,6 +232,14 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		} else {
 			cliFlagTokens = tokens
 		}
+		prefixTokens, err := cliflags.Tokenise(profileInfo.CommandPrefix)
+		if err != nil {
+			m.logger.Warn("failed to tokenise command_prefix for profile, launching without launcher prefix",
+				zap.String("profile_id", profileInfo.ProfileID),
+				zap.Error(err))
+		} else {
+			commandPrefixTokens = prefixTokens
+		}
 	}
 	// Allow model override from request (for dynamic model switching)
 	if req.ModelOverride != "" {
@@ -244,13 +253,14 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		sessionID = ""
 	}
 	cmdOpts := agents.CommandOptions{
-		Model:              model,
-		SessionID:          sessionID,
-		AutoApprove:        autoApprove,
-		PermissionValues:   permissionValues,
-		CLIFlagTokens:      cliFlagTokens,
-		Runtime:            models.ExecutorType(req.ExecutorType).Runtime(),
-		PreferNativeBinary: preferNative,
+		Model:               model,
+		SessionID:           sessionID,
+		AutoApprove:         autoApprove,
+		PermissionValues:    permissionValues,
+		CLIFlagTokens:       cliFlagTokens,
+		CommandPrefixTokens: commandPrefixTokens,
+		Runtime:             models.ExecutorType(req.ExecutorType).Runtime(),
+		PreferNativeBinary:  preferNative,
 	}
 	return agentCommands{
 		initial:   m.commandBuilder.BuildCommandString(agentConfig, cmdOpts),

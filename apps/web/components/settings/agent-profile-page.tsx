@@ -156,6 +156,7 @@ function ProfileSettingsCard({
             allow_indexing: permissionValues.allow_indexing,
             cli_passthrough: draft.cliPassthrough,
             cli_flags: draft.cliFlags ?? [],
+            command_prefix: draft.commandPrefix ?? "",
           }}
           baselineProfile={{
             name: savedProfile.name,
@@ -166,6 +167,7 @@ function ProfileSettingsCard({
             allow_indexing: savedPermissionValues.allow_indexing,
             cli_passthrough: savedProfile.cliPassthrough,
             cli_flags: savedProfile.cliFlags ?? [],
+            command_prefix: savedProfile.commandPrefix ?? "",
           }}
           onChange={handleFormChange}
           modelConfig={modelConfig}
@@ -216,6 +218,7 @@ function useProfileEditorState(
       arePermissionsDirty(draft, savedProfile, permissionSettings) ||
       draft.cliPassthrough !== savedProfile.cliPassthrough ||
       !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
+      (draft.commandPrefix ?? "") !== (savedProfile.commandPrefix ?? "") ||
       !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
     [draft, savedProfile, permissionSettings],
   );
@@ -271,6 +274,7 @@ function useProfileSave({
         ...permissionsToProfilePatch(draft),
         cli_passthrough: draft.cliPassthrough,
         cli_flags: draft.cliFlags,
+        command_prefix: draft.commandPrefix ?? "",
         env_vars: draft.envVars ?? [],
       });
       setSavedProfile(updated);

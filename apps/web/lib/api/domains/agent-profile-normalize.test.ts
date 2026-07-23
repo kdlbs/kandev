@@ -3,11 +3,13 @@ import { normalizeAgentProfile, toAgentProfilePayload } from "./agent-profile-no
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 
 const sampleEnvVar = { key: "ANTHROPIC_BASE_URL", value: "https://api.example" };
+const SAMPLE_ID = "p1";
+const SAMPLE_PREFIX = "greywall --";
 
 describe("normalizeAgentProfile", () => {
   it("converts snake_case wire payload to canonical camelCase", () => {
     const wire = {
-      id: "p1",
+      id: SAMPLE_ID,
       agent_id: "claude",
       name: "default",
       agent_display_name: "Claude Code",
@@ -24,7 +26,7 @@ describe("normalizeAgentProfile", () => {
     };
     const result = normalizeAgentProfile(wire);
     expect(result).toEqual({
-      id: "p1",
+      id: SAMPLE_ID,
       name: "default",
       agentId: "claude",
       agentDisplayName: "Claude Code",
@@ -53,7 +55,7 @@ describe("normalizeAgentProfile", () => {
 
   it("accepts already-camelCase input", () => {
     const result = normalizeAgentProfile({
-      id: "p1",
+      id: SAMPLE_ID,
       name: "default",
       agentId: "codex",
       cliPassthrough: true,
@@ -61,12 +63,35 @@ describe("normalizeAgentProfile", () => {
     expect(result.agentId).toBe("codex");
     expect(result.cliPassthrough).toBe(true);
   });
+
+  it("maps command_prefix to commandPrefix", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      command_prefix: SAMPLE_PREFIX,
+    });
+    expect(result.commandPrefix).toBe(SAMPLE_PREFIX);
+  });
+
+  it("accepts already-camelCase commandPrefix", () => {
+    const result = normalizeAgentProfile({
+      id: SAMPLE_ID,
+      name: "default",
+      commandPrefix: SAMPLE_PREFIX,
+    });
+    expect(result.commandPrefix).toBe(SAMPLE_PREFIX);
+  });
+
+  it("leaves commandPrefix undefined when absent", () => {
+    const result = normalizeAgentProfile({ id: "x", name: "y" });
+    expect(result.commandPrefix).toBeUndefined();
+  });
 });
 
 describe("toAgentProfilePayload", () => {
   it("converts canonical camelCase back to snake_case wire shape", () => {
     const payload = toAgentProfilePayload({
-      id: toAgentProfileId("p1"),
+      id: toAgentProfileId(SAMPLE_ID),
       agentId: "claude",
       name: "default",
       cliPassthrough: false,
@@ -74,7 +99,7 @@ describe("toAgentProfilePayload", () => {
       envVars: [sampleEnvVar],
     });
     expect(payload).toEqual({
-      id: "p1",
+      id: SAMPLE_ID,
       agent_id: "claude",
       name: "default",
       cli_passthrough: false,
@@ -84,8 +109,17 @@ describe("toAgentProfilePayload", () => {
   });
 
   it("omits undefined fields rather than emitting nullish keys", () => {
-    const payload = toAgentProfilePayload({ id: toAgentProfileId("p1"), name: "x" });
-    expect(payload).toEqual({ id: "p1", name: "x" });
+    const payload = toAgentProfilePayload({ id: toAgentProfileId(SAMPLE_ID), name: "x" });
+    expect(payload).toEqual({ id: SAMPLE_ID, name: "x" });
     expect("agent_id" in payload).toBe(false);
+  });
+
+  it("maps commandPrefix to command_prefix", () => {
+    const payload = toAgentProfilePayload({
+      id: toAgentProfileId(SAMPLE_ID),
+      name: "default",
+      commandPrefix: SAMPLE_PREFIX,
+    });
+    expect(payload).toEqual({ id: SAMPLE_ID, name: "default", command_prefix: SAMPLE_PREFIX });
   });
 });
