@@ -100,6 +100,7 @@ function makeSession() {
 beforeEach(mockDefaultHydrationData);
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.useRealTimers();
 });
 
