@@ -3,6 +3,7 @@
 import { IconArrowUpCircle } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
+import { Switch } from "@kandev/ui/switch";
 import Link from "@/components/routing/app-link";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
@@ -13,10 +14,15 @@ type PluginRowProps = {
   busy: boolean;
   /** Set when the marketplace has a newer version than the installed one. */
   update?: MarketplaceEntry;
+  /** The instance-wide auto-update default, used when the plugin has no override. */
+  autoUpdateDefault: boolean;
+  /** True while this row's auto-update override request is in flight. */
+  autoUpdateBusy: boolean;
   onEnable: (plugin: PluginRecord) => void;
   onDisable: (plugin: PluginRecord) => void;
   onUninstall: (plugin: PluginRecord) => void;
   onUpdate?: (entry: MarketplaceEntry) => void;
+  onSetAutoUpdate: (plugin: PluginRecord, value: boolean | null) => void;
 };
 
 /**
@@ -28,10 +34,13 @@ export function PluginRow({
   plugin,
   busy,
   update,
+  autoUpdateDefault,
+  autoUpdateBusy,
   onEnable,
   onDisable,
   onUninstall,
   onUpdate,
+  onSetAutoUpdate,
 }: PluginRowProps) {
   const canEnable = plugin.status === "disabled" || plugin.status === "registered";
   const canDisable = plugin.status === "active" || plugin.status === "error";
@@ -95,11 +104,80 @@ export function PluginRow({
           ))}
         </div>
       )}
+
+      <PluginAutoUpdateRow
+        plugin={plugin}
+        autoUpdateDefault={autoUpdateDefault}
+        busy={autoUpdateBusy}
+        onSetAutoUpdate={onSetAutoUpdate}
+      />
     </div>
   );
 }
 
-type PluginRowActionsProps = Omit<PluginRowProps, "onEnable" | "onDisable" | "onUninstall"> & {
+/**
+ * The per-plugin auto-update control. The switch reflects the effective state
+ * (the plugin's own override, or the instance-wide default when it has none);
+ * toggling it sets an explicit override. Once overridden, a "Reset" affordance
+ * clears the override so the plugin follows the global default again.
+ */
+function PluginAutoUpdateRow({
+  plugin,
+  autoUpdateDefault,
+  busy,
+  onSetAutoUpdate,
+}: {
+  plugin: PluginRecord;
+  autoUpdateDefault: boolean;
+  busy: boolean;
+  onSetAutoUpdate: (plugin: PluginRecord, value: boolean | null) => void;
+}) {
+  const isOverridden = plugin.auto_update !== null && plugin.auto_update !== undefined;
+  const effective = isOverridden ? (plugin.auto_update as boolean) : autoUpdateDefault;
+
+  return (
+    <div className="flex items-center justify-between gap-3 border-t border-border/50 pt-3">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span>Auto-update</span>
+        {isOverridden && (
+          <Badge variant="outline" className="text-[11px]">
+            override
+          </Badge>
+        )}
+      </div>
+      <div className="flex items-center gap-2">
+        {isOverridden && (
+          <button
+            type="button"
+            data-testid={`plugin-auto-update-reset-${plugin.id}`}
+            className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline cursor-pointer disabled:opacity-50"
+            disabled={busy}
+            onClick={() => onSetAutoUpdate(plugin, null)}
+          >
+            Reset
+          </button>
+        )}
+        <Switch
+          data-testid={`plugin-auto-update-${plugin.id}`}
+          checked={effective}
+          disabled={busy}
+          onCheckedChange={(value) => onSetAutoUpdate(plugin, value)}
+          className="cursor-pointer"
+        />
+      </div>
+    </div>
+  );
+}
+
+type PluginRowActionsProps = Omit<
+  PluginRowProps,
+  | "onEnable"
+  | "onDisable"
+  | "onUninstall"
+  | "autoUpdateDefault"
+  | "autoUpdateBusy"
+  | "onSetAutoUpdate"
+> & {
   canEnable: boolean;
   canDisable: boolean;
   onEnable: (plugin: PluginRecord) => void;

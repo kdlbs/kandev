@@ -3,8 +3,10 @@
 import { useState } from "react";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Switch } from "@kandev/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
+import { useAutoUpdateSettings } from "@/hooks/domains/plugins/use-auto-update-settings";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { usePluginUpdates } from "@/hooks/domains/plugins/use-plugin-updates";
 import type { MarketplaceEntry } from "@/lib/types/plugins";
@@ -22,6 +24,7 @@ import { usePluginActions } from "./use-plugin-actions";
 export function PluginsSettings() {
   const list = usePlugins();
   const actions = usePluginActions();
+  const autoUpdate = useAutoUpdateSettings();
   const { updates, reload: reloadUpdates } = usePluginUpdates();
   const [updatingId, setUpdatingId] = useState<string | null>(null);
 
@@ -65,6 +68,7 @@ export function PluginsSettings() {
           <InstalledTab
             list={list}
             actions={actions}
+            autoUpdate={autoUpdate}
             updates={updates}
             updatingId={updatingId}
             onUpdate={handleUpdate}
@@ -97,15 +101,25 @@ export function PluginsSettings() {
 type InstalledTabProps = {
   list: ReturnType<typeof usePlugins>;
   actions: ReturnType<typeof usePluginActions>;
+  autoUpdate: ReturnType<typeof useAutoUpdateSettings>;
   updates: Map<string, MarketplaceEntry>;
   updatingId: string | null;
   onUpdate: (entry: MarketplaceEntry) => void;
 };
 
-/** The Installed tab: sync/install toolbar, sync errors, and the plugin list. */
-function InstalledTab({ list, actions, updates, updatingId, onUpdate }: InstalledTabProps) {
+/** The Installed tab: auto-update toggle, sync/install toolbar, sync errors, and the plugin list. */
+function InstalledTab({
+  list,
+  actions,
+  autoUpdate,
+  updates,
+  updatingId,
+  onUpdate,
+}: InstalledTabProps) {
   return (
     <>
+      <GlobalAutoUpdateToggle settings={autoUpdate} />
+
       <div className="flex items-center justify-between gap-2">
         <div className="text-sm font-medium text-foreground">Installed plugins</div>
         <div className="flex items-center gap-2">
@@ -145,6 +159,7 @@ function InstalledTab({ list, actions, updates, updatingId, onUpdate }: Installe
       <PluginList
         list={list}
         actions={actions}
+        autoUpdateDefault={autoUpdate.autoUpdateDefault}
         updates={updates}
         updatingId={updatingId}
         onUpdate={onUpdate}
@@ -153,15 +168,59 @@ function InstalledTab({ list, actions, updates, updatingId, onUpdate }: Installe
   );
 }
 
+/**
+ * The instance-wide "Automatically update plugins" switch. When on, every
+ * installed plugin without its own per-row override is auto-updated in the
+ * background. Individual rows can still override this either way.
+ */
+function GlobalAutoUpdateToggle({
+  settings,
+}: {
+  settings: ReturnType<typeof useAutoUpdateSettings>;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-background p-4">
+      <div className="min-w-0 space-y-1">
+        <label
+          htmlFor="plugins-auto-update-default"
+          className="text-sm font-medium text-foreground cursor-pointer"
+        >
+          Automatically update plugins
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Check the marketplace periodically and install newer versions of active plugins. Applies
+          to every plugin unless overridden per plugin below.
+        </p>
+      </div>
+      <Switch
+        id="plugins-auto-update-default"
+        data-testid="plugins-auto-update-default"
+        checked={settings.autoUpdateDefault}
+        disabled={!settings.loaded}
+        onCheckedChange={settings.setDefault}
+        className="cursor-pointer"
+      />
+    </div>
+  );
+}
+
 type PluginListProps = {
   list: ReturnType<typeof usePlugins>;
   actions: ReturnType<typeof usePluginActions>;
+  autoUpdateDefault: boolean;
   updates: Map<string, MarketplaceEntry>;
   updatingId: string | null;
   onUpdate: (entry: MarketplaceEntry) => void;
 };
 
-function PluginList({ list, actions, updates, updatingId, onUpdate }: PluginListProps) {
+function PluginList({
+  list,
+  actions,
+  autoUpdateDefault,
+  updates,
+  updatingId,
+  onUpdate,
+}: PluginListProps) {
   const { items, loaded, loading, error } = list;
 
   if (error) {
@@ -196,10 +255,13 @@ function PluginList({ list, actions, updates, updatingId, onUpdate }: PluginList
           plugin={plugin}
           busy={actions.busyId === plugin.id || updatingId === plugin.id}
           update={updates.get(plugin.id)}
+          autoUpdateDefault={autoUpdateDefault}
+          autoUpdateBusy={actions.autoUpdateBusyId === plugin.id}
           onEnable={actions.handleEnable}
           onDisable={actions.handleDisable}
           onUninstall={actions.openUninstall}
           onUpdate={onUpdate}
+          onSetAutoUpdate={actions.handleSetAutoUpdate}
         />
       ))}
     </div>

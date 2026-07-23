@@ -267,6 +267,57 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect.poll(() => fs.existsSync(pluginDir), { timeout: 10_000 }).toBe(false);
   });
 
+  test("auto-update: global default persists and a per-plugin override toggles and resets", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+
+    const globalToggle = testPage.getByTestId("plugins-auto-update-default");
+    const rowToggle = pluginRow.getByTestId(`plugin-auto-update-${PLUGIN_ID}`);
+    const rowReset = pluginRow.getByTestId(`plugin-auto-update-reset-${PLUGIN_ID}`);
+
+    // Default is off (opt-in); the row inherits it — unchecked, no override.
+    await expect(globalToggle).toBeEnabled({ timeout: 15_000 });
+    await expect(globalToggle).toHaveAttribute("aria-checked", "false");
+    await expect(rowToggle).toHaveAttribute("aria-checked", "false");
+    await expect(rowReset).toHaveCount(0);
+
+    // Turn the instance-wide default on; the inheriting row reflects it.
+    await globalToggle.click();
+    await expect(globalToggle).toHaveAttribute("aria-checked", "true");
+    await expect(rowToggle).toHaveAttribute("aria-checked", "true");
+    await expect(rowReset).toHaveCount(0);
+
+    // The default persisted server-side (plugin_settings) across a reload.
+    await testPage.reload();
+    await expect(globalToggle).toHaveAttribute("aria-checked", "true", { timeout: 15_000 });
+    await expect(rowToggle).toHaveAttribute("aria-checked", "true");
+
+    // Override the row OFF despite the on default → shows override + Reset.
+    await rowToggle.click();
+    await expect(rowToggle).toHaveAttribute("aria-checked", "false");
+    await expect(rowReset).toBeVisible();
+
+    // The per-plugin override persisted on the plugin record across a reload.
+    await testPage.reload();
+    await expect(rowToggle).toHaveAttribute("aria-checked", "false", { timeout: 15_000 });
+    await expect(rowReset).toBeVisible();
+
+    // Reset clears the override → the row inherits the (still on) default again.
+    await rowReset.click();
+    await expect(rowToggle).toHaveAttribute("aria-checked", "true");
+    await expect(rowReset).toHaveCount(0);
+
+    // Leave the instance-wide default off so sibling tests start clean.
+    await globalToggle.click();
+    await expect(globalToggle).toHaveAttribute("aria-checked", "false");
+  });
+
   test("settings page: schema-driven form, secret masking, and Host GetConfig delivery", async ({
     testPage,
     apiClient,

@@ -39,9 +39,16 @@ var ErrNotFound = errors.New("plugin not found")
 type Record struct {
 	manifest.Manifest `yaml:",inline"`
 
-	Status       string    `yaml:"status" json:"status"`
-	InstallPath  string    `yaml:"install_path" json:"install_path"`
-	Signed       bool      `yaml:"signed" json:"signed"`
+	Status      string `yaml:"status" json:"status"`
+	InstallPath string `yaml:"install_path" json:"install_path"`
+	Signed      bool   `yaml:"signed" json:"signed"`
+	// AutoUpdate is the operator's per-plugin auto-update override. It is a
+	// tri-state: nil means "inherit the instance-wide default"
+	// (Service.AutoUpdateDefault), true forces auto-update on for this plugin,
+	// and false forces it off — either override wins over the global default.
+	// Persisted so the choice survives restart and, unlike Status, is carried
+	// over verbatim when a plugin is upgraded in place (see Service.Install).
+	AutoUpdate   *bool     `yaml:"auto_update,omitempty" json:"auto_update,omitempty"`
 	InstalledAt  time.Time `yaml:"installed_at" json:"installed_at"`
 	RestartCount int       `yaml:"restart_count" json:"restart_count"`
 }

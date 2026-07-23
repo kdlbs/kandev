@@ -1,6 +1,6 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
-import type { PluginRecord, SyncResult } from "@/lib/types/plugins";
+import type { PluginRecord, PluginSettings, SyncResult } from "@/lib/types/plugins";
 
 const BASE = "/api/plugins";
 
@@ -138,6 +138,50 @@ export async function uninstallPlugin(id: string, options?: ApiRequestOptions) {
   return fetchJson<{ deleted: boolean }>(`${BASE}/${encodeURIComponent(id)}`, {
     ...options,
     init: { ...(options?.init ?? {}), method: "DELETE" },
+  });
+}
+
+// getPluginSettings fetches the instance-wide plugin preferences
+// (GET /api/plugins/settings), currently just the auto-update default.
+export async function getPluginSettings(options?: ApiRequestOptions): Promise<PluginSettings> {
+  return fetchJson<PluginSettings>(`${BASE}/settings`, options);
+}
+
+// updatePluginSettings sets the instance-wide auto-update default
+// (PUT /api/plugins/settings). Turning it on opts every plugin without a
+// per-plugin override into background auto-update. Returns the persisted
+// settings.
+export async function updatePluginSettings(
+  autoUpdateDefault: boolean,
+  options?: ApiRequestOptions,
+): Promise<PluginSettings> {
+  return fetchJson<PluginSettings>(`${BASE}/settings`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PUT",
+      body: JSON.stringify({ auto_update_default: autoUpdateDefault }),
+    },
+  });
+}
+
+// setPluginAutoUpdate sets or clears a plugin's per-plugin auto-update override
+// (PUT /api/plugins/:id/auto-update). Pass `null` to clear the override so the
+// plugin inherits the instance-wide default again; `true`/`false` force it
+// on/off. Returns the updated plugin record. Throws a 404 ApiError for an
+// unknown id.
+export async function setPluginAutoUpdate(
+  id: string,
+  autoUpdate: boolean | null,
+  options?: ApiRequestOptions,
+): Promise<PluginRecord> {
+  return fetchJson<PluginRecord>(`${BASE}/${encodeURIComponent(id)}/auto-update`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PUT",
+      body: JSON.stringify({ auto_update: autoUpdate }),
+    },
   });
 }
 

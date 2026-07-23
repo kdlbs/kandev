@@ -9,12 +9,15 @@ import {
   enablePlugin,
   getPlugin,
   getPluginConfig,
+  getPluginSettings,
   installPluginFromUrl,
   installPluginUpload,
   listPlugins,
+  setPluginAutoUpdate,
   syncPlugins,
   uninstallPlugin,
   updatePluginConfig,
+  updatePluginSettings,
 } from "./plugins-api";
 import { ApiError } from "../client";
 
@@ -312,6 +315,59 @@ describe("syncPlugins", () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ error: "sync failed" }, 500));
 
     await expect(syncPlugins()).rejects.toMatchObject({ status: 500, message: "sync failed" });
+  });
+});
+
+describe("getPluginSettings / updatePluginSettings", () => {
+  it("fetches GET /api/plugins/settings", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ auto_update_default: true }));
+
+    const result = await getPluginSettings();
+
+    const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe("http://api.test/api/plugins/settings");
+    expect(init?.method ?? "GET").toBe("GET");
+    expect(result).toEqual({ auto_update_default: true });
+  });
+
+  it("PUTs the auto-update default to /api/plugins/settings", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ auto_update_default: true }));
+
+    const result = await updatePluginSettings(true);
+
+    const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe("http://api.test/api/plugins/settings");
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toEqual({ auto_update_default: true });
+    expect(result).toEqual({ auto_update_default: true });
+  });
+});
+
+describe("setPluginAutoUpdate", () => {
+  it("PUTs a true override to /api/plugins/:id/auto-update and returns the record", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(plugin({ auto_update: true })));
+
+    const result = await setPluginAutoUpdate(PLUGIN_ID, true);
+
+    const [url, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(String(url)).toBe(`${PLUGIN_URL}/auto-update`);
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toEqual({ auto_update: true });
+    expect(result.auto_update).toBe(true);
+  });
+
+  it("PUTs a null body to clear the override (inherit the default)", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(plugin()));
+
+    await setPluginAutoUpdate(PLUGIN_ID, null);
+
+    const [, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(JSON.parse(String(init?.body))).toEqual({ auto_update: null });
+  });
+
+  it("propagates a 404 as an ApiError", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ error: "plugin not found" }, 404));
+    await expect(setPluginAutoUpdate("missing", true)).rejects.toBeInstanceOf(ApiError);
   });
 });
 
