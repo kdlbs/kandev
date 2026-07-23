@@ -45,7 +45,7 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 	if err != nil {
 		return "", fmt.Errorf("load task for MCP mode: %w", err)
 	}
-	if task.IsOfficeOwnedAndAssigned() {
+	if task != nil && task.IsFromOffice {
 		return McpModeOffice, nil
 	}
 	return "", nil
@@ -293,7 +293,7 @@ func (e *Executor) shouldSkipFailedStartReviewForTask(ctx context.Context, taskI
 			zap.Error(err))
 		return true
 	}
-	if task.IsOfficeOwnedAndAssigned() {
+	if task != nil && task.IsFromOffice {
 		e.logger.Debug("skipping failed-start task REVIEW state for office task",
 			zap.String("task_id", taskID),
 			zap.String("session_id", failedSessionID))

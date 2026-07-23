@@ -29,6 +29,7 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, log *logger.Logg
 			Tasks:         svcs.Workspaces,
 			TaskStatus:    svcs.Dashboard,
 			Agents:        svcs.Agents,
+			Projects:      svcs.Projects,
 			Approvals:     svcs.Approvals,
 			Runs:          svcs.Workspaces,
 			AgentModifier: svcs.Agents,

@@ -9,6 +9,8 @@ Agents running in separate Kandev tasks can talk to each other directly. One age
 
 Communication works across all relationship types — parent to child, child to parent, sibling to sibling, and tasks in entirely different workspaces or workflows ("projects"). The only requirement is that each agent knows the other task's full UUID.
 
+The examples below use canonical MCP protocol names ending in `_kandev`. An agent client may show a server-qualified display or registry alias, such as `mcp__kandev__message_task_kandev`; the prefix is client-specific, so use the form exposed by the active client rather than treating the qualified form as universal.
+
 ## Discovering task IDs
 
 An agent typically learns a peer's task ID in one of three ways:

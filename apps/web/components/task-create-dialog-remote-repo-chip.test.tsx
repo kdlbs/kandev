@@ -5,10 +5,6 @@ import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { UseRemoteRepositoriesResult } from "@/hooks/domains/integrations/use-remote-repositories";
 
-// Each test passes a stubbed `accessibleRepos` prop to the chip. The hook
-// itself now lives at the chips-row level (see chips-row test); the chip is
-// pure presentational glue over the result. Defaults to an empty/idle state
-// and individual tests override the slice they care about.
 type AccessibleRepo = {
   provider: "github" | "gitlab" | "azure_devops";
   owner: string;
@@ -52,42 +48,39 @@ function remoteTestURL(repo: AccessibleRepo): string {
   }
   return `https://${repo.provider}.com/${repo.owner}/${repo.name}`;
 }
-
 import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
 
 const TRIGGER_TID = "remote-repo-chip-trigger";
 const INPUT_TID = "remote-repo-input";
+const ALREADY_ADDED_MARKER = "already-added-repository-marker";
 const FULL_NAME = "acme/site";
 const URL_ACME_SITE = "https://github.com/acme/site";
-
+function githubSite(overrides: Partial<AccessibleRepo> = {}): AccessibleRepo {
+  return {
+    provider: "github",
+    owner: "acme",
+    name: "site",
+    full_name: FULL_NAME,
+    default_branch: "main",
+    private: false,
+    ...overrides,
+  };
+}
 afterEach(() => {
   cleanup();
 });
-
 function row(overrides: Partial<TaskRemoteRepoRow> = {}): TaskRemoteRepoRow {
   return { key: "remote-0", url: "", branch: "", source: "paste", ...overrides };
 }
-
 function renderInProvider(ui: Parameters<typeof render>[0]) {
   return render(<TooltipProvider>{ui}</TooltipProvider>);
 }
-
 const noopBranch = () => undefined;
 const noopRemove = () => undefined;
-
 describe("RemoteRepoChip — write paths", () => {
   it("picker selection writes URL + picker metadata (incl. default_branch) via onURLChange", () => {
     const accessibleRepos = makeAccessible({
-      repos: [
-        {
-          provider: "github",
-          owner: "acme",
-          name: "site",
-          full_name: FULL_NAME,
-          default_branch: "trunk",
-          private: false,
-        },
-      ],
+      repos: [githubSite({ default_branch: "trunk" })],
     });
     const onURLChange = vi.fn();
     renderInProvider(
@@ -113,7 +106,6 @@ describe("RemoteRepoChip — write paths", () => {
       }),
     );
   });
-
   it("selects an Azure DevOps repository with provider metadata", () => {
     const accessibleRepos = makeAccessible({
       repos: [
@@ -147,7 +139,6 @@ describe("RemoteRepoChip — write paths", () => {
       expect.objectContaining({ provider: "azure_devops", fullName: "Platform/api" }),
     );
   });
-
   it("calls onRemove when the X button is clicked", () => {
     const onRemove = vi.fn();
     renderInProvider(
@@ -165,7 +156,77 @@ describe("RemoteRepoChip — write paths", () => {
     expect(onRemove).toHaveBeenCalledOnce();
   });
 });
-
+describe("RemoteRepoChip — already added marker", () => {
+  it("marks a provider repository selected in another row and still selects it", () => {
+    const onURLChange = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible({
+          repos: [githubSite()],
+        })}
+        selectedRepositoryIdentities={["github:id:acme/site"]}
+        onURLChange={onURLChange}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    const marker = screen.getByTestId(ALREADY_ADDED_MARKER);
+    expect(marker.getAttribute("aria-label")).toBe("Already added");
+    expect(marker.classList).toContain("text-primary");
+    expect(screen.queryByText("Already added")).toBeNull();
+    fireEvent.click(screen.getByText(FULL_NAME).closest("button") as HTMLButtonElement);
+    expect(onURLChange).toHaveBeenCalledOnce();
+  });
+  it("does not mark an identical provider id from a different provider", () => {
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible({
+          repos: [
+            {
+              provider: "gitlab",
+              owner: "acme",
+              name: "site",
+              full_name: FULL_NAME,
+              default_branch: "main",
+              private: false,
+            },
+          ],
+        })}
+        selectedRepositoryIdentities={["github:id:acme/site"]}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    expect(screen.queryByTestId(ALREADY_ADDED_MARKER)).toBeNull();
+  });
+  it("marks an option from a normalized pasted URL identity", () => {
+    renderInProvider(
+      <RemoteRepoChip
+        row={row()}
+        branches={[]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible({
+          repos: [githubSite()],
+        })}
+        selectedRepositoryIdentities={["url:github:acme/site"]}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    expect(screen.getByTestId(ALREADY_ADDED_MARKER)).toBeTruthy();
+  });
+});
 describe("RemoteRepoChip — unified search", () => {
   it("uses ordinary text as repository search without committing it on blur", () => {
     const onURLChange = vi.fn();
@@ -190,19 +251,9 @@ describe("RemoteRepoChip — unified search", () => {
     expect(screen.queryByRole("alert")).toBeNull();
     expect(onURLChange).not.toHaveBeenCalled();
   });
-
   it("picker click after searching commits only the selected repository", () => {
     const accessibleRepos = makeAccessible({
-      repos: [
-        {
-          provider: "github",
-          owner: "acme",
-          name: "site",
-          full_name: FULL_NAME,
-          default_branch: "main",
-          private: false,
-        },
-      ],
+      repos: [githubSite()],
     });
     const onURLChange = vi.fn();
     renderInProvider(
@@ -234,20 +285,10 @@ describe("RemoteRepoChip — unified search", () => {
     );
   });
 });
-
 describe("RemoteRepoChip — picker focus", () => {
   it("does not commit a typed URL on blur when focus moves to a repository option", () => {
     const accessibleRepos = makeAccessible({
-      repos: [
-        {
-          provider: "github",
-          owner: "acme",
-          name: "site",
-          full_name: FULL_NAME,
-          default_branch: "main",
-          private: false,
-        },
-      ],
+      repos: [githubSite()],
     });
     const onURLChange = vi.fn();
     renderInProvider(
@@ -267,7 +308,6 @@ describe("RemoteRepoChip — picker focus", () => {
     const option = screen.getByText(FULL_NAME).closest("button") as HTMLButtonElement;
     fireEvent.blur(input, { relatedTarget: option });
     fireEvent.click(option);
-
     expect(onURLChange).toHaveBeenCalledTimes(1);
     expect(onURLChange).toHaveBeenCalledWith(
       URL_ACME_SITE,
@@ -280,7 +320,6 @@ describe("RemoteRepoChip — picker focus", () => {
     );
   });
 });
-
 describe("RemoteRepoChip — branch pill", () => {
   it("is disabled when the URL is empty", () => {
     renderInProvider(
@@ -297,7 +336,6 @@ describe("RemoteRepoChip — branch pill", () => {
     const branchTrigger = screen.getByTestId("remote-branch-chip-trigger") as HTMLButtonElement;
     expect(branchTrigger.disabled).toBe(true);
   });
-
   it("enables once URL is present and branches load", () => {
     const branches: Branch[] = [
       { name: "main", type: "remote", remote: "origin" },
@@ -319,9 +357,6 @@ describe("RemoteRepoChip — branch pill", () => {
   });
 
   it("is enabled when the row already has a branch even if branch options haven't loaded yet", () => {
-    // Picker pre-fill sets `row.branch` before the branch list fetch finishes.
-    // The pill must show the value as the active selection rather than
-    // greying out and confusing the user into thinking pre-fill failed.
     renderInProvider(
       <RemoteRepoChip
         row={row({ url: URL_ACME_SITE, branch: "trunk" })}
@@ -341,23 +376,8 @@ describe("RemoteRepoChip — branch pill", () => {
 
 describe("RemoteRepoChip — option layout", () => {
   it("never renders an option description line, even when the repo has a description", () => {
-    // Inverted from the original "renders description as a second line" test —
-    // the description was dropped from the picker to keep each row compact and
-    // one-line, after the picker switched to client-side filtering over a
-    // single fetch (descriptions added visual noise without aiding the
-    // case-insensitive full_name substring match).
     const accessibleRepos = makeAccessible({
-      repos: [
-        {
-          provider: "github",
-          owner: "acme",
-          name: "site",
-          full_name: FULL_NAME,
-          default_branch: "main",
-          description: "The acme corporate website",
-          private: false,
-        },
-      ],
+      repos: [githubSite({ description: "The acme corporate website" })],
     });
     renderInProvider(
       <RemoteRepoChip
@@ -373,7 +393,6 @@ describe("RemoteRepoChip — option layout", () => {
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
     expect(screen.queryByTestId("remote-repo-option-description")).toBeNull();
     expect(screen.queryByText("The acme corporate website")).toBeNull();
-    // The owner/name line is still rendered.
     expect(screen.getByText(FULL_NAME)).toBeTruthy();
   });
 });
@@ -405,16 +424,7 @@ describe("RemoteRepoChip — picker loading state", () => {
         branchesLoading={false}
         accessibleRepos={makeAccessible({
           loading: true,
-          repos: [
-            {
-              provider: "github",
-              owner: "acme",
-              name: "site",
-              full_name: FULL_NAME,
-              default_branch: "main",
-              private: false,
-            },
-          ],
+          repos: [githubSite()],
         })}
         onURLChange={vi.fn()}
         onBranchChange={noopBranch}
@@ -588,7 +598,6 @@ describe("RemoteRepoChip — trigger label", () => {
         onRemove={noopRemove}
       />,
     );
-    // Short URLs render verbatim; the middle-ellipsis only fires past ~30 chars.
     expect(screen.getByTestId(TRIGGER_TID).textContent).toContain("github.com/foo/bar");
   });
 });

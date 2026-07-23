@@ -7,18 +7,17 @@ description: Stage and commit changes using Conventional Commits. Use when there
 
 ## Planner Entry
 
-The user-started primary session delegates full
-verification to `verify`, then delegates staging and committing the verified
-checkout to an `implementer` worker. It does not run Git commands directly. The
-commit worker must receive the successful verification result and must not spawn
-other workers.
+The planner may stage and commit routine changes directly after their focused
+implementation checks pass. Final delegated `verify` runs on the committed
+artifact before push. Return the hook receipt defined below so `verify` can
+avoid repeating checks that successful hooks already covered.
 
 Create a git commit following this project's Conventional Commits convention. These messages are used by git-cliff (`cliff.toml`) to auto-generate changelogs and release notes. PRs are squash-merged, so the PR title becomes the commit on `main` — CI validates it via `pr-title.yml`.
 
-## Available skills and subagents
+## Available skills
 
-- **`verify` worker** — The planner runs this prerequisite before assigning the
-  commit worker.
+- **`verify` worker** — The planner runs this post-commit, pre-push gate with
+  the hook receipt and last verified SHA.
 
 ## Format
 
@@ -73,8 +72,11 @@ explicitly requests task tracking.
    pre-commit --version >/dev/null 2>&1 && echo "INSTALLED" || echo "NOT_INSTALLED"
 
    # Is the hook actually wired into git's hook system?
-   HOOK_PATH=$(git rev-parse --git-path hooks/pre-commit)
-   test -f "$HOOK_PATH" && grep -q "pre-commit" "$HOOK_PATH" && echo "ACTIVE" || echo "INACTIVE"
+   PRE_COMMIT_HOOK_PATH=$(git rev-parse --git-path hooks/pre-commit)
+   COMMIT_MSG_HOOK_PATH=$(git rev-parse --git-path hooks/commit-msg)
+   test -f "$PRE_COMMIT_HOOK_PATH" && grep -q "pre-commit" "$PRE_COMMIT_HOOK_PATH" \
+     && test -f "$COMMIT_MSG_HOOK_PATH" && grep -q "pre-commit" "$COMMIT_MSG_HOOK_PATH" \
+     && echo "ACTIVE" || echo "INACTIVE"
    ```
 
    - If **NOT_INSTALLED**, tell the user once: _"⚠️ pre-commit is not on PATH. Install it with `pip install pre-commit` so format/lint runs on every commit."_ Then continue (don't block).
@@ -87,13 +89,33 @@ explicitly requests task tracking.
 
    Why this matters: a missing hook lets lint regressions slip past local commits and only surface in CI (e.g. funlen / cognitive complexity on backend Go code). The hook catches them in <1s at commit time. See `Makefile`'s `doctor` target for the idempotent install command.
 
-3. **Require verify (MANDATORY — do NOT skip):** Confirm the planner supplied a
-   successful `verify` worker result for the current checkout. If the checkout
-   changed afterward or no result was supplied, stop and report that a new
-   verification assignment is required. Do not spawn or run verification from
-   the commit worker.
+3. **Capture the parent SHA and preserve hook evidence:**
+   ```bash
+   git rev-parse HEAD
+   ```
+   Never use `--no-verify`, `SKIP`, or another hook-bypass option or
+   environment variable. A bypassed commit is allowed only when the user
+   explicitly requests it, and its receipt must say `bypass: true`; it never
+   qualifies for hook-aware verification omissions.
 
 4. **Stage files:** Stage relevant files (prefer specific files over `git add -A`).
    - **Splitting commits with new files:** When introducing a brand-new file alongside the file that uses it, stage them together. The Go lint pre-commit hook stashes *unstaged* changes before linting but keeps *untracked* files in the working tree — so a new helper committed alone, while its (still-unstaged) caller sits in the working tree, lints as `unused` and rejects the commit.
 
 5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.
+   If a formatter changes files and prevents the commit, review and re-stage
+   those files, then create a new commit attempt; do not use `--amend`.
+
+6. **Return a hook receipt:** After a successful commit, report:
+   ```text
+   parent_sha: <pre-commit HEAD>
+   commit_sha: <new HEAD>
+   pre_commit_hook: active|inactive
+   commit_msg_hook: active|inactive
+   hook_results: <hook-id=passed|skipped, ...>
+   bypass: false|true
+   commit_result: pass
+   worktree: clean|dirty
+   ```
+   `verify` may use the receipt only when both hooks are active, bypass is
+   false, the commit succeeded, the current `HEAD` still equals `commit_sha`,
+   and the worktree is clean. The commit worker does not run verification.

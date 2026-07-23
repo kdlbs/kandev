@@ -372,8 +372,8 @@ func TestHandleTaskPRCIAutomationAutoFixExpandsPromptReferences(t *testing.T) {
 	if !strings.Contains(queued, "Fix the PR using @my-prompt") {
 		t.Fatalf("expected original prompt text preserved, got %q", queued)
 	}
-	if !strings.Contains(queued, "<kandev-system>EXPANDED:") {
-		t.Fatalf("expected saved-prompt reference to be expanded, got %q", queued)
+	if !strings.Contains(queued, sysprompt.Wrap(fakeResolvedPromptReferenceContext)) {
+		t.Fatalf("expected canonical saved-prompt expansion with resolved content, got %q", queued)
 	}
 }
 

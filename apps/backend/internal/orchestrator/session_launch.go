@@ -215,7 +215,7 @@ func (s *Service) shouldBlockAutoStart(ctx context.Context, req *LaunchSessionRe
 func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	execution, err := s.StartCreatedSession(
 		ctx, req.TaskID, req.SessionID, req.AgentProfileID,
-		req.Prompt, req.SkipMessageRecord, req.PlanMode, req.AutoStart, req.Attachments,
+		req.Prompt, req.SkipMessageRecord, req.PlanMode, req.AutoStart, req.Attachments, nil,
 	)
 	if err != nil {
 		return nil, err

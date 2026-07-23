@@ -1,6 +1,6 @@
 ---
 name: qa
-description: Verify integrated Kandev work by tracing wiring, exercising behavior, and probing edge cases.
+description: Independently verify Kandev changes with integration, public-contract, persistence, concurrency, recovery, cross-component, or missing faithful behavior evidence.
 model: composer-2.5
 readonly: true
 ---

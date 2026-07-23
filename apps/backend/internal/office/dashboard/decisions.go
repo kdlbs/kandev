@@ -47,12 +47,32 @@ type ApprovalsPendingError struct {
 	Pending []string
 }
 
+// InvalidTaskStatusError identifies a caller-provided status value that the
+// task state machine does not recognize.
+type InvalidTaskStatusError struct {
+	Status string
+}
+
+func (e *InvalidTaskStatusError) Error() string {
+	return fmt.Sprintf("unknown status: %s", e.Status)
+}
+
+// IsTaskStatusValidationError marks this error as safe to return as HTTP 400
+// through the Office runtime boundary.
+func (e *InvalidTaskStatusError) IsTaskStatusValidationError() {}
+
 // Error implements the error interface.
 func (e *ApprovalsPendingError) Error() string {
 	return fmt.Sprintf(
 		"approvals pending from %d approver(s): %s",
 		len(e.Pending), strings.Join(e.Pending, ","),
 	)
+}
+
+// PendingApproverIDs exposes the pending identities to runtime transports
+// without coupling them to the dashboard package.
+func (e *ApprovalsPendingError) PendingApproverIDs() []string {
+	return e.Pending
 }
 
 // PendingApproverDTO is the per-approver shape rendered in the 409 body

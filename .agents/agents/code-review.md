@@ -1,6 +1,6 @@
 ---
 name: code-review
-description: Review changed code for quality, security, and architecture compliance. Use after implementing features or before opening PRs.
+description: Frontier review for architecture, cross-cutting, high-risk, or stale/incomplete external-review Kandev changes.
 tools: Bash, Read, Grep, Glob
 model: opus
 effort: high

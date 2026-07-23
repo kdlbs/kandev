@@ -992,7 +992,7 @@ func (e *Executor) writeTaskInProgressForRuntime(ctx context.Context, taskID, se
 			zap.String("task_id", taskID))
 		return nil
 	}
-	if task.IsOfficeOwnedAndAssigned() {
+	if task != nil && task.IsFromOffice {
 		e.logger.Debug("skipping IN_PROGRESS transition for office task",
 			zap.String("task_id", taskID))
 		return nil

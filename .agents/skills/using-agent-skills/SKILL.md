@@ -10,12 +10,10 @@ Use this as the routing map for Kandev's local skills. Prefer the repo's existin
 ## Session Role
 
 The root `AGENTS.md` (also supplied to Claude through `CLAUDE.md`) is the
-authoritative always-on planner/worker role boundary. The user-started primary
-session plans and delegates through the active harness's native subagent tool;
-registered custom agents execute bounded worker assignments. Execution skills
-below describe what the assigned worker does, not work the planner performs
-directly. Never use Kandev MCP task/session APIs as worker delegation or as a
-fallback for unavailable native subagents.
+authoritative role boundary. The planner is the default architect and may apply
+execution skills directly to small scoped work; workers provide bounded
+isolation or independent evidence when their ROI is positive. Never use Kandev
+MCP task/session APIs as worker delegation or as a fallback.
 
 Load `/planner-orchestration` only when its detailed work-packet, model-tier,
 or completion rules are needed. Execution skills do not each need to load it.
@@ -36,11 +34,11 @@ Task arrives
 |-- Seed isolated product demo data? -------> /product-demo-seeding
 |-- Record landing/product media? ----------> /product-demo-seeding -> /product-video-capture (always in that order)
 |-- Frontend/UI change? --------------------> /mobile-parity plus /e2e as needed
-|-- Security-sensitive change? -------------> security-auditor subagent plus /code-review
+|-- High-impact security boundary/concern? -> security-auditor per /planner-orchestration
 |-- Test strategy or coverage gaps? --------> test-engineer subagent plus /tdd or /e2e
 |-- Add debug logs? ------------------------> /debug
 |-- Add Jira/Linear-style integration? -----> /add-integration
-|-- Verify implemented behavior? -----------> /qa then /verify
+|-- Verify implemented behavior? -----------> PR-first review, exceptional /qa, mandatory /verify
 |-- Simplify recent code? ------------------> /simplify
 |-- Review code? ---------------------------> /code-review
 |-- Improve skills/agents/commands? --------> /harness-improvement
@@ -59,7 +57,8 @@ Task arrives
 5. Surface assumptions before building on them. If requirements, specs, and code disagree, stop and name the conflict.
 6. Keep scope tight. Do not refactor adjacent systems or add "useful" features that are not in the request/spec.
 7. Verify with evidence: targeted tests, full `/verify` when needed, browser/E2E proof for user-facing flows.
-8. The planner never uses a direct execution fallback when a worker is unavailable.
+8. Keep small safe work local when context reload and coordination cost exceed
+   delegation value; preserve worker packet/no-subagent rules when delegating.
 9. Product media always invokes `/product-demo-seeding` before `/product-video-capture`, even when a prior seed or capture exists. Re-prove current `origin/main`, disposable runtime/data, and teardown; never capture a developer instance or database.
 
 ## Upstream Name Mapping

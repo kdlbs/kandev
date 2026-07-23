@@ -59,8 +59,11 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
                     raise SystemExit(0)
 
                 joined = " ".join(args)
-                if "/pulls/" in joined and os.environ.get("INLINE_FAIL") == "1":
+                if "/pulls/" in joined and "/comments" in joined and os.environ.get("INLINE_FAIL") == "1":
                     print("line is not part of the diff", file=sys.stderr)
+                    raise SystemExit(1)
+                if "/reviews" in joined and os.environ.get("TERMINAL_REVIEW_FAIL") == "1":
+                    print("terminal review unavailable", file=sys.stderr)
                     raise SystemExit(1)
                 if "/issues/" in joined and os.environ.get("ISSUE_COMMENT_FAIL") == "1":
                     print("issue comments unavailable", file=sys.stderr)
@@ -80,9 +83,11 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         output: str,
         inline_fail: bool = False,
         issue_comment_fail: bool = False,
+        terminal_review_fail: bool = False,
         gh_bin: Path | None = None,
         include_patch: bool = False,
     ) -> subprocess.CompletedProcess[str]:
+        self.calls_path.unlink(missing_ok=True)
         self.output_path.write_text(output, encoding="utf-8")
         env = {
             **os.environ,
@@ -91,12 +96,16 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
             "GITHUB_REPOSITORY": "kdlbs/kandev",
             "PR_NUMBER": "42",
             "HEAD_SHA": "0123456789abcdef",
+            "GITHUB_RUN_ID": "27340000005",
+            "GITHUB_RUN_ATTEMPT": "2",
             "OPENCODE_MODEL": "opencode-go/minimax-m3",
         }
         if inline_fail:
             env["INLINE_FAIL"] = "1"
         if issue_comment_fail:
             env["ISSUE_COMMENT_FAIL"] = "1"
+        if terminal_review_fail:
+            env["TERMINAL_REVIEW_FAIL"] = "1"
         command = [
             sys.executable,
             str(SCRIPT),
@@ -137,10 +146,68 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
                     bodies.append(call[index + 1][len("body=") :])
         return bodies
 
-    def test_missing_findings_block_posts_diagnostic_without_failing(self) -> None:
+    def terminal_review_calls(self) -> list[list[str]]:
+        return [call for call in self.read_calls() if any("/reviews" in arg for arg in call)]
+
+    def terminal_review_body(self, call: list[str]) -> str:
+        return next(arg[len("body=") :] for arg in call if arg.startswith("body="))
+
+    def test_empty_findings_post_trusted_exact_head_clean_terminal_review(self) -> None:
+        result = self.run_script(output="<opencode_findings>[]</opencode_findings>\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        terminal_calls = self.terminal_review_calls()
+        self.assertEqual(len(terminal_calls), 1, terminal_calls)
+        call = terminal_calls[0]
+        self.assertIn("repos/kdlbs/kandev/pulls/42/reviews", call)
+        self.assertIn("commit_id=0123456789abcdef", call)
+        self.assertIn("event=COMMENT", call)
+        body = self.terminal_review_body(call)
+        self.assertIn("<!-- kandev-review: clean -->", body)
+        self.assertIn("<!-- kandev-review: workflow-run id=27340000005 attempt=2 -->", body)
+        self.assertIn("OpenCode review complete", body)
+
+    def test_nonempty_findings_post_blocked_terminal_review_without_clean_marker(self) -> None:
+        findings = [{"path": "src/app.ts", "line": 99, "title": "Bad line", "body": "This line moved."}]
+        result = self.run_script(output=f"<opencode_findings>{json.dumps(findings)}</opencode_findings>\n")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        terminal_calls = self.terminal_review_calls()
+        self.assertEqual(len(terminal_calls), 1, terminal_calls)
+        body = self.terminal_review_body(terminal_calls[0])
+        self.assertNotIn("<!-- kandev-review: clean -->", body)
+        self.assertIn("<!-- kandev-review: workflow-run id=27340000005 attempt=2 -->", body)
+        self.assertIn("action required", body.lower())
+
+    def test_diagnostic_paths_never_post_clean_terminal_review(self) -> None:
+        for output, status in [("not findings", "0\n"), ("<opencode_findings>[]</opencode_findings>", "2\n")]:
+            with self.subTest(output=output, status=status):
+                self.status_path.write_text(status, encoding="utf-8")
+                result = self.run_script(output=output)
+                self.assertNotEqual(result.returncode, 0)
+                terminal_calls = self.terminal_review_calls()
+                self.assertEqual(len(terminal_calls), 1, terminal_calls)
+                self.assertNotIn("<!-- kandev-review: clean -->", self.terminal_review_body(terminal_calls[0]))
+                self.assertIn("<!-- kandev-review: workflow-run id=27340000005 attempt=2 -->", self.terminal_review_body(terminal_calls[0]))
+
+    def test_terminal_review_failure_fails_the_step(self) -> None:
+        result = self.run_script(
+            output="<opencode_findings>[]</opencode_findings>\n", terminal_review_fail=True
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Could not post OpenCode terminal review", result.stderr)
+
+    def test_diagnostic_terminal_review_failure_fails_the_step(self) -> None:
+        result = self.run_script(output="not findings", terminal_review_fail=True)
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Could not post OpenCode terminal review", result.stderr)
+
+    def test_missing_findings_block_posts_diagnostic_and_fails(self) -> None:
         result = self.run_script(output="OpenCode refused to read external_directory (/tmp/*)\n")
 
-        self.assertEqual(result.returncode, 0)
+        self.assertNotEqual(result.returncode, 0)
         self.assertIn("did not produce parseable findings", result.stderr)
         self.assertTrue(
             any("<!-- opencode-review:diagnostic -->" in body for body in self.bodies()),
@@ -148,10 +215,10 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         )
         self.assertIn("No parseable findings block", self.summary_path.read_text())
 
-    def test_invalid_findings_json_posts_diagnostic_without_failing(self) -> None:
+    def test_invalid_findings_json_posts_diagnostic_and_fails(self) -> None:
         result = self.run_script(output="<opencode_findings>{}</opencode_findings>\n")
 
-        self.assertEqual(result.returncode, 0)
+        self.assertNotEqual(result.returncode, 0)
         self.assertIn("did not produce parseable findings", result.stderr)
         self.assertTrue(any("<!-- opencode-review:diagnostic -->" in body for body in self.bodies()))
         self.assertIn("not an array", self.summary_path.read_text())
@@ -160,7 +227,7 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         result = self.run_script(output="<opencode_findings>```json\n[]\n```</opencode_findings>\n")
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertTrue(any("<!-- opencode-review:no-findings -->" in body for body in self.bodies()))
+        self.assertTrue(any("<!-- kandev-review: clean -->" in body for body in self.bodies()))
 
     def test_missing_gh_binary_reports_gracefully(self) -> None:
         result = self.run_script(
@@ -171,13 +238,28 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Binary not found", result.stderr)
 
-    def test_valid_empty_array_posts_no_findings_comment(self) -> None:
+    def test_valid_empty_array_does_not_post_legacy_no_findings_issue_comment(self) -> None:
         result = self.run_script(output="<opencode_findings>[]</opencode_findings>\n")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         bodies = self.bodies()
-        self.assertTrue(any("<!-- opencode-review:no-findings -->" in body for body in bodies))
+        self.assertFalse(any("<!-- opencode-review:no-findings -->" in body for body in bodies))
         self.assertFalse(any("<!-- opencode-review:diagnostic -->" in body for body in bodies))
+
+    def test_parse_findings_rejects_prefix_suffix_duplicate_and_empty_then_nonempty_blocks(self) -> None:
+        invalid_outputs = [
+            "prefix <opencode_findings>[]</opencode_findings>",
+            "<opencode_findings>[]</opencode_findings> suffix",
+            "<opencode_findings>[]</opencode_findings><opencode_findings>[]</opencode_findings>",
+            "<opencode_findings>[]</opencode_findings><opencode_findings>[{\"path\":\"src/app.ts\",\"line\":1,\"title\":\"bad\",\"body\":\"bad\"}]</opencode_findings>",
+        ]
+        for output in invalid_outputs:
+            with self.subTest(output=output):
+                result = self.run_script(output=output)
+                self.assertNotEqual(result.returncode, 0)
+                terminal_calls = self.terminal_review_calls()
+                self.assertEqual(len(terminal_calls), 1, terminal_calls)
+                self.assertNotIn("<!-- kandev-review: clean -->", self.terminal_review_body(terminal_calls[0]))
 
     def test_inline_failures_are_posted_as_one_fallback_comment(self) -> None:
         result = self.run_script(
@@ -224,7 +306,7 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg for arg in call)]
+        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg and "/comments" in arg for arg in call)]
         self.assertEqual(len(pull_comment_calls), 2, pull_comment_calls)
         self.assertTrue(any("line=9" in arg for call in pull_comment_calls for arg in call))
         self.assertTrue(any("line=10" in arg for call in pull_comment_calls for arg in call))
@@ -259,7 +341,7 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg for arg in call)]
+        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg and "/comments" in arg for arg in call)]
         self.assertEqual(len(pull_comment_calls), 1, pull_comment_calls)
         self.assertTrue(any("line=10" in arg for arg in pull_comment_calls[0]))
         self.assertFalse(any("line=99" in arg for call in self.read_calls() for arg in call))
@@ -296,7 +378,7 @@ class OpenCodeReviewScriptTest(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg for arg in call)]
+        pull_comment_calls = [call for call in self.read_calls() if any("/pulls/" in arg and "/comments" in arg for arg in call)]
         self.assertEqual(len(pull_comment_calls), 1, pull_comment_calls)
         self.assertTrue(any("line=9" in arg for arg in pull_comment_calls[0]))
         self.assertFalse(any("line=10" in arg for call in self.read_calls() for arg in call))

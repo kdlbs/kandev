@@ -80,6 +80,7 @@ This spec is the top-level entry point for Office. It covers the workspace model
   - `/office/projects/[id]` shows description, status, repos, task list filtered to this project (same list/board UI as `/office/tasks`), budget breakdown, agent instances on this project, and clickable rows that open the task detail.
   - The sidebar Projects section shows active projects with color dots, task counts, and a `+` to create.
 - **CEO integration**: the CEO's system prompt includes current project structure so it can assign tasks to projects, create new projects when work doesn't fit, and pick the right repo for each task.
+- **Agent CLI integration**: an authorized Office agent creates and lists projects in its current workspace through `$KANDEV_CLI kandev projects ...`; follow-up task creation accepts a project ID. Office agents do not create additional workspaces from inside a run.
 - **Cross-project delegation pattern**: features spanning multiple projects flow through the agent hierarchy using existing primitives (hierarchy, subtasks, blockers, `requires_approval`). Example: CEO -> CTO -> Analyst (analysis subtask with approval) -> per-repo worker tasks chained by blockers -> QA on a multi-worktree session -> SRE ship. No special schema required.
 
 ### Configuration storage and sync
@@ -167,13 +168,15 @@ When a user opens `/office`, the backend checks both DB and filesystem state via
 
 **On "Create & Launch"** the following are created in a single transaction:
 1. Office workspace: `kandev.yml` on filesystem + DB row in `workspaces` + system office workflow (7 steps).
-2. CEO Office identity with `role=ceo`, full Office permissions, and bundled skills (kandev-protocol, memory).
+2. CEO Office identity with `role=ceo`, full Office permissions, and bundled skills (kandev-protocol, memory, kandev-projects).
 3. Agent runtime row `status=idle` in `office_agent_runtime`.
 4. Workspace provider routing seed: automatic fallback disabled by default, default tier persisted from the coordinator tier selector, and Frontier / Balanced / Economy mapped to authoritative execution profile IDs so launches use the complete selected CLI configuration and profile deletion is blocked while referenced.
 5. First task if not skipped: assigned to the CEO, `status=todo`; a `task_assigned` wakeup is enqueued so the scheduler picks it up. The task brief tells the CEO to create the required projects, including one per repository, and propose follow-up tasks for human approval before creating them.
 6. Onboarding state marked completed in the DB.
 
 After creation the user is redirected to `/office`.
+
+The launched CEO has a documented, permission-checked CLI command for every mutation required by the default first-task brief. In particular, project creation must not depend on Kanban/config MCP tools, which are intentionally unavailable to Office sessions.
 
 **Returning users**: backend checks `onboarding_state` per user; if completed and no `mode=new`, skip wizard and show dashboard; if not completed, the wizard is shown again on next visit.
 
