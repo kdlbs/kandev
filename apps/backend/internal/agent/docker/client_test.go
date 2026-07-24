@@ -2,34 +2,39 @@ package docker
 
 import (
 	"fmt"
+	"net/netip"
 	"testing"
 
-	"github.com/docker/go-connections/nat"
+	"github.com/moby/moby/api/types/network"
 )
 
 func TestNormalizeDockerHostIP(t *testing.T) {
 	cases := []struct {
-		in   string
+		name string
+		in   netip.Addr
 		want string
 	}{
-		{in: "", want: "127.0.0.1"},
-		{in: "0.0.0.0", want: "127.0.0.1"},
-		{in: "::", want: "127.0.0.1"},
-		{in: "127.0.0.1", want: "127.0.0.1"},
-		{in: "10.0.0.5", want: "10.0.0.5"},
-		{in: "::1", want: "::1"},
+		{name: "unset", in: netip.Addr{}, want: "127.0.0.1"},
+		{name: "ipv4 wildcard", in: netip.MustParseAddr("0.0.0.0"), want: "127.0.0.1"},
+		{name: "ipv6 wildcard", in: netip.MustParseAddr("::"), want: "127.0.0.1"},
+		{name: "ipv4 loopback", in: netip.MustParseAddr("127.0.0.1"), want: "127.0.0.1"},
+		{name: "ipv4 host", in: netip.MustParseAddr("10.0.0.5"), want: "10.0.0.5"},
+		{name: "ipv6 loopback", in: netip.MustParseAddr("::1"), want: "::1"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.in, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			if got := normalizeDockerHostIP(tc.in); got != tc.want {
-				t.Errorf("normalizeDockerHostIP(%q) = %q, want %q", tc.in, got, tc.want)
+				t.Errorf("normalizeDockerHostIP(%v) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
 	}
 }
 
 func TestBuildDockerPortBindings_EmptyReturnsNil(t *testing.T) {
-	exposed, bindings := buildDockerPortBindings(nil)
+	exposed, bindings, err := buildDockerPortBindings(nil)
+	if err != nil {
+		t.Fatalf("buildDockerPortBindings: %v", err)
+	}
 	if exposed != nil {
 		t.Errorf("expected nil exposed ports, got %v", exposed)
 	}
@@ -43,13 +48,16 @@ func TestBuildDockerPortBindings_AssignsContainerAndHost(t *testing.T) {
 		{ContainerPort: 8080, HostIP: "127.0.0.1", HostPort: "0"},
 		{ContainerPort: 9000, HostIP: "0.0.0.0", HostPort: "9001"},
 	}
-	exposed, bindings := buildDockerPortBindings(in)
+	exposed, bindings, err := buildDockerPortBindings(in)
+	if err != nil {
+		t.Fatalf("buildDockerPortBindings: %v", err)
+	}
 
 	if got := len(exposed); got != 2 {
 		t.Fatalf("exposed ports = %d, want 2", got)
 	}
 	for _, b := range in {
-		key := nat.Port(fmt.Sprintf("%d/tcp", b.ContainerPort))
+		key := network.MustParsePort(fmt.Sprintf("%d/tcp", b.ContainerPort))
 		if _, ok := exposed[key]; !ok {
 			t.Errorf("exposed missing %s", key)
 		}
@@ -57,7 +65,7 @@ func TestBuildDockerPortBindings_AssignsContainerAndHost(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("bindings[%s] = %d entries, want 1", key, len(got))
 		}
-		if got[0].HostIP != b.HostIP || got[0].HostPort != b.HostPort {
+		if got[0].HostIP.String() != b.HostIP || got[0].HostPort != b.HostPort {
 			t.Errorf("bindings[%s] = %+v, want host_ip=%q host_port=%q", key, got[0], b.HostIP, b.HostPort)
 		}
 	}
@@ -68,9 +76,57 @@ func TestBuildDockerPortBindings_DeduplicatesContainerPort(t *testing.T) {
 		{ContainerPort: 7000, HostIP: "127.0.0.1", HostPort: "0"},
 		{ContainerPort: 7000, HostIP: "10.0.0.5", HostPort: "7000"},
 	}
-	_, bindings := buildDockerPortBindings(in)
-	got := bindings[nat.Port("7000/tcp")]
+	_, bindings, err := buildDockerPortBindings(in)
+	if err != nil {
+		t.Fatalf("buildDockerPortBindings: %v", err)
+	}
+	got := bindings[network.MustParsePort("7000/tcp")]
 	if len(got) != 2 {
 		t.Fatalf("want both bindings on port 7000, got %d", len(got))
+	}
+}
+
+func TestBuildDockerPortBindings_RejectsInvalidInput(t *testing.T) {
+	cases := []struct {
+		name string
+		in   PortBindingConfig
+	}{
+		{name: "container port zero", in: PortBindingConfig{ContainerPort: 0, HostPort: "1"}},
+		{name: "container port too large", in: PortBindingConfig{ContainerPort: 70000, HostPort: "1"}},
+		{name: "host ip not an address", in: PortBindingConfig{ContainerPort: 8080, HostIP: "localhost"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, _, err := buildDockerPortBindings([]PortBindingConfig{tc.in}); err == nil {
+				t.Fatal("expected an error, got nil")
+			}
+		})
+	}
+}
+
+func TestBuildDockerPortBindings_EmptyHostIPPublishesOnAllInterfaces(t *testing.T) {
+	_, bindings, err := buildDockerPortBindings([]PortBindingConfig{
+		{ContainerPort: 8080, HostIP: "", HostPort: "8080"},
+	})
+	if err != nil {
+		t.Fatalf("buildDockerPortBindings: %v", err)
+	}
+	got := bindings[network.MustParsePort("8080/tcp")]
+	if len(got) != 1 {
+		t.Fatalf("bindings = %d entries, want 1", len(got))
+	}
+	if got[0].HostIP.IsValid() {
+		t.Errorf("host IP = %v, want the zero address (all interfaces)", got[0].HostIP)
+	}
+}
+
+func TestParseHostPort(t *testing.T) {
+	if got, err := parseHostPort("9001"); err != nil || got != 9001 {
+		t.Fatalf("parseHostPort(9001) = %d, %v", got, err)
+	}
+	for _, in := range []string{"", "abc", "70000", "-1"} {
+		if _, err := parseHostPort(in); err == nil {
+			t.Errorf("parseHostPort(%q) = nil error, want an error", in)
+		}
 	}
 }
