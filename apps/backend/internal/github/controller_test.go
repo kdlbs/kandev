@@ -936,23 +936,46 @@ func TestHttpGetPRInfo_ServiceError(t *testing.T) {
 }
 
 func TestHttpGetPRInfo_NoClient(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/repos/acme/widget/pulls/99" {
+			t.Errorf("path = %q, want public PR endpoint", r.URL.Path)
+		}
+		if got := r.Header.Get("Accept"); got != githubAccept {
+			t.Errorf("Accept = %q, want %q", got, githubAccept)
+		}
+		if got := r.Header.Get("X-GitHub-Api-Version"); got != githubAPIVersion {
+			t.Errorf("X-GitHub-Api-Version = %q, want %q", got, githubAPIVersion)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":99,"title":"Public widget","state":"open","user":{"login":"octo"},"head":{"ref":"feature/public","sha":"abc123"},"base":{"ref":"main"}}`))
+	}))
+	t.Cleanup(api.Close)
+
+	originalAPIBase := anonymousAPIBase
+	anonymousAPIBase = api.URL
+	t.Cleanup(func() { anonymousAPIBase = originalAPIBase })
+
 	router, _ := setupControllerTest(nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/prs/acme/widget/99/info", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var got struct {
-		Code string `json:"code"`
-	}
+	var got PR
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got.Code != "github_not_configured" {
-		t.Fatalf("expected github_not_configured code, got %q", got.Code)
+	if got.Number != 99 || got.Title != "Public widget" {
+		t.Fatalf("PR = %#v, want public PR details", got)
+	}
+	if got.RepoOwner != "acme" || got.RepoName != "widget" || got.HeadBranch != "feature/public" || got.BaseBranch != "main" || got.AuthorLogin != "octo" {
+		t.Fatalf("PR fallback fields = %#v", got)
 	}
 }
 
