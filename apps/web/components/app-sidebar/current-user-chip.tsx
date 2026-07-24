@@ -33,7 +33,13 @@ async function handleLogout() {
  * responsible for gating on mode/user presence so single-user (disabled)
  * installs never render this.
  */
-export function CurrentUserChip({ collapsed }: { collapsed: boolean }) {
+export function CurrentUserChip({
+  collapsed,
+  className,
+}: {
+  collapsed: boolean;
+  className?: string;
+}) {
   const user = useAppStore((s) => s.auth.user);
   if (!user) return null;
 
@@ -48,6 +54,7 @@ export function CurrentUserChip({ collapsed }: { collapsed: boolean }) {
           className={cn(
             "flex items-center gap-1.5 rounded-md cursor-pointer overflow-hidden border border-transparent transition-colors hover:border-border hover:bg-muted/50",
             collapsed ? "justify-center p-1" : "px-1.5 py-1 max-w-[140px]",
+            className,
           )}
         >
           <Avatar size="sm">

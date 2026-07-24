@@ -184,7 +184,9 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
         />
       )}
       <ThemeToggle />
-      {showCurrentUser && <CurrentUserChip collapsed={collapsed} />}
+      {showCurrentUser && (
+        <CurrentUserChip collapsed={collapsed} className={cn(!collapsed && "ml-auto")} />
+      )}
       <ImproveKandevDialog
         open={improveOpen}
         onOpenChange={setImproveOpen}
