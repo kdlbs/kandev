@@ -1,20 +1,35 @@
 import { useCallback, type ReactNode } from "react";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { DiffComment } from "@/lib/diff/types";
+import type { TaskReviewFinding } from "@/lib/types/review";
 import { CommentForm } from "./comment-form";
 import { CommentDisplay } from "./comment-display";
 import { HunkActionBar } from "./hunk-action-bar";
 import { WalkthroughStepCard } from "./walkthrough-step-card";
+import { ReviewFindingCard } from "./review-finding-card";
 
 type AnnotationMetadata = {
-  type: "comment" | "new-comment-form" | "hunk-actions" | "walkthrough-step";
+  type: "comment" | "new-comment-form" | "hunk-actions" | "walkthrough-step" | "review-finding";
   comment?: DiffComment;
   isEditing?: boolean;
   changeBlockId?: string;
+  /** Set when type is "review-finding". */
+  finding?: TaskReviewFinding;
+  /** Explains why an anchored finding is stale, when it is. */
+  findingStaleReason?: string;
+};
+
+type ReviewFindingHandlers = {
+  onResolve?: (finding: TaskReviewFinding) => void;
+  onDismiss?: (finding: TaskReviewFinding) => void;
+  onReopen?: (finding: TaskReviewFinding) => void;
+  onSendToAgent?: (finding: TaskReviewFinding) => void;
 };
 
 type UseAnnotationRendererOpts = {
   handleRevertBlock: (changeBlockId: string) => Promise<void>;
+  /** Actions for inline review findings; omitted when findings are read-only. */
+  reviewFindingHandlers?: ReviewFindingHandlers;
   onButtonEnter: () => void;
   onButtonLeave: () => void;
   handleCommentSubmit: (content: string) => void;
@@ -29,6 +44,30 @@ type UseAnnotationRendererOpts = {
 
 export type { AnnotationMetadata };
 
+/** One review finding rendered inline at its anchored diff line. */
+function InlineReviewFinding({
+  finding,
+  staleReason,
+  handlers,
+}: {
+  finding: TaskReviewFinding;
+  staleReason?: string;
+  handlers?: ReviewFindingHandlers;
+}) {
+  return (
+    <div className="my-1 px-2">
+      <ReviewFindingCard
+        finding={finding}
+        staleReason={staleReason}
+        onResolve={handlers?.onResolve}
+        onDismiss={handlers?.onDismiss}
+        onReopen={handlers?.onReopen}
+        onSendToAgent={handlers?.onSendToAgent}
+      />
+    </div>
+  );
+}
+
 export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
   const {
     handleRevertBlock,
@@ -42,11 +81,23 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
     setShowCommentForm,
     setSelectedLines,
     setEditingComment,
+    reviewFindingHandlers,
   } = opts;
 
   return useCallback(
     (annotation: DiffLineAnnotation<AnnotationMetadata>): ReactNode => {
-      const { type, comment, isEditing, changeBlockId } = annotation.metadata;
+      const { type, comment, isEditing, changeBlockId, finding, findingStaleReason } =
+        annotation.metadata;
+
+      if (type === "review-finding" && finding) {
+        return (
+          <InlineReviewFinding
+            finding={finding}
+            staleReason={findingStaleReason}
+            handlers={reviewFindingHandlers}
+          />
+        );
+      }
 
       if (type === "walkthrough-step") {
         return <WalkthroughStepCard key="walkthrough-step" />;
@@ -120,6 +171,7 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
       onButtonLeave,
       setShowCommentForm,
       setSelectedLines,
+      reviewFindingHandlers,
     ],
   );
 }
