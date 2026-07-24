@@ -103,6 +103,22 @@ func (r *Registry) SetStatus(id string, status Status) (*store.Record, bool) {
 	return &clone, true
 }
 
+// SetAutoUpdate updates the in-memory per-plugin auto-update override for id
+// and returns a copy of the updated record. ok is false if id is not
+// registered. Called by Service.SetPluginAutoUpdate, which persists the copy
+// to the store; v is nil to clear the override (inherit the global default).
+func (r *Registry) SetAutoUpdate(id string, v *bool) (*store.Record, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.byID[id]
+	if !ok {
+		return nil, false
+	}
+	rec.AutoUpdate = v
+	clone := *rec
+	return &clone, true
+}
+
 // SetRestartCount updates the in-memory restart count for id and returns a
 // copy of the updated record. ok is false if id is not registered. Called
 // by Service after a runtime.Manager-driven restart, to persist
