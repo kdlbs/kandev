@@ -70,6 +70,10 @@ test.describe("Attach local workspace sources", () => {
 
     const workspaceActions = testPage.getByTestId("files-workspace-actions");
     await expect(workspaceActions).toBeEnabled();
+    await expect(workspaceActions).toHaveAccessibleName("Workspace actions");
+    const workspaceActionsBox = await workspaceActions.boundingBox();
+    expect(workspaceActionsBox).not.toBeNull();
+    expect(workspaceActionsBox!.width).toBeLessThanOrEqual(44);
     await workspaceActions.click();
     const addSources = testPage.getByRole("menuitem", { name: "Add sources" });
     const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });

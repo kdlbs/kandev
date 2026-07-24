@@ -4,11 +4,11 @@ import { useCallback, useEffect, useRef, type ReactNode, type Ref, type RefObjec
 import {
   IconSearch,
   IconListTree,
-  IconFolderShare,
   IconFolderOpen,
   IconCopy,
   IconCheck,
   IconPlus,
+  IconDots,
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -155,18 +155,22 @@ function WorkspaceActionsMenu({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <button
-          ref={setTriggerRef}
-          type="button"
-          aria-label="Workspace actions"
-          data-testid="files-workspace-actions"
-          className="inline-flex min-h-11 min-w-11 items-center gap-1 rounded px-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer sm:min-h-8 sm:min-w-0"
-        >
-          <IconFolderShare className="h-3.5 w-3.5" />
-          <span>Workspace actions</span>
-        </button>
-      </DropdownMenuTrigger>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <DropdownMenuTrigger asChild>
+            <button
+              ref={setTriggerRef}
+              type="button"
+              aria-label="Workspace actions"
+              data-testid="files-workspace-actions"
+              className="inline-flex size-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer sm:size-8"
+            >
+              <IconDots className="h-4 w-4" />
+            </button>
+          </DropdownMenuTrigger>
+        </TooltipTrigger>
+        <TooltipContent>Workspace actions</TooltipContent>
+      </Tooltip>
       <DropdownMenuContent
         align="end"
         className="w-56"
