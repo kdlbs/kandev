@@ -287,15 +287,36 @@ export function parseCodeFences(text: string): FenceSegment[] {
 
 // ── Paste handler ───────────────────────────────────────────────────
 
-function extractFiles(items: DataTransferItemList): File[] {
+export type ImagePasteIssue = "unreadable-image";
+
+function extractFiles(clipboardData: DataTransfer): File[] {
+  const listedFiles = Array.from(clipboardData.files);
+  if (listedFiles.length > 0) return listedFiles;
+
   const files: File[] = [];
-  for (const item of items) {
+  for (const item of clipboardData.items) {
     if (item.kind === "file") {
       const file = item.getAsFile();
       if (file) files.push(file);
     }
   }
   return files;
+}
+
+function hasUnreadableImage(clipboardData: DataTransfer): boolean {
+  const hasImageItem = Array.from(clipboardData.items).some((item) =>
+    item.type.startsWith("image/"),
+  );
+  if (hasImageItem) return true;
+
+  const html = clipboardData.getData("text/html");
+  if (!html) return false;
+  const parsed = new DOMParser().parseFromString(html, "text/html");
+  if (!parsed.body.querySelector("img")) return false;
+  parsed.body
+    .querySelectorAll("img, script, style, template, noscript")
+    .forEach((element) => element.remove());
+  return !parsed.body.textContent?.trim();
 }
 
 function segmentToNodes(
@@ -332,21 +353,26 @@ function insertCodeFenceNodes(
 export function handleEditorPaste(
   view: import("@tiptap/pm/view").EditorView,
   event: ClipboardEvent,
-  onImagePasteRef: React.RefObject<((files: File[]) => void) | undefined>,
+  onImagePasteRef: React.RefObject<((files: File[], issue?: ImagePasteIssue) => void) | undefined>,
 ): boolean {
   // 1. File paste (images and other files)
-  const items = event.clipboardData?.items;
-  if (items) {
-    const files = extractFiles(items);
+  const clipboardData = event.clipboardData;
+  if (clipboardData) {
+    const files = extractFiles(clipboardData);
     if (files.length > 0) {
       event.preventDefault();
       onImagePasteRef.current?.(files);
       return true;
     }
+    if (hasUnreadableImage(clipboardData)) {
+      event.preventDefault();
+      onImagePasteRef.current?.([], "unreadable-image");
+      return true;
+    }
   }
 
   // 2. Markdown code fence paste
-  const text = event.clipboardData?.getData("text/plain");
+  const text = clipboardData?.getData("text/plain");
   if (text && text.includes("```")) {
     const segments = parseCodeFences(text);
     if (segments.some((s) => s.type === "code")) {

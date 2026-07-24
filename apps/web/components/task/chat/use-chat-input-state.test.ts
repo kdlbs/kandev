@@ -189,4 +189,19 @@ describe("useChatInputState attachment feedback", () => {
     );
     expect(result.current.attachments).toEqual([]);
   });
+
+  it("warns when a pasted image has no readable file data", async () => {
+    const { result } = renderInputState(vi.fn());
+
+    await act(async () => {
+      await result.current.addFiles([], "unreadable-image");
+    });
+
+    const warning = screen.getByTestId("toast-message");
+    expect(warning.textContent).toContain("Pasted image couldn’t be attached");
+    expect(warning.textContent).toContain(
+      "The browser didn’t provide image data. Save the image, then attach the file instead.",
+    );
+    expect(result.current.attachments).toEqual([]);
+  });
 });

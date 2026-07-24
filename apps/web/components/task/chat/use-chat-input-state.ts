@@ -25,7 +25,10 @@ import {
   MAX_TOTAL_SIZE,
   type FileAttachment,
 } from "./file-attachment";
-import { useAttachmentFileFeedback } from "./use-attachment-file-feedback";
+import {
+  useAttachmentFileFeedback,
+  useUnreadablePastedImageFeedback,
+} from "./use-attachment-file-feedback";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
 import type {
@@ -34,6 +37,7 @@ import type {
   MessageAttachment,
 } from "./chat-input-container";
 import type { TipTapInputHandle } from "./tiptap-input";
+import type { ImagePasteIssue } from "./tiptap-helpers";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
@@ -205,6 +209,7 @@ function useAttachments(sessionId: string | null) {
     sessionId ? getChatDraftAttachments(sessionId).map(restoreAttachmentPreview) : [],
   );
   const rejectOversizedFile = useAttachmentFileFeedback();
+  const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
   const attachmentsRef = useRef(attachments);
   const prevSessionIdRef = useRef(sessionId);
   const prevPersistSessionIdRef = useRef(sessionId);
@@ -234,7 +239,11 @@ function useAttachments(sessionId: string | null) {
   }, [attachments, sessionId]);
 
   const addFiles = useCallback(
-    async (files: File[]) => {
+    async (files: File[], issue?: ImagePasteIssue) => {
+      if (issue === "unreadable-image") {
+        warnUnreadablePastedImage();
+        return;
+      }
       if (attachments.length >= MAX_FILES) {
         console.warn(`Maximum ${MAX_FILES} files allowed`);
         return;
@@ -251,7 +260,7 @@ function useAttachments(sessionId: string | null) {
         if (attachment) setAttachments((prev) => [...prev, attachment]);
       }
     },
-    [attachments, rejectOversizedFile],
+    [attachments, rejectOversizedFile, warnUnreadablePastedImage],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {

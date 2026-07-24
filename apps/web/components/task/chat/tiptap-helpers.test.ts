@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
-import { getMarkdownText, textToEditorContent } from "./tiptap-helpers";
+import { describe, expect, it, vi } from "vitest";
+import type { EditorView } from "@tiptap/pm/view";
+import { getMarkdownText, handleEditorPaste, textToEditorContent } from "./tiptap-helpers";
 import * as tiptapHelpers from "./tiptap-helpers";
 
 describe("entity reference trigger", () => {
@@ -244,5 +245,121 @@ describe("textToEditorContent", () => {
         text: "See [#ENG-123](https://jira.example.test/browse/ENG-123)",
       },
     ]);
+  });
+});
+
+const PNG_MIME_TYPE = "image/png";
+
+describe("handleEditorPaste", () => {
+  it("uses clipboard files when item conversion does not provide a file", () => {
+    const image = new File(["image"], "copied.png", { type: PNG_MIME_TYPE });
+    const onImagePaste = vi.fn();
+    const preventDefault = vi.fn();
+    const event = {
+      clipboardData: {
+        files: [image],
+        items: [],
+        getData: () => "",
+      },
+      preventDefault,
+    } as unknown as ClipboardEvent;
+
+    const handled = handleEditorPaste({} as EditorView, event, {
+      current: onImagePaste,
+    });
+
+    expect(handled).toBe(true);
+    expect(onImagePaste).toHaveBeenCalledWith([image]);
+    expect(preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to a readable file item when the clipboard file list is empty", () => {
+    const image = new File(["image"], "copied.png", { type: PNG_MIME_TYPE });
+    const onImagePaste = vi.fn();
+    const preventDefault = vi.fn();
+    const event = {
+      clipboardData: {
+        files: [],
+        items: [{ kind: "file", type: PNG_MIME_TYPE, getAsFile: () => image }],
+        getData: () => "",
+      },
+      preventDefault,
+    } as unknown as ClipboardEvent;
+
+    const handled = handleEditorPaste({} as EditorView, event, {
+      current: onImagePaste,
+    });
+
+    expect(handled).toBe(true);
+    expect(onImagePaste).toHaveBeenCalledWith([image]);
+    expect(preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it("does not duplicate a file mirrored in the clipboard file list and items", () => {
+    const image = new File(["image"], "copied.png", { type: PNG_MIME_TYPE });
+    const onImagePaste = vi.fn();
+    const event = {
+      clipboardData: {
+        files: [image],
+        items: [{ kind: "file", type: PNG_MIME_TYPE, getAsFile: () => image }],
+        getData: () => "",
+      },
+      preventDefault: vi.fn(),
+    } as unknown as ClipboardEvent;
+
+    handleEditorPaste({} as EditorView, event, {
+      current: onImagePaste,
+    });
+
+    expect(onImagePaste).toHaveBeenCalledOnce();
+    expect(onImagePaste).toHaveBeenCalledWith([image]);
+  });
+
+  it("reports image-only HTML when the browser exposes no readable file", () => {
+    const onImagePaste = vi.fn();
+    const preventDefault = vi.fn();
+    const event = {
+      clipboardData: {
+        files: [],
+        items: [{ kind: "string", type: "text/html" }],
+        getData: (type: string) =>
+          type === "text/html"
+            ? '<meta charset="utf-8"><style>img { max-width: 100%; }</style><img src="https://images.example.test/large-image.png" alt="">'
+            : "",
+      },
+      preventDefault,
+    } as unknown as ClipboardEvent;
+
+    const handled = handleEditorPaste({} as EditorView, event, {
+      current: onImagePaste,
+    });
+
+    expect(handled).toBe(true);
+    expect(onImagePaste).toHaveBeenCalledWith([], "unreadable-image");
+    expect(preventDefault).toHaveBeenCalledOnce();
+  });
+
+  it("leaves rich HTML with visible text to the editor", () => {
+    const onImagePaste = vi.fn();
+    const preventDefault = vi.fn();
+    const event = {
+      clipboardData: {
+        files: [],
+        items: [{ kind: "string", type: "text/html" }],
+        getData: (type: string) =>
+          type === "text/html"
+            ? '<p>Visible caption <img src="https://images.example.test/image.png"></p>'
+            : "Visible caption",
+      },
+      preventDefault,
+    } as unknown as ClipboardEvent;
+
+    const handled = handleEditorPaste({} as EditorView, event, {
+      current: onImagePaste,
+    });
+
+    expect(handled).toBe(false);
+    expect(onImagePaste).not.toHaveBeenCalled();
+    expect(preventDefault).not.toHaveBeenCalled();
   });
 });

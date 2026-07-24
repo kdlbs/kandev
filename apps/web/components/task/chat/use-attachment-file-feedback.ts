@@ -19,3 +19,16 @@ export function useAttachmentFileFeedback() {
     [toast],
   );
 }
+
+export function useUnreadablePastedImageFeedback() {
+  const { toast } = useToast();
+
+  return useCallback(() => {
+    toast({
+      title: "Pasted image couldn’t be attached",
+      description:
+        "The browser didn’t provide image data. Save the image, then attach the file instead.",
+      variant: "error",
+    });
+  }, [toast]);
+}
