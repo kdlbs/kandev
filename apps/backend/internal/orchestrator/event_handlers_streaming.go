@@ -153,9 +153,13 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	if payload.Data.SessionStatus == "resumed" {
 		statusMsg = "Session resumed"
 	}
+	turnID := s.currentTurnIDForSession(ctx, sessionID)
+	if turnID == "" {
+		return
+	}
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx, taskID, statusMsg, sessionID,
-		string(v1.MessageTypeStatus), s.currentTurnIDForSession(ctx, sessionID), nil, false,
+		string(v1.MessageTypeStatus), turnID, nil, false,
 	); err != nil {
 		s.logger.Error("failed to create session status message",
 			zap.String("task_id", taskID),

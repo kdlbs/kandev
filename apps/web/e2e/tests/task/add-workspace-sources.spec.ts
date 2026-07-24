@@ -40,7 +40,7 @@ function createSourceDirectories(root: string) {
 }
 
 test.describe("Attach local workspace sources", () => {
-  test("adds a local repository and folder atomically, scopes Changes to Git, and persists", async ({
+  test("adds a local repository and folder successively, scopes Changes to Git, and persists", async ({
     testPage,
     apiClient,
     seedData,
@@ -119,34 +119,42 @@ test.describe("Attach local workspace sources", () => {
     await savedRepositoryRow.getByRole("button", { name: "Remove source" }).click();
     await addRepository.click();
     await testPage.getByRole("menuitem", { name: "Local Git repository" }).click();
-    await dialog.getByRole("button", { name: "Add folder" }).click();
-    const rows = dialog.getByTestId("workspace-source-row");
-    await expect(rows).toHaveCount(2);
+    const repositoryRow = dialog.getByTestId("workspace-source-row");
     await chooseDirectory(
       testPage,
-      rows.nth(0).getByTestId("folder-picker-trigger"),
+      repositoryRow.getByTestId("folder-picker-trigger"),
       backend.tmpDir,
       repositoryPath,
     );
-    await rows.nth(0).getByRole("textbox", { name: "Base branch" }).fill("main");
-    await chooseDirectory(
-      testPage,
-      rows.nth(1).getByTestId("folder-picker-trigger"),
-      backend.tmpDir,
-      folderPath,
-    );
-    await expect(rows).toHaveCount(2);
-    await prCapture.screenshot("workspace-actions-mixed-sources", {
-      caption: "Desktop Add to workspace dialog with a local repository and folder configured",
-    });
+    await repositoryRow.getByRole("textbox", { name: "Base branch" }).fill("main");
     await submit.click();
     await expect(dialog).not.toBeVisible();
-
     await expect(
       session.files
         .getByTestId("file-tree-node")
         .filter({ hasText: "second-local-repository-main" }),
     ).toBeVisible({ timeout: 30_000 });
+    if (!task.session_id) throw new Error("task creation did not return a session id");
+    const turnsAfterFirstAttachment = await apiClient.listSessionTurns(task.session_id);
+    expect(turnsAfterFirstAttachment.turns.filter((turn) => !turn.completed_at)).toEqual([]);
+
+    await workspaceActions.click();
+    await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Add folder" }).click();
+    const folderRow = dialog.getByTestId("workspace-source-row");
+    await chooseDirectory(
+      testPage,
+      folderRow.getByTestId("folder-picker-trigger"),
+      backend.tmpDir,
+      folderPath,
+    );
+    await prCapture.screenshot("workspace-actions-mixed-sources", {
+      caption: "Desktop Add to workspace dialog with a local folder configured",
+    });
+    await submit.click();
+    await expect(dialog).not.toBeVisible();
+
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
     ).toBeVisible();
