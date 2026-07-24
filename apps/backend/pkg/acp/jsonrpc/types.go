@@ -16,7 +16,7 @@ type Response struct {
 	JSONRPC string          `json:"jsonrpc"` // Always "2.0"
 	ID      interface{}     `json:"id"`
 	Result  json.RawMessage `json:"result,omitempty"`
-	Error   *Error          `json:"error,omitempty"`
+	Error   *Error          `json:"error,omitempty"`delete
 }
 
 // Error represents a JSON-RPC 2.0 error
