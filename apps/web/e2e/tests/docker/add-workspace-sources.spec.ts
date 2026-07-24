@@ -18,10 +18,6 @@ function containerFile(containerID: string, file: string): string {
   return execFileSync("docker", ["exec", containerID, "cat", file], { encoding: "utf8" });
 }
 
-function fixtureBackendEnv(fixture: { gitConfigEnvVars: Array<{ key: string; value: string }> }) {
-  return Object.fromEntries(fixture.gitConfigEnvVars.map(({ key, value }) => [key, value]));
-}
-
 async function cleanupFixture(
   fixture: { close: () => Promise<void> },
   releaseBackendEnv?: () => Promise<void>,
@@ -58,7 +54,7 @@ test.describe("Docker executor — attach workspace sources", () => {
     const fixture = await startHTTPGitFixture(backend.tmpDir, "docker-second-source");
     let releaseBackendEnv: (() => Promise<void>) | undefined;
     try {
-      releaseBackendEnv = await backend.useEnv(fixtureBackendEnv(fixture));
+      releaseBackendEnv = await backend.useEnv(fixture.backendEnv);
       const { executors } = await apiClient.listExecutors();
       const dockerExecutor = executors.find((executor) => executor.type === "local_docker");
       expect(dockerExecutor).toBeTruthy();
@@ -182,7 +178,7 @@ test.describe("Docker executor — attach workspace sources", () => {
     const fixture = await startHTTPGitFixture(backend.tmpDir, "docker-rollback-source");
     let releaseBackendEnv: (() => Promise<void>) | undefined;
     try {
-      releaseBackendEnv = await backend.useEnv(fixtureBackendEnv(fixture));
+      releaseBackendEnv = await backend.useEnv(fixture.backendEnv);
       const { executors } = await apiClient.listExecutors();
       const dockerExecutor = executors.find((executor) => executor.type === "local_docker");
       expect(dockerExecutor).toBeTruthy();
