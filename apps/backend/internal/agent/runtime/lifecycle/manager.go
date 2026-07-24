@@ -81,6 +81,10 @@ type Manager struct {
 	// from agentctl instances through the agent stream.
 	mcpHandler agentctl.MCPHandler
 
+	// sessionAccessCheck enforces per-user workspace scoping on session-scoped
+	// surfaces (opt-in auth). Nil = no scoping. See SetSessionAccessChecker.
+	sessionAccessCheck func(ctx context.Context, sessionID string) error
+
 	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
 	ensureExecutionGroup singleflight.Group
 
@@ -338,6 +342,14 @@ func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 	m.mcpHandler = handler
 	// Update the stream manager with the handler
 	m.streamManager.mcpHandler = handler
+}
+
+// SetSessionAccessChecker installs the per-user session visibility check used
+// by GetOrEnsureExecution. The checker must return nil for contexts without a
+// request identity (internal callers). Set once during startup wiring, before
+// the HTTP server accepts connections.
+func (m *Manager) SetSessionAccessChecker(check func(ctx context.Context, sessionID string) error) {
+	m.sessionAccessCheck = check
 }
 
 // SetWorkspaceInfoProvider sets the provider for workspace information.

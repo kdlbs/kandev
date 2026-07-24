@@ -36,6 +36,14 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
+	// Per-user workspace scoping (opt-in auth): user-facing session surfaces
+	// funnel through here; internal callers pass a ctx without an identity
+	// and are unaffected.
+	if check := m.sessionAccessCheck; check != nil {
+		if err := check(ctx, sessionID); err != nil {
+			return nil, err
+		}
+	}
 
 	// Fast path: execution already in memory
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {

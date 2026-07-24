@@ -26,16 +26,24 @@ func provideAuthService(
 	if err != nil {
 		return nil, err
 	}
+	backfills := []auth.BackfillFunc{
+		// Pre-auth workspaces (owner_id='') become the admin's at setup.
+		repos.Task.ClaimUnownedWorkspaces,
+	}
+	// Pre-auth secrets (user_id='') are claimed the same way. Interface
+	// assertion keeps SecretStore mocks free of the method.
+	if claimer, ok := repos.Secrets.(interface {
+		ClaimUnowned(context.Context, string) error
+	}); ok {
+		backfills = append(backfills, claimer.ClaimUnowned)
+	}
 	return auth.NewService(ctx, auth.Deps{
-		Cfg:      cfg,
-		Store:    repos.Auth,
-		Users:    repos.UserAccounts,
-		Settings: settingsStore,
-		Backfills: []auth.BackfillFunc{
-			// Pre-auth workspaces (owner_id='') become the admin's at setup.
-			repos.Task.ClaimUnownedWorkspaces,
-		},
-		Log: log,
+		Cfg:       cfg,
+		Store:     repos.Auth,
+		Users:     repos.UserAccounts,
+		Settings:  settingsStore,
+		Backfills: backfills,
+		Log:       log,
 	})
 }
 

@@ -437,6 +437,10 @@ func startAgentInfrastructure(
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
+	// Session-scoped HTTP surfaces (shell, files, ports, vscode, LSP) funnel
+	// through GetOrEnsureExecution — one chokepoint enforces per-user
+	// workspace scoping for all of them (opt-in auth).
+	lifecycleMgr.SetSessionAccessChecker(services.Task.AuthorizeSessionAccess)
 	log.Info("Workspace info provider configured for session recovery")
 
 	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
