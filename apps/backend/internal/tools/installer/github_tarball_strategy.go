@@ -163,12 +163,24 @@ func (s *GithubTarballStrategy) download(ctx context.Context, url string) error 
 }
 
 // extractTarGz decompresses and extracts a tar.gz stream into destDir.
+//
+// Every write goes through an os.Root anchored at destDir, so containment is
+// enforced by the OS-level path walk rather than by lexical validation of the
+// entry name alone. Lexical checks are not sufficient on their own: an archive
+// can ship a symlink whose target passes containment (e.g. "a" -> ".") and then
+// write through it with a later entry that really resolves outside destDir.
 func extractTarGz(r io.Reader, destDir string) error {
 	gzReader, err := gzip.NewReader(r)
 	if err != nil {
 		return fmt.Errorf("failed to create gzip reader: %w", err)
 	}
 	defer func() { _ = gzReader.Close() }()
+
+	root, err := os.OpenRoot(destDir)
+	if err != nil {
+		return fmt.Errorf("failed to open destination %s: %w", destDir, err)
+	}
+	defer func() { _ = root.Close() }()
 
 	tarReader := tar.NewReader(gzReader)
 	for {
@@ -180,67 +192,70 @@ func extractTarGz(r io.Reader, destDir string) error {
 			return fmt.Errorf("tar read error: %w", err)
 		}
 
-		if err := extractTarEntry(tarReader, header, destDir); err != nil {
+		if err := extractTarEntry(tarReader, header, root); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func extractTarEntry(tr *tar.Reader, header *tar.Header, destDir string) error {
-	cleanName, err := sanitizeTarPath(header.Name, destDir)
+func extractTarEntry(tr *tar.Reader, header *tar.Header, root *os.Root) error {
+	cleanName, err := sanitizeTarPath(header.Name, root.Name())
 	if err != nil {
 		return err
 	}
 
-	target := filepath.Join(destDir, cleanName)
-
 	switch header.Typeflag {
 	case tar.TypeDir:
-		return os.MkdirAll(target, os.FileMode(header.Mode))
+		return root.MkdirAll(cleanName, os.FileMode(header.Mode))
 	case tar.TypeReg:
-		return writeFileFromTar(tr, target, os.FileMode(header.Mode))
+		return writeFileFromTar(tr, root, cleanName, os.FileMode(header.Mode))
 	case tar.TypeSymlink:
-		// Validate symlink target to prevent path traversal attacks
-		if filepath.IsAbs(header.Linkname) {
-			return fmt.Errorf("symlink target must not be absolute: %s -> %s", header.Name, header.Linkname)
-		}
-
-		// Resolve the symlink target path relative to the symlink's location
-		symlinkDir := filepath.Dir(target)
-		linkTarget := filepath.Join(symlinkDir, header.Linkname)
-
-		// Ensure the resolved symlink target is within destDir
-		cleanLinkTarget := filepath.Clean(linkTarget)
-		cleanDestDir := filepath.Clean(destDir)
-		if !strings.HasPrefix(cleanLinkTarget, cleanDestDir+string(os.PathSeparator)) && cleanLinkTarget != cleanDestDir {
-			return fmt.Errorf("symlink target escapes destination: %s -> %s", header.Name, header.Linkname)
-		}
-
-		// Remove existing symlink/file before creating (handles re-installs)
-		_ = os.Remove(target)
-		return os.Symlink(header.Linkname, target)
+		return extractSymlinkEntry(root, cleanName, header)
 	default:
 		// Skip unsupported types (block devices, char devices, etc.)
 		return nil
 	}
 }
 
-func writeFileFromTar(tr *tar.Reader, target string, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return fmt.Errorf("failed to create parent directory: %w", err)
+// extractSymlinkEntry creates header's symlink under root. root.Symlink already
+// confines where the link itself lands, and root refuses to follow a link out of
+// the tree later; rejecting escaping targets up front keeps the archive honest
+// and surfaces a clear error instead of a confusing failure further along.
+func extractSymlinkEntry(root *os.Root, cleanName string, header *tar.Header) error {
+	if filepath.IsAbs(header.Linkname) {
+		return fmt.Errorf("symlink target must not be absolute: %s -> %s", header.Name, header.Linkname)
 	}
 
-	f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
+	// Resolve the target relative to the symlink's own directory, both
+	// expressed relative to destDir. Anything that climbs to ".." has left it.
+	linkTarget := filepath.Join(filepath.Dir(cleanName), header.Linkname)
+	if linkTarget == ".." || strings.HasPrefix(linkTarget, ".."+string(os.PathSeparator)) {
+		return fmt.Errorf("symlink target escapes destination: %s -> %s", header.Name, header.Linkname)
+	}
+
+	// Remove existing symlink/file before creating (handles re-installs)
+	_ = root.Remove(cleanName)
+	return root.Symlink(header.Linkname, cleanName)
+}
+
+func writeFileFromTar(tr *tar.Reader, root *os.Root, name string, mode os.FileMode) error {
+	if dir := filepath.Dir(name); dir != "." {
+		if err := root.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("failed to create parent directory: %w", err)
+		}
+	}
+
+	f, err := root.OpenFile(name, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
-		return fmt.Errorf("failed to create file %s: %w", target, err)
+		return fmt.Errorf("failed to create file %s: %w", name, err)
 	}
 	defer func() { _ = f.Close() }()
 
 	// Limit copy size to prevent decompression bombs (1 GB)
 	const maxFileSize = 1 << 30
 	if _, err := io.Copy(f, io.LimitReader(tr, maxFileSize)); err != nil {
-		return fmt.Errorf("failed to write file %s: %w", target, err)
+		return fmt.Errorf("failed to write file %s: %w", name, err)
 	}
 	return nil
 }

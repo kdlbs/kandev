@@ -444,6 +444,52 @@ func TestExtractTarGz_SymlinkDotDotEscapeBlocked(t *testing.T) {
 	}
 }
 
+func TestExtractTarGz_WriteThroughSymlinkChainBlocked(t *testing.T) {
+	// Lexical containment alone lets an archive escape in two hops: "a" -> "."
+	// resolves to destDir itself (contained), so "a/x" -> ".." *looks* like it
+	// lands on destDir while it really lands on destDir's parent. A later entry
+	// written through a/x then escapes. Extraction must refuse the write.
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+	tarWriter := tar.NewWriter(gzWriter)
+
+	_ = tarWriter.WriteHeader(&tar.Header{
+		Name:     "a",
+		Typeflag: tar.TypeSymlink,
+		Linkname: ".",
+	})
+	_ = tarWriter.WriteHeader(&tar.Header{
+		Name:     "a/x",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "..",
+	})
+	content := []byte("PWNED")
+	_ = tarWriter.WriteHeader(&tar.Header{
+		Name:     "a/x/pwned.txt",
+		Typeflag: tar.TypeReg,
+		Mode:     0o644,
+		Size:     int64(len(content)),
+	})
+	_, _ = tarWriter.Write(content)
+
+	_ = tarWriter.Close()
+	_ = gzWriter.Close()
+
+	parent := t.TempDir()
+	destDir := filepath.Join(parent, "install")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		t.Fatalf("failed to create destDir: %v", err)
+	}
+
+	if err := extractTarGz(&buf, destDir); err == nil {
+		t.Error("expected error for write through an escaping symlink chain, got nil")
+	}
+
+	if _, err := os.Lstat(filepath.Join(parent, "pwned.txt")); !os.IsNotExist(err) {
+		t.Errorf("archive escaped destDir: pwned.txt written to %s (lstat err: %v)", parent, err)
+	}
+}
+
 func TestResolveTarget_Unsupported(t *testing.T) {
 	s := &GithubTarballStrategy{
 		config: GithubTarballConfig{
