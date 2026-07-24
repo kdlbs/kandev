@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/office/agents.md
 created: 2026-07-24
-status: verifying
+status: done
 ---
 
 # Implementation Plan: Agent Launcher Hardening Follow-ups
