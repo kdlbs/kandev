@@ -285,6 +285,8 @@ func provideGateway(
 	// on page load, so BroadcastToSession misses the focused-but-not-yet-
 	// subscribed client. Volume is low (debounced down-transitions) and clients
 	// filter by session_id in the payload.
+	//ws:global — payload carries only session_id + poll mode (no content);
+	// scoping it would need a session→workspace resolve per transition.
 	gateway.Hub.AddSessionModeListener(func(sessionID string, mode gateways.SessionMode) {
 		msg, err := ws.NewNotification(ws.ActionSessionPollModeChanged, map[string]interface{}{
 			"session_id": sessionID,

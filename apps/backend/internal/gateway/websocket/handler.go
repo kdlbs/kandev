@@ -8,6 +8,7 @@ import (
 	gorillaws "github.com/gorilla/websocket"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -32,15 +33,15 @@ func NewHandler(hub *Hub, log *logger.Logger) *Handler {
 	}
 }
 
-// HandleConnection upgrades HTTP to WebSocket and handles messages
+// HandleConnection upgrades HTTP to WebSocket and handles messages.
+//
+// Authentication happens before this handler: the global HTTP middleware
+// resolves cookie/bearer credentials, and the gateway's requireConnectionAuth
+// route guard rejects unauthenticated attempts (and accepts ?token=<PAT>)
+// when auth is enforced. Whatever identity survived lands on the client so
+// subscriptions, dispatched actions, and broadcast routing are scoped to it.
 func (h *Handler) HandleConnection(c *gin.Context) {
-	// Validate token (optional for now)
-	token := c.Query("token")
-	if token == "" {
-		token = c.GetHeader("Authorization")
-	}
-	// TODO: Implement proper JWT validation
-	_ = token
+	identity, _ := authn.FromGin(c)
 
 	// Upgrade connection to WebSocket
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
@@ -54,11 +55,12 @@ func (h *Handler) HandleConnection(c *gin.Context) {
 
 	h.logger.Debug("WebSocket connection established",
 		zap.String("client_id", clientID),
+		zap.String("user_id", identity.UserID),
 		zap.String("remote_addr", c.Request.RemoteAddr),
 	)
 
 	// Create client and register with hub
-	client := NewClient(clientID, conn, h.hub, h.logger)
+	client := NewClient(clientID, identity, conn, h.hub, h.logger)
 
 	// Register client with hub
 	h.hub.Register(client)

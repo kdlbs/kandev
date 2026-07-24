@@ -681,6 +681,12 @@ func startGatewayAndServe(
 	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, log))
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
+	// WS gateway per-user scoping (opt-in auth): connection auth on upgrade
+	// and proxy routes, subscription visibility checks, and workspace-owner
+	// broadcast routing. Must be installed before SetupRoutes runs in
+	// buildHTTPServer.
+	gateway.SetAuthPolicy(gatewayAuthPolicy(services.Auth, services.Task, repos.Task))
+
 	waitForAgentctlControlHealthy(ctx, cfg, log)
 
 	// ============================================

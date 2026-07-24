@@ -2,6 +2,8 @@ package backendapp
 
 import (
 	"context"
+	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -9,7 +11,10 @@ import (
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // provideAuthService wires the opt-in authentication service: mode state from
@@ -45,6 +50,50 @@ func provideAuthService(
 		Backfills: backfills,
 		Log:       log,
 	})
+}
+
+// gatewayAuthPolicy assembles the WS gateway scoping hooks from the auth and
+// task services. The workspace-owner resolver caches lookups briefly: it runs
+// on every workspace-scoped broadcast.
+func gatewayAuthPolicy(authSvc *auth.Service, taskSvc *taskservice.Service, taskRepo *sqliterepo.Repository) gateways.AuthPolicy {
+	return gateways.AuthPolicy{
+		Enforced:     func() bool { return authSvc.Mode() != auth.ModeDisabled },
+		ResolveToken: authSvc.ResolveBearer,
+		Subscriptions: gateways.SubscriptionAccessPolicy{
+			Task:    taskSvc.AuthorizeTaskAccess,
+			Session: taskSvc.AuthorizeSessionAccess,
+		},
+		WorkspaceOwner: newWorkspaceOwnerResolver(taskRepo),
+	}
+}
+
+// ownerCacheTTL bounds staleness of broadcast routing after an ownership
+// change (only the setup wizard's claim changes owners in practice).
+const ownerCacheTTL = 30 * time.Second
+
+func newWorkspaceOwnerResolver(taskRepo *sqliterepo.Repository) gateways.WorkspaceOwnerResolver {
+	type cacheEntry struct {
+		owner    string
+		cachedAt time.Time
+	}
+	var mu sync.Mutex
+	cache := map[string]cacheEntry{}
+	return func(ctx context.Context, workspaceID string) (string, error) {
+		mu.Lock()
+		if entry, ok := cache[workspaceID]; ok && time.Since(entry.cachedAt) < ownerCacheTTL {
+			mu.Unlock()
+			return entry.owner, nil
+		}
+		mu.Unlock()
+		workspace, err := taskRepo.GetWorkspace(ctx, workspaceID)
+		if err != nil {
+			return "", err
+		}
+		mu.Lock()
+		cache[workspaceID] = cacheEntry{owner: workspace.OwnerID, cachedAt: time.Now()}
+		mu.Unlock()
+		return workspace.OwnerID, nil
+	}
 }
 
 // warnIfExposedWithoutAuth surfaces the fail-closed nudge promised by

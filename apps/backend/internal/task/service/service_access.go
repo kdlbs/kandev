@@ -100,6 +100,12 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	return nil
 }
 
+// AuthorizeTaskAccess is the public form of authorizeTaskID, consumed by the
+// WS gateway's subscription checks.
+func (s *Service) AuthorizeTaskAccess(ctx context.Context, taskID string) error {
+	return s.authorizeTaskID(ctx, taskID)
+}
+
 // AuthorizeSessionAccess checks visibility of a task session via its task's
 // workspace. Wired into the lifecycle manager (SetSessionAccessChecker) so
 // every session-scoped HTTP surface (shell, files, processes, ports, vscode,

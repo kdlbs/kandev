@@ -128,8 +128,10 @@ func (b *OfficeEventBroadcaster) subscribeWithout(eventBus bus.EventBus, subject
 				zap.String("action", action), zap.Error(err))
 			return nil
 		}
-		// Broadcast to all clients — they filter by workspace_id in the payload.
-		b.hub.Broadcast(msg)
+		// Route to the owning workspace's clients (falls back to broadcast
+		// for unowned workspaces / disabled auth); clients additionally
+		// filter by workspace_id in the payload.
+		b.hub.BroadcastToWorkspace(extractWorkspaceID(event.Data), msg)
 		return nil
 	})
 	if err != nil {

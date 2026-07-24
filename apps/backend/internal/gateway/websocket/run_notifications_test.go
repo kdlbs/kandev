@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -62,8 +63,8 @@ func TestRunEventBroadcaster_FansOutByRunID(t *testing.T) {
 	_ = RegisterRunNotifications(ctx, eventBus, hub, log)
 
 	// Spy on hub.BroadcastToRun by snooping the run-subscriber map.
-	clientA := NewClient("client-A", nil, hub, log)
-	clientB := NewClient("client-B", nil, hub, log)
+	clientA := NewClient("client-A", authn.Identity{}, nil, hub, log)
+	clientB := NewClient("client-B", authn.Identity{}, nil, hub, log)
 	hub.SubscribeToRun(clientA, "run-A")
 	hub.SubscribeToRun(clientB, "run-B")
 
@@ -133,7 +134,7 @@ func TestRunEventBroadcaster_IgnoresMalformedPayload(t *testing.T) {
 func TestClient_HandleRunSubscribe_Validation(t *testing.T) {
 	log := testLogger()
 	hub := NewHub(nil, log)
-	client := NewClient("c1", nil, hub, log)
+	client := NewClient("c1", authn.Identity{}, nil, hub, log)
 
 	// Empty payload — must not register.
 	msg := &ws.Message{

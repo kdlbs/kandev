@@ -128,6 +128,7 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 			b.logLifecycleBroadcast(action, data, sessionID)
 		}
 
+		workspaceID := extractWorkspaceID(event.Data)
 		switch action {
 		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
 			if sessionID != "" {
@@ -135,9 +136,10 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 				return nil
 			}
 		case ws.ActionSessionStateChanged:
-			// Broadcast globally so the sidebar task switcher can track
-			// session state changes for all tasks, not just the active one.
-			b.hub.Broadcast(msg)
+			// Broadcast beyond the session subscribers so the sidebar task
+			// switcher can track state changes for all tasks — but scoped to
+			// the owning workspace's user when auth is enabled.
+			b.hub.BroadcastToWorkspace(workspaceID, msg)
 			return nil
 		case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted:
 			if sessionID != "" {
@@ -150,12 +152,16 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 				return nil
 			}
 		case ws.ActionExecutorPrepareProgress, ws.ActionExecutorPrepareCompleted:
-			// Broadcast globally so prepare progress/warnings are available
-			// when the user navigates to the session page after task creation.
-			b.hub.Broadcast(msg)
+			// Broadcast to the owning workspace's clients so prepare
+			// progress/warnings are available when the user navigates to the
+			// session page after task creation.
+			b.hub.BroadcastToWorkspace(workspaceID, msg)
 			return nil
 		}
-		b.hub.Broadcast(msg)
+		// Workspace-carrying events (task/workflow/repository/…) route to the
+		// owner's clients; events without workspace context (executors,
+		// environments, agent profiles — instance-wide resources) stay global.
+		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
 	})
 	if err != nil {
@@ -163,6 +169,22 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 		return
 	}
 	b.subscriptions = append(b.subscriptions, sub)
+}
+
+// extractWorkspaceID pulls a workspace ID from event payloads (map- or
+// struct-shaped). Empty means "no workspace context" — the event is treated
+// as instance-wide and broadcast to everyone.
+func extractWorkspaceID(data interface{}) string {
+	if m, ok := data.(map[string]interface{}); ok {
+		if id, ok := m["workspace_id"].(string); ok {
+			return id
+		}
+		return ""
+	}
+	if provider, ok := data.(interface{ GetWorkspaceID() string }); ok {
+		return provider.GetWorkspaceID()
+	}
+	return ""
 }
 
 func (b *TaskEventBroadcaster) logLifecycleBroadcast(action string, data map[string]interface{}, sessionID string) {

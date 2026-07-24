@@ -59,6 +59,10 @@ type Hub struct {
 	// like session.launch. It still cancels on server shutdown.
 	dispatchCtx context.Context
 
+	// authPolicy carries the per-user scoping hooks (opt-in auth). Zero
+	// value = unscoped, today's behavior. See access.go.
+	authPolicy AuthPolicy
+
 	mu     sync.RWMutex
 	logger *logger.Logger
 }
@@ -281,6 +285,44 @@ func (h *Hub) Unregister(client *Client) {
 // Broadcast sends a notification to all connected clients
 func (h *Hub) Broadcast(msg *ws.Message) {
 	h.broadcast <- msg
+}
+
+// setAuthPolicy installs the scoping hooks (see Gateway.SetAuthPolicy).
+func (h *Hub) setAuthPolicy(policy AuthPolicy) {
+	h.authPolicy = policy
+}
+
+// BroadcastToWorkspace routes a notification to the clients allowed to see a
+// workspace: its owner's connections, synthetic (auth-disabled) connections,
+// and everyone when the workspace is unowned or the resolver is unavailable.
+// The graceful fallbacks make this a strict narrowing of Broadcast — an
+// event never disappears entirely because ownership could not be resolved;
+// it only stops crossing user boundaries once ownership is known.
+func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
+	resolver := h.authPolicy.WorkspaceOwner
+	if resolver == nil || workspaceID == "" {
+		h.Broadcast(msg)
+		return
+	}
+	owner, err := resolver(h.DispatchContext(), workspaceID)
+	if err != nil || owner == "" {
+		h.Broadcast(msg)
+		return
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal workspace broadcast", zap.Error(err))
+		return
+	}
+	h.mu.RLock()
+	recipients := make([]*Client, 0, len(h.clients))
+	for client := range h.clients {
+		if clientMayReceive(client, owner) {
+			recipients = append(recipients, client)
+		}
+	}
+	h.mu.RUnlock()
+	h.sendToClients(data, recipients, msg.Action)
 }
 
 // getSubscribersLocked reads subscribers for an ID from a subscriber map under the read lock.
