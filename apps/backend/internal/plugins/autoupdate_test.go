@@ -138,6 +138,47 @@ func TestAutoUpdateCandidatesFiltersByStatusAndOptIn(t *testing.T) {
 	}
 }
 
+// TestEligibleForAutoUpdate pins the authoritative install-time gate that
+// re-checks a plugin's current state (guarding the window between the candidate
+// snapshot / catalog fetch and the actual install).
+func TestEligibleForAutoUpdate(t *testing.T) {
+	svc, _, ss := newAutoUpdateService(t)
+	installTestPlugin(t, svc, "kandev-plugin-slack") // active
+	if err := ss.SetAutoUpdateDefault(true); err != nil {
+		t.Fatalf("SetAutoUpdateDefault(true): %v", err)
+	}
+
+	if !svc.eligibleForAutoUpdate("kandev-plugin-slack") {
+		t.Fatal("active, globally-opted-in plugin should be eligible")
+	}
+
+	// An unknown plugin is never eligible.
+	if svc.eligibleForAutoUpdate("nope") {
+		t.Fatal("unknown plugin must not be eligible")
+	}
+
+	// A per-plugin opt-out removes eligibility despite the global default.
+	if _, err := svc.SetPluginAutoUpdate("kandev-plugin-slack", bptr(false)); err != nil {
+		t.Fatalf("SetPluginAutoUpdate(false): %v", err)
+	}
+	if svc.eligibleForAutoUpdate("kandev-plugin-slack") {
+		t.Fatal("opted-out plugin must not be eligible")
+	}
+
+	// Clear the override (inherits the on default again), then disabling it
+	// removes eligibility — the install-time gate never reactivates a plugin the
+	// operator turned off mid-sweep.
+	if _, err := svc.SetPluginAutoUpdate("kandev-plugin-slack", nil); err != nil {
+		t.Fatalf("SetPluginAutoUpdate(nil): %v", err)
+	}
+	if err := svc.Disable("kandev-plugin-slack"); err != nil {
+		t.Fatalf("Disable(): %v", err)
+	}
+	if svc.eligibleForAutoUpdate("kandev-plugin-slack") {
+		t.Fatal("disabled plugin must not be eligible")
+	}
+}
+
 // --- RunAutoUpdatePass integration (marketplace + install-from-URL) ---
 
 func serveBytes(t *testing.T, body []byte) *httptest.Server {

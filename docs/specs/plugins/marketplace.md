@@ -322,10 +322,16 @@ instead of by a click.
   cadence, plus one sweep shortly after boot) upgrades a plugin only when it is
   currently **active** *and* opted in *and* the catalog reports
   `update_available`. **Disabled/errored plugins are never auto-updated** — a
-  disabled plugin stays on its installed version until re-enabled. The upgrade
-  reuses the normal pipeline (stop old process → verify+extract new → restart →
-  roll back to the previous version on failure); a single plugin's failure is
-  logged and never aborts the rest of the sweep.
+  disabled plugin stays on its installed version until re-enabled. Eligibility is
+  re-checked immediately before each install, so an operator who disables or
+  opts a plugin out mid-sweep is never overridden by a stale candidate.
+- **Failure handling reuses the install pipeline unchanged.** An upgrade runs the
+  same verified path as a manual update: a package that fails its checksum/extract
+  gate is rejected with the installed version left untouched, and a package that
+  extracts but fails to spawn leaves the plugin in `error` (exactly as a manual
+  update would) rather than being silently reverted to the prior version — kandev
+  does not re-run a superseded release. A single plugin's failure is logged and
+  never aborts the rest of the sweep.
 - **No new surface for the plugin itself.** Auto-update is an operator preference
   layered over the existing install/lifecycle machinery; the plugin's own state
   machine (`registered → active → disabled → error`) is unchanged.

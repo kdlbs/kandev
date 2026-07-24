@@ -150,6 +150,7 @@ function PluginAutoUpdateRow({
           <button
             type="button"
             data-testid={`plugin-auto-update-reset-${plugin.id}`}
+            aria-label={`Reset auto-update for ${plugin.display_name} to the default`}
             className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline cursor-pointer disabled:opacity-50"
             disabled={busy}
             onClick={() => onSetAutoUpdate(plugin, null)}
@@ -159,6 +160,7 @@ function PluginAutoUpdateRow({
         )}
         <Switch
           data-testid={`plugin-auto-update-${plugin.id}`}
+          aria-label={`Auto-update for ${plugin.display_name}`}
           checked={effective}
           disabled={busy}
           onCheckedChange={(value) => onSetAutoUpdate(plugin, value)}

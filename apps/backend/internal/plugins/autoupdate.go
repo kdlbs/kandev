@@ -143,7 +143,7 @@ func (s *Service) RunAutoUpdatePass(ctx context.Context) (AutoUpdateOutcome, err
 	if err != nil {
 		return AutoUpdateOutcome{}, fmt.Errorf("plugins: auto-update catalog fetch: %w", err)
 	}
-	return s.applyAutoUpdates(ctx, catalog.Plugins, optedIn), nil
+	return s.applyAutoUpdates(ctx, catalog.Plugins), nil
 }
 
 // autoUpdateCandidates returns the set of active, opted-in plugin ids eligible
@@ -161,16 +161,25 @@ func (s *Service) autoUpdateCandidates(def bool) map[string]bool {
 	return out
 }
 
-// applyAutoUpdates reinstalls every catalog entry that is an eligible
-// candidate and reports an available update, stopping early if ctx is
+// applyAutoUpdates reinstalls every catalog entry that reports an available
+// update and is still eligible at install time, stopping early if ctx is
 // cancelled (e.g. backend shutdown mid-pass).
-func (s *Service) applyAutoUpdates(ctx context.Context, entries []marketplace.CatalogEntry, optedIn map[string]bool) AutoUpdateOutcome {
+func (s *Service) applyAutoUpdates(ctx context.Context, entries []marketplace.CatalogEntry) AutoUpdateOutcome {
 	var outcome AutoUpdateOutcome
 	for _, entry := range entries {
 		if ctx.Err() != nil {
 			return outcome
 		}
-		if entry.InstallState != marketplace.StateUpdateAvailable || !optedIn[entry.ID] || entry.PackageURL == "" {
+		if entry.InstallState != marketplace.StateUpdateAvailable || entry.PackageURL == "" {
+			continue
+		}
+		// Re-check eligibility immediately before installing. The candidate
+		// snapshot and the catalog fetch above can lag seconds behind operator
+		// actions (disable, uninstall, or flipping the toggle off), so a stale
+		// entry must not reach InstallFromURL — Install unconditionally
+		// re-activates, and reactivating a plugin the operator just disabled
+		// would violate the active-and-opted-in-only contract.
+		if !s.eligibleForAutoUpdate(entry.ID) {
 			continue
 		}
 		from := entry.InstalledVersion
@@ -186,4 +195,25 @@ func (s *Service) applyAutoUpdates(ctx context.Context, entries []marketplace.Ca
 			zap.String("plugin_id", entry.ID), zap.String("from", from), zap.String("to", entry.Version))
 	}
 	return outcome
+}
+
+// eligibleForAutoUpdate reports whether id is, right now, an installed active
+// plugin that is effectively opted in to auto-update. It is the authoritative
+// gate applied immediately before an auto-update install (see applyAutoUpdates),
+// closing the window between the candidate snapshot / catalog fetch and the
+// install during which an operator may have disabled, uninstalled, or opted the
+// plugin out. Read without holding the lifecycle lock deliberately: the only
+// remaining race is the sub-millisecond gap before InstallFromURL's own
+// download begins, and holding the lock across a multi-second package download
+// would needlessly block concurrent operator actions.
+func (s *Service) eligibleForAutoUpdate(id string) bool {
+	def, err := s.AutoUpdateDefault()
+	if err != nil {
+		return false
+	}
+	rec, ok := s.registry.Get(id)
+	if !ok {
+		return false
+	}
+	return rec.Status == StatusActive && effectiveAutoUpdate(rec.AutoUpdate, def)
 }
