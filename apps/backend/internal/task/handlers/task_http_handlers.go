@@ -113,7 +113,7 @@ func buildTaskDTOsWithSessionInfo(
 	if err != nil {
 		return nil, err
 	}
-	pendingActionsBySession, err := pendingActionsForWaitingPrimarySessions(ctx, svc, primarySessionInfoMap)
+	pendingActionsBySession, err := pendingActionsForInputCapableSessions(ctx, svc, sessionsByTask)
 	if err != nil {
 		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(err))
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
@@ -134,7 +134,7 @@ func buildTaskDTOsWithSessionInfo(
 			sessionCount = &n
 		}
 		si := extractSessionInfo(primarySessionInfoMap[task.ID])
-		result = append(result, dto.FromTaskWithSessionInfo(
+		taskDTO := dto.FromTaskWithSessionInfo(
 			task,
 			primarySessionID,
 			sessionCount,
@@ -146,7 +146,9 @@ func buildTaskDTOsWithSessionInfo(
 			si.workingDirectory,
 			si.sessionState,
 			pendingActionPtr(si.sessionID, pendingActionsBySession),
-		))
+		)
+		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
+		result = append(result, taskDTO)
 	}
 	return result, nil
 }
@@ -201,21 +203,48 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 	return si
 }
 
-func pendingActionsForWaitingPrimarySessions(
+func pendingActionsForInputCapableSessions(
 	ctx context.Context,
 	svc *service.Service,
-	primarySessionInfoMap map[string]*models.TaskSession,
+	sessionsByTask map[string][]*models.TaskSession,
 ) (map[string]models.TaskPendingAction, error) {
-	sessionIDs := make([]string, 0, len(primarySessionInfoMap))
-	for _, info := range primarySessionInfoMap {
-		if info != nil && info.State == models.TaskSessionStateWaitingForInput {
-			sessionIDs = append(sessionIDs, info.ID)
+	sessionIDs := make([]string, 0)
+	for _, sessions := range sessionsByTask {
+		for _, session := range sessions {
+			if isInputCapableSession(session) {
+				sessionIDs = append(sessionIDs, session.ID)
+			}
 		}
 	}
 	if len(sessionIDs) == 0 {
 		return map[string]models.TaskPendingAction{}, nil
 	}
 	return svc.GetPendingActionsForSessions(ctx, sessionIDs)
+}
+
+func isInputCapableSession(session *models.TaskSession) bool {
+	return session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput)
+}
+
+func taskPendingActionPtr(sessions []*models.TaskSession, actions map[string]models.TaskPendingAction) *string {
+	var clarification bool
+	for _, session := range sessions {
+		if !isInputCapableSession(session) {
+			continue
+		}
+		switch actions[session.ID] {
+		case models.TaskPendingActionPermission:
+			value := string(models.TaskPendingActionPermission)
+			return &value
+		case models.TaskPendingActionClarification:
+			clarification = true
+		}
+	}
+	if clarification {
+		value := string(models.TaskPendingActionClarification)
+		return &value
+	}
+	return nil
 }
 
 func pendingActionPtr(
@@ -262,7 +291,9 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	ids := make([]string, 0, len(sessions))
 	for _, session := range sessions {
-		sessionDTOs = append(sessionDTOs, dto.FromTaskSessionSummary(session))
+		summary := dto.FromTaskSessionSummary(session)
+		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
+		sessionDTOs = append(sessionDTOs, summary)
 		ids = append(ids, session.ID)
 	}
 	// Resolve the per-session tool_call counts so the frontend can render
@@ -304,8 +335,10 @@ func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
+	sessionDTO := dto.FromTaskSession(session)
+	dto.EnrichForegroundActivity(&sessionDTO, h.foregroundActivity)
 	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
-		Session: dto.FromTaskSession(session),
+		Session: sessionDTO,
 	})
 }
 
@@ -324,8 +357,10 @@ func (h *TaskHandlers) httpDismissLastAgentError(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
+	sessionDTO := dto.FromTaskSession(session)
+	dto.EnrichForegroundActivity(&sessionDTO, h.foregroundActivity)
 	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
-		Session: dto.FromTaskSession(session),
+		Session: sessionDTO,
 	})
 }
 

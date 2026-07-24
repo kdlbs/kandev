@@ -276,9 +276,10 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn context.CancelCauseFunc
-	rpcDone chan struct{}
-	abortCh chan struct{}
+	endTurn          context.CancelCauseFunc
+	rpcDone          chan struct{}
+	abortCh          chan struct{}
+	promptGeneration uint64
 }
 
 type asyncTurnFinalizer struct {

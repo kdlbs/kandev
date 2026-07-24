@@ -24,6 +24,36 @@ function renderDialog(ui: ReactNode, confirmTaskArchive = true) {
   );
 }
 
+type SeedTask = { id: string; foregroundActivity?: "generating" | "background" | null };
+
+// Seed the store's active kanban tasks so useTaskInFlight resolves the same
+// foreground_activity aggregate the board shows — the guard reads live store
+// state, not a prop.
+function renderWithTasks(ui: ReactNode, tasks: SeedTask[], confirmTaskArchive = true) {
+  return render(
+    <StateProvider
+      initialState={{
+        userSettings: { ...defaultState.userSettings, confirmTaskArchive },
+        kanban: {
+          workflowId: "wf-1",
+          steps: [],
+          tasks: tasks.map((t) => ({
+            id: t.id,
+            workflowStepId: "step-1",
+            title: t.id,
+            position: 0,
+            foregroundActivity: t.foregroundActivity ?? undefined,
+          })),
+        },
+      }}
+    >
+      {ui}
+    </StateProvider>,
+  );
+}
+
+const WARNING_TESTID = "still-working-warning";
+
 function DisableArchiveConfirmationButton() {
   const settings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
@@ -185,5 +215,97 @@ describe("TaskArchiveConfirmDialog cleanup copy", () => {
         /This will delete the task's worktree and stop any running agent sessions/,
       ),
     ).toBeNull();
+  });
+});
+
+describe("TaskArchiveConfirmDialog still-working guard", () => {
+  it("warns when the task is generating", () => {
+    renderWithTasks(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: "generating" }],
+    );
+    expect(screen.getByTestId(WARNING_TESTID)).toBeTruthy();
+    expect(screen.getByTestId(WARNING_TESTID).textContent).toMatch(/still working/i);
+  });
+
+  it("warns when spawned background work is still running", () => {
+    renderWithTasks(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: "background" }],
+    );
+    expect(screen.getByTestId(WARNING_TESTID)).toBeTruthy();
+  });
+
+  it("omits the warning for an idle task", () => {
+    renderWithTasks(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: null }],
+    );
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(screen.queryByTestId(WARNING_TESTID)).toBeNull();
+  });
+
+  it("warns for a bulk archive when any selected task is in-flight", () => {
+    renderWithTasks(
+      <TaskArchiveConfirmDialog
+        open
+        onOpenChange={() => {}}
+        isBulkOperation
+        count={2}
+        taskIds={["a", "b"]}
+        executorTypes={["worktree", "worktree"]}
+        onConfirm={() => {}}
+      />,
+      [
+        { id: "a", foregroundActivity: null },
+        { id: "b", foregroundActivity: "generating" },
+      ],
+    );
+    expect(screen.getByTestId(WARNING_TESTID)).toBeTruthy();
+  });
+
+  it("does not warn (or prompt) when archive confirmation is disabled, even mid-run", async () => {
+    // Documented residual gap (operator decision q1_opt2): honoring the
+    // confirmTaskArchive bypass means an in-flight task can be archived with no
+    // dialog and therefore no warning. Delete has no such bypass.
+    const onConfirm = vi.fn();
+    renderWithTasks(
+      <StrictMode>
+        <TaskArchiveConfirmDialog
+          open
+          onOpenChange={() => {}}
+          taskTitle="My task"
+          taskId="task-1"
+          executorType="worktree"
+          onConfirm={onConfirm}
+        />
+      </StrictMode>,
+      [{ id: "task-1", foregroundActivity: "generating" }],
+      false,
+    );
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ cascade: false }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.queryByTestId(WARNING_TESTID)).toBeNull();
   });
 });

@@ -636,8 +636,47 @@ func (sm *SessionManager) SendPrompt(
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
 ) (*PromptResult, error) {
+	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, nil)
+}
+
+// SendPromptWithDispatchCallback reports the point at which agentctl accepted
+// the prompt while preserving SendPrompt's completion semantics.
+func (sm *SessionManager) SendPromptWithDispatchCallback(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	validateStatus bool,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+) (*PromptResult, error) {
+	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, onDispatched)
+}
+
+func (sm *SessionManager) sendPrompt(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	validateStatus bool,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+) (*PromptResult, error) {
 	if execution.agentctl == nil {
 		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+
+	// Agentctl acknowledges prompt dispatch before the adapter's session/prompt
+	// RPC completes. Serialize here as well as in the ACP adapter so two callers
+	// cannot reset the same buffers and race on the shared completion channel.
+	execution.promptMu.Lock()
+	defer execution.promptMu.Unlock()
+
+	// Dispatch-only callers return before the agent completes, but the next prompt
+	// still must not reset shared buffers or consume that earlier completion as its
+	// own. Keep the pending completion as an execution-level barrier.
+	if err := waitForPendingDispatchedPrompt(ctx, execution); err != nil {
+		return nil, err
 	}
 
 	// Drain any stale signal left in the channel by a prior dispatch-only prompt
@@ -657,15 +696,30 @@ func (sm *SessionManager) SendPrompt(
 		defer beginPromptBarrier(execution)()
 	}
 
-	// Inject session trace context so prompt spans become children of the session span
+	preparedCtx, effectivePrompt, promptGeneration, err := sm.preparePrompt(ctx, execution, prompt, validateStatus, attachments)
+	if err != nil {
+		return nil, err
+	}
+	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, attachments, promptGeneration); err != nil {
+		return nil, err
+	}
+	return sm.finishAcceptedPrompt(preparedCtx, execution, dispatchOnly, onDispatched)
+}
+
+func (sm *SessionManager) preparePrompt(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	validateStatus bool,
+	attachments []v1.MessageAttachment,
+) (context.Context, string, uint64, error) {
 	if sessionSpan := trace.SpanFromContext(execution.SessionTraceContext()); sessionSpan.SpanContext().IsValid() {
 		ctx = trace.ContextWithSpan(ctx, sessionSpan)
 	}
-
 	// For follow-up prompts, validate status before claiming a new generation.
 	if validateStatus {
 		if execution.Status != v1.AgentStatusRunning && execution.Status != v1.AgentStatusReady {
-			return nil, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
+			return ctx, "", 0, fmt.Errorf("execution %q is not ready for prompts (status: %s)", execution.ID, execution.Status)
 		}
 	}
 
@@ -677,13 +731,13 @@ func (sm *SessionManager) SendPrompt(
 		var err error
 		promptGeneration, err = sm.promptStarter(execution.ID)
 		if err != nil {
-			return nil, err
+			return ctx, "", 0, err
 		}
 	case sm.executionStore != nil:
 		var err error
 		promptGeneration, err = sm.executionStore.BeginPrompt(execution.ID)
 		if err != nil {
-			return nil, err
+			return ctx, "", 0, err
 		}
 	default:
 		// Tests that construct SessionManager without lifecycle dependencies
@@ -691,54 +745,78 @@ func (sm *SessionManager) SendPrompt(
 		promptGeneration = beginExecutionPrompt(execution)
 	}
 
-	// Clear buffers and streaming state before starting prompt
-	// This ensures each prompt starts fresh and doesn't append to previous message
 	execution.messageMu.Lock()
 	execution.messageBuffer.Reset()
 	execution.thinkingBuffer.Reset()
-	execution.currentMessageID = ""  // Clear streaming message ID for new turn
-	execution.currentThinkingID = "" // Clear streaming thinking ID for new turn
+	execution.currentMessageID = ""
+	execution.currentThinkingID = ""
 	execution.messageMu.Unlock()
 
-	// Apply resume context injection if needed (first prompt after resume)
 	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
-
 	sm.logger.Info("sending prompt to agent",
 		zap.String("execution_id", execution.ID),
 		zap.Int("prompt_length", len(effectivePrompt)),
 		zap.Int("attachments_count", len(attachments)))
-
-	// Store user prompt to session history for context injection (store original, not with injected context)
 	if sm.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 		if err := sm.historyManager.AppendUserMessage(execution.SessionID, prompt); err != nil {
 			sm.logger.Warn("failed to store user message to history", zap.Error(err))
 		}
 	}
-
-	// Initialize activity timestamp for stall detection
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
 	execution.lastActivityAtMu.Unlock()
+	return ctx, effectivePrompt, promptGeneration, nil
+}
 
-	// Fire the prompt (returns immediately now — completion comes via WebSocket complete event)
-	err := sm.dispatchPrompt(ctx, execution, effectivePrompt, attachments, promptGeneration)
-	if err != nil {
-		if isCancelReleaseError(err.Error()) {
-			sm.logger.Info("prompt trigger abandoned after cancel; requeueing",
-				zap.String("execution_id", execution.ID),
-				zap.Error(err))
-			return nil, fmt.Errorf("failed to trigger prompt: %w: %w", err, ErrCancelEscalated)
-		}
-		sm.logger.Error("failed to trigger prompt",
-			zap.String("execution_id", execution.ID),
-			zap.Error(err))
-		return nil, fmt.Errorf("failed to trigger prompt: %w", err)
+func (sm *SessionManager) triggerPrompt(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+) error {
+	err := sm.dispatchPrompt(ctx, execution, prompt, attachments, promptGeneration)
+	if err == nil {
+		return nil
 	}
+	if isCancelReleaseError(err.Error()) {
+		sm.logger.Info("prompt trigger abandoned after cancel; requeueing",
+			zap.String("execution_id", execution.ID), zap.Error(err))
+		return fmt.Errorf("failed to trigger prompt: %w: %w", err, ErrCancelEscalated)
+	}
+	sm.logger.Error("failed to trigger prompt",
+		zap.String("execution_id", execution.ID), zap.Error(err))
+	return fmt.Errorf("failed to trigger prompt: %w", err)
+}
 
+func waitForPendingDispatchedPrompt(ctx context.Context, execution *AgentExecution) error {
+	if !execution.dispatchedPromptPending {
+		return nil
+	}
+	select {
+	case <-execution.promptDoneCh:
+		execution.dispatchedPromptPending = false
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (sm *SessionManager) finishAcceptedPrompt(
+	ctx context.Context,
+	execution *AgentExecution,
+	dispatchOnly bool,
+	onDispatched func(),
+) (*PromptResult, error) {
+	if dispatchOnly {
+		execution.dispatchedPromptPending = true
+	}
+	if onDispatched != nil {
+		onDispatched()
+	}
 	if dispatchOnly {
 		return &PromptResult{StopReason: PromptStopReasonDispatched}, nil
 	}
-
 	// Wait for completion signal from handleAgentEvent(complete) or stream disconnect.
 	return sm.waitForPromptDone(ctx, execution)
 }
@@ -764,7 +842,7 @@ func (sm *SessionManager) dispatchPrompt(
 	sm.logger.Warn("prompt retry after stream reconnect failed",
 		zap.String("execution_id", execution.ID),
 		zap.Error(retryErr))
-	return err
+	return retryErr
 }
 
 // beginPromptBarrier sets up a completion signal on the execution so CancelAgent

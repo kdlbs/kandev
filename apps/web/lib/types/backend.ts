@@ -9,6 +9,7 @@ export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 
 import type {
   AvailableAgent,
+  ForegroundActivity,
   SavedLayout,
   SidebarViewApi,
   SidebarViewDraftApi,
@@ -89,6 +90,10 @@ export type TaskEventPayload = {
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  task_pending_action?: TaskPendingAction | null;
+  // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions
+  // (§spec:task-level-indicator); absent/null when no session is running.
+  foreground_activity?: ForegroundActivity | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;
@@ -242,6 +247,20 @@ export type TaskSessionStateChangedPayload = {
   review_status?: string;
   // Task environment (for session→environment mapping)
   task_environment_id?: string;
+  // Fine-grained busy substate (see ADR-0049), carried on coarse transitions;
+  // live flips arrive on session.activity_changed.
+  foreground_activity?: ForegroundActivity | null;
+};
+
+/**
+ * Payload for `session.activity_changed` — the fine-grained busy signal
+ * (see ADR-0049). Fires when foreground ownership or detached background
+ * liveness changes, including after the foreground turn settles.
+ */
+export type TaskSessionActivityChangedPayload = {
+  task_id: string;
+  session_id: string;
+  foreground_activity: ForegroundActivity | null;
 };
 
 export type TaskSessionWaitingForInputPayload = {
@@ -491,6 +510,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "session.state_changed": BackendMessage<
       "session.state_changed",
       TaskSessionStateChangedPayload
+    >;
+    "session.activity_changed": BackendMessage<
+      "session.activity_changed",
+      TaskSessionActivityChangedPayload
     >;
     "session.waiting_for_input": BackendMessage<
       "session.waiting_for_input",

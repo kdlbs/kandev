@@ -13,7 +13,8 @@ import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
-import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { getTaskStateIcon, isTaskInFlight } from "@/lib/ui/state-icons";
+import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
 import {
@@ -378,6 +379,16 @@ function TaskListRow({
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const isDeleting = deletingTaskId === task.id;
   const isArchived = !!task.archived_at;
+  // Carry the sidebar's rich "needs me" reading to the list row: derive the
+  // message-derived pending-clarification / pending-permission flags (with the
+  // boot-payload snapshot fallback) instead of collapsing to the coarse state
+  // (§spec:waiting-for-input-parity).
+  const pendingInput = useTaskPendingInput(task.primary_session_id, {
+    taskId: task.id,
+    taskPendingAction: task.task_pending_action,
+    primarySessionState: task.primary_session_state,
+    primarySessionPendingAction: task.primary_session_pending_action,
+  });
 
   return (
     <div
@@ -400,7 +411,13 @@ function TaskListRow({
         data-testid="tasks-list-row-content"
         style={{ paddingLeft: `${level * 28}px` }}
       >
-        {getTaskStateIcon(task.state, "h-4 w-4 shrink-0")}
+        {getTaskStateIcon(
+          task.state,
+          "h-4 w-4 shrink-0",
+          pendingInput.clarification,
+          task.foreground_activity,
+          pendingInput.permission,
+        )}
         <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
           {task.title}
         </span>
@@ -587,6 +604,7 @@ function TaskRowActions({
         onOpenChange={onDeleteOpenChange}
         taskTitle={task.title}
         taskId={task.id}
+        isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
         isDeleting={isDeleting}
         onConfirm={({ cascade }) => onDelete(task.id, { cascade })}
@@ -596,6 +614,7 @@ function TaskRowActions({
         onOpenChange={onArchiveOpenChange}
         taskTitle={task.title}
         taskId={task.id}
+        isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
         onConfirm={({ cascade }) => onArchive(task.id, { cascade })}
       />

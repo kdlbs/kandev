@@ -144,6 +144,11 @@ type AgentExecution struct {
 	// Channel signaled by handleAgentEvent(complete) or stream disconnect to unblock SendPrompt.
 	// Buffered (size 1) so the sender never blocks.
 	promptDoneCh chan PromptCompletionSignal
+	// promptMu keeps exactly one SendPrompt completion waiter and one set of
+	// response buffers active for an execution. Agentctl accepts prompt requests
+	// asynchronously, so its transport-level gate alone cannot provide this.
+	promptMu                sync.Mutex
+	dispatchedPromptPending bool
 
 	// Closed when the current SendPrompt returns, so CancelAgent can wait
 	// for the in-flight prompt to finish before the caller retries.

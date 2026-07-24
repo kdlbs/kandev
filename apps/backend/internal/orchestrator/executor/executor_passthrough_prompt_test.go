@@ -522,3 +522,27 @@ func TestExecutor_Prompt_ACPPathUnchanged(t *testing.T) {
 		t.Errorf("MarkPassthroughRunning must not be called in ACP mode; got %d", got)
 	}
 }
+
+func TestExecutor_PromptWithDispatchCallback_RequiresCapableManager(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return false },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	exec := newTestExecutor(t, agentManager, repo)
+
+	called := false
+	_, err := exec.PromptWithDispatchCallback(
+		context.Background(), "task-1", "sess-1", "hello", nil, false,
+		func() { called = true },
+	)
+	if !errors.Is(err, ErrPromptDispatchCallbackUnsupported) {
+		t.Fatalf("expected explicit dispatch callback capability error, got: %v", err)
+	}
+	if called {
+		t.Fatal("callback must not run after a fallback PromptAgent completion")
+	}
+	if agentManager.promptAgentCallCount != 0 {
+		t.Fatalf("PromptAgent fallback must not run, got %d calls", agentManager.promptAgentCallCount)
+	}
+}

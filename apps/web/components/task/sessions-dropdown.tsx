@@ -22,9 +22,10 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
-import type { TaskSession, TaskSessionState } from "@/lib/types/http";
+import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { buildAgentLabelsById, resolveAgentLabelFor, sortSessions } from "./session-sort";
 
 type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
@@ -54,6 +55,22 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
   failed: "Failed",
   cancelled: "Cancelled",
 };
+
+// The session-icon tooltip reflects the message-derived "needs me" reading
+// (§spec:waiting-for-input-parity): a pending permission / clarification prompt
+// names itself even when the coarse status is still "running" mid-turn. Stale
+// pending data cannot replace a starting or terminal lifecycle label.
+export function sessionStatusTooltip(
+  state: TaskSessionState,
+  pending: PendingInput,
+  foregroundActivity?: ForegroundActivity | null,
+): string {
+  const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
+  if (canRequestInput && pending.permission) return "Permission requested";
+  if (canRequestInput && pending.clarification) return "Waiting for input";
+  if (foregroundActivity === "background") return "Background running";
+  return STATUS_LABELS[mapSessionStatus(state)];
+}
 
 function mapSessionStatus(state: TaskSessionState): SessionStatus {
   switch (state) {
@@ -406,6 +423,7 @@ function SessionRow({
   onDelete: (sessionId: string) => void;
 }) {
   const status = mapSessionStatus(session.state);
+  const pending = useSessionPendingInput(session.id);
   const duration = formatDuration(session.started_at, status === "running", currentTime);
   const showDuration = duration !== "0s";
 
@@ -432,9 +450,19 @@ function SessionRow({
       <div className="w-5 shrink-0 flex items-center justify-center">
         <Tooltip>
           <TooltipTrigger asChild>
-            <div>{getSessionStateIcon(session.state, "h-3.5 w-3.5")}</div>
+            <div>
+              {getSessionStateIcon(
+                session.state,
+                "h-3.5 w-3.5",
+                session.foreground_activity,
+                pending.clarification,
+                pending.permission,
+              )}
+            </div>
           </TooltipTrigger>
-          <TooltipContent side="left">{STATUS_LABELS[status]}</TooltipContent>
+          <TooltipContent side="left">
+            {sessionStatusTooltip(session.state, pending, session.foreground_activity)}
+          </TooltipContent>
         </Tooltip>
       </div>
     </div>

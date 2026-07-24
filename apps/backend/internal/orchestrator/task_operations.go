@@ -2215,6 +2215,11 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	// Same reasoning for the push-detection tracker. Multi-repo sessions
 	// accumulate one entry per repo; pushTrackerForget walks them all.
 	s.pushTrackerForget(sessionID)
+	// And the foreground/background turn-activity signal. It is normally cleared
+	// at turn close, but a trailing stream event can re-create the entry after
+	// the last turn completed; forget it here so a deleted session leaves no
+	// orphaned map slot.
+	s.clearTurnActivity(sessionID)
 
 	// Auto-promote another session if we deleted the primary
 	if wasPrimary {
@@ -2638,19 +2643,13 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 
 	// Only allow prompts when the session is ready for input.
 	// Reject when the agent is still starting, already processing, or in a terminal state.
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.loadPromptableSession(ctx, taskID, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session: %w", err)
+		return nil, err
 	}
-	if err := s.checkSessionPromptable(taskID, sessionID, session.State); err != nil {
-		if !errors.Is(err, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {
-			return nil, err
-		}
-		readySession, waitErr := s.waitForStartingSessionPromptable(ctx, taskID, sessionID)
-		if waitErr != nil {
-			return nil, waitErr
-		}
-		session = readySession
+	foregroundClaim, err := s.claimForegroundForPrompt(taskID, sessionID, session)
+	if err != nil {
+		return nil, err
 	}
 
 	// Apply config-mode and plan-mode prompt transforms.
@@ -2661,6 +2660,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	_, hadExecutionBeforeEnsure := s.executor.GetExecutionBySession(sessionID)
 	resumedForPrompt := !hadExecutionBeforeEnsure
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
+		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
 		return nil, fmt.Errorf("failed to ensure session is running: %w", err)
 	}
 
@@ -2676,10 +2676,16 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		// Re-apply transforms in case metadata changed during ensureSessionRunning.
 		effectivePrompt = s.effectivePromptForSession(sessionID, prompt, planMode, session)
 	}
+	foregroundDispatch := s.beginForegroundDispatch(sessionID, foregroundClaim)
+	if foregroundDispatch == nil {
+		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+	}
 
-	// Check if model switching is requested
-	if result, switched, err := s.trySwitchModel(ctx, taskID, sessionID, model, effectivePrompt, session); switched || err != nil {
-		return result, err
+	if result, handled, switchErr := s.trySwitchModelForPrompt(
+		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch,
+	); handled {
+		return result, switchErr
 	}
 
 	previousSessionState := session.State
@@ -2689,25 +2695,107 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// the pre-injection prompt; PromptTask re-applies config/plan transforms.
 	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
 
-	claimedSession, err := s.claimSessionRunningForPrompt(ctx, taskID, sessionID, claimEntryID, session)
+	claimedSession, err := s.claimSessionRunningForPrompt(
+		ctx, taskID, sessionID, claimEntryID, session, foregroundClaim,
+	)
 	if err != nil {
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
 		return nil, err
 	}
 	session = claimedSession
 	s.startTurnForSession(ctx, sessionID)
+	// beginForegroundDispatch atomically established foreground-generating
+	// ownership before any cleanup/provider event could interleave. Publish that
+	// flip now that session admission succeeded; claimed RUNNING prompts also need
+	// the broadcast because their earlier atomic claim made the same transition.
+	if foregroundDispatch.yieldedBeforeBegin || foregroundClaim != nil {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
 	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
 	// We still want to log and respond, but the prompt should continue regardless.
 	promptCtx := context.WithoutCancel(ctx)
-	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly, session)
+	result, err := s.executor.PromptWithDispatchCallback(
+		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
+		func() {
+			if s.acceptForegroundDispatch(foregroundDispatch) {
+				s.publishForegroundActivityChanged(promptCtx, taskID, sessionID)
+			}
+		}, session,
+	)
 	if err != nil {
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
 		return s.handlePromptDispatchFailure(ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments, previousSessionState, err)
 	}
 	return &PromptResult{
 		StopReason:   result.StopReason,
 		AgentMessage: result.AgentMessage,
 	}, nil
+}
+
+func (s *Service) loadPromptableSession(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	if promptErr := s.checkSessionPromptable(taskID, sessionID, session.State); promptErr != nil {
+		if !errors.Is(promptErr, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {
+			return nil, promptErr
+		}
+		return s.waitForStartingSessionPromptable(ctx, taskID, sessionID)
+	}
+	return session, nil
+}
+
+// claimForegroundForPrompt closes the gap between reading a RUNNING session's
+// background-idle substate and dispatching its next prompt.
+func (s *Service) claimForegroundForPrompt(taskID, sessionID string, session *models.TaskSession) (*foregroundClaim, error) {
+	if session.State != models.TaskSessionStateRunning {
+		return nil, nil
+	}
+	claim := s.claimForegroundTurn(sessionID)
+	if claim != nil {
+		return claim, nil
+	}
+	s.logger.Warn("rejected prompt: another prompt claimed the background-idle foreground turn first",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+	return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+}
+
+func (s *Service) releaseForegroundClaimOnFailure(ctx context.Context, taskID, sessionID string, claim *foregroundClaim) {
+	if s.releaseForegroundClaim(claim) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
+}
+
+func (s *Service) rollbackForegroundDispatchOnFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	dispatch *foregroundDispatch,
+) {
+	if s.rollbackForegroundDispatch(dispatch) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
+}
+
+// trySwitchModelForPrompt keeps foreground admission consistent when a model
+// switch either dispatches the prompt itself or fails before reaching the agent.
+func (s *Service) trySwitchModelForPrompt(ctx context.Context, taskID, sessionID, model, prompt string, session *models.TaskSession, dispatch *foregroundDispatch) (*PromptResult, bool, error) {
+	result, switched, err := s.trySwitchModel(ctx, taskID, sessionID, model, prompt, session)
+	if !switched && err == nil {
+		return nil, false, nil
+	}
+	if err != nil {
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, dispatch)
+		return result, true, err
+	}
+	revealedBackground := s.acceptForegroundDispatch(dispatch)
+	if revealedBackground || dispatch.yieldedBeforeBegin || s.acceptedForegroundDispatchClaim(dispatch) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
+	return result, true, nil
 }
 
 // handlePromptDispatchFailure handles a failed executor.Prompt call from
@@ -2772,7 +2860,12 @@ func (s *Service) effectivePromptForSession(sessionID, prompt string, planMode b
 // call near its top. Reloading the session and re-running
 // checkSessionPromptable here makes "is it actually still safe to mark this
 // session RUNNING right now" an atomic fact, not a stale read.
-func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sessionID, claimEntryID string, session *models.TaskSession) (*models.TaskSession, error) {
+func (s *Service) claimSessionRunningForPrompt(
+	ctx context.Context,
+	taskID, sessionID, claimEntryID string,
+	session *models.TaskSession,
+	foregroundClaim *foregroundClaim,
+) (*models.TaskSession, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -2788,7 +2881,9 @@ func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sess
 	if freshSession == nil {
 		return nil, errQueuedDispatchSuperseded
 	}
-	if promptErr := s.checkSessionPromptable(taskID, sessionID, freshSession.State); promptErr != nil {
+	if promptErr := s.recheckPromptableWithForegroundClaim(
+		taskID, sessionID, freshSession.State, foregroundClaim,
+	); promptErr != nil {
 		return nil, promptErr
 	}
 	s.setSessionRunning(ctx, taskID, sessionID, freshSession)
@@ -2814,6 +2909,23 @@ func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sess
 	return freshSession, nil
 }
 
+func (s *Service) recheckPromptableWithForegroundClaim(
+	taskID, sessionID string,
+	state models.TaskSessionState,
+	claim *foregroundClaim,
+) error {
+	if claim == nil {
+		return s.checkSessionPromptable(taskID, sessionID, state)
+	}
+	if state != models.TaskSessionStateRunning {
+		return fmt.Errorf("%w: session is in %s state", ErrSessionNotPromptable, state)
+	}
+	if !s.isForegroundClaimCurrent(sessionID, claim) {
+		return fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+	}
+	return nil
+}
+
 // checkSessionPromptable returns nil when the session's state accepts a new
 // prompt. RUNNING is rejected with ErrAgentPromptInProgress; any other
 // non-acceptable state (STARTING / CREATED / FAILED / CANCELLED) is rejected
@@ -2829,6 +2941,20 @@ func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.
 		models.TaskSessionStateIdle:
 		return nil
 	case models.TaskSessionStateRunning:
+		// Narrow the busy signal: a session that kicked off background work and
+		// is otherwise idle in the foreground should still accept a new message
+		// rather than reporting "running" and dropping it.
+		//
+		// This is a *read*, not a claim — DrainQueuedMessage and the STARTING wait
+		// both call it without going on to drive a turn themselves. PromptTask,
+		// which does, follows a passing read with claimForegroundTurn to close the
+		// check-then-act window against a second concurrent prompt.
+		if !s.isForegroundTurnGenerating(sessionID) {
+			s.logger.Debug("accepting prompt: foreground turn idle, only background work outstanding",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return nil
+		}
 		s.logger.Warn("rejected prompt while agent is already running",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),

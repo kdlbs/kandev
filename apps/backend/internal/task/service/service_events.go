@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"maps"
 	"time"
 
 	"go.uber.org/zap"
@@ -13,6 +14,21 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+type taskPublicationQueue struct {
+	pending  []taskPublication
+	draining bool
+}
+
+type taskPublication struct {
+	ctx     context.Context
+	publish func(context.Context)
+}
+
+type taskActivitySnapshot struct {
+	activity v1.ForegroundActivity
+	known    bool
+}
 
 // PublishTaskUpdated publishes a task.updated event for the given task.
 // Used when task metadata changes (e.g., primary session assignment) that
@@ -38,6 +54,11 @@ func (s *Service) PublishTaskStateChanged(ctx context.Context, task *models.Task
 func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
 }
+
+// taskPublicationTimeout bounds publication-owned repository reads and
+// synchronous EventBus delivery. It intentionally starts when a queued closure
+// drains, rather than inheriting a caller deadline that may already have expired.
+const taskPublicationTimeout = 10 * time.Second
 
 // Field names shared by every session.state_changed publish in this file —
 // extracted to satisfy goconst without borrowing unrelated constants.
@@ -138,6 +159,87 @@ func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType strin
 	if s.eventBus == nil {
 		return
 	}
+	if task == nil {
+		return
+	}
+
+	// Callers can reuse and mutate task/extra while a prior same-task event is
+	// blocked in a synchronous subscriber. Queue an immutable request snapshot.
+	taskSnapshot := snapshotTaskForPublication(task)
+	extraSnapshot := maps.Clone(extra)
+	oldWorkflowSnapshot := append([]string(nil), oldWorkflowIDs...)
+	var oldStateSnapshot *v1.TaskState
+	if oldState != nil {
+		value := *oldState
+		oldStateSnapshot = &value
+	}
+	s.enqueueTaskPublication(ctx, taskSnapshot.ID, func(publicationCtx context.Context) {
+		s.publishTaskEventNow(publicationCtx, eventType, taskSnapshot, oldStateSnapshot, extraSnapshot, oldWorkflowSnapshot, nil)
+	})
+}
+
+// enqueueTaskPublication runs one FIFO drainer for each task. A reentrant
+// EventBus subscriber only appends work: it never waits for the drainer that
+// called it, avoiding self-deadlock while preserving publication order. Each
+// closure retains its caller's context values but drops cancellation and
+// deadlines when it begins draining, then receives a bounded service-owned
+// publication context.
+func (s *Service) enqueueTaskPublication(ctx context.Context, taskID string, publish func(context.Context)) {
+	s.taskPublicationMu.Lock()
+	if s.taskPublications == nil {
+		s.taskPublications = make(map[string]*taskPublicationQueue)
+	}
+	queue := s.taskPublications[taskID]
+	if queue == nil {
+		queue = &taskPublicationQueue{}
+		s.taskPublications[taskID] = queue
+	}
+	queue.pending = append(queue.pending, taskPublication{ctx: ctx, publish: publish})
+	if queue.draining {
+		s.taskPublicationMu.Unlock()
+		return
+	}
+	queue.draining = true
+	s.taskPublicationMu.Unlock()
+
+	for {
+		s.taskPublicationMu.Lock()
+		if len(queue.pending) == 0 {
+			delete(s.taskPublications, taskID)
+			s.taskPublicationMu.Unlock()
+			return
+		}
+		next := queue.pending[0]
+		queue.pending = queue.pending[1:]
+		s.taskPublicationMu.Unlock()
+
+		func() {
+			publicationCtx, cancel := context.WithTimeout(context.WithoutCancel(next.ctx), taskPublicationTimeout)
+			defer cancel()
+			next.publish(publicationCtx)
+		}()
+	}
+}
+
+func snapshotTaskForPublication(task *models.Task) *models.Task {
+	snapshot := *task
+	snapshot.Metadata = maps.Clone(task.Metadata)
+	if task.ArchivedAt != nil {
+		archivedAt := *task.ArchivedAt
+		snapshot.ArchivedAt = &archivedAt
+	}
+	snapshot.Repositories = make([]*models.TaskRepository, len(task.Repositories))
+	for index, repository := range task.Repositories {
+		if repository == nil {
+			continue
+		}
+		copy := *repository
+		snapshot.Repositories[index] = &copy
+	}
+	return &snapshot
+}
+
+func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, task *models.Task, oldState *v1.TaskState, extra map[string]interface{}, oldWorkflowIDs []string, activity *taskActivitySnapshot) {
 
 	data := map[string]interface{}{
 		"task_id":          task.ID,
@@ -154,7 +256,7 @@ func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType strin
 		"is_ephemeral":     task.IsEphemeral,
 	}
 
-	s.addTaskSessionEventFields(ctx, task.ID, data)
+	activity = s.addTaskSessionEventFieldsWithActivity(ctx, task.ID, data, activity)
 
 	if task.ParentID != "" {
 		data["parent_id"] = task.ParentID
@@ -188,11 +290,19 @@ func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType strin
 	}
 
 	event := bus.NewEvent(eventType, "task-service", data)
-	if err := s.eventBus.Publish(ctx, eventType, event); err != nil {
+	err := s.eventBus.Publish(ctx, eventType, event)
+	if err != nil {
 		s.logger.Error("failed to publish task event",
 			zap.String("event_type", eventType),
 			zap.String("task_id", task.ID),
 			zap.Error(err))
+	} else if activity.known {
+		s.recordTaskActivity(task.ID, activity.activity)
+	}
+	if eventType == events.TaskDeleted {
+		s.forgetTaskActivity(task.ID)
+	}
+	if err != nil {
 		return
 	}
 	s.logTaskLifecycleEventPublished(eventType, task, data)
@@ -221,23 +331,58 @@ func (s *Service) logTaskLifecycleEventPublished(eventType string, task *models.
 // primary executor details into the task event payload. Extracted to keep
 // publishTaskEvent under the project's function-length limit.
 func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, data map[string]interface{}) {
+	s.addTaskSessionEventFieldsWithActivity(ctx, taskID, data, nil)
+}
+
+func (s *Service) addTaskSessionEventFieldsWithActivity(ctx context.Context, taskID string, data map[string]interface{}, activity *taskActivitySnapshot) *taskActivitySnapshot {
+	activity = s.addTaskForegroundActivityEventField(ctx, taskID, data, activity)
+
 	if sessionCountMap, err := s.GetSessionCountsForTasks(ctx, []string{taskID}); err == nil {
 		if count, ok := sessionCountMap[taskID]; ok {
 			data["session_count"] = count
 		}
 	}
+	s.addTaskPendingActionEventField(ctx, taskID, data)
 
 	primarySessionInfoMap, err := s.GetPrimarySessionInfoForTasks(ctx, []string{taskID})
 	if err != nil {
-		return
+		return activity
 	}
 	sessionInfo, ok := primarySessionInfoMap[taskID]
 	if !ok || sessionInfo == nil {
 		data["primary_session_id"] = nil
 		data["primary_session_state"] = nil
 		data["primary_session_pending_action"] = nil
-		return
+		return activity
 	}
+	s.addPrimarySessionEventFields(ctx, taskID, data, sessionInfo)
+	return activity
+}
+
+func (s *Service) addTaskForegroundActivityEventField(ctx context.Context, taskID string, data map[string]interface{}, activity *taskActivitySnapshot) *taskActivitySnapshot {
+	// Task-level MOST-ACTIVE-WINS activity aggregate (§spec:task-level-indicator).
+	// Present as the value or explicit nil when the aggregate is KNOWN, so a coarse
+	// state change never leaves a stale background-running reading on the client, and
+	// recording it keeps the live-propagation dedup baseline in step with every task
+	// event. When the session set could not be loaded the aggregate is UNKNOWN: omit
+	// the field entirely and leave the dedup baseline untouched, so the WS merge
+	// preserves the client's last-known reading rather than clearing a still-working
+	// task to a coarse "done" (§spec:live-propagation-fallback safe fallback).
+	if activity == nil {
+		current, known := s.computeTaskForegroundActivity(ctx, taskID)
+		activity = &taskActivitySnapshot{activity: current, known: known}
+	}
+	if activity.known {
+		if activity.activity != "" {
+			data["foreground_activity"] = string(activity.activity)
+		} else {
+			data["foreground_activity"] = nil
+		}
+	}
+	return activity
+}
+
+func (s *Service) addPrimarySessionEventFields(ctx context.Context, taskID string, data map[string]interface{}, sessionInfo *models.TaskSession) {
 	data["primary_session_id"] = sessionInfo.ID
 	if sessionInfo.ReviewStatus != models.ReviewStatusNone {
 		data["review_status"] = string(sessionInfo.ReviewStatus)
@@ -263,6 +408,44 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 	}
 	if execType != "" {
 		data["is_remote_executor"] = models.IsRemoteExecutorType(models.ExecutorType(execType))
+	}
+}
+
+func (s *Service) addTaskPendingActionEventField(ctx context.Context, taskID string, data map[string]interface{}) {
+	sessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to list sessions for task pending action", zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput) {
+			sessionIDs = append(sessionIDs, session.ID)
+		}
+	}
+	if len(sessionIDs) == 0 {
+		data["task_pending_action"] = nil
+		return
+	}
+	actions, err := s.GetPendingActionsForSessions(ctx, sessionIDs)
+	if err != nil {
+		s.logger.Warn("failed to load task pending action", zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	var clarification bool
+	for _, sessionID := range sessionIDs {
+		switch actions[sessionID] {
+		case models.TaskPendingActionPermission:
+			data["task_pending_action"] = string(models.TaskPendingActionPermission)
+			return
+		case models.TaskPendingActionClarification:
+			clarification = true
+		}
+	}
+	if clarification {
+		data["task_pending_action"] = string(models.TaskPendingActionClarification)
+	} else {
+		data["task_pending_action"] = nil
 	}
 }
 

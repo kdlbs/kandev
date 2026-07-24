@@ -157,6 +157,17 @@ export type TaskSessionState =
 
 export type TaskPendingAction = "clarification" | "permission";
 
+/**
+ * Fine-grained busy substate of a session (see ADR-0049). Distinguishes
+ * a foreground turn that is actively generating from one that is idle, held open
+ * only by spawned background work (a subagent task, a run-in-background shell, an
+ * active Monitor). `generating` is meaningful while `state === "RUNNING"`;
+ * `background` may outlive the foreground turn. Delivered live over the
+ * `session.activity_changed` WS event and carried on `session.state_changed`;
+ * absent/`null` is treated as "generating" for a RUNNING session.
+ */
+export type ForegroundActivity = "generating" | "background";
+
 export type Workflow = {
   id: WorkflowId;
   workspace_id: WorkspaceId;
@@ -306,6 +317,17 @@ export type Task = {
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  task_pending_action?: TaskPendingAction | null;
+  /**
+   * Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions
+   * (§spec:task-level-indicator): "generating" when any session is generating,
+   * "background" when none is generating but at least one RUNNING session holds a
+   * turn open for background work, and absent/`null` when no session is running
+   * (task-level surfaces then fall through to the coarse task state). Computed on
+   * the backend and carried on the task record so every task-level surface reads
+   * one authoritative value.
+   */
+  foreground_activity?: ForegroundActivity | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -401,6 +423,11 @@ export type TaskSession = {
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   state: TaskSessionState;
+  /**
+   * Fine-grained busy substate (ADR-0049). Pushed over
+   * `session.activity_changed`; background may outlive the foreground turn.
+   */
+  foreground_activity?: ForegroundActivity | null;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
   agent_profile_snapshot?: Record<string, unknown> | null;
@@ -724,10 +751,7 @@ export type StepPortable = {
   pull_from_step_position?: number;
 };
 
-export type ImportWorkflowsResult = {
-  created: string[];
-  skipped: string[];
-};
+export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
 
 // Helper function to check if a step has a specific on_enter action
 export function stepHasOnEnterAction(

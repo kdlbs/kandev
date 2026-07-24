@@ -16,8 +16,9 @@ import (
 // it pops the barrier off the queue, releasing the waiter once everything
 // queued ahead of it has been processed.
 type notifWork struct {
-	notif acp.SessionNotification
-	sync  chan struct{}
+	notif            acp.SessionNotification
+	sync             chan struct{}
+	promptGeneration uint64
 }
 
 // enqueueACPUpdate is the SDK-facing notification handler. It pushes the
@@ -36,7 +37,7 @@ func (a *Adapter) enqueueACPUpdate(n acp.SessionNotification) {
 	select {
 	case <-a.lifetimeCtx.Done():
 		return
-	case a.notifQueue <- notifWork{notif: n}:
+	case a.notifQueue <- notifWork{notif: n, promptGeneration: a.currentPromptGeneration()}:
 	}
 }
 
@@ -95,7 +96,7 @@ func (a *Adapter) runUpdateWorker() {
 				close(item.sync)
 				continue
 			}
-			a.handleACPUpdate(item.notif)
+			a.handleACPUpdate(item.notif, item.promptGeneration)
 		}
 	}
 }
@@ -104,7 +105,16 @@ func (a *Adapter) runUpdateWorker() {
 // Runs synchronously on the update worker goroutine; do not call from the SDK's
 // notification path (use enqueueACPUpdate instead). Unit tests invoke this
 // directly to exercise the conversion logic without spinning up the worker.
-func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
+//
+//nolint:cyclop // Existing notification conversion branches; prompt identity adds no new conversion path.
+func (a *Adapter) handleACPUpdate(
+	n acp.SessionNotification,
+	promptGenerations ...uint64,
+) {
+	var promptGeneration uint64
+	if len(promptGenerations) > 0 {
+		promptGeneration = promptGenerations[0]
+	}
 	// Fast path during session/load: history-replay notifications can arrive as
 	// a burst large enough to overflow the ACP SDK's 1024-deep notification
 	// queue if the per-item handler is slow. Check the loading flag first and
@@ -157,7 +167,7 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 	}
 	if event == nil && !suppressed {
 		// Try untyped updates not yet supported by the ACP SDK.
-		event = a.tryConvertUntypedUpdate(rawData, sessionID)
+		event = a.tryConvertUntypedUpdate(rawData, sessionID, promptGeneration)
 	}
 	if event != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, event)
@@ -299,7 +309,12 @@ type acpUsageUpdate struct {
 	SessionUpdate string `json:"sessionUpdate"`
 	Size          int64  `json:"size"`
 	Used          int64  `json:"used"`
-	Cost          *struct {
+	Meta          struct {
+		ClaudeOrigin struct {
+			Kind string `json:"kind"`
+		} `json:"_claude/origin"`
+	} `json:"_meta,omitempty"`
+	Cost *struct {
 		Amount   float64 `json:"amount"`
 		Currency string  `json:"currency"`
 	} `json:"cost,omitempty"`
@@ -394,7 +409,11 @@ func (a *Adapter) consumeUsageDelta(sessionID string) (int64, int64) {
 
 // tryConvertUntypedUpdate handles ACP session update types not yet supported by the SDK.
 // When the SDK adds native support, move the handling into convertNotification and delete this.
-func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID string) *AgentEvent {
+func (a *Adapter) tryConvertUntypedUpdate(
+	rawNotification []byte,
+	sessionID string,
+	promptGenerations ...uint64,
+) *AgentEvent {
 	var envelope struct {
 		Update json.RawMessage `json:"update"`
 	}
@@ -436,13 +455,37 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 	effectiveSize := a.recordUsageAndMaxSize(sessionID, usage.Size, usage.Used, costSubcents)
 
 	remaining := max(effectiveSize-usage.Used, 0)
-	return &AgentEvent{
+	contextEvent := &AgentEvent{
 		Type:                   streams.EventTypeContextWindow,
 		SessionID:              sessionID,
 		ContextWindowSize:      effectiveSize,
 		ContextWindowUsed:      usage.Used,
 		ContextWindowRemaining: remaining,
 		ContextEfficiency:      float64(usage.Used) / float64(effectiveSize) * 100,
+	}
+
+	var lifecycleType string
+	switch usage.Meta.ClaudeOrigin.Kind {
+	case "human":
+		lifecycleType = streams.EventTypeForegroundIdle
+	case "task-notification":
+		lifecycleType = streams.EventTypeBackgroundComplete
+	}
+	if lifecycleType == "" {
+		return contextEvent
+	}
+	// Preserve the context-window update carried by the same provider frame.
+	// The returned lifecycle event follows it through the normal notification
+	// worker path, maintaining provider order without overloading either type.
+	a.sendUpdate(*contextEvent)
+	var promptGeneration uint64
+	if len(promptGenerations) > 0 {
+		promptGeneration = promptGenerations[0]
+	}
+	return &AgentEvent{
+		Type:             lifecycleType,
+		SessionID:        sessionID,
+		PromptGeneration: promptGeneration,
 	}
 }
 

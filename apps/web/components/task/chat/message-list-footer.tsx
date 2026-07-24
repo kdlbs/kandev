@@ -8,6 +8,7 @@ type MessageListFooterProps = {
   sessionState?: TaskSessionState;
   sessionId: string | null;
   messages: Message[];
+  isWorking?: boolean;
   footerActionMessages?: Message[];
 };
 
@@ -37,6 +38,7 @@ export function MessageListFooter({
   sessionState,
   sessionId,
   messages,
+  isWorking,
   footerActionMessages = [],
 }: MessageListFooterProps) {
   const currentActionableFailure = findCurrentActionableFailure(messages, footerActionMessages);
@@ -50,7 +52,12 @@ export function MessageListFooter({
   return (
     <>
       {!recoveryOwnsFailure && (
-        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
+        <AgentStatus
+          sessionState={sessionState}
+          sessionId={sessionId}
+          messages={messages}
+          isWorking={isWorking}
+        />
       )}
       {visibleFooterActionMessages.map((message) => (
         <MessageRenderer key={message.id} comment={message} isTaskDescription={false} />

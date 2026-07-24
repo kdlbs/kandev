@@ -396,13 +396,14 @@ type HeaderFooterArgs = {
   loadMore: () => Promise<number>;
   sessionState?: TaskSessionState;
   sessionId: string | null;
+  isWorking: boolean;
   footerActionMessages?: Message[];
 };
 
 /** Memoized Virtuoso Header (load-more status) and Footer (agent status + actions). */
 function useVirtuosoHeaderFooter(args: HeaderFooterArgs) {
   const { isLoadingMore, hasMore, showLoadingState, messagesLoading, isInitialLoading } = args;
-  const { messages, loadMore, sessionState, sessionId, footerActionMessages } = args;
+  const { messages, loadMore, sessionState, sessionId, isWorking, footerActionMessages } = args;
   const footerActions = useMemo(() => footerActionMessages ?? [], [footerActionMessages]);
 
   const Header = useCallback(
@@ -434,10 +435,11 @@ function useVirtuosoHeaderFooter(args: HeaderFooterArgs) {
         sessionState={sessionState}
         sessionId={sessionId}
         messages={messages}
+        isWorking={isWorking}
         footerActionMessages={footerActions}
       />
     ),
-    [sessionId, sessionState, messages, footerActions],
+    [sessionId, sessionState, messages, isWorking, footerActions],
   );
 
   return { Header, Footer, footerActions };
@@ -487,6 +489,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
     loadMore,
     sessionState,
     sessionId,
+    isWorking,
     footerActionMessages,
   });
 
@@ -506,6 +509,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
           sessionState={sessionState}
           sessionId={sessionId}
           messages={messages}
+          isWorking={isWorking}
           footerActionMessages={footerActions}
         />
       </SessionPanelContent>

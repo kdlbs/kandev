@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import type { TaskState, TaskSessionState } from "@/lib/types/http";
+import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu, type StepDef } from "./task-switcher-context-menu";
 import {
@@ -18,6 +18,8 @@ export type TaskSwitcherItem = {
   title: string;
   state?: TaskState;
   sessionState?: TaskSessionState;
+  /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
+  foregroundActivity?: ForegroundActivity | null;
   description?: string;
   workflowId?: string;
   workflowName?: string;
@@ -257,6 +259,7 @@ function TaskRow({
         title={task.title}
         state={task.state}
         sessionState={task.sessionState}
+        foregroundActivity={task.foregroundActivity}
         isArchived={task.isArchived}
         isSelected={isSelected}
         diffStats={task.diffStats}

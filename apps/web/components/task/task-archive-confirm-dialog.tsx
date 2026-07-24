@@ -15,7 +15,9 @@ import {
 import { Checkbox } from "@kandev/ui/checkbox";
 import { useAppStore } from "@/components/state-provider";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
+import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
+import { StillWorkingWarning } from "./task-still-working-warning";
 
 type TaskArchiveConfirmDialogProps = {
   open: boolean;
@@ -26,6 +28,7 @@ type TaskArchiveConfirmDialogProps = {
   isArchiving?: boolean;
   taskId?: string;
   taskIds?: string[];
+  isInFlight?: boolean;
   /** Executor type of the task being archived (single). */
   executorType?: string | null;
   /** Executor types of the tasks being archived (bulk). */
@@ -77,6 +80,7 @@ export function TaskArchiveConfirmDialog({
   isArchiving,
   taskId,
   taskIds,
+  isInFlight,
   executorType,
   executorTypes,
   onConfirm,
@@ -101,6 +105,9 @@ export function TaskArchiveConfirmDialog({
     onOpenChange,
   );
   const subtaskCount = useSubtaskCount(open && requiresConfirmation, taskId, taskIds);
+  const shouldCheckInFlight = [open, requiresConfirmation].every(Boolean);
+  const storeInFlight = useTaskInFlight(taskId, taskIds, shouldCheckInFlight);
+  const taskIsInFlight = [isInFlight, storeInFlight].includes(true);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setCascade(false);
@@ -125,6 +132,7 @@ export function TaskArchiveConfirmDialog({
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {taskIsInFlight && <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />}
         {subtaskCount > 0 && (
           <label className="flex items-start gap-2 text-sm cursor-pointer">
             <Checkbox

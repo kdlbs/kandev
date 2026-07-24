@@ -34,7 +34,9 @@ import { NewSessionDialog, type HandoffPreset } from "../new-session-dialog";
 import { MobilePillButton } from "./mobile-pill-button";
 import { MobilePickerSheet } from "./mobile-picker-sheet";
 import { formatTaskSessionStateLabel } from "@/lib/ui/state-labels";
-import type { TaskSession, TaskSessionState } from "@/lib/types/http";
+import { getSessionStateIcon } from "@/lib/ui/state-icons";
+import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
+import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 
 type SessionRow = {
@@ -42,6 +44,7 @@ type SessionRow = {
   agentName: string | null;
   agentLabel: string;
   state: TaskSessionState | null;
+  foregroundActivity: ForegroundActivity | null;
   isPrimary: boolean;
   index: number;
   startedAt: string;
@@ -65,6 +68,7 @@ function buildSessionRows(
       // matching the desktop session tab title precedence.
       agentLabel: s.name || labelParts[1] || labelParts[0] || profile?.label || "Agent",
       state: (s.state as TaskSessionState | undefined) ?? null,
+      foregroundActivity: s.foreground_activity ?? null,
       isPrimary: primarySessionId ? s.id === primarySessionId : !!s.is_primary,
       index: idx + 1,
       startedAt: s.started_at,
@@ -72,19 +76,58 @@ function buildSessionRows(
   });
 }
 
-const STATE_TONE: Partial<Record<TaskSessionState, string>> = {
-  RUNNING: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  STARTING: "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400",
-  WAITING_FOR_INPUT: "bg-amber-500/15 text-amber-600 dark:text-amber-400",
-  FAILED: "bg-destructive/15 text-destructive",
-};
+// The mobile sessions section reads the per-session substate through the same
+// shared vocabulary as the desktop session switcher and the reopen menu
+// (§spec:session-level-truth): getSessionStateIcon carries background-running
+// as a spinner distinct — by SHAPE and MOTION, not hue alone — from generating
+// (a static dot) and from done (a check), so the three read apart even in a
+// grayscale scan. The label reinforces the distinction in words: while spawned
+// background work runs, the row reads "Working in background" rather than the
+// bare "Running", so background is never confused with generating.
+const BACKGROUND_RUNNING_LABEL = "Working in background";
 
-function StateBadge({ state }: { state: TaskSessionState | null }) {
+function sessionStateLabel(
+  state: TaskSessionState,
+  foregroundActivity: ForegroundActivity | null,
+  pending: PendingInput,
+): string {
+  const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
+  if (canRequestInput && pending.permission) return "Permission requested";
+  if (canRequestInput && pending.clarification) {
+    return formatTaskSessionStateLabel("WAITING_FOR_INPUT");
+  }
+  if (canRequestInput && foregroundActivity === "background") return BACKGROUND_RUNNING_LABEL;
+  return formatTaskSessionStateLabel(state);
+}
+
+function StateBadge({
+  sessionId,
+  state,
+  foregroundActivity,
+  testId,
+}: {
+  sessionId: string;
+  state: TaskSessionState | null;
+  foregroundActivity: ForegroundActivity | null;
+  testId?: string;
+}) {
+  const pending = useSessionPendingInput(sessionId);
   if (!state) return null;
-  const tone = STATE_TONE[state] ?? "bg-foreground/10 text-muted-foreground";
+  const label = sessionStateLabel(state, foregroundActivity, pending);
   return (
-    <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded leading-none ${tone}`}>
-      {formatTaskSessionStateLabel(state)}
+    <span
+      data-testid={testId}
+      title={label}
+      className="flex items-center gap-1 whitespace-nowrap text-[10px] font-medium leading-none text-muted-foreground shrink-0"
+    >
+      {getSessionStateIcon(
+        state,
+        "h-3 w-3 shrink-0",
+        foregroundActivity,
+        pending.clarification,
+        pending.permission,
+      )}
+      {label}
     </span>
   );
 }
@@ -263,7 +306,12 @@ function SessionRowItem({
         )}
         {row.agentName && <AgentLogo agentName={row.agentName} size={16} className="shrink-0" />}
         <span className="text-sm truncate flex-1">{row.agentLabel}</span>
-        <StateBadge state={row.state} />
+        <StateBadge
+          sessionId={row.id}
+          state={row.state}
+          foregroundActivity={row.foregroundActivity}
+          testId={`mobile-session-state-${row.id}`}
+        />
         <SessionActionsMenu
           taskId={taskId}
           state={row.state}

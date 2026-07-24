@@ -27,6 +27,7 @@ import { repositorySlug } from "@/lib/repository-slug";
 import { formatUserHomePath } from "@/lib/utils";
 import {
   repositoryId as toRepositoryId,
+  type ForegroundActivity,
   type Repository,
   type TaskPendingAction,
   type TaskState,
@@ -53,6 +54,13 @@ export interface Task {
    */
   primarySessionState?: string | null;
   primarySessionPendingAction?: TaskPendingAction | null;
+  taskPendingAction?: TaskPendingAction | null;
+  /**
+   * Task-level MOST-ACTIVE-WINS activity aggregate (§spec:task-level-indicator);
+   * undefined/null when no session is running. Drives the background-running
+   * affordance on the card status icon.
+   */
+  foregroundActivity?: ForegroundActivity | null;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primaryExecutorId?: string | null;
   primaryExecutorType?: string | null;

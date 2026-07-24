@@ -388,6 +388,17 @@ func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID stri
 	}, nil
 }
 
+func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgentWithDispatchCallback(ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
 // CancelAgent interrupts the current agent turn without terminating the process.
 func (a *lifecycleAdapter) CancelAgent(ctx context.Context, sessionID string) error {
 	return a.mgr.CancelAgentBySessionID(ctx, sessionID)
@@ -646,6 +657,11 @@ func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, se
 // StepRequiresCompletionSignal forwards to the orchestrator service.
 func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
+}
+
+// ForegroundActivity forwards to the orchestrator service (ADR-0049).
+func (w *orchestratorWrapper) ForegroundActivity(sessionID string) v1.ForegroundActivity {
+	return w.svc.ForegroundActivity(sessionID)
 }
 
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface

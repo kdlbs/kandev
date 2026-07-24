@@ -2,14 +2,30 @@ import { useAppStore } from "@/components/state-provider";
 import { useSession } from "@/hooks/domains/session/use-session";
 import { useTask } from "@/hooks/use-task";
 import type { TaskSession } from "@/lib/types/http";
+import { deriveSessionInputMode } from "./session-input-mode";
 
-function deriveSessionFlags(state: TaskSession["state"] | undefined, errorMessage?: string) {
+export function deriveSessionFlags(session: TaskSession | null | undefined) {
+  const state = session?.state;
+  const errorMessage = session?.error_message;
   const isStarting = state === "STARTING";
-  const isAgentBusy = state === "RUNNING";
-  const isWorking = isStarting || isAgentBusy;
+  const isRunning = state === "RUNNING";
+  // ADR-0049. Three conditions, not two:
+  //  (a) generating       — RUNNING, foreground actively producing output
+  //  (b) background-idle   — foreground settled, spawned background work remains
+  //  (c) fully idle        — no foreground or background work
+  // `isAgentBusy` gates the composer (queue-vs-send): only a foreground-
+  // generating turn (a) blocks input; (b) accepts it. An absent/unknown
+  // substate defaults to generating, preserving the historical
+  // reject-while-RUNNING contract.
+  const hasBackgroundWork = session?.foreground_activity === "background";
+  const inputMode = deriveSessionInputMode(session);
+  const isAgentBusy = inputMode === "queue";
+  // `isWorking` drives the spinner/affordance: any live turn (generating OR
+  // background-idle) plus STARTING — it must stay up through (b).
+  const isWorking = isStarting || isRunning || hasBackgroundWork;
   const isFailed = state === "FAILED" || state === "CANCELLED";
   const needsRecovery = state === "WAITING_FOR_INPUT" && !!errorMessage;
-  return { isStarting, isWorking, isAgentBusy, isFailed, needsRecovery };
+  return { inputMode, isStarting, isWorking, isAgentBusy, isFailed, needsRecovery };
 }
 
 type UseSessionStateOptions = {
@@ -41,7 +57,7 @@ export function useSessionState(sessionId: string | null, options: UseSessionSta
   );
 
   const taskDescription = task?.description ?? null;
-  const flags = deriveSessionFlags(session?.state, session?.error_message);
+  const flags = deriveSessionFlags(session);
   const isPreparingEnvironment = prepareStatus === "preparing";
 
   return {

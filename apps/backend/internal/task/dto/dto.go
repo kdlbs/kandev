@@ -133,32 +133,42 @@ type EnvironmentDTO struct {
 }
 
 type TaskDTO struct {
-	ID                          string                 `json:"id"`
-	WorkspaceID                 string                 `json:"workspace_id"`
-	WorkflowID                  string                 `json:"workflow_id"`
-	WorkflowStepID              string                 `json:"workflow_step_id"`
-	Title                       string                 `json:"title"`
-	Description                 string                 `json:"description"`
-	State                       v1.TaskState           `json:"state"`
-	Priority                    string                 `json:"priority"`
-	Repositories                []TaskRepositoryDTO    `json:"repositories,omitempty"`
-	Position                    int                    `json:"position"`
-	PrimarySessionID            *string                `json:"primary_session_id,omitempty"`
-	SessionCount                *int                   `json:"session_count,omitempty"`
-	ReviewStatus                models.ReviewStatus    `json:"review_status,omitempty"`
-	PrimaryExecutorID           *string                `json:"primary_executor_id,omitempty"`
-	PrimaryExecutorType         *string                `json:"primary_executor_type,omitempty"`
-	PrimaryExecutorName         *string                `json:"primary_executor_name,omitempty"`
-	PrimaryAgentName            *string                `json:"primary_agent_name,omitempty"`
-	PrimaryWorkingDirectory     *string                `json:"primary_working_directory,omitempty"`
-	PrimarySessionState         *string                `json:"primary_session_state,omitempty"`
-	PrimarySessionPendingAction *string                `json:"primary_session_pending_action"`
-	IsRemoteExecutor            bool                   `json:"is_remote_executor,omitempty"`
-	ParentID                    string                 `json:"parent_id,omitempty"`
-	ArchivedAt                  *time.Time             `json:"archived_at,omitempty"`
-	CreatedAt                   time.Time              `json:"created_at"`
-	UpdatedAt                   time.Time              `json:"updated_at"`
-	Metadata                    map[string]interface{} `json:"metadata,omitempty"`
+	ID                          string              `json:"id"`
+	WorkspaceID                 string              `json:"workspace_id"`
+	WorkflowID                  string              `json:"workflow_id"`
+	WorkflowStepID              string              `json:"workflow_step_id"`
+	Title                       string              `json:"title"`
+	Description                 string              `json:"description"`
+	State                       v1.TaskState        `json:"state"`
+	Priority                    string              `json:"priority"`
+	Repositories                []TaskRepositoryDTO `json:"repositories,omitempty"`
+	Position                    int                 `json:"position"`
+	PrimarySessionID            *string             `json:"primary_session_id,omitempty"`
+	SessionCount                *int                `json:"session_count,omitempty"`
+	ReviewStatus                models.ReviewStatus `json:"review_status,omitempty"`
+	PrimaryExecutorID           *string             `json:"primary_executor_id,omitempty"`
+	PrimaryExecutorType         *string             `json:"primary_executor_type,omitempty"`
+	PrimaryExecutorName         *string             `json:"primary_executor_name,omitempty"`
+	PrimaryAgentName            *string             `json:"primary_agent_name,omitempty"`
+	PrimaryWorkingDirectory     *string             `json:"primary_working_directory,omitempty"`
+	PrimarySessionState         *string             `json:"primary_session_state,omitempty"`
+	PrimarySessionPendingAction *string             `json:"primary_session_pending_action"`
+	TaskPendingAction           *string             `json:"task_pending_action"`
+	// ForegroundActivity is the task-level MOST-ACTIVE-WINS activity aggregate
+	// across the task's sessions (§spec:task-level-indicator): "generating" when
+	// any session is generating, "background" when none is generating but at
+	// least one RUNNING session is holding a turn open for background work, and
+	// empty (omitted) when no session is running — in which case task-level
+	// surfaces fall through to the coarse task state (done / waiting / failed).
+	// Computed on the backend and carried on the task record so every task-level
+	// surface reads one authoritative value; stamped by EnrichTaskForegroundActivity.
+	ForegroundActivity v1.ForegroundActivity  `json:"foreground_activity,omitempty"`
+	IsRemoteExecutor   bool                   `json:"is_remote_executor,omitempty"`
+	ParentID           string                 `json:"parent_id,omitempty"`
+	ArchivedAt         *time.Time             `json:"archived_at,omitempty"`
+	CreatedAt          time.Time              `json:"created_at"`
+	UpdatedAt          time.Time              `json:"updated_at"`
+	Metadata           map[string]interface{} `json:"metadata,omitempty"`
 
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
@@ -230,6 +240,13 @@ type TaskSessionDTO struct {
 	IsPassthrough     bool                `json:"is_passthrough"`
 	ReviewStatus      models.ReviewStatus `json:"review_status,omitempty"`
 	TaskEnvironmentID string              `json:"task_environment_id,omitempty"`
+	// ForegroundActivity mirrors the in-memory fine-grained busy substate so a
+	// fresh page-load / second tab sees live background work without waiting for
+	// a WS flip (ADR-0049). Generating is emitted only for RUNNING sessions;
+	// background may remain present after the foreground turn settles.
+	// Not persisted — populated at the serialization boundary by
+	// EnrichForegroundActivity, never by FromTaskSession.
+	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
@@ -266,6 +283,9 @@ type TaskSessionSummaryDTO struct {
 	IsPassthrough     bool                          `json:"is_passthrough"`
 	ReviewStatus      models.ReviewStatus           `json:"review_status,omitempty"`
 	TaskEnvironmentID string                        `json:"task_environment_id,omitempty"`
+	// ForegroundActivity mirrors the in-memory fine-grained busy substate
+	// (ADR-0049); see TaskSessionDTO.
+	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
@@ -716,6 +736,37 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		result.Worktrees = session.Worktrees
 	}
 	return result
+}
+
+// ForegroundActivityProvider surfaces the in-memory fine-grained busy substate
+// for a session (ADR-0049). It is satisfied by the
+// orchestrator; the serialization layer depends only on this narrow seam so it
+// takes no hard orchestrator dependency and can be faked in tests.
+type ForegroundActivityProvider interface {
+	ForegroundActivity(sessionID string) v1.ForegroundActivity
+}
+
+// EnrichForegroundActivity stamps the live fine-grained busy substate onto a full
+// session DTO. Generating is emitted only for RUNNING sessions; detached
+// background activity remains meaningful after the coarse state settles.
+func EnrichForegroundActivity(dto *TaskSessionDTO, provider ForegroundActivityProvider) {
+	if dto == nil || provider == nil {
+		return
+	}
+	if activity, ok := sessionForegroundActivity(dto.ID, dto.State, provider); ok {
+		dto.ForegroundActivity = activity
+	}
+}
+
+// EnrichForegroundActivitySummary is EnrichForegroundActivity for the lightweight
+// summary DTO used by the list endpoints.
+func EnrichForegroundActivitySummary(dto *TaskSessionSummaryDTO, provider ForegroundActivityProvider) {
+	if dto == nil || provider == nil {
+		return
+	}
+	if activity, ok := sessionForegroundActivity(dto.ID, dto.State, provider); ok {
+		dto.ForegroundActivity = activity
+	}
 }
 
 // WorkflowStepDTO represents a workflow step for API responses

@@ -43,6 +43,54 @@ const (
 	TaskSessionStateCancelled       TaskSessionState = "CANCELLED"
 )
 
+// ForegroundActivity is the fine-grained busy substate of a RUNNING session
+// (ADR-0049). It distinguishes a foreground turn that is
+// actively generating from one that is idle, held open only by spawned
+// background work (a subagent task, a run-in-background shell, an active
+// Monitor). It is only meaningful while the session state is RUNNING; for every
+// other state the coarse state already tells the whole story.
+type ForegroundActivity string
+
+const (
+	// ForegroundActivityGenerating means the foreground agent is producing
+	// output — the historical "busy" condition; input stays gated.
+	ForegroundActivityGenerating ForegroundActivity = "generating"
+	// ForegroundActivityBackground means the foreground turn has yielded to
+	// outstanding background work; input is accepted even though the session
+	// still reads RUNNING and the "working" affordance stays up.
+	ForegroundActivityBackground ForegroundActivity = "background"
+)
+
+// AggregateForegroundActivity reduces the per-session foreground activities of a
+// task's RUNNING sessions to a single task-level value using MOST-ACTIVE-WINS
+// (§spec:task-level-indicator):
+//
+//   - ForegroundActivityGenerating — any session is generating;
+//   - ForegroundActivityBackground — none is generating but at least one is
+//     holding a turn open for background work;
+//   - ""                           — neither, so task-level surfaces fall through
+//     to the coarse task state (done / waiting / failed).
+//
+// Callers pass only the activities of RUNNING sessions (a non-RUNNING session
+// carries no busy substate); empty values are ignored, so passing "" for a
+// non-RUNNING session is harmless. The background tier is inserted BETWEEN
+// generating and done and does not redefine the other states.
+func AggregateForegroundActivity(activities []ForegroundActivity) ForegroundActivity {
+	sawBackground := false
+	for _, activity := range activities {
+		switch activity {
+		case ForegroundActivityGenerating:
+			return ForegroundActivityGenerating
+		case ForegroundActivityBackground:
+			sawBackground = true
+		}
+	}
+	if sawBackground {
+		return ForegroundActivityBackground
+	}
+	return ""
+}
+
 // MessageType represents a normalized session message type.
 type MessageType string
 

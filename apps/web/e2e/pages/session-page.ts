@@ -298,9 +298,11 @@ export class SessionPage {
       .filter({ has: this.page.getByTestId(testId) });
   }
 
-  /** Agent STARTING or RUNNING status indicator. */
+  /** Foreground or detached-background working status indicator. */
   agentStatus(): Locator {
-    return this.page.getByRole("status", { name: /Agent is (starting|running)/ });
+    return this.page.getByRole("status", {
+      name: /Agent is (starting|running)|Background work is running/,
+    });
   }
 
   /** Divider that appears after the "New session started" status message is rendered. */

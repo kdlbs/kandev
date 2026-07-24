@@ -1,4 +1,8 @@
-import type { TaskPendingAction, TaskState as TaskStatus } from "@/lib/types/http";
+import type {
+  ForegroundActivity,
+  TaskPendingAction,
+  TaskState as TaskStatus,
+} from "@/lib/types/http";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -62,6 +66,13 @@ export type KanbanState = {
     primarySessionId?: string | null;
     primarySessionState?: string | null;
     primarySessionPendingAction?: TaskPendingAction | null;
+    taskPendingAction?: TaskPendingAction | null;
+    /**
+     * Task-level MOST-ACTIVE-WINS activity aggregate (§spec:task-level-indicator);
+     * undefined/null when no session is running. Drives the board card and task
+     * list background-running affordance.
+     */
+    foregroundActivity?: ForegroundActivity | null;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     primaryExecutorId?: string | null;

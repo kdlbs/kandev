@@ -103,6 +103,26 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 	return result, err
 }
 
+// PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
+// must keep admission serialized until the queued prompt is actually dispatched.
+func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
+	}
+	lease, err := m.acquireActivity(ctx, activity.KindExecutionRunning)
+	if err != nil {
+		return nil, err
+	}
+	key := executionActivityKey(executionID)
+	m.trackActivity(key, lease)
+	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
+	if err != nil || !dispatchOnly {
+		m.releaseActivity(key)
+	}
+	return result, err
+}
+
 // cancelWaitTimeout bounds how long CancelAgent waits for the in-flight SendPrompt
 // to exit after the in-flight session/prompt RPC has ended (cancel acknowledged).
 // Exposed as a var (not const) so tests can shorten it without fake clocks.

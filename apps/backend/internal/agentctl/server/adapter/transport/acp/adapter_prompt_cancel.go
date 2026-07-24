@@ -8,17 +8,33 @@ import (
 	"go.uber.org/zap"
 )
 
-func (a *Adapter) registerPromptTurn(parent context.Context) (context.Context, *promptTurnState) {
+func (a *Adapter) registerPromptTurn(
+	parent context.Context,
+	promptGenerations ...uint64,
+) (context.Context, *promptTurnState) {
+	var promptGeneration uint64
+	if len(promptGenerations) > 0 {
+		promptGeneration = promptGenerations[0]
+	}
 	promptCtx, endTurn := context.WithCancelCause(parent)
 	turn := &promptTurnState{
-		endTurn: endTurn,
-		rpcDone: make(chan struct{}),
-		abortCh: make(chan struct{}),
+		endTurn:          endTurn,
+		rpcDone:          make(chan struct{}),
+		abortCh:          make(chan struct{}),
+		promptGeneration: promptGeneration,
 	}
 	a.promptTurnMu.Lock()
 	a.promptTurn = turn
 	a.promptTurnMu.Unlock()
 	return promptCtx, turn
+}
+
+func (a *Adapter) currentPromptGeneration() uint64 {
+	turn := a.currentPromptTurn()
+	if turn == nil {
+		return 0
+	}
+	return turn.promptGeneration
 }
 
 func (a *Adapter) clearPromptTurn(turn *promptTurnState) {

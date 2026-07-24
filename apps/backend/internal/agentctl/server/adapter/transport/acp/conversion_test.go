@@ -900,6 +900,48 @@ func TestTryConvertUntypedUpdate_UsageUpdate(t *testing.T) {
 	}
 }
 
+func TestTryConvertUntypedUpdate_HumanOriginSignalsForegroundIdle(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":23638,"_meta":{"_claude/origin":{"kind":"human"}}}}`)
+
+	event := a.tryConvertUntypedUpdate(raw, "s1")
+	if event == nil {
+		t.Fatal("expected foreground-idle event")
+	}
+	if event.Type != "foreground_idle" {
+		t.Fatalf("event type = %q, want foreground_idle", event.Type)
+	}
+}
+
+func TestTryConvertUntypedUpdate_HumanOriginPreservesPromptGeneration(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":23638,"_meta":{"_claude/origin":{"kind":"human"}}}}`)
+
+	event := a.tryConvertUntypedUpdate(raw, "s1", 42)
+	if event == nil {
+		t.Fatal("expected foreground-idle event")
+	}
+	if event.PromptGeneration != 42 {
+		t.Fatalf("prompt generation = %d, want 42", event.PromptGeneration)
+	}
+}
+
+func TestTryConvertUntypedUpdate_TaskNotificationSignalsOneBackgroundCompletion(t *testing.T) {
+	a := newTestAdapter()
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":24892,"_meta":{"_claude/origin":{"kind":"task-notification"}}}}`)
+
+	event := a.tryConvertUntypedUpdate(raw, "s1")
+	if event == nil {
+		t.Fatal("expected background-complete event")
+	}
+	if event.Type != "background_complete" {
+		t.Fatalf("event type = %q, want background_complete", event.Type)
+	}
+	if event.ToolCallID != "" {
+		t.Fatalf("task-notification unexpectedly invented work identity %q", event.ToolCallID)
+	}
+}
+
 func TestTryConvertUntypedUpdate_SessionInfoUpdate(t *testing.T) {
 	a := newTestAdapter()
 	t.Cleanup(func() { _ = a.Close() })

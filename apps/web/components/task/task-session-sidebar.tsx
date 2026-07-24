@@ -29,7 +29,11 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
-import { buildPendingFlags, readPendingFlags } from "./task-session-sidebar-aggregate";
+import {
+  buildPendingFlags,
+  readTaskPendingFlags,
+  workflowStepTitle,
+} from "./task-session-sidebar-aggregate";
 import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
@@ -117,10 +121,11 @@ function toSidebarItem(
   const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
   // Sidebar shows just one slot; pick the primary PR (first by created_at).
   const pr = ctx.taskPRsByTaskId[task.id]?.[0];
-  const pending = readPendingFlags(ctx.pendingFlags, task.primarySessionId, {
-    primarySessionState: resolvedSessionState,
-    primarySessionPendingAction: task.primarySessionPendingAction,
-  });
+  const pending = readTaskPendingFlags(
+    ctx.pendingFlags,
+    ctx.sessionsByTaskId[task.id] ?? [],
+    task.taskPendingAction,
+  );
 
   const diffStats = resolveDiffStats(
     sessionInfo.diffStats,
@@ -134,13 +139,18 @@ function toSidebarItem(
     title: task.title,
     state: task.state as TaskState | undefined,
     sessionState: resolvedSessionState,
+    // Task-level most-active-wins busy aggregate from the task record — the same
+    // authoritative value the board card, list rows, graph nodes, and open-task
+    // header read via getTaskStateIcon. Reading it here (instead of the single
+    // most-active client session's substate) makes the sidebar agree with those
+    // surfaces for multi-session tasks and off-screen rows (§spec:task-level-truth).
+    // Optional field: an absent aggregate reads the same as null (safe → not-background).
+    foregroundActivity: task.foregroundActivity,
     description: task.description,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),
     workflowStepId: task.workflowStepId as string | undefined,
-    workflowStepTitle: task.workflowStepId
-      ? ctx.stepTitleById.get(task.workflowStepId as string)
-      : undefined,
+    workflowStepTitle: workflowStepTitle(task, ctx.stepTitleById),
     repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
     diffStats,
     isRemoteExecutor: task.isRemoteExecutor,
@@ -170,6 +180,24 @@ type TaskSessionSidebarProps = {
   hideFilterBar?: boolean;
 };
 
+function usePendingSessionIds(
+  primarySessionIds: string[],
+  sessionsByTaskId: Record<string, TaskSession[]>,
+) {
+  return useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...primarySessionIds,
+          ...Object.values(sessionsByTaskId)
+            .flat()
+            .map((session) => session.id),
+        ]),
+      ),
+    [primarySessionIds, sessionsByTaskId],
+  );
+}
+
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -197,8 +225,8 @@ function useSidebarData(workspaceId: string | null) {
     isLoading: isLoadingWorkflow,
   } = useWorkspaceSidebarTasks(workspaceId);
 
-  // Stable primary session IDs from kanban tasks feed subscriptions and pending-flag selectors.
   const primarySessionIds = useStablePrimarySessionIds(allTasks);
+  const pendingSessionIds = usePendingSessionIds(primarySessionIds, sessionsByTaskId);
   const acknowledgementSessionIds = useMemo(
     () => agentErrorAcknowledgementSessionIds(allTasks, sessionsByTaskId),
     [allTasks, sessionsByTaskId],
@@ -210,7 +238,7 @@ function useSidebarData(workspaceId: string | null) {
     dismissedAgentErrors,
   });
   const pendingFlags = useAppStore(
-    useShallow((state) => buildPendingFlags(state.messages.bySession, primarySessionIds)),
+    useShallow((state) => buildPendingFlags(state.messages.bySession, pendingSessionIds)),
   );
 
   const tasksWithRepositories = useMemo(() => {

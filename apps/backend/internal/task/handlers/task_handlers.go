@@ -33,6 +33,7 @@ type handlerRepo interface {
 type TaskHandlers struct {
 	service                    *service.Service
 	orchestrator               OrchestratorStarter
+	foregroundActivity         dto.ForegroundActivityProvider
 	repo                       handlerRepo
 	planService                *service.PlanService
 	handoffSvc                 *service.HandoffService
@@ -91,13 +92,21 @@ type OrchestratorStarter interface {
 }
 
 func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
-	return &TaskHandlers{
+	h := &TaskHandlers{
 		service:      svc,
 		orchestrator: orchestrator,
 		repo:         repo,
 		planService:  planService,
 		logger:       log.WithFields(zap.String("component", "task-task-handlers")),
 	}
+	// The orchestrator also surfaces the in-memory fine-grained busy substate
+	// (ADR-0049). Derive the narrow provider from it so the
+	// session-fetch handlers can stamp foreground_activity onto RUNNING sessions
+	// without waiting for a WS flip. Nil (e.g. in tests) simply omits the field.
+	if fa, ok := orchestrator.(dto.ForegroundActivityProvider); ok {
+		h.foregroundActivity = fa
+	}
+	return h
 }
 
 func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {

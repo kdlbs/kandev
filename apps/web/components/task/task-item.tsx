@@ -20,8 +20,12 @@ import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { isDebugUI } from "@/lib/config";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
-import type { TaskState, TaskSessionState } from "@/lib/types/http";
-import { shouldUseQuestionTaskIcon, shouldUsePermissionTaskIcon } from "@/lib/ui/state-icons";
+import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
+import {
+  getSessionStateIcon,
+  shouldUseQuestionTaskIcon,
+  shouldUsePermissionTaskIcon,
+} from "@/lib/ui/state-icons";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
@@ -37,6 +41,13 @@ type TaskItemProps = {
   title: string;
   state?: TaskState;
   sessionState?: TaskSessionState;
+  /**
+   * Task-level most-active-wins busy aggregate (ADR-0049) carried on the task
+   * record. Drives the sidebar row's generating/background tiers so it agrees
+   * with the board card and open-task header instead of re-deriving from a
+   * single session's substate (§spec:task-level-truth).
+   */
+  foregroundActivity?: ForegroundActivity | null;
   isArchived?: boolean;
   isSelected?: boolean;
   /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
@@ -162,17 +173,27 @@ function taskItemRowClick(
 function TaskStateIcon({
   sessionState,
   state,
+  foregroundActivity,
   isInProgress,
   hasPendingClarification,
   hasPendingPermission,
 }: {
   sessionState?: TaskSessionState;
   state?: TaskState;
+  foregroundActivity?: ForegroundActivity | null;
   isInProgress: boolean;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
 }) {
-  if (shouldUseQuestionTaskIcon(state, hasPendingClarification)) {
+  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
+    return (
+      <IconShieldQuestion
+        data-testid="task-state-pending-permission"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-amber-500"
+      />
+    );
+  }
+  if (hasPendingClarification) {
     return (
       <IconMessageQuestion
         data-testid="task-state-waiting-for-input"
@@ -180,11 +201,27 @@ function TaskStateIcon({
       />
     );
   }
-  if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
+  if (foregroundActivity === "generating") {
     return (
-      <IconShieldQuestion
-        data-testid="task-state-pending-permission"
-        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-amber-500"
+      <IconCircleDashed
+        data-testid="task-state-running"
+        data-loading-phase="running"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500 animate-spin"
+      />
+    );
+  }
+  if (foregroundActivity === "background") {
+    return (
+      <span data-testid="task-state-background-running" className="mt-[1px] flex shrink-0">
+        {getSessionStateIcon("RUNNING", "h-3.5 w-3.5", "background")}
+      </span>
+    );
+  }
+  if (shouldUseQuestionTaskIcon(state)) {
+    return (
+      <IconMessageQuestion
+        data-testid="task-state-waiting-for-input"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-yellow-500"
       />
     );
   }
@@ -197,6 +234,8 @@ function TaskStateIcon({
       />
     );
   }
+  // When the aggregate is unknown, a live turn safely falls back to the
+  // established generating spinner rather than a done affordance.
   if (isInProgress) {
     return (
       <IconCircleDashed
@@ -399,6 +438,7 @@ export const TaskItem = memo(function TaskItem({
   title,
   state,
   sessionState,
+  foregroundActivity,
   isArchived,
   isSelected = false,
   isMultiSelected = false,
@@ -449,6 +489,7 @@ export const TaskItem = memo(function TaskItem({
       <TaskStateIcon
         sessionState={sessionState}
         state={state}
+        foregroundActivity={foregroundActivity}
         isInProgress={isInProgress}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}

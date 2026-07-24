@@ -469,6 +469,26 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateMessage: %v", err)
 	}
+	if err := harness.taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "boot-session-secondary", TaskID: task.ID, State: models.TaskSessionStateWaitingForInput,
+		StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession secondary: %v", err)
+	}
+	if err := harness.taskRepo.CreateTurn(ctx, &models.Turn{
+		ID: "boot-turn-secondary", TaskID: task.ID, TaskSessionID: "boot-session-secondary",
+		StartedAt: now, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTurn secondary: %v", err)
+	}
+	if err := harness.taskRepo.CreateMessage(ctx, &models.Message{
+		ID: "boot-permission", TaskID: task.ID, TaskSessionID: "boot-session-secondary",
+		TurnID: "boot-turn-secondary", AuthorType: models.MessageAuthorAgent,
+		Type: models.MessageTypePermissionRequest, Content: "Allow?",
+		Metadata: map[string]interface{}{"status": "pending"}, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateMessage secondary: %v", err)
+	}
 
 	state := bootInitialState(
 		ctx,
@@ -512,6 +532,7 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 					WorkflowStepID              string  `json:"workflowStepId"`
 					PrimarySessionState         *string `json:"primarySessionState"`
 					PrimarySessionPendingAction *string `json:"primarySessionPendingAction"`
+					TaskPendingAction           *string `json:"taskPendingAction"`
 				} `json:"tasks"`
 			} `json:"snapshots"`
 			IsLoading bool `json:"isLoading"`
@@ -527,6 +548,7 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 				WorkflowStepID              string  `json:"workflowStepId"`
 				PrimarySessionState         *string `json:"primarySessionState"`
 				PrimarySessionPendingAction *string `json:"primarySessionPendingAction"`
+				TaskPendingAction           *string `json:"taskPendingAction"`
 			} `json:"tasks"`
 			IsLoading bool `json:"isLoading"`
 		} `json:"kanban"`
@@ -554,6 +576,9 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 			snapshotTask.PrimarySessionPendingAction,
 		)
 	}
+	if snapshotTask.TaskPendingAction == nil || *snapshotTask.TaskPendingAction != "permission" {
+		t.Fatalf("snapshot taskPendingAction = %#v, want permission", snapshotTask.TaskPendingAction)
+	}
 	if decoded.Kanban.WorkflowID != workflows[0].ID {
 		t.Fatalf("active kanban workflow = %q, want %q", decoded.Kanban.WorkflowID, workflows[0].ID)
 	}
@@ -564,8 +589,28 @@ func TestBootInitialStateHomeIncludesKanbanFirstPaintState(t *testing.T) {
 			activeTask.PrimarySessionPendingAction,
 		)
 	}
+	if activeTask.TaskPendingAction == nil || *activeTask.TaskPendingAction != "permission" {
+		t.Fatalf("active taskPendingAction = %#v, want permission", activeTask.TaskPendingAction)
+	}
 	if decoded.KanbanMulti.IsLoading || decoded.Kanban.IsLoading {
 		t.Fatal("boot payload should mark kanban data loaded")
+	}
+}
+
+func TestBootTaskPendingActionExcludesStartingAndTerminalSessions(t *testing.T) {
+	sessions := []*models.TaskSession{
+		{ID: "starting", State: models.TaskSessionStateStarting},
+		{ID: "completed", State: models.TaskSessionStateCompleted},
+		{ID: "failed", State: models.TaskSessionStateFailed},
+	}
+	actions := map[string]models.TaskPendingAction{
+		"starting":  models.TaskPendingActionPermission,
+		"completed": models.TaskPendingActionPermission,
+		"failed":    models.TaskPendingActionClarification,
+	}
+
+	if got := bootTaskPendingActionPtr(sessions, actions); got != nil {
+		t.Fatalf("bootTaskPendingActionPtr() = %q, want nil for stale sessions", *got)
 	}
 }
 

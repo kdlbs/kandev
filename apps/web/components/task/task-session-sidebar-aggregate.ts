@@ -30,6 +30,14 @@ export type PendingActionFallback = {
   primarySessionPendingAction?: TaskPendingAction | null;
 };
 
+export function workflowStepTitle(
+  task: KanbanState["tasks"][number],
+  stepTitleById: Map<string, string>,
+): string | undefined {
+  if (!task.workflowStepId) return undefined;
+  return stepTitleById.get(task.workflowStepId as string);
+}
+
 function fallbackPendingFlags(fallback?: PendingActionFallback): {
   clarification: boolean;
   permission: boolean;
@@ -59,6 +67,32 @@ export function readPendingFlags(
     clarification: pendingFlags[clarKey] ?? false,
     permission: pendingFlags[permKey] ?? false,
   };
+}
+
+export function readTaskPendingFlags(
+  pendingFlags: Record<string, boolean>,
+  sessions: Array<{ id: string; state: string }>,
+  taskPendingAction?: TaskPendingAction | null,
+): { clarification: boolean; permission: boolean } {
+  let clarification = false;
+  let permission = false;
+  let hasUnloadedMessages = false;
+  for (const session of sessions) {
+    if (session.state !== "RUNNING" && session.state !== "WAITING_FOR_INPUT") continue;
+    const clarKey = pendingClarKey(session.id);
+    const permKey = pendingPermKey(session.id);
+    if (!(clarKey in pendingFlags) && !(permKey in pendingFlags)) {
+      hasUnloadedMessages = true;
+      continue;
+    }
+    clarification ||= pendingFlags[clarKey] ?? false;
+    permission ||= pendingFlags[permKey] ?? false;
+  }
+  if (sessions.length === 0 || hasUnloadedMessages) {
+    permission ||= taskPendingAction === "permission";
+    clarification ||= taskPendingAction === "clarification";
+  }
+  return { clarification, permission };
 }
 
 export type SidebarStepInfo = {

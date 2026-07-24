@@ -12,6 +12,7 @@
  */
 
 import { Badge } from "@kandev/ui/badge";
+import type { ForegroundActivity } from "@/lib/types/http";
 
 export type TaskHeaderProps = {
   identifier?: string | null;
@@ -25,7 +26,38 @@ export type TaskHeaderProps = {
   assigneeName?: string | null;
   /** Optional pill colour for the state badge. Falls back to outline. */
   stateBadgeVariant?: "default" | "secondary" | "outline" | "destructive";
+  /**
+   * Task-level MOST-ACTIVE-WINS activity aggregate (§spec:task-level-indicator).
+   * When set it takes precedence over the coarse workflow state in the badge, so a
+   * task still doing background work never reads as a done coarse state and stays
+   * distinct from a generating task.
+   */
+  foregroundActivity?: ForegroundActivity | null;
+  /**
+   * Message-derived "needs me" flags (§spec:waiting-for-input-parity). When set
+   * the badge reads the waiting variant distinctly ("Permission requested" /
+   * "Waiting for input") instead of the raw coarse state, matching the sidebar.
+   */
+  hasPendingClarification?: boolean;
+  hasPendingPermission?: boolean;
 };
+
+// Pending input is the most actionable state and sits above live activity, with
+// pending permission taking precedence over clarification. Without pending input,
+// the task-level activity aggregate sits above the coarse workflow state.
+function resolveBadgeLabel(
+  state: string | null | undefined,
+  foregroundActivity: ForegroundActivity | null | undefined,
+  hasPendingClarification: boolean,
+  hasPendingPermission: boolean,
+): string | null {
+  if (hasPendingPermission) return "Permission requested";
+  if (hasPendingClarification) return "Waiting for input";
+  if (foregroundActivity === "generating") return "Generating";
+  if (foregroundActivity === "background") return "Background running";
+  if (state === "WAITING_FOR_INPUT") return "Waiting for input";
+  return state ?? null;
+}
 
 export function TaskHeader({
   identifier,
@@ -33,16 +65,25 @@ export function TaskHeader({
   state,
   assigneeName,
   stateBadgeVariant = "outline",
+  foregroundActivity,
+  hasPendingClarification = false,
+  hasPendingPermission = false,
 }: TaskHeaderProps) {
+  const badgeLabel = resolveBadgeLabel(
+    state,
+    foregroundActivity,
+    hasPendingClarification,
+    hasPendingPermission,
+  );
   return (
     <div className="flex items-center gap-3 min-w-0">
       {identifier && (
         <span className="text-xs font-mono text-muted-foreground shrink-0">{identifier}</span>
       )}
       <span className="text-sm font-medium truncate flex-1">{title}</span>
-      {state && (
+      {badgeLabel && (
         <Badge variant={stateBadgeVariant} className="shrink-0">
-          {state}
+          {badgeLabel}
         </Badge>
       )}
       {assigneeName && (

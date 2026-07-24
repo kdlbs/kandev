@@ -136,6 +136,7 @@ describe("useSessionState", () => {
 
       expect(result.current.isStarting).toBe(true);
       expect(result.current.isWorking).toBe(true);
+      expect(result.current.isAgentBusy).toBe(true);
     });
 
     it("does not set isStarting when session state is CREATED", () => {
@@ -143,9 +144,10 @@ describe("useSessionState", () => {
 
       const { result } = renderHook(() => useSessionState("session-1"));
 
-      // CREATED is not isStarting — the input should be enabled so tests
-      // that create sessions and immediately fill() the input work correctly.
+      // CREATED stays directly promptable so its first chat can start the agent.
       expect(result.current.isStarting).toBe(false);
+      expect(result.current.isAgentBusy).toBe(false);
+      expect(result.current.inputMode).toBe("direct");
     });
 
     it("does not set isStarting when WAITING_FOR_INPUT", () => {
@@ -174,6 +176,7 @@ describe("useSessionState", () => {
 
       expect(result.current.isAgentBusy).toBe(true);
       expect(result.current.isWorking).toBe(true);
+      expect(result.current.inputMode).toBe("queue");
     });
 
     it("sets isFailed when session state is FAILED", () => {
@@ -183,5 +186,71 @@ describe("useSessionState", () => {
 
       expect(result.current.isFailed).toBe(true);
     });
+  });
+});
+
+describe("useSessionState — fine-grained busy signal (foreground_activity)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockActiveTaskId = null;
+    mockActiveSessionId = null;
+    mockSessionItems = {};
+    mockSession = null;
+    mockTask = null;
+    mockPrepareProgress = {};
+  });
+
+  // ADR-0049. (a) generating gates the composer;
+  // (b) background-idle accepts input but stays working; (c) fully idle.
+  it("(a) RUNNING+generating gates the composer", () => {
+    mockSession = {
+      ...createMockSession("session-1", "task-1", "RUNNING"),
+      foreground_activity: "generating",
+    };
+
+    const { result } = renderHook(() => useSessionState("session-1"));
+
+    // Gated (busy) AND working.
+    expect(result.current.isAgentBusy).toBe(true);
+    expect(result.current.isWorking).toBe(true);
+  });
+
+  it("(b) RUNNING+background accepts input while the working affordance stays up", () => {
+    mockSession = {
+      ...createMockSession("session-1", "task-1", "RUNNING"),
+      foreground_activity: "background",
+    };
+
+    const { result } = renderHook(() => useSessionState("session-1"));
+
+    // Composer enabled (not busy) — the message sends instead of queueing —
+    // yet still working, never "done".
+    expect(result.current.isAgentBusy).toBe(false);
+    expect(result.current.isWorking).toBe(true);
+    expect(result.current.inputMode).toBe("direct");
+  });
+
+  it("settled+background accepts input while detached work keeps the affordance active", () => {
+    mockSession = {
+      ...createMockSession("session-1", "task-1", "WAITING_FOR_INPUT"),
+      foreground_activity: "background",
+    };
+
+    const { result } = renderHook(() => useSessionState("session-1"));
+
+    expect(result.current.isWorking).toBe(true);
+    expect(result.current.isAgentBusy).toBe(false);
+  });
+
+  it("settled+generating is idle because generating only owns a live foreground turn", () => {
+    mockSession = {
+      ...createMockSession("session-1", "task-1", "WAITING_FOR_INPUT"),
+      foreground_activity: "generating",
+    };
+
+    const { result } = renderHook(() => useSessionState("session-1"));
+
+    expect(result.current.isWorking).toBe(false);
+    expect(result.current.isAgentBusy).toBe(false);
   });
 });

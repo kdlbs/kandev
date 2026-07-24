@@ -32,6 +32,21 @@ type OrchestratorService interface {
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) error
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 	StepRequiresCompletionSignal(ctx context.Context, taskID string) bool
+	// ForegroundActivity reports the fine-grained busy substate of a RUNNING
+	// session (ADR-0049): "background" when the foreground turn has yielded to
+	// spawned background work and can accept a new message.
+	//
+	// Deliberately a hard dependency here, unlike TaskHandlers — which reaches the
+	// same method through an optional type-assertion on OrchestratorStarter and
+	// simply omits the field when it isn't there. The asymmetry is the difference
+	// in blast radius, not an oversight: this is the admission gate, so an
+	// orchestrator that silently lacked the method would fall back to rejecting
+	// every RUNNING session and quietly un-ship the feature. Requiring it makes
+	// that a compile error. TaskHandlers only enriches a DTO with the substate; if
+	// it's absent the client just falls back to the safe "generating" default, so
+	// there a soft dependency costs nothing. Resist "fixing" the inconsistency by
+	// making this one optional.
+	ForegroundActivity(sessionID string) v1.ForegroundActivity
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -297,7 +312,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 		req.TaskSessionID = sessionResp.Session.ID
 	}
-	if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session.State); wsErr != nil {
+	if wsErr := h.errorForBlockedMessageSession(msg, sessionResp.Session.ID, sessionResp.Session.State); wsErr != nil {
 		return wsErr, nil
 	}
 	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
@@ -410,9 +425,16 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(primary)}, nil
 }
 
-func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, state models.TaskSessionState) *ws.Message {
+func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, sessionID string, state models.TaskSessionState) *ws.Message {
 	switch state {
 	case models.TaskSessionStateRunning:
+		// A RUNNING session whose foreground turn has yielded to spawned
+		// background work (ADR-0049) accepts a new message: it flows on to
+		// PromptTask, which owns the same foreground-idle gate and forwards it.
+		// Only a foreground-generating turn is blocked here.
+		if h.orchestrator != nil && h.orchestrator.ForegroundActivity(sessionID) == v1.ForegroundActivityBackground {
+			return nil
+		}
 		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
 		return wsErr
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:
@@ -452,7 +474,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 	}
 	sessionDTO := dto.FromTaskSession(session)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
-	if wsErr := h.errorForBlockedMessageSession(msg, sessionDTO.State); wsErr != nil {
+	if wsErr := h.errorForBlockedMessageSession(msg, sessionID, sessionDTO.State); wsErr != nil {
 		if sessionDTO.State == models.TaskSessionStateRunning {
 			h.logBlockedRunningSession(sessionID, sessionDTO.State)
 		}

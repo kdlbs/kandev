@@ -19,6 +19,8 @@ import Link from "@/components/routing/app-link";
 import { TaskPageContent } from "@/components/task/task-page-content";
 import { TaskBody, resolveTaskBodyMode } from "@/components/task/TaskBody";
 import { TaskHeader } from "@/components/task/TaskHeader";
+import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
+import { TaskStateActions } from "@/components/task/task-state-actions";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { isFromOffice } from "@/lib/types/http";
 import type { Repository, RepositoryScript, Task } from "@/lib/types/http";
@@ -76,11 +78,7 @@ export function KanbanTaskShell({
     <div className="flex h-full min-h-0 w-full flex-col overflow-y-auto bg-background p-6">
       {showOfficeLink && <CrossLinkRow taskId={taskId} target="office" />}
       <div className="mt-4 max-w-3xl">
-        <TaskHeader
-          identifier={task?.id?.slice(0, 8)}
-          title={task?.title ?? "Loading..."}
-          state={task?.state ?? null}
-        />
+        <SimpleTaskHeaderRow task={task} />
         <p className="mt-4 text-sm text-muted-foreground">
           {showOfficeLink
             ? "Simple view for kanban tasks shows the chat that's already in the panels. For the full Linear-style experience (comments, properties, activity timeline), open this task in the office view."
@@ -95,6 +93,51 @@ export function KanbanTaskShell({
   }
 
   return <TaskBody mode={mode} simpleSlot={simpleSlot} advancedSlot={advancedSlot} />;
+}
+
+// Open-task header row for the kanban simple view: a task-level status icon plus
+// the shared TaskHeader. Both reflect the MOST-ACTIVE-WINS activity aggregate so a
+// background-running task reads distinctly and never as done (§spec:task-level-indicator),
+// and carry the sidebar's rich "needs me" reading — pending clarification /
+// permission — so the header distinguishes waiting-for-input (§spec:waiting-for-input-parity).
+function simpleTaskHeaderData(task: Task | null) {
+  return {
+    primarySessionId: task?.primary_session_id,
+    pendingFallback: {
+      taskId: task?.id,
+      taskPendingAction: task?.task_pending_action,
+      primarySessionState: task?.primary_session_state,
+      primarySessionPendingAction: task?.primary_session_pending_action,
+    },
+    identifier: task?.id?.slice(0, 8),
+    title: task?.title ?? "Loading...",
+    state: task?.state ?? null,
+    foregroundActivity: task?.foreground_activity,
+  };
+}
+
+function SimpleTaskHeaderRow({ task }: { task: Task | null }) {
+  const data = simpleTaskHeaderData(task);
+  const pendingInput = useTaskPendingInput(data.primarySessionId, data.pendingFallback);
+  return (
+    <div className="flex items-center gap-2">
+      <TaskStateActions
+        state={data.state ?? undefined}
+        className="shrink-0"
+        foregroundActivity={data.foregroundActivity}
+        hasPendingClarification={pendingInput.clarification}
+        hasPendingPermission={pendingInput.permission}
+      />
+      <TaskHeader
+        identifier={data.identifier}
+        title={data.title}
+        state={data.state}
+        foregroundActivity={data.foregroundActivity}
+        hasPendingClarification={pendingInput.clarification}
+        hasPendingPermission={pendingInput.permission}
+      />
+    </div>
+  );
 }
 
 function CrossLinkRow({ taskId, target }: { taskId: string; target: "office" | "kanban" }) {
