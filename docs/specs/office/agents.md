@@ -189,8 +189,8 @@ launcher prefixes are customization rather than an isolation boundary.
 Decision:
 [ADR-2026-07-24-operator-owned-agent-launcher-settings](../../decisions/2026-07-24-operator-owned-agent-launcher-settings.md).
 
-An interim risk-reduction guard may require a per-boot SPA token on
-state-changing agent/settings requests and reject Office bearer tokens. Because
+The interim risk-reduction guard requires a per-boot SPA token on
+state-changing agent/settings requests and rejects Office bearer tokens. Because
 an intentional agent can fetch and replay the unauthenticated boot payload,
 this guard is a CSRF and accidental-mutation interlock only; it does not satisfy
 the operator-boundary scenarios below.

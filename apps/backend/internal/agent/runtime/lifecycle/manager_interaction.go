@@ -625,28 +625,9 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
-	m.logger.Info("restarting agent process for context reset",
-		zap.String("execution_id", executionID),
-		zap.String("task_id", execution.TaskID),
-		zap.String("session_id", execution.SessionID))
-
-	// Capture the active session mode before the restart so it can be re-applied to
-	// the fresh ACP session (issue #1183). Capture now, before the streams reconnect
-	// and the restarted agent reports its default mode (which would overwrite the cache).
-	prevMode := execution.GetModeState()
-
-	// Resolve agent config early — needed for both command rebuild and ACP session init
-	agentConfig, err := m.getAgentConfigForExecution(execution)
+	preparation, err := m.prepareAgentRestart(ctx, execution)
 	if err != nil {
-		return fmt.Errorf("failed to get agent config for restart: %w", err)
-	}
-
-	// Resolve the replacement command before touching the current process or
-	// execution state. A configured command prefix is launcher policy, so a
-	// malformed or unavailable replacement must leave the current agent intact.
-	cmds, err := m.buildFreshAgentCommand(ctx, execution, agentConfig)
-	if err != nil {
-		return fmt.Errorf("failed to rebuild agent command for restart: %w", err)
+		return err
 	}
 
 	// 1. Close WebSocket streams (updates + workspace). Use per-stream Close
@@ -666,31 +647,7 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 	}
 
 	// 3. Reset execution state after the replacement command has been validated.
-	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
-		exec.ACPSessionID = ""
-		exec.Status = v1.AgentStatusStarting
-		exec.ErrorMessage = ""
-		exec.needsResumeContext = false
-		exec.resumeContextInjected = false
-		exec.sessionInitialized = false
-		exec.AgentCommand = cmds.initial
-		exec.ContinueCommand = cmds.continue_
-		exec.AgentArgs = cmds.args
-		exec.ContinueArgs = cmds.continueArgs
-
-		exec.messageMu.Lock()
-		exec.messageBuffer.Reset()
-		exec.thinkingBuffer.Reset()
-		exec.currentMessageID = ""
-		exec.currentThinkingID = ""
-		exec.messageMu.Unlock()
-
-		// Drain any stale prompt completion signal
-		select {
-		case <-exec.promptDoneCh:
-		default:
-		}
-	})
+	m.resetAgentRestartState(executionID, preparation.commands)
 
 	// 4. Wait for agentctl to be ready (it should still be running)
 	if err := execution.agentctl.WaitForReady(ctx, 30*time.Second); err != nil {
@@ -712,18 +669,18 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 			zap.Error(err))
 	}
 
-	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
+	mcpServers, err := m.resolveMcpServers(ctx, execution, preparation.agentConfig)
 	if err != nil {
 		return fmt.Errorf("failed to resolve MCP config for restart: %w", err)
 	}
 
-	if err := m.initializeACPSessionForRestart(ctx, execution, agentConfig, mcpServers); err != nil {
+	if err := m.initializeACPSessionForRestart(ctx, execution, preparation.agentConfig, mcpServers); err != nil {
 		m.updateExecutionError(executionID, "failed to initialize ACP session after restart: "+err.Error())
 		return fmt.Errorf("failed to initialize ACP session after restart: %w", err)
 	}
 
 	// Restore the user's session permission mode onto the fresh ACP session.
-	m.reapplySessionModeAfterReset(ctx, execution, execution.ACPSessionID, prevMode)
+	m.reapplySessionModeAfterReset(ctx, execution, execution.ACPSessionID, preparation.previousMode)
 
 	m.logger.Info("agent process restarted with fresh context",
 		zap.String("execution_id", executionID),
@@ -732,6 +689,59 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentContextReset, execution)
 	return nil
+}
+
+type agentRestartPreparation struct {
+	agentConfig  agents.Agent
+	commands     agentCommands
+	previousMode *CachedModeState
+}
+
+// prepareAgentRestart builds and validates the replacement before touching the current process.
+func (m *Manager) prepareAgentRestart(ctx context.Context, execution *AgentExecution) (agentRestartPreparation, error) {
+	m.logger.Info("restarting agent process for context reset",
+		zap.String("execution_id", execution.ID),
+		zap.String("task_id", execution.TaskID),
+		zap.String("session_id", execution.SessionID))
+
+	agentConfig, err := m.getAgentConfigForExecution(execution)
+	if err != nil {
+		return agentRestartPreparation{}, fmt.Errorf("failed to get agent config for restart: %w", err)
+	}
+	commands, err := m.buildFreshAgentCommand(ctx, execution, agentConfig)
+	if err != nil {
+		return agentRestartPreparation{}, fmt.Errorf("failed to rebuild agent command for restart: %w", err)
+	}
+	return agentRestartPreparation{
+		agentConfig:  agentConfig,
+		commands:     commands,
+		previousMode: execution.GetModeState(),
+	}, nil
+}
+
+func (m *Manager) resetAgentRestartState(executionID string, commands agentCommands) {
+	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
+		exec.ACPSessionID = ""
+		exec.Status = v1.AgentStatusStarting
+		exec.ErrorMessage = ""
+		exec.needsResumeContext = false
+		exec.resumeContextInjected = false
+		exec.sessionInitialized = false
+		exec.AgentCommand = commands.initial
+		exec.ContinueCommand = commands.continue_
+		exec.AgentArgs = commands.args
+		exec.ContinueArgs = commands.continueArgs
+		exec.messageMu.Lock()
+		exec.messageBuffer.Reset()
+		exec.thinkingBuffer.Reset()
+		exec.currentMessageID = ""
+		exec.currentThinkingID = ""
+		exec.messageMu.Unlock()
+		select {
+		case <-exec.promptDoneCh:
+		default:
+		}
+	})
 }
 
 // initializeACPSessionForRestart connects streams and creates a new ACP session without

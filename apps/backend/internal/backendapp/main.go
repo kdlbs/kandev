@@ -788,14 +788,15 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER
 	// ============================================
-	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
+	server, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer)
-
-	port := cfg.Server.Port
-	if port == 0 {
-		port = ports.Backend
+	if err != nil {
+		log.Error("Failed to build HTTP server", zap.Error(err))
+		return false
 	}
+
+	port := resolvedHTTPPort(cfg)
 	hosts, err := cfg.Server.ResolvedBinds()
 	if err != nil {
 		log.Error("Invalid server bind configuration", zap.Error(err))
@@ -1644,6 +1645,15 @@ func buildOfficeDashboardService(
 }
 
 // buildHTTPServer creates the HTTP server with all routes registered.
+var newInterimSettingsInterlockToken = httpmw.NewInterimSettingsInterlockToken
+
+func resolvedHTTPPort(cfg *config.Config) int {
+	if cfg.Server.Port != 0 {
+		return cfg.Server.Port
+	}
+	return ports.Backend
+}
+
 func buildHTTPServer(
 	cfg *config.Config,
 	log *logger.Logger,
@@ -1662,21 +1672,16 @@ func buildHTTPServer(
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
-) *http.Server {
+) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(httpmw.RequestLogger(log, "kandev"))
 	router.Use(httpmw.OtelTracing("kandev"))
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
-
-	port := cfg.Server.Port
-	if port == 0 {
-		port = ports.Backend
-	}
-	interimSettingsInterlockToken, err := httpmw.NewInterimSettingsInterlockToken()
+	interimSettingsInterlockToken, err := newInterimSettingsInterlockToken()
 	if err != nil {
-		log.Error("generate interim settings interlock token", zap.Error(err))
+		return nil, fmt.Errorf("generate interim settings interlock token: %w", err)
 	}
 
 	registerRoutes(routeParams{
@@ -1712,7 +1717,7 @@ func buildHTTPServer(
 		version:                       Version,
 		webInternalURL:                cfg.Server.WebInternalURL,
 		devMode:                       cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
-		httpPort:                      port,
+		httpPort:                      resolvedHTTPPort(cfg),
 		features:                      cfg.Features,
 		voice:                         cfg.Voice,
 		interimSettingsInterlockToken: interimSettingsInterlockToken,
@@ -1727,7 +1732,7 @@ func buildHTTPServer(
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
-	}
+	}, nil
 }
 
 // awaitShutdown waits for an OS signal then performs graceful shutdown.

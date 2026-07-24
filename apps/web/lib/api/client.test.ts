@@ -44,17 +44,20 @@ describe("fetchJson", () => {
     });
 
     const headers = fetcher.mock.calls[0][1]?.headers;
+    const normalizedHeaders = new Headers(headers);
 
     expect({
       isHeaders: headers instanceof Headers,
-      contentTypes: [...new Headers(headers).entries()].filter(
+      contentType: normalizedHeaders.get("content-type"),
+      contentTypeCount: [...normalizedHeaders.entries()].filter(
         ([name]) => name.toLowerCase() === "content-type",
-      ),
-      callerHeader: new Headers(headers).get("X-Caller-Header"),
-      interlock: new Headers(headers).get("X-Kandev-Interim-Settings-Interlock"),
+      ).length,
+      callerHeader: normalizedHeaders.get("X-Caller-Header"),
+      interlock: normalizedHeaders.get("X-Kandev-Interim-Settings-Interlock"),
     }).toEqual({
       isHeaders: true,
-      contentTypes: [["Content-Type", "application/json"]],
+      contentType: "application/json",
+      contentTypeCount: 1,
       callerHeader: "preserved",
       interlock: interlockToken,
     });

@@ -94,7 +94,7 @@ test.describe("Mobile agent profile config selector", () => {
         timeout: 15_000,
       });
       const storedAfterClear = await apiClient.getAgentProfile(profile.id);
-      expect(storedAfterClear.commandPrefix ?? "").toBe("");
+      expect(storedAfterClear.commandPrefix).toBeUndefined();
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
     }
