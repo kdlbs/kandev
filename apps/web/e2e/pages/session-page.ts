@@ -266,6 +266,10 @@ export class SessionPage {
     await taskRow.click({ button: "right" });
   }
 
+  async openCreateSubtaskForSidebarTask(title: string): Promise<void> {
+    await this.openSidebarMenuAndClick(title, "Create Subtask");
+  }
+
   async sendSidebarTaskToWorkflow(
     title: string,
     workflowId: string,
