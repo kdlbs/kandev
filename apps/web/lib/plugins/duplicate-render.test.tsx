@@ -51,7 +51,11 @@ function makeImporter() {
           registry.registerComponent(SLOT, function CostIcon() {
             return jsx(
               "button",
-              { "data-testid": ICON_TESTID, "aria-label": "Session cost" },
+              {
+                "data-testid": ICON_TESTID,
+                "aria-label": "Session cost",
+                className: "cursor-pointer",
+              },
               "🪙",
             );
           });
