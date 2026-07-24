@@ -9,6 +9,8 @@ on:
       - ".github/scripts/lint-action-pinning_test.py"
       - ".github/scripts/collect-macos-desktop-diagnostics.sh"
       - ".github/scripts/release-workflow-contract_test.py"
+      - ".github/release-signing-key.asc"
+      - "docs/public/release-process.md"
   pull_request:
     branches: [main]
     paths:
@@ -17,6 +19,8 @@ on:
       - ".github/scripts/lint-action-pinning_test.py"
       - ".github/scripts/collect-macos-desktop-diagnostics.sh"
       - ".github/scripts/release-workflow-contract_test.py"
+      - ".github/release-signing-key.asc"
+      - "docs/public/release-process.md"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
