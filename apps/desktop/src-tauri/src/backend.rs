@@ -359,8 +359,7 @@ pub fn desktop_environment(
 ) -> BTreeMap<OsString, OsString> {
     let path = normalized_path(env.get(OsStr::new("PATH")), home_dir);
     env.retain(|key, _| {
-        !key
-            .to_string_lossy()
+        !key.to_string_lossy()
             .eq_ignore_ascii_case(DESKTOP_NATIVE_NOTIFICATIONS_ENV)
     });
     env.insert(
