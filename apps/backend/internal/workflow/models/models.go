@@ -23,7 +23,19 @@ const (
 	OnEnterClearDecisions             OnEnterActionType = "clear_decisions"
 	OnEnterQueueRunForEachParticipant OnEnterActionType = "queue_run_for_each_participant"
 	OnEnterQueueRun                   OnEnterActionType = "queue_run"
+
+	// OnEnterRunCodeReview starts a native code-review pass over the task's
+	// changed files when it enters the step, so a review can sit between an
+	// implement step and a human gate. The optional "agent_profile_id" config
+	// key selects which profile's agent and model does the reviewing, which is
+	// how a different model can review than implemented. A failed review does
+	// not block the transition.
+	OnEnterRunCodeReview OnEnterActionType = "run_code_review"
 )
+
+// ReviewAgentProfileConfigKey is the on_enter action config key naming the
+// agent profile that should perform a run_code_review pass.
+const ReviewAgentProfileConfigKey = "agent_profile_id"
 
 // OnTurnStartActionType represents the type of action to execute when a user sends a message.
 type OnTurnStartActionType string

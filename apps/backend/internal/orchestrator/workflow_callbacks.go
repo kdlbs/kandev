@@ -4,8 +4,19 @@ import (
 	"context"
 	"fmt"
 
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/review"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
+
+// ReviewRunner launches native code-review passes. Satisfied by
+// *review.Runner; declared here so the orchestrator does not depend on the
+// concrete type and tests can substitute a fake.
+type ReviewRunner interface {
+	Launch(ctx context.Context, req review.RunRequest) (*taskmodels.TaskReviewRun, error)
+}
 
 // buildWorkflowCallbacks creates the callback registry for the workflow engine.
 // Each callback wraps an existing orchestrator Service method, keeping side-effect
@@ -43,6 +54,9 @@ func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 	}
 	if svc.engineDecisions != nil {
 		r[engine.ActionClearDecisions] = engine.ClearDecisionsCallback{Decisions: svc.engineDecisions}
+	}
+	if svc.reviewRunner != nil {
+		r[engine.ActionRunCodeReview] = &runCodeReviewCallback{svc: svc}
 	}
 	if svc.engineTaskCreator != nil {
 		r[engine.ActionCreateChildTask] = engine.CreateChildTaskCallback{Creator: svc.engineTaskCreator}
@@ -186,6 +200,38 @@ func (c *autoStartAgentCallback) Execute(ctx context.Context, in engine.ActionIn
 	})
 	if err != nil {
 		return engine.ActionResult{}, fmt.Errorf("auto-start via LaunchSession failed: %w", err)
+	}
+	return engine.ActionResult{}, nil
+}
+
+// runCodeReviewCallback starts a native code-review pass over the task's changed
+// files when it enters the step.
+//
+// A review failure never blocks the transition: the run row records the reason
+// and the Review panel surfaces it, but a task must not get stuck in a step
+// because no reviewer was configured or the provider was down. That is why this
+// logs and returns nil instead of propagating the error.
+type runCodeReviewCallback struct {
+	svc *Service
+}
+
+func (c *runCodeReviewCallback) Execute(ctx context.Context, in engine.ActionInput) (engine.ActionResult, error) {
+	profileID := ""
+	if in.Action.RunCodeReview != nil {
+		profileID = in.Action.RunCodeReview.AgentProfileID
+	}
+	_, err := c.svc.reviewRunner.Launch(ctx, review.RunRequest{
+		TaskID:         in.State.TaskID,
+		SessionID:      in.State.SessionID,
+		AgentProfileID: profileID,
+		Trigger:        taskmodels.ReviewTriggerWorkflowStep,
+		WorkflowStepID: in.Step.ID,
+	})
+	if err != nil {
+		c.svc.logger.Warn("workflow step code review did not start",
+			zap.String("task_id", in.State.TaskID),
+			zap.String("workflow_step_id", in.Step.ID),
+			zap.Error(err))
 	}
 	return engine.ActionResult{}, nil
 }

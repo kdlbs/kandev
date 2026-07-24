@@ -297,6 +297,11 @@ type Service struct {
 	engineTaskCreator      engine.TaskCreator
 	engineWorkflowSwitcher engine.WorkflowSwitcher
 
+	// Native code review. When set, buildWorkflowCallbacks registers the
+	// run_code_review on_enter action. Nil-safe: without it the action kind
+	// simply has no callback and the engine treats it as a no-op.
+	reviewRunner ReviewRunner
+
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
 	// ciAutomationInFlight prevents PR feedback and task-PR update events from
@@ -848,6 +853,13 @@ func (s *Service) SetEngineParticipantStore(store engine.ParticipantStore) {
 func (s *Service) SetEngineDecisionStore(store engine.DecisionStore) {
 	s.engineDecisions = store
 	s.engineOptions = append(s.engineOptions, engine.WithDecisionStore(store))
+	s.reinitWorkflowEngine()
+}
+
+// SetReviewRunner wires the native code-review runner, enabling the
+// run_code_review workflow step action.
+func (s *Service) SetReviewRunner(runner ReviewRunner) {
+	s.reviewRunner = runner
 	s.reinitWorkflowEngine()
 }
 

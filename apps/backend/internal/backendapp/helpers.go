@@ -1242,6 +1242,29 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetHandoffService(handoffSvc)
 	}
 
+	// Native code review. The runner owns background review passes, so it is
+	// started here and drained on shutdown; the orchestrator gets it too, which
+	// is what enables the run_code_review workflow step action.
+	reviewParts := buildReviewComponents(p)
+	mcpHandlers.SetReviewService(reviewParts.service)
+	mcpHandlers.SetReviewRunner(reviewParts.runner)
+	p.orchestratorSvc.SetReviewRunner(reviewParts.runner)
+	reviewParts.runner.Start(context.Background())
+	if p.addCleanup != nil {
+		p.addCleanup(func() error {
+			reviewParts.runner.Stop()
+			return nil
+		})
+	}
+	// Any pass still marked running belongs to a previous process. Close them so
+	// the UI never shows a review that will never finish.
+	if cancelled, err := p.taskRepo.CancelInFlightTaskReviewRuns(context.Background()); err != nil {
+		p.log.Warn("failed to cancel interrupted review runs", zap.Error(err))
+	} else if cancelled > 0 {
+		p.log.Info("cancelled review runs interrupted by restart", zap.Int("count", cancelled))
+	}
+	p.log.Debug("Registered native code review (WebSocket + MCP)")
+
 	mcpHandlers.RegisterHandlers(p.gateway.Dispatcher)
 	p.log.Debug("Registered MCP handlers (WebSocket)")
 
