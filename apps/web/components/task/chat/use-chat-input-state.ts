@@ -37,7 +37,7 @@ import type {
   MessageAttachment,
 } from "./chat-input-container";
 import type { TipTapInputHandle } from "./tiptap-input";
-import type { ImagePasteIssue } from "./tiptap-helpers";
+import type { ImagePasteIssue } from "./clipboard-attachments";
 
 type UseChatInputStateProps = {
   sessionId: string | null;

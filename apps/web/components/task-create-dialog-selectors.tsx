@@ -15,6 +15,14 @@ import {
   MAX_TOTAL_SIZE,
   type FileAttachment,
 } from "@/components/task/chat/file-attachment";
+import {
+  useAttachmentFileFeedback,
+  useUnreadablePastedImageFeedback,
+} from "@/components/task/chat/use-attachment-file-feedback";
+import {
+  readClipboardAttachments,
+  type ImagePasteIssue,
+} from "@/components/task/chat/clipboard-attachments";
 import { ContextZone } from "@/components/task/chat/context-items/context-zone";
 import { MentionMenu } from "@/components/task/chat/mention-menu";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
@@ -319,34 +327,46 @@ type TaskFormInputsProps = {
 function useFileAttachments() {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const rejectOversizedFile = useAttachmentFileFeedback();
+  const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
 
-  const addFiles = useCallback(async (files: File[]) => {
-    const processed: FileAttachment[] = [];
-    for (const file of files) {
-      const attachment = await processFile(file);
-      if (attachment) processed.push(attachment);
-    }
-    if (processed.length === 0) return;
+  const addFiles = useCallback(
+    async (files: File[], issue?: ImagePasteIssue) => {
+      if (issue === "unreadable-image") {
+        warnUnreadablePastedImage();
+        return;
+      }
+      const processed: FileAttachment[] = [];
+      for (const file of files) {
+        if (rejectOversizedFile(file)) continue;
+        const attachment = await processFile(file);
+        if (attachment) processed.push(attachment);
+      }
+      if (processed.length === 0) return;
 
-    setAttachments((prev) => {
-      let nextCount = prev.length;
-      let nextTotalSize = prev.reduce((sum, att) => sum + att.size, 0);
-      const accepted: FileAttachment[] = [];
-      for (const att of processed) {
-        if (nextCount >= MAX_FILES) break;
-        if (nextTotalSize + att.size > MAX_TOTAL_SIZE) break;
-        accepted.push(att);
-        nextCount += 1;
-        nextTotalSize += att.size;
-      }
-      if (nextCount >= MAX_FILES && accepted.length < processed.length) {
-        console.warn(`Maximum ${MAX_FILES} files allowed`);
-      } else if (accepted.length < processed.length) {
-        console.warn(`Total attachment size limit exceeded (max: ${formatBytes(MAX_TOTAL_SIZE)})`);
-      }
-      return accepted.length > 0 ? [...prev, ...accepted] : prev;
-    });
-  }, []);
+      setAttachments((prev) => {
+        let nextCount = prev.length;
+        let nextTotalSize = prev.reduce((sum, att) => sum + att.size, 0);
+        const accepted: FileAttachment[] = [];
+        for (const att of processed) {
+          if (nextCount >= MAX_FILES) break;
+          if (nextTotalSize + att.size > MAX_TOTAL_SIZE) break;
+          accepted.push(att);
+          nextCount += 1;
+          nextTotalSize += att.size;
+        }
+        if (nextCount >= MAX_FILES && accepted.length < processed.length) {
+          console.warn(`Maximum ${MAX_FILES} files allowed`);
+        } else if (accepted.length < processed.length) {
+          console.warn(
+            `Total attachment size limit exceeded (max: ${formatBytes(MAX_TOTAL_SIZE)})`,
+          );
+        }
+        return accepted.length > 0 ? [...prev, ...accepted] : prev;
+      });
+    },
+    [rejectOversizedFile, warnUnreadablePastedImage],
+  );
 
   const handleRemoveAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((att) => att.id !== id));
@@ -357,24 +377,16 @@ function useFileAttachments() {
 
 function useAttachmentHandlers(
   disabled: boolean | undefined,
-  addFiles: (files: File[]) => Promise<void>,
+  addFiles: (files: File[], issue?: ImagePasteIssue) => Promise<void>,
   setIsDragging: (v: boolean) => void,
 ) {
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (disabled) return;
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      const files: File[] = [];
-      for (const item of items) {
-        if (item.kind === "file") {
-          const file = item.getAsFile();
-          if (file) files.push(file);
-        }
-      }
-      if (files.length > 0) {
+      const { files, issue } = readClipboardAttachments(e.clipboardData);
+      if (files.length > 0 || issue) {
         e.preventDefault();
-        void addFiles(files);
+        void addFiles(files, issue);
       }
     },
     [disabled, addFiles],

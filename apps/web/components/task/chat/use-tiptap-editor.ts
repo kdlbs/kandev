@@ -23,8 +23,8 @@ import {
   getMarkdownText,
   textToHtml,
   handleEditorPaste,
-  type ImagePasteIssue,
 } from "./tiptap-helpers";
+import type { ImagePasteIssue } from "./clipboard-attachments";
 import { CodeBlockView } from "./tiptap-code-block-view";
 import { DynamicPlaceholder, updateDynamicPlaceholder } from "./tiptap-dynamic-placeholder";
 import { EntityReferenceNode } from "./tiptap-entity-reference-extension";

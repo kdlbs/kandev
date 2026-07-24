@@ -3,6 +3,7 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import { isEntityReference } from "@/lib/entity-references/message-references";
 import { formatSlashCommandLabel, normalizeSlashCommandName } from "./tiptap-slash-command-utils";
 import type { SlashCommand } from "./slash-command-types";
+import { readClipboardAttachments, type ImagePasteIssue } from "./clipboard-attachments";
 
 // ── JSON node types ─────────────────────────────────────────────────
 
@@ -287,38 +288,6 @@ export function parseCodeFences(text: string): FenceSegment[] {
 
 // ── Paste handler ───────────────────────────────────────────────────
 
-export type ImagePasteIssue = "unreadable-image";
-
-function extractFiles(clipboardData: DataTransfer): File[] {
-  const listedFiles = Array.from(clipboardData.files);
-  if (listedFiles.length > 0) return listedFiles;
-
-  const files: File[] = [];
-  for (const item of clipboardData.items) {
-    if (item.kind === "file") {
-      const file = item.getAsFile();
-      if (file) files.push(file);
-    }
-  }
-  return files;
-}
-
-function hasUnreadableImage(clipboardData: DataTransfer): boolean {
-  const hasImageItem = Array.from(clipboardData.items).some((item) =>
-    item.type.startsWith("image/"),
-  );
-  if (hasImageItem) return true;
-
-  const html = clipboardData.getData("text/html");
-  if (!html) return false;
-  const parsed = new DOMParser().parseFromString(html, "text/html");
-  if (!parsed.body.querySelector("img")) return false;
-  parsed.body
-    .querySelectorAll("img, script, style, template, noscript")
-    .forEach((element) => element.remove());
-  return !parsed.body.textContent?.trim();
-}
-
 function segmentToNodes(
   seg: FenceSegment,
   schema: import("@tiptap/pm/model").Schema,
@@ -358,15 +327,15 @@ export function handleEditorPaste(
   // 1. File paste (images and other files)
   const clipboardData = event.clipboardData;
   if (clipboardData) {
-    const files = extractFiles(clipboardData);
+    const { files, issue } = readClipboardAttachments(clipboardData);
     if (files.length > 0) {
       event.preventDefault();
       onImagePasteRef.current?.(files);
       return true;
     }
-    if (hasUnreadableImage(clipboardData)) {
+    if (issue) {
       event.preventDefault();
-      onImagePasteRef.current?.([], "unreadable-image");
+      onImagePasteRef.current?.([], issue);
       return true;
     }
   }

@@ -10,7 +10,7 @@ import { ChatInputToolbar } from "./chat-input-toolbar";
 import { ContextZone } from "./context-items/context-zone";
 import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
-import type { ImagePasteIssue } from "./tiptap-helpers";
+import type { ImagePasteIssue } from "./clipboard-attachments";
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
