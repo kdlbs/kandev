@@ -7,7 +7,6 @@ import {
   IconFileText,
   IconFlask,
   IconInfoCircle,
-  IconLock,
   IconRefresh,
   IconScale,
   IconServerCog,
@@ -36,7 +35,6 @@ const BASE_ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
 
 const AUTH_ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
   { href: `${ROOT_HREF}/users`, label: "Users", icon: IconUsers },
-  { href: `${ROOT_HREF}/authentication`, label: "Authentication", icon: IconLock },
 ];
 
 type SystemGroupProps = {

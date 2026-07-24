@@ -28,7 +28,6 @@ describe("auth slice", () => {
     store.getState().setAuthState({
       mode: "enabled",
       authenticated: true,
-      env_required: false,
       user: {
         id: "user-1",
         email: "a@b.com",

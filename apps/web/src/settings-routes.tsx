@@ -47,7 +47,6 @@ import { SettingsLayoutClient } from "@/components/settings/settings-layout-clie
 import { SpritesSettings } from "@/components/settings/sprites-settings";
 import { AboutCard } from "@/components/settings/system/about-card";
 import { ApiTokens } from "@/components/settings/account/api-tokens";
-import { AuthenticationSettings } from "@/components/settings/system/authentication-settings";
 import { SecuritySettings } from "@/components/settings/account/security-settings";
 import { UsersTable } from "@/components/settings/system/users-table";
 import { BackupsTable } from "@/components/settings/system/backups-table";
@@ -169,14 +168,6 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       description="Manage accounts, roles, and invite links for this instance."
     >
       <UsersTable />
-    </SystemPageShell>
-  ),
-  "/settings/system/authentication": () => (
-    <SystemPageShell
-      title="Authentication"
-      description="Turn sign-in on or off for this Kandev instance."
-    >
-      <AuthenticationSettings />
     </SystemPageShell>
   ),
   "/settings/account/security": () => (

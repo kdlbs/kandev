@@ -19,8 +19,6 @@ import {
   createInvite,
   previewInvite,
   acceptInvite,
-  fetchAuthSettings,
-  updateAuthSettings,
   listUsers,
   createUser,
   updateUser,
@@ -73,9 +71,7 @@ function bodyJson(): unknown {
 
 describe("fetchAuthState", () => {
   it("GETs /me and returns the StatePayload shape", async () => {
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ mode: "enabled", authenticated: false, env_required: false }),
-    );
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ mode: "enabled", authenticated: false }));
     const state = await fetchAuthState();
     expect(lastCall().url).toBe(`${BASE}/me`);
     expect(method()).toBe("GET");
@@ -223,24 +219,6 @@ describe("invites", () => {
     });
     expect(lastCall().url).toBe(`${BASE}/invites/accept`);
     expect(accepted.user.email).toBe(INVITEE_EMAIL);
-  });
-});
-
-describe("auth settings", () => {
-  it("reads and updates the enable/disable toggle", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ mode: "enabled", env_required: false }));
-    const settings = await fetchAuthSettings();
-    expect(lastCall().url).toBe(`${BASE}/settings`);
-    expect(settings.mode).toBe("enabled");
-
-    fetchSpy.mockResolvedValueOnce(
-      jsonResponse({ mode: "disabled", env_required: false, setup_required: false }),
-    );
-    const updated = await updateAuthSettings(false);
-    expect(lastCall().url).toBe(`${BASE}/settings`);
-    expect(method()).toBe("PATCH");
-    expect(bodyJson()).toEqual({ enabled: false });
-    expect(updated.mode).toBe("disabled");
   });
 });
 

@@ -13,7 +13,6 @@ const AUTH_BASE = "/api/v1/auth";
 export type AuthState = {
   mode: AuthMode;
   authenticated: boolean;
-  env_required: boolean;
   user?: AuthUser;
 };
 
@@ -162,21 +161,6 @@ export function acceptInvite(
   options?: ApiRequestOptions,
 ): Promise<{ user: AuthUser }> {
   return post("/invites/accept", body, options);
-}
-
-// --- auth settings (admin) ---
-
-export function fetchAuthSettings(
-  options?: ApiRequestOptions,
-): Promise<{ mode: AuthMode; env_required: boolean }> {
-  return fetchJson<{ mode: AuthMode; env_required: boolean }>(`${AUTH_BASE}/settings`, options);
-}
-
-export function updateAuthSettings(
-  enabled: boolean,
-  options?: ApiRequestOptions,
-): Promise<{ mode: AuthMode; env_required: boolean; setup_required: boolean }> {
-  return patch("/settings", { enabled }, options);
 }
 
 // --- admin user management ---

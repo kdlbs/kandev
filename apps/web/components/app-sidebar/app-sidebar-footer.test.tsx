@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   routerPush: vi.fn(),
   toggleSettingsMode: vi.fn(),
+  logout: vi.fn().mockResolvedValue(undefined),
 }));
 
 const state = {
@@ -17,10 +18,15 @@ const state = {
     ],
   },
   appSidebar: { settingsMode: false },
+  auth: {
+    mode: "disabled" as string,
+    user: null as { display_name: string; email: string } | null,
+  },
 };
 
 let officeEnabled = false;
-let pathname = "/tasks/session-1";
+const DEFAULT_PATHNAME = "/tasks/session-1";
+let pathname = DEFAULT_PATHNAME;
 
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.routerPush }),
@@ -60,6 +66,32 @@ vi.mock("@/components/theme-toggle", () => ({
   ThemeToggle: () => <button type="button">Theme</button>,
 }));
 
+vi.mock("@/lib/api/domains/auth-api", () => ({
+  logout: mocks.logout,
+}));
+
+// Radix dropdown primitives rely on pointer/portal behaviour that jsdom
+// doesn't model well; render them as plain elements so clicks reach the
+// current-user chip's own logic (see app-sidebar-workspace-picker.test.tsx).
+vi.mock("@kandev/ui/dropdown-menu", () => ({
+  DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    "data-testid": testId,
+  }: {
+    children: React.ReactNode;
+    onClick?: () => void;
+    "data-testid"?: string;
+  }) => (
+    <button type="button" data-testid={testId} onClick={() => onClick?.()}>
+      {children}
+    </button>
+  ),
+}));
+
 import { AppSidebarFooter } from "./app-sidebar-footer";
 
 function renderFooter() {
@@ -73,7 +105,7 @@ function renderFooter() {
 describe("AppSidebarFooter", () => {
   beforeEach(() => {
     officeEnabled = false;
-    pathname = "/tasks/session-1";
+    pathname = DEFAULT_PATHNAME;
     state.workspaces.activeId = "kanban-1";
     state.workspaces.items = [
       { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
@@ -81,6 +113,7 @@ describe("AppSidebarFooter", () => {
       { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
     ];
     state.appSidebar.settingsMode = false;
+    state.auth = { mode: "disabled", user: null };
     window.localStorage.clear();
     document.cookie = "office-active-workspace=; path=/; max-age=0";
     mocks.routerPush.mockClear();
@@ -166,7 +199,7 @@ describe("AppSidebarFooter", () => {
     expect(mocks.routerPush).toHaveBeenCalledWith("/?workspaceId=kanban-1");
   });
   it("navigates to /settings when the gear opens settings mode from a non-settings route", () => {
-    pathname = "/tasks/session-1";
+    pathname = DEFAULT_PATHNAME;
     state.appSidebar.settingsMode = false;
 
     renderFooter();
@@ -196,5 +229,49 @@ describe("AppSidebarFooter", () => {
 
     expect(mocks.routerPush).not.toHaveBeenCalled();
     expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
+  });
+});
+
+describe("AppSidebarFooter current-user chip", () => {
+  beforeEach(() => {
+    officeEnabled = false;
+    pathname = DEFAULT_PATHNAME;
+    state.appSidebar.settingsMode = false;
+    state.auth = { mode: "disabled", user: null };
+    mocks.logout.mockClear();
+  });
+
+  afterEach(() => cleanup());
+
+  it("does not render the current-user chip in disabled auth mode", () => {
+    state.auth = { mode: "disabled", user: null };
+
+    renderFooter();
+
+    expect(screen.queryByTestId("current-user-chip")).toBeNull();
+  });
+
+  it("does not render the current-user chip when enabled mode has no user yet", () => {
+    state.auth = { mode: "enabled", user: null };
+
+    renderFooter();
+
+    expect(screen.queryByTestId("current-user-chip")).toBeNull();
+  });
+
+  it("renders the current-user chip and logs out when enabled with a user", () => {
+    state.auth = {
+      mode: "enabled",
+      user: { display_name: "Jane Doe", email: "jane@example.com" },
+    };
+
+    renderFooter();
+
+    const chip = screen.getByTestId("current-user-chip");
+    expect(chip.textContent).toContain("Jane Doe");
+
+    fireEvent.click(screen.getByTestId("current-user-logout"));
+
+    expect(mocks.logout).toHaveBeenCalledOnce();
   });
 });
