@@ -206,9 +206,13 @@ function MessageMetaInfo({
         </span>
       )}
       {showTimestamp && (
-        <span className="text-[10px] text-muted-foreground/60 font-mono">
+        <time
+          dateTime={createdAt}
+          title={new Date(createdAt).toLocaleString()}
+          className="text-[10px] text-muted-foreground/60 font-mono"
+        >
           {formatRelativeTime(createdAt)}
-        </span>
+        </time>
       )}
     </>
   );
