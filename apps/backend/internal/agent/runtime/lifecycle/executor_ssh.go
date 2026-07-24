@@ -37,12 +37,14 @@ const (
 // when many short-lived channels race the long-lived stream channels), and
 // the local port forwarder.
 type sshSessionState struct {
-	target    *SSHTarget
-	client    *ssh.Client
-	forwarder *SSHPortForwarder
-	pid       int
-	remoteDir string
-	authToken string
+	target         *SSHTarget
+	client         *ssh.Client
+	forwarder      *SSHPortForwarder
+	agentctlClient *agentctl.Client
+	pid            int
+	remoteDir      string
+	authToken      string
+	reusingProcess bool
 }
 
 // SSHExecutor implements ExecutorBackend for SSH-reachable Linux and macOS hosts.
@@ -390,14 +392,18 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 	port, _ := strconv.Atoi(getMetadataString(req.Metadata, MetadataKeySSHRemoteAgentctlPort))
 	taskDir := getMetadataString(req.Metadata, MetadataKeySSHRemoteTaskDir)
 	workdir := r.workdirRoot(req.Metadata)
+	client := state.agentctlClient
+	if client == nil {
+		client = agentctl.NewClient(sshAgentctlLoopbackHost, state.forwarder.LocalPort(), r.logger,
+			agentctl.WithExecutionID(resumedSSHAgentctlInstanceID(req)),
+			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(state.authToken))
+	}
 	return &ExecutorInstance{
-		InstanceID:  req.InstanceID,
-		TaskID:      req.TaskID,
-		SessionID:   req.SessionID,
-		RuntimeName: r.Name(),
-		Client: agentctl.NewClient(sshAgentctlLoopbackHost, state.forwarder.LocalPort(), r.logger,
-			agentctl.WithExecutionID(req.InstanceID),
-			agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(state.authToken)),
+		InstanceID:    req.InstanceID,
+		TaskID:        req.TaskID,
+		SessionID:     req.SessionID,
+		RuntimeName:   r.Name(),
+		Client:        client,
 		WorkspacePath: taskDir,
 		AuthToken:     state.authToken,
 		Metadata: map[string]interface{}{
@@ -412,6 +418,7 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 			MetadataKeySSHLocalForwardPort:   strconv.Itoa(state.forwarder.LocalPort()),
 			MetadataKeySSHWorkdirRoot:        workdir,
 			MetadataKeyIsRemote:              true,
+			"reuse_existing_process":         state.reusingProcess,
 		},
 	}
 }
@@ -520,15 +527,20 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 		_ = client.Close()
 		return fmt.Errorf("ssh resume: agentctl health: %w", err)
 	}
+	instanceClient, reusingProcess := r.newResumedAgentctlClient(
+		ctx, fwd.LocalPort(), req,
+	)
 
 	r.mu.Lock()
 	r.sessions[req.InstanceID] = &sshSessionState{
-		target:    target,
-		client:    client,
-		forwarder: fwd,
-		pid:       pid,
-		remoteDir: sessionDir,
-		authToken: req.AuthToken,
+		target:         target,
+		client:         client,
+		forwarder:      fwd,
+		agentctlClient: instanceClient,
+		pid:            pid,
+		remoteDir:      sessionDir,
+		authToken:      req.AuthToken,
+		reusingProcess: reusingProcess,
 	}
 	r.mu.Unlock()
 
@@ -540,6 +552,30 @@ func (r *SSHExecutor) ResumeRemoteInstance(ctx context.Context, req *ExecutorCre
 	}
 	req.Metadata[MetadataKeySSHLocalForwardPort] = strconv.Itoa(fwd.LocalPort())
 	return nil
+}
+
+func (r *SSHExecutor) newResumedAgentctlClient(
+	ctx context.Context,
+	localPort int,
+	req *ExecutorCreateRequest,
+) (*agentctl.Client, bool) {
+	client := agentctl.NewClient(sshAgentctlLoopbackHost, localPort, r.logger,
+		agentctl.WithExecutionID(resumedSSHAgentctlInstanceID(req)),
+		agentctl.WithSessionID(req.SessionID), agentctl.WithAuthToken(req.AuthToken))
+	status, err := client.GetStatus(ctx)
+	if err != nil {
+		r.logger.Debug("ssh resume could not get agent status; starting a new process",
+			zap.String("instance_id", req.InstanceID), zap.Error(err))
+		return client, false
+	}
+	return client, status != nil && status.IsAgentRunning()
+}
+
+func resumedSSHAgentctlInstanceID(req *ExecutorCreateRequest) string {
+	if req.PreviousExecutionID != "" {
+		return req.PreviousExecutionID
+	}
+	return req.InstanceID
 }
 
 func requireSSHAgentctlAuthToken(token string) error {
