@@ -249,6 +249,7 @@ export type AppState = {
   quickChat: (typeof defaultUIState)["quickChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   taskDeletedNotification: (typeof defaultUIState)["taskDeletedNotification"];
+  updateAvailableNotification: (typeof defaultUIState)["updateAvailableNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
@@ -300,7 +301,7 @@ export type AppState = {
   resetLinearIssueWatches: () => void;
 
   // Actions from all slices
-  hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
+  hydrate: (state: HydrationState, options?: HydrationOptions) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState["items"]) => void;
   setActiveWorkflow: (workflowId: string | null) => void;
@@ -408,6 +409,7 @@ export type AppState = {
   setQuickChatInitialPrompt: UIA["setQuickChatInitialPrompt"];
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
+  setUpdateAvailableNotification: (n: UISliceTypes.UpdateAvailableNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;
@@ -620,7 +622,17 @@ export type AppState = {
   AutomationsSliceActions &
   PluginsSliceActions;
 
-export function createAppStore(initialState?: Partial<AppState>) {
+// Most callers hydrate a fully-shaped slice per top-level key (see
+// mergeInitialState / hydrateState), but `system` is a grab-bag of many
+// independently-fetched fields (info, diskUsage, updates, ...). Callers that
+// only have one piece of it (e.g. update notification settings from the
+// settings boot payload) must be able to pass a partial `system` object
+// without fabricating placeholder values for the rest.
+export type HydrationState = Omit<Partial<AppState>, "system"> & {
+  system?: Partial<AppState["system"]>;
+};
+
+export function createAppStore(initialState?: HydrationState) {
   const merged = mergeInitialState(initialState);
 
   return createStore<AppState>()(
@@ -670,5 +682,5 @@ export function createAppStore(initialState?: Partial<AppState>) {
 
 export type StoreProviderProps = {
   children: React.ReactNode;
-  initialState?: Partial<AppState>;
+  initialState?: HydrationState;
 };

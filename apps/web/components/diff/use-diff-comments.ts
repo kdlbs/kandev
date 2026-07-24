@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { toast } from "sonner";
 import type { SelectedLineRange } from "@pierre/diffs";
 import { useCommentsStore } from "@/lib/state/slices/comments";
 import { useDiffFileComments } from "@/hooks/domains/comments/use-diff-comments";
@@ -92,10 +91,6 @@ export function useDiffComments({
       };
 
       storeAddComment(comment);
-      toast.success("Comment added", {
-        description: "Your comment will be sent with your next message.",
-        duration: 2000,
-      });
       return comment;
     },
     [sessionId, filePath, diff, newContent, oldContent, storeAddComment],

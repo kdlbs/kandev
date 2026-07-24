@@ -239,6 +239,8 @@ Never delete a managed task directory merely because its database row looks term
 
 The backend contacts the public GitHub Releases API once at startup and every six hours, with a 30-second HTTP timeout, and persists the last successful result. **Check now** performs a synchronous request and permits one manual check per process every 30 seconds. Offline or rate-limited installations continue to show cached state.
 
+**Settings > System > Updates > Update notifications** controls whether a newly detected release triggers a notification, and on which channel: **Desktop notification** (native OS notification, or a browser notification when not running the desktop app), **In-app banner**, or **Both**. Defaults to enabled on both channels; disabling stops delivery without losing the underlying update check. Each release only notifies once per install.
+
 Before any update, finish or stop active sessions, create and export a database backup plus its master key, preserve unpushed Git work, and read release notes.
 
 - Desktop: use **Settings > System > Updates** when signed updater assets are available; otherwise install the new desktop package.

@@ -346,3 +346,31 @@ describe("hydrateState — sidebar views from user settings", () => {
     });
   });
 });
+
+describe("hydrateState — system slice", () => {
+  it("leaf-merges update notification settings without clobbering other system fields", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.system.info = { version: "v1.0.0" } as unknown as AppState["system"]["info"];
+
+      hydrateState(draft, {
+        system: {
+          updateNotificationSettings: { enabled: false, channel: "desktop" },
+        },
+      });
+    });
+
+    expect(result.system.updateNotificationSettings).toEqual({
+      enabled: false,
+      channel: "desktop",
+    });
+    expect(result.system.info).toEqual({ version: "v1.0.0" });
+  });
+
+  it("leaves the system slice untouched when the caller supplies no system fields", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {});
+    });
+
+    expect(result.system).toEqual(defaultState.system);
+  });
+});

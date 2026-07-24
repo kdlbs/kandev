@@ -4,6 +4,7 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
+import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 
 // ---------------------------------------------------------------------------
 // Quick Chat queue tests
@@ -199,6 +200,21 @@ async function seedTaskAndWaitForIdle(
 
 test.describe("Task session queue", () => {
   test.describe.configure({ retries: 1 });
+
+  test("full queue scrolls internally without hiding the composer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedFullQueueTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Desktop full queue scrolling",
+    );
+
+    await expectFullQueueScrolls(session);
+  });
 
   test("queue message via submit button on task session page", async ({
     testPage,

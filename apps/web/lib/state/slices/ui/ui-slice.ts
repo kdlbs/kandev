@@ -84,6 +84,7 @@ export const defaultUIState: UISliceState = {
   quickChat: { isOpen: false, sessions: [], activeSessionId: null },
   sessionFailureNotification: null,
   taskDeletedNotification: null,
+  updateAvailableNotification: null,
   bottomTerminal: { isOpen: false, pendingCommand: null },
   sidebarViews: createDefaultSidebarState(),
   collapsedSubtaskParents: [],
@@ -255,6 +256,10 @@ function buildNotificationActions(set: ImmerSet) {
     setTaskDeletedNotification: (n: UISlice["taskDeletedNotification"]) =>
       set((draft) => {
         draft.taskDeletedNotification = n;
+      }),
+    setUpdateAvailableNotification: (n: UISlice["updateAvailableNotification"]) =>
+      set((draft) => {
+        draft.updateAvailableNotification = n;
       }),
   };
 }

@@ -302,7 +302,8 @@ function QueuePanel({
       aria-label="Queued messages"
       data-testid="queued-ghost-list"
       className={cn(
-        "flex-shrink-0 px-3 pt-1.5 pb-1 border-t border-border/40",
+        "flex max-h-[min(40dvh,32rem)] flex-shrink-0 flex-col px-3 pt-1.5 pb-1",
+        "border-t border-border/40",
         "animate-in slide-in-from-bottom-2 fade-in-0 duration-200",
       )}
     >
@@ -316,7 +317,10 @@ function QueuePanel({
         onDrain={onDrain}
         onClose={onClose}
       />
-      <div className="space-y-1.5">
+      <div
+        data-testid="queue-scroll-region"
+        className="min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-1"
+      >
         {entries.map((entry, index) => (
           <QueuedGhostMessage
             key={entry.id}
@@ -355,7 +359,7 @@ function QueuePanelHeader({
 }: QueuePanelHeaderProps) {
   const capacityText = max > 0 ? `${count} of ${max}` : `${count}`;
   return (
-    <div className="flex items-center justify-between gap-3 py-1">
+    <div className="flex shrink-0 items-center justify-between gap-3 py-1">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <IconLayoutList className="h-3.5 w-3.5" />
         <span className="uppercase tracking-wide">Queued</span>

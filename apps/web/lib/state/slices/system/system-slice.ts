@@ -9,6 +9,7 @@ export const defaultSystemState: SystemSliceState = {
     backups: { items: [], loaded: false },
     logs: { files: [], tail: [], tailLoaded: false },
     updates: null,
+    updateNotificationSettings: null,
     jobs: {},
     metrics: null,
     storage: { overview: null, runs: [], quarantine: [] },
@@ -54,6 +55,10 @@ export const createSystemSlice: StateCreator<
   setSystemUpdates: (updates) =>
     set((draft) => {
       draft.system.updates = updates;
+    }),
+  setSystemUpdateNotificationSettings: (settings) =>
+    set((draft) => {
+      draft.system.updateNotificationSettings = settings;
     }),
   upsertSystemJob: (job) =>
     set((draft) => {

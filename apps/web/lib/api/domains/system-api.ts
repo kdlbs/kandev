@@ -8,6 +8,7 @@ import type {
   LogFileInfo,
   LogTailResponse,
   UpdatesResponse,
+  UpdateNotificationSettings,
   JobAcceptResponse,
   RestartCapability,
   RestartResponse,
@@ -174,6 +175,25 @@ export function applyUpdate(
     ...options,
     // Spread caller init first so the required method/body can't be overridden.
     init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ confirm }) },
+  });
+}
+
+export function fetchUpdateNotificationSettings(
+  options?: ApiRequestOptions,
+): Promise<UpdateNotificationSettings> {
+  return fetchJson<UpdateNotificationSettings>(`${SYSTEM_BASE}/updates/notification-settings`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function saveUpdateNotificationSettings(
+  settings: UpdateNotificationSettings,
+  options?: ApiRequestOptions,
+): Promise<UpdateNotificationSettings> {
+  return fetchJson<UpdateNotificationSettings>(`${SYSTEM_BASE}/updates/notification-settings`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "PUT", body: JSON.stringify(settings) },
   });
 }
 

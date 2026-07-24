@@ -104,6 +104,11 @@ export type TaskDeletedNotification = {
   reason?: string;
 };
 
+export type UpdateAvailableNotification = {
+  version: string;
+  url?: string;
+};
+
 export type BottomTerminalState = {
   isOpen: boolean;
   pendingCommand: string | null;
@@ -154,6 +159,8 @@ export type UISliceState = {
   sessionFailureNotification: SessionFailureNotification | null;
   /** Set when the focused task is deleted live, so a toast can explain why. */
   taskDeletedNotification: TaskDeletedNotification | null;
+  /** Set when the background updates poller reports a newly detected release. */
+  updateAvailableNotification: UpdateAvailableNotification | null;
   bottomTerminal: BottomTerminalState;
   sidebarViews: SidebarSliceState;
   /** Parent task IDs whose subtasks are collapsed in the sidebar. Tab-scoped (sessionStorage). */
@@ -219,6 +226,7 @@ export type UISliceActions = {
   setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;
+  setUpdateAvailableNotification: (n: UpdateAvailableNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;

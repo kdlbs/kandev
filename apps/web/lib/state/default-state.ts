@@ -17,6 +17,7 @@ import {
   defaultSystemState,
 } from "./slices";
 import { getStoredQuickChatNames } from "@/lib/local-storage";
+import type { HydrationState } from "./store";
 import { migrateView } from "./slices/ui/ui-slice";
 
 export const defaultState = {
@@ -117,7 +118,7 @@ export type DefaultState = typeof defaultState;
 
 function mergeCodeHostFields(
   d: DefaultState,
-  s: Partial<DefaultState>,
+  s: HydrationState,
 ): Pick<
   DefaultState,
   | "taskMRs"
@@ -144,7 +145,7 @@ function mergeCodeHostFields(
   };
 }
 
-function mergeQuickChatState(initialState: Partial<DefaultState>): DefaultState["quickChat"] {
+function mergeQuickChatState(initialState: HydrationState): DefaultState["quickChat"] {
   const quickChat = { ...defaultState.quickChat, ...initialState.quickChat };
   if (!initialState.quickChat?.sessions) return quickChat;
 
@@ -162,7 +163,7 @@ function mergeQuickChatState(initialState: Partial<DefaultState>): DefaultState[
   };
 }
 
-function mergeSidebarViewState(initialState: Partial<DefaultState>): DefaultState["sidebarViews"] {
+function mergeSidebarViewState(initialState: HydrationState): DefaultState["sidebarViews"] {
   const sidebarViews = { ...defaultState.sidebarViews, ...initialState.sidebarViews };
   const userSettings = initialState.userSettings;
   const serverViews = userSettings?.sidebarViews?.map(migrateView) ?? [];
@@ -179,7 +180,7 @@ function mergeSidebarViewState(initialState: Partial<DefaultState>): DefaultStat
 }
 
 function mergeSidebarTaskPrefsState(
-  initialState: Partial<DefaultState>,
+  initialState: HydrationState,
 ): DefaultState["sidebarTaskPrefs"] {
   const sidebarTaskPrefs = {
     ...defaultState.sidebarTaskPrefs,
@@ -202,7 +203,7 @@ function mergeSidebarTaskPrefsState(
 }
 
 function mergeReviewPRSelectionState(
-  initialState: Partial<DefaultState>,
+  initialState: HydrationState,
 ): DefaultState["reviewPRSelection"] {
   return {
     ...defaultState.reviewPRSelection,
@@ -214,11 +215,11 @@ function mergeReviewPRSelectionState(
   };
 }
 
-function mergeSessionFailureNotification(initialState: Partial<DefaultState>) {
+function mergeSessionFailureNotification(initialState: HydrationState) {
   return initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification;
 }
 
-export function mergeInitialState(initialState?: Partial<DefaultState>): DefaultState {
+export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
   return {
     ...defaultState,
@@ -307,7 +308,7 @@ export function mergeInitialState(initialState?: Partial<DefaultState>): Default
 // Split out of mergeInitialState to stay under the per-function line limit —
 // these fields are the UI/panel slice of the merge and have no cross-field
 // dependencies on the rest of DefaultState.
-function mergeUIPanelState(initialState: Partial<DefaultState>) {
+function mergeUIPanelState(initialState: HydrationState) {
   return {
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },

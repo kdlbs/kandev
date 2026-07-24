@@ -22,6 +22,15 @@ import {
 } from "@/components/task/chat/messages/message-debug-metadata";
 import { formatMessageSessionConfig } from "@/components/task/chat/messages/message-session-config";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@kandev/ui/dialog";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 
 const ACTION_BUTTON_SIZE = "h-5 w-5 p-1";
 const ACTION_BUTTON_HOVER = "hover:bg-muted rounded";
@@ -187,6 +196,48 @@ function MessageDebugDialog({
   );
 }
 
+function MessageTimestamp({ createdAt }: { createdAt: string }) {
+  const usesTouchDrawer = useTouchDrawer();
+  const [open, setOpen] = useState(false);
+  const absoluteTime = new Date(createdAt).toLocaleString();
+  const timeEl = (
+    <time
+      dateTime={createdAt}
+      title={absoluteTime}
+      className="text-[10px] text-muted-foreground/60 font-mono"
+    >
+      {formatRelativeTime(createdAt)}
+    </time>
+  );
+
+  if (!usesTouchDrawer) return timeEl;
+
+  // Native `title` tooltips never fire on touch (no hover event), so coarse
+  // pointers get a tap-to-open Drawer surfacing the same absolute time.
+  return (
+    <Drawer open={open} onOpenChange={setOpen}>
+      <DrawerTrigger asChild>
+        <button
+          type="button"
+          data-testid="message-timestamp-trigger"
+          className="cursor-pointer border-0 bg-transparent p-0 text-left"
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={`Show full timestamp: ${absoluteTime}`}
+        >
+          {timeEl}
+        </button>
+      </DrawerTrigger>
+      <DrawerContent data-testid="message-timestamp-drawer">
+        <DrawerHeader>
+          <DrawerTitle>Message time</DrawerTitle>
+          <DrawerDescription>{absoluteTime}</DrawerDescription>
+        </DrawerHeader>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
 function MessageMetaInfo({
   showModel,
   sessionConfigText,
@@ -205,11 +256,7 @@ function MessageMetaInfo({
           {sessionConfigText}
         </span>
       )}
-      {showTimestamp && (
-        <span className="text-[10px] text-muted-foreground/60 font-mono">
-          {formatRelativeTime(createdAt)}
-        </span>
-      )}
+      {showTimestamp && <MessageTimestamp createdAt={createdAt} />}
     </>
   );
 }

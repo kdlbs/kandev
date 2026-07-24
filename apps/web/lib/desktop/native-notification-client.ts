@@ -4,7 +4,8 @@ export type NativeNotificationRequest = {
   eventId: string;
   title: string;
   body: string;
-  taskId: string;
+  /** Absent for account/app-scoped events (e.g. an available update) that have no task. */
+  taskId?: string;
   sessionId?: string | null;
 };
 
