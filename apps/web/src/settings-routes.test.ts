@@ -108,6 +108,16 @@ describe("buildSettingsInitialStateForRoute", () => {
     expect(loaded.userSettings?.loaded).toBe(true);
     expect(failed.userSettings).toBeUndefined();
   });
+
+  it("maps the update notification settings from the boot payload", () => {
+    const state = buildState({
+      updateNotificationSettings: { enabled: false, channel: "desktop" },
+    });
+
+    expect(state.system).toEqual({
+      updateNotificationSettings: { enabled: false, channel: "desktop" },
+    });
+  });
 });
 
 describe("renderSettingsRoute", () => {

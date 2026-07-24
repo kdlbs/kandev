@@ -1,8 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { StateProvider } from "@/components/state-provider";
+import type { StoreApi } from "zustand";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
+import type { AppState } from "@/lib/state/store";
 import { UpdateNotificationsCard } from "./update-notifications-card";
 
 const mockSave = vi.fn();
@@ -26,6 +28,27 @@ function renderCard(initial?: { enabled: boolean; channel: string }) {
       </ToastProvider>
     </StateProvider>,
   );
+}
+
+function StoreCapture({ onStore }: { onStore: (store: StoreApi<AppState>) => void }) {
+  onStore(useAppStoreApi());
+  return null;
+}
+
+function renderCardCapturingStore() {
+  let store: StoreApi<AppState> | undefined;
+  const utils = render(
+    <StateProvider>
+      <ToastProvider>
+        <SettingsSaveProvider>
+          <StoreCapture onStore={(s) => (store = s)} />
+          <UpdateNotificationsCard />
+        </SettingsSaveProvider>
+      </ToastProvider>
+    </StateProvider>,
+  );
+  if (!store) throw new Error("store was not captured");
+  return { ...utils, store };
 }
 
 beforeEach(() => {
@@ -84,5 +107,20 @@ describe("UpdateNotificationsCard", () => {
 
     await waitFor(() => expect(mockSave).toHaveBeenCalledWith({ enabled: true, channel: "both" }));
     await waitFor(() => expect(trigger.getAttribute(DIRTY_ATTRIBUTE)).toBe("false"));
+  });
+
+  it("adopts the boot-payload value once hydration lands after the initial render", async () => {
+    const { store } = renderCardCapturingStore();
+
+    const toggle = await screen.findByRole("switch", { name: TOGGLE_NAME });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("Both")).toBeTruthy();
+
+    act(() => {
+      store.getState().setSystemUpdateNotificationSettings({ enabled: true, channel: "desktop" });
+    });
+
+    await waitFor(() => expect(screen.getByText("Desktop notification")).toBeTruthy());
+    expect(toggle.getAttribute(DIRTY_ATTRIBUTE)).toBe("false");
   });
 });
