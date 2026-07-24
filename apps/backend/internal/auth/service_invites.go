@@ -62,8 +62,16 @@ func (s *Service) AcceptInvite(ctx context.Context, token, email, password, disp
 	if _, err := s.users.GetUserByEmail(ctx, email); err == nil {
 		return nil, "", ErrEmailTaken
 	}
+	// Consume the invite FIRST — MarkInviteUsed is atomic (WHERE used_by IS
+	// NULL). This is the serialization point: two concurrent accepts of the
+	// same (empty-email) invite cannot both proceed to create a user, closing
+	// the double-provisioning race.
+	userID := uuid.New().String()
+	if err := s.store.MarkInviteUsed(ctx, invite.ID, userID, time.Now().UTC()); err != nil {
+		return nil, "", ErrInviteInvalid
+	}
 	user := &usermodels.User{
-		ID:          uuid.New().String(),
+		ID:          userID,
 		Email:       email,
 		DisplayName: displayName,
 		Role:        invite.Role,
@@ -84,9 +92,6 @@ func (s *Service) AcceptInvite(ctx context.Context, token, email, password, disp
 	}
 	if err := s.store.CreateIdentity(ctx, identity); err != nil {
 		return nil, "", err
-	}
-	if err := s.store.MarkInviteUsed(ctx, invite.ID, user.ID, time.Now().UTC()); err != nil {
-		return nil, "", ErrInviteInvalid
 	}
 	sessionToken, err := s.createSession(ctx, user.ID, userAgent, ip)
 	if err != nil {

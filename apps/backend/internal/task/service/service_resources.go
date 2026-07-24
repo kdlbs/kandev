@@ -1171,6 +1171,9 @@ func (s *Service) CountActiveSessionsByRepository(ctx context.Context, id string
 // Repository script operations
 
 func (s *Service) CreateRepositoryScript(ctx context.Context, req *CreateRepositoryScriptRequest) (*models.RepositoryScript, error) {
+	if err := s.authorizeRepositoryID(ctx, req.RepositoryID); err != nil {
+		return nil, err
+	}
 	script := &models.RepositoryScript{
 		ID:           uuid.New().String(),
 		RepositoryID: req.RepositoryID,
@@ -1188,12 +1191,22 @@ func (s *Service) CreateRepositoryScript(ctx context.Context, req *CreateReposit
 }
 
 func (s *Service) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) {
-	return s.repoEntities.GetRepositoryScript(ctx, id)
+	script, err := s.repoEntities.GetRepositoryScript(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeRepositoryID(ctx, script.RepositoryID); err != nil {
+		return nil, err
+	}
+	return script, nil
 }
 
 func (s *Service) UpdateRepositoryScript(ctx context.Context, id string, req *UpdateRepositoryScriptRequest) (*models.RepositoryScript, error) {
 	script, err := s.repoEntities.GetRepositoryScript(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeRepositoryID(ctx, script.RepositoryID); err != nil {
 		return nil, err
 	}
 	if req.Name != nil {
@@ -1221,6 +1234,9 @@ func (s *Service) DeleteRepositoryScript(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if err := s.authorizeRepositoryID(ctx, script.RepositoryID); err != nil {
+		return err
+	}
 	if err := s.repoEntities.DeleteRepositoryScript(ctx, id); err != nil {
 		s.logger.Error("failed to delete repository script", zap.String("script_id", id), zap.Error(err))
 		return err
@@ -1231,6 +1247,9 @@ func (s *Service) DeleteRepositoryScript(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error) {
+	if err := s.authorizeRepositoryID(ctx, repositoryID); err != nil {
+		return nil, err
+	}
 	return s.repoEntities.ListRepositoryScripts(ctx, repositoryID)
 }
 

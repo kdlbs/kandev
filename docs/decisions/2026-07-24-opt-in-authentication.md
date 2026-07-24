@@ -57,5 +57,10 @@ a login screen or any behavioral change.
   tree. Documented limitation; per-user executor sandboxing is future work.
 - OIDC/SSO can be added by inserting rows with a new provider into
   `auth_identities`; no migration required.
-- Office run subscriptions are not yet ownership-checked (no workspace
-  context at that layer) — accepted gap, noted in the spec.
+- Office workspace-scoped HTTP routes are ownership-gated via a group
+  middleware (agent-JWT callers keep their workspace-claim scoping); office
+  run subscriptions remain unchecked — accepted gap, noted in the spec.
+- The session-access check is enforced at the lifecycle chokepoint AND at
+  the reverse-proxy handlers (vscode/port) that resolve executions by bare
+  lookup; message read/search and repository-script routes carry explicit
+  scoping. These closed IDOR/read gaps found in the pre-merge security audit.

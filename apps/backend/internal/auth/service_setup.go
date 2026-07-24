@@ -19,6 +19,8 @@ import (
 // local identity insert is the commit point that flips ModeSetup → ModeEnabled,
 // and a partial failure before it leaves the instance safely in setup mode.
 func (s *Service) Setup(ctx context.Context, email, password, displayName, userAgent, ip string) (*usermodels.User, string, error) {
+	s.setupMu.Lock()
+	defer s.setupMu.Unlock()
 	if s.Mode() != ModeSetup {
 		return nil, "", ErrSetupNotAvailable
 	}

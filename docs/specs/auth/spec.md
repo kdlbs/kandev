@@ -79,5 +79,7 @@ the local single-user install with a login screen it never asked for.
   isolation is the boundary; per-user executor sandboxing is future work.
 - No workspace sharing/membership — one owner per workspace.
 - No OIDC/SSO yet (schema is ready).
-- Office run subscriptions are not yet ownership-checked (run events carry
-  no workspace context at the subscription layer).
+- Office workspace-scoped HTTP routes (those carrying a `:wsId`) are
+  ownership-checked when auth is enabled; office run *subscriptions* are not
+  yet ownership-checked (run events carry no workspace context at the
+  subscription layer).

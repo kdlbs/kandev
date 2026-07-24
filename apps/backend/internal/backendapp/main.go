@@ -437,10 +437,13 @@ func startAgentInfrastructure(
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
-	// Session-scoped HTTP surfaces (shell, files, ports, vscode, LSP) funnel
-	// through GetOrEnsureExecution — one chokepoint enforces per-user
-	// workspace scoping for all of them (opt-in auth).
+	// Session/environment-scoped HTTP surfaces (shell, files, ports, vscode,
+	// LSP, terminals) enforce per-user workspace scoping (opt-in auth). The
+	// GetOrEnsure* execution paths run these checks internally; the vscode and
+	// port reverse proxies (bare lookup + cache) call CheckSessionAccess at
+	// the handler.
 	lifecycleMgr.SetSessionAccessChecker(services.Task.AuthorizeSessionAccess)
+	lifecycleMgr.SetEnvironmentAccessChecker(services.Task.AuthorizeEnvironmentAccess)
 	log.Info("Workspace info provider configured for session recovery")
 
 	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
@@ -1683,6 +1686,15 @@ func buildHTTPServer(
 ) *http.Server {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	// Do not trust X-Forwarded-For by default: gin trusts all proxies out of
+	// the box, which would let a directly-reachable backend accept a spoofed
+	// client IP and defeat the login rate limiter (keyed on ClientIP). With no
+	// trusted proxies, ClientIP() falls back to the real peer RemoteAddr.
+	// Deployments behind a real proxy should front kandev with one that sets a
+	// trusted hop; revisit if a configurable trusted-proxy CIDR is added.
+	if err := router.SetTrustedProxies(nil); err != nil {
+		log.Warn("failed to clear trusted proxies", zap.Error(err))
+	}
 	router.Use(httpmw.RequestLogger(log, "kandev"))
 	router.Use(httpmw.OtelTracing("kandev"))
 	router.Use(gin.Recovery())

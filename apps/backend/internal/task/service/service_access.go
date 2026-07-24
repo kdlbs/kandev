@@ -106,10 +106,15 @@ func (s *Service) AuthorizeTaskAccess(ctx context.Context, taskID string) error 
 	return s.authorizeTaskID(ctx, taskID)
 }
 
+// AuthorizeWorkspaceAccess is the public form of authorizeWorkspaceID,
+// consumed by the office route-scoping middleware.
+func (s *Service) AuthorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
+	return s.authorizeWorkspaceID(ctx, workspaceID)
+}
+
 // AuthorizeSessionAccess checks visibility of a task session via its task's
-// workspace. Wired into the lifecycle manager (SetSessionAccessChecker) so
-// every session-scoped HTTP surface (shell, files, processes, ports, vscode,
-// LSP) is covered by one chokepoint.
+// workspace. Wired into the lifecycle manager so session-scoped surfaces
+// (files, processes, ports, vscode, terminal, LSP) are covered.
 func (s *Service) AuthorizeSessionAccess(ctx context.Context, sessionID string) error {
 	_, scoped := callerScope(ctx)
 	if !scoped {
@@ -120,6 +125,40 @@ func (s *Service) AuthorizeSessionAccess(ctx context.Context, sessionID string) 
 		return err
 	}
 	return s.authorizeTaskID(ctx, session.TaskID)
+}
+
+// AuthorizeEnvironmentAccess checks visibility of a task environment via its
+// task's workspace. Used by the terminal environment-shell route, which
+// resolves executions by environment ID rather than session ID.
+func (s *Service) AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error {
+	_, scoped := callerScope(ctx)
+	if !scoped {
+		return nil
+	}
+	env, err := s.taskEnvironments.GetTaskEnvironment(ctx, taskEnvironmentID)
+	if err != nil {
+		return err
+	}
+	return s.authorizeTaskID(ctx, env.TaskID)
+}
+
+// authorizeRepositoryID checks visibility of a repository via its workspace.
+// Denials use ErrRepositoryNotFound (no existence leak).
+func (s *Service) authorizeRepositoryID(ctx context.Context, repositoryID string) error {
+	if _, scoped := callerScope(ctx); !scoped {
+		return nil
+	}
+	repo, err := s.repoEntities.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return err
+	}
+	if repo == nil {
+		return nil
+	}
+	if err := s.authorizeWorkspaceID(ctx, repo.WorkspaceID); err != nil {
+		return repoerrors.ErrRepositoryNotFound
+	}
+	return nil
 }
 
 // filterWorkspacesForCaller narrows a workspace list to the caller's view.

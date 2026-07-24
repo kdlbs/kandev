@@ -76,6 +76,13 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	if taskEnvironmentID == "" {
 		return nil, fmt.Errorf("task_environment_id is required")
 	}
+	// Per-user scoping (opt-in auth) — before the cache short-circuit so a
+	// cached execution cannot be reached by a non-owner.
+	if check := m.environmentAccessCheck; check != nil {
+		if err := check(ctx, taskEnvironmentID); err != nil {
+			return nil, err
+		}
+	}
 
 	if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
 		return execution, nil
@@ -318,6 +325,13 @@ func (m *Manager) IsAgentCommandConfigured(executionID string) bool {
 //
 // Returns the execution with a running passthrough process, or an error.
 func (m *Manager) EnsurePassthroughExecution(ctx context.Context, sessionID string) (*AgentExecution, error) {
+	// Per-user scoping (opt-in auth) — before the cache short-circuit so a
+	// cached execution cannot be reached by a non-owner.
+	if check := m.sessionAccessCheck; check != nil {
+		if err := check(ctx, sessionID); err != nil {
+			return nil, err
+		}
+	}
 	// Check if execution already exists with a running passthrough process.
 	// PassthroughProcessID is not cleared on exit, so a stale ID can point at
 	// a dead process; verify the runner still has it before short-circuiting,

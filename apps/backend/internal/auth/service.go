@@ -12,6 +12,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -95,6 +96,11 @@ type Service struct {
 	log       *logger.Logger
 	limiter   *loginLimiter
 	mode      atomic.Value // Mode
+
+	// setupMu serializes the setup wizard so two concurrent first-visitors
+	// cannot both mutate the shared default-user profile before the identity
+	// insert commits.
+	setupMu sync.Mutex
 
 	// dummyHash equalizes login timing for unknown emails.
 	dummyHash string

@@ -85,6 +85,11 @@ type Manager struct {
 	// surfaces (opt-in auth). Nil = no scoping. See SetSessionAccessChecker.
 	sessionAccessCheck func(ctx context.Context, sessionID string) error
 
+	// environmentAccessCheck is the environment-keyed sibling of
+	// sessionAccessCheck, used by the terminal environment-shell route which
+	// resolves executions by environment ID. Nil = no scoping.
+	environmentAccessCheck func(ctx context.Context, environmentID string) error
+
 	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
 	ensureExecutionGroup singleflight.Group
 
@@ -345,11 +350,28 @@ func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 }
 
 // SetSessionAccessChecker installs the per-user session visibility check used
-// by GetOrEnsureExecution. The checker must return nil for contexts without a
-// request identity (internal callers). Set once during startup wiring, before
-// the HTTP server accepts connections.
+// by GetOrEnsureExecution and EnsurePassthroughExecution. The checker must
+// return nil for contexts without a request identity (internal callers). Set
+// once during startup wiring, before the HTTP server accepts connections.
 func (m *Manager) SetSessionAccessChecker(check func(ctx context.Context, sessionID string) error) {
 	m.sessionAccessCheck = check
+}
+
+// SetEnvironmentAccessChecker installs the per-user environment visibility
+// check used by GetOrEnsureExecutionForEnvironment (terminal env-shell route).
+func (m *Manager) SetEnvironmentAccessChecker(check func(ctx context.Context, environmentID string) error) {
+	m.environmentAccessCheck = check
+}
+
+// CheckSessionAccess authorizes a session-scoped operation for the ctx
+// identity. Handlers that resolve an execution by a bare in-memory lookup
+// (vscode/port reverse proxies) must call this before serving, since only the
+// GetOrEnsure* paths run the check internally. No-op when no checker is set.
+func (m *Manager) CheckSessionAccess(ctx context.Context, sessionID string) error {
+	if m.sessionAccessCheck == nil {
+		return nil
+	}
+	return m.sessionAccessCheck(ctx, sessionID)
 }
 
 // SetWorkspaceInfoProvider sets the provider for workspace information.
