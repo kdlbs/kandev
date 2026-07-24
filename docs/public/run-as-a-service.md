@@ -9,7 +9,7 @@ The native Kandev launcher can install itself as a systemd service on Linux or a
 
 Install Kandev first using a persistent [CLI installation](cli.md#install). Do not install a long-lived service from an ephemeral `npx` invocation: the generated unit records the absolute native executable and release-bundle paths.
 
-> **Network security:** the backend listens on `0.0.0.0` by default, and the Kandev web, HTTP, and WebSocket endpoints do not provide an authentication boundary. Bind it to loopback and use an authenticated TLS reverse proxy or private VPN before allowing remote access. The `auth.jwtSecret` configuration field is not a web-login password. See [server configuration](configuration.md#root-and-server).
+> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. Before allowing remote access, enable [opt-in authentication](authentication.md) (`KANDEV_AUTH_REQUIRED=true` or `Settings > System > Authentication`) and terminate TLS in a reverse proxy — authentication does not replace HTTPS. A server bound to non-loopback interfaces without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
 
 ## Choose a service mode
 
