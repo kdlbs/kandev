@@ -189,31 +189,31 @@ union or materialization contract.
 ## Tests
 
 - **What:** folder persistence, canonical uniqueness, cross-table display-name/position allocation,
-  cascade deletion, and SQLite/Postgres replay safety.  
+  cascade deletion, and SQLite/Postgres replay safety.
   **File:** `internal/task/repository/*workspace_source*_test.go` and
-  `internal/task/repository/sqlite/*workspace_folder*_test.go`.  
+  `internal/task/repository/sqlite/*workspace_folder*_test.go`.
   **How:** real database tests, including migration replay.
 - **What:** valid mixed batches, repository resolution, idle gate, duplicate/cross-workspace/path
-  failures, partial materialization rollback, client cancellation, and legacy add-branch parity.  
-  **File:** `internal/task/service/service_workspace_sources_test.go` and existing branch tests.  
+  failures, partial materialization rollback, client cancellation, and legacy add-branch parity.
+  **File:** `internal/task/service/service_workspace_sources_test.go` and existing branch tests.
   **How:** table-driven service tests with real SQLite plus fake materializer failure injection.
 - **What:** HTTP status mapping, MCP current-task defaulting and batch forwarding, event truthfulness,
-  and compatibility tool behavior.  
-  **File:** task handler, MCP handler/server, gateway, and service event tests beside the source.  
+  and compatibility tool behavior.
+  **File:** task handler, MCP handler/server, gateway, and service event tests beside the source.
   **How:** HTTP/WS integration tests and MCP captured-payload tests.
 - **What:** host root promotion, link safety, Windows/Unix path behavior, idle restart/rebind,
-  agentctl source rescan, rollback, and relaunch reconstruction.  
+  agentctl source rescan, rollback, and relaunch reconstruction.
   **File:** `internal/backendapp/workspace_source_materializer_test.go`, lifecycle tests, and agentctl
-  process/API tests.  
+  process/API tests.
   **How:** temporary Git repositories/folders plus fake lifecycle clients; platform-specific tests
   where link semantics differ.
 - **What:** Docker/SSH/Sprites repository clone transport, unsupported-folder rejection, credential
-  redaction, cancellation, cleanup, and reset reconstruction.  
-  **File:** lifecycle executor tests and agentctl workspace-source API tests.  
+  redaction, cancellation, cleanup, and reset reconstruction.
+  **File:** lifecycle executor tests and agentctl workspace-source API tests.
   **How:** table-driven unit/integration tests with fake agentctl plus existing container harnesses.
 - **What:** mixed picker state, payload construction, duplicate errors, disabled busy state,
-  task/session event merges, and file-tree cache reset.  
-  **File:** focused `*.test.ts(x)` files beside the new picker, API helper, toolbar, and WS handlers.  
+  task/session event merges, and file-tree cache reset.
+  **File:** focused `*.test.ts(x)` files beside the new picker, API helper, toolbar, and WS handlers.
   **How:** Vitest and Testing Library.
 - **What:** task creation keeps its existing mode presentation while Add sources renders no
   Local/Remote tabs, appends mixed rows from one repository menu, and provides 44px mobile choices.
@@ -231,25 +231,25 @@ union or materialization contract.
 - **Scenario:** GIVEN an idle one-repository worktree task, WHEN a desktop user adds a second local
   repository and a plain folder through **Workspace actions → Add sources**, THEN both
   top-level entries appear and only the repository appears in Changes.
-  **File:** `apps/web/e2e/tests/task/add-workspace-sources.spec.ts`.  
+  **File:** `apps/web/e2e/tests/task/add-workspace-sources.spec.ts`.
   **What to verify:** both menu actions, open-folder request routing, the tab-free repository-kind
   menu, mixed-row preservation, dialog flow, atomic success, Files refresh,
   repository-aware UI, and persistence after reload.
 - **Scenario:** GIVEN the Files tab on a Pixel 5 viewport, WHEN the user opens the full-height source
   picker through the workspace-actions bottom-sheet menu and attaches two source kinds through the
   responsive repository menu, THEN the same task value is delivered without horizontal overflow.
-  **File:** `apps/web/e2e/tests/task/mobile-add-workspace-sources.spec.ts`.  
+  **File:** `apps/web/e2e/tests/task/mobile-add-workspace-sources.spec.ts`.
   **What to verify:** 44px trigger/menu rows, both actions, open-folder request routing,
   internal scroll, fixed safe-area footer, submit outcome, dismissal/focus return, and document
   containment.
 - **Scenario:** GIVEN a Docker task, WHEN a remote repository is attached, THEN it is readable inside
-  the running container; the folder source kind is absent and a forged folder request is rejected.  
-  **File:** `apps/web/e2e/tests/docker/add-workspace-sources.spec.ts`.  
+  the running container; the folder source kind is absent and a forged folder request is rejected.
+  **File:** `apps/web/e2e/tests/docker/add-workspace-sources.spec.ts`.
   **What to verify:** live agentctl repository materialization, capability gating, rollback, and
   reset/relaunch.
 - **Scenario:** GIVEN an SSH task, WHEN a repository source is attached, THEN it appears in the
-  remote task directory and survives backend reconnect.  
-  **File:** `apps/web/e2e/tests/ssh/add-workspace-sources.spec.ts`.  
+  remote task directory and survives backend reconnect.
+  **File:** `apps/web/e2e/tests/ssh/add-workspace-sources.spec.ts`.
   **What to verify:** remote placement, rescan, persistence, and cleanup ownership.
 
 ---
