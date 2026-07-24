@@ -3,6 +3,7 @@
 
 import fnmatch
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -10,8 +11,19 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release.yml"
 DIAGNOSTICS_PATH = REPO_ROOT / ".github" / "scripts" / "collect-macos-desktop-diagnostics.sh"
+PUBLISH_NPM_PATH = REPO_ROOT / "scripts" / "release" / "publish-npm.sh"
+PUBLIC_KEY_PATH = REPO_ROOT / ".github" / "release-signing-key.asc"
+RELEASE_PROCESS_PATH = REPO_ROOT / "docs" / "public" / "release-process.md"
+LINT_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 WORKFLOW = WORKFLOW_PATH.read_text()
 DIAGNOSTICS = DIAGNOSTICS_PATH.read_text()
+PUBLISH_NPM = PUBLISH_NPM_PATH.read_text()
+RELEASE_PROCESS = RELEASE_PROCESS_PATH.read_text()
+LINT_WORKFLOW = LINT_WORKFLOW_PATH.read_text()
+NORMAL_RELEASE_IF = (
+    "if: ${{ !inputs.dry_run && !inputs.desktop_validation_only "
+    "&& inputs.backfill_tag == '' }}"
+)
 
 
 def step_block(name: str) -> str:
@@ -35,6 +47,152 @@ def job_block(name: str) -> str:
 
 
 class ReleaseWorkflowContractTest(unittest.TestCase):
+    def test_normal_release_uses_release_environment_and_requires_main(self) -> None:
+        prepare = job_block("prepare")
+        self.assertIn(
+            "environment: ${{ (!inputs.dry_run && !inputs.desktop_validation_only "
+            "&& inputs.backfill_tag == '') && 'release' || 'release-validation' }}",
+            prepare,
+        )
+
+        guard = step_block("Require main for normal release")
+        self.assertIn(NORMAL_RELEASE_IF, guard)
+        self.assertIn("CURRENT_REF: ${{ github.ref }}", guard)
+        self.assertIn('if [ "$CURRENT_REF" != "refs/heads/main" ]', guard)
+
+    def test_normal_release_validates_signing_identity_after_merge(self) -> None:
+        prepare = job_block("prepare")
+        merge = step_block("Create release PR + squash-merge")
+        public_key = step_block("Validate committed release signing public key")
+        signing = step_block("Import release tag signing key")
+        self.assertIn(NORMAL_RELEASE_IF, public_key)
+        self.assertIn("gpg --batch --with-colons --show-keys .github/release-signing-key.asc", public_key)
+        self.assertIn("PUBLIC_FINGERPRINT", public_key)
+        self.assertIn('echo "fingerprint=$PUBLIC_FINGERPRINT" >> "$GITHUB_OUTPUT"', public_key)
+        self.assertIn(NORMAL_RELEASE_IF, signing)
+        self.assertIn("id: import_release_gpg", signing)
+        self.assertIn(
+            "uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0",
+            signing,
+        )
+        self.assertIn("gpg_private_key: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}", signing)
+        self.assertIn("passphrase: ${{ secrets.RELEASE_GPG_PASSPHRASE }}", signing)
+        self.assertIn("git_user_signingkey: true", signing)
+        self.assertIn("git_tag_gpgsign: true", signing)
+
+        validate = step_block("Validate release tag signing identity")
+        self.assertIn(NORMAL_RELEASE_IF, validate)
+        self.assertIn("EXPECTED_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}", validate)
+        self.assertIn(
+            "COMMITTED_PUBLIC_FINGERPRINT: ${{ steps.committed_release_gpg.outputs.fingerprint }}",
+            validate,
+        )
+        self.assertIn(
+            "IMPORTED_FINGERPRINT: ${{ steps.import_release_gpg.outputs.fingerprint }}",
+            validate,
+        )
+        self.assertIn('if [ -z "$EXPECTED_FINGERPRINT" ]', validate)
+        self.assertIn('if [ "$COMMITTED_PUBLIC_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]', validate)
+        self.assertIn('if [ "$IMPORTED_FINGERPRINT" != "$COMMITTED_PUBLIC_FINGERPRINT" ]', validate)
+        self.assertIn('if [ "$IMPORTED_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]', validate)
+        self.assertIn("TAGGER_NAME: ${{ steps.import_release_gpg.outputs.name }}", validate)
+        self.assertIn("TAGGER_EMAIL: ${{ steps.import_release_gpg.outputs.email }}", validate)
+        self.assertIn('git config user.name "$TAGGER_NAME"', validate)
+        self.assertIn('git config user.email "$TAGGER_EMAIL"', validate)
+        self.assertIn('git config user.signingkey "$IMPORTED_FINGERPRINT"', validate)
+
+        tag = step_block("Create and push signed release tag")
+        self.assertIn(NORMAL_RELEASE_IF, tag)
+        self.assertIn('git tag -s "$TAG" -m "release: $NEXT"', tag)
+        self.assertIn('git tag -v "$TAG"', tag)
+        self.assertLess(tag.index('git tag -s "$TAG"'), tag.index('git tag -v "$TAG"'))
+        self.assertLess(tag.index('git tag -v "$TAG"'), tag.index('git push origin "$TAG"'))
+        self.assertNotIn('git tag -a "$TAG"', tag)
+
+        self.assertLess(prepare.index(merge), prepare.index(public_key))
+        self.assertLess(prepare.index(public_key), prepare.index(signing))
+        self.assertLess(prepare.index(signing), prepare.index(validate))
+        self.assertLess(prepare.index(validate), prepare.index(tag))
+
+    def test_committed_release_key_is_one_public_primary_key_without_secret_material(self) -> None:
+        result = subprocess.run(
+            ["gpg", "--batch", "--with-colons", "--show-keys", str(PUBLIC_KEY_PATH)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        records = [line.split(":") for line in result.stdout.splitlines() if line]
+        primary_keys = [record for record in records if record[0] == "pub"]
+        secret_keys = [record for record in records if record[0] in {"sec", "ssb"}]
+        primary_fingerprints = [
+            records[index + 1][9]
+            for index, record in enumerate(records[:-1])
+            if record[0] == "pub" and records[index + 1][0] == "fpr"
+        ]
+
+        self.assertEqual([], secret_keys)
+        self.assertEqual(1, len(primary_keys))
+        self.assertEqual(1, len(primary_fingerprints))
+        self.assertRegex(primary_fingerprints[0], r"^[A-F0-9]{40}$")
+
+    def test_release_documentation_declares_the_committed_public_key_fingerprint(self) -> None:
+        result = subprocess.run(
+            ["gpg", "--batch", "--with-colons", "--show-keys", str(PUBLIC_KEY_PATH)],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        records = [line.split(":") for line in result.stdout.splitlines() if line]
+        primary_fingerprints = [
+            records[index + 1][9]
+            for index, record in enumerate(records[:-1])
+            if record[0] == "pub" and records[index + 1][0] == "fpr"
+        ]
+        documented_fingerprint = re.search(
+            r"The current key is committed at `\.github/release-signing-key\.asc`; "
+            r"its full fingerprint is `([A-F0-9]{40})`\.",
+            RELEASE_PROCESS,
+        )
+
+        self.assertIsNotNone(documented_fingerprint)
+        self.assertEqual(primary_fingerprints[0], documented_fingerprint.group(1))
+
+    def test_release_contract_ci_runs_when_key_or_release_documentation_changes(self) -> None:
+        for trigger in ("push", "pull_request"):
+            trigger_block = re.search(
+                rf"  {trigger}:\n.*?(?=\n  [a-z_]+:|\nconcurrency:)",
+                LINT_WORKFLOW,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(trigger_block)
+            self.assertIn('".github/release-signing-key.asc"', trigger_block.group(0))
+            self.assertIn('"docs/public/release-process.md"', trigger_block.group(0))
+
+    def test_tag_push_recovery_recreates_tag_at_logged_merge_commit(self) -> None:
+        tag = step_block("Create and push signed release tag")
+        self.assertIn('MERGE_COMMIT="$(git rev-parse HEAD)"', tag)
+        self.assertIn('echo "Release merge commit: $MERGE_COMMIT"', tag)
+        self.assertIn('git checkout --detach $MERGE_COMMIT', tag)
+        self.assertIn("git tag -s $TAG -m 'release: $NEXT'", tag)
+        self.assertIn('git tag -v $TAG', tag)
+        self.assertIn("matches RELEASE_GPG_FINGERPRINT", tag)
+        self.assertIn('git push origin $TAG', tag)
+        self.assertNotIn('Recover manually: git push origin $TAG', tag)
+
+    def test_npm_publish_preserves_oidc_provenance_for_all_packages(self) -> None:
+        publish_job = job_block("publish-npm")
+        self.assertIn("id-token: write", publish_job)
+        self.assertEqual(PUBLISH_NPM.count("npm publish --access public --provenance"), 2)
+
+        for package in (
+            "@kdlbs/runtime-linux-x64",
+            "@kdlbs/runtime-linux-arm64",
+            "@kdlbs/runtime-darwin-x64",
+            "@kdlbs/runtime-darwin-arm64",
+            "@kdlbs/runtime-win32-x64",
+        ):
+            self.assertIn(f'"{package}"', PUBLISH_NPM)
+
     def test_backfill_tag_input_uses_existing_tag_without_recreating_it(self) -> None:
         self.assertIn("backfill_tag:", WORKFLOW)
         self.assertIn("BACKFILL_TAG: ${{ inputs.backfill_tag }}", WORKFLOW)
@@ -59,7 +217,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
 
         for name in (
             "Bump version + generate CHANGELOG (in working tree)",
-            "Create release PR + squash-merge + tag",
+            "Create release PR + squash-merge",
+            "Import release tag signing key",
+            "Validate release tag signing identity",
+            "Create and push signed release tag",
         ):
             self.assertIn("inputs.backfill_tag == ''", step_block(name))
 

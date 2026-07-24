@@ -28,7 +28,10 @@ export function parseMCPTaskAgentProfileDefault(
 }
 
 export function parseSystemMetricsDisplay(value: UserSettingsData["system_metrics_display"]) {
-  return { showInTopbar: value?.show_in_topbar ?? false };
+  return {
+    showInTopbar: value?.show_in_topbar ?? false,
+    simplified: value?.simplified ?? false,
+  };
 }
 
 export function parseAppStatusBarOrder(value: UserSettingsData["app_status_bar_order"]) {

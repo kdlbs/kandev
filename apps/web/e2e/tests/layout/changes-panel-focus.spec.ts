@@ -384,4 +384,67 @@ test.describe("Changes panel focus behavior", () => {
 
     await expect(changesTab(testPage)).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
   });
+
+  test("new git updates do not replace a returning task's saved agent tab", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const taskA = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Saved Agent Focus A",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const taskB = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Saved Agent Focus B",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!taskA.session_id || !taskB.session_id) {
+      throw new Error("Tasks did not start sessions");
+    }
+
+    await testPage.goto(`/t/${taskA.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.waitForDockviewReady();
+    await session.clickSessionChatTab();
+    await expect(session.activeChat()).toBeVisible();
+
+    await session.taskInSidebar("Saved Agent Focus B").click();
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), {
+      timeout: 15_000,
+    });
+    await session.waitForLoad();
+
+    await setGitStatusForSession(testPage, taskA.session_id, []);
+    await expect
+      .poll(() => changesCountForSession(testPage, taskA.session_id!), { timeout: 15_000 })
+      .toBe(0);
+    await setGitStatusForSession(testPage, taskA.session_id, ["background-change.txt"]);
+    await expect
+      .poll(() => changesCountForSession(testPage, taskA.session_id!), { timeout: 15_000 })
+      .toBe(1);
+
+    await session.taskInSidebar("Saved Agent Focus A").click();
+
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), {
+      timeout: 15_000,
+    });
+    await expect(session.activeChat()).toBeVisible({ timeout: 5_000 });
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/);
+  });
 });

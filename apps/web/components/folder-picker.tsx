@@ -1,7 +1,16 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { IconFolder, IconBox, IconChevronRight } from "@tabler/icons-react";
+import {
+  IconBox,
+  IconCheck,
+  IconChevronRight,
+  IconFolder,
+  IconFolderPlus,
+  IconX,
+} from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Input } from "@kandev/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -64,12 +73,11 @@ export function FolderPicker({ value, onChange, placeholder }: FolderPickerProps
         sideOffset={4}
         data-testid="folder-picker-popover"
       >
-        <Breadcrumb path={listing?.path ?? ""} onNavigate={(p) => void load(p)} />
-        <Entries
+        <DirectoryBrowserBody
           listing={listing}
           loading={loading}
           error={error}
-          onDescend={(p) => void load(p)}
+          onNavigate={(p) => void load(p)}
         />
         <Footer
           choosable={listing?.choosable === true}
@@ -97,7 +105,7 @@ function leafName(path: string): string {
   return idx === -1 ? trimmed : trimmed.slice(idx + 1) || "/";
 }
 
-function useDirectoryListing(open: boolean, value: string) {
+export function useDirectoryListing(open: boolean, value: string) {
   const [listing, setListing] = useState<DirectoryListing | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -180,10 +188,18 @@ function appendPathSegments(
   }
 }
 
-function Breadcrumb({ path, onNavigate }: { path: string; onNavigate: (p: string) => void }) {
+function Breadcrumb({
+  path,
+  onNavigate,
+  touchRows = false,
+}: {
+  path: string;
+  onNavigate: (p: string) => void;
+  touchRows?: boolean;
+}) {
   const segs = pathSegments(path);
   return (
-    <div className="flex items-center gap-0.5 border-b border-border bg-muted/30 px-2 py-1.5 overflow-x-auto">
+    <div className="flex items-center gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/30 px-2 py-1.5">
       {segs.length === 0 && (
         <span className="text-[11px] text-muted-foreground italic">Loading…</span>
       )}
@@ -200,6 +216,7 @@ function Breadcrumb({ path, onNavigate }: { path: string; onNavigate: (p: string
               disabled={last}
               className={cn(
                 "rounded px-1.5 py-0.5 text-[11px] font-mono whitespace-nowrap",
+                touchRows && "min-h-12",
                 last
                   ? "text-foreground cursor-default"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer",
@@ -214,16 +231,163 @@ function Breadcrumb({ path, onNavigate }: { path: string; onNavigate: (p: string
   );
 }
 
+export function DirectoryBrowserBody({
+  listing,
+  loading,
+  error,
+  onNavigate,
+  onCreateDirectory,
+  touchRows = false,
+  fillAvailableHeight = false,
+}: {
+  listing: DirectoryListing | null;
+  loading: boolean;
+  error: string | null;
+  onNavigate: (path: string) => void;
+  onCreateDirectory?: (name: string) => Promise<void>;
+  touchRows?: boolean;
+  fillAvailableHeight?: boolean;
+}) {
+  return (
+    <div className={cn("flex min-h-0 flex-col", fillAvailableHeight && "flex-1")}>
+      {onCreateDirectory ? (
+        <DirectoryBrowserToolbar
+          key={listing?.path}
+          disabled={!listing || loading}
+          onCreateDirectory={onCreateDirectory}
+          touchRows={touchRows}
+        />
+      ) : null}
+      <Breadcrumb path={listing?.path ?? ""} onNavigate={onNavigate} touchRows={touchRows} />
+      <Entries
+        listing={listing}
+        loading={loading}
+        error={error}
+        onDescend={onNavigate}
+        touchRows={touchRows}
+        fillAvailableHeight={fillAvailableHeight}
+      />
+    </div>
+  );
+}
+
+function DirectoryBrowserToolbar({
+  disabled,
+  onCreateDirectory,
+  touchRows,
+}: {
+  disabled: boolean;
+  onCreateDirectory: (name: string) => Promise<void>;
+  touchRows: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const createFolder = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName || creating) return;
+    setCreating(true);
+    setError(null);
+    try {
+      await onCreateDirectory(trimmedName);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create folder");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  return (
+    <div className="shrink-0 border-b border-border bg-muted/10 px-3 py-2">
+      {editing ? (
+        <div className="space-y-1.5">
+          <div className="flex min-w-0 items-center gap-2">
+            <IconFolderPlus className="size-4 shrink-0 text-muted-foreground" />
+            <Input
+              aria-label="New folder name"
+              value={name}
+              onChange={(event) => {
+                setName(event.target.value);
+                setError(null);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void createFolder();
+                } else if (event.key === "Escape") {
+                  setEditing(false);
+                }
+              }}
+              placeholder="Folder name"
+              autoFocus
+              className={cn("min-w-0 flex-1", touchRows && "h-10")}
+            />
+            <Button
+              type="button"
+              size={touchRows ? "icon-lg" : "icon"}
+              className={touchRows ? "size-11" : undefined}
+              onClick={() => void createFolder()}
+              disabled={!name.trim() || creating}
+              aria-label="Create folder"
+              title="Create folder"
+            >
+              <IconCheck />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size={touchRows ? "icon-lg" : "icon"}
+              className={touchRows ? "size-11" : undefined}
+              onClick={() => setEditing(false)}
+              aria-label="Cancel new folder"
+              title="Cancel"
+            >
+              <IconX />
+            </Button>
+          </div>
+          {error ? (
+            <p role="alert" className="pl-6 text-xs text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-medium text-muted-foreground">Folders</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size={touchRows ? "lg" : "sm"}
+            className={touchRows ? "min-h-11" : undefined}
+            onClick={() => setEditing(true)}
+            disabled={disabled}
+          >
+            <IconFolderPlus />
+            New folder
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Entries({
   listing,
   loading,
   error,
   onDescend,
+  touchRows,
+  fillAvailableHeight,
 }: {
   listing: DirectoryListing | null;
   loading: boolean;
   error: string | null;
   onDescend: (path: string) => void;
+  touchRows?: boolean;
+  fillAvailableHeight?: boolean;
 }) {
   if (loading) return <EmptyRow text="Loading…" />;
   if (error) return <EmptyRow text={error} variant="error" testId="folder-picker-error" />;
@@ -232,7 +396,10 @@ function Entries({
   }
   return (
     <div
-      className="max-h-[280px] overflow-y-auto overscroll-contain py-1"
+      className={cn(
+        "overflow-y-auto overscroll-contain py-1",
+        fillAvailableHeight ? "min-h-0 flex-1" : "max-h-[280px]",
+      )}
       onWheel={(e) => e.stopPropagation()}
     >
       {listing.entries.map((entry) => (
@@ -240,7 +407,10 @@ function Entries({
           key={entry.path}
           type="button"
           onClick={() => onDescend(entry.path)}
-          className="group flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-accent cursor-pointer"
+          className={cn(
+            "group flex w-full items-center gap-2 px-3 text-left text-xs hover:bg-accent cursor-pointer",
+            touchRows ? "min-h-12 py-2" : "py-1.5",
+          )}
           data-testid="folder-picker-entry"
         >
           <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-muted-foreground group-hover:text-foreground" />

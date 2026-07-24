@@ -266,6 +266,7 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 		"s1",
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -291,6 +292,7 @@ func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
 		"s1",
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
+		nil,
 	)
 
 	require.ErrorIs(t, err, writeFailure)
@@ -1850,6 +1852,43 @@ func TestSetSessionStartingAllowsTerminalResumeWithoutTaskPromotion(t *testing.T
 	require.Equal(t, models.TaskSessionStateStarting, updated.State)
 	require.Nil(t, updated.CompletedAt)
 	require.Empty(t, taskRepo.stateWrites)
+}
+
+// TestSetSessionStartingAllowsArchiveCancelledResumeWithoutPromotion covers
+// sessions cancelled by an archive (Service.ArchiveTask or the cascade
+// archive path), which carry a distinct ErrorMessage; unlike an explicit
+// user/coordinator stop, these must recover into STARTING like a Failed
+// session so Resume works normally once the task is unarchived (bug:
+// "Can't resume this un-archived task").
+func TestSetSessionStartingAllowsArchiveCancelledResumeWithoutPromotion(t *testing.T) {
+	for _, reason := range []string{models.SessionArchiveCancelReason, models.SessionArchiveTreeCancelReason} {
+		t.Run(reason, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+
+			current, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			current.State = models.TaskSessionStateCancelled
+			current.ErrorMessage = reason
+			require.NoError(t, repo.UpdateTaskSession(ctx, current))
+
+			next := *current
+			next.State = models.TaskSessionStateStarting
+			next.ErrorMessage = ""
+			next.UpdatedAt = time.Now().UTC()
+
+			taskRepo := newMockTaskRepo()
+			svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+			require.NoError(t, svc.setSessionStarting(ctx, "t1", &next, false))
+
+			updated, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			require.Equal(t, models.TaskSessionStateStarting, updated.State)
+			require.Empty(t, taskRepo.stateWrites)
+		})
+	}
 }
 
 // Pins the call-site wiring: cancelled office turn must NOT leave the session at IDLE.

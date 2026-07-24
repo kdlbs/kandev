@@ -140,9 +140,8 @@ function AgentErrorStatus({
       ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
       : undefined,
   );
-  const [userCollapsed, setUserCollapsed] = useState(false);
-  const expanded = !!errorMessage && !userCollapsed;
-  const toggle = useCallback(() => setUserCollapsed((v) => !v), []);
+  const [expanded, setExpanded] = useState(false);
+  const toggle = useCallback(() => setExpanded((value) => !value), []);
 
   const displayLabel = resolveAgentErrorLabel(errorMessage, config.label);
   const hasDetails = !!errorMessage;
@@ -155,12 +154,16 @@ function AgentErrorStatus({
     >
       <button
         type="button"
-        className={`flex w-full items-center gap-2 px-3 py-2 ${hasDetails ? "cursor-pointer" : ""}`}
+        className={`flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left sm:min-h-0 ${hasDetails ? "cursor-pointer" : ""}`}
         onClick={hasDetails ? toggle : undefined}
         disabled={!hasDetails}
+        aria-expanded={hasDetails ? expanded : undefined}
+        aria-label={
+          hasDetails ? `${expanded ? "Hide" : "Show"} error details: ${displayLabel}` : displayLabel
+        }
       >
         <IconAlertCircle className="h-3.5 w-3.5 flex-shrink-0" aria-hidden="true" />
-        <span className="font-medium">{displayLabel}</span>
+        <span className="min-w-0 break-words font-medium">{displayLabel}</span>
         {hasDetails && (
           <IconChevronDown
             className={`ml-auto h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`}
@@ -168,7 +171,7 @@ function AgentErrorStatus({
         )}
       </button>
       {expanded && errorMessage && (
-        <pre className="px-3 pb-2 whitespace-pre-wrap break-words text-[11px] text-destructive/80 max-h-40 overflow-y-auto">
+        <pre className="max-h-40 max-w-full overflow-y-auto whitespace-pre-wrap break-words px-3 pb-2 text-[11px] text-destructive/80">
           {errorMessage}
         </pre>
       )}

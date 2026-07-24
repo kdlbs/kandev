@@ -20,6 +20,7 @@ import {
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useAppShortcuts } from "@/hooks/use-app-shortcuts";
+import { usePluginShortcuts } from "@/hooks/use-plugin-shortcuts";
 import { useAppStore } from "@/components/state-provider";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
@@ -186,7 +187,11 @@ export function GlobalCommands() {
 
   useRegisterCommands(commands);
   useKeyboardShortcut(quickChatShortcut, handleOpenQuickChat);
+  // Order matters: useAppShortcuts (core) must register its capture-phase
+  // keydown listener before usePluginShortcuts so core shortcuts win when a
+  // combo matches both — see the precedence note on each hook.
   useAppShortcuts();
+  usePluginShortcuts();
 
   return null;
 }

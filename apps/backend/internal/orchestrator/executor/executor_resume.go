@@ -832,10 +832,13 @@ func (e *Executor) applyResumeCloneURL(req *LaunchAgentRequest, repository *mode
 // so the lifecycle preparer can resume/recreate each repo's worktree. The
 // legacy top-level fields stay populated from the primary for backwards
 // compat.
+//
+// Gates on resolveAllRepoInfo's DB-backed count, not task.Repositories: task
+// here is loaded via the raw repository GetTask (validateAndLockResume),
+// which never attaches the one-to-many task_repositories rows — that field
+// is always empty on this path. Gating on it silently dropped every repo but
+// the primary on any resume of a multi-repo task.
 func (e *Executor) applyResumeMultiRepoConfig(ctx context.Context, task *v1.Task, req *LaunchAgentRequest, existingEnv *models.TaskEnvironment) error {
-	if len(task.Repositories) <= 1 {
-		return nil
-	}
 	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
 	if err != nil {
 		return err

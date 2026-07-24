@@ -136,6 +136,12 @@ export function useEditorKeybinds() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // Another capture-phase core dispatcher (`useAppShortcuts`) or a
+      // plugin keybinding (`usePluginShortcuts`) may have already handled
+      // and prevented this event — bail out so a combo shared with tab
+      // navigation, terminal toggle, or BOTTOM_TERMINAL fires only once.
+      if (e.defaultPrevented) return;
+
       const api = useDockviewStore.getState().api;
       if (!api) return;
 

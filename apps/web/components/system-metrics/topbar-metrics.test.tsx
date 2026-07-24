@@ -22,7 +22,7 @@ function renderMetrics() {
   const initialState = {
     userSettings: {
       ...defaultSettingsState.userSettings,
-      systemMetricsDisplay: { showInTopbar: true },
+      systemMetricsDisplay: { showInTopbar: true, simplified: false },
     },
     system: {
       ...defaultSystemState.system,

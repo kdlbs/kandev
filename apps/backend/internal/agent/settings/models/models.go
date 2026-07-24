@@ -64,6 +64,13 @@ type AgentProfile struct {
 	// CLIPassthrough enables TUI-passthrough execution style. Orthogonal to ACP.
 	CLIPassthrough bool `json:"cli_passthrough" db:"cli_passthrough"`
 
+	// CommandPrefix is an optional launcher prefix prepended to the agent
+	// subprocess command. It lets a user wrap the ACP agent in a sandbox
+	// launcher (e.g. "greywall --" produces "greywall -- npx -y <pkg> …").
+	// The raw string is shell-tokenised at launch time, mirroring CLIFlags.
+	// Empty means the agent command runs unwrapped.
+	CommandPrefix string `json:"command_prefix" db:"command_prefix"`
+
 	// AllowIndexing is retained for backward compatibility with existing
 	// auggie profiles. The launch path no longer consults it — it is read
 	// only by the legacy migration shim that seeds CLIFlags on the first

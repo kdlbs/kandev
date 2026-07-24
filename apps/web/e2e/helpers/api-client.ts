@@ -114,6 +114,7 @@ type CreateTaskOpts = {
   workflow_id?: string;
   workflow_step_id?: string;
   agent_profile_id?: string;
+  executor_profile_id?: string;
   repository_ids?: string[];
   repositories?: TaskRepositoryInput[];
   plan_mode?: boolean;
@@ -128,6 +129,7 @@ type TaskRepositoryInput = {
   repository_id?: string;
   base_branch?: string;
   checkout_branch?: string;
+  pr_number?: number;
   remote_url?: string;
   provider?: string;
   provider_repo_id?: string;
@@ -156,6 +158,8 @@ function buildCreateTaskBody(
   };
   setIf(body, "workflow_id", options.workflow_id);
   setIf(body, "workflow_step_id", options.workflow_step_id);
+  setIf(body, "agent_profile_id", options.agent_profile_id);
+  setIf(body, "executor_profile_id", options.executor_profile_id);
   setIf(body, "metadata", buildTaskMetadata(options));
   setIf(
     body,
@@ -344,9 +348,11 @@ export class ApiClient {
       workflow_step_id?: string;
       /** Stored in task.Metadata so auto_start_agent can pick it up on on_enter. */
       agent_profile_id?: string;
+      /** Executor profile used when the task session is prepared. */
+      executor_profile_id?: string;
       /** Repository IDs to associate with the task (required for agent execution). */
       repository_ids?: string[];
-      /** Full repository entries with optional checkout_branch / base_branch. */
+      /** Full repository entries with optional checkout_branch / base_branch / pr_number. */
       repositories?: TaskRepositoryInput[];
       /** When true, task is placed at position 0 regardless of is_start_step. */
       plan_mode?: boolean;
@@ -417,6 +423,7 @@ export class ApiClient {
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
+      command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
     },
   ): Promise<{
@@ -430,6 +437,7 @@ export class ApiClient {
       config_options: opts.config_options,
       cli_passthrough: opts.cli_passthrough ?? false,
       cli_flags: opts.cli_flags,
+      command_prefix: opts.command_prefix,
       env_vars: opts.env_vars,
     });
   }
@@ -457,6 +465,7 @@ export class ApiClient {
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
+      command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
     },
   ): Promise<void> {
@@ -496,7 +505,7 @@ export class ApiClient {
       workflow_id?: string;
       workflow_step_id?: string;
       repository_ids?: string[];
-      /** Full repository entries with optional checkout_branch / base_branch. */
+      /** Full repository entries with optional checkout_branch / base_branch / pr_number. */
       repositories?: TaskRepositoryInput[];
       executor_id?: string;
       executor_profile_id?: string;
@@ -2438,6 +2447,26 @@ export class ApiClient {
       automation_id: automationId,
       status,
       task_id: taskId ?? "",
+    });
+  }
+
+  /**
+   * Seed a task_sessions row directly via the E2E HTTP endpoint —
+   * deterministic state seeding, not a substitute for driving a real
+   * agent stop/resume cycle. Used to assert on session-state-derived
+   * behavior (e.g. the automation Recent Runs "Cancelled" status, which
+   * is keyed off the task's *primary* session state, not the task's own
+   * state). Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async seedAutomationTaskSession(
+    taskId: string,
+    state: string,
+    isPrimary = true,
+  ): Promise<{ id: string; task_id: string; status: string }> {
+    return this.request("POST", "/api/v1/e2e/task-sessions", {
+      task_id: taskId,
+      state,
+      is_primary: isPrimary,
     });
   }
 }

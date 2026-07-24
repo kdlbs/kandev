@@ -3,8 +3,11 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import type { ReactNode } from "react";
 import type { Branch } from "@/lib/types/http";
 
+const TOOLTIP_ROOT_TEST_ID = "tooltip-root";
+
 vi.mock("@kandev/ui/tooltip", async () => {
   const React = await import("react");
+  const TooltipContext = React.createContext<((open: boolean) => void) | undefined>(undefined);
   return {
     Tooltip: ({
       open,
@@ -15,18 +18,64 @@ vi.mock("@kandev/ui/tooltip", async () => {
       onOpenChange?: (open: boolean) => void;
       children: ReactNode;
     }) => {
-      React.useEffect(() => {
-        onOpenChange?.(true);
-      }, [onOpenChange]);
       return (
-        <div data-testid="tooltip-root" data-open={String(open)}>
-          {children}
-        </div>
+        <TooltipContext.Provider value={onOpenChange}>
+          <div data-testid={TOOLTIP_ROOT_TEST_ID} data-open={String(open)}>
+            {children}
+          </div>
+        </TooltipContext.Provider>
       );
     },
-    TooltipTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
-    TooltipContent: ({ children }: { children: ReactNode }) => (
-      <div data-testid="tooltip-content">{children}</div>
+    TooltipTrigger: ({
+      children,
+      onPointerEnter: triggerPointerEnter,
+      onPointerLeave: triggerPointerLeave,
+      onFocus: triggerFocus,
+      onBlur: triggerBlur,
+      ...triggerProps
+    }: {
+      children: ReactNode;
+      onPointerEnter?: React.PointerEventHandler;
+      onPointerLeave?: React.PointerEventHandler;
+      onFocus?: React.FocusEventHandler;
+      onBlur?: React.FocusEventHandler;
+      [key: string]: unknown;
+    }) => {
+      const onOpenChange = React.useContext(TooltipContext);
+      const child = React.Children.only(children) as React.ReactElement<{
+        onPointerEnter?: React.PointerEventHandler;
+        onPointerLeave?: React.PointerEventHandler;
+        onFocus?: React.FocusEventHandler;
+        onBlur?: React.FocusEventHandler;
+      }>;
+      return React.cloneElement(child, {
+        ...triggerProps,
+        onPointerEnter: (event) => {
+          triggerPointerEnter?.(event);
+          child.props.onPointerEnter?.(event);
+          onOpenChange?.(true);
+        },
+        onPointerLeave: (event) => {
+          triggerPointerLeave?.(event);
+          child.props.onPointerLeave?.(event);
+          onOpenChange?.(false);
+        },
+        onFocus: (event) => {
+          triggerFocus?.(event);
+          child.props.onFocus?.(event);
+          onOpenChange?.(true);
+        },
+        onBlur: (event) => {
+          triggerBlur?.(event);
+          child.props.onBlur?.(event);
+          onOpenChange?.(false);
+        },
+      });
+    },
+    TooltipContent: ({ children, className }: { children: ReactNode; className?: string }) => (
+      <div data-testid="tooltip-content" className={className}>
+        {children}
+      </div>
     ),
   };
 });
@@ -36,10 +85,14 @@ import {
   branchToOption,
   computeBranchPlaceholder,
   Pill,
+  type PillOption,
 } from "./task-create-dialog-pill";
+
+const CREATE_REPOSITORY = "Create new repository";
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -49,6 +102,32 @@ function localBranch(name: string): Branch {
 
 function remoteBranch(name: string, remote = "origin"): Branch {
   return { name, type: "remote", remote } as Branch;
+}
+
+const TOOLTIP_PILL_VALUE = "kandev";
+const REPOSITORY_TOOLTIP = "Repository · ~/kandev";
+
+function renderTooltipPill({
+  value = TOOLTIP_PILL_VALUE,
+  options = [],
+  tooltip = REPOSITORY_TOOLTIP,
+}: {
+  value?: string;
+  options?: PillOption[];
+  tooltip?: string;
+} = {}) {
+  render(
+    <Pill
+      icon={<span aria-hidden="true" />}
+      value={value}
+      placeholder="repository"
+      options={options}
+      onSelect={vi.fn()}
+      searchPlaceholder="Search repositories..."
+      emptyMessage="No repositories"
+      tooltip={tooltip}
+    />,
+  );
 }
 
 describe("sortBranches", () => {
@@ -134,21 +213,10 @@ describe("Pill tooltip", () => {
     );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
 
-    render(
-      <Pill
-        icon={<span aria-hidden="true" />}
-        value="kandev"
-        placeholder="repository"
-        options={[]}
-        onSelect={vi.fn()}
-        searchPlaceholder="Search repositories..."
-        emptyMessage="No repositories"
-        tooltip="Repository · ~/kandev"
-      />,
-    );
+    renderTooltipPill();
 
     await waitFor(() => {
-      expect(screen.getByTestId("tooltip-root").getAttribute("data-open")).toBe("false");
+      expect(screen.getByTestId(TOOLTIP_ROOT_TEST_ID).getAttribute("data-open")).toBe("false");
     });
   });
 
@@ -170,6 +238,83 @@ describe("Pill tooltip", () => {
     const tooltipTrigger = screen.getByLabelText("Select a repository first");
     expect(tooltipTrigger.getAttribute("tabindex")).toBe("0");
     expect(tooltipTrigger.querySelector("[aria-hidden='true'] button")).not.toBeNull();
+  });
+
+  it("allows the first later mouse hover when the pointer left for the picker", async () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    renderTooltipPill({ options: [{ value: "repo-1", label: "repo-one" }] });
+
+    const trigger = screen.getByRole("button", { name: new RegExp(TOOLTIP_PILL_VALUE, "i") });
+    fireEvent.click(trigger);
+    fireEvent.pointerLeave(trigger);
+    fireEvent.click(await screen.findByRole("option", { name: "repo-one" }));
+    fireEvent.pointerEnter(trigger);
+
+    expect(screen.getByTestId(TOOLTIP_ROOT_TEST_ID).getAttribute("data-open")).toBe("true");
+  });
+
+  it("keeps touch selection tooltip suppression through focus restoration", async () => {
+    const frameCallbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      frameCallbacks.push(callback);
+      return frameCallbacks.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    renderTooltipPill({ options: [{ value: "repo-1", label: "repo-one" }] });
+    frameCallbacks.shift()?.(0);
+
+    const trigger = screen.getByRole("button", { name: new RegExp(TOOLTIP_PILL_VALUE, "i") });
+    fireEvent.pointerEnter(trigger, { pointerType: "touch" });
+    fireEvent.click(trigger);
+    const option = await screen.findByRole("option", { name: "repo-one" });
+    fireEvent.pointerDown(option, { pointerType: "touch" });
+    fireEvent.click(option);
+    fireEvent.pointerLeave(trigger, { pointerType: "touch" });
+    frameCallbacks.shift()?.(0);
+    frameCallbacks.shift()?.(0);
+    fireEvent.blur(trigger);
+    fireEvent.focus(trigger);
+
+    expect(screen.getByTestId(TOOLTIP_ROOT_TEST_ID).getAttribute("data-open")).toBe("false");
+
+    fireEvent.pointerEnter(trigger, { pointerType: "mouse" });
+
+    expect(screen.getByTestId(TOOLTIP_ROOT_TEST_ID).getAttribute("data-open")).toBe("true");
+  });
+
+  it("wraps long repository paths inside a viewport-safe tooltip", () => {
+    renderTooltipPill({
+      value: "repository",
+      tooltip: `Repository · C:\\${"unbroken-path-segment".repeat(20)}`,
+    });
+
+    const classes = screen.getByTestId("tooltip-content").classList;
+    expect(classes.contains("max-w-[calc(100vw-2rem)]")).toBe(true);
+    expect(classes.contains("break-all")).toBe(true);
+  });
+
+  it("releases picker tooltip suppression when the keyboard leaves the trigger", async () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    renderTooltipPill({ options: [{ value: "repo-1", label: "repo-one" }] });
+
+    const trigger = screen.getByRole("button", { name: new RegExp(TOOLTIP_PILL_VALUE, "i") });
+    fireEvent.click(trigger);
+    fireEvent.click(await screen.findByRole("option", { name: "repo-one" }));
+    fireEvent.blur(trigger);
+    fireEvent.focus(trigger);
+
+    expect(screen.getByTestId(TOOLTIP_ROOT_TEST_ID).getAttribute("data-open")).toBe("true");
   });
 });
 
@@ -194,5 +339,47 @@ describe("Pill popover", () => {
     const content = document.body.querySelector('[data-slot="popover-content"]');
     expect(content).not.toBeNull();
     expect(screen.getByTestId("clipping-host").contains(content)).toBe(false);
+  });
+
+  it("activates an optional toolbar action with a pointer", () => {
+    const onAction = vi.fn();
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value=""
+        placeholder="repository"
+        options={[]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search repositories..."
+        emptyMessage="No repositories"
+        action={{ label: CREATE_REPOSITORY, onSelect: onAction }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("repository"));
+    fireEvent.click(screen.getByRole("button", { name: CREATE_REPOSITORY }));
+
+    expect(onAction).toHaveBeenCalledOnce();
+  });
+
+  it("renders an optional toolbar action outside the option list", () => {
+    const onAction = vi.fn();
+    render(
+      <Pill
+        icon={<span aria-hidden="true" />}
+        value=""
+        placeholder="repository"
+        options={[]}
+        onSelect={vi.fn()}
+        searchPlaceholder="Search repositories..."
+        emptyMessage="No repositories"
+        action={{ label: CREATE_REPOSITORY, onSelect: onAction }}
+      />,
+    );
+
+    fireEvent.click(screen.getByText("repository"));
+    expect(screen.getByRole("button", { name: CREATE_REPOSITORY })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: CREATE_REPOSITORY })).toBeNull();
+    expect(onAction).not.toHaveBeenCalled();
   });
 });

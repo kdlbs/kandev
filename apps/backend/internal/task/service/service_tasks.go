@@ -612,9 +612,12 @@ func pathAtOrInsideRoot(path, root string) bool {
 }
 
 // resolveRepoInputLocal handles the LocalPath branch of resolveRepoInput.
-// Looks the path up in the workspace snapshot; on miss, calls
-// CreateRepository (and reports created=true). Extracted to keep
-// resolveRepoInput inside the cyclomatic-complexity budget.
+// Looks the path up in the workspace snapshot first; on miss, delegates to
+// FindOrCreateRepositoryByLocalPath, which re-checks the canonical path
+// against the database immediately before inserting (see repoResolveMu) so a
+// second resolver racing this one onto the same on-disk repo reuses its row
+// instead of creating a sibling duplicate. Extracted to keep resolveRepoInput
+// inside the cyclomatic-complexity budget.
 func (s *Service) resolveRepoInputLocal(
 	ctx context.Context, workspaceID string, repoInput TaskRepositoryInput,
 	repoByPath map[string]*models.Repository, baseBranch string,
@@ -651,22 +654,30 @@ func (s *Service) resolveRepoInputLocal(
 				defaultBranch = probedBranch
 			}
 		}
-		createdRepo, createErr := s.CreateRepository(ctx, &CreateRepositoryRequest{
+		// identityPath is left empty when canonicalization failed: there is no
+		// reliable identity to dedupe against in that case, so
+		// FindOrCreateRepositoryByLocalPath always creates — same as prior
+		// behavior for that edge case.
+		var identityPath string
+		if pathErr == nil {
+			identityPath = canonicalPath
+		}
+		resolved, wasCreated, resolveErr := s.FindOrCreateRepositoryByLocalPath(ctx, workspaceID, identityPath, &CreateRepositoryRequest{
 			WorkspaceID:   workspaceID,
 			Name:          name,
 			SourceType:    "local",
 			LocalPath:     repoInput.LocalPath,
 			DefaultBranch: defaultBranch,
 		})
-		if createErr != nil {
-			return "", "", false, createErr
+		if resolveErr != nil {
+			return "", "", false, resolveErr
 		}
-		repo = createdRepo
+		repo = resolved
 		if repoByPath != nil {
 			repoByPath[repoInput.LocalPath] = repo
 			repoByPath[repo.LocalPath] = repo
 		}
-		created = true
+		created = wasCreated
 	} else {
 		replacement, replacementCreated, replaceErr := s.replaceTaskWorktreeRepositoryMatch(ctx, workspaceID, repo)
 		if replaceErr != nil {
@@ -1014,6 +1025,14 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if req.Metadata != nil {
 		task.Metadata = req.Metadata
 	}
+	parentCleared := false
+	if req.ParentID != nil && *req.ParentID != task.ParentID {
+		if err := s.resolveParentID(ctx, task, *req.ParentID); err != nil {
+			return nil, err
+		}
+		parentCleared = *req.ParentID == ""
+		task.ParentID = *req.ParentID
+	}
 	task.UpdatedAt = time.Now().UTC()
 
 	if err := s.tasks.UpdateTask(ctx, task); err != nil {
@@ -1039,10 +1058,111 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if stateChanged && oldState != nil {
 		s.publishTaskEvent(ctx, events.TaskStateChanged, task, oldState)
 	}
-	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	if parentCleared {
+		// Explicitly signal the un-nest with parent_id: nil so clients can
+		// distinguish "parent removed" from "parent unchanged" — matching the
+		// detach path's event contract. publishTaskEvent otherwise omits an
+		// empty parent_id entirely.
+		s.publishTaskEventWithExtra(ctx, events.TaskUpdated, task, nil, map[string]interface{}{parentIDEventField: nil})
+	} else {
+		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	}
 	s.logger.Info("task updated", zap.String("task_id", task.ID))
 
 	return task, nil
+}
+
+// parentChainWalkLimit bounds the ancestor walk in resolveParentID so a
+// corrupted parent chain can never spin forever. Real subtask trees are
+// nowhere near this depth.
+const parentChainWalkLimit = 1000
+
+// parentIDEventField is the task-event payload key carrying a task's parent.
+// Emitting it explicitly (as nil) on un-nest lets clients tell "parent
+// removed" apart from "parent unchanged".
+const parentIDEventField = "parent_id"
+
+// ErrInvalidParent wraps every rejection from resolveParentID so HTTP/WS
+// handlers can classify a bad re-parent request as a client error (400)
+// rather than an internal error (500).
+var ErrInvalidParent = errors.New("invalid parent")
+
+// resolveParentID validates a proposed parent assignment for task. An empty
+// parentID (un-nest) is always allowed. A non-empty parentID must reference a
+// different, existing, non-archived task in the same workspace, and must not
+// introduce a cycle (nesting a task under one of its own descendants).
+func (s *Service) resolveParentID(ctx context.Context, task *models.Task, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	if parentID == task.ID {
+		return fmt.Errorf("%w: a task cannot be its own parent", ErrInvalidParent)
+	}
+	parent, err := s.tasks.GetTask(ctx, parentID)
+	if err != nil {
+		return fmt.Errorf("%w: parent task not found: %s", ErrInvalidParent, parentID)
+	}
+	if parent.WorkspaceID != task.WorkspaceID {
+		return fmt.Errorf("%w: parent task must belong to the same workspace", ErrInvalidParent)
+	}
+	if parent.ArchivedAt != nil {
+		return fmt.Errorf("%w: parent task is archived", ErrInvalidParent)
+	}
+	// Cycle detection runs before the depth guard so a self-referential
+	// re-parent reports the more specific "cycle" error rather than a depth
+	// violation.
+	if err := s.checkParentCycle(ctx, task, parent); err != nil {
+		return err
+	}
+	return s.validateReparentDepth(ctx, task, parent)
+}
+
+// checkParentCycle walks up the parent's ancestor chain. Reaching task.ID means
+// the new edge would close a cycle (task -> ... -> parent -> task).
+func (s *Service) checkParentCycle(ctx context.Context, task, parent *models.Task) error {
+	current := parent
+	for i := 0; i < parentChainWalkLimit; i++ {
+		if current.ID == task.ID {
+			return fmt.Errorf("%w: nesting would create a cycle", ErrInvalidParent)
+		}
+		if current.ParentID == "" {
+			return nil
+		}
+		ancestor, err := s.tasks.GetTask(ctx, current.ParentID)
+		if err != nil {
+			// Broken chain — treat the missing ancestor as a root so we don't
+			// block a legitimate re-parent on inconsistent data.
+			return nil
+		}
+		current = ancestor
+	}
+	return fmt.Errorf("%w: parent chain too deep", ErrInvalidParent)
+}
+
+// validateReparentDepth enforces the one-level subtask limit for kanban
+// (non-office) tasks on the re-parent path, mirroring validateSubtaskDepth on
+// the create path. Office task trees intentionally allow arbitrary depth, so
+// the guard is skipped when either endpoint is an Office task. The returned
+// error wraps both ErrInvalidParent (so handlers map it to HTTP 400) and
+// ErrSubtaskDepthExceeded (so callers can still classify the depth violation).
+func (s *Service) validateReparentDepth(ctx context.Context, task, parent *models.Task) error {
+	if task.IsFromOffice || parent.IsFromOffice {
+		return nil
+	}
+	// Nesting under a task that is itself a subtask would create a grandchild.
+	if parent.ParentID != "" {
+		return fmt.Errorf("%w: %w", ErrInvalidParent, ErrSubtaskDepthExceeded)
+	}
+	// Moving a task that already has children would push those children to
+	// depth 2 under the new parent.
+	children, err := s.tasks.ListChildren(ctx, task.ID)
+	if err != nil {
+		return fmt.Errorf("%w: failed to check existing subtasks: %v", ErrInvalidParent, err)
+	}
+	if len(children) > 0 {
+		return fmt.Errorf("%w: %w", ErrInvalidParent, ErrSubtaskDepthExceeded)
+	}
+	return nil
 }
 
 type taskMessageRollbackRepository interface {
@@ -1243,7 +1363,7 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 	var cancelledSessions []*models.TaskSession
 	var cancelErr error
 	for attempt := 1; attempt <= maxCancelAttempts; attempt++ {
-		cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(ctx, taskID, "task archived")
+		cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(ctx, taskID, models.SessionArchiveCancelReason)
 		if cancelErr == nil {
 			break
 		}
@@ -1275,7 +1395,7 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 	// can no longer consume a shared batch-wide budget and starve the
 	// events for sessions later in the loop.
 	detachedCtx := context.WithoutCancel(ctx)
-	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, "task archived")
+	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)
 }
 
 func (s *Service) registerTaskRuntimeStopOwners(stopTargets []taskStopTarget, force bool) {

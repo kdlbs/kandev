@@ -473,10 +473,13 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"terminalFontFamily":          nullString(settings.TerminalFontFamily),
 		"terminalFontSize":            nullInt(settings.TerminalFontSize),
 		"changesPanelLayout":          changesPanelLayout(settings.ChangesPanelLayout),
-		"systemMetricsDisplay":        map[string]any{"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar},
-		"appStatusBarOrder":           mapAppStatusBarOrder(settings.AppStatusBarOrder),
-		"voiceMode":                   mapVoiceMode(settings.VoiceMode),
-		"loaded":                      true,
+		"systemMetricsDisplay": map[string]any{
+			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
+			"simplified":   settings.SystemMetricsDisplay.Simplified,
+		},
+		"appStatusBarOrder": mapAppStatusBarOrder(settings.AppStatusBarOrder),
+		"voiceMode":         mapVoiceMode(settings.VoiceMode),
+		"loaded":            true,
 	}
 }
 

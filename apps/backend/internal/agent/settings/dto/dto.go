@@ -34,7 +34,10 @@ type AgentProfileDTO struct {
 	CLIFlags         []CLIFlagDTO       `json:"cli_flags"`
 	EnvVars          []ProfileEnvVarDTO `json:"env_vars,omitempty"`
 	CLIPassthrough   bool               `json:"cli_passthrough"`
-	UserModified     bool               `json:"user_modified"`
+	// CommandPrefix is an optional launcher prefix prepended to the agent
+	// command (e.g. "greywall --"). Shell-tokenised at launch time.
+	CommandPrefix string `json:"command_prefix,omitempty"`
+	UserModified  bool   `json:"user_modified"`
 	// WorkspaceID scopes the profile to an office workspace. Empty for
 	// shallow kanban-only profiles. Surfaced so consumers (e.g. test
 	// cleanup helpers) can distinguish office-owned profiles from
@@ -273,6 +276,7 @@ type CommandPreviewRequest struct {
 	Model              string          `json:"model"`
 	PermissionSettings map[string]bool `json:"permission_settings"`
 	CLIPassthrough     bool            `json:"cli_passthrough"`
+	CommandPrefix      string          `json:"command_prefix,omitempty"`
 }
 
 // CommandPreviewResponse is the response for the command preview endpoint

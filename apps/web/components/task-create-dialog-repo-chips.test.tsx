@@ -4,10 +4,8 @@ import type { Branch, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "./task-create-dialog-types";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
-// One mocked branches hook now — id-based and path-based rows go through
-// the same loader. Tests can override the return value when they need
-// branch-specific assertions; the mockBySource handle lets a test prove
-// which kind of source the chip passed in.
+// The unified branch mock lets tests override results and inspect whether
+// chips select an id-based or path-based source.
 const lastBranchSource = vi.hoisted((): { value: unknown } => ({ value: null }));
 const mockBranches = vi.hoisted((): { value: { branches: Branch[]; isLoading: boolean } } => ({
   value: { branches: [], isLoading: false },
@@ -58,11 +56,9 @@ function row(overrides: Partial<TaskRepoRow> = {}): TaskRepoRow {
 }
 
 function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
-  // Only the fields RepoChipsRow actually reads/sets need to be real.
-  const remoteUrl = (overrides.remoteRepos?.[0]?.url ?? "") as string;
   const branchesByUrl = {
     branches: (url: string) =>
-      url === remoteUrl
+      url === (overrides.remoteRepos?.[0]?.url ?? "")
         ? ((overrides as Partial<DialogFormState>).branchesByUrl?.branches(url) ?? [])
         : [],
     loading: () => false,
@@ -200,6 +196,28 @@ describe("RepoChipsRow", () => {
     expect(onRowBranchChange).toHaveBeenCalledWith("r0", "feature/x");
   });
 
+  it("uses the symbolic current branch for an unborn local repository", () => {
+    mockBranches.value = { branches: [], isLoading: false };
+    const onRowBranchChange = vi.fn();
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({
+          repositories: [row({ key: "r0", repositoryId: REPO_FRONT_ID })],
+          currentLocalBranch: "main",
+          currentLocalBranchLoading: false,
+        })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={onRowBranchChange}
+        isLocalExecutor
+      />,
+    );
+
+    expect(onRowBranchChange).toHaveBeenCalledWith("r0", "main");
+  });
+
   it("local-executor row shows the loading placeholder while resolving the current branch", () => {
     mockBranches.value = { branches: [], isLoading: false };
     renderInProvider(
@@ -243,8 +261,7 @@ describe("RepoChipsRow", () => {
         onRowBranchChange={NOOP}
       />,
     );
-    const btn = screen.getByTestId("add-repository") as HTMLButtonElement;
-    expect(btn.disabled).toBe(false);
+    expect((screen.getByTestId("add-repository") as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("calls fs.addRepository when the + button is clicked", () => {
@@ -403,7 +420,6 @@ describe("RepoChipsRow", () => {
     fireEvent.click(screen.getByTestId("branch-chip-trigger"));
     expect(screen.getByText("main")).toBeTruthy();
     expect(screen.getByText("origin/main")).toBeTruthy();
-    // Reset for sibling tests.
     mockBranches.value = { branches: [], isLoading: false };
   });
 });
@@ -456,6 +472,78 @@ describe("WorkspaceRepoChips duplicate policy", () => {
 
     expect(screen.getByRole("option", { name: /^frontend/ })).toBeTruthy();
     expect(screen.getByRole("option", { name: /^backend/ })).toBeTruthy();
+  });
+
+  it("does not expose repository creation when the caller does not opt in", () => {
+    renderWorkspaceChips(false);
+
+    fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[1]);
+
+    expect(screen.queryByText("Create new repository")).toBeNull();
+  });
+
+  it("routes repository creation to the only row", () => {
+    const onCreateRepository = vi.fn();
+    renderInProvider(
+      <WorkspaceRepoChips
+        rows={[workspaceRows[0]]}
+        repositories={workspaceRepositories}
+        workspaceId="ws-1"
+        canAddMore
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        onCreateRepository={onCreateRepository}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
+    fireEvent.click(screen.getByTestId("create-local-repository-button"));
+
+    expect(onCreateRepository).toHaveBeenCalledWith("r0");
+  });
+
+  it("refreshes repositories from the selector toolbar", () => {
+    const onRefreshRepositories = vi.fn();
+    renderInProvider(
+      <WorkspaceRepoChips
+        rows={[workspaceRows[0]]}
+        repositories={workspaceRepositories}
+        workspaceId="ws-1"
+        canAddMore
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        onRefreshRepositories={onRefreshRepositories}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER));
+    fireEvent.click(screen.getByTestId("repo-refresh-button"));
+
+    expect(onRefreshRepositories).toHaveBeenCalledOnce();
+  });
+
+  it("does not expose repository creation for multi-repository tasks", () => {
+    renderInProvider(
+      <WorkspaceRepoChips
+        rows={workspaceRows}
+        repositories={workspaceRepositories}
+        workspaceId="ws-1"
+        canAddMore
+        onAdd={vi.fn()}
+        onRemove={vi.fn()}
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        onCreateRepository={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[1]);
+
+    expect(screen.queryByText("Create new repository")).toBeNull();
   });
 });
 

@@ -43,7 +43,7 @@ Office therefore treats a workspace-scoped rich `agent_profiles` row as a stable
 ### CEO agent
 
 - The CEO is an agent instance with `role=ceo` and elevated permissions.
-- The CEO does not write code. It reads task descriptions, decomposes them into subtasks, assigns them to workers, and monitors completion.
+- The CEO does not write code. It reads task descriptions and evidence, handles small coordination or status concerns directly, decomposes implementation work into subtasks, assigns them to workers, and monitors completion.
 - The CEO's system prompt includes its delegation rules, the current org tree, the workspace's project structure, and the current task backlog (unassigned and in-progress).
 - The CEO creates worker agents when no suitable worker exists for a task type, via the hire flow.
 - The CEO is configured with a high-capability reasoning model, user-selectable via the profile.
@@ -320,9 +320,9 @@ When the scheduler processes a wakeup:
 
 Seeded on agent creation; users edit them in the Instructions tab.
 
-- **CEO `AGENTS.md`**: persona ("You are the CEO. You lead the company, not do individual work."), delegation routing table (code -> CTO, marketing -> CMO, etc.), rules (always delegate, never implement, post comments explaining decisions), subtask creation procedure, references to `./HEARTBEAT.md`.
-- **CEO `HEARTBEAT.md`** (8-step checklist): read wake reason; if `task_assigned` triage and delegate; if `task_comment` read and respond; if `task_children_completed` review and complete parent; if `approval_resolved` act on decision; if `heartbeat` check workspace status and reassign stalled tasks; post comments on all actions; exit.
-- **Worker `AGENTS.md`**: persona ("You are a worker agent. You implement tasks assigned to you."), procedure (read task -> check blockers -> do the work -> post progress -> update status), rules (only work on assigned tasks, write tests, focused commits), subtask creation for self-decomposition.
+- **CEO `AGENTS.md`**: persona ("You are the CEO. You lead the company, not do individual work."), delegation routing table (code -> CTO, marketing -> CMO, etc.), rules (directly handle first triage and small coordination/status concerns; delegate implementation work; post comments explaining decisions), subtask creation procedure, references to `./HEARTBEAT.md`.
+- **CEO `HEARTBEAT.md`** (8-step checklist): read wake reason; if `task_assigned` triage directly and delegate only when independent evidence justifies it; if `task_comment` read and respond; if `task_children_completed` review and complete parent; if `approval_resolved` act on decision; if `heartbeat` check workspace status and reassign stalled tasks; post comments on all actions; exit.
+- **Worker `AGENTS.md`**: persona ("You are a worker agent. You implement tasks assigned to you."), procedure (read task -> check blockers -> do the work -> post progress -> update status), rules (only work on assigned tasks, write tests, focused commits), and scope escalation to the CEO rather than recursive self-decomposition by default.
 - **Reviewer `AGENTS.md`**: persona ("You are a reviewer. You review work done by other agents."), review checklist (correctness, quality, security, performance), approve/reject procedure, rules (be specific, suggest fixes, approve if meets requirements).
 
 ## API surface

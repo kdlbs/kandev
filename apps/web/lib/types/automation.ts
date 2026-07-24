@@ -8,6 +8,7 @@ export type RunStatus =
   | "succeeded"
   | "failed"
   | "skipped"
+  | "archived"
   | "cancelled";
 
 // ExecutionMode controls whether an automation firing creates a visible

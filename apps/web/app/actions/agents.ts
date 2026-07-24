@@ -74,6 +74,7 @@ export async function createAgentAction(payload: {
       mode?: string;
       cli_passthrough: boolean;
       cli_flags?: CLIFlag[];
+      command_prefix?: string;
       env_vars?: ProfileEnvVar[];
     } & ProfilePermissions
   >;
@@ -113,6 +114,7 @@ export async function createAgentProfileAction(
     config_options?: Record<string, string>;
     cli_passthrough: boolean;
     cli_flags?: CLIFlag[];
+    command_prefix?: string;
     env_vars?: ProfileEnvVar[];
   } & ProfilePermissions,
 ): Promise<AgentProfile> {
@@ -134,6 +136,7 @@ export async function updateAgentProfileAction(
     auto_approve?: boolean;
     cli_passthrough?: boolean;
     cli_flags?: CLIFlag[];
+    command_prefix?: string;
     env_vars?: ProfileEnvVar[];
   },
 ): Promise<AgentProfile> {
@@ -221,6 +224,7 @@ export type CommandPreviewRequest = {
   permission_settings: Record<string, boolean>;
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
+  command_prefix?: string;
 };
 
 export type CommandPreviewResponse = {

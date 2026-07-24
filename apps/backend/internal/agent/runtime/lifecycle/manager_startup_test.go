@@ -22,8 +22,9 @@ type blockingAgentProfileResolver struct {
 }
 
 type cancellableAgentProfileResolver struct {
-	entered chan struct{}
-	release chan struct{}
+	entered   chan struct{}
+	cancelled chan struct{}
+	release   chan struct{}
 }
 
 func (r *cancellableAgentProfileResolver) ResolveProfile(
@@ -33,6 +34,8 @@ func (r *cancellableAgentProfileResolver) ResolveProfile(
 	close(r.entered)
 	select {
 	case <-ctx.Done():
+		close(r.cancelled)
+		<-r.release
 		return nil, ctx.Err()
 	case <-r.release:
 		return &AgentProfileInfo{AgentID: "mock-agent"}, nil
@@ -140,7 +143,7 @@ func TestTerminalInvalidationCancelsAndDrainsAdmittedStart(t *testing.T) {
 	coordinator := activity.NewCoordinator(activity.Options{})
 	mgr.SetActivityCoordinator(coordinator)
 	resolver := &cancellableAgentProfileResolver{
-		entered: make(chan struct{}), release: make(chan struct{}),
+		entered: make(chan struct{}), cancelled: make(chan struct{}), release: make(chan struct{}),
 	}
 	mgr.profileResolver = resolver
 	if err := mgr.executionStore.Add(&AgentExecution{
@@ -153,6 +156,7 @@ func TestTerminalInvalidationCancelsAndDrainsAdmittedStart(t *testing.T) {
 	go func() { result <- mgr.StartAgentProcess(context.Background(), "exec-invalidated") }()
 	<-resolver.entered
 	mgr.releaseActivity(executionActivityKey("exec-invalidated"))
+	<-resolver.cancelled
 	maintenance, _, maintenanceErr := coordinator.TryAcquireMaintenance(context.Background(), 0)
 	if maintenance != nil {
 		maintenance.Release()
@@ -162,6 +166,7 @@ func TestTerminalInvalidationCancelsAndDrainsAdmittedStart(t *testing.T) {
 		<-result
 		t.Fatalf("maintenance error = %v, want ErrBusy until invalidated start drains", maintenanceErr)
 	}
+	close(resolver.release)
 	if err := <-result; !errors.Is(err, errExecutionActivityInvalidated) {
 		t.Fatalf("StartAgentProcess error = %v, want claim invalidation", err)
 	}

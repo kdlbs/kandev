@@ -23,15 +23,18 @@ Workflow position and runtime state are different. Moving a card changes its wor
 
 ## Prepare a workspace
 
-A new workspace created by a user does not automatically receive a workflow.
+A new workspace created from **Settings → Workspaces** automatically receives a **Kanban** workflow
+with the built-in Kanban steps, so it can accept tasks immediately.
 
 1. Open **Settings → Workspaces** and select **Add Workspace**.
 2. Enter the required workspace name.
-3. Open the workspace's **Repositories** page and add the local repositories the workspace needs. Remote URLs are not registered on this page; enter them through **New Task → Remote**.
-4. Open its **Workflows** page and create, import, or synchronize a workflow.
+3. Open the workspace's **Repositories** page and add existing local repositories the workspace needs. You can also initialize a new empty repository while creating a task. Remote URLs are not registered on this page; enter them through **New Task → Remote**.
+4. Open its **Workflows** page to review the default **Kanban** workflow. Create, import, or synchronize another workflow when the workspace needs a different process.
 5. On **Workspace Settings**, optionally choose a **Default Executor** and **Default Agent Profile**. Both default to **No default** unless configured.
 
-The initial database bootstrap can include a **Default Workspace** and a simple development workflow. Do not assume a later workspace inherits them.
+The initial database bootstrap can include a **Default Workspace** and a **Development** workflow.
+Later user-created workspaces receive **Kanban** instead; they do not inherit other workflows or
+settings from the default workspace.
 
 ## Create a task
 
@@ -51,7 +54,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 
    | Source | Use it for | Important behavior |
    |---|---|---|
-   | **Repo** | A configured or discovered local repository | Select a base branch for each repository row. Add more rows for a multi-repository task. |
+   | **Repo** | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task. |
    | **Remote** | A remote repository | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL; then select the branch. Clone and fetch require valid credentials. |
    | **None** | Planning, research, or work outside Git | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable. |
 
@@ -67,6 +70,8 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    On mobile, the two non-primary actions are separate buttons labeled **Plan mode** and **Create only**; they have the same plan-mode and create-without-agent behavior.
 
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
+
+Creating a repository is available only in an unlocked, single-repository **New Task** form. Kandev rejects an existing target path, creates no initial files or commit, registers the repository in the workspace, and switches the task to a direct **Local** executor profile. If no direct Local profile is available, repository creation stays disabled. Add more repository rows only after selecting existing repositories; empty multi-repository worktrees are not supported.
 
 ### Choose the profile for tasks created by agents
 

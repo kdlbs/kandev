@@ -23,8 +23,9 @@ scoped work may be direct under `/planner-orchestration`. Workers do not spawn.
 - **`spark-explorer`** - Codex-only opt-in read-only specialist for bounded call-path tracing and evidence gathering; never use it for architecture, security, final review, implementation, or edits.
 - **`spark-implementer`** - Codex-only opt-in specialist for explicit localized low-risk UI or code edits; use the normal implementer for work outside its stop conditions.
 
-If a required worker cannot be launched, stop and report the unavailable role.
-Never execute that worker's phase in the planner session.
+If an exceptional required worker cannot be launched, stop and report the
+unavailable role. Small, localized implementation and initial investigation
+remain planner work; do not invent a worker phase for them.
 
 ## Core Flow
 
@@ -194,7 +195,8 @@ For each task:
   `plan.md` unless the work packet explicitly owns that shared file and the
   update is serialized outside parallel execution.
 
-Assign every independent task to the normal `implementer` worker by default.
+Keep small, localized tasks in the planner session by default. Delegate only
+substantial independent tasks with a stated reason direct work is insufficient.
 Codex may use `spark-implementer` only for an explicit, localized low-risk UI
 or code edit when none of its documented stop conditions apply; if there is
 doubt, use the normal `implementer`. Keep the same file-ownership, wave, TDD,

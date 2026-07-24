@@ -636,6 +636,9 @@ type AgentProfileInfo struct {
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
 	// profile. Passed verbatim to cliflags.Resolve at launch time.
 	CLIFlags []settingsmodels.CLIFlag
+	// CommandPrefix is an optional launcher prefix (e.g. "greywall --")
+	// shell-tokenised and prepended to the agent command at launch time.
+	CommandPrefix string
 	// EnvVars are user-configured environment variables for this profile.
 	EnvVars []settingsmodels.ProfileEnvVar
 

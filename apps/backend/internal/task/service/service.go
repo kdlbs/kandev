@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -114,6 +115,12 @@ type WorkflowStepCreator interface {
 	CreateStepsFromTemplate(ctx context.Context, workflowID, templateID string) error
 }
 
+// WorkspaceBootstrapper owns the atomic persistence of a standard Kanban
+// workspace and its initial workflow state.
+type WorkspaceBootstrapper interface {
+	CreateWorkspaceWithKanban(ctx context.Context, workspace *models.Workspace) (*models.Workflow, error)
+}
+
 // WorkflowStepGetter retrieves workflow step information.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
@@ -203,6 +210,7 @@ type Service struct {
 	providerProber        ProviderDefaultBranchProber
 	gitArchiveCapture     GitArchiveCapture
 	workflowStepCreator   WorkflowStepCreator
+	workspaceBootstrapper WorkspaceBootstrapper
 	workflowStepGetter    WorkflowStepGetter
 	startStepResolver     StartStepResolver
 	prTaskResolver        PRTaskResolver
@@ -224,6 +232,14 @@ type Service struct {
 	cleanupWorkerWake   chan struct{}
 	cleanupRunsMu       sync.Mutex
 	cleanupRuns         map[*taskResourceCleanupRun]struct{}
+	// repoResolveMu serializes the check-then-create sections of
+	// FindOrCreateRepository and FindOrCreateRepositoryByLocalPath so two
+	// resolvers racing to register the same not-yet-known repository (by
+	// provider identity or by canonical local_path) converge on a single row
+	// instead of each inserting a duplicate. Covers concurrent requests
+	// within this backend process only — this backend is single-process per
+	// SQLite database, so that is the complete threat model today.
+	repoResolveMu sync.Mutex
 }
 
 // NewService creates a new task service
@@ -299,6 +315,10 @@ func (s *Service) SetGitArchiveCapture(capture GitArchiveCapture) {
 // SetWorkflowStepCreator wires the workflow step creator for workflow creation.
 func (s *Service) SetWorkflowStepCreator(creator WorkflowStepCreator) {
 	s.workflowStepCreator = creator
+}
+
+func (s *Service) SetWorkspaceBootstrapper(bootstrapper WorkspaceBootstrapper) {
+	s.workspaceBootstrapper = bootstrapper
 }
 
 // SetWorkflowStepGetter wires the workflow step getter for MoveTask.

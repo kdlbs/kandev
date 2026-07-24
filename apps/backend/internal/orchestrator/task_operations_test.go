@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -65,6 +66,21 @@ func seedTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessi
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
+}
+
+// taskEnvironmentFailureRepo injects an error after session creation but before
+// Executor reaches AgentManager.LaunchAgent. This models workspace-preparation
+// failures, which do not trigger the executor's launch-failure callback.
+type taskEnvironmentFailureRepo struct {
+	*sqliterepo.Repository
+	err    error
+	called chan struct{}
+	once   sync.Once
+}
+
+func (r *taskEnvironmentFailureRepo) GetTaskEnvironmentByTaskID(_ context.Context, _ string) (*models.TaskEnvironment, error) {
+	r.once.Do(func() { close(r.called) })
+	return nil, r.err
 }
 
 func TestCreateStartSession_KanbanRunnerCreatesDistinctSession(t *testing.T) {
@@ -2251,6 +2267,421 @@ func TestStartCreatedSession_NotInCreatedState(t *testing.T) {
 	}
 }
 
+func TestStartCreatedSession_MissingRemoteRefCreatesNeutralRecoveryMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+
+	launchErr := errors.New("environment preparation failed: fatal: couldn't find remote ref feature/deleted-pr")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		Title:       "Test Task",
+		Description: "start the task",
+		State:       v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
+	svc.executor.SetOnSessionStateChange(func(callbackCtx context.Context, callbackTaskID, callbackSessionID string, state models.TaskSessionState, errorMessage string) error {
+		svc.updateTaskSessionState(callbackCtx, callbackTaskID, callbackSessionID, state, errorMessage, true)
+		return nil
+	})
+
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "start the task", true, false, true, nil, nil)
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("StartCreatedSession error = %v, want %v", err, launchErr)
+	}
+
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("expected one recovery message, got %d", len(messages.sessionMessages))
+	}
+	message := messages.sessionMessages[0]
+	if message.metadata["failure_kind"] != "branch_fetch_failed" {
+		t.Fatalf("failure_kind = %#v, want branch_fetch_failed", message.metadata["failure_kind"])
+	}
+	if _, ok := message.metadata["actions"]; ok {
+		t.Fatalf("expected neutral guidance without archive/delete actions, got %#v", message.metadata["actions"])
+	}
+}
+
+func TestStartCreatedSession_MissingRemoteRefDoesNotDuplicateExecutorRecoveryMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+
+	launchErr := errors.New("environment preparation failed: fatal: couldn't find remote ref feature/deleted-pr")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		Title:       "Test Task",
+		Description: "start the task",
+		State:       v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+	svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
+	// Production routes terminal failures through the strict transition callback
+	// so recovery guidance can set suppressToast before state_changed publishes it.
+	svc.executor.SetOnSessionStateTransition(svc.transitionTaskSessionState)
+
+	_, err := svc.StartCreatedSession(ctx, "task1", "session1", "profile1", "start the task", true, false, true, nil, nil)
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("StartCreatedSession error = %v, want %v", err, launchErr)
+	}
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("expected exactly one recovery message, got %d", len(messages.sessionMessages))
+	}
+	if _, suppressed := svc.suppressToast.Load("session1"); suppressed {
+		t.Fatal("state-change publishing did not consume the toast-suppression marker")
+	}
+}
+
+func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
+	const (
+		taskID = "task1"
+	)
+
+	newTask := func() *v1.Task {
+		return &v1.Task{
+			ID:          taskID,
+			WorkspaceID: "ws1",
+			WorkflowID:  "wf1",
+			Title:       "Test Task",
+			Description: "prepare the workspace",
+			State:       v1.TaskStateInProgress,
+		}
+	}
+
+	t.Run("early missing remote ref creates one neutral recovery message", func(t *testing.T) {
+		baseRepo := setupTestRepo(t)
+		seedTaskAndSession(t, baseRepo, taskID, "existing-session", models.TaskSessionStateCreated)
+		failureRepo := &taskEnvironmentFailureRepo{
+			Repository: baseRepo,
+			err:        errors.New("environment preparation failed: fatal: couldn't find remote ref feature/deleted-pr"),
+			called:     make(chan struct{}),
+		}
+		taskRepo := newMockTaskRepo()
+		taskRepo.tasks[taskID] = newTask()
+		agentMgr := &mockAgentManager{}
+		exec := executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{})
+		svc := &Service{
+			logger:             testLogger(),
+			repo:               failureRepo,
+			workflowStepGetter: newMockStepGetter(),
+			taskRepo:           taskRepo,
+			agentManager:       agentMgr,
+			executor:           exec,
+			messageQueue:       messagequeue.NewServiceMemory(testLogger()),
+			scheduler:          scheduler.NewScheduler(queue.NewTaskQueue(1), exec, taskRepo, testLogger(), scheduler.SchedulerConfig{}),
+		}
+		messages := &mockMessageCreator{sessionMessageDone: make(chan struct{})}
+		svc.messageCreator = messages
+		svc.eventBus = bus.NewMemoryEventBus(testLogger())
+
+		sessionID, err := svc.PrepareTaskSession(context.Background(), taskID, "profile1", "", "", "", true)
+		if err != nil {
+			t.Fatalf("PrepareTaskSession: %v", err)
+		}
+
+		select {
+		case <-messages.sessionMessageDone:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for missing-branch recovery message")
+		}
+		if len(messages.sessionMessages) != 1 {
+			t.Fatalf("expected exactly one recovery message, got %d", len(messages.sessionMessages))
+		}
+		message := messages.sessionMessages[0]
+		if message.sessionID != sessionID {
+			t.Fatalf("recovery message session = %q, want %q", message.sessionID, sessionID)
+		}
+		if message.metadata["failure_kind"] != "branch_fetch_failed" {
+			t.Fatalf("failure_kind = %#v, want branch_fetch_failed", message.metadata["failure_kind"])
+		}
+		if _, ok := message.metadata["actions"]; ok {
+			t.Fatalf("expected neutral guidance without archive/delete actions, got %#v", message.metadata["actions"])
+		}
+		require.Eventually(t, func() bool {
+			failedSession, getErr := baseRepo.GetTaskSession(context.Background(), sessionID)
+			return getErr == nil && failedSession.State == models.TaskSessionStateFailed
+		}, time.Second, 10*time.Millisecond, "expected early launch failure to mark the session FAILED")
+		require.Eventually(t, func() bool {
+			taskRepo.mu.Lock()
+			defer taskRepo.mu.Unlock()
+			return taskRepo.updatedStates[taskID] == v1.TaskStateFailed
+		}, time.Second, 10*time.Millisecond, "expected early launch failure to mark the task FAILED")
+		if _, suppressed := svc.suppressToast.Load(sessionID); suppressed {
+			t.Fatal("missing-branch recovery left a stale toast-suppression marker")
+		}
+	})
+
+	t.Run("transport failure does not create missing-branch recovery", func(t *testing.T) {
+		baseRepo := setupTestRepo(t)
+		seedTaskAndSession(t, baseRepo, taskID, "existing-session", models.TaskSessionStateCreated)
+		failureRepo := &taskEnvironmentFailureRepo{
+			Repository: baseRepo,
+			err:        errors.New("environment preparation failed: branch \"feature/deleted-pr\" not found locally or on remote: fatal: unable to access 'https://github.com/kdlbs/kandev.git/': Could not resolve host: github.com"),
+			called:     make(chan struct{}),
+		}
+		taskRepo := newMockTaskRepo()
+		taskRepo.tasks[taskID] = newTask()
+		agentMgr := &mockAgentManager{}
+		exec := executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{})
+		svc := &Service{
+			logger:             testLogger(),
+			repo:               failureRepo,
+			workflowStepGetter: newMockStepGetter(),
+			taskRepo:           taskRepo,
+			agentManager:       agentMgr,
+			executor:           exec,
+			messageQueue:       messagequeue.NewServiceMemory(testLogger()),
+			scheduler:          scheduler.NewScheduler(queue.NewTaskQueue(1), exec, taskRepo, testLogger(), scheduler.SchedulerConfig{}),
+		}
+		messages := &mockMessageCreator{sessionMessageDone: make(chan struct{})}
+		svc.messageCreator = messages
+
+		if _, err := svc.PrepareTaskSession(context.Background(), taskID, "profile1", "", "", "", true); err != nil {
+			t.Fatalf("PrepareTaskSession: %v", err)
+		}
+		select {
+		case <-failureRepo.called:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for workspace launch")
+		}
+		select {
+		case <-messages.sessionMessageDone:
+			t.Fatal("transport failure created missing-branch recovery message")
+		case <-time.After(100 * time.Millisecond):
+		}
+	})
+
+	t.Run("executor callback recovery is not duplicated", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedTaskAndSession(t, repo, taskID, "existing-session", models.TaskSessionStateCreated)
+		taskRepo := newMockTaskRepo()
+		taskRepo.tasks[taskID] = newTask()
+		launchErr := errors.New("environment preparation failed: fatal: couldn't find remote ref feature/deleted-pr")
+		agentMgr := &mockAgentManager{
+			launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				return nil, launchErr
+			},
+		}
+		svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+		svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
+		svc.eventBus = bus.NewMemoryEventBus(testLogger())
+		svc.executor.SetOnSessionStateChange(func(callbackCtx context.Context, callbackTaskID, callbackSessionID string, state models.TaskSessionState, errorMessage string) error {
+			svc.updateTaskSessionState(callbackCtx, callbackTaskID, callbackSessionID, state, errorMessage, true)
+			return nil
+		})
+		messages := &mockMessageCreator{sessionMessageDone: make(chan struct{})}
+		svc.messageCreator = messages
+
+		sessionID, err := svc.PrepareTaskSession(context.Background(), taskID, "profile1", "", "", "", true)
+		if err != nil {
+			t.Fatalf("PrepareTaskSession: %v", err)
+		}
+		select {
+		case <-messages.sessionMessageDone:
+		case <-time.After(time.Second):
+			t.Fatal("timed out waiting for executor recovery message")
+		}
+		require.Eventually(t, func() bool {
+			session, getErr := repo.GetTaskSession(context.Background(), sessionID)
+			return getErr == nil && session.State == models.TaskSessionStateFailed
+		}, time.Second, 10*time.Millisecond, "expected failed state after workspace launch error")
+		if len(messages.sessionMessages) != 1 {
+			t.Fatalf("expected exactly one recovery message, got %d", len(messages.sessionMessages))
+		}
+	})
+}
+
+func TestHandleEarlyMissingPRBranchLaunchFailure_SkipsTaskFailureWhenSessionTransitionLoses(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+
+	svc.handleEarlyMissingPRBranchLaunchFailure(
+		context.Background(), "task1", "session1",
+		errors.New("fatal: couldn't find remote ref feature/deleted-pr"),
+	)
+
+	if len(messages.sessionMessages) != 0 {
+		t.Fatalf("terminal-race loser created %d recovery messages", len(messages.sessionMessages))
+	}
+	taskRepo.mu.Lock()
+	defer taskRepo.mu.Unlock()
+	if taskRepo.stateWrites["task1"] != 0 {
+		t.Fatalf("terminal-race loser wrote task FAILED %d times", taskRepo.stateWrites["task1"])
+	}
+	if got := taskRepo.tasks["task1"].State; got != v1.TaskStateInProgress {
+		t.Fatalf("task state = %s, want IN_PROGRESS", got)
+	}
+}
+
+func TestHandleEarlyMissingPRBranchLaunchFailure_ArchiveSafeTaskWrite(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
+	// Model ArchiveTask winning after the session CAS but before the task-state
+	// CAS: UpdateTaskStateIfSessionState must decline the write.
+	taskRepo.updateIfSessionState = func(context.Context, string, string, models.TaskSessionState, v1.TaskState) (bool, error) {
+		return false, nil
+	}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+
+	svc.handleEarlyMissingPRBranchLaunchFailure(
+		context.Background(), "task1", "session1",
+		errors.New("fatal: couldn't find remote ref feature/deleted-pr"),
+	)
+
+	failedSession, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if failedSession.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", failedSession.State)
+	}
+	taskRepo.mu.Lock()
+	defer taskRepo.mu.Unlock()
+	if taskRepo.stateWrites["task1"] != 0 || taskRepo.unconditionalWrites["task1"] != 0 {
+		t.Fatalf("archive-safe task CAS was bypassed: state writes=%d unconditional=%d", taskRepo.stateWrites["task1"], taskRepo.unconditionalWrites["task1"])
+	}
+	if got := taskRepo.tasks["task1"].State; got != v1.TaskStateInProgress {
+		t.Fatalf("archived task state = %s, want IN_PROGRESS", got)
+	}
+}
+
+func TestHandleEarlyMissingPRBranchLaunchFailure_ConcurrentLaunchesCreateOneMessage(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+
+	launchErr := errors.New("fatal: couldn't find remote ref feature/deleted-pr")
+	start := make(chan struct{})
+	var ready sync.WaitGroup
+	var done sync.WaitGroup
+	ready.Add(2)
+	done.Add(2)
+	for range 2 {
+		go func() {
+			defer done.Done()
+			ready.Done()
+			<-start
+			svc.handleEarlyMissingPRBranchLaunchFailure(context.Background(), "task1", "session1", launchErr)
+		}()
+	}
+	ready.Wait()
+	close(start)
+	done.Wait()
+
+	messages.mu.Lock()
+	messageCount := len(messages.sessionMessages)
+	messages.mu.Unlock()
+	if messageCount != 1 {
+		t.Fatalf("recovery message count = %d, want 1", messageCount)
+	}
+	taskRepo.mu.Lock()
+	defer taskRepo.mu.Unlock()
+	if taskRepo.stateWrites["task1"] != 1 {
+		t.Fatalf("task FAILED writes = %d, want 1", taskRepo.stateWrites["task1"])
+	}
+}
+
+func TestPrepareAndStartCreatedSession_MissingRemoteRefClaimsRecoveryOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "existing-session", models.TaskSessionStateCreated)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID: "task1", WorkspaceID: "ws1", WorkflowID: "wf1", Title: "Test Task", Description: "start task", State: v1.TaskStateInProgress,
+	}
+	launchEntered := make(chan struct{})
+	var launchEnteredOnce sync.Once
+	releaseLaunch := make(chan struct{})
+	launchErr := errors.New("environment preparation failed: fatal: couldn't find remote ref feature/deleted-pr")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchEnteredOnce.Do(func() { close(launchEntered) })
+			<-releaseLaunch
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+	svc.executor.SetOnSessionStateTransition(svc.transitionTaskSessionState)
+	svc.executor.SetOnLaunchFailed(svc.handleSessionLaunchFailed)
+	messages := &mockMessageCreator{sessionMessageDone: make(chan struct{})}
+	svc.messageCreator = messages
+
+	sessionID, err := svc.PrepareTaskSession(ctx, "task1", "profile1", "", "", "", true)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+	select {
+	case <-launchEntered:
+	case <-time.After(time.Second):
+		t.Fatal("prepared launch did not reach agent launch")
+	}
+
+	startDone := make(chan error, 1)
+	go func() {
+		_, startErr := svc.StartCreatedSession(ctx, "task1", sessionID, "profile1", "start task", true, false, false, nil, nil)
+		startDone <- startErr
+	}()
+	close(releaseLaunch)
+	select {
+	case <-startDone:
+	case <-time.After(time.Second):
+		t.Fatal("StartCreatedSession did not settle after prepared launch failed")
+	}
+	select {
+	case <-messages.sessionMessageDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for missing-branch recovery message")
+	}
+
+	failed, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if failed.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", failed.State)
+	}
+	messages.mu.Lock()
+	defer messages.mu.Unlock()
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("recovery message count = %d, want 1", len(messages.sessionMessages))
+	}
+}
+
 func TestStartCreatedSession_WorkflowOverridePromotesPreparedWhenTaskHasNoPrimary(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2600,8 +3031,12 @@ func TestIssue1884_StepProfileSignalGateStaysInTaskMode(t *testing.T) {
 // mockMessageCreator implements MessageCreator for testing.
 // Only CreateUserMessage is tracked; all other methods are no-op stubs.
 type mockMessageCreator struct {
+	mu                 sync.Mutex
 	userMessages       []mockUserMessage
 	sessionMessages    []mockSessionMessage
+	sessionMessageDone chan struct{}
+	sessionMessageOnce sync.Once
+	sessionMessageErr  error
 	agentMessages      []mockAgentMessage
 	agentMessageWrites int
 	agentStreamWrites  int
@@ -2651,6 +3086,11 @@ func (m *mockMessageCreator) UpdateToolCallMessage(context.Context, string, stri
 }
 
 func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sessionMessageErr != nil {
+		return m.sessionMessageErr
+	}
 	m.sessionMessages = append(m.sessionMessages, mockSessionMessage{
 		taskID:        taskID,
 		content:       content,
@@ -2660,6 +3100,9 @@ func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, con
 		metadata:      metadata,
 		requestsInput: requestsInput,
 	})
+	if m.sessionMessageDone != nil {
+		m.sessionMessageOnce.Do(func() { close(m.sessionMessageDone) })
+	}
 	return nil
 }
 
@@ -2697,7 +3140,7 @@ func (m *mockMessageCreator) InvalidateModelCache(string) {}
 func TestBackfillInitialUserMessageIfMissing_RecordsWhenSessionEmpty(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
 
 	mc := &mockMessageCreator{}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -3378,6 +3821,58 @@ func TestResumeTaskSession_ArchivedDuringLaunch(t *testing.T) {
 	}
 }
 
+func TestResumeTaskSession_FailureTaskWriteIsConditionalOnFailedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
+	// Model ArchiveTask winning after the session FAILED CAS but before the
+	// task write. Resume must not use its legacy unconditional task update.
+	taskRepo.updateIfSessionState = func(context.Context, string, string, models.TaskSessionState, v1.TaskState) (bool, error) {
+		return false, nil
+	}
+	launchErr := errors.New("resume workspace failed")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentProfileID = "profile-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("UpdateTaskSession: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "resume-archive-race", SessionID: "session1", TaskID: "task1", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+
+	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeTaskSession error = %v, want %v", err, launchErr)
+	}
+	failed, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSession after failure: %v", err)
+	}
+	if failed.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", failed.State)
+	}
+	taskRepo.mu.Lock()
+	defer taskRepo.mu.Unlock()
+	if taskRepo.stateWrites["task1"] != 0 || taskRepo.unconditionalWrites["task1"] != 0 {
+		t.Fatalf("resume bypassed conditional task write: conditional=%d unconditional=%d", taskRepo.stateWrites["task1"], taskRepo.unconditionalWrites["task1"])
+	}
+}
+
 // TestResumeTaskSession_FailedKeepsResumeToken verifies that resuming a FAILED
 // session preserves the ACP resume token so the relaunched agent restores the
 // prior conversation via ACP session/load (for native-resume agents).
@@ -3432,6 +3927,67 @@ func TestResumeTaskSession_FailedKeepsResumeToken(t *testing.T) {
 	}
 	if er.ResumeToken != "acp-session-xyz" {
 		t.Errorf("expected resume token to be preserved on FAILED resume, got %q", er.ResumeToken)
+	}
+}
+
+// TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully is the
+// end-to-end regression for "Can't resume this un-archived task": a session
+// cancelled by an archive (Service.ArchiveTask / cascade archive) must resume
+// like a Failed one once the task is unarchived. Before the fix, the launch
+// succeeded but the STARTING-transition guard rejected the CANCELLED session
+// as superseded, leaving the freshly-launched execution orphaned while the
+// session stayed stuck at CANCELLED and the task was marked FAILED.
+func TestResumeTaskSession_ArchiveCancelledSessionResumesSuccessfully(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+
+	startAgentProcessCalled := false
+	agentMgr := &sessionUpdatingAgentManager{
+		mockAgentManager: &mockAgentManager{
+			launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+				return &executor.LaunchAgentResponse{
+					AgentExecutionID: "exec-new",
+					Status:           v1.AgentStatusStarting,
+				}, nil
+			},
+		},
+		repo:          repo,
+		sessionID:     "session1",
+		taskID:        "task1",
+		onStartCalled: &startAgentProcessCalled,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	// Session was cancelled by an archive; the task has since been unarchived
+	// (seedTaskAndSession's task is never archived), leaving exactly the state
+	// an unarchive-then-resume observes. No ExecutorRunning row exists — the
+	// archive cleanup already tore it down, which ResumeTaskSession's initial
+	// guard explicitly allows for terminal-state sessions.
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
+	session, _ := repo.GetTaskSession(ctx, "session1")
+	session.AgentProfileID = "profile-1"
+	session.ErrorMessage = models.SessionArchiveTreeCancelReason
+	_ = repo.UpdateTaskSession(ctx, session)
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session1"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		t.Fatalf("precondition: expected no executors_running row for session1 (archive cleanup should have removed it), got err=%v", err)
+	}
+
+	if _, err := svc.ResumeTaskSession(ctx, "task1", "session1"); err != nil {
+		t.Fatalf("ResumeTaskSession on archive-cancelled session returned: %v", err)
+	}
+
+	resumed, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if resumed.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %s, want WAITING_FOR_INPUT (agent started successfully)", resumed.State)
+	}
+	if got, ok := taskRepo.updatedStates["task1"]; ok && got == v1.TaskStateFailed {
+		t.Error("task must not be marked FAILED when resume of an archive-cancelled session succeeds")
 	}
 }
 
@@ -3549,6 +4105,93 @@ func TestResumeTaskSession_FailedStateWriteSurvivesCancelledCallerCtx(t *testing
 	}
 	if persisted.State != models.TaskSessionStateFailed {
 		t.Errorf("expected session1 state=FAILED, got %v", persisted.State)
+	}
+}
+
+func TestResumeTaskSession_AlreadyFailedMissingRemoteRefCreatesNeutralRecoveryMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	launchErr := errors.New("environment preparation failed: fatal: couldn't find remote ref feature/foo")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageCreator = &mockMessageCreator{}
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get seeded session: %v", err)
+	}
+	session.AgentProfileID = "profile-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update seeded session: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "resume-missing-ref", SessionID: "session1", TaskID: "task1", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed executor record: %v", err)
+	}
+
+	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeTaskSession error = %v, want %v", err, launchErr)
+	}
+
+	messages := svc.messageCreator.(*mockMessageCreator).sessionMessages
+	if len(messages) != 1 {
+		t.Fatalf("expected one recovery message, got %d", len(messages))
+	}
+	message := messages[0]
+	if message.metadata["failure_kind"] != "branch_fetch_failed" {
+		t.Fatalf("failure_kind = %#v, want branch_fetch_failed", message.metadata["failure_kind"])
+	}
+	if _, ok := message.metadata["actions"]; ok {
+		t.Fatalf("expected no destructive actions without a repository-scoped PR match, got %#v", message.metadata["actions"])
+	}
+	taskRepo.mu.Lock()
+	defer taskRepo.mu.Unlock()
+	if taskRepo.stateWrites["task1"] != 0 {
+		t.Fatalf("already failed resume rewrote task state %d times", taskRepo.stateWrites["task1"])
+	}
+}
+
+func TestResumeTaskSession_UnrelatedLaunchFailureDoesNotCreateRecoveryMessage(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskRepo := newMockTaskRepo()
+	launchErr := errors.New("failed to launch container")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messageCreator := &mockMessageCreator{}
+	svc.messageCreator = messageCreator
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateFailed)
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get seeded session: %v", err)
+	}
+	session.AgentProfileID = "profile-1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update seeded session: %v", err)
+	}
+
+	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeTaskSession error = %v, want %v", err, launchErr)
+	}
+	if len(messageCreator.sessionMessages) != 0 {
+		t.Fatalf("expected no recovery message, got %#v", messageCreator.sessionMessages)
 	}
 }
 

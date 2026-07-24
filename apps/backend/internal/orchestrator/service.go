@@ -1543,9 +1543,24 @@ func isMissingBranchError(err error) bool {
 		return false
 	}
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "couldn't find remote ref") ||
-		(strings.Contains(msg, "not found locally or on remote") && strings.Contains(msg, "branch")) ||
-		(strings.Contains(msg, "pathspec") && strings.Contains(msg, "did not match"))
+	if strings.Contains(msg, "couldn't find remote ref") {
+		return true
+	}
+	if strings.Contains(msg, "pathspec") && strings.Contains(msg, "did not match") &&
+		!strings.Contains(msg, "fetch branch failed") {
+		return true
+	}
+
+	const missingBranchMarker = "not found locally or on remote"
+	markerIndex := strings.Index(msg, missingBranchMarker)
+	if markerIndex < 0 || !strings.Contains(msg[:markerIndex], "branch") {
+		return false
+	}
+
+	// The worktree layer appends the underlying fetch failure after this marker.
+	// Only the marker by itself is evidence that the remote branch is missing.
+	detail := strings.TrimSpace(msg[markerIndex+len(missingBranchMarker):])
+	return detail == ""
 }
 
 var (
@@ -1571,6 +1586,25 @@ func extractMissingBranchName(err error) string {
 		return strings.TrimSpace(match[1])
 	}
 	return ""
+}
+
+const missingPRBranchRecoveryClaimKey = "missing_pr_branch_recovery_claimed"
+
+type failedSessionMetadataClaimer interface {
+	SetSessionMetadataKeyIfAbsentIfState(
+		ctx context.Context,
+		sessionID, key string,
+		value interface{},
+		expectedState models.TaskSessionState,
+	) (bool, error)
+}
+
+type failedSessionMetadataClaimReleaser interface {
+	RemoveSessionMetadataKeyIfState(
+		ctx context.Context,
+		sessionID, key string,
+		expectedState models.TaskSessionState,
+	) (bool, error)
 }
 
 func (s *Service) matchingTaskPRState(ctx context.Context, taskID, repositoryID, branch string) string {
@@ -1610,7 +1644,7 @@ func taskPRState(prs []*github.TaskPR, repositoryID, branch string) (string, boo
 		}
 		matched = true
 		state = strings.ToLower(strings.TrimSpace(pr.State))
-		if state != "open" && state != "closed" && state != "merged" {
+		if state != githubPRStateOpen && state != githubPRStateClosed && state != githubPRStateMerged {
 			return "", true
 		}
 	}
@@ -1635,21 +1669,61 @@ func (s *Service) hasOnlyTaskRepository(ctx context.Context, taskID, repositoryI
 		strings.TrimSpace(repositories[0].RepositoryID) == repositoryID
 }
 
+// handleSessionLaunchFailed creates branch guidance only after the caller has
+// persisted FAILED. The claim is stored on the session because prepare, start,
+// and resume may race.
 func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, sessionID, repositoryID string, launchErr error) {
 	if s.messageCreator == nil || !isMissingBranchError(launchErr) {
 		return
 	}
-
+	recoveryCtx := context.WithoutCancel(ctx)
 	branch := extractMissingBranchName(launchErr)
-	prState := s.matchingTaskPRState(ctx, taskID, repositoryID, branch)
-	if prState == "open" {
+	prState := s.matchingTaskPRState(recoveryCtx, taskID, repositoryID, branch)
+	if prState == githubPRStateOpen {
 		return
 	}
+	claimer, ok := s.repo.(failedSessionMetadataClaimer)
+	if !ok {
+		s.logger.Warn("session repository cannot claim missing-branch recovery",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID))
+		return
+	}
+	claimed, err := claimer.SetSessionMetadataKeyIfAbsentIfState(
+		recoveryCtx, sessionID, missingPRBranchRecoveryClaimKey, true, models.TaskSessionStateFailed,
+	)
+	if err != nil {
+		s.logger.Warn("failed to claim missing-branch recovery",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if !claimed {
+		return
+	}
+	if err := s.createMissingPRBranchRecoveryMessage(recoveryCtx, taskID, sessionID, branch, prState); err != nil {
+		releaser, ok := s.repo.(failedSessionMetadataClaimReleaser)
+		if !ok {
+			s.logger.Warn("session repository cannot release missing-branch recovery claim after message failure",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID))
+			return
+		}
+		if _, releaseErr := releaser.RemoveSessionMetadataKeyIfState(
+			recoveryCtx, sessionID, missingPRBranchRecoveryClaimKey, models.TaskSessionStateFailed,
+		); releaseErr != nil {
+			s.logger.Warn("failed to release missing-branch recovery claim after message failure",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(releaseErr))
+		}
+	}
+}
+
+func (s *Service) createMissingPRBranchRecoveryMessage(
+	ctx context.Context,
+	taskID, sessionID, branch, prState string,
+) error {
 	content := "Kandev couldn't fetch the requested branch from the configured repository. Verify the task's repository branch or PR link, then retry."
 	if branch != "" {
 		content = "Kandev couldn't fetch branch \"" + branch + "\" from the configured repository. Verify the task's repository branch or PR link, then retry."
 	}
-	authoritativeMissingBranch := prState == "closed" || prState == "merged"
+	authoritativeMissingBranch := prState == githubPRStateClosed || prState == githubPRStateMerged
 	if authoritativeMissingBranch {
 		content = "This task references a PR branch that no longer exists on remote."
 		if branch != "" {
@@ -1681,7 +1755,6 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 			},
 		}
 	}
-	s.suppressToast.Store(sessionID, true)
 	msgCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := s.messageCreator.CreateSessionMessage(
@@ -1698,7 +1771,10 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
+		return err
 	}
+	s.suppressToast.Store(sessionID, true)
+	return nil
 }
 
 // IsRunning returns true if the service is running

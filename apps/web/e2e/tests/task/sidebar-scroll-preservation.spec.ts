@@ -1,6 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
+const OVERLAY_SCROLLBAR_SELECTOR =
+  "[data-slot='scroll-area-scrollbar'][data-orientation='vertical']";
+
 /**
  * Regression: when clicking another task in the sidebar, the sidebar's
  * scroll position would jump back to the top. Dockview rebuilds panel slots
@@ -9,7 +12,132 @@ import { SessionPage } from "../../pages/session-page";
  * position. usePortalSlot now snapshots scroll positions inside each portal
  * via a capturing scroll listener and restores them after every reattach.
  */
-test.describe("sidebar scroll preservation across task switch", () => {
+test.describe("sidebar scrolling", () => {
+  test("keeps the empty list transparent and uses the full sidebar width", async ({ testPage }) => {
+    await testPage.goto("/");
+
+    const tasksToggle = testPage.getByRole("button", { name: "Tasks", exact: true });
+    if ((await tasksToggle.getAttribute("aria-expanded")) !== "true") {
+      await tasksToggle.click();
+    }
+
+    const appSidebar = testPage.getByTestId("app-sidebar");
+    const taskSidebar = testPage.getByTestId("task-sidebar");
+    const scrollRoot = taskSidebar.locator("[data-slot='scroll-area']");
+    await expect(taskSidebar.getByText("No tasks yet.")).toBeVisible();
+
+    await expect
+      .poll(() => scrollRoot.evaluate((element) => getComputedStyle(element).backgroundColor))
+      .toBe("rgba(0, 0, 0, 0)");
+
+    const [navigationBox, taskSidebarBox] = await Promise.all([
+      appSidebar.locator("nav").boundingBox(),
+      taskSidebar.boundingBox(),
+    ]);
+    expect(navigationBox).not.toBeNull();
+    expect(taskSidebarBox).not.toBeNull();
+    expect(taskSidebarBox!.x).toBeCloseTo(navigationBox!.x, 0);
+    expect(taskSidebarBox!.x + taskSidebarBox!.width).toBeCloseTo(
+      navigationBox!.x + navigationBox!.width,
+      0,
+    );
+  });
+
+  test("fades overflowing tasks and reveals the scrollbar on hover", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+
+    const taskCount = 25;
+    const taskIds: string[] = [];
+    for (let index = 0; index < taskCount; index++) {
+      const task = await apiClient.createTask(
+        seedData.workspaceId,
+        `Overflow Task ${String(index).padStart(2, "0")}`,
+        {
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+          repository_ids: [seedData.repositoryId],
+        },
+      );
+      taskIds.push(task.id);
+    }
+
+    await testPage.goto(`/t/${taskIds.at(-1)!}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const scrollContainer = testPage.getByTestId("task-sidebar-scroll");
+    await expect(scrollContainer).toBeVisible();
+    await expect(session.sidebar.getByTestId("sidebar-task-item")).toHaveCount(taskCount, {
+      timeout: 10_000,
+    });
+
+    const overlayGeometry = await scrollContainer.evaluate((element) => {
+      // Headless Chromium uses platform overlay scrollbars, while desktop
+      // WebViews can reserve a native gutter. Force that platform mode so the
+      // regression is deterministic in CI.
+      element.style.scrollbarGutter = "stable";
+      const row = element.querySelector<HTMLElement>("[data-testid='sidebar-task-item']");
+      if (!row) throw new Error("Expected a rendered sidebar task row");
+      const containerRect = element.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      return {
+        rowRightGap: containerRect.right - rowRect.right,
+      };
+    });
+    expect(overlayGeometry.rowRightGap).toBeLessThanOrEqual(1);
+
+    await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "true");
+    const overlayScrollbar = session.sidebar.locator(OVERLAY_SCROLLBAR_SELECTOR);
+    await expect(overlayScrollbar).toBeAttached();
+    const restingStyles = await scrollContainer.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        maskImage: styles.maskImage,
+      };
+    });
+    expect(restingStyles.maskImage).toContain("linear-gradient");
+    await expect(overlayScrollbar).toHaveCSS("opacity", "0");
+
+    await scrollContainer.hover();
+    const hoverStyles = await scrollContainer.evaluate((element) => {
+      const styles = getComputedStyle(element);
+      return {
+        maskImage: styles.maskImage,
+      };
+    });
+    expect(hoverStyles.maskImage).toBe("none");
+    await expect(overlayScrollbar).toHaveCSS("opacity", "1");
+
+    await scrollContainer.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+    await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "false");
+  });
+
+  test("does not mount an overlay scrollbar when the task list fits", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Short Task List", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const scrollContainer = testPage.getByTestId("task-sidebar-scroll");
+    await expect(scrollContainer).toHaveAttribute("data-can-scroll-down", "false");
+    await expect(session.sidebar.locator(OVERLAY_SCROLLBAR_SELECTOR)).toHaveCount(0);
+  });
+
   test("clicking another task does not reset the sidebar scroll position", async ({
     testPage,
     apiClient,

@@ -2,6 +2,7 @@
 
 import { PanelLoadingState } from "@/components/panel-loading-state";
 import type { FileTreeNode } from "@/lib/types/backend";
+import { WorkspaceUnavailable } from "./workspace-unavailable";
 
 type RenderSessionOrLoadStateInput = {
   isSessionFailed: boolean;
@@ -23,12 +24,7 @@ export function renderSessionOrLoadState({
   onRetry,
 }: RenderSessionOrLoadStateInput) {
   if (isSessionFailed) {
-    return (
-      <div className="p-4 text-sm text-destructive/80 space-y-2">
-        <div>Session failed</div>
-        {sessionError && <div className="text-xs text-muted-foreground">{sessionError}</div>}
-      </div>
-    );
+    return <WorkspaceUnavailable error={sessionError} />;
   }
   if ((loadState === "loading" || isLoadingTree) && !tree) {
     return <PanelLoadingState label="Loading files..." />;

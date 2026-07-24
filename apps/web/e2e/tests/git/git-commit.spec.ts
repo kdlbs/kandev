@@ -256,12 +256,17 @@ test.describe("Git commit pre-hooks", () => {
       await dialogCommitBtn.click();
 
       // The error message should appear in the chat
-      await expect(session.gitOperationErrorMessage()).toBeVisible({ timeout: 30_000 });
+      const errorMessage = session.gitOperationErrorMessage();
+      await expect(errorMessage).toBeVisible({ timeout: 30_000 });
+      await expect(errorMessage.getByText("Git commit failed", { exact: true })).toBeVisible();
+      await expect(session.gitFixButton()).toBeVisible();
 
-      // Verify the error output contains the pre-commit hook message
-      await expect(
-        session.gitOperationErrorMessage().getByText("lint check failed: missing semicolons"),
-      ).toBeVisible({ timeout: 15_000 });
+      // The concise summary and Fix action remain available while command
+      // output stays collapsed until the user asks to inspect it.
+      const hookOutput = errorMessage.getByText("lint check failed: missing semicolons");
+      await expect(hookOutput).toBeHidden();
+      await errorMessage.locator("summary", { hasText: "Technical details" }).click();
+      await expect(hookOutput).toBeVisible({ timeout: 15_000 });
 
       // Click the Fix button
       await session.gitFixButton().click();

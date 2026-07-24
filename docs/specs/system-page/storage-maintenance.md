@@ -1,6 +1,7 @@
 ---
 status: shipped
 created: 2026-07-14
+updated: 2026-07-23
 owner: cfl
 ---
 
@@ -34,6 +35,14 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
   bytes, the managed Go cache, the service user's default Go cache when it is a distinct path,
   Kandev-managed container count and writable-layer bytes, Docker image-layer bytes, Docker build
   cache, and unused Docker images.
+- A successful storage analysis is reused for 15 minutes. Opening or refreshing the Storage page,
+  saving policy settings, and adopting an external Go cache consume that cached snapshot instead of
+  starting another filesystem or Docker scan. Manual **Analyze** always bypasses the cache and
+  replaces it with a fresh successful snapshot.
+- The Storage analysis card shows when its snapshot was measured using a relative timestamp.
+  Policy editing remains available while read-only analysis or cleanup jobs run. A settings
+  mutation that can conflict with another settings mutation may block saving briefly, but the UI
+  names that operation instead of reporting an unspecified storage action.
 - Scheduled maintenance is install-wide, persists in Kandev's database, and is disabled by
   default. Enabling it does not require editing the VM, a systemd unit, or environment
   variables.
@@ -128,6 +137,9 @@ Decision: [ADR-2026-07-19-workspace-symlink-entries](../../decisions/2026-07-19-
 - Kandev creates an ownership marker beside the managed cache. It never deletes the default user
   cache such as `/root/.cache/go-build` unless that exact path was explicitly adopted through the
   Storage page with a destructive confirmation.
+- After adoption succeeds, the external Go-cache field shows the persisted
+  `go_cache.adopted_path` immediately and after page reload. Unrelated overview refreshes do not
+  erase a path the user is currently editing.
 - Analysis reports the managed cache's current bytes and read-only usage for the service user's
   distinct default Go cache (`$GOCACHE` when absolute, otherwise the platform user-cache path).
   Reporting the default cache does not adopt it or grant cleanup ownership. Cleanup rotates the
@@ -140,26 +152,26 @@ Decision: [ADR-2026-07-19-workspace-symlink-entries](../../decisions/2026-07-19-
 
 ### Agent session temporary data
 
-- Each agent instance receives an isolated operating-system temporary directory at
-  `<system-temp>/kandev-agent/<readable-prefix>-<identity-digest>` through `TMPDIR`, `TMP`, and
-  `TEMP`. The deterministic name includes the raw session ID, instance ID, and port so distinct
-  instance identities cannot collide after unsafe characters are sanitized.
-- The directory is owned by that agent instance and remains available while its agent, shell,
-  VS Code, or workspace subprocesses may still be running.
-- Instance teardown first closes every process-start admission path, including requests already in
-  flight, then removes the owned session directory only after each process leader and its owned
-  process tree are reaped. On Unix this includes verified process-group disappearance; Windows uses
-  the executor's existing process-tree termination primitive.
-  Teardown validates that the target is a non-root child of the Kandev agent-temp root and never
-  removes the shared root or a sibling session directory.
-- Cleanup runs whenever the owning agentctl instance is permanently deleted, including task/session
-  archive and delete stops and when teardown observes that the main agent process has already
-  stopped. A later resume creates a new instance and does not depend on the prior instance's scratch
-  files. A cleanup failure is reported without broadening deletion to another path. The instance
-  and port remain reserved only when HTTP shutdown or process reaping is unresolved; a
-  temporary-directory-only failure retains a retry tombstone but releases the execution port.
-- Session temporary data is ephemeral and is not quarantined, restored, or included in task
-  recovery. See [ADR 0045](../../decisions/0045-install-wide-storage-maintenance.md).
+- Host-local agent instances inherit `TMPDIR`, `TMP`, and `TEMP` from the Kandev service unchanged.
+  Kandev does not create or inject a per-instance temporary root. When the service leaves those
+  variables unset, agents and their child tools use the operating system default temporary
+  location; when an operator configures them for the service, every host-local agent shares that
+  configured location.
+- Tool-managed caches may therefore be shared when the tool's own default uses the temporary
+  location. Persistent caches remain governed by their own variables and policies: in particular,
+  Go's default `GOCACHE` is separate from `TMPDIR`, and Kandev only injects its managed Go-cache path
+  when the existing Storage setting is explicitly enabled.
+- Kandev-specific files that require collision-free identity must use an explicit unique path or
+  filename. A future collision in one tool is fixed at that tool boundary; it does not justify
+  replacing the complete temporary environment for every agent child process.
+- Archive/delete teardown still closes process admission and reaps each owned process tree. It does
+  not recursively delete arbitrary files from the inherited system temporary directory because
+  those files are shared and cannot be attributed safely to one task.
+- Existing `/tmp/kandev-agent/*` directories created by older versions are legacy host data. The
+  Storage scheduler does not delete them by name or age, and new agent runs do not add to that root.
+  Operators may remove confirmed-inactive legacy data through their normal host temporary-file
+  policy or a deliberate one-time maintenance procedure. See
+  [ADR 0045](../../decisions/0045-install-wide-storage-maintenance.md).
 
 ### Docker storage
 
@@ -278,7 +290,7 @@ All routes are under the existing authenticated System route group.
 
 ```text
 GET    /api/v1/system/storage
-       -> { settings, capabilities, summary, last_run }
+       -> { settings, capabilities, summary, analyzed_at, last_run }
 
 PATCH  /api/v1/system/storage/settings
        body: {
@@ -316,6 +328,10 @@ DELETE /api/v1/system/storage/quarantine/:id
 `capabilities` reports the managed Go path, whether Go-cache adoption is available, Docker
 availability, configured Docker host, and whether host-global Docker cleanup is allowed. API
 responses never expose secret environment values.
+
+`analyzed_at` is the RFC 3339 timestamp of the successful analysis that produced `summary`.
+`GET /storage` reuses that snapshot for 15 minutes. `POST /storage/analyze` bypasses the freshness
+window and replaces the cached snapshot only when the forced analysis succeeds.
 
 Storage operations use the existing `system.job.update` WebSocket event and polling fallback.
 Job kinds are `storage-analysis`, `storage-cleanup`, and `storage-quarantine-delete`.
@@ -406,6 +422,9 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 ## Persistence guarantees
 
 - Settings, cleanup intents, maintenance runs, and quarantine entries survive backend restarts.
+- The 15-minute analysis snapshot is process-local and does not survive a backend restart. The first
+  Storage overview request after startup measures a new snapshot; later requests reuse it until it
+  expires or manual **Analyze** replaces it.
 - A scheduled loop starts only when `enabled=true`; startup does not immediately run destructive
   cleanup. The first scheduled run is eligible after one full configured interval.
 - Pending/retryable task cleanup resumes after startup independent of scheduled-maintenance
@@ -422,6 +441,13 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
   daemon, **THEN** no destructive storage cleanup runs and the Storage page shows scheduling off.
 - **GIVEN** scheduling is disabled, **WHEN** the user selects **Analyze**, **THEN** the page shows
   reclaimable bytes without changing any filesystem or Docker resource.
+- **GIVEN** a successful storage snapshot is less than 15 minutes old, **WHEN** the user refreshes
+  the page or saves policy settings, **THEN** the same summary and `analyzed_at` are returned without
+  invoking the storage providers again.
+- **GIVEN** a cached storage snapshot of any age, **WHEN** the user selects **Analyze**, **THEN** all
+  analysis providers run and a successful result replaces the snapshot and `analyzed_at`.
+- **GIVEN** a storage analysis or cleanup job is running, **WHEN** the user edits maintenance
+  policy, **THEN** the policy controls and shared Save action remain available.
 - **GIVEN** scheduling is enabled and a task is running a Go test, **WHEN** the maintenance interval
   arrives, **THEN** the run is recorded as `skipped_busy` and no provider changes resources.
 - **GIVEN** maintenance holds the idle gate, **WHEN** a new task launch arrives, **THEN** maintenance
@@ -457,9 +483,19 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
   reports the reclaimed bytes.
 - **GIVEN** `/root/.cache/go-build` was not explicitly adopted, **WHEN** storage cleanup runs,
   **THEN** Kandev does not modify it.
+- **GIVEN** an external Go cache was adopted successfully, **WHEN** the Storage page rerenders or is
+  reopened, **THEN** the external-cache input contains the persisted adopted path.
 - **GIVEN** `/root/.cache/go-build` is the service user's default Go cache and is not adopted,
   **WHEN** storage analysis runs, **THEN** its path and bytes are reported read-only while cleanup
   remains unavailable for that path.
+- **GIVEN** the Kandev service has no temporary-directory variables configured, **WHEN** two
+  host-local agents start, **THEN** neither instance receives an injected `TMPDIR`, `TMP`, or `TEMP`
+  value and their tools use the operating system defaults.
+- **GIVEN** an operator sets `TMPDIR`, `TMP`, or `TEMP` on the Kandev service, **WHEN** a host-local
+  agent starts, **THEN** it inherits those values unchanged rather than receiving a per-instance
+  replacement.
+- **GIVEN** a task is archived or deleted, **WHEN** its local instance tears down, **THEN** Kandev
+  reaps its owned processes but does not sweep the shared default temporary directory.
 - **GIVEN** the Docker daemon reports image-layer usage, **WHEN** storage analysis runs, **THEN**
   image-layer bytes are shown separately from build-cache and managed-container writable bytes.
 - **GIVEN** an exited container has `kandev.managed=true` and its task is positively absent,
@@ -484,7 +520,12 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 - Cleaning remote SSH executor filesystems; remote maintenance requires a separate explicit design.
 - Restoring uncommitted files after their quarantine retention has expired.
 - Automatically cleaning a pre-existing user Go cache without explicit path adoption.
+- Age-based or name-based deletion of unmarked `/tmp/kandev-agent/*` directories.
+- A Kandev-owned general-purpose sweeper for the operating system's shared temporary directory.
+- Guaranteed compatibility with tools that require a fixed, globally unique name in shared temp;
+  those tools need a scoped path override when a real collision is observed.
 
 ## Implementation plan
 
-See [the implementation plan](../../plans/storage-maintenance/plan.md).
+- [Original Storage maintenance implementation](../../plans/storage-maintenance/plan.md)
+- [Storage overview cache and settings follow-up](../../plans/storage-overview-cache/plan.md)

@@ -69,9 +69,10 @@ func provideStorageComposition(
 		docker: dockerProvider, dockerClient: dockerClient, dockerHost: cfg.Docker.Host,
 		homeDir: cfg.ResolvedHomeDir(),
 	}
+	cachedOverview := storagepkg.NewOverviewCache(overview)
 	providers := storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider)
 	runner := storagepkg.NewRunner(storagepkg.RunnerConfig{
-		Activity: coordinator, Store: store, Providers: providers,
+		Activity: coordinator, Store: store, Providers: providers, Overview: cachedOverview,
 	})
 	scheduler := storagepkg.NewScheduler(settings, runner, storagepkg.SchedulerOptions{})
 	runtime := storagepkg.NewRuntime(storagepkg.RuntimeConfig{
@@ -84,10 +85,10 @@ func provideStorageComposition(
 	}
 	operations := storagepkg.NewOperations(storagepkg.OperationsConfig{
 		Settings: settings, Store: store, Jobs: tracker, Activity: coordinator,
-		Providers: providers, Overview: overview, GoCache: goCache, Quarantine: quarantine,
+		Providers: providers, Overview: cachedOverview, GoCache: goCache, Quarantine: quarantine,
 	})
 	handler := storagepkg.NewHandler(storagepkg.HandlerConfig{
-		Settings: settings, Runs: store, Quarantine: store, Overview: overview,
+		Settings: settings, Runs: store, Quarantine: store, Overview: cachedOverview,
 		Mutations: operations, OnSettingsChanged: runtime.ApplySettings,
 	})
 	return &storageComposition{

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -509,6 +508,15 @@ func (m *Manager) retryFetchAsRemoteTrackingRef(ctx context.Context, repoPath, b
 // it automatically prunes and retries. If the repository uses git-crypt, it creates
 // the worktree without checkout, then unlocks git-crypt and performs the checkout.
 func (m *Manager) gitAddWorktreeExisting(ctx context.Context, repoPath, branchName, worktreePath string) (string, error) {
+	release, err := acquireWorktreeTargetPath(ctx, worktreePath)
+	if err != nil {
+		return "", fmt.Errorf("acquire worktree target path: %w", err)
+	}
+	defer release()
+	return m.gitAddWorktreeExistingLocked(ctx, repoPath, branchName, worktreePath)
+}
+
+func (m *Manager) gitAddWorktreeExistingLocked(ctx context.Context, repoPath, branchName, worktreePath string) (string, error) {
 	worktreeID := uuid.New().String()
 	usesGitCrypt := m.usesGitCrypt(repoPath)
 
@@ -519,7 +527,7 @@ func (m *Manager) gitAddWorktreeExisting(ctx context.Context, repoPath, branchNa
 	}
 	args = append(args, worktreePath, branchName)
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err == nil {
@@ -569,7 +577,7 @@ func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchNam
 	}
 	args = append(args, worktreePath, branchName)
 
-	retryCmd := exec.CommandContext(ctx, "git", args...)
+	retryCmd := newGitCommand(ctx, args...)
 	retryCmd.Dir = repoPath
 	retryOutput, retryErr := runGitCmdCombinedOutput(ctx, retryCmd)
 	if retryErr != nil {
@@ -600,7 +608,7 @@ func (m *Manager) retryWorktreeExisting(ctx context.Context, repoPath, branchNam
 func (m *Manager) gitAddWorktreeExistingWithGitCrypt(ctx context.Context, repoPath, branchName, worktreePath string) (string, error) {
 	worktreeID := uuid.New().String()
 
-	cmd := exec.CommandContext(ctx, "git", "worktree", "add", "--no-checkout", worktreePath, branchName)
+	cmd := newGitCommand(ctx, "worktree", "add", "--no-checkout", worktreePath, branchName)
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
@@ -644,7 +652,7 @@ func (m *Manager) tryRecoverCheckedOutBranch(ctx context.Context, repoPath, bran
 		zap.String("branch", branchName),
 		zap.String("stale_path", checkedOutPath))
 
-	pruneCmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+	pruneCmd := newGitCommand(ctx, "worktree", "prune")
 	pruneCmd.Dir = repoPath
 	if output, err := runGitCmdCombinedOutput(ctx, pruneCmd); err != nil {
 		m.logger.Error("git worktree prune failed",
@@ -702,46 +710,180 @@ func (m *Manager) buildWorktreeNames(req CreateRequest) (dirName, branchName str
 	return dirName, branchName
 }
 
+type newBranchAddSnapshot struct {
+	branchRef string
+	branchOID string
+}
+
+func (m *Manager) createNewBranchRef(
+	ctx context.Context, repoPath, branchName, baseRef string,
+) (newBranchAddSnapshot, error) {
+	resolveCmd := newGitCommand(ctx, "rev-parse", "--verify", baseRef+"^{commit}")
+	resolveCmd.Dir = repoPath
+	output, err := runGitCmdOutput(ctx, resolveCmd)
+	if err != nil {
+		return newBranchAddSnapshot{}, ClassifyGitError(string(output), err)
+	}
+	oid := strings.TrimSpace(string(output))
+	if oid == "" {
+		return newBranchAddSnapshot{}, fmt.Errorf("%w: base ref %q resolved to an empty object ID", ErrGitCommandFailed, baseRef)
+	}
+	ownership := newBranchAddSnapshot{branchRef: "refs/heads/" + branchName}
+	zeroOID := strings.Repeat("0", len(oid))
+	createCmd := newGitCommand(ctx, "update-ref", ownership.branchRef, oid, zeroOID)
+	createCmd.Dir = repoPath
+	createOutput, createErr := runGitCmdCombinedOutput(ctx, createCmd)
+	if createErr != nil {
+		if strings.Contains(strings.ToLower(string(createOutput)), "reference already exists") {
+			return newBranchAddSnapshot{}, fmt.Errorf("%w: %s", ErrBranchExists, strings.TrimSpace(string(createOutput)))
+		}
+		return newBranchAddSnapshot{}, ClassifyGitError(string(createOutput), createErr)
+	}
+	ownership.branchOID = oid
+	return ownership, nil
+}
+
+func deleteBranchRefIfOwned(ctx context.Context, repoPath string, snapshot newBranchAddSnapshot) ([]byte, error) {
+	cmd := newGitCommand(ctx, "update-ref", "-d", snapshot.branchRef, snapshot.branchOID)
+	cmd.Dir = repoPath
+	return runGitCmdCombinedOutput(ctx, cmd)
+}
+
+func restoreBranchRefIfDeleted(ctx context.Context, repoPath string, snapshot newBranchAddSnapshot) ([]byte, error) {
+	cmd := newGitCommand(ctx, "update-ref", snapshot.branchRef, snapshot.branchOID, strings.Repeat("0", len(snapshot.branchOID)))
+	cmd.Dir = repoPath
+	return runGitCmdCombinedOutput(ctx, cmd)
+}
+
+func (m *Manager) rollbackFailedNewBranchAdd(
+	ctx context.Context,
+	repoPath, branchName, worktreePath string,
+	snapshot newBranchAddSnapshot,
+) {
+	if snapshot.branchRef == "" || snapshot.branchOID == "" {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), m.inspectTimeout)
+	defer cancel()
+	registrationOwnership, inspectErr := inspectWorktreeRegistrationOwnership(
+		cleanupCtx, repoPath, worktreePath, snapshot.branchRef, snapshot.branchOID,
+	)
+	if inspectErr != nil {
+		m.logger.Warn("failed to verify partial worktree ownership; leaving path untouched",
+			zap.String("path", worktreePath), zap.Error(inspectErr))
+		return
+	}
+	switch registrationOwnership {
+	case worktreeRegistrationAbsent:
+		// git may fail before it registers a worktree (for example when the
+		// target is non-empty). The branch was created with a zero-OID CAS, so
+		// this matching delete only removes our still-unmodified ref. Never
+		// touch the target path: it was not registered as ours.
+		if output, err := deleteBranchRefIfOwned(cleanupCtx, repoPath, snapshot); err != nil {
+			m.logger.Warn("failed to roll back unregistered worktree branch",
+				zap.String("branch", branchName),
+				zap.String("output", string(output)),
+				zap.Error(err))
+		}
+		return
+	case worktreeRegistrationCompeting:
+		return
+	case worktreeRegistrationOwned:
+		// Continue below.
+	default:
+		return
+	}
+	// Delete the exact ref while the owned worktree registration still blocks
+	// ordinary competing checkouts. The expected old OID preserves an advanced
+	// or replaced ref; failure leaves both the ref and worktree untouched.
+	if output, err := deleteBranchRefIfOwned(cleanupCtx, repoPath, snapshot); err != nil {
+		m.logger.Warn("failed to roll back worktree branch",
+			zap.String("branch", branchName),
+			zap.String("output", string(output)),
+			zap.Error(err))
+		return
+	}
+	removeErr := m.removeWorktreeDir(cleanupCtx, worktreePath, repoPath)
+	registrationOwnership, inspectErr = inspectWorktreeRegistrationOwnership(
+		cleanupCtx, repoPath, worktreePath, snapshot.branchRef, snapshot.branchOID,
+	)
+	// Git's removal command can report an error even when its filesystem/prune
+	// fallback completed the registration cleanup. The post-cleanup ownership
+	// inspection is authoritative for whether deleting the ref remains safe.
+	if inspectErr == nil && registrationOwnership == worktreeRegistrationAbsent {
+		return
+	}
+	if removeErr != nil {
+		m.logger.Warn("failed to roll back partial worktree",
+			zap.String("path", worktreePath), zap.Error(removeErr))
+	}
+	if inspectErr != nil {
+		m.logger.Warn("failed to verify worktree registration after partial cleanup",
+			zap.String("path", worktreePath), zap.Error(inspectErr))
+	} else {
+		m.logger.Warn("partial worktree registration remains after cleanup",
+			zap.String("path", worktreePath), zap.Uint8("registration_ownership", uint8(registrationOwnership)))
+	}
+	// A branch registration prevents ordinary worktree creation from adopting
+	// this ref while cleanup runs. If cleanup did not prove that registration
+	// is gone, restore the exact OID with a zero-OID CAS before returning so a
+	// registered worktree can never be left pointing at a missing branch.
+	if output, err := restoreBranchRefIfDeleted(cleanupCtx, repoPath, snapshot); err != nil {
+		m.logger.Warn("failed to restore branch after partial worktree cleanup",
+			zap.String("branch", branchName),
+			zap.String("output", string(output)),
+			zap.Error(err))
+	}
+}
+
 // gitAddWorktree runs "git worktree add" and returns the new worktree UUID.
 // If the repository uses git-crypt, it creates the worktree without checkout,
 // then unlocks git-crypt and performs the checkout separately.
 func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, worktreePath, baseRef string) (string, error) {
+	release, err := acquireWorktreeTargetPath(ctx, worktreePath)
+	if err != nil {
+		return "", fmt.Errorf("acquire worktree target path: %w", err)
+	}
+	defer release()
+	return m.gitAddWorktreeLocked(ctx, repoPath, branchName, worktreePath, baseRef)
+}
+
+func (m *Manager) gitAddWorktreeLocked(ctx context.Context, repoPath, branchName, worktreePath, baseRef string) (string, error) {
 	worktreeID := uuid.New().String()
 	usesGitCrypt := m.usesGitCrypt(repoPath)
+	addSnapshot, err := m.createNewBranchRef(ctx, repoPath, branchName, baseRef)
+	if err != nil {
+		return "", err
+	}
 
-	// Build worktree add command.
-	// Use -c branch.autoSetupMerge=false to prevent git from automatically
-	// setting upstream tracking when the base ref is a remote-tracking branch
-	// (e.g. origin/feature/foo). New task branches should start with no
-	// upstream until the user explicitly pushes.
-	args := []string{"-c", "branch.autoSetupMerge=false", "worktree", "add", "-b", branchName}
+	args := []string{"worktree", "add"}
 	if usesGitCrypt {
 		args = append(args, "--no-checkout")
 	}
-	args = append(args, worktreePath, baseRef)
+	args = append(args, worktreePath, branchName)
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
 		outStr := string(output)
+		m.rollbackFailedNewBranchAdd(ctx, repoPath, branchName, worktreePath, addSnapshot)
 		// Check if this is a git-crypt error we didn't anticipate
 		if isGitCryptSmudgeError(outStr) {
 			m.logger.Warn("git-crypt smudge error detected, retrying with --no-checkout",
 				zap.String("output", outStr))
-			return m.gitAddWorktreeWithGitCrypt(ctx, repoPath, branchName, worktreePath, baseRef)
+			return m.gitAddWorktreeWithGitCryptLocked(ctx, repoPath, branchName, worktreePath, baseRef)
 		}
 		m.logger.Error("git worktree add failed",
 			zap.String("output", outStr),
 			zap.Error(err))
-		return "", fmt.Errorf("%w: %s", ErrGitCommandFailed, outStr)
+		return "", ClassifyGitError(outStr, err)
 	}
 
 	// If we used --no-checkout, we need to unlock git-crypt and checkout
 	if usesGitCrypt {
 		if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
-			// Cleanup the worktree on failure
-			_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
+			m.rollbackFailedNewBranchAdd(ctx, repoPath, branchName, worktreePath, addSnapshot)
 			return "", err
 		}
 	} else {
@@ -754,31 +896,31 @@ func (m *Manager) gitAddWorktree(ctx context.Context, repoPath, branchName, work
 // gitAddWorktreeWithGitCrypt creates a worktree using --no-checkout and then
 // unlocks git-crypt. This is used as a fallback when we detect a git-crypt
 // smudge filter error.
-func (m *Manager) gitAddWorktreeWithGitCrypt(ctx context.Context, repoPath, branchName, worktreePath, baseRef string) (string, error) {
+func (m *Manager) gitAddWorktreeWithGitCryptLocked(ctx context.Context, repoPath, branchName, worktreePath, baseRef string) (string, error) {
 	worktreeID := uuid.New().String()
+	addSnapshot, err := m.createNewBranchRef(ctx, repoPath, branchName, baseRef)
+	if err != nil {
+		return "", err
+	}
 
-	// Create worktree without checkout.
-	// Use -c branch.autoSetupMerge=false to prevent git from automatically
-	// setting upstream tracking when the base ref is a remote-tracking branch.
-	cmd := exec.CommandContext(ctx, "git",
-		"-c", "branch.autoSetupMerge=false",
+	cmd := newGitCommand(ctx,
 		"worktree", "add",
-		"-b", branchName,
 		"--no-checkout",
 		worktreePath,
-		baseRef)
+		branchName)
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err != nil {
+		m.rollbackFailedNewBranchAdd(ctx, repoPath, branchName, worktreePath, addSnapshot)
 		m.logger.Error("git worktree add (--no-checkout) failed",
 			zap.String("output", string(output)),
 			zap.Error(err))
-		return "", fmt.Errorf("%w: %s", ErrGitCommandFailed, string(output))
+		return "", ClassifyGitError(string(output), err)
 	}
 
 	// Unlock git-crypt and checkout
 	if err := m.unlockGitCryptAndCheckout(ctx, worktreePath); err != nil {
-		_ = m.removeWorktreeDir(ctx, worktreePath, repoPath)
+		m.rollbackFailedNewBranchAdd(ctx, repoPath, branchName, worktreePath, addSnapshot)
 		return "", err
 	}
 
@@ -790,6 +932,15 @@ func (m *Manager) gitAddWorktreeWithGitCrypt(ctx context.Context, repoPath, bran
 // error is detected. Returns the effective usesGitCrypt flag (forced to true
 // if the retry path was taken so the caller knows to unlock+checkout).
 func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branch, worktreePath string) (bool, error) {
+	release, err := acquireWorktreeTargetPath(ctx, worktreePath)
+	if err != nil {
+		return false, fmt.Errorf("acquire worktree target path: %w", err)
+	}
+	defer release()
+	return m.gitAddWorktreeForRecreateLocked(ctx, repoPath, branch, worktreePath)
+}
+
+func (m *Manager) gitAddWorktreeForRecreateLocked(ctx context.Context, repoPath, branch, worktreePath string) (bool, error) {
 	usesGitCrypt := m.usesGitCrypt(repoPath)
 	args := []string{"worktree", "add"}
 	if usesGitCrypt {
@@ -797,7 +948,7 @@ func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branc
 	}
 	args = append(args, worktreePath, branch)
 
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
 	output, err := runGitCmdCombinedOutput(ctx, cmd)
 	if err == nil {
@@ -807,20 +958,20 @@ func (m *Manager) gitAddWorktreeForRecreate(ctx context.Context, repoPath, branc
 	if isGitCryptSmudgeError(outStr) && !usesGitCrypt {
 		m.logger.Warn("git-crypt smudge error during recreate, retrying with --no-checkout",
 			zap.String("output", outStr))
-		retryCmd := exec.CommandContext(ctx, "git", "worktree", "add", "--no-checkout", worktreePath, branch)
+		retryCmd := newGitCommand(ctx, "worktree", "add", "--no-checkout", worktreePath, branch)
 		retryCmd.Dir = repoPath
 		if retryOutput, retryErr := runGitCmdCombinedOutput(ctx, retryCmd); retryErr != nil {
 			m.logger.Error("failed to recreate worktree (--no-checkout)",
 				zap.String("output", string(retryOutput)),
 				zap.Error(retryErr))
-			return false, fmt.Errorf("%w: %s", ErrGitCommandFailed, string(retryOutput))
+			return false, ClassifyGitError(string(retryOutput), retryErr)
 		}
 		return true, nil // Force unlock/checkout
 	}
 	m.logger.Error("failed to recreate worktree",
 		zap.String("output", outStr),
 		zap.Error(err))
-	return false, fmt.Errorf("%w: %s", ErrGitCommandFailed, outStr)
+	return false, ClassifyGitError(outStr, err)
 }
 
 // copyConfiguredFiles copies user-specified files from the source repo into
@@ -873,7 +1024,7 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	}
 
 	// Remove from git worktree list
-	cmd := exec.CommandContext(ctx, "git", "worktree", "prune")
+	cmd := newGitCommand(ctx, "worktree", "prune")
 	cmd.Dir = req.RepositoryPath
 	if err := runGitCmd(ctx, cmd); err != nil {
 		m.logger.Debug("git worktree prune failed", zap.Error(err))

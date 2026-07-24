@@ -257,6 +257,10 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			bgCtx := context.Background()
 			prepExec, launchErr := s.executor.LaunchPreparedSession(bgCtx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID})
 			if launchErr != nil {
+				// LaunchAgent failures persist FAILED in the executor. Earlier
+				// workspace failures return here and are recorded through the same
+				// session-level recovery claim.
+				s.handleEarlyMissingPRBranchLaunchFailure(bgCtx, taskID, sessionID, launchErr)
 				s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
@@ -476,6 +480,9 @@ func (s *Service) StartCreatedSession(
 	}
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments})
 	if err != nil {
+		// The executor persists LaunchAgent failures. Cover earlier prepared-session
+		// failures here; the session-level claim makes either completion order safe.
+		s.handleEarlyMissingPRBranchLaunchFailure(ctx, taskID, sessionID, err)
 		return nil, err
 	}
 
@@ -490,6 +497,56 @@ func (s *Service) StartCreatedSession(
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
+}
+
+// handleEarlyMissingPRBranchLaunchFailure covers failures that occur before
+// Executor reaches AgentManager.LaunchAgent. Those failures do not run the
+// executor's launch-failure bookkeeping, so this fallback owns the terminal
+// transition and lets the shared persisted claim create guidance once.
+func (s *Service) handleEarlyMissingPRBranchLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchErr error,
+) {
+	if !isMissingBranchError(launchErr) {
+		return
+	}
+	s.recordSessionLaunchFailure(ctx, taskID, sessionID, launchErr)
+}
+
+// recordSessionLaunchFailure transitions a still-active session to FAILED,
+// attaches missing-branch guidance only after that CAS succeeds, and updates
+// the task only while the same failed session still owns it.
+func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) {
+	_, changed := s.updateTaskSessionStateWithHook(
+		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
+		func() { s.handleSessionLaunchFailed(ctx, taskID, sessionID, "", launchErr) }, preloadedSession...,
+	)
+	if !changed {
+		// A resume may begin from an already FAILED session. Its state CAS is
+		// intentionally a no-op, but the persisted claim still lets this newly
+		// classified failure publish guidance exactly once. The claim itself is
+		// state-guarded, so a concurrently cancelled/completed session cannot
+		// receive stale recovery UI.
+		if len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0].State == models.TaskSessionStateFailed {
+			s.handleSessionLaunchFailed(ctx, taskID, sessionID, "", launchErr)
+		}
+		return
+	}
+	updated, err := s.taskRepo.UpdateTaskStateIfSessionState(
+		ctx, taskID, sessionID, models.TaskSessionStateFailed, v1.TaskStateFailed,
+	)
+	if err != nil {
+		s.logger.Warn("failed to update task state to FAILED after early launch error",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if !updated {
+		return
+	}
+	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateFailed)
 }
 
 func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID string) error {
@@ -1205,15 +1262,10 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 			// away), the SessionStateFailed and TaskStateFailed updates would
 			// themselves fail with "context canceled" and leave the task stuck
 			// looking "running" forever.
-			s.updateTaskSessionState(resumeCtx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
-			if stateErr := s.taskRepo.UpdateTaskState(resumeCtx, taskID, v1.TaskStateFailed); stateErr != nil {
-				s.logger.Warn("failed to update task state to FAILED after resume error",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID),
-					zap.Error(stateErr))
-			} else {
-				s.processParentChildrenCompletedForTaskState(resumeCtx, taskID, v1.TaskStateFailed)
-			}
+			// ResumeSession launches the workspace directly rather than through
+			// LaunchPreparedSession. Record this failure with the same state CAS,
+			// persisted recovery claim, and archive-safe task CAS as early launch.
+			s.recordSessionLaunchFailure(resumeCtx, taskID, sessionID, err, session)
 			return nil, err
 		}
 	}

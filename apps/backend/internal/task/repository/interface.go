@@ -271,6 +271,15 @@ type RepositoryEntityRepository interface {
 	ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error)
 	ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []string) (map[string][]*models.RepositoryScript, error)
 	GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, host, owner, name string) (*models.Repository, error)
+	// GetRepositoryByLocalPath finds a live repository by workspace and canonical
+	// local_path. Returns nil, nil if not found. Used by
+	// Service.FindOrCreateRepositoryByLocalPath to check for an existing row by
+	// canonical path immediately before insert (serialized via repoResolveMu),
+	// instead of relying solely on a batch snapshot that can go stale across
+	// concurrent callers within this process. This closes the common
+	// single-process race; it is not a substitute for a database-level
+	// uniqueness constraint against writers outside this process.
+	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
 }
 
 // ExecutorRepository handles executor CRUD, executor profiles, and running state.

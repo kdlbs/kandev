@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Message } from "@/lib/types/http";
 import type { PrepareStepInfo } from "@/lib/state/slices/session-runtime/types";
@@ -7,6 +7,8 @@ let mockSteps: PrepareStepInfo[] = [];
 let mockPrepareStatus: "preparing" | "completed" | "failed" = "preparing";
 let mockSessionState: string = "STARTING";
 let mockMessages: Message[] = [];
+let mockPrepareError: string | undefined;
+const CREATE_WORKTREE = "Create worktree";
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
@@ -17,6 +19,7 @@ vi.mock("@/components/state-provider", () => ({
             sessionId: "session-1",
             status: mockPrepareStatus,
             steps: mockSteps,
+            errorMessage: mockPrepareError,
           },
         },
       },
@@ -45,6 +48,7 @@ describe("PrepareProgress", () => {
   afterEach(() => {
     cleanup();
     mockMessages = [];
+    mockPrepareError = undefined;
   });
 
   it("hides skipped steps that have no useful details", () => {
@@ -127,6 +131,32 @@ describe("PrepareProgress", () => {
     expect(screen.getByText("Environment prepared with warnings")).toBeTruthy();
     expect(screen.queryByText("Environment prepared on a fresh sandbox")).toBeNull();
   });
+
+  it("keeps failed preparation diagnostics collapsed until requested", () => {
+    mockPrepareStatus = "failed";
+    mockSessionState = "FAILED";
+    mockPrepareError =
+      "branch feature/very-long-name not found locally or on remote: fatal: could not resolve host";
+    mockSteps = [
+      {
+        name: CREATE_WORKTREE,
+        status: "failed",
+        error: "fatal: could not resolve host github.com",
+        output: "git fetch origin feature/very-long-name",
+      },
+    ];
+
+    render(<PrepareProgress sessionId="session-1" />);
+
+    expect(screen.getByText("Environment setup failed")).toBeTruthy();
+    expect(screen.queryByText(/branch feature\/very-long-name not found/)).toBeNull();
+    expect(screen.queryByText(CREATE_WORKTREE)).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Show preparation details" }));
+
+    expect(screen.getByText(/branch feature\/very-long-name not found/)).toBeTruthy();
+    expect(screen.getByText(CREATE_WORKTREE)).toBeTruthy();
+  });
 });
 
 function makeSetupScriptMessage(overrides: Partial<Message["metadata"] & object> = {}): Message {
@@ -162,7 +192,7 @@ describe("PrepareProgress per-repo setup script", () => {
     mockSessionState = "STARTING";
     mockSteps = [
       { name: "Validate repository", status: "completed" },
-      { name: "Create worktree", status: "completed" },
+      { name: CREATE_WORKTREE, status: "completed" },
     ];
     mockMessages = [makeSetupScriptMessage()];
 
@@ -176,11 +206,12 @@ describe("PrepareProgress per-repo setup script", () => {
     // `failed` keeps the panel auto-expanded.
     mockPrepareStatus = "failed";
     mockSessionState = "FAILED";
-    mockSteps = [{ name: "Create worktree", status: "completed" }];
+    mockSteps = [{ name: CREATE_WORKTREE, status: "completed" }];
     mockMessages = [makeSetupScriptMessage({ exit_code: 2 })];
 
     render(<PrepareProgress sessionId="session-1" />);
 
+    fireEvent.click(screen.getByRole("button", { name: "Show preparation details" }));
     expect(screen.getByText("Script exited with code 2")).toBeTruthy();
   });
 });

@@ -6,9 +6,8 @@ import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { Message, TaskSessionState } from "@/lib/types/http";
-import { AgentStatus } from "@/components/task/chat/messages/agent-status";
-import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { MessageListFooter } from "./message-list-footer";
 import {
   type MessageListProps,
   MessageListStatus,
@@ -431,12 +430,12 @@ function useVirtuosoHeaderFooter(args: HeaderFooterArgs) {
 
   const Footer = useCallback(
     () => (
-      <>
-        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
-        {footerActions.map((msg) => (
-          <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
-        ))}
-      </>
+      <MessageListFooter
+        sessionState={sessionState}
+        sessionId={sessionId}
+        messages={messages}
+        footerActionMessages={footerActions}
+      />
     ),
     [sessionId, sessionState, messages, footerActions],
   );
@@ -503,10 +502,12 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
           messagesCount={messages.length}
           onLoadMore={loadMore}
         />
-        <AgentStatus sessionState={sessionState} sessionId={sessionId} messages={messages} />
-        {footerActions.map((msg) => (
-          <MessageRenderer key={msg.id} comment={msg} isTaskDescription={false} />
-        ))}
+        <MessageListFooter
+          sessionState={sessionState}
+          sessionId={sessionId}
+          messages={messages}
+          footerActionMessages={footerActions}
+        />
       </SessionPanelContent>
     );
   }

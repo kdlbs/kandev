@@ -32,7 +32,7 @@ type OperationsConfig struct {
 	Jobs       *jobs.Tracker
 	Activity   *activity.Coordinator
 	Providers  []CleanupProvider
-	Overview   OverviewProvider
+	Overview   OverviewRefresher
 	GoCache    GoCacheAdopter
 	Quarantine QuarantineController
 }
@@ -60,6 +60,7 @@ func (o *Operations) AdoptGoCache(
 	if err != nil {
 		return StorageMaintenanceSettings{}, Capabilities{}, err
 	}
+	o.invalidateOverview()
 	return settings, o.config.Overview.Capabilities(ctx, settings), nil
 }
 
@@ -75,9 +76,15 @@ func (o *Operations) Analyze(ctx context.Context) (string, error) {
 		if _, err := o.config.Store.TransitionRun(jobCtx, id, RunStateRunning, nil, ""); err != nil {
 			return nil, err
 		}
-		summary, analyzeErr := o.config.Overview.Summary(jobCtx)
-		return o.finishAnalysis(jobCtx, id, summary, analyzeErr)
+		snapshot, analyzeErr := o.config.Overview.Refresh(jobCtx)
+		return o.finishAnalysis(jobCtx, id, snapshot.Summary, analyzeErr)
 	}), nil
+}
+
+type OverviewRefresher interface {
+	OverviewReader
+	OverviewInvalidator
+	Refresh(context.Context) (OverviewSnapshot, error)
 }
 
 func (o *Operations) RunNow(ctx context.Context, resources []string) (string, error) {
@@ -95,7 +102,7 @@ func (o *Operations) RunNow(ctx context.Context, resources []string) (string, er
 	return o.startTracked(ctx, JobKindCleanup, func(jobCtx context.Context, id string) (map[string]any, error) {
 		runner := NewRunner(RunnerConfig{
 			Activity: o.config.Activity, Store: o.config.Store, Providers: providers,
-			NewID: func() string { return id },
+			NewID: func() string { return id }, Overview: o.config.Overview,
 		})
 		run, runErr := runner.Run(jobCtx, RunTriggerManual, settings)
 		return runResultMap(run), runErr
@@ -106,7 +113,12 @@ func (o *Operations) RestoreQuarantine(ctx context.Context, id string) (Quaranti
 	if o.config.Quarantine == nil {
 		return QuarantineEntry{}, errors.New("quarantine provider is unavailable")
 	}
-	return o.config.Quarantine.Restore(ctx, id)
+	entry, err := o.config.Quarantine.Restore(ctx, id)
+	if err != nil {
+		return QuarantineEntry{}, err
+	}
+	o.invalidateOverview()
+	return entry, nil
 }
 
 func (o *Operations) DeleteQuarantine(ctx context.Context, id, confirmation string) (string, error) {
@@ -125,8 +137,17 @@ func (o *Operations) DeleteQuarantine(ctx context.Context, id, confirmation stri
 	}
 	return o.startTracked(ctx, JobKindQuarantineDelete, func(jobCtx context.Context, _ string) (map[string]any, error) {
 		entry, err := o.config.Quarantine.PermanentDelete(jobCtx, id, confirmation)
+		if err == nil {
+			o.invalidateOverview()
+		}
 		return map[string]any{"entry": entry}, err
 	}), nil
+}
+
+func (o *Operations) invalidateOverview() {
+	if o.config.Overview != nil {
+		o.config.Overview.Invalidate()
+	}
 }
 
 func (o *Operations) preflight(ctx context.Context) error {

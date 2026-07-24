@@ -154,7 +154,13 @@ func (r *Repository) ListRepositories(ctx context.Context, workspaceID string) (
 }
 
 // GetRepositoryByProviderInfo finds a repository by workspace, provider, owner, and name.
-// Returns nil, nil if not found.
+// Returns nil, nil if not found. When duplicate rows share the same provider
+// identity (e.g. left behind by a resolver race that predates
+// Service.repoResolveMu), orders by created_at then id so the row returned
+// here is always the same earliest-created row that
+// dedupeRepositoriesByIdentity keeps as the canonical winner in
+// ListRepositories — otherwise a caller could resolve to, and write
+// backfilled fields onto, a duplicate that ListRepositories hides.
 func (r *Repository) GetRepositoryByProviderInfo(ctx context.Context, workspaceID, provider, host, owner, name string) (*models.Repository, error) {
 	repository := &models.Repository{}
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
@@ -163,7 +169,34 @@ func (r *Repository) GetRepositoryByProviderInfo(ctx context.Context, workspaceI
 		FROM repositories
 		WHERE workspace_id = ? AND provider = ? AND provider_host = ?
 			AND provider_owner = ? AND provider_name = ? AND deleted_at IS NULL
+		ORDER BY created_at ASC, id ASC
+		LIMIT 1
 	`), workspaceID, provider, host, owner, name).Scan(
+		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
+		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
+		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.WorktreeBranchTemplate, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CopyFiles, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return repository, err
+}
+
+// GetRepositoryByLocalPath finds a live repository by workspace and canonical
+// local_path. Returns nil, nil if not found. Mirrors GetRepositoryByProviderInfo,
+// including the created_at/id tiebreak, so local-path resolution can do the
+// same lookup-then-create as provider-URL resolution instead of trusting a
+// possibly-stale in-memory snapshot.
+func (r *Repository) GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error) {
+	repository := &models.Repository{}
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT id, workspace_id, name, source_type, local_path, provider, provider_repo_id, provider_host, provider_owner,
+		       provider_name, remote_url, default_branch, worktree_branch_prefix, worktree_branch_template, pull_before_worktree, setup_script, cleanup_script, dev_script, copy_files, created_at, updated_at, deleted_at
+		FROM repositories
+		WHERE workspace_id = ? AND local_path = ? AND local_path != '' AND deleted_at IS NULL
+		ORDER BY created_at ASC, id ASC
+		LIMIT 1
+	`), workspaceID, localPath).Scan(
 		&repository.ID, &repository.WorkspaceID, &repository.Name, &repository.SourceType, &repository.LocalPath,
 		&repository.Provider, &repository.ProviderRepoID, &repository.ProviderHost, &repository.ProviderOwner, &repository.ProviderName, &repository.RemoteURL,
 		&repository.DefaultBranch, &repository.WorktreeBranchPrefix, &repository.WorktreeBranchTemplate, &repository.PullBeforeWorktree, &repository.SetupScript, &repository.CleanupScript, &repository.DevScript, &repository.CopyFiles, &repository.CreatedAt, &repository.UpdatedAt, &repository.DeletedAt,

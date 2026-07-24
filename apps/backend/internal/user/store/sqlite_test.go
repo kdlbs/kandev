@@ -194,13 +194,27 @@ func TestScanUserSettingsSystemMetricsDisplayDefault(t *testing.T) {
 	if settings.SystemMetricsDisplay.ShowInTopbar {
 		t.Fatal("system metrics display should default to disabled")
 	}
+	encoded, err := json.Marshal(settings.SystemMetricsDisplay)
+	if err != nil {
+		t.Fatalf("marshal system metrics display: %v", err)
+	}
+	if string(encoded) != `{"show_in_topbar":false,"simplified":false}` {
+		t.Fatalf("default system metrics display = %s, want detailed preference", encoded)
+	}
 
-	settings, err = scanUserSettings(settingsScanner{raw: `{"system_metrics_display":{"show_in_topbar":true}}`}, DefaultUserID)
+	settings, err = scanUserSettings(settingsScanner{raw: `{"system_metrics_display":{"show_in_topbar":true,"simplified":true}}`}, DefaultUserID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !settings.SystemMetricsDisplay.ShowInTopbar {
 		t.Fatal("expected stored system metrics display preference")
+	}
+	encoded, err = json.Marshal(settings.SystemMetricsDisplay)
+	if err != nil {
+		t.Fatalf("marshal stored system metrics display: %v", err)
+	}
+	if string(encoded) != `{"show_in_topbar":true,"simplified":true}` {
+		t.Fatalf("stored system metrics display = %s, want simplified preference", encoded)
 	}
 }
 
@@ -221,13 +235,13 @@ func TestSQLiteRepositorySystemMetricsDisplayRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get defaults: %v", err)
 	}
-	settings.SystemMetricsDisplay = models.SystemMetricsDisplaySettings{ShowInTopbar: true}
+	settings.SystemMetricsDisplay = models.SystemMetricsDisplaySettings{ShowInTopbar: true, Simplified: true}
 	upsertUserSettingsForTest(t, repo, ctx, settings)
 	got, err := repo.GetUserSettings(ctx, DefaultUserID)
 	if err != nil {
 		t.Fatalf("get settings: %v", err)
 	}
-	if !got.SystemMetricsDisplay.ShowInTopbar {
+	if !got.SystemMetricsDisplay.ShowInTopbar || !got.SystemMetricsDisplay.Simplified {
 		t.Fatal("expected system metrics display preference to round-trip")
 	}
 }

@@ -23,6 +23,7 @@ afterEach(() => {
 });
 
 const CANCEL_TEST_ID = "recovery-cancel-retry-button";
+const TECHNICAL_DETAILS = "Technical details";
 
 function retryMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -60,9 +61,15 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
 
 /** ActionMessage reads session state from the store (keyed by comment.session_id),
  *  so seed it via the provider instead of passing a prop. */
-function renderAction(comment: Message, sessionState?: TaskSessionState) {
+function renderAction(comment: Message, sessionState?: TaskSessionState, sessionError?: string) {
   const initialState: Partial<AppState> = sessionState
-    ? { taskSessions: { items: { "sess-1": { state: sessionState } as TaskSession } } }
+    ? {
+        taskSessions: {
+          items: {
+            "sess-1": { state: sessionState, error_message: sessionError } as TaskSession,
+          },
+        },
+      }
     : {};
   return render(<ActionMessage comment={comment} />, {
     wrapper: ({ children }) => (
@@ -95,6 +102,11 @@ describe("ActionMessage — transient retry (warning variant)", () => {
     expect(container.firstChild).toBeNull();
   });
 
+  it("hides while the session is STARTING so the startup status remains visible", () => {
+    const { container } = renderAction(retryMessage(), "STARTING");
+    expect(container.firstChild).toBeNull();
+  });
+
   it("renders the red variant for a non-warning recovery banner", () => {
     const errorMsg = retryMessage({
       content: "Agent encountered an error",
@@ -110,5 +122,79 @@ describe("ActionMessage — transient retry (warning variant)", () => {
     const text = screen.getByText(/Agent encountered an error/i);
     expect(text.className).toContain("text-red-600");
     expect(text.className).not.toContain("text-amber-600");
+  });
+});
+
+describe("ActionMessage — missing PR branch", () => {
+  it("renders a plain-language recovery panel with collapsed technical details", () => {
+    renderAction(
+      retryMessage({
+        content:
+          'The remote PR branch "codex/enhance-prompt-result-delivery" no longer exists (likely merged and deleted).',
+        metadata: {
+          variant: "warning",
+          failure_kind: "missing_pr_branch",
+          missing_branch: "codex/enhance-prompt-result-delivery",
+          error_output: "fatal: unable to access github.com: Could not resolve host",
+          actions: [
+            {
+              type: "archive_task",
+              label: "Archive task",
+              icon: "archive",
+              test_id: "missing-branch-archive-button",
+            },
+            {
+              type: "delete_task",
+              label: "Delete task",
+              icon: "trash",
+              variant: "destructive",
+              test_id: "missing-branch-delete-button",
+            },
+          ],
+        },
+      } as Partial<Message>),
+      "FAILED",
+    );
+
+    expect(screen.getByTestId("missing-branch-recovery")).toBeTruthy();
+    expect(screen.getByText("Branch is no longer available")).toBeTruthy();
+    expect(screen.getByText("codex/enhance-prompt-result-delivery")).toBeTruthy();
+    const technicalDetails = screen.getByText(TECHNICAL_DETAILS).closest("details");
+    expect(technicalDetails?.open).toBe(false);
+    expect(screen.getByTestId("missing-branch-archive-button").className).toContain("min-h-11");
+    expect(screen.getByTestId("missing-branch-delete-button").className).toContain("min-h-11");
+
+    fireEvent.click(screen.getByText(TECHNICAL_DETAILS));
+    expect(technicalDetails?.open).toBe(true);
+    expect(screen.getByText(/Could not resolve host/)).toBeTruthy();
+  });
+
+  it("uses the current session error as collapsed technical details", () => {
+    renderAction(
+      retryMessage({
+        content: 'The remote PR branch "feature/missing" no longer exists.',
+        metadata: {
+          variant: "warning",
+          failure_kind: "missing_pr_branch",
+          missing_branch: "feature/missing",
+          actions: [
+            {
+              type: "archive_task",
+              label: "Archive task",
+              test_id: "missing-branch-archive-button",
+            },
+          ],
+        },
+      } as Partial<Message>),
+      "FAILED",
+      "environment preparation failed: fatal: could not resolve host github.com",
+    );
+
+    const details = screen.getByText(TECHNICAL_DETAILS).closest("details");
+    expect(details?.open).toBe(false);
+    expect(screen.getByText(/could not resolve host github.com/)).toBeTruthy();
+
+    fireEvent.click(screen.getByText(TECHNICAL_DETAILS));
+    expect(details?.open).toBe(true);
   });
 });
