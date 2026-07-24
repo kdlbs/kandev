@@ -90,3 +90,22 @@ func TestExtractAnchorText_HandlesCRLF(t *testing.T) {
 		t.Fatalf("expected CRLF diffs to work, got %q", got)
 	}
 }
+
+func TestExtractAnchorText_TrailingNewlineIsNotAContextLine(t *testing.T) {
+	// Splitting on "\n" leaves an empty element after a trailing newline. It
+	// carries no diff marker, so counting it would let a range that reaches the
+	// end of the hunk pick up a phantom blank line.
+	diff := "@@ -1,2 +1,3 @@\n keep\n+added\n"
+	if got := ExtractAnchorText(diff, 1, 3); got != "keep\nadded" {
+		t.Fatalf("expected no phantom trailing line, got %q", got)
+	}
+}
+
+func TestExtractAnchorText_InteriorBlankContextLineStillCounts(t *testing.T) {
+	// A whitespace-stripped blank context line legitimately appears as "".
+	// Interior empties must keep advancing the new-side counter.
+	diff := "@@ -1,3 +1,4 @@\n first\n\n+added\n"
+	if got := ExtractAnchorText(diff, 3, 3); got != "added" {
+		t.Fatalf("expected an interior blank line to advance numbering, got %q", got)
+	}
+}

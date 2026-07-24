@@ -30,7 +30,7 @@ func ExtractAnchorText(diff string, startLine, endLine int) string {
 	newLine := 0
 	inHunk := false
 
-	for _, raw := range strings.Split(diff, "\n") {
+	for _, raw := range diffBodyLines(diff) {
 		line := strings.TrimSuffix(raw, "\r")
 		if start, ok := parseHunkStart(line); ok {
 			newLine = start
@@ -73,6 +73,18 @@ func stripDiffMarker(line string) string {
 		return ""
 	}
 	return line[1:]
+}
+
+// diffBodyLines splits a diff into lines, dropping the empty element a trailing
+// newline leaves behind. That artifact carries no diff marker, so counting it as
+// a context line would push the new-side numbering one past the hunk's end and
+// let an anchor pick up a phantom trailing line.
+func diffBodyLines(diff string) []string {
+	lines := strings.Split(diff, "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		return lines[:len(lines)-1]
+	}
+	return lines
 }
 
 func parseHunkStart(line string) (int, bool) {

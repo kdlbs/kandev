@@ -233,6 +233,13 @@ func handlePrompt(e *emitter, prompt, model string) {
 		scenarioWalkthroughRequested(e)
 		return
 	}
+	// Native code review: the backend sends a generated prompt (not a slash
+	// command), so match on its sentinel and reply with the fenced JSON the
+	// parser expects.
+	if isCodeReviewRequest(prompt) {
+		e.text(codeReviewResponse(prompt))
+		return
+	}
 
 	switch {
 	case strings.EqualFold(cmd, "all") || strings.EqualFold(cmd, "/all"):

@@ -80,6 +80,18 @@ type NewSideLine = { lineNumber: number; text: string };
 const HUNK_HEADER = /^@@+ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/;
 
 /**
+ * Splits a diff into lines, dropping the empty element a trailing newline leaves
+ * behind. That artifact carries no diff marker, so counting it as a context line
+ * would add a phantom line past the end of the hunk and let an anchor match
+ * against it.
+ */
+function diffBodyLines(diff: string): string[] {
+  const lines = diff.split("\n");
+  if (lines.length > 0 && lines[lines.length - 1] === "") return lines.slice(0, -1);
+  return lines;
+}
+
+/**
  * Extracts the new-side lines of a unified diff with their line numbers.
  * Deletions are skipped because they exist only on the old side and must not
  * advance the new-side counter.
@@ -89,7 +101,7 @@ function newSideLines(diff: string): NewSideLine[] {
   let lineNumber = 0;
   let inHunk = false;
 
-  for (const raw of diff.split("\n")) {
+  for (const raw of diffBodyLines(diff)) {
     const line = raw.replace(/\r$/, "");
     const header = line.match(HUNK_HEADER);
     if (header) {
