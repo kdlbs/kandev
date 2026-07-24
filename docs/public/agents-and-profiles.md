@@ -38,7 +38,8 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Model | Requested through ACP when the agent supports model selection. Leaving it unset uses the agent's default where the form allows that. |
 | Mode | Requested with ACP `session/set_mode`. The choices come from the installed agent. |
 | Configuration options | Dynamic ACP values requested with `session/set_config_option`. |
-| CLI flags | Enabled entries are tokenized and appended to the launch command. |
+| CLI flags | Enabled entries are tokenized and appended to the ACP launch command. |
+| Command prefix | Optional ACP-only launcher argv prepended to the command, for example `greywall --`. |
 | Environment | Literal values or references to Kandev secrets, resolved when the process starts. |
 | CLI passthrough | Uses the CLI's native terminal interface instead of a structured ACP conversation. |
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
@@ -59,6 +60,12 @@ Each flag entry has a raw value, description, enabled state, and an agent-specif
 The field is not a shell script. Pipes, redirects, variable expansion, and command substitution do not run as shell syntax. Empty or malformed quoting is rejected. Keep separate profiles for materially different permission or workspace flags, and recheck customized flags after upgrading the CLI.
 
 Some older profiles contain compatibility fields such as Auggie's `allow_indexing`; current launch behavior is represented by the active profile settings and flags.
+
+### ACP command prefixes
+
+**Command prefix** is available for ACP launches, not terminal-passthrough launches. Kandev parses the prefix into structured argv rather than running a shell: quote a path containing spaces, for example `"/opt/launchers/safe wrapper" --`. The resulting argv is prefixed to the agent command, so shell features such as pipes, redirects, variable expansion, and command substitution are not evaluated.
+
+The prefix must contain a nonempty first argv element that is not flag-like. Malformed quotes, a trailing escape, an empty launcher, or a prefix beginning with `-` is rejected when you save or preview it. If an older persisted profile contains an invalid prefix, Kandev fails the launch rather than silently running the agent without its configured launcher. Check the command preview after changing a prefix.
 
 ## Environment variables and secrets
 
@@ -89,7 +96,7 @@ Workspace automation selectors do not offer passthrough agent profiles or Local 
 
 ## Structured ACP and terminal passthrough
 
-ACP sessions can expose typed messages, tool updates, permission requests, models, modes, dynamic configuration, todos, usage, and resume metadata. Each capability depends on the agent's actual ACP implementation.
+ACP sessions can expose typed messages, tool updates, permission requests, models, modes, dynamic configuration, todos, usage, and resume metadata. Each capability depends on the agent's actual ACP implementation. ACP-only profile settings, including command prefixes and structured configuration, do not add those capabilities to a terminal-passthrough CLI.
 
 Passthrough preserves the CLI's native PTY interface. It is useful when the native terminal has features that ACP does not expose, but Kandev cannot manufacture structured capabilities that are absent. Custom TUI profiles are locked to passthrough. Profile-specific MCP injection also varies by CLI; verify the command preview and the MCP section before depending on it.
 

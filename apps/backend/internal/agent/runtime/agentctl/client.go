@@ -258,13 +258,15 @@ func (c *Client) GetStatus(ctx context.Context) (*StatusResponse, error) {
 
 // ConfigureAgent configures the agent command and optional approval policy. Must be called before Start().
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
-func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[string]string, approvalPolicy, continueCommand string) error {
+func (c *Client) ConfigureAgent(ctx context.Context, command string, agentArgs []string, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string) error {
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/agent/configure", c.executionID)
 	defer span.End()
 
 	payload := struct {
 		Command         string            `json:"command"`
+		AgentArgs       *[]string         `json:"agent_args,omitempty"`
 		ContinueCommand string            `json:"continue_command,omitempty"`
+		ContinueArgs    *[]string         `json:"continue_args,omitempty"`
 		Env             map[string]string `json:"env,omitempty"`
 		ApprovalPolicy  string            `json:"approval_policy,omitempty"`
 	}{
@@ -272,6 +274,12 @@ func (c *Client) ConfigureAgent(ctx context.Context, command string, env map[str
 		ContinueCommand: continueCommand,
 		Env:             env,
 		ApprovalPolicy:  approvalPolicy,
+	}
+	if agentArgs != nil {
+		payload.AgentArgs = &agentArgs
+	}
+	if continueArgs != nil {
+		payload.ContinueArgs = &continueArgs
 	}
 
 	body, err := json.Marshal(payload)

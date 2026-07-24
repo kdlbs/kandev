@@ -374,9 +374,21 @@ func (s *Server) handleStart(c *gin.Context) {
 // AgentConfigure request/response - configures the agent command before starting
 type AgentConfigureRequest struct {
 	Command         string            `json:"command"`
+	AgentArgs       optionalArgs      `json:"agent_args"`
 	ContinueCommand string            `json:"continue_command,omitempty"` // For one-shot agents (Amp): command for follow-up prompts
+	ContinueArgs    optionalArgs      `json:"continue_args"`
 	Env             map[string]string `json:"env,omitempty"`
 	ApprovalPolicy  string            `json:"approval_policy,omitempty"` // For Codex: "untrusted", "on-failure", "on-request", "never"
+}
+
+type optionalArgs struct {
+	Present bool
+	Args    []string
+}
+
+func (a *optionalArgs) UnmarshalJSON(data []byte) error {
+	a.Present = true
+	return json.Unmarshal(data, &a.Args)
 }
 
 type AgentConfigureResponse struct {
@@ -395,7 +407,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	if req.Command == "" {
+	if !req.AgentArgs.Present && req.Command == "" {
 		c.JSON(http.StatusBadRequest, AgentConfigureResponse{
 			Success: false,
 			Error:   "command is required",
@@ -403,7 +415,7 @@ func (s *Server) handleAgentConfigure(c *gin.Context) {
 		return
 	}
 
-	if err := s.procMgr.Configure(req.Command, req.Env, req.ApprovalPolicy, req.ContinueCommand); err != nil {
+	if err := s.procMgr.Configure(req.Command, req.AgentArgs.Args, req.AgentArgs.Present, req.Env, req.ApprovalPolicy, req.ContinueCommand, req.ContinueArgs.Args, req.ContinueArgs.Present); err != nil {
 		s.logger.Error("failed to configure agent", zap.Error(err), zap.String("command", req.Command))
 		c.JSON(http.StatusInternalServerError, AgentConfigureResponse{
 			Success: false,

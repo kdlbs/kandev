@@ -453,42 +453,43 @@ func sessionACPConfigBaseline(session *models.TaskSession) map[string]string {
 
 // routeParams holds all dependencies needed for HTTP and WebSocket route registration.
 type routeParams struct {
-	router                  *gin.Engine
-	gateway                 *gateways.Gateway
-	taskSvc                 *taskservice.Service
-	taskRepo                *sqliterepo.Repository
-	officeRepo              *officesqlite.Repository
-	analyticsRepo           analyticsrepository.Repository
-	orchestratorSvc         *orchestrator.Service
-	lifecycleMgr            *lifecycle.Manager
-	hostUtilityMgr          *hostutility.Manager
-	eventBus                bus.EventBus
-	services                *Services
-	systemSvc               *systemsvc.Service
-	workspaceRestorer       taskhandlers.WorkspaceQuarantineRestorer
-	runtimeFlagsSvc         *runtimeflags.Service
-	agentSettingsController *agentsettingscontroller.Controller
-	agentSettingsRepo       settingsstore.Repository
-	agentList               taskhandlers.AgentLister
-	agentRegistry           *registry.Registry
-	userCtrl                *usercontroller.Controller
-	notificationCtrl        *notificationcontroller.Controller
-	editorCtrl              *editorcontroller.Controller
-	promptCtrl              *promptcontroller.Controller
-	utilityCtrl             *utilitycontroller.Controller
-	msgCreator              *messageCreatorAdapter
-	secretsSvc              *secrets.Service
-	secretStore             secrets.SecretStore
-	mcpConfigSvc            *mcpconfig.Service
-	addCleanup              func(func() error)
-	repoCloner              *repoclone.Cloner
-	version                 string
-	webInternalURL          string
-	devMode                 bool
-	httpPort                int
-	features                config.FeaturesConfig
-	voice                   config.VoiceConfig
-	log                     *logger.Logger
+	router                        *gin.Engine
+	gateway                       *gateways.Gateway
+	taskSvc                       *taskservice.Service
+	taskRepo                      *sqliterepo.Repository
+	officeRepo                    *officesqlite.Repository
+	analyticsRepo                 analyticsrepository.Repository
+	orchestratorSvc               *orchestrator.Service
+	lifecycleMgr                  *lifecycle.Manager
+	hostUtilityMgr                *hostutility.Manager
+	eventBus                      bus.EventBus
+	services                      *Services
+	systemSvc                     *systemsvc.Service
+	workspaceRestorer             taskhandlers.WorkspaceQuarantineRestorer
+	runtimeFlagsSvc               *runtimeflags.Service
+	agentSettingsController       *agentsettingscontroller.Controller
+	agentSettingsRepo             settingsstore.Repository
+	agentList                     taskhandlers.AgentLister
+	agentRegistry                 *registry.Registry
+	userCtrl                      *usercontroller.Controller
+	notificationCtrl              *notificationcontroller.Controller
+	editorCtrl                    *editorcontroller.Controller
+	promptCtrl                    *promptcontroller.Controller
+	utilityCtrl                   *utilitycontroller.Controller
+	msgCreator                    *messageCreatorAdapter
+	secretsSvc                    *secrets.Service
+	secretStore                   secrets.SecretStore
+	mcpConfigSvc                  *mcpconfig.Service
+	addCleanup                    func(func() error)
+	repoCloner                    *repoclone.Cloner
+	version                       string
+	webInternalURL                string
+	devMode                       bool
+	httpPort                      int
+	features                      config.FeaturesConfig
+	voice                         config.VoiceConfig
+	interimSettingsInterlockToken string
+	log                           *logger.Logger
 }
 
 // registerRoutes sets up all HTTP and WebSocket routes on the given router.
@@ -696,6 +697,7 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	)
 	payload.RouteData = bootRouteData(ctx, req, p, route)
 	payload.Plugins = bootActivePlugins(p)
+	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
 	return payload
 }
 
@@ -915,7 +917,7 @@ func registerSecondaryRoutes(
 	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.eventBus, p.log)
 	p.log.Info("Registered Workflow handlers (HTTP + WebSocket)")
 
-	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log)
+	agentsettingshandlers.RegisterRoutes(p.router, p.agentSettingsController, p.gateway.Hub, p.log, p.interimSettingsInterlockToken)
 	p.log.Debug("Registered Agent Settings handlers (HTTP)")
 
 	// Login PTY: spawns agent login commands under a PTY on the kandev host

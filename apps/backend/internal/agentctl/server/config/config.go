@@ -14,6 +14,7 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -194,6 +195,9 @@ type InstanceConfig struct {
 	// When set, the adapter spawns a new process per prompt using this command for
 	// continuation (thread ID appended at runtime). Only used by Amp.
 	ContinueCommand string
+
+	// ContinueArgs is the structured argv for ContinueCommand.
+	ContinueArgs []string
 
 	// VscodeCommand is the command to run the VS Code server (e.g., "code-server")
 	VscodeCommand string
@@ -455,6 +459,18 @@ type InstanceOverrides struct {
 // ParseCommand splits a command string into arguments
 func ParseCommand(cmd string) []string {
 	return strings.Fields(cmd)
+}
+
+// ValidateCommandArgs rejects argv that cannot safely identify an executable.
+func ValidateCommandArgs(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("agent command cannot be empty")
+	}
+	executable := strings.TrimSpace(args[0])
+	if executable == "" || strings.HasPrefix(executable, "-") {
+		return fmt.Errorf("agent command executable is invalid")
+	}
+	return nil
 }
 
 // CollectAgentEnv collects environment variables to pass to the agent.

@@ -144,6 +144,12 @@ func TestPromoteWorkspaceExecutionResetsCommandWhenProjectMCPFails(t *testing.T)
 	if execution.ContinueCommand != "" {
 		t.Fatalf("ContinueCommand = %q, want reset to empty", execution.ContinueCommand)
 	}
+	if execution.AgentArgs != nil {
+		t.Fatalf("AgentArgs = %#v, want nil after failed promotion", execution.AgentArgs)
+	}
+	if execution.ContinueArgs != nil {
+		t.Fatalf("ContinueArgs = %#v, want nil after failed promotion", execution.ContinueArgs)
+	}
 	if execution.IsPassthrough {
 		t.Fatal("IsPassthrough should be reset after failed promotion")
 	}

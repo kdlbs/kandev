@@ -115,7 +115,7 @@ describe("installPluginFromUrl", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       url: "https://example.test/acme-tools-1.0.0.tar.gz",
     });
-    expect((init?.headers as Record<string, string>)?.["Content-Type"]).toBe("application/json");
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
     expect(result.plugin.id).toBe(PLUGIN_ID);
     expect(result.plugin.status).toBe("active");
     expect(result.warning).toBeUndefined();

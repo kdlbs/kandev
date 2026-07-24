@@ -1,4 +1,7 @@
 import { getBackendConfig } from "@/lib/config";
+import { readInterimSettingsInterlockToken } from "@/src/boot-payload";
+
+const interimSettingsInterlockHeader = "X-Kandev-Interim-Settings-Interlock";
 
 export type ApiRequestOptions = {
   baseUrl?: string;
@@ -47,19 +50,30 @@ async function throwFromResponse(response: Response): Promise<never> {
 export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Promise<T> {
   const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
   const url = resolveUrl(pathOrUrl, baseUrl);
+  const headers = requestHeaders(options?.init?.headers);
+  headers.set("Content-Type", "application/json");
+  if (isMutation(options?.init?.method)) {
+    const token = readInterimSettingsInterlockToken();
+    if (token) headers.set(interimSettingsInterlockHeader, token);
+  }
   const response = await fetch(url, {
     ...options?.init,
     cache: options?.cache,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.init?.headers ?? {}),
-    },
+    headers,
   });
   if (!response.ok) await throwFromResponse(response);
   if (response.status === 204) return undefined as T;
   const text = await response.text();
   if (!text) return undefined as T;
   return JSON.parse(text) as T;
+}
+
+function isMutation(method: string | undefined): boolean {
+  return ["POST", "PUT", "PATCH", "DELETE"].includes(method?.toUpperCase() ?? "GET");
+}
+
+function requestHeaders(headers: HeadersInit | undefined): Headers {
+  return new Headers(headers);
 }
 
 /**

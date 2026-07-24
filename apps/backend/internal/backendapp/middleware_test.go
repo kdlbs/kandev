@@ -3,6 +3,7 @@ package backendapp
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -27,6 +28,28 @@ func TestCORSMiddlewareEchoesOriginForCredentialedRequests(t *testing.T) {
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
 		t.Fatalf("Access-Control-Allow-Credentials = %q, want true", got)
+	}
+}
+
+func TestCORSMiddlewareAllowsInterimSettingsInterlockHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(corsMiddleware())
+	router.POST("/api/v1/agents", func(c *gin.Context) { c.Status(http.StatusNoContent) })
+
+	req := httptest.NewRequest(http.MethodOptions, "/api/v1/agents", nil)
+	req.Host = "localhost:38429"
+	req.Header.Set("Origin", "http://localhost:37429")
+	req.Header.Set("Access-Control-Request-Method", http.MethodPost)
+	req.Header.Set("Access-Control-Request-Headers", "X-Kandev-Interim-Settings-Interlock")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if !strings.Contains(rec.Header().Get("Access-Control-Allow-Headers"), "X-Kandev-Interim-Settings-Interlock") {
+		t.Fatalf("Access-Control-Allow-Headers = %q, want interim settings interlock header", rec.Header().Get("Access-Control-Allow-Headers"))
 	}
 }
 

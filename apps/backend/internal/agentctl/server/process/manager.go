@@ -798,9 +798,9 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.exitCode.Store(-1)
 	m.exitErr.Store(errorWrapper{err: nil})
 
-	if len(m.cfg.AgentArgs) == 0 {
+	if err := config.ValidateCommandArgs(m.cfg.AgentArgs); err != nil {
 		m.status.Store(StatusError)
-		return fmt.Errorf("no agent command configured")
+		return err
 	}
 
 	// Build adapter config and create protocol adapter
@@ -941,10 +941,14 @@ func (m *Manager) buildAdapterConfig() error {
 
 	// Configure one-shot mode when a continue command is provided.
 	// One-shot adapters (e.g., Amp) spawn a new subprocess per prompt.
-	if m.cfg.ContinueCommand != "" {
+	continueArgs := m.cfg.ContinueArgs
+	if continueArgs == nil && m.cfg.ContinueCommand != "" {
+		continueArgs = config.ParseCommand(m.cfg.ContinueCommand)
+	}
+	if len(continueArgs) > 0 {
 		m.adapterCfg.OneShotConfig = &adapter.OneShotConfig{
 			InitialArgs:  m.cfg.AgentArgs,
-			ContinueArgs: config.ParseCommand(m.cfg.ContinueCommand),
+			ContinueArgs: continueArgs,
 			Env:          m.cfg.AgentEnv,
 			WorkDir:      m.cfg.WorkDir,
 		}
@@ -1160,7 +1164,7 @@ func lookupEnvValue(env []string, key string) string {
 // Configure sets the agent command and optional environment variables.
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
-func (m *Manager) Configure(command string, env map[string]string, approvalPolicy, continueCommand string) error {
+func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -1168,14 +1172,22 @@ func (m *Manager) Configure(command string, env map[string]string, approvalPolic
 		return fmt.Errorf("cannot configure while agent is running")
 	}
 
-	if command == "" {
-		return fmt.Errorf("agent command cannot be empty")
+	args := agentArgs
+	if !agentArgsPresent {
+		args = config.ParseCommand(command)
 	}
-
-	// Parse the command string and update config
-	args := config.ParseCommand(command)
-	if len(args) == 0 {
-		return fmt.Errorf("failed to parse agent command")
+	if err := config.ValidateCommandArgs(args); err != nil {
+		return err
+	}
+	if continueArgsPresent {
+		if err := config.ValidateCommandArgs(continueArgs); err != nil {
+			return fmt.Errorf("invalid continue command: %w", err)
+		}
+	} else if continueCommand != "" {
+		continueArgs = config.ParseCommand(continueCommand)
+		if err := config.ValidateCommandArgs(continueArgs); err != nil {
+			return fmt.Errorf("invalid continue command: %w", err)
+		}
 	}
 
 	m.cfg.AgentCommand = command
@@ -1187,8 +1199,12 @@ func (m *Manager) Configure(command string, env map[string]string, approvalPolic
 	}
 
 	// Store continue command for one-shot adapters (e.g., Amp)
-	if continueCommand != "" {
+	if continueArgsPresent {
 		m.cfg.ContinueCommand = continueCommand
+		m.cfg.ContinueArgs = continueArgs
+	} else if continueCommand != "" {
+		m.cfg.ContinueCommand = continueCommand
+		m.cfg.ContinueArgs = continueArgs
 	}
 
 	// Merge additional env vars
