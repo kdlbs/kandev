@@ -14,9 +14,9 @@ spec: "../../specs/tasks/attach-workspace-sources.md"
 
 ## Acceptance
 
-- Desktop E2E opens the combined menu, exercises both actions, adds sources through the shared
-  Local/Remote selector, and proves rows survive mode switching.
-- Mobile E2E proves the 44px trigger/menu/mode geometry, inset action menu, full-height Add sources
+- Desktop E2E opens the combined menu, exercises both actions, adds sources through the tab-free
+  repository-kind menu, and proves mixed rows remain visible.
+- Mobile E2E proves the 44px trigger/menu geometry, inset action menu, full-height Add sources
   drawer, safe-area/footer containment, no document horizontal overflow, submit outcome, and focus
   return.
 - Executor E2E enters Add sources through the combined menu and continues proving capability

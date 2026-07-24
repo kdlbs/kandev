@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useState, type RefObject, type ReactNode } from "react";
-import { IconPlus, IconX } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconCloudDownload,
+  IconFolderPlus,
+  IconGitBranch,
+  IconPlus,
+  IconStack2,
+  IconX,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -18,9 +26,14 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from "@kandev/ui/drawer";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { Input } from "@kandev/ui/input";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { ControlledSourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import { useAppStore } from "@/components/state-provider";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
@@ -39,6 +52,7 @@ import { useDialogOpenerFocus } from "./use-dialog-opener-focus";
 import { useSubmitWorkspaceSources } from "./use-submit-workspace-sources";
 import { useWorkspaceRepositoryOptions } from "./use-workspace-repository-options";
 import { useWorkspaceSourceRows } from "./use-workspace-source-rows";
+import { cn } from "@/lib/utils";
 
 type Props = {
   open: boolean;
@@ -136,6 +150,7 @@ export function AddWorkspaceSourcesDialog({
         />
       }
       submitting={submitting}
+      canSubmit={sourceRows.rows.length > 0}
       onCancel={() => close(false)}
       onSubmit={() => {
         sourceRows.validate();
@@ -163,6 +178,7 @@ type AddWorkspaceSourcesSurfaceProps = {
   error: string | null;
   form: ReactNode;
   submitting: boolean;
+  canSubmit: boolean;
   onCancel: () => void;
   onSubmit: () => void;
 };
@@ -176,6 +192,7 @@ function AddWorkspaceSourcesSurface({
   error,
   form,
   submitting,
+  canSubmit,
   onCancel,
   onSubmit,
 }: AddWorkspaceSourcesSurfaceProps) {
@@ -194,10 +211,10 @@ function AddWorkspaceSourcesSurface({
         type="button"
         data-testid="add-workspace-sources-submit"
         className="min-h-11 cursor-pointer"
-        disabled={submitting}
+        disabled={submitting || !canSubmit}
         onClick={onSubmit}
       >
-        {submitting ? "Adding…" : "Add sources"}
+        {submitting ? "Adding…" : "Add to workspace"}
       </Button>
     </div>
   );
@@ -218,8 +235,10 @@ function AddWorkspaceSourcesSurface({
           className="h-dvh !max-h-dvh rounded-none flex flex-col overflow-hidden data-[vaul-drawer-direction=bottom]:!mt-0"
         >
           <DrawerHeader className="shrink-0 text-left">
-            <DrawerTitle>Add sources</DrawerTitle>
-            <DrawerDescription>Add repositories or folders to this task.</DrawerDescription>
+            <DrawerTitle>Add to workspace</DrawerTitle>
+            <DrawerDescription>
+              Choose repositories or folders to make available in this task.
+            </DrawerDescription>
           </DrawerHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4">
             {errorMessage}
@@ -239,8 +258,10 @@ function AddWorkspaceSourcesSurface({
         onCloseAutoFocus={onCloseAutoFocus}
       >
         <DialogHeader>
-          <DialogTitle>Add sources</DialogTitle>
-          <DialogDescription>Add repositories or folders to this task.</DialogDescription>
+          <DialogTitle>Add to workspace</DialogTitle>
+          <DialogDescription>
+            Choose repositories or folders to make available in this task.
+          </DialogDescription>
         </DialogHeader>
         {errorMessage}
         {form}
@@ -277,33 +298,21 @@ function SourceForm({
   onUpdate: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
   isMobile: boolean;
 }) {
-  const [mode, setMode] = useState<"local" | "remote">("local");
   return (
-    <div className="space-y-3 py-2" data-testid="add-workspace-sources-form">
+    <div className="space-y-4 py-1" data-testid="add-workspace-sources-form">
       <div className="flex flex-wrap items-center gap-2">
-        <ControlledSourceModeSwitch
-          mode={mode}
-          onModeChange={setMode}
-          touchSized={isMobile}
-          options={[
-            { value: "local", label: "Local", testId: "source-mode-local" },
-            { value: "remote", label: "Remote", testId: "source-mode-remote" },
-          ]}
-        />
-        <div className="flex flex-wrap gap-2">
-          {mode === "local" && (
-            <>
-              <AddButton label="Saved repository" onClick={() => onAdd("saved_repository")} />
-              <AddButton label="Local Git repository" onClick={() => onAdd("local_repository")} />
-              {capabilities.canAddFolders && (
-                <AddButton label="Local folder" onClick={() => onAdd("folder")} />
-              )}
-            </>
-          )}
-          {mode === "remote" && (
-            <AddButton label="Remote Git repository" onClick={() => onAdd("remote_repository")} />
-          )}
-        </div>
+        <RepositorySourceMenu isMobile={isMobile} onAdd={onAdd} />
+        {capabilities.canAddFolders && (
+          <Button
+            type="button"
+            variant="outline"
+            className={cn("cursor-pointer", isMobile ? "min-h-11" : "h-9 px-3")}
+            onClick={() => onAdd("folder")}
+          >
+            <IconFolderPlus className="h-4 w-4" />
+            Add folder
+          </Button>
+        )}
       </div>
       {capabilities.requiresCloneableLocalRepository && (
         <p className="text-sm text-muted-foreground">
@@ -330,12 +339,75 @@ function SourceForm({
   );
 }
 
-function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
+function RepositorySourceMenu({
+  isMobile,
+  onAdd,
+}: {
+  isMobile: boolean;
+  onAdd: (kind: "saved_repository" | "local_repository" | "remote_repository") => void;
+}) {
+  const itemClass = cn("cursor-pointer items-start gap-3", isMobile ? "min-h-11" : "py-2");
   return (
-    <Button type="button" variant="outline" className="min-h-11 cursor-pointer" onClick={onClick}>
-      <IconPlus className="mr-1 h-4 w-4" />
-      {label}
-    </Button>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          className={cn("cursor-pointer", isMobile ? "min-h-11" : "h-9 px-3")}
+        >
+          <IconPlus className="h-4 w-4" />
+          Add repository
+          <IconChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-80 max-w-[calc(100vw-2rem)]">
+        <RepositorySourceMenuItem
+          label="Workspace repository"
+          description="Choose from saved or discovered repositories."
+          icon={<IconStack2 className="mt-0.5 h-4 w-4 text-muted-foreground" />}
+          className={itemClass}
+          onSelect={() => onAdd("saved_repository")}
+        />
+        <RepositorySourceMenuItem
+          label="Local Git repository"
+          description="Use an existing checkout on this machine."
+          icon={<IconGitBranch className="mt-0.5 h-4 w-4 text-muted-foreground" />}
+          className={itemClass}
+          onSelect={() => onAdd("local_repository")}
+        />
+        <RepositorySourceMenuItem
+          label="Remote repository"
+          description="Clone from a provider or Git URL."
+          icon={<IconCloudDownload className="mt-0.5 h-4 w-4 text-muted-foreground" />}
+          className={itemClass}
+          onSelect={() => onAdd("remote_repository")}
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function RepositorySourceMenuItem({
+  label,
+  description,
+  icon,
+  className,
+  onSelect,
+}: {
+  label: string;
+  description: string;
+  icon: ReactNode;
+  className: string;
+  onSelect: () => void;
+}) {
+  return (
+    <DropdownMenuItem aria-label={label} className={className} onSelect={onSelect}>
+      {icon}
+      <span className="min-w-0">
+        <span className="block text-sm font-medium text-foreground">{label}</span>
+        <span className="block text-xs text-muted-foreground">{description}</span>
+      </span>
+    </DropdownMenuItem>
   );
 }
 
@@ -412,7 +484,16 @@ function SourceRow({
 }
 
 function labelFor(type: NonNullable<WorkspaceSourceRow["sourceType"]>) {
-  return type.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+  switch (type) {
+    case "saved_repository":
+      return "Workspace repository";
+    case "local_repository":
+      return "Local Git repository";
+    case "remote_repository":
+      return "Remote repository";
+    case "folder":
+      return "Folder";
+  }
 }
 
 function LocalPathRow({

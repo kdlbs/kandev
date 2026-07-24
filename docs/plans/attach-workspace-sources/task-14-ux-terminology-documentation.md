@@ -15,7 +15,7 @@ spec: "../../specs/tasks/attach-workspace-sources.md"
 ## Acceptance
 
 - Public docs direct users through **Files → Workspace actions → Add sources** and describe the
-  shared **Local / Remote** modes rather than the removed three-card taxonomy.
+  tab-free **Add repository** menu rather than the removed Local/Remote modes.
 - Documentation preserves executor capability, branch, atomicity, and folder limitations without
   implying a backend contract change.
 - Feature-status and cross-linked coordination/developer-tool descriptions use the same concise

@@ -127,15 +127,31 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   );
   expect(scrollOwners).toBe(1);
 
-  const localMode = drawer.getByTestId("source-mode-local");
-  const remoteMode = drawer.getByTestId("source-mode-remote");
-  const [localModeBox, remoteModeBox] = await Promise.all([
-    localMode.boundingBox(),
-    remoteMode.boundingBox(),
+  await expect(drawer.getByTestId("source-mode-local")).toHaveCount(0);
+  await expect(drawer.getByTestId("source-mode-remote")).toHaveCount(0);
+  const addRepository = drawer.getByRole("button", { name: "Add repository" });
+  const addFolder = drawer.getByRole("button", { name: "Add folder" });
+  const submit = drawer.getByTestId("add-workspace-sources-submit");
+  const [addRepositoryBox, addFolderBox] = await Promise.all([
+    addRepository.boundingBox(),
+    addFolder.boundingBox(),
   ]);
-  expect(localModeBox?.height).toBeGreaterThanOrEqual(44);
-  expect(remoteModeBox?.height).toBeGreaterThanOrEqual(44);
-  await drawer.getByRole("button", { name: "Saved repository" }).tap();
+  expect(addRepositoryBox?.height).toBeGreaterThanOrEqual(44);
+  expect(addFolderBox?.height).toBeGreaterThanOrEqual(44);
+  await expect(submit).toBeDisabled();
+  await addRepository.tap();
+  const workspaceRepository = testPage.getByRole("menuitem", { name: "Workspace repository" });
+  const localRepository = testPage.getByRole("menuitem", { name: "Local Git repository" });
+  const remoteRepository = testPage.getByRole("menuitem", { name: "Remote repository" });
+  const [workspaceRepositoryBox, localRepositoryBox, remoteRepositoryBox] = await Promise.all([
+    workspaceRepository.boundingBox(),
+    localRepository.boundingBox(),
+    remoteRepository.boundingBox(),
+  ]);
+  expect(workspaceRepositoryBox?.height).toBeGreaterThanOrEqual(44);
+  expect(localRepositoryBox?.height).toBeGreaterThanOrEqual(44);
+  expect(remoteRepositoryBox?.height).toBeGreaterThanOrEqual(44);
+  await workspaceRepository.tap();
   const savedRepositoryRow = drawer.getByTestId("workspace-source-row").first();
   await expect(savedRepositoryRow.getByRole("alert")).toHaveCount(0);
   await expect(savedRepositoryRow.getByRole("textbox", { name: "Checkout branch" })).toHaveCount(0);
@@ -152,8 +168,9 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   expect(createBox?.height).toBeGreaterThanOrEqual(44);
   await testPage.keyboard.press("Escape");
   await savedRepositoryRow.getByRole("button", { name: "Remove source" }).tap();
-  await drawer.getByRole("button", { name: "Local Git repository" }).tap();
-  await drawer.getByRole("button", { name: "Local folder" }).tap();
+  await addRepository.tap();
+  await testPage.getByRole("menuitem", { name: "Local Git repository" }).tap();
+  await addFolder.tap();
   const rows = drawer.getByTestId("workspace-source-row");
   await expect(rows).toHaveCount(2);
   await chooseDirectory(
@@ -169,17 +186,12 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     backend.tmpDir,
     folderPath,
   );
-  await remoteMode.tap();
   await expect(rows).toHaveCount(2);
-  await prCapture.screenshot("workspace-actions-local-remote", {
-    caption:
-      "Pixel 5 Add sources drawer after switching to Remote with configured Local rows preserved",
+  await prCapture.screenshot("workspace-actions-mixed-sources", {
+    caption: "Pixel 5 Add to workspace drawer with a local repository and folder configured",
   });
-  await localMode.tap();
-  await expect(rows).toHaveCount(2);
 
   const footer = drawer.locator("div.border-t").last();
-  const submit = drawer.getByTestId("add-workspace-sources-submit");
   const [footerBox, submitBox] = await Promise.all([footer.boundingBox(), submit.boundingBox()]);
   expect(footerBox).not.toBeNull();
   expect(submitBox).not.toBeNull();

@@ -70,9 +70,13 @@ test.describe("SSH executor — attach workspace sources", () => {
       await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
       const dialog = testPage.getByTestId("add-workspace-sources-dialog");
       await expect(dialog).toBeVisible();
-      await expect(dialog.getByTestId("source-mode-local")).toBeVisible();
-      await expect(dialog.getByTestId("source-mode-remote")).toBeVisible();
-      await expect(dialog.getByRole("button", { name: "Local folder" })).toHaveCount(0);
+      await expect(dialog.getByTestId("source-mode-local")).toHaveCount(0);
+      await expect(dialog.getByRole("button", { name: "Add folder" })).toHaveCount(0);
+      await dialog.getByRole("button", { name: "Add repository" }).click();
+      await expect(testPage.getByRole("menuitem", { name: "Workspace repository" })).toBeVisible();
+      await expect(testPage.getByRole("menuitem", { name: "Local Git repository" })).toBeVisible();
+      await expect(testPage.getByRole("menuitem", { name: "Remote repository" })).toBeVisible();
+      await testPage.keyboard.press("Escape");
       await dialog.getByRole("button", { name: "Cancel" }).click();
       const response = await apiClient.rawRequest(
         "POST",

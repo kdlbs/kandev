@@ -1,6 +1,6 @@
 ---
 id: "11-shared-local-remote-selector"
-title: "Shared Local and Remote selector"
+title: "Tab-free repository source chooser"
 status: done
 wave: 7
 depends_on:
@@ -9,17 +9,17 @@ plan: "plan.md"
 spec: "../../specs/tasks/attach-workspace-sources.md"
 ---
 
-# Task 11: Shared Local and Remote selector
+# Task 11: Tab-free repository source chooser
 
 ## Acceptance
 
-- Task creation and Add sources consume one controlled segmented source-mode component. Task
-  creation retains **Repo / Remote / None**, its state semantics, and existing test IDs; Add sources
-  renders **Local / Remote** with 44px options on phone viewports.
-- Add sources reuses the combined saved/discovered local repository picker in **Local** and the
-  provider-backed/pasted-URL picker in **Remote**. The local-folder/manual-path affordance remains
-  available only when the executor supports it.
-- Switching modes never removes configured rows, validation state, or mixed-batch payload data.
+- Task creation retains **Repo / Remote / None**, its state semantics, and existing test IDs. Add
+  sources does not render a second segmented mode component.
+- Add sources presents one **Add repository** menu with **Workspace repository**, **Local Git
+  repository**, and **Remote repository**. It reuses the combined saved/discovered picker and the
+  provider-backed/pasted-URL picker; **Add folder** remains available only when supported.
+- Adding another kind never removes configured rows, validation state, or mixed-batch payload data.
+- Phone triggers and source-kind menu rows provide an actual 44px touch target.
 
 ## Verification
 
@@ -52,7 +52,7 @@ Task 06.
 
 ## Inputs
 
-- Spec: **What** source-mode requirements and Local/Remote scenarios.
+- Spec: **What** repository-kind requirements and mixed-source scenarios.
 - Plan: **Frontend → Shared source picker** and **Mobile design contract**.
 - Patterns: `WorkspaceRepoChips`, `RemoteRepoChip`, `useDiscoverReposEffect`, and the existing
   create-task `SourceModeSwitch`.

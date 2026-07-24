@@ -42,6 +42,13 @@ async function finishClose(surface: HTMLElement, isDrawer: boolean) {
   await waitFor(() => expect(surface.isConnected).toBe(false));
 }
 
+function openRepositoryMenu() {
+  const trigger = screen.getByRole("button", { name: "Add repository" });
+  fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+  fireEvent.click(trigger);
+  return trigger;
+}
+
 function Harness({ makeTurnActive = false }: { makeTurnActive?: boolean }) {
   return (
     <StateProvider>
@@ -102,7 +109,7 @@ afterEach(() => {
 });
 
 describe("AddWorkspaceSourcesDialog", () => {
-  it("uses touch-sized Local and Remote modes without discarding mixed source rows", async () => {
+  it("uses a touch-sized repository menu without tabs or discarded mixed source rows", async () => {
     isMobile = true;
     render(
       <TooltipProvider>
@@ -111,27 +118,34 @@ describe("AddWorkspaceSourcesDialog", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
-    const local = await screen.findByTestId("source-mode-local");
-    expect(local.className).toContain("min-h-11");
-    fireEvent.click(screen.getByRole("button", { name: "Local folder" }));
-    fireEvent.click(screen.getByTestId("source-mode-remote"));
-    fireEvent.click(screen.getByRole("button", { name: "Remote Git repository" }));
-    fireEvent.click(local);
+    expect(screen.queryByTestId("source-mode-local")).toBeNull();
+    expect(screen.queryByTestId("source-mode-remote")).toBeNull();
+    const addRepository = screen.getByRole("button", { name: "Add repository" });
+    const submit = screen.getByTestId("add-workspace-sources-submit");
+    expect(addRepository.className).toContain("min-h-11");
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Add folder" }));
+    openRepositoryMenu();
+    const remoteRepository = await screen.findByRole("menuitem", { name: "Remote repository" });
+    expect(remoteRepository.className).toContain("min-h-11");
+    fireEvent.click(remoteRepository);
 
     expect(screen.getByText("Folder")).toBeTruthy();
-    expect(screen.getByText("Remote Repository")).toBeTruthy();
+    expect(screen.getByText("Remote repository")).toBeTruthy();
     expect(screen.queryByText("Choose a repository and base branch.")).toBeNull();
     expect(screen.queryByRole("textbox", { name: "Checkout branch" })).toBeNull();
+    expect((submit as HTMLButtonElement).disabled).toBe(false);
 
-    fireEvent.click(screen.getByTestId("add-workspace-sources-submit"));
+    fireEvent.click(submit);
 
     const validationError = screen.getByText("Choose a repository and base branch.");
     expect(validationError.className).toContain("text-xs");
     const form = screen.getByTestId("add-workspace-sources-form");
     expect(form.querySelectorAll('[role="alert"]')).toHaveLength(2);
 
-    fireEvent.click(screen.getByTestId("source-mode-remote"));
-    fireEvent.click(screen.getByRole("button", { name: "Remote Git repository" }));
+    openRepositoryMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Local Git repository" }));
     expect(form.querySelectorAll('[role="alert"]')).toHaveLength(2);
   });
 
@@ -174,7 +188,7 @@ describe("AddWorkspaceSourcesDialog", () => {
       fireEvent.click(opener);
       const surface = await screen.findByTestId(surfaceTestId);
       await waitFor(() => expect(opener.disabled).toBe(true));
-      fireEvent.click(screen.getByRole("button", { name: "Local folder" }));
+      fireEvent.click(screen.getByRole("button", { name: "Add folder" }));
       fireEvent.click(screen.getByRole("button", { name: "Choose local folder" }));
       fireEvent.click(screen.getByTestId("add-workspace-sources-submit"));
 
@@ -208,13 +222,14 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
 
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     await waitFor(() => expect(discoverRepositoriesAction).toHaveBeenCalledWith("workspace-1"));
-    fireEvent.click(screen.getByRole("button", { name: "Saved repository" }));
+    openRepositoryMenu();
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Workspace repository" }));
     fireEvent.click(screen.getByTestId("repo-chip-trigger"));
 
     expect(await screen.findByText("discovered-project")).toBeTruthy();
     expect(screen.getByText("on disk")).toBeTruthy();
+    expect(screen.getByTestId("create-local-repository-button")).toBeTruthy();
     fireEvent.click(screen.getByTestId("repo-refresh-button"));
     await waitFor(() => expect(refreshRepositories).toHaveBeenCalledOnce());
-    expect(screen.getByTestId("create-local-repository-button")).toBeTruthy();
   });
 });

@@ -95,8 +95,14 @@ test.describe("Attach local workspace sources", () => {
     await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
     const dialog = testPage.getByTestId("add-workspace-sources-dialog");
     await expect(dialog).toBeVisible();
-    await expect(dialog.getByTestId("source-mode-local")).toHaveAttribute("aria-checked", "true");
-    await dialog.getByRole("button", { name: "Saved repository" }).click();
+    await expect(dialog.getByTestId("source-mode-local")).toHaveCount(0);
+    const addRepository = dialog.getByRole("button", { name: "Add repository" });
+    const submit = dialog.getByTestId("add-workspace-sources-submit");
+    await expect(submit).toBeDisabled();
+    await addRepository.click();
+    await expect(testPage.getByRole("menuitem", { name: "Local Git repository" })).toBeVisible();
+    await expect(testPage.getByRole("menuitem", { name: "Remote repository" })).toBeVisible();
+    await testPage.getByRole("menuitem", { name: "Workspace repository" }).click();
     const savedRepositoryRow = dialog.getByTestId("workspace-source-row").first();
     await expect(savedRepositoryRow.getByRole("alert")).toHaveCount(0);
     await expect(savedRepositoryRow.getByRole("textbox", { name: "Checkout branch" })).toHaveCount(
@@ -106,13 +112,14 @@ test.describe("Attach local workspace sources", () => {
     await expect(testPage.getByTestId("repo-refresh-button")).toBeVisible();
     await expect(testPage.getByTestId("create-local-repository-button")).toBeVisible();
     await testPage.keyboard.press("Escape");
-    await dialog.getByTestId("add-workspace-sources-submit").click();
+    await submit.click();
     const savedRepositoryError = savedRepositoryRow.getByRole("alert");
     await expect(savedRepositoryError).toHaveText("Choose a repository and base branch.");
     await expect(savedRepositoryError).toHaveCSS("font-size", "12px");
     await savedRepositoryRow.getByRole("button", { name: "Remove source" }).click();
-    await dialog.getByRole("button", { name: "Local Git repository" }).click();
-    await dialog.getByRole("button", { name: "Local folder" }).click();
+    await addRepository.click();
+    await testPage.getByRole("menuitem", { name: "Local Git repository" }).click();
+    await dialog.getByRole("button", { name: "Add folder" }).click();
     const rows = dialog.getByTestId("workspace-source-row");
     await expect(rows).toHaveCount(2);
     await chooseDirectory(
@@ -128,15 +135,11 @@ test.describe("Attach local workspace sources", () => {
       backend.tmpDir,
       folderPath,
     );
-    await dialog.getByTestId("source-mode-remote").click();
     await expect(rows).toHaveCount(2);
-    await prCapture.screenshot("workspace-actions-local-remote", {
-      caption:
-        "Desktop Add sources dialog after switching to Remote with configured Local rows preserved",
+    await prCapture.screenshot("workspace-actions-mixed-sources", {
+      caption: "Desktop Add to workspace dialog with a local repository and folder configured",
     });
-    await dialog.getByTestId("source-mode-local").click();
-    await expect(rows).toHaveCount(2);
-    await dialog.getByTestId("add-workspace-sources-submit").click();
+    await submit.click();
     await expect(dialog).not.toBeVisible();
 
     await expect(
