@@ -197,7 +197,7 @@ const taskSessionSelectCols = `ts.id, ts.task_id,
 	ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
-	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name`
+	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id`
 
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
@@ -306,6 +306,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	// via NullString so the empty case maps to "" on the model.
 	var agentProfileID sql.NullString
 	var name sql.NullString
+	var lastReadMessageID sql.NullString
 
 	err := row.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
@@ -313,7 +314,7 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name,
+		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 	)
 
 	if err == sql.ErrNoRows {
@@ -334,6 +335,9 @@ func (r *Repository) scanTaskSession(ctx context.Context, row *sql.Row, noRowsEr
 	}
 	if name.Valid {
 		session.Name = name.String
+	}
+	if lastReadMessageID.Valid {
+		session.LastReadMessageID = lastReadMessageID.String
 	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time
@@ -1171,6 +1175,25 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 	return nil
 }
 
+// UpdateTaskSessionLastReadMessageID persists messageID as the session's
+// read cursor — deliberately a narrow single-column write (like
+// RenameTaskSession/UpdateTaskSessionBaseCommit) so it never collides with a
+// concurrent metadata or full-row write, and vice versa.
+func (r *Repository) UpdateTaskSessionLastReadMessageID(ctx context.Context, id, messageID string) error {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_sessions SET last_read_message_id = ?, updated_at = ? WHERE id = ?
+	`), messageID, now, id)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
+	}
+	return nil
+}
+
 // ResetTaskSessionBasesForRepository rewrites base_branch and clears
 // base_commit_sha on every task_session belonging to (taskID, repositoryID).
 // Used by service.UpdateRepositoryBaseBranch after the changes-panel
@@ -1491,6 +1514,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	var reviewStatus sql.NullString
 	var agentProfileID sql.NullString
 	var name sql.NullString
+	var lastReadMessageID sql.NullString
 
 	err := rows.Scan(
 		&session.ID, &session.TaskID, &session.AgentExecutionID, &session.ContainerID, &agentProfileID,
@@ -1498,7 +1522,7 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 		&session.RepositoryID, &session.BaseBranch, &session.BaseCommitSHA, &session.WorkspacePath,
 		&agentProfileSnapshotJSON, &executorSnapshotJSON, &environmentSnapshotJSON, &repositorySnapshotJSON,
 		&state, &session.ErrorMessage, &metadataJSON, &session.StartedAt, &completedAt, &session.UpdatedAt,
-		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name,
+		&isPrimary, &reviewStatus, &isPassthrough, &session.TaskEnvironmentID, &name, &lastReadMessageID,
 	)
 	if err != nil {
 		return nil, err
@@ -1515,6 +1539,9 @@ func scanTaskSessionRow(rows *sql.Rows) (*models.TaskSession, error) {
 	}
 	if name.Valid {
 		session.Name = name.String
+	}
+	if lastReadMessageID.Valid {
+		session.LastReadMessageID = lastReadMessageID.String
 	}
 	if completedAt.Valid {
 		session.CompletedAt = &completedAt.Time

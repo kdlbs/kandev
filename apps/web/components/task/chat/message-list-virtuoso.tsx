@@ -13,6 +13,7 @@ import {
   type MessageListProps,
   MessageListStatus,
   MessageItem,
+  UnreadDivider,
   getItemKey,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
@@ -106,7 +107,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
     childrenByParentToolCallId,
     taskId,
   } = props;
-  const { worktreePath, onOpenFile, lastTurnGroupId, activeTurnId } = props;
+  const { worktreePath, onOpenFile, lastTurnGroupId, activeTurnId, dividerBeforeItemKey } = props;
   const { hasMore, isLoadingMore, loadMore } = props;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const itemCount = items.length;
@@ -151,9 +152,11 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
     (index: number) => {
       const item = items[index - firstItemIndex];
       if (!item) return <div />;
+      const key = getItemKey(item);
 
       return (
         <div className="pb-2">
+          {dividerBeforeItemKey === key && <UnreadDivider />}
           <MessageItem
             item={item}
             sessionId={sessionId}
@@ -183,6 +186,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
       activeTurnId,
       streamingMessageId,
       handleScrollToMessage,
+      dividerBeforeItemKey,
     ],
   );
 

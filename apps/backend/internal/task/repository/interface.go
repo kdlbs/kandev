@@ -227,6 +227,7 @@ type SessionRepository interface {
 	SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error)
 	DismissLastAgentError(ctx context.Context, sessionID string, expected models.LastAgentError, dismissedAt time.Time) (bool, error)
 	GetLastAgentMessage(ctx context.Context, sessionID string) (string, error)
+	UpdateTaskSessionLastReadMessageID(ctx context.Context, id, messageID string) error
 }
 
 // SessionWorktreeRepository handles the task session↔worktree association.

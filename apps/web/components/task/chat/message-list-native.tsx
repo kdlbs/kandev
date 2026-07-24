@@ -11,6 +11,7 @@ import {
   type MessageListProps,
   MessageListStatus,
   MessageItem,
+  UnreadDivider,
   getItemKey,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
@@ -185,6 +186,7 @@ export const NativeMessageList = memo(function NativeMessageList({
   sessionState,
   worktreePath,
   onOpenFile,
+  dividerBeforeItemKey,
 }: MessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -240,6 +242,7 @@ export const NativeMessageList = memo(function NativeMessageList({
         const key = getItemKey(item);
         return (
           <div key={key} id={`msg-${key}`} className="pb-2" style={{ overflowAnchor: "none" }}>
+            {dividerBeforeItemKey === key && <UnreadDivider />}
             <MessageItem
               item={item}
               sessionId={sessionId}

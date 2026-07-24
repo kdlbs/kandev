@@ -31,6 +31,9 @@ export type MessageListProps = {
   sessionState?: TaskSessionState;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
+  /** Render item key (see getItemKey) the unread "New" divider should
+   *  appear immediately before; null/undefined renders no divider. */
+  dividerBeforeItemKey?: string | null;
 };
 
 export function getItemKey(item: RenderItem): string {
@@ -169,6 +172,27 @@ export function LastAgentErrorNotice({
           <IconX className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Slack-style unread-messages divider: a red rule with a "New" label,
+ * positioned by the caller immediately before the first unread render item
+ * (see hooks/use-processed-messages.ts's findUnreadDividerItemId).
+ */
+export function UnreadDivider() {
+  return (
+    <div
+      data-testid="unread-divider"
+      role="separator"
+      aria-label="New messages"
+      className="relative my-3 flex items-center"
+    >
+      <div className="h-px flex-1 bg-destructive" />
+      <span className="ml-2 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-destructive">
+        New
+      </span>
     </div>
   );
 }

@@ -9,6 +9,7 @@ import {
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
 import { useFileEditors } from "@/hooks/use-file-editors";
+import { usePanelActive } from "@/hooks/use-panel-active";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
 import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
@@ -188,6 +189,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
   );
   useChatSessionTitle(panelId, sessionId, !!paramSessionId);
+  const isVisible = usePanelActive(panelId);
 
   if (isPassthrough) {
     return (
@@ -205,6 +207,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       onOpenFile={openFile}
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
+      isVisible={isVisible}
     />
   );
 }

@@ -471,6 +471,34 @@ func (h *TaskHandlers) httpDismissLastAgentError(c *gin.Context) {
 	})
 }
 
+type markSessionReadRequest struct {
+	MessageID string `json:"message_id"`
+}
+
+// httpMarkSessionRead advances the session's Slack-style unread-divider read
+// cursor to req.MessageID. A missing session is a 404; any other failure
+// (empty ids, an unknown message, or a message belonging to a different
+// session) is a 400 — the caller sent bad input, not a missing resource.
+func (h *TaskHandlers) httpMarkSessionRead(c *gin.Context) {
+	var req markSessionReadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	session, err := h.service.MarkSessionRead(c.Request.Context(), c.Param("id"), req.MessageID)
+	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "task session not found"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
+		Session: dto.FromTaskSession(session),
+	})
+}
+
 func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {

@@ -264,6 +264,10 @@ type TaskSessionDTO struct {
 	// EnrichForegroundActivity, never by FromTaskSession.
 	ForegroundActivity  v1.ForegroundActivity `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                   `json:"active_subagent_count"`
+	// LastReadMessageID is the session's Slack-style read cursor — the id of
+	// the newest message the frontend has marked as read. Used by the
+	// transcript to position the unread ("New") divider.
+	LastReadMessageID string `json:"last_read_message_id,omitempty"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
@@ -304,6 +308,7 @@ type TaskSessionSummaryDTO struct {
 	// (ADR-0049); see TaskSessionDTO.
 	ForegroundActivity  v1.ForegroundActivity `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                   `json:"active_subagent_count"`
+	LastReadMessageID string                        `json:"last_read_message_id,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
@@ -723,6 +728,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		IsPassthrough:     session.IsPassthrough,
 		ReviewStatus:      session.ReviewStatus,
 		TaskEnvironmentID: session.TaskEnvironmentID,
+		LastReadMessageID: session.LastReadMessageID,
 	}
 	if len(session.Worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID
@@ -762,6 +768,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		IsPassthrough:     session.IsPassthrough,
 		ReviewStatus:      session.ReviewStatus,
 		TaskEnvironmentID: session.TaskEnvironmentID,
+		LastReadMessageID: session.LastReadMessageID,
 	}
 	if len(session.Worktrees) > 0 {
 		result.WorktreeID = session.Worktrees[0].WorktreeID

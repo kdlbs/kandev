@@ -68,6 +68,7 @@ vi.mock("@/lib/api/domains/session-api", () => ({
 import {
   MessageItem,
   MessageListStatus,
+  UnreadDivider,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
   getStreamingAgentMessageId,
@@ -332,5 +333,15 @@ describe("MessageListStatus", () => {
 
     expect(screen.queryByTestId("conversation-loading-state")).not.toBeNull();
     expect(screen.queryByText("Loading conversation...")).not.toBeNull();
+  });
+});
+
+describe("UnreadDivider", () => {
+  it("renders a labeled separator marking new messages", () => {
+    render(<UnreadDivider />);
+
+    const divider = screen.getByTestId("unread-divider");
+    expect(divider.getAttribute("role")).toBe("separator");
+    expect(screen.getByText("New")).not.toBeNull();
   });
 });

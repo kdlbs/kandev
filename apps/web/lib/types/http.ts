@@ -436,6 +436,9 @@ export type TaskSession = ActiveSubagentCountFields & {
   review_status?: WorkflowReviewStatus;
   // Server-resolved tool_call count, populated by ListTaskSessions.
   command_count?: number;
+  // Slack-style read cursor: the id of the newest message the frontend has
+  // marked as read. Used to position the unread ("New") divider.
+  last_read_message_id?: string;
 };
 
 export type TaskSessionsResponse = {

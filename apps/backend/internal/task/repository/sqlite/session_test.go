@@ -146,6 +146,63 @@ func TestRenameTaskSession(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskSessionLastReadMessageID verifies the read-cursor setter
+// rejects a missing session, persists the message id (round-tripping through
+// both GetTaskSession and ListTaskSessions, which scan via the single-row and
+// multi-row helpers respectively), and that ToAPI omits an empty cursor.
+func TestUpdateTaskSessionLastReadMessageID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "missing-session", "msg-1"); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID error = %v, want ErrTaskSessionNotFound", err)
+	}
+
+	seedForMsgTest(t, repo, "task-read", "session-read", "turn-read")
+	session, err := repo.GetTaskSession(ctx, "session-read")
+	if err != nil {
+		t.Fatalf("GetTaskSession before mark-read: %v", err)
+	}
+	if _, ok := session.ToAPI()["last_read_message_id"]; ok {
+		t.Fatalf("ToAPI() should omit last_read_message_id when empty")
+	}
+
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-read", "msg-1"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, "session-read")
+	if err != nil {
+		t.Fatalf("GetTaskSession after mark-read: %v", err)
+	}
+	if session.LastReadMessageID != "msg-1" {
+		t.Fatalf("session.LastReadMessageID = %q, want %q", session.LastReadMessageID, "msg-1")
+	}
+	if got := session.ToAPI()["last_read_message_id"]; got != "msg-1" {
+		t.Fatalf(`ToAPI()["last_read_message_id"] = %v, want "msg-1"`, got)
+	}
+
+	// Round-trips through the multi-row scan path (ListTaskSessions) too.
+	sessions, err := repo.ListTaskSessions(ctx, "task-read")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].LastReadMessageID != "msg-1" {
+		t.Fatalf("ListTaskSessions did not carry LastReadMessageID: %#v", sessions)
+	}
+
+	// Advancing to a newer message overwrites the cursor (last write wins).
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-read", "msg-2"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID advance: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, "session-read")
+	if err != nil {
+		t.Fatalf("GetTaskSession after advance: %v", err)
+	}
+	if session.LastReadMessageID != "msg-2" {
+		t.Fatalf("session.LastReadMessageID = %q, want %q", session.LastReadMessageID, "msg-2")
+	}
+}
+
 // TestTaskSessionNotFoundErrorsAreTyped verifies that GetTaskSession,
 // UpdateTaskSession, UpdateTaskSessionState, and UpdateTaskSessionBaseCommit
 // all return ErrTaskSessionNotFound for a missing session, that

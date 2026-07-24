@@ -117,6 +117,31 @@ func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp st
 	return s.sessions.GetTaskSession(ctx, sessionID)
 }
 
+// MarkSessionRead advances sessionID's Slack-style read cursor to messageID.
+// messageID must belong to sessionID — a stale id, a synthetic frontend-only
+// row (e.g. the task-description placeholder), or a cross-session id is
+// rejected rather than persisted, since a wrong cursor would hide genuinely
+// unread messages behind a mispositioned "New" divider.
+func (s *Service) MarkSessionRead(ctx context.Context, sessionID, messageID string) (*models.TaskSession, error) {
+	if sessionID == "" {
+		return nil, fmt.Errorf("session_id is required")
+	}
+	if messageID == "" {
+		return nil, fmt.Errorf("message_id is required")
+	}
+	message, err := s.messages.GetMessage(ctx, messageID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to look up message %s: %w", messageID, err)
+	}
+	if message.TaskSessionID != sessionID {
+		return nil, fmt.Errorf("message %s does not belong to session %s", messageID, sessionID)
+	}
+	if err := s.sessions.UpdateTaskSessionLastReadMessageID(ctx, sessionID, messageID); err != nil {
+		return nil, err
+	}
+	return s.sessions.GetTaskSession(ctx, sessionID)
+}
+
 // GetPrimarySession returns the primary session for a task.
 func (s *Service) GetPrimarySession(ctx context.Context, taskID string) (*models.TaskSession, error) {
 	if err := s.authorizeTaskID(ctx, taskID); err != nil {

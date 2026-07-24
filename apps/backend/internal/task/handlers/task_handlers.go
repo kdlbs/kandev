@@ -126,6 +126,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/tasks/:id/context", h.httpGetTaskContext)
 	api.GET("/task-sessions/:id", h.httpGetTaskSession)
 	api.POST("/task-sessions/:id/last-agent-error/dismiss", h.httpDismissLastAgentError)
+	api.POST("/task-sessions/:id/mark-read", h.httpMarkSessionRead)
 	api.GET("/tasks/:id/sessions", h.httpListTaskSessions)
 	api.POST("/tasks/:id/sessions/ensure", h.httpEnsureTaskSession)
 	api.GET("/tasks/:id/environment", h.httpGetTaskEnvironment)

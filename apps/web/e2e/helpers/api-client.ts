@@ -1711,6 +1711,27 @@ export class ApiClient {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}/turns`);
   }
 
+  async getTaskSession(sessionId: string): Promise<{
+    session: { id: string; last_read_message_id?: string };
+  }> {
+    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
+  }
+
+  /**
+   * Seeds the session's Slack-style read cursor directly via the backend
+   * mark-read endpoint. Used by e2e specs to deterministically simulate
+   * "the user last read up through messageId" without needing a real
+   * background agent turn to run while the session is out of view.
+   */
+  async markSessionRead(
+    sessionId: string,
+    messageId: string,
+  ): Promise<{ session: { id: string; last_read_message_id?: string } }> {
+    return this.request("POST", `/api/v1/task-sessions/${sessionId}/mark-read`, {
+      message_id: messageId,
+    });
+  }
+
   async listTasks(
     workspaceId: string,
   ): Promise<{ tasks: Array<{ id: string; title: string; workflow_step_id?: string }> }> {

@@ -84,6 +84,27 @@ export async function dismissLastAgentError(
   );
 }
 
+/**
+ * Advances the session's Slack-style read cursor to messageId. Called when a
+ * session becomes the visible chat panel — the caller must snapshot the
+ * session's PRIOR last_read_message_id (to position the unread divider)
+ * before invoking this, since the response overwrites it.
+ */
+export async function markSessionRead(
+  taskSessionId: string,
+  messageId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskSessionResponse>(`/api/v1/task-sessions/${taskSessionId}/mark-read`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId }),
+    },
+  });
+}
+
 export async function listTaskSessionMessages(
   taskSessionId: string,
   params?: { limit?: number; before?: string; after?: string; sort?: "asc" | "desc" },
