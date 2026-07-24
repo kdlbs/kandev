@@ -1,34 +1,39 @@
-import { createRef } from "react";
+import React, { createRef } from "react";
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { ToastProvider } from "@/components/toast-provider";
 import { shouldShowChatFocusHint, useChatInputContainer } from "./use-chat-input-container";
 import type { ChatInputContainerHandle } from "./chat-input-container";
 
 function renderInputState(overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {}) {
-  return renderHook(() =>
-    useChatInputContainer({
-      ref: createRef<ChatInputContainerHandle>(),
-      sessionId: "session-1",
-      isSending: false,
-      isStarting: false,
-      isPreparingEnvironment: false,
-      isMoving: false,
-      isFailed: false,
-      needsRecovery: false,
-      executorUnavailable: false,
-      isAgentBusy: false,
-      hasAgentCommands: true,
-      placeholder: undefined,
-      contextItems: [],
-      pendingClarification: null,
-      onClarificationResolved: undefined,
-      pendingCommentsByFile: undefined,
-      hasContextComments: false,
-      showRequestChangesTooltip: false,
-      onRequestChangesTooltipDismiss: undefined,
-      onSubmit: vi.fn(),
-      ...overrides,
-    }),
+  return renderHook(
+    () =>
+      useChatInputContainer({
+        ref: createRef<ChatInputContainerHandle>(),
+        sessionId: "session-1",
+        isSending: false,
+        isStarting: false,
+        isPreparingEnvironment: false,
+        isMoving: false,
+        isFailed: false,
+        needsRecovery: false,
+        executorUnavailable: false,
+        isAgentBusy: false,
+        hasAgentCommands: true,
+        placeholder: undefined,
+        contextItems: [],
+        pendingClarification: null,
+        onClarificationResolved: undefined,
+        pendingCommentsByFile: undefined,
+        hasContextComments: false,
+        showRequestChangesTooltip: false,
+        onRequestChangesTooltipDismiss: undefined,
+        onSubmit: vi.fn(),
+        ...overrides,
+      }),
+    {
+      wrapper: ({ children }) => React.createElement(ToastProvider, null, children),
+    },
   );
 }
 
