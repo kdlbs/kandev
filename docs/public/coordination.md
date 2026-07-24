@@ -170,11 +170,11 @@ Before starting, document:
 
 ### Add sources after creation
 
-For an idle, non-archived repository-backed task, use **Files → Workspace actions → Add sources**. Its **Local** mode shares task creation's saved/discovered local-repository selector and offers local folders when the executor supports them; its **Remote** mode uses provider-backed repositories or pasted repository URLs. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer.
+For an idle, non-archived repository-backed task, use **Files → Workspace actions → Add Repositories to workspace**. Its **Local** mode shares task creation's saved/discovered local-repository selector, including refresh and create-repository actions, and offers local folders when the executor supports them; its **Remote** mode uses provider-backed repositories or pasted repository URLs. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer.
 
 Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Folder sources are live host grants and work only on **Worktree** and **Local/Local PC**; they are unavailable to Docker and remote runtimes. Remote Docker remains unimplemented. Local Git sources need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use host repositories directly.
 
-Use a base branch for every repository attachment. Worktree, Docker, SSH, and Sprites can materialize an optional existing checkout branch for repository sources. Local/Local PC never changes the user-owned repository checkout.
+Use a base branch for every repository attachment. Local/Local PC never changes the user-owned repository checkout.
 
 Kandev rejects the entire request if a source is invalid, duplicated, inaccessible, or cannot be materialized. A failure removes new source records and Kandev-owned materialization; existing task contents remain intact. Attachments persist across reload, relaunch, and reset. A missing persisted folder is surfaced during a new or reset environment rather than silently omitted.
 
@@ -239,7 +239,7 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 - **Agent cannot spawn on another task:** `spawn_session_kandev` is same-workspace only; create a task or use a normal targeted message instead.
 - **Parent does not advance after children finish:** the parent needs an active session in `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT` in addition to terminal direct children.
 - **A multi-repository executor is disabled:** Local/Local PC creation is still gated, or Remote Docker is not implemented. Choose Worktree, Local Docker, SSH, or Sprites.
-- **Add sources is rejected:** wait until the task has no active turn or tool call, check every source's locator and branch, and remove duplicate repository/branch pairs or folder paths. A Docker or remote task cannot attach a folder.
+- **Adding repositories is rejected:** wait until the task has no active turn or tool call, check every source's locator and branch, and remove duplicate repository/branch pairs or folder paths. A Docker or remote task cannot attach a folder.
 - **Changed base did not refresh immediately:** the database value is saved even when live tracker refresh fails; the next session launch rebuilds the comparison state.
 - **Changed base did not retarget the PR:** the base-update tool changes Kandev's comparison context, not Git history or provider PR metadata.
 

@@ -15,19 +15,20 @@ manually moving files into the task workspace.
 ## What
 
 - A repository-backed task exposes one **Workspace actions** menu in the Files panel on desktop and
-  mobile. The menu contains **Add sources** and **Open workspace folder** rather than separate
-  toolbar controls.
+  mobile. The menu contains **Add Repositories to workspace** and **Open workspace folder** rather
+  than separate toolbar controls.
 - **Add sources** uses the same repository-selection language as task creation, with **Local** and
   **Remote** modes instead of separate saved-repository, local-Git, and remote-Git choice cards.
 - Subject to the task executor's capabilities, one submission can add one or more mixed sources.
   **Local** combines saved workspace repositories and discovered local Git repositories in the
-  shared repository selector and offers an arbitrary local folder affordance when supported.
+  shared repository selector, including its refresh and create-repository actions, and offers an
+  arbitrary local folder affordance when supported.
   **Remote** reuses the provider-backed and pasted-URL repository selector from task creation.
 - Switching between **Local** and **Remote** changes only the available selector. Rows already added
   to the batch remain visible and are not discarded, so one submission can still mix local,
   remote, and folder sources.
-- Repository rows include a base branch and may select an existing checkout branch, matching the
-  repository and branch controls used by task creation.
+- Repository rows choose a base branch with the shared task-creation controls. The add-sources UI
+  does not expose a second checkout-branch field.
 - A successful submission makes every added source visible as a named top-level entry in the Files
   panel. Repository sources also appear in repository-aware Changes, branch, editor, and pull
   request surfaces; folder sources remain file-only.
@@ -44,9 +45,9 @@ manually moving files into the task workspace.
 - Kandev may re-root or restart an idle task environment when its executor cannot safely change the
   agent working directory in place. The action is unavailable while a turn or tool call is active,
   and the backend independently rejects that race with a conflict response.
-- When **Add sources** is unavailable, the combined Files action remains reachable so **Open
-  workspace folder** still works. The **Add sources** menu item is disabled and shows the reason in
-  touch-visible text rather than relying on a tooltip.
+- When **Add Repositories to workspace** is unavailable, the combined Files action remains
+  reachable so **Open workspace folder** still works. The repository action is disabled and shows
+  the reason in touch-visible text rather than relying on a tooltip.
 - Existing conversations, task state, plan, sessions, and repository attachments remain intact.
 - Agents receive a batch `add_workspace_sources_kandev` MCP tool that uses the same validation and
   materialization path. The existing `add_branch_to_task_kandev` tool remains as a compatibility
@@ -62,14 +63,14 @@ Repository attachments continue to use `task_repositories`; their current unique
 
 Arbitrary folder attachments use `task_workspace_folders`:
 
-| Field | Contract |
-| --- | --- |
-| `id` | Stable attachment identity. |
-| `task_id` | Owning task; cascade-deleted with the task. |
-| `local_path` | Canonical absolute path selected on the Kandev host. |
-| `display_name` | Sanitized, non-empty top-level workspace entry name. |
-| `position` | Stable order among folder attachments. |
-| `created_at`, `updated_at` | Audit timestamps. |
+| Field                      | Contract                                             |
+| -------------------------- | ---------------------------------------------------- |
+| `id`                       | Stable attachment identity.                          |
+| `task_id`                  | Owning task; cascade-deleted with the task.          |
+| `local_path`               | Canonical absolute path selected on the Kandev host. |
+| `display_name`             | Sanitized, non-empty top-level workspace entry name. |
+| `position`                 | Stable order among folder attachments.               |
+| `created_at`, `updated_at` | Audit timestamps.                                    |
 
 `(task_id, local_path)` and `(task_id, display_name)` are unique. The effective source projection
 combines ordered `task_repositories` and `task_workspace_folders`; it does not replace repository
@@ -125,17 +126,17 @@ persisted in source URLs or copied into agent-visible metadata.
 
 ## Failure modes
 
-| Condition | Observable behavior |
-| --- | --- |
-| A turn or tool call is active | The UI disables the action when known; a racing request returns `409` without mutation. |
-| Any source is invalid or duplicated | The full batch is rejected before persistence or materialization. |
-| A host materializer fails | New filesystem entries and source records are rolled back; existing task contents remain. |
-| A container/remote repository clone fails | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source. |
-| A container/remote task submits a folder source | The request returns `422` without persistence or filesystem changes. |
-| Agentctl cannot rescan the new root | The attachment fails rather than reporting success with a stale Files tree. |
-| A requested file move or rename crosses canonical source roots | The request is rejected before either source is mutated. |
-| A persisted local folder later disappears | The current live environment keeps its existing materialization; a new/reset environment surfaces the missing source and does not silently omit it. |
-| The client disconnects during materialization | Rollback runs on a detached bounded context and the eventual task event reflects durable state. |
+| Condition                                                      | Observable behavior                                                                                                                                 |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A turn or tool call is active                                  | The UI disables the action when known; a racing request returns `409` without mutation.                                                             |
+| Any source is invalid or duplicated                            | The full batch is rejected before persistence or materialization.                                                                                   |
+| A host materializer fails                                      | New filesystem entries and source records are rolled back; existing task contents remain.                                                           |
+| A container/remote repository clone fails                      | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source.           |
+| A container/remote task submits a folder source                | The request returns `422` without persistence or filesystem changes.                                                                                |
+| Agentctl cannot rescan the new root                            | The attachment fails rather than reporting success with a stale Files tree.                                                                         |
+| A requested file move or rename crosses canonical source roots | The request is rejected before either source is mutated.                                                                                            |
+| A persisted local folder later disappears                      | The current live environment keeps its existing materialization; a new/reset environment surfaces the missing source and does not silently omit it. |
+| The client disconnects during materialization                  | Rollback runs on a detached bounded context and the eventual task event reflects durable state.                                                     |
 
 ## Persistence guarantees
 
@@ -148,7 +149,8 @@ must be retried.
 ## Scenarios
 
 - **GIVEN** a repository-backed task with the Files tree loaded, **WHEN** the user opens the
-  workspace-actions control, **THEN** one menu exposes **Add sources** and **Open workspace folder**.
+  workspace-actions control, **THEN** one menu exposes **Add Repositories to workspace** and **Open
+  workspace folder**.
 - **GIVEN** a running worktree task with one repository and no active turn, **WHEN** the user opens
   **Add sources**, selects **Local**, and adds a saved or discovered repository and branch with the
   shared task-create selector, **THEN** the new worktree appears as a top-level Files entry and in
@@ -168,17 +170,17 @@ must be retried.
   materialization fails, **THEN** none of the three new attachments remain in the database, Files
   tree, or executor workspace.
 - **GIVEN** an active agent turn, **WHEN** the user attempts to add sources, **THEN** no source is
-  attached, the **Add sources** menu item explains that the task must be idle first, and **Open
-  workspace folder** remains available.
+  attached, the **Add Repositories to workspace** menu item explains that the task must be idle
+  first, and **Open workspace folder** remains available.
 - **GIVEN** the same repository/branch or canonical folder is already attached, **WHEN** it is
   submitted again, **THEN** the request returns a conflict naming the duplicate and leaves the task
   unchanged.
 - **GIVEN** a phone viewport on the Files tab, **WHEN** the user opens the 44px workspace-actions
   control, **THEN** an inset bottom-sheet menu exposes both actions with touch-sized rows.
-- **GIVEN** that phone action menu, **WHEN** the user selects **Add sources**, switches between
-  **Local** and **Remote**, adds two sources, and submits, **THEN** a touch-usable full-height picker
-  completes the same operation without horizontal document overflow and returns focus to the
-  workspace-actions control.
+- **GIVEN** that phone action menu, **WHEN** the user selects **Add Repositories to workspace**,
+  switches between **Local** and **Remote**, adds two sources, and submits, **THEN** a touch-usable
+  full-height picker completes the same operation without horizontal document overflow and returns
+  focus to the workspace-actions control.
 - **GIVEN** an agent calls `add_workspace_sources_kandev` for its current idle task, **WHEN** all
   inputs materialize, **THEN** the UI receives the same task and session updates as the human flow.
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type RefObject, type ReactNode } from "react";
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -22,26 +22,23 @@ import { Input } from "@kandev/ui/input";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { ControlledSourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import { useAppStore } from "@/components/state-provider";
-import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useBranchesByURL } from "@/hooks/domains/github/use-branches-by-url";
 import { usePRInfoByURL } from "@/hooks/domains/github/use-pr-info-by-url";
 import { useRemoteRepositories } from "@/hooks/domains/integrations/use-remote-repositories";
 import { FolderPicker } from "@/components/folder-picker";
-import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
 import { RemoteRepoChip } from "@/components/task-create-dialog-remote-repo-chip";
-import type { TaskRepoRow, TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
-import {
-  addWorkspaceSourceRow,
-  getWorkspaceSourceValidation,
-  removeWorkspaceSourceRow,
-  updateWorkspaceSourceRow,
-  type WorkspaceSourceRow,
-} from "@/components/workspace-source-picker/workspace-source-state";
+import type { TaskRemoteRepoRow } from "@/components/task-create-dialog-types";
+import type { LocalRepository, Repository } from "@/lib/types/http";
+import { type WorkspaceSourceRow } from "@/components/workspace-source-picker/workspace-source-state";
 import {
   getWorkspaceSourceCapabilities,
   hasCloneableSavedRepository,
 } from "@/components/workspace-source-picker/executor-capabilities";
+import { SavedRepositorySourceRow } from "./saved-repository-source-row";
+import { useDialogOpenerFocus } from "./use-dialog-opener-focus";
 import { useSubmitWorkspaceSources } from "./use-submit-workspace-sources";
+import { useWorkspaceRepositoryOptions } from "./use-workspace-repository-options";
+import { useWorkspaceSourceRows } from "./use-workspace-source-rows";
 
 type Props = {
   open: boolean;
@@ -64,63 +61,41 @@ export function AddWorkspaceSourcesDialog({
   openerRef,
 }: Props) {
   const { isMobile } = useResponsiveBreakpoint();
-  const { repositories } = useRepositories(workspaceId, open);
-  const [rows, setRows] = useState<WorkspaceSourceRow[]>([]);
+  const { repositories, discoveredRepositories, repositoriesRefreshing, refreshRepositoryOptions } =
+    useWorkspaceRepositoryOptions(workspaceId, open);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const sourceRows = useWorkspaceSourceRows(executorType);
   const reconcileWorkspaceSourcesAdopted = useAppStore(
     (state) => state.reconcileWorkspaceSourcesAdopted,
   );
-  const capturedOpenerRef = useRef<HTMLElement | null>(null);
-  const shouldRestoreFocusRef = useRef(false);
-  if (open && opener) capturedOpenerRef.current = opener;
-  const errors = getWorkspaceSourceValidation(rows);
+  const { requestFocusRestoration, restoreOpenerFocus } = useDialogOpenerFocus({
+    open,
+    opener,
+    openerRef,
+  });
   const capabilities = getWorkspaceSourceCapabilities(executorType);
-  const restoreOpenerFocus = useCallback((event?: { preventDefault(): void }) => {
-    if (!shouldRestoreFocusRef.current) return;
-    const focusTarget = openerRef?.current ?? capturedOpenerRef.current;
-    event?.preventDefault();
-    if (!focusTarget?.isConnected || focusTarget.matches(":disabled")) {
-      shouldRestoreFocusRef.current = false;
-      capturedOpenerRef.current = null;
-      return;
-    }
-    shouldRestoreFocusRef.current = false;
-    capturedOpenerRef.current = null;
-    focusTarget.focus();
-  }, []);
   const close = useCallback(
     (nextOpen: boolean) => {
       if (!nextOpen && !submitting) {
-        shouldRestoreFocusRef.current = true;
+        requestFocusRestoration();
+        sourceRows.resetValidation();
+        setSubmitError(null);
         onOpenChange(false);
       }
     },
-    [onOpenChange, restoreOpenerFocus, submitting],
-  );
-  useEffect(() => {
-    if (!open) restoreOpenerFocus();
-  }, [open, restoreOpenerFocus]);
-  const add = useCallback(
-    (kind: NonNullable<WorkspaceSourceRow["sourceType"]>) =>
-      setRows((current) => addWorkspaceSourceRow(current, kind, executorType)),
-    [executorType],
-  );
-  const update = useCallback(
-    (key: string, patch: Partial<WorkspaceSourceRow>) =>
-      setRows((current) => updateWorkspaceSourceRow(current, key, patch)),
-    [],
+    [onOpenChange, requestFocusRestoration, sourceRows, submitting],
   );
   const submit = useSubmitWorkspaceSources({
-    errors,
+    errors: sourceRows.errors,
     onOpenChange,
     reconcileWorkspaceSourcesAdopted,
-    rows,
+    rows: sourceRows.rows,
     submitting,
     taskId,
     onSuccess: () => {
-      setRows([]);
-      shouldRestoreFocusRef.current = true;
+      sourceRows.reset();
+      requestFocusRestoration();
     },
     setSubmitting,
     setSubmitError,
@@ -135,26 +110,43 @@ export function AddWorkspaceSourcesDialog({
       error={submitError}
       form={
         <SourceForm
-          rows={rows}
+          rows={sourceRows.rows}
           workspaceId={workspaceId}
-          errors={errors}
+          errors={sourceRows.visibleErrors}
           repositories={selectableRepositories(repositories, capabilities)}
+          discoveredRepositories={
+            capabilities.requiresCloneableLocalRepository ? [] : discoveredRepositories
+          }
+          repositoriesRefreshing={repositoriesRefreshing}
+          onRefreshRepositories={refreshRepositoryOptions}
           capabilities={capabilities}
-          onAdd={add}
-          onRemove={(key) => setRows((current) => removeWorkspaceSourceRow(current, key))}
-          onUpdate={update}
+          onAdd={(kind) => {
+            setSubmitError(null);
+            sourceRows.add(kind);
+          }}
+          onRemove={(key) => {
+            setSubmitError(null);
+            sourceRows.remove(key);
+          }}
+          onUpdate={(key, patch) => {
+            setSubmitError(null);
+            sourceRows.update(key, patch);
+          }}
           isMobile={isMobile}
         />
       }
       submitting={submitting}
       onCancel={() => close(false)}
-      onSubmit={() => void submit()}
+      onSubmit={() => {
+        sourceRows.validate();
+        void submit();
+      }}
     />
   );
 }
 
 function selectableRepositories(
-  repositories: Parameters<typeof WorkspaceRepoChips>[0]["repositories"],
+  repositories: Repository[],
   capabilities: ReturnType<typeof getWorkspaceSourceCapabilities>,
 ) {
   return capabilities.requiresCloneableLocalRepository
@@ -261,7 +253,10 @@ function AddWorkspaceSourcesSurface({
 function SourceForm({
   rows,
   repositories,
+  discoveredRepositories,
   workspaceId,
+  repositoriesRefreshing,
+  onRefreshRepositories,
   errors,
   capabilities,
   onAdd,
@@ -270,8 +265,11 @@ function SourceForm({
   isMobile,
 }: {
   rows: WorkspaceSourceRow[];
-  repositories: Parameters<typeof WorkspaceRepoChips>[0]["repositories"];
+  repositories: Repository[];
+  discoveredRepositories: LocalRepository[];
   workspaceId: string | null;
+  repositoriesRefreshing: boolean;
+  onRefreshRepositories: () => void;
   errors: Record<string, string>;
   capabilities: ReturnType<typeof getWorkspaceSourceCapabilities>;
   onAdd: (kind: NonNullable<WorkspaceSourceRow["sourceType"]>) => void;
@@ -318,7 +316,10 @@ function SourceForm({
           key={row.key}
           row={row}
           repositories={repositories}
+          discoveredRepositories={discoveredRepositories}
           workspaceId={workspaceId}
+          repositoriesRefreshing={repositoriesRefreshing}
+          onRefreshRepositories={onRefreshRepositories}
           capabilities={capabilities}
           error={errors[row.key]}
           onRemove={onRemove}
@@ -341,15 +342,21 @@ function AddButton({ label, onClick }: { label: string; onClick: () => void }) {
 function SourceRow({
   row,
   repositories,
+  discoveredRepositories,
   workspaceId,
+  repositoriesRefreshing,
+  onRefreshRepositories,
   capabilities,
   error,
   onRemove,
   onUpdate,
 }: {
   row: WorkspaceSourceRow;
-  repositories: Parameters<typeof WorkspaceRepoChips>[0]["repositories"];
+  repositories: Repository[];
+  discoveredRepositories: LocalRepository[];
   workspaceId: string | null;
+  repositoriesRefreshing: boolean;
+  onRefreshRepositories: () => void;
   capabilities: ReturnType<typeof getWorkspaceSourceCapabilities>;
   error?: string;
   onRemove: (key: string) => void;
@@ -370,11 +377,14 @@ function SourceRow({
         </button>
       </div>
       {type === "saved_repository" && (
-        <SavedRepositoryRow
+        <SavedRepositorySourceRow
           row={row}
           repositories={repositories}
+          discoveredRepositories={discoveredRepositories}
           workspaceId={workspaceId}
-          canChooseCheckoutBranch={capabilities.canChooseCheckoutBranch}
+          canCreateRepository={!capabilities.requiresCloneableLocalRepository}
+          repositoriesRefreshing={repositoriesRefreshing}
+          onRefreshRepositories={onRefreshRepositories}
           onUpdate={onUpdate}
         />
       )}
@@ -382,24 +392,18 @@ function SourceRow({
         <LocalPathRow
           row={row}
           label="Choose local Git repository"
-          canChooseCheckoutBranch={capabilities.canChooseCheckoutBranch}
           requiresCloneableOrigin={capabilities.requiresCloneableLocalRepository}
           onUpdate={onUpdate}
         />
       )}
       {type === "remote_repository" && (
-        <RemoteRepositoryRow
-          row={row}
-          workspaceId={workspaceId}
-          canChooseCheckoutBranch={capabilities.canChooseCheckoutBranch}
-          onUpdate={onUpdate}
-        />
+        <RemoteRepositoryRow row={row} workspaceId={workspaceId} onUpdate={onUpdate} />
       )}
       {type === "folder" && (
         <LocalPathRow row={row} label="Choose local folder" onUpdate={onUpdate} />
       )}
       {error && (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-xs text-destructive">
           {error}
         </p>
       )}
@@ -411,53 +415,14 @@ function labelFor(type: NonNullable<WorkspaceSourceRow["sourceType"]>) {
   return type.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function SavedRepositoryRow({
-  row,
-  repositories,
-  workspaceId,
-  canChooseCheckoutBranch,
-  onUpdate,
-}: {
-  row: WorkspaceSourceRow;
-  repositories: Parameters<typeof WorkspaceRepoChips>[0]["repositories"];
-  workspaceId: string | null;
-  canChooseCheckoutBranch: boolean;
-  onUpdate: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
-}) {
-  const chip: TaskRepoRow = {
-    key: row.key,
-    repositoryId: row.repositoryId,
-    branch: row.baseBranch ?? "",
-  };
-  return (
-    <>
-      <WorkspaceRepoChips
-        rows={[chip]}
-        repositories={repositories}
-        workspaceId={workspaceId}
-        canAddMore={false}
-        onAdd={() => {}}
-        onRemove={() => {}}
-        onRowRepositoryChange={(_, repositoryId) =>
-          onUpdate(row.key, { repositoryId, localPath: undefined, remoteUrl: undefined })
-        }
-        onRowBranchChange={(_, baseBranch) => onUpdate(row.key, { baseBranch })}
-      />
-      {canChooseCheckoutBranch ? <CheckoutBranchInput row={row} onUpdate={onUpdate} /> : null}
-    </>
-  );
-}
-
 function LocalPathRow({
   row,
   label,
-  canChooseCheckoutBranch = false,
   requiresCloneableOrigin = false,
   onUpdate,
 }: {
   row: WorkspaceSourceRow;
   label: string;
-  canChooseCheckoutBranch?: boolean;
   requiresCloneableOrigin?: boolean;
   onUpdate: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
 }) {
@@ -491,7 +456,6 @@ function LocalPathRow({
               ? "This repository must have a cloneable origin; Kandev will verify it before adding."
               : "Uses the current checkout. Kandev does not switch your local repository branch."}
           </p>
-          {canChooseCheckoutBranch ? <CheckoutBranchInput row={row} onUpdate={onUpdate} /> : null}
         </>
       )}
     </>
@@ -501,12 +465,10 @@ function LocalPathRow({
 function RemoteRepositoryRow({
   row,
   workspaceId,
-  canChooseCheckoutBranch,
   onUpdate,
 }: {
   row: WorkspaceSourceRow;
   workspaceId: string | null;
-  canChooseCheckoutBranch: boolean;
   onUpdate: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
 }) {
   const branches = useBranchesByURL();
@@ -548,24 +510,6 @@ function RemoteRepositoryRow({
         onBranchChange={(baseBranch) => onUpdate(row.key, { baseBranch })}
         onRemove={() => {}}
       />
-      {canChooseCheckoutBranch ? <CheckoutBranchInput row={row} onUpdate={onUpdate} /> : null}
     </>
-  );
-}
-
-function CheckoutBranchInput({
-  row,
-  onUpdate,
-}: {
-  row: WorkspaceSourceRow;
-  onUpdate: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
-}) {
-  return (
-    <Input
-      aria-label="Checkout branch"
-      placeholder="Checkout branch (optional)"
-      value={row.checkoutBranch ?? ""}
-      onChange={(event) => onUpdate(row.key, { checkoutBranch: event.target.value })}
-    />
   );
 }

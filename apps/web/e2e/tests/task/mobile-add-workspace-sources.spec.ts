@@ -70,7 +70,9 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   expect(entryBox!.width).toBeGreaterThanOrEqual(44);
   expect(entryBox!.width).toBeLessThanOrEqual(48);
   await entryPoint.tap();
-  const addSources = testPage.getByRole("menuitem", { name: "Add sources" });
+  const addSources = testPage.getByRole("menuitem", {
+    name: "Add Repositories to workspace",
+  });
   const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
   const actionMenu = addSources.locator("xpath=ancestor::*[@role='menu'][1]");
   await actionMenu.evaluate((element) =>
@@ -105,7 +107,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   ]);
   await expect(openFolder).not.toBeVisible();
   await entryPoint.tap();
-  await testPage.getByRole("menuitem", { name: "Add sources" }).tap();
+  await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).tap();
 
   const drawer = testPage.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();
@@ -133,6 +135,23 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   ]);
   expect(localModeBox?.height).toBeGreaterThanOrEqual(44);
   expect(remoteModeBox?.height).toBeGreaterThanOrEqual(44);
+  await drawer.getByRole("button", { name: "Saved repository" }).tap();
+  const savedRepositoryRow = drawer.getByTestId("workspace-source-row").first();
+  await expect(savedRepositoryRow.getByRole("alert")).toHaveCount(0);
+  await expect(savedRepositoryRow.getByRole("textbox", { name: "Checkout branch" })).toHaveCount(0);
+  await savedRepositoryRow.getByTestId("repo-chip-trigger").tap();
+  const refreshRepositories = testPage.getByTestId("repo-refresh-button");
+  const createRepository = testPage.getByTestId("create-local-repository-button");
+  await expect(refreshRepositories).toBeVisible();
+  await expect(createRepository).toBeVisible();
+  const [refreshBox, createBox] = await Promise.all([
+    refreshRepositories.boundingBox(),
+    createRepository.boundingBox(),
+  ]);
+  expect(refreshBox?.height).toBeGreaterThanOrEqual(44);
+  expect(createBox?.height).toBeGreaterThanOrEqual(44);
+  await testPage.keyboard.press("Escape");
+  await savedRepositoryRow.getByRole("button", { name: "Remove source" }).tap();
   await drawer.getByRole("button", { name: "Local Git repository" }).tap();
   await drawer.getByRole("button", { name: "Local folder" }).tap();
   const rows = drawer.getByTestId("workspace-source-row");

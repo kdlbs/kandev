@@ -86,7 +86,7 @@ test.describe("Docker executor — attach workspace sources", () => {
       await session.waitForLoad();
       await session.clickTab("Files");
       await testPage.getByTestId("files-workspace-actions").click();
-      await testPage.getByRole("menuitem", { name: "Add sources" }).click();
+      await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
       const dialog = testPage.getByTestId("add-workspace-sources-dialog");
       await expect(dialog).toBeVisible();
       await expect(dialog.getByTestId("source-mode-local")).toBeVisible();

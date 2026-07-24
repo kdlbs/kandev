@@ -52,11 +52,11 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 2. Select the workspace and workflow when Kandev cannot infer them. A regular non-ephemeral task must belong to a workflow.
 3. Select a source:
 
-   | Source | Use it for | Important behavior |
-   |---|---|---|
-   | **Repo** | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task. |
-   | **Remote** | A remote repository | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL; then select the branch. Clone and fetch require valid credentials. |
-   | **None** | Planning, research, or work outside Git | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable. |
+   | Source     | Use it for                                        | Important behavior                                                                                                                                                                                                  |
+   | ---------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | **Repo**   | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task. |
+   | **Remote** | A remote repository                               | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL; then select the branch. Clone and fetch require valid credentials.                                                        |
+   | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable.                                           |
 
 4. Select a compatible executor profile and agent profile. A workflow default agent profile locks the task-level agent selector. Executor and agent compatibility is validated before launch.
 5. Enter the initial description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode**; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. A nonempty description exposes the standard split actions.
@@ -89,7 +89,7 @@ Changes and review are scoped by repository. State the expected deliverable, bas
 
 ### Add sources to an existing task
 
-For a non-archived, repository-backed task, open the **Files** panel and choose **Workspace actions → Add sources**. The picker shares task creation's repository selectors: **Local** offers saved workspace repositories and discovered local Git repositories, plus an arbitrary local-folder option when the executor supports it; **Remote** offers provider-backed repositories and pasted repository URLs. Add one or more rows in a single submission. Repository rows always choose a base branch. On Worktree, Docker, SSH, and Sprites, repository rows can also choose an existing checkout branch for Kandev's owned materialization. Local/Local PC uses the user-owned repository's current checkout and never switches it. The whole mixed batch succeeds or fails together.
+For a non-archived, repository-backed task, open the **Files** panel and choose **Workspace actions → Add Repositories to workspace**. The picker shares task creation's repository selectors: **Local** offers saved workspace repositories and discovered local Git repositories, with the same refresh and create-repository actions, plus an arbitrary local-folder option when the executor supports it; **Remote** offers provider-backed repositories and pasted repository URLs. Add one or more rows in a single submission. Repository rows choose a base branch once; the flow does not ask for a second checkout branch. Local/Local PC uses the user-owned repository's current checkout and never switches it. The whole mixed batch succeeds or fails together.
 
 The task must be idle: Kandev disables the action while a turn or tool call is active, and rejects a race without changing the task. Desktop opens a dialog; phones open the same flow in a full-height drawer. On success, repositories appear in Files and repository-aware Changes, branch, editor, and pull-request surfaces; folders are Files-only.
 
