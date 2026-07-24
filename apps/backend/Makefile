@@ -53,6 +53,10 @@ ifeq ($(OS)$(MSYSTEM),Windows_NT)
   DEBUG_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug&
   EXEC =
   RUN_BIN = "$(subst /,\,$(BUILD_DIR)/$(BINARY_NAME)$(EXE))"
+  # check-make-shells is a bash script; native cmd.exe can't run its shebang, so
+  # print a skip note instead (mirrors the root Makefile's doctor guard). CI runs
+  # the real check on Linux, and Git Bash/WSL run it locally.
+  CHECK_SHELLS = @echo check-make-shells is bash-only - run it from Git Bash/WSL or the Linux CI
   # Windows recipes run under cmd.exe, which has no POSIX `if command -v ...; then`
   # syntax. Neither codesign nor rcodesign ships on Windows anyway, so ad-hoc
   # signing is a no-op here: darwin/arm64 stays Go-signed at link time, and
@@ -73,6 +77,7 @@ else
   DEBUG_ENV = KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug
   EXEC = exec
   RUN_BIN = ./$(BUILD_DIR)/$(BINARY_NAME)$(EXE)
+  CHECK_SHELLS = @../../scripts/check-make-shells
   # Ad-hoc sign a darwin Mach-O so Apple Silicon (AMFI) will run it; ad-hoc needs
   # no Apple identity. Go already ad-hoc-signs darwin/arm64 at link time, so this
   # is mainly to (a) sign darwin/amd64 too and (b) re-sign uniformly. Prefer
@@ -250,9 +255,10 @@ test-windows:
 
 ## Verify run/dev/start-debug expand to the right per-shell command line across
 ## native Windows (cmd), Git Bash/MSYS, and Unix — the Make-target dispatch the
-## Go CI jobs don't exercise. Dry-run only (make -n), so it runs on any platform.
+## Go CI jobs don't exercise. The harness is a bash script, so it runs under Git
+## Bash/WSL or the Linux CI; on native cmd/PowerShell it prints a skip note.
 check-make-shells:
-	@../../scripts/check-make-shells
+	$(CHECK_SHELLS)
 
 ## Run E2E tests (real agents, costs money — manual only)
 ## Set agent commands via env vars: E2E_CLAUDE_CODE_COMMAND, E2E_AMP_COMMAND

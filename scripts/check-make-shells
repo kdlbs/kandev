@@ -14,9 +14,11 @@
 # the env var is never exported.
 #
 # Each shell is simulated deterministically with make's OS=/MSYSTEM=
-# command-line overrides, so this needs only GNU make — not the real shell —
-# and runs on any platform. Covers the Make-target dispatch that the backend
-# Go CI jobs don't exercise.
+# command-line overrides, so one host checks the dispatch for all three shells
+# without having to run on each. The harness itself is bash (grep, sed), so it
+# needs a POSIX shell — it runs in the Linux CI job and under Git Bash/WSL
+# locally, not from native cmd.exe/PowerShell. Covers the Make-target dispatch
+# that the backend Go CI jobs don't exercise.
 
 set -euo pipefail
 
