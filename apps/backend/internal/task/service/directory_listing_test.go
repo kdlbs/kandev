@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -46,6 +47,22 @@ func TestListDirectory_ListsImmediateSubdirsOnly(t *testing.T) {
 	// A t.TempDir is not the filesystem root, so the parent should be set.
 	if got.Parent == "" {
 		t.Errorf("expected parent to be set for nested path, got empty")
+	}
+}
+
+func TestDriveRootsFromMask(t *testing.T) {
+	got := driveRootsFromMask((1 << 2) | (1 << 4))
+	want := []DirectoryEntry{
+		{Name: `C:\`, Path: `C:\`},
+		{Name: `E:\`, Path: `E:\`},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("drive roots = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("drive root[%d] = %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }
 
@@ -147,5 +164,33 @@ func TestListDirectory_ParentEmptyAtFilesystemRoot(t *testing.T) {
 	}
 	if got.Parent != "" {
 		t.Errorf("expected empty parent at %q, got %q", target, got.Parent)
+	}
+	if !got.Choosable {
+		t.Errorf("filesystem root %q should be choosable", target)
+	}
+}
+
+func TestCreateDirectoryRejectsInvalidOrExistingChild(t *testing.T) {
+	svc := &Service{}
+	parent := t.TempDir()
+	existing := filepath.Join(parent, "existing")
+	if err := os.Mkdir(existing, 0o755); err != nil {
+		t.Fatalf("Mkdir existing: %v", err)
+	}
+
+	if _, err := svc.CreateDirectory(context.Background(), parent, "nested/name"); !errors.Is(
+		err,
+		ErrInvalidDirectoryCreation,
+	) {
+		t.Fatalf("invalid name error = %v, want ErrInvalidDirectoryCreation", err)
+	}
+	if _, err := svc.CreateDirectory(context.Background(), parent, "existing"); !errors.Is(
+		err,
+		ErrDirectoryAlreadyExists,
+	) {
+		t.Fatalf("existing name error = %v, want ErrDirectoryAlreadyExists", err)
+	}
+	if entries, err := os.ReadDir(existing); err != nil || len(entries) != 0 {
+		t.Fatalf("existing directory changed: entries=%v error=%v", entries, err)
 	}
 }

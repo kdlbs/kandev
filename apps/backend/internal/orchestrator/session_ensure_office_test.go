@@ -83,16 +83,55 @@ func TestFindExistingSession_OfficeTaskWithViewerAgent(t *testing.T) {
 // is_primary lookup intact under the new gating.
 func TestFindExistingSession_KanbanTask_UsesPrimary(t *testing.T) {
 	repo := setupTestRepo(t)
-	seedSession(t, repo, "task-k", "sess-k", "step1")
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-k", Name: "Kanban", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-k", WorkspaceID: "ws-k", Name: "Kanban", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := seedWorkflowStep(t, repo, "wfs-k"); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:                     "task-k",
+		WorkspaceID:            "ws-k",
+		WorkflowID:             "wf-k",
+		WorkflowStepID:         "wfs-k",
+		State:                  v1.TaskStateInProgress,
+		AssigneeAgentProfileID: "agent-runner",
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range []*models.TaskSession{
+		{ID: "sess-primary", TaskID: "task-k", AgentProfileID: "agent-primary", IsPrimary: true, State: models.TaskSessionStateIdle, StartedAt: now, UpdatedAt: now},
+		{ID: "sess-runner", TaskID: "task-k", AgentProfileID: "agent-runner", State: models.TaskSessionStateIdle, StartedAt: now, UpdatedAt: now},
+	} {
+		if err := repo.CreateTaskSession(ctx, session); err != nil {
+			t.Fatal(err)
+		}
+	}
+	task, err := repo.GetTask(ctx, "task-k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if task.IsFromOffice {
+		t.Fatal("Kanban task unexpectedly projected as Office-owned")
+	}
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
-	resp := svc.findExistingSession(context.Background(), "task-k")
+	resp := svc.findExistingSession(ctx, "task-k")
 	if resp == nil {
 		t.Fatal("expected resume target, got nil")
 	}
-	// Kanban / quick-chat sessions don't go through the office branch.
-	if resp.Source == "existing_office_agent" {
-		t.Errorf("kanban session must not surface as office")
+	if resp.SessionID != "sess-primary" {
+		t.Errorf("session_id: got %q want sess-primary", resp.SessionID)
+	}
+	if resp.Source != "existing_primary" {
+		t.Errorf("source: got %q want existing_primary", resp.Source)
 	}
 }
 

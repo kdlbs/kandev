@@ -257,6 +257,10 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			bgCtx := context.Background()
 			prepExec, launchErr := s.executor.LaunchPreparedSession(bgCtx, task, sessionID, executor.LaunchOptions{AgentProfileID: agentProfileID, ExecutorID: executorID, WorkflowStepID: workflowStepID})
 			if launchErr != nil {
+				// LaunchAgent failures persist FAILED in the executor. Earlier
+				// workspace failures return here and are recorded through the same
+				// session-level recovery claim.
+				s.handleEarlyMissingPRBranchLaunchFailure(bgCtx, taskID, sessionID, launchErr)
 				s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
@@ -284,9 +288,17 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 // autoStart marks the launch as having been triggered by an automated path
 // (only consumed when skipMessageRecord is false — callers that store their
 // own message control its metadata directly).
+// references contains validated entity references whose exact server-generated
+// context block may survive first-turn canonicalization.
 //
-//nolint:cyclop,funlen // existing complexity inherited from main's session-lifecycle handling; signature touched here only to thread autoStart
-func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
+//nolint:cyclop,funlen,gocognit // Existing complexity inherited from session-lifecycle handling.
+func (s *Service) StartCreatedSession(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+) (*executor.TaskExecution, error) {
 	s.logger.Debug("starting created session",
 		zap.String("task_id", taskID),
 		zap.String("session_id", sessionID),
@@ -422,7 +434,10 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload task after on_turn_start: %w", err)
 	}
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID, planMode, task.IsEphemeral)
+	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
+		ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
+		planMode, task.IsEphemeral, session.IsPassthrough,
+	)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -433,17 +448,24 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 
 	// Wrap the first prompt with the Kandev MCP system block. See the
 	// matching block in startTask for the rationale (DB stores wrapped form;
-	// Message.ToAPI strips for display). Idempotent — upstream call sites that
-	// record the user message themselves (wsAddMessage on CREATED sessions)
-	// wrap first, and the HasKandevContext guard prevents a second wrap here.
+	// Message.ToAPI strips for display). The injectors canonicalize any upstream
+	// wrap from current server state before launch.
 	// Passthrough profiles skip the wrap: the prompt is typed straight into the
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
-	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !session.IsPassthrough {
-		effectivePrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
-			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
-			IncludeCoordinatorTaskControls: !isOfficeTask && !configMode,
-		})
+	if (effectivePrompt != "" || len(attachments) > 0) && !session.IsPassthrough {
+		referenceContext := EntityReferenceContext(references)
+		if isOfficeTask {
+			effectivePrompt = sysprompt.InjectOfficeContext(
+				taskID, sessionID, effectivePrompt,
+				referenceContext, promptReferenceContext,
+			)
+		} else {
+			effectivePrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
+				RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+				IncludeCoordinatorTaskControls: !configMode,
+			}, referenceContext, promptReferenceContext)
+		}
 	}
 
 	executorID := session.ExecutorID
@@ -458,6 +480,9 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	}
 	execution, err := s.executor.LaunchPreparedSession(ctx, task, sessionID, executor.LaunchOptions{AgentProfileID: effectiveProfileID, ExecutorID: executorID, Prompt: effectivePrompt, StartAgent: true, McpMode: mcpMode, Attachments: attachments})
 	if err != nil {
+		// The executor persists LaunchAgent failures. Cover earlier prepared-session
+		// failures here; the session-level claim makes either completion order safe.
+		s.handleEarlyMissingPRBranchLaunchFailure(ctx, taskID, sessionID, err)
 		return nil, err
 	}
 
@@ -472,6 +497,56 @@ func (s *Service) StartCreatedSession(ctx context.Context, taskID, sessionID, ag
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
+}
+
+// handleEarlyMissingPRBranchLaunchFailure covers failures that occur before
+// Executor reaches AgentManager.LaunchAgent. Those failures do not run the
+// executor's launch-failure bookkeeping, so this fallback owns the terminal
+// transition and lets the shared persisted claim create guidance once.
+func (s *Service) handleEarlyMissingPRBranchLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	launchErr error,
+) {
+	if !isMissingBranchError(launchErr) {
+		return
+	}
+	s.recordSessionLaunchFailure(ctx, taskID, sessionID, launchErr)
+}
+
+// recordSessionLaunchFailure transitions a still-active session to FAILED,
+// attaches missing-branch guidance only after that CAS succeeds, and updates
+// the task only while the same failed session still owns it.
+func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) {
+	_, changed := s.updateTaskSessionStateWithHook(
+		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
+		func() { s.handleSessionLaunchFailed(ctx, taskID, sessionID, "", launchErr) }, preloadedSession...,
+	)
+	if !changed {
+		// A resume may begin from an already FAILED session. Its state CAS is
+		// intentionally a no-op, but the persisted claim still lets this newly
+		// classified failure publish guidance exactly once. The claim itself is
+		// state-guarded, so a concurrently cancelled/completed session cannot
+		// receive stale recovery UI.
+		if len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0].State == models.TaskSessionStateFailed {
+			s.handleSessionLaunchFailed(ctx, taskID, sessionID, "", launchErr)
+		}
+		return
+	}
+	updated, err := s.taskRepo.UpdateTaskStateIfSessionState(
+		ctx, taskID, sessionID, models.TaskSessionStateFailed, v1.TaskStateFailed,
+	)
+	if err != nil {
+		s.logger.Warn("failed to update task state to FAILED after early launch error",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if !updated {
+		return
+	}
+	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateFailed)
 }
 
 func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID string) error {
@@ -683,7 +758,23 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		s.tagSessionAsWorkflowSwitched(ctx, sessionID)
 	}
 
-	effectivePrompt, planModeActive := s.applyWorkflowAndPlanMode(ctx, effectivePrompt, task.ID, sessionID, workflowStepID, planMode, task.IsEphemeral)
+	// Passthrough sessions skip both the workflow-prompt "@name" expansion below
+	// and the Kandev MCP wrap further down: the prompt is typed straight into
+	// the agent CLI's TTY and the user sees it verbatim — they don't want a
+	// wall of MCP-tool boilerplate or a hidden expansion block prepended to
+	// "hello". Use the session snapshot, not a live profile lookup, so a
+	// mid-run profile edit cannot change wrap behavior. Looked up once here and
+	// reused below so we don't hit GetTaskSession twice for the same fact.
+	// If the lookup fails, resolveIsPassthroughForLaunch fails safe by
+	// treating the session as passthrough: skipping the wrap/expansion is
+	// strictly less harmful than leaking hidden <kandev-system> content into
+	// a real passthrough session's PTY.
+	isPassthrough := s.resolveIsPassthroughForLaunch(ctx, sessionID)
+
+	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
+		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
+		planMode, task.IsEphemeral, isPassthrough,
+	)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
@@ -700,26 +791,25 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// rely on the agent CLI's conversation history retaining it.
 	// Idempotent: upstream call sites (wsAddMessage on CREATED sessions,
 	// recordAutoStartMessage) wrap before recording the user message so the DB
-	// row carries the block; the HasKandevContext guard makes this orchestrator
-	// pass a no-op in those cases instead of double-wrapping.
-	// Passthrough sessions skip the wrap: the prompt is typed straight into the
-	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
-	// MCP-tool boilerplate prepended to "hello". Use the session snapshot, not a
-	// live profile lookup, so a mid-run profile edit cannot change wrap behavior.
-	skipKandevMCPWrap := false
-	if launchSession, sessErr := s.repo.GetTaskSession(ctx, sessionID); sessErr == nil {
-		skipKandevMCPWrap = launchSession.IsPassthrough
-	}
+	// row carries the block; the mode-aware injector canonicalizes it instead of
+	// double-wrapping.
+	skipKandevMCPWrap := isPassthrough
 	// `task` here is *v1.Task from the scheduler, which does NOT carry the
 	// orchestrator's WorkflowStepID — go through the task-ID variant so the
 	// repo lookup pulls the canonical step. Using the workflowStepID parameter
 	// directly is wrong because it can be empty on manual user-initiated starts
 	// while the task is already bound to a signal-gated step in the DB.
-	if (effectivePrompt != "" || len(attachments) > 0) && !sysprompt.HasKandevContext(effectivePrompt) && !skipKandevMCPWrap {
-		effectivePrompt = sysprompt.InjectKandevContextWithOptions(task.ID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
-			RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, task.ID),
-			IncludeCoordinatorTaskControls: !isOfficeTask && !configMode,
-		})
+	if (effectivePrompt != "" || len(attachments) > 0) && !skipKandevMCPWrap {
+		if isOfficeTask {
+			effectivePrompt = sysprompt.InjectOfficeContext(
+				task.ID, sessionID, effectivePrompt, promptReferenceContext,
+			)
+		} else {
+			effectivePrompt = sysprompt.InjectKandevContextWithOptions(task.ID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
+				RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, task.ID),
+				IncludeCoordinatorTaskControls: !configMode,
+			}, promptReferenceContext)
+		}
 	}
 
 	// Office tasks restrict the MCP toolset: kanban tools (move/update/list
@@ -758,8 +848,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	return execution, nil
 }
 
-// isOfficeTask returns true when the task has an assignee agent profile, which
-// identifies it as an office-managed task (as opposed to a kanban / quick-chat task).
+// isOfficeTask returns the repository's canonical Office ownership projection.
 func (s *Service) isOfficeTask(ctx context.Context, taskID string) bool {
 	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
 	return err == nil && isOfficeTask
@@ -770,7 +859,7 @@ func (s *Service) lookupOfficeTask(ctx context.Context, taskID string) (bool, er
 	if err != nil {
 		return false, err
 	}
-	return dbTask != nil && dbTask.AssigneeAgentProfileID != "", nil
+	return dbTask != nil && dbTask.IsFromOffice, nil
 }
 
 // prepareSessionForStart creates the session for a launch and propagates any
@@ -794,8 +883,25 @@ func (s *Service) prepareSessionForStart(
 	return sessionID, nil
 }
 
+// resolveIsPassthroughForLaunch reloads the session snapshot to decide
+// whether this launch is a passthrough session (skip the Kandev MCP wrap and
+// the "@name" prompt-reference expansion). If the reload fails, this fails
+// safe by treating the session as passthrough: skipping the wrap/expansion is
+// strictly less harmful than leaking hidden <kandev-system> content into a
+// real passthrough session's PTY.
+func (s *Service) resolveIsPassthroughForLaunch(ctx context.Context, sessionID string) bool {
+	launchSession, sessErr := s.repo.GetTaskSession(ctx, sessionID)
+	if sessErr != nil {
+		s.logger.Warn("failed to reload session for passthrough check; defaulting to passthrough (skip hidden-content injection) as the safer failure mode",
+			zap.String("session_id", sessionID),
+			zap.Error(sessErr))
+		return true
+	}
+	return launchSession.IsPassthrough
+}
+
 // createStartSession picks the right session-creation path for the task:
-// office tasks with an assignee use the per-(task, agent) EnsureSessionForAgent
+// Office tasks with an assignee use the per-(task, agent) EnsureSessionForAgent
 // (so runs reuse one row across turns); kanban / quick-chat fall through to
 // the per-launch PrepareSession used since day one.
 func (s *Service) createStartSession(
@@ -803,7 +909,7 @@ func (s *Service) createStartSession(
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
 ) (string, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
-	if err == nil && dbTask != nil && dbTask.AssigneeAgentProfileID != "" {
+	if err == nil && dbTask != nil && dbTask.IsFromOffice && dbTask.AssigneeAgentProfileID != "" {
 		session, ensureErr := s.executor.EnsureSessionForAgent(
 			ctx, task, dbTask.AssigneeAgentProfileID, agentProfileID, executorID, executorProfileID,
 		)
@@ -934,8 +1040,9 @@ func (s *Service) postLaunchStart(ctx context.Context, taskID string, execution 
 // applyWorkflowAndPlanMode applies workflow step configuration and plan mode injection to a prompt.
 // Returns the effective prompt and whether plan mode is active (from either the step or the caller).
 // For ephemeral tasks (quick chat), workflow step processing is skipped since they have no workflow.
-func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, sessionID string, workflowStepID string, planMode bool, isEphemeral bool) (string, bool) {
+func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, taskID string, sessionID string, workflowStepID string, planMode bool, isEphemeral bool, isPassthrough bool) (string, bool, string) {
 	effectivePrompt := prompt
+	promptReferenceContext := ""
 
 	stepHasPlanMode := false
 	// Skip workflow step prompt injection for ephemeral tasks - they don't have workflows
@@ -947,7 +1054,9 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 				zap.Error(err))
 		} else {
 			stepHasPlanMode = step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
-			effectivePrompt = s.buildWorkflowPrompt(effectivePrompt, step, taskID, sessionID)
+			effectivePrompt, promptReferenceContext = s.buildWorkflowPromptWithContext(
+				ctx, effectivePrompt, step, taskID, sessionID, isPassthrough,
+			)
 		}
 	}
 
@@ -958,7 +1067,7 @@ func (s *Service) applyWorkflowAndPlanMode(ctx context.Context, prompt string, t
 		effectivePrompt = strings.Join(parts, "\n\n")
 	}
 
-	return effectivePrompt, planMode || stepHasPlanMode
+	return effectivePrompt, planMode || stepHasPlanMode, promptReferenceContext
 }
 
 // backfillInitialUserMessageIfMissing records the task's description as the
@@ -1009,7 +1118,19 @@ func (s *Service) recordInitialMessage(ctx context.Context, taskID, sessionID, p
 // Otherwise, step.Prompt fully replaces the base prompt.
 // If the step has enable_plan_mode in on_enter events, plan mode prefix is also prepended.
 // Only true internal instructions are wrapped in <kandev-system> tags so they can be stripped from the visible chat.
-func (s *Service) buildWorkflowPrompt(basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string) string {
+func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, step *wfmodels.WorkflowStep, taskID string, sessionID string, isPassthrough bool) string {
+	prompt, _ := s.buildWorkflowPromptWithContext(ctx, basePrompt, step, taskID, sessionID, isPassthrough)
+	return prompt
+}
+
+func (s *Service) buildWorkflowPromptWithContext(
+	ctx context.Context,
+	basePrompt string,
+	step *wfmodels.WorkflowStep,
+	taskID string,
+	sessionID string,
+	isPassthrough bool,
+) (string, string) {
 	_ = sessionID
 	var parts []string
 
@@ -1029,7 +1150,34 @@ func (s *Service) buildWorkflowPrompt(basePrompt string, step *wfmodels.Workflow
 		parts = append(parts, basePrompt)
 	}
 
-	return strings.Join(parts, "\n\n")
+	joined := strings.Join(parts, "\n\n")
+	return s.expandPromptReferencesWithContext(ctx, joined, isPassthrough)
+}
+
+// expandPromptReferences resolves "@name" saved-prompt references in prompt
+// via the configured PromptReferenceExpander. When no expander is set, prompt
+// is returned unchanged. Passthrough sessions skip expansion entirely: the
+// prompt is written raw to a PTY with no <kandev-system> stripping step, so
+// the expansion's hidden wrapper block would be typed into the terminal
+// verbatim instead of staying hidden.
+func (s *Service) expandPromptReferences(ctx context.Context, prompt string, isPassthrough bool) string {
+	expanded, _ := s.expandPromptReferencesWithContext(ctx, prompt, isPassthrough)
+	return expanded
+}
+
+func (s *Service) expandPromptReferencesWithContext(
+	ctx context.Context,
+	prompt string,
+	isPassthrough bool,
+) (string, string) {
+	if s.promptExpander == nil || isPassthrough {
+		return prompt, ""
+	}
+	var zapLogger *zap.Logger
+	if s.logger != nil {
+		zapLogger = s.logger.Zap()
+	}
+	return s.promptExpander.AppendReferenceExpansionsWithContext(ctx, prompt, zapLogger)
 }
 
 // ResumeTaskSession restarts a specific task session using its stored worktree.
@@ -1114,15 +1262,10 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 			// away), the SessionStateFailed and TaskStateFailed updates would
 			// themselves fail with "context canceled" and leave the task stuck
 			// looking "running" forever.
-			s.updateTaskSessionState(resumeCtx, taskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
-			if stateErr := s.taskRepo.UpdateTaskState(resumeCtx, taskID, v1.TaskStateFailed); stateErr != nil {
-				s.logger.Warn("failed to update task state to FAILED after resume error",
-					zap.String("task_id", taskID),
-					zap.String("session_id", sessionID),
-					zap.Error(stateErr))
-			} else {
-				s.processParentChildrenCompletedForTaskState(resumeCtx, taskID, v1.TaskStateFailed)
-			}
+			// ResumeSession launches the workspace directly rather than through
+			// LaunchPreparedSession. Record this failure with the same state CAS,
+			// persisted recovery claim, and archive-safe task CAS as early launch.
+			s.recordSessionLaunchFailure(resumeCtx, taskID, sessionID, err, session)
 			return nil, err
 		}
 	}
@@ -1278,7 +1421,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 
 	s.advanceTaskWorkflowStep(ctx, dbTask, workflowStepID, session)
 
-	effectivePrompt := s.buildWorkflowPrompt(dbTask.Description, step, taskID, sessionID)
+	effectivePrompt := s.buildWorkflowPrompt(ctx, dbTask.Description, step, taskID, sessionID, session.IsPassthrough)
 
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		return err
@@ -2578,7 +2721,9 @@ func (s *Service) handlePromptDispatchFailure(ctx context.Context, taskID, sessi
 		s.logger.Warn("prompt after lazy resume hit missing execution; falling back to fresh launch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
-		if freshErr := s.fallbackFreshLaunchOnMissingExecution(ctx, taskID, sessionID, prompt, planMode, nil, attachments); freshErr == nil {
+		if freshErr := s.fallbackFreshLaunchOnMissingExecution(
+			ctx, taskID, sessionID, prompt, planMode, nil, attachments, nil,
+		); freshErr == nil {
 			return &PromptResult{}, nil
 		} else {
 			promptErr = freshErr

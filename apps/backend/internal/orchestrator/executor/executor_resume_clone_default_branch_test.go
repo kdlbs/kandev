@@ -213,6 +213,166 @@ func TestResolveTaskRepoInfo_BackfillIsBestEffortWhenLocalPathBroken(t *testing.
 	}
 }
 
+// TestResolveTaskRepoInfo_ReClonesWhenLocalPathIsNotAGitRepo is the regression
+// guard for the production bug where a provider-backed repository row ends up
+// with a non-empty LocalPath pointing at a directory with no ".git" (e.g. a
+// stale path left after a moved/deleted clone). Previously the clone guard
+// only fired when LocalPath == "", so this stale path sailed straight through
+// to the worktree preparer, which failed with "repository is not a git
+// repository". resolveTaskRepoInfo must detect the invalid path and re-clone.
+func TestResolveTaskRepoInfo_ReClonesWhenLocalPathIsNotAGitRepo(t *testing.T) {
+	staleLocalPath := t.TempDir() // exists on disk, but has no .git inside
+
+	originPath := initBareOriginWithMain(t)
+	freshClonePath := filepath.Join(t.TempDir(), "fresh-clone")
+	runGitInTest(t, "", "clone", originPath, freshClonePath)
+
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{
+		ID:            "repo-1",
+		Provider:      "github",
+		ProviderOwner: "acme",
+		ProviderName:  "thing",
+		LocalPath:     staleLocalPath, // set, but not a valid git checkout
+		DefaultBranch: "",
+	}
+	taskRepo := &models.TaskRepository{ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1"}
+
+	updater := &recordingRepoUpdater{}
+	exc := newTestExecutor(t, &mockAgentManager{}, repo)
+	exc.SetRepoCloner(&fakeRepoCloner{returnPath: freshClonePath}, updater)
+
+	info, err := exc.resolveTaskRepoInfo(context.Background(), taskRepo)
+	if err != nil {
+		t.Fatalf("resolveTaskRepoInfo: %v", err)
+	}
+	if info.RepositoryPath != freshClonePath {
+		t.Errorf("RepositoryPath: got %q, want re-cloned path %q", info.RepositoryPath, freshClonePath)
+	}
+	if info.BaseBranch != "main" {
+		t.Errorf("BaseBranch: got %q, want %q (detected from the fresh clone)", info.BaseBranch, "main")
+	}
+}
+
+// TestResolveTaskRepoInfo_KeepsStaleLocalPathWhenNoClonerConfigured guards the
+// "never blank a set path" contract: when the stored LocalPath is invalid but
+// no cloner is configured to fix it, resolveTaskRepoInfo must not wipe out the
+// existing (bad) path — it should be left as-is so the failure surfaces with
+// full context rather than silently becoming empty.
+func TestResolveTaskRepoInfo_KeepsStaleLocalPathWhenNoClonerConfigured(t *testing.T) {
+	staleLocalPath := t.TempDir()
+
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{
+		ID:            "repo-1",
+		Provider:      "github",
+		ProviderOwner: "acme",
+		ProviderName:  "thing",
+		LocalPath:     staleLocalPath,
+		DefaultBranch: "",
+	}
+	taskRepo := &models.TaskRepository{ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1"}
+
+	exc := newTestExecutor(t, &mockAgentManager{}, repo)
+	exc.SetRepoCloner(nil, &recordingRepoUpdater{})
+
+	info, err := exc.resolveTaskRepoInfo(context.Background(), taskRepo)
+	if err != nil {
+		t.Fatalf("resolveTaskRepoInfo: %v", err)
+	}
+	if info.RepositoryPath != staleLocalPath {
+		t.Errorf("RepositoryPath: got %q, want unchanged stale path %q", info.RepositoryPath, staleLocalPath)
+	}
+}
+
+// TestResolveTaskRepoInfo_DoesNotReCloneLocalSourceTypeRepo is the regression
+// guard for the Codex review finding on the stale-path re-clone fix: a repo
+// can be SourceType "local" (the user picked a checkout on their own machine)
+// while still carrying ProviderOwner/ProviderName (the origin it was imported
+// from). If that local checkout is temporarily missing/unmounted, the guard
+// must NOT clone the remote into a managed path and overwrite the user's
+// saved LocalPath — only genuinely provider-backed repos (SourceType !=
+// "local") are eligible for the self-heal re-clone.
+func TestResolveTaskRepoInfo_DoesNotReCloneLocalSourceTypeRepo(t *testing.T) {
+	missingLocalPath := filepath.Join(t.TempDir(), "unmounted-checkout") // does not exist on disk
+
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{
+		ID:            "repo-1",
+		SourceType:    "local",
+		Provider:      "github",
+		ProviderOwner: "acme",
+		ProviderName:  "thing",
+		LocalPath:     missingLocalPath,
+		DefaultBranch: "",
+	}
+	taskRepo := &models.TaskRepository{ID: "tr-1", TaskID: "task-1", RepositoryID: "repo-1"}
+
+	updater := &recordingRepoUpdater{}
+	exc := newTestExecutor(t, &mockAgentManager{}, repo)
+	// A cloner IS configured; if the guard incorrectly fired, this would clone
+	// and overwrite LocalPath. The test asserts it does not fire.
+	exc.SetRepoCloner(&fakeRepoCloner{returnPath: filepath.Join(t.TempDir(), "should-not-be-used")}, updater)
+
+	info, err := exc.resolveTaskRepoInfo(context.Background(), taskRepo)
+	if err != nil {
+		t.Fatalf("resolveTaskRepoInfo: %v", err)
+	}
+	if info.RepositoryPath != missingLocalPath {
+		t.Errorf("RepositoryPath: got %q, want unchanged local path %q (must not be overwritten by a re-clone)", info.RepositoryPath, missingLocalPath)
+	}
+	if got := updater.getDefaultBranch("repo-1"); got != "" {
+		t.Errorf("UpdateRepositoryDefaultBranch should not be called for a local-sourced repo, got %q", got)
+	}
+}
+
+// TestApplyResumeRepoConfig_SelfHealsStaleProviderPath is the regression guard
+// for the Greptile review finding that the single-repo resume path
+// (applyResumeRepoConfig) read repository.LocalPath directly without running
+// it through the same stale-path re-clone guard as resolveTaskRepoInfo. A
+// RESUME of a session whose repo has a stale/missing provider-backed local
+// path must self-heal by re-cloning, just like a fresh launch does.
+func TestApplyResumeRepoConfig_SelfHealsStaleProviderPath(t *testing.T) {
+	staleLocalPath := t.TempDir() // exists on disk, but has no .git inside
+
+	originPath := initBareOriginWithMain(t)
+	freshClonePath := filepath.Join(t.TempDir(), "fresh-clone")
+	runGitInTest(t, "", "clone", originPath, freshClonePath)
+
+	repo := newMockRepository()
+	repo.repositories["repo-1"] = &models.Repository{
+		ID:            "repo-1",
+		Provider:      "github",
+		ProviderOwner: "acme",
+		ProviderName:  "thing",
+		LocalPath:     staleLocalPath,
+	}
+	repo.tasks["task-1"] = &models.Task{ID: "task-1"}
+	task := (&models.Task{ID: "task-1"}).ToAPI()
+	session := &models.TaskSession{
+		ID:           "sess-1",
+		TaskID:       "task-1",
+		RepositoryID: "repo-1",
+		BaseBranch:   "main",
+	}
+
+	updater := &recordingRepoUpdater{}
+	exc := newTestExecutor(t, &mockAgentManager{}, repo)
+	exc.SetRepoCloner(&fakeRepoCloner{returnPath: freshClonePath}, updater)
+
+	req := &LaunchAgentRequest{TaskID: "task-1", SessionID: "sess-1", ExecutorType: "worktree"}
+	if _, err := exc.applyResumeRepoConfig(context.Background(), task, session, req, nil); err != nil {
+		t.Fatalf("applyResumeRepoConfig: %v", err)
+	}
+
+	if repo.repositories["repo-1"].LocalPath != freshClonePath {
+		t.Errorf("Repository.LocalPath: got %q, want re-cloned path %q", repo.repositories["repo-1"].LocalPath, freshClonePath)
+	}
+	if req.RepositoryPath != freshClonePath {
+		t.Errorf("req.RepositoryPath: got %q, want re-cloned path %q", req.RepositoryPath, freshClonePath)
+	}
+}
+
 // fakeRepoCloner returns a fixed local path for any clone request.
 type fakeRepoCloner struct{ returnPath string }
 

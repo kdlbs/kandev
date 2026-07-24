@@ -4,14 +4,31 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DiffViewer } from "./diff-viewer";
 import type { FileDiffData } from "@/lib/diff/types";
 
-const fileDiffProps: Array<{ options?: { overflow?: string } }> = [];
+const expansionState = vi.hoisted(() => ({
+  isContentLoaded: true,
+  isLoading: false,
+  error: null as string | null,
+  loadContent: vi.fn(),
+  canExpand: true,
+}));
+
+vi.mock("./use-expandable-diff", () => ({
+  useExpandableDiff: (options: { fileDiffMetadata: unknown }) => ({
+    ...expansionState,
+    metadata: options.fileDiffMetadata,
+  }),
+}));
+
+const fileDiffProps: Array<{
+  options?: { overflow?: string; hunkSeparators?: string };
+}> = [];
 
 vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => ({ resolvedTheme: "dark" }),
 }));
 
 vi.mock("@pierre/diffs/react", () => ({
-  FileDiff: (props: { options?: { overflow?: string } }) => {
+  FileDiff: (props: { options?: { overflow?: string; hunkSeparators?: string } }) => {
     fileDiffProps.push(props);
     return <div data-testid="file-diff" />;
   },
@@ -29,6 +46,8 @@ const data: FileDiffData = {
 afterEach(() => {
   cleanup();
   fileDiffProps.length = 0;
+  expansionState.canExpand = true;
+  expansionState.loadContent.mockReset();
 });
 
 describe("DiffViewer", () => {
@@ -63,5 +82,14 @@ describe("DiffViewer", () => {
     rerender(<DiffViewer data={data} onCommentUpdate={secondUpdate} />);
 
     await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(renderCount));
+  });
+
+  it("keeps simple hunk separators when full-content reparse rejects expansion", async () => {
+    expansionState.canExpand = false;
+
+    render(<DiffViewer data={data} sessionId="session-1" enableExpansion />);
+
+    await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(0));
+    expect(fileDiffProps.at(-1)?.options?.hunkSeparators).toBe("simple");
   });
 });

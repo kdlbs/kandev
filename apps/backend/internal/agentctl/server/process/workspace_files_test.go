@@ -1,12 +1,14 @@
 package process
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
 func TestResolveNonExistentPath(t *testing.T) {
@@ -145,6 +147,80 @@ func findChild(node *types.FileTreeNode, name string) *types.FileTreeNode {
 		}
 	}
 	return nil
+}
+
+func createOwnershipMarkerFixture(t *testing.T) string {
+	t.Helper()
+	taskRoot := t.TempDir()
+	repositoryDir := filepath.Join(taskRoot, "repository")
+	if err := os.Mkdir(repositoryDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		filepath.Join(taskRoot, storageworkspaces.OwnershipMarkerFilename),
+		filepath.Join(taskRoot, "visible.txt"),
+		filepath.Join(repositoryDir, storageworkspaces.OwnershipMarkerFilename),
+	} {
+		if err := os.WriteFile(path, []byte("fixture"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return taskRoot
+}
+
+func TestGetFileTree_HidesOnlyRootOwnershipMarker(t *testing.T) {
+	taskRoot := createOwnershipMarkerFixture(t)
+
+	tree, err := (&WorkspaceTracker{workDir: taskRoot}).GetFileTree("", 2)
+	if err != nil {
+		t.Fatalf("GetFileTree failed: %v", err)
+	}
+	if findChild(tree, storageworkspaces.OwnershipMarkerFilename) != nil {
+		t.Errorf("root ownership marker %q should be hidden", storageworkspaces.OwnershipMarkerFilename)
+	}
+	if findChild(tree, "visible.txt") == nil {
+		t.Error("ordinary root file should remain visible")
+	}
+	repository := requireChild(t, tree, "repository")
+	if findChild(repository, storageworkspaces.OwnershipMarkerFilename) == nil {
+		t.Errorf("nested repository file %q should remain visible", storageworkspaces.OwnershipMarkerFilename)
+	}
+}
+
+func TestGetFileList_HidesOnlyRootOwnershipMarker(t *testing.T) {
+	taskRoot := createOwnershipMarkerFixture(t)
+	initGitRepoAt(t, taskRoot)
+
+	files, err := (&WorkspaceTracker{workDir: taskRoot}).getFileList(context.Background())
+	if err != nil {
+		t.Fatalf("getFileList failed: %v", err)
+	}
+	paths := make(map[string]bool, len(files.Files))
+	for _, file := range files.Files {
+		paths[filepath.ToSlash(file.Path)] = true
+	}
+	if paths[storageworkspaces.OwnershipMarkerFilename] {
+		t.Errorf("root ownership marker %q should be hidden", storageworkspaces.OwnershipMarkerFilename)
+	}
+	if !paths["visible.txt"] {
+		t.Error("ordinary root file should remain visible")
+	}
+	if !paths["repository/"+storageworkspaces.OwnershipMarkerFilename] {
+		t.Errorf("nested repository file %q should remain visible", storageworkspaces.OwnershipMarkerFilename)
+	}
+}
+
+func TestSearchFiles_HidesOnlyRootOwnershipMarker(t *testing.T) {
+	marker := storageworkspaces.OwnershipMarkerFilename
+	wt := &WorkspaceTracker{currentFiles: types.FileListUpdate{Files: []types.FileEntry{
+		{Path: marker},
+		{Path: filepath.Join("repository", marker)},
+	}}}
+
+	matches := wt.SearchFiles("kandev-workspace", 20)
+	if len(matches) != 1 || matches[0] != filepath.Join("repository", marker) {
+		t.Fatalf("SearchFiles matches = %v, want only nested marker", matches)
+	}
 }
 
 func TestGetFileTree_Symlinks(t *testing.T) {

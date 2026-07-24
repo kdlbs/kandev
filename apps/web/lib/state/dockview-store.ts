@@ -19,8 +19,10 @@ import {
   TERMINAL_DEFAULT_ID,
   getPresetLayout,
   applyLayout,
+  computePinnedMaxPxFor,
   getPinnedWidth,
   getRootSplitview,
+  LAYOUT_PINNED_MIN_PX,
   fromDockviewApi,
   filterEphemeral,
   defaultLayout,
@@ -142,6 +144,7 @@ type DockviewStore = {
       groupId?: string;
       source?: string;
       repositoryName?: string;
+      prKey?: string;
     },
   ) => void;
   addCommitDetailPanel: (
@@ -341,6 +344,52 @@ export function resolvePresetPinnedWidths(
   return cleaned;
 }
 
+/**
+ * Resolve pinned widths stored by a reusable/custom layout for the current
+ * workbench. Selecting a saved layout is an explicit geometry change, so its
+ * own widths take precedence over the task's currently live pinned widths. A
+ * complete snapshot is scaled proportionally to the current workbench before
+ * runtime caps apply. Incomplete snapshots retain valid absolute pinned widths;
+ * invalid/missing pinned widths are omitted so the normal ratio default applies.
+ */
+export function resolveCustomLayoutPinnedWidths(
+  columns: LayoutState["columns"],
+  totalWidth: number,
+): Map<string, number> {
+  const widths = new Map<string, number>();
+  const hasValidWidth = (column: LayoutState["columns"][number]): boolean =>
+    typeof column.width === "number" && Number.isFinite(column.width) && column.width > 0;
+  const hasCompleteGeometry =
+    columns.length > 0 && columns.every((column) => hasValidWidth(column));
+  const savedTotal = hasCompleteGeometry
+    ? columns.reduce((total, column) => total + (column.width ?? 0), 0)
+    : 0;
+
+  const resolveColumn = (column: LayoutState["columns"][number], sidebarWidth = 0): number => {
+    const savedWidth = column.width;
+    if (typeof savedWidth !== "number") return 0;
+    const requestedWidth = hasCompleteGeometry
+      ? Math.round((savedWidth / savedTotal) * totalWidth)
+      : savedWidth;
+    const min = column.minWidth ?? LAYOUT_PINNED_MIN_PX;
+    const max =
+      column.maxWidth ?? computePinnedMaxPxFor(column.id, totalWidth, sidebarWidth || undefined);
+    return Math.max(min, Math.min(requestedWidth, max));
+  };
+
+  const sidebar = columns.find(
+    (column) => column.id === "sidebar" && column.pinned && hasValidWidth(column),
+  );
+  const sidebarWidth = sidebar ? resolveColumn(sidebar) : 0;
+  if (sidebarWidth > 0) widths.set("sidebar", sidebarWidth);
+
+  for (const column of columns) {
+    if (column.id === "sidebar" || !column.pinned || !hasValidWidth(column)) continue;
+    widths.set(column.id, resolveColumn(column, sidebarWidth));
+  }
+  return widths;
+}
+
 /** Capture the live right pixel width into pinnedWidths before a layout rebuild. */
 function captureLiveWidths(api: DockviewApi, set: StoreSet): Map<string, number> {
   if (api.hasMaximizedGroup()) {
@@ -530,7 +579,7 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
     applyCustomLayout: (layout: SavedLayoutConfig, opts?: ApplyCustomLayoutOptions) => {
       const { api } = get();
       if (!api) return;
-      const liveWidths = captureLiveWidths(api, set);
+      captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       set({ isRestoringLayout: true });
@@ -538,7 +587,6 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         api,
         layout,
         opts,
-        liveWidths,
         safeWidth,
         safeHeight,
         set,
@@ -569,7 +617,6 @@ type RestoreCustomLayoutParams = {
   api: DockviewApi;
   layout: SavedLayoutConfig;
   opts: ApplyCustomLayoutOptions | undefined;
-  liveWidths: Map<string, number>;
   safeWidth: number;
   safeHeight: number;
   set: StoreSet;
@@ -579,7 +626,6 @@ function restoreCustomLayout({
   api,
   layout,
   opts,
-  liveWidths,
   safeWidth,
   safeHeight,
   set,
@@ -593,7 +639,11 @@ function restoreCustomLayout({
       opts?.activeSessionId ?? null,
       opts?.sessionIds ?? [],
     );
-    set(applyLayout(api, activeState, liveWidths, safeWidth, safeHeight));
+    const savedWidths = resolveCustomLayoutPinnedWidths(activeState.columns, safeWidth);
+    set({
+      ...applyLayout(api, activeState, savedWidths, safeWidth, safeHeight),
+      pinnedWidths: savedWidths,
+    });
     return { appliedState: activeState, oldFormatRestoreFailed: false };
   }
 

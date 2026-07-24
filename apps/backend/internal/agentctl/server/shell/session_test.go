@@ -582,17 +582,17 @@ func TestBuildShellEnv(t *testing.T) {
 	}
 }
 
-func TestBuildShellEnvOverridesManagedTemp(t *testing.T) {
+func TestBuildShellEnvAppliesExplicitTempOverrides(t *testing.T) {
 	workDir := t.TempDir()
 	t.Setenv("TMPDIR", "unmanaged")
 	env := buildShellEnv(workDir, map[string]string{
-		"TMPDIR": "/tmp/kandev-agent/session",
-		"TMP":    "/tmp/kandev-agent/session",
-		"TEMP":   "/tmp/kandev-agent/session",
+		"TMPDIR": "/srv/kandev/shared-tmp",
+		"TMP":    "/srv/kandev/shared-tmp",
+		"TEMP":   "/srv/kandev/shared-tmp",
 	})
 
 	for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
-		want := key + "=/tmp/kandev-agent/session"
+		want := key + "=/srv/kandev/shared-tmp"
 		found := false
 		for _, entry := range env {
 			if entry == want {

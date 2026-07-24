@@ -473,9 +473,13 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"terminalFontFamily":          nullString(settings.TerminalFontFamily),
 		"terminalFontSize":            nullInt(settings.TerminalFontSize),
 		"changesPanelLayout":          changesPanelLayout(settings.ChangesPanelLayout),
-		"systemMetricsDisplay":        map[string]any{"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar},
-		"voiceMode":                   mapVoiceMode(settings.VoiceMode),
-		"loaded":                      true,
+		"systemMetricsDisplay": map[string]any{
+			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
+			"simplified":   settings.SystemMetricsDisplay.Simplified,
+		},
+		"appStatusBarOrder": mapAppStatusBarOrder(settings.AppStatusBarOrder),
+		"voiceMode":         mapVoiceMode(settings.VoiceMode),
+		"loaded":            true,
 	}
 }
 
@@ -600,6 +604,13 @@ func mapSidebarTaskPrefs(prefs usermodels.SidebarTaskPrefs) map[string]any {
 		"pinnedTaskIds":          stringSlice(prefs.PinnedTaskIDs),
 		"orderedTaskIds":         stringSlice(prefs.OrderedTaskIDs),
 		"subtaskOrderByParentId": stringSliceMap(prefs.SubtaskOrderByParentID),
+	}
+}
+
+func mapAppStatusBarOrder(order usermodels.AppStatusBarOrder) map[string]any {
+	return map[string]any{
+		"leftItemIds":  stringSlice(order.LeftItemIDs),
+		"rightItemIds": stringSlice(order.RightItemIDs),
 	}
 }
 

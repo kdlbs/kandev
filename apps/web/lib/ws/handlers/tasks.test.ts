@@ -110,6 +110,31 @@ function makeDeletedMessage(payload: Record<string, unknown>) {
 
 const REVIEW_TITLE = "Review PR #11259";
 
+// Shared setup for the primary-session focus-follow tests: a single task t1
+// whose kanban primary, plus the active/pinned session ids, are the only knobs
+// that vary between cases.
+function makeFollowStore(opts: {
+  primarySessionId: string | null;
+  activeSessionId: string | null;
+  pinnedSessionId: string | null;
+  setActiveSessionAuto: (taskId: string, sessionId: string) => void;
+}) {
+  return makeStore({
+    kanban: {
+      workflowId: "wf1",
+      steps: [],
+      tasks: [{ id: "t1", primarySessionId: opts.primarySessionId, workflowId: "wf1" }],
+    } as unknown as AppState["kanban"],
+    tasks: {
+      activeTaskId: "t1",
+      activeSessionId: opts.activeSessionId,
+      pinnedSessionId: opts.pinnedSessionId,
+      lastSessionByTaskId: {},
+    },
+    setActiveSessionAuto: opts.setActiveSessionAuto,
+  });
+}
+
 function makeActiveStore() {
   return makeStore({
     kanban: { workflowId: "wf1", steps: [], tasks: [{ id: "t1", workflowId: "wf1" }] },
@@ -146,18 +171,10 @@ describe("task.updated primary-session focus follow", () => {
   });
 
   it("follows focus to the new primary when the user is on the previous primary", () => {
-    store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
-      tasks: {
-        activeTaskId: "t1",
-        activeSessionId: "sess-old",
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
+    store = makeFollowStore({
+      primarySessionId: "sess-old",
+      activeSessionId: "sess-old",
+      pinnedSessionId: null,
       setActiveSessionAuto,
     });
 
@@ -170,18 +187,10 @@ describe("task.updated primary-session focus follow", () => {
 
   it("does NOT follow focus when the user is on a different session than the previous primary", () => {
     // User manually selected sess-other; primary swapping shouldn't yank them away.
-    store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
-      tasks: {
-        activeTaskId: "t1",
-        activeSessionId: SESS_OTHER,
-        pinnedSessionId: SESS_OTHER,
-        lastSessionByTaskId: {},
-      },
+    store = makeFollowStore({
+      primarySessionId: "sess-old",
+      activeSessionId: SESS_OTHER,
+      pinnedSessionId: SESS_OTHER,
       setActiveSessionAuto,
     });
 
@@ -214,18 +223,10 @@ describe("task.updated primary-session focus follow", () => {
   });
 
   it("does NOT call setActiveSessionAuto when the primary did not change", () => {
-    store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
-      tasks: {
-        activeTaskId: "t1",
-        activeSessionId: "sess-old",
-        pinnedSessionId: null,
-        lastSessionByTaskId: {},
-      },
+    store = makeFollowStore({
+      primarySessionId: "sess-old",
+      activeSessionId: "sess-old",
+      pinnedSessionId: null,
       setActiveSessionAuto,
     });
 
@@ -237,9 +238,11 @@ describe("task.updated primary-session focus follow", () => {
 });
 
 // Regression: even when the user happens to be sitting on the previous
-// primary, an explicit pin on it must override primary-follow-focus —
-// otherwise a workflow profile switch silently yanks them off the session
-// they deliberately clicked into.
+// primary, an explicit pin on it must override primary-follow-focus here.
+// A pinned user whose session is genuinely retired is followed via the session
+// state-transition handoff once that session reaches a terminal state — not
+// from task.updated, where a retirement is indistinguishable from a manual
+// "Set as Primary" that leaves the pinned session live.
 describe("task.updated primary-session focus follow (pinning)", () => {
   let store: ReturnType<typeof makeStore>;
   let setActiveSessionAuto: ReturnType<typeof vi.fn<(taskId: string, sessionId: string) => void>>;
@@ -250,18 +253,26 @@ describe("task.updated primary-session focus follow (pinning)", () => {
   });
 
   it("does NOT follow focus when the user has pinned the previous primary", () => {
-    store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [{ id: "t1", primarySessionId: "sess-old", workflowId: "wf1" }],
-      } as unknown as AppState["kanban"],
-      tasks: {
-        activeTaskId: "t1",
-        activeSessionId: "sess-old",
-        pinnedSessionId: "sess-old",
-        lastSessionByTaskId: {},
-      },
+    store = makeFollowStore({
+      primarySessionId: "sess-old",
+      activeSessionId: "sess-old",
+      pinnedSessionId: "sess-old",
+      setActiveSessionAuto,
+    });
+
+    const handlers = registerTasksHandlers(store);
+    handlers["task.updated"]!(makeMessage(makeTask("t1", "sess-new")));
+
+    expect(setActiveSessionAuto).not.toHaveBeenCalled();
+  });
+
+  it("does NOT follow focus when there was no previous primary (first assignment)", () => {
+    // Boundary case: a task.updated that assigns the very first primary must not
+    // steal focus — there is no replaced session the user was viewing.
+    store = makeFollowStore({
+      primarySessionId: null,
+      activeSessionId: null,
+      pinnedSessionId: null,
       setActiveSessionAuto,
     });
 

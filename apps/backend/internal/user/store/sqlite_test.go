@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -193,13 +194,27 @@ func TestScanUserSettingsSystemMetricsDisplayDefault(t *testing.T) {
 	if settings.SystemMetricsDisplay.ShowInTopbar {
 		t.Fatal("system metrics display should default to disabled")
 	}
+	encoded, err := json.Marshal(settings.SystemMetricsDisplay)
+	if err != nil {
+		t.Fatalf("marshal system metrics display: %v", err)
+	}
+	if string(encoded) != `{"show_in_topbar":false,"simplified":false}` {
+		t.Fatalf("default system metrics display = %s, want detailed preference", encoded)
+	}
 
-	settings, err = scanUserSettings(settingsScanner{raw: `{"system_metrics_display":{"show_in_topbar":true}}`}, DefaultUserID)
+	settings, err = scanUserSettings(settingsScanner{raw: `{"system_metrics_display":{"show_in_topbar":true,"simplified":true}}`}, DefaultUserID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !settings.SystemMetricsDisplay.ShowInTopbar {
 		t.Fatal("expected stored system metrics display preference")
+	}
+	encoded, err = json.Marshal(settings.SystemMetricsDisplay)
+	if err != nil {
+		t.Fatalf("marshal stored system metrics display: %v", err)
+	}
+	if string(encoded) != `{"show_in_topbar":true,"simplified":true}` {
+		t.Fatalf("stored system metrics display = %s, want simplified preference", encoded)
 	}
 }
 
@@ -220,14 +235,48 @@ func TestSQLiteRepositorySystemMetricsDisplayRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get defaults: %v", err)
 	}
-	settings.SystemMetricsDisplay = models.SystemMetricsDisplaySettings{ShowInTopbar: true}
+	settings.SystemMetricsDisplay = models.SystemMetricsDisplaySettings{ShowInTopbar: true, Simplified: true}
 	upsertUserSettingsForTest(t, repo, ctx, settings)
 	got, err := repo.GetUserSettings(ctx, DefaultUserID)
 	if err != nil {
 		t.Fatalf("get settings: %v", err)
 	}
-	if !got.SystemMetricsDisplay.ShowInTopbar {
+	if !got.SystemMetricsDisplay.ShowInTopbar || !got.SystemMetricsDisplay.Simplified {
 		t.Fatal("expected system metrics display preference to round-trip")
+	}
+}
+
+func TestSQLiteRepositoryAppStatusBarOrderDefaultAndRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	if settings.AppStatusBarOrder.LeftItemIDs == nil || settings.AppStatusBarOrder.RightItemIDs == nil {
+		t.Fatalf("default AppStatusBarOrder = %#v, want non-nil empty arrays", settings.AppStatusBarOrder)
+	}
+	settings.AppStatusBarOrder = models.AppStatusBarOrder{
+		LeftItemIDs:  []string{"builtin:connection", "plugin:left"},
+		RightItemIDs: []string{"builtin:metrics", "plugin:right"},
+	}
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get settings: %v", err)
+	}
+	if !reflect.DeepEqual(got.AppStatusBarOrder, settings.AppStatusBarOrder) {
+		t.Fatalf("AppStatusBarOrder = %#v, want %#v", got.AppStatusBarOrder, settings.AppStatusBarOrder)
 	}
 }
 

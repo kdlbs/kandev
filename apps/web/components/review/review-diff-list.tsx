@@ -1,10 +1,7 @@
 "use client";
 
 import { memo, useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { IconAlertTriangle, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
-import { Checkbox } from "@kandev/ui/checkbox";
 import { FileDiffViewer, DiffErrorBoundary } from "@/components/diff";
-import { FileStatusIcon } from "@/components/shared/file-status-icon";
 import type { RevertBlockInfo } from "@/components/diff";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent, updateFileContent } from "@/lib/ws/workspace-files";
@@ -22,8 +19,9 @@ import {
 } from "./types";
 import type { ReviewFile } from "./types";
 import { RepoGroupHeader } from "./review-diff-list-groups";
-import { FileDiffToolbar } from "./review-diff-toolbar";
+import { ReviewDiffHeader, type ReviewExternalLinkContext } from "./review-diff-header";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
+import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 
 type ReviewDiffListProps = {
   files: ReviewFile[];
@@ -60,6 +58,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   // multiple repos a committed file lacking `repository_name` must NOT borrow
   // an arbitrary repo's base branch, so the fallback stays undefined there.
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const activeTaskPR = useActiveTaskPR();
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const fallbackBaseBranch = useMemo(() => {
     const branches = Object.values(baseBranchByRepo);
@@ -109,8 +108,13 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 onPreviewMarkdown={onPreviewMarkdown}
                 sectionRef={fileRefs.get(key)}
                 scrollContainer={scrollContainerRef}
-                baseBranchByRepo={baseBranchByRepo}
-                fallbackBaseBranch={fallbackBaseBranch}
+                externalLinkContext={{
+                  baseBranchByRepo,
+                  fallbackBaseBranch,
+                  taskId: activeTaskId,
+                  publishedPRBranch: activeTaskPR?.head_branch,
+                  publishedPRRepositoryId: activeTaskPR?.repository_id,
+                }}
               />
             );
           })}
@@ -144,8 +148,7 @@ type FileDiffSectionProps = {
   scrollContainer: React.RefObject<HTMLDivElement | null>;
   /** Per-repo base branches + single-repo fallback, resolved once by the list
    *  and shared across rows so diff expansion can fetch the correct old side. */
-  baseBranchByRepo: Record<string, string>;
-  fallbackBaseBranch?: string;
+  externalLinkContext: ReviewExternalLinkContext;
 };
 
 function useLazyVisible(scrollContainer: React.RefObject<HTMLDivElement | null>) {
@@ -215,91 +218,6 @@ function useAutoMarkOnScroll({
     return () => observer.disconnect();
   }, [autoMarkOnScroll, fileKey, isReviewed, isStale, onToggleReviewed, scrollContainer]);
   return scrollSentinelRef;
-}
-
-type FileDiffHeaderProps = {
-  file: ReviewFile;
-  isReviewed: boolean;
-  isStale: boolean;
-  sessionId: string;
-  collapsed: boolean;
-  wordWrap: boolean;
-  expandUnchanged: boolean;
-  onCheckboxChange: (checked: boolean | "indeterminate") => void;
-  onDiscard: () => void;
-  onOpenFile?: (filePath: string, repo?: string) => void;
-  onPreviewMarkdown?: (filePath: string) => void;
-  onToggleCollapse: () => void;
-  onToggleExpandUnchanged: () => void;
-  onToggleWordWrap: () => void;
-};
-
-function FileDiffHeader({
-  file,
-  isReviewed,
-  isStale,
-  collapsed,
-  wordWrap,
-  expandUnchanged,
-  sessionId,
-  onCheckboxChange,
-  onDiscard,
-  onOpenFile,
-  onPreviewMarkdown,
-  onToggleCollapse,
-  onToggleExpandUnchanged,
-  onToggleWordWrap,
-}: FileDiffHeaderProps) {
-  return (
-    <div
-      data-testid="review-file-header"
-      data-file-path={file.path}
-      className="sticky top-0 z-10 flex items-center gap-2 px-4 py-2 bg-card/95 backdrop-blur-sm border-b border-border/50"
-    >
-      <Checkbox
-        checked={isReviewed}
-        onCheckedChange={onCheckboxChange}
-        className="h-4 w-4 cursor-pointer"
-      />
-      <button
-        onClick={onToggleCollapse}
-        className="flex items-center gap-1.5 flex-1 min-w-0 cursor-pointer text-left hover:text-foreground"
-      >
-        {collapsed ? (
-          <IconChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <IconChevronDown className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-        )}
-        <span className="text-[13px] font-medium truncate">{file.path}</span>
-      </button>
-      <FileStatusIcon status={file.status} oldPath={file.old_path} className="sm:hidden" />
-      {isStale && (
-        <span className="flex items-center gap-1 text-xs text-yellow-500">
-          <IconAlertTriangle className="h-3.5 w-3.5" />
-          changed
-        </span>
-      )}
-      <span className="text-xs text-muted-foreground">
-        {file.additions > 0 && <span className="text-emerald-500">+{file.additions}</span>}
-        {file.additions > 0 && file.deletions > 0 && " / "}
-        {file.deletions > 0 && <span className="text-rose-500">-{file.deletions}</span>}
-      </span>
-      <FileDiffToolbar
-        diff={file.diff}
-        filePath={file.path}
-        sessionId={sessionId}
-        source={file.source}
-        wordWrap={wordWrap}
-        expandUnchanged={expandUnchanged}
-        onDiscard={onDiscard}
-        onOpenFile={onOpenFile}
-        onPreviewMarkdown={onPreviewMarkdown}
-        onToggleExpandUnchanged={onToggleExpandUnchanged}
-        onToggleWordWrap={onToggleWordWrap}
-        repo={file.repository_name}
-      />
-    </div>
-  );
 }
 
 function useCommentRunHandler(sessionId: string) {
@@ -389,8 +307,9 @@ function useScrollIntoViewOnSelect(
  * (controls-less) render:
  *
  *  - uncommitted rows: diff is working-tree-vs-HEAD, so baseRef="HEAD".
- *  - committed rows: diff is base-branch-vs-HEAD, so baseRef is the repo's
- *    base branch. HEAD already contains the commits, so expanding against it
+ *  - committed rows: diff is base-vs-HEAD, so baseRef is the exact old-side
+ *    commit carried by the file; payloads without that ref fall back to the
+ *    repo's base branch. HEAD already contains the commits, so expanding against it
  *    pairs identical old/new content and yields no controls (the bug behind
  *    "expansion stopped working in the review screen"). With no known base
  *    branch we can't fetch the pre-change content, so expansion is disabled
@@ -405,7 +324,7 @@ function useScrollIntoViewOnSelect(
  * the renderer, so enabling expansion here is always safe.
  */
 export function resolveDiffExpansion(
-  file: Pick<ReviewFile, "source" | "status" | "repository_name">,
+  file: Pick<ReviewFile, "source" | "status" | "repository_name" | "base_ref">,
   baseBranchByRepo: Record<string, string>,
   fallbackBaseBranch?: string,
 ): { enableExpansion: boolean; baseRef: string } {
@@ -413,6 +332,7 @@ export function resolveDiffExpansion(
     return { enableExpansion: false, baseRef: "HEAD" };
   }
   if (file.source === "committed") {
+    if (file.base_ref) return { enableExpansion: true, baseRef: file.base_ref };
     const repoName = file.repository_name ?? "";
     // Exact per-repo base wins. Fall back to the task's sole base branch ONLY
     // for single-repo files (no repository_name) — a multi-repo file whose repo
@@ -506,8 +426,7 @@ function FileDiffSection({
   onPreviewMarkdown,
   sectionRef,
   scrollContainer,
-  baseBranchByRepo,
-  fallbackBaseBranch,
+  externalLinkContext,
 }: FileDiffSectionProps) {
   const [collapsed, setCollapsed] = useState(false);
   const [expandUnchanged, setExpandUnchanged] = useState(false);
@@ -554,14 +473,14 @@ function FileDiffSection({
 
   const { enableExpansion, baseRef } = resolveDiffExpansion(
     file,
-    baseBranchByRepo,
-    fallbackBaseBranch,
+    externalLinkContext.baseBranchByRepo,
+    externalLinkContext.fallbackBaseBranch,
   );
 
   return (
     <div ref={sectionRef} className="border-b border-border">
       <div ref={scrollSentinelRef} className="h-0" />
-      <FileDiffHeader
+      <ReviewDiffHeader
         file={file}
         isReviewed={isReviewed}
         isStale={isStale}
@@ -576,6 +495,7 @@ function FileDiffSection({
         onToggleCollapse={handleToggleCollapse}
         onToggleExpandUnchanged={handleToggleExpandUnchanged}
         onToggleWordWrap={handleToggleWordWrap}
+        {...externalLinkContext}
       />
       <div ref={sentinelRef} />
       {!collapsed &&

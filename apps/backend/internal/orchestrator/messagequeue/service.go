@@ -54,7 +54,7 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 // is propagated to the resulting Message row when the queued message is
 // drained (e.g. sender_task_id for messages sent via message_task_kandev).
 func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
-	metadataCopy := copyMessageMetadata(metadata, 0)
+	metadataCopy := copyMessageMetadata(metadata, false)
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
 		TaskID:      taskID,
@@ -87,7 +87,7 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 // inserts a new tail entry if allowInsert is true; otherwise ErrEntryNotFound is
 // returned. The returned bool is true when an existing entry was replaced.
 func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, error) {
-	metadataCopy := copyMessageMetadata(metadata, 1)
+	metadataCopy := copyMessageMetadata(metadata, true)
 	metadataCopy[MetadataCoalesceKey] = coalesceKey
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
@@ -119,11 +119,11 @@ func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, ta
 	return queued, replaced, nil
 }
 
-func copyMessageMetadata(metadata map[string]interface{}, extraCapacity int) map[string]interface{} {
-	if len(metadata) == 0 && extraCapacity == 0 {
+func copyMessageMetadata(metadata map[string]interface{}, ensureWritable bool) map[string]interface{} {
+	if len(metadata) == 0 && !ensureWritable {
 		return nil
 	}
-	out := make(map[string]interface{}, len(metadata)+extraCapacity)
+	out := make(map[string]interface{}, len(metadata))
 	for key, value := range metadata {
 		out[key] = value
 	}
@@ -200,7 +200,13 @@ func (s *Service) TakeQueuedEntry(ctx context.Context, sessionID, entryID string
 // was already drained, the session doesn't own it, or the queuedBy guard
 // rejects the caller.
 func (s *Service) UpdateMessage(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {
-	if err := s.repo.UpdateContent(ctx, sessionID, entryID, content, attachments, queuedBy); err != nil {
+	return s.UpdateMessageWithMetadata(ctx, sessionID, entryID, content, attachments, nil, queuedBy)
+}
+
+// UpdateMessageWithMetadata atomically edits queue content and applies
+// metadata replacements while retaining unrelated metadata keys.
+func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	if err := s.repo.UpdateContentAndMetadata(ctx, sessionID, entryID, content, attachments, metadataUpdates, queuedBy); err != nil {
 		return err
 	}
 	s.logger.Info("queued entry updated",

@@ -376,6 +376,77 @@ describe("loadPlugins — initialize() timeout isolation", () => {
   });
 });
 
+describe("update sequence: unload before reload", () => {
+  const PLUGIN_UPDATE_A_ID = "plugin-update-a";
+  const MAIN_TOP_BAR_SLOT = "main-top-bar";
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_UPDATE_A_ID);
+  });
+
+  it("registers the top-bar slot component exactly once when a plugin is unloaded then reloaded (update), not twice", async () => {
+    const Widget = () => null;
+    const importer = fakeImporterFor({
+      [BUNDLE_JS_URL]: (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_UPDATE_A_ID, {
+          initialize: (registry: PluginRegistry) => {
+            registry.registerComponent(MAIN_TOP_BAR_SLOT, Widget);
+          },
+        }),
+    });
+
+    // First install.
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_UPDATE_A_ID, bundleUrl: BUNDLE_JS_URL })],
+      makeHostFactory,
+      importer,
+    );
+    expect(pluginRegistry.getSlotComponents(MAIN_TOP_BAR_SLOT)).toEqual([Widget]);
+
+    // Update: the reused install path must revoke the previous version's
+    // registrations before reloading, exactly like disable/uninstall do.
+    unloadPlugin(PLUGIN_UPDATE_A_ID);
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_UPDATE_A_ID, bundleUrl: BUNDLE_JS_URL })],
+      makeHostFactory,
+      importer,
+    );
+
+    expect(pluginRegistry.getSlotComponents(MAIN_TOP_BAR_SLOT)).toEqual([Widget]);
+  });
+});
+
+describe("unloadPlugin — evictCache option", () => {
+  const PLUGIN_EVICT_A_ID = "plugin-evict-a";
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_EVICT_A_ID);
+  });
+
+  it("re-imports the bundle on the next load when evictCache is true, unlike the default reuse-cached-registration behavior", async () => {
+    const firstInitialize = vi.fn();
+    const secondInitialize = vi.fn();
+    let importCount = 0;
+    const importer = vi.fn(async (_url: string) => {
+      importCount += 1;
+      registerFake(PLUGIN_EVICT_A_ID, {
+        initialize: importCount === 1 ? firstInitialize : secondInitialize,
+      });
+      return {};
+    });
+
+    await loadPlugins([activePlugin({ id: PLUGIN_EVICT_A_ID })], makeHostFactory, importer);
+    expect(importCount).toBe(1);
+    expect(firstInitialize).toHaveBeenCalledTimes(1);
+
+    unloadPlugin(PLUGIN_EVICT_A_ID, { evictCache: true });
+    await loadPlugins([activePlugin({ id: PLUGIN_EVICT_A_ID })], makeHostFactory, importer);
+
+    expect(importCount).toBe(2);
+    expect(secondInitialize).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("disable then re-enable in the same session", () => {
   afterEach(() => {
     pluginRegistry.unregisterPlugin(PLUGIN_REENABLE_A_ID);

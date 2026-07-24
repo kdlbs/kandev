@@ -1,5 +1,5 @@
 ---
-description: Review changed Kandev code for correctness, security, architecture, scope, complexity, and missing tests after implementation or before PRs.
+description: Frontier-review Kandev changes with architecture, cross-cutting, high-risk, or stale/incomplete external-review risk.
 mode: subagent
 temperature: 0.1
 permission:

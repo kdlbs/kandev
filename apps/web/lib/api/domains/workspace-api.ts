@@ -5,6 +5,7 @@ import type {
   RepositoryBranchesResponse,
   ListRepositoryScriptsResponse,
   Workspace,
+  Repository,
 } from "@/lib/types/http";
 
 // Workspace operations
@@ -35,6 +36,21 @@ export async function listRepositories(
   const queryString = searchParams.toString();
   const url = `/api/v1/workspaces/${workspaceId}/repositories${queryString ? `?${queryString}` : ""}`;
   return fetchJson<ListRepositoriesResponse>(url, options);
+}
+
+export async function initializeLocalRepository(
+  workspaceId: string,
+  payload: { name: string; parentPath: string },
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<Repository>(`/api/v1/workspaces/${workspaceId}/repositories/initialize-local`, {
+    ...options,
+    init: {
+      method: "POST",
+      body: JSON.stringify({ name: payload.name, parent_path: payload.parentPath }),
+      ...(options?.init ?? {}),
+    },
+  });
 }
 
 /**

@@ -146,6 +146,12 @@ func allPermissionMeta() []PermissionMeta {
 			Type:        "bool",
 		},
 		{
+			Key:         shared.PermCanCreateProjects,
+			Label:       "Create projects",
+			Description: "Allow this agent to create new projects",
+			Type:        "bool",
+		},
+		{
 			Key:         shared.PermCanApprove,
 			Label:       "Approve requests",
 			Description: "Allow this agent to approve or reject approval requests",

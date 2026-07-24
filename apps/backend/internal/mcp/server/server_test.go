@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -222,6 +223,29 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
 	assert.Equal(t, 27, len(tools))
+}
+
+func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	taskServer := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	stepComplete, ok := taskServer.mcpServer.ListTools()["step_complete_kandev"]
+	require.True(t, ok, "task mode must register step_complete_kandev")
+
+	serialized, err := json.Marshal(stepComplete.Tool)
+	require.NoError(t, err)
+	var tool map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(serialized, &tool))
+	assert.NotContains(t, tool, "_meta", "task tools should use normal client discovery")
+
+	for _, mode := range []string{ModeOffice, ModeConfig, ModeExternal} {
+		t.Run(mode, func(t *testing.T) {
+			restrictedServer := New(backend, "test-session", "test-task", 10005, log, "", false, mode)
+			assert.NotContains(t, restrictedServer.mcpServer.ListTools(), "step_complete_kandev")
+		})
+	}
 }
 
 func TestServerModeConfig_ToolCount(t *testing.T) {

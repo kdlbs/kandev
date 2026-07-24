@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/httpmw"
+	"github.com/kandev/kandev/internal/entityrefs"
 	"go.uber.org/zap"
 
 	// Common packages
@@ -469,7 +470,7 @@ func startAgentInfrastructure(
 	log.Info("Initializing Orchestrator...")
 
 	orchestratorSvc, msgCreator, err := provideOrchestrator(cfg, log, dbPool, eventBus, repos.Task, services.Task, services.User,
-		lifecycleMgr, agentRegistry, services.Workflow, repos.Secrets, repoCloner)
+		lifecycleMgr, agentRegistry, services.Workflow, repos.Secrets, repoCloner, services.Prompts)
 	if err != nil {
 		log.Error("Failed to initialize orchestrator", zap.Error(err))
 		return false
@@ -645,10 +646,15 @@ func startGatewayAndServe(
 	// WEBSOCKET GATEWAY
 	// ============================================
 	log.Info("Initializing WebSocket Gateway...")
+	var referenceValidator entityrefs.SubmissionValidator
+	if services.Mentions != nil {
+		referenceValidator = services.Mentions.Submission
+	}
 	gateway, _, notificationCtrl, terminalSvc, err := provideGateway(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
 		repos.Notification, repos.Task, repos.Terminal, services.GitHub, services.GitLab,
+		referenceValidator,
 		cfg.ResolvedHomeDir(),
 	)
 	if terminalSvc != nil {
@@ -745,6 +751,7 @@ func startGatewayAndServe(
 	}
 
 	services.Task.StartAutoArchiveLoop(ctx)
+	services.Task.StartArchivedSessionReconciliationLoop(ctx)
 	services.Task.StartQuickChatExpirationLoop(ctx)
 
 	// ============================================

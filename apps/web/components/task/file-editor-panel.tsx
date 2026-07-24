@@ -16,6 +16,7 @@ import { calculateHash } from "@/lib/utils/file-diff";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { syncOpenFileFromWorkspace } from "@/hooks/file-editors-sync";
 import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
+import { FileViewerExternalLink } from "./file-viewer-header";
 
 type FileCategory = "image" | "binary" | "text";
 
@@ -33,16 +34,72 @@ function ImagePanel({
   fileKey,
   path,
   worktreePath,
+  headerActions,
 }: {
   fileKey: string;
   path: string;
   worktreePath: string | undefined;
+  headerActions?: React.ReactNode;
 }) {
   const content = useDockviewStore((s) => s.openFiles.get(fileKey)?.content ?? "");
   return (
     <PanelRoot>
       <PanelBody padding={false} scroll={false}>
-        <FileImageViewer path={path} content={content} worktreePath={worktreePath} />
+        <FileImageViewer
+          path={path}
+          content={content}
+          worktreePath={worktreePath}
+          headerActions={headerActions}
+        />
+      </PanelBody>
+    </PanelRoot>
+  );
+}
+
+type StaticFilePanelProps = {
+  category: Exclude<FileCategory, "text">;
+  fileKey: string;
+  path: string;
+  worktreePath?: string;
+  sessionId: string | null;
+  taskId: string | null;
+  repositoryId?: string;
+  repositoryName?: string;
+};
+
+function StaticFilePanel({
+  category,
+  fileKey,
+  path,
+  worktreePath,
+  sessionId,
+  taskId,
+  repositoryId,
+  repositoryName,
+}: StaticFilePanelProps) {
+  const headerActions = (
+    <FileViewerExternalLink
+      path={path}
+      sessionId={sessionId}
+      taskId={taskId}
+      repositoryId={repositoryId}
+      repositoryName={repositoryName}
+    />
+  );
+  if (category === "image") {
+    return (
+      <ImagePanel
+        fileKey={fileKey}
+        path={path}
+        worktreePath={worktreePath}
+        headerActions={headerActions}
+      />
+    );
+  }
+  return (
+    <PanelRoot>
+      <PanelBody padding={false} scroll={false}>
+        <FileBinaryViewer path={path} worktreePath={worktreePath} headerActions={headerActions} />
       </PanelBody>
     </PanelRoot>
   );
@@ -278,17 +335,18 @@ export const FileEditorPanel = memo(function FileEditorPanel({
   const worktreePath = activeSession?.worktree_path ?? undefined;
   const repositoryId = activeSession?.repository_id ?? undefined;
   const category = resolveFileCategory(isBinary, path);
-
-  if (category === "image")
-    return <ImagePanel fileKey={fileKey} path={path} worktreePath={worktreePath} />;
-
-  if (category === "binary") {
+  if (category !== "text") {
     return (
-      <PanelRoot>
-        <PanelBody padding={false} scroll={false}>
-          <FileBinaryViewer path={path} worktreePath={worktreePath} />
-        </PanelBody>
-      </PanelRoot>
+      <StaticFilePanel
+        category={category}
+        fileKey={fileKey}
+        path={path}
+        worktreePath={worktreePath}
+        sessionId={activeSessionId}
+        taskId={activeTaskId}
+        repositoryId={repositoryId}
+        repositoryName={repo}
+      />
     );
   }
 

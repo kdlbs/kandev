@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,6 +19,15 @@ type CommentWriter interface {
 
 // TaskCreator is the task mutation dependency used by runtime actions.
 type TaskCreator interface {
+	CreateOfficeTaskAsAgent(
+		ctx context.Context,
+		callerAgentID string,
+		workspaceID string,
+		projectID string,
+		assigneeAgentID string,
+		title string,
+		description string,
+	) (string, error)
 	CreateOfficeSubtaskAsAgent(
 		ctx context.Context,
 		callerAgentID string,
@@ -26,11 +36,143 @@ type TaskCreator interface {
 		title string,
 		description string,
 	) (string, error)
+	GetTaskWorkspaceID(ctx context.Context, taskID string) (string, error)
+	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
+}
+
+// CreateTaskInput contains the supported root and child task fields.
+type CreateTaskInput struct {
+	Title                 string   `json:"title"`
+	Description           string   `json:"description"`
+	ParentTaskID          string   `json:"parent_id"`
+	AssigneeAgentID       string   `json:"assignee"`
+	ProjectID             string   `json:"project_id"`
+	Priority              string   `json:"priority"`
+	BlockedBy             []string `json:"blocked_by"`
+	WorkspaceMode         string   `json:"workspace_mode"`
+	WorkspaceGroupID      string   `json:"workspace_group_id"`
+	DefaultChildWorkspace string   `json:"default_child_workspace"`
+	DefaultChildOrdering  string   `json:"default_child_ordering"`
+}
+
+var errTaskTitleRequired = fmt.Errorf("task title is required")
+
+func (i CreateTaskInput) unsupportedField() string {
+	fields := []struct {
+		name    string
+		present bool
+	}{
+		{"priority", strings.TrimSpace(i.Priority) != ""},
+		{"blocked_by", len(i.BlockedBy) > 0},
+		{"workspace_mode", strings.TrimSpace(i.WorkspaceMode) != ""},
+		{"workspace_group_id", strings.TrimSpace(i.WorkspaceGroupID) != ""},
+		{"default_child_workspace", strings.TrimSpace(i.DefaultChildWorkspace) != ""},
+		{"default_child_ordering", strings.TrimSpace(i.DefaultChildOrdering) != ""},
+	}
+	for _, field := range fields {
+		if field.present {
+			return field.name
+		}
+	}
+	return ""
+}
+
+// CreateTask creates a root Office task or a child of the requested parent.
+func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input CreateTaskInput) (string, error) {
+	if input.ParentTaskID != "" {
+		if !runCtx.Capabilities.Allows(CapabilityCreateSubtask) {
+			return "", ErrCapabilityDenied
+		}
+		if !runCtx.CanMutateTask(input.ParentTaskID) {
+			return "", ErrTaskOutOfScope
+		}
+	} else if !runCtx.Capabilities.Allows(CapabilityCreateTask) {
+		return "", ErrCapabilityDenied
+	}
+	if strings.TrimSpace(runCtx.WorkspaceID) == "" {
+		return "", ErrWorkspaceOutOfScope
+	}
+	input.Title = strings.TrimSpace(input.Title)
+	if input.Title == "" {
+		return "", errTaskTitleRequired
+	}
+	input.AssigneeAgentID = strings.TrimSpace(input.AssigneeAgentID)
+	if a.deps.Tasks == nil {
+		return "", fmt.Errorf("%w: tasks", ErrRuntimeDependencyMissing)
+	}
+	if err := a.validateTaskRelations(ctx, runCtx.WorkspaceID, input); err != nil {
+		return "", err
+	}
+	if input.ParentTaskID != "" {
+		return a.deps.Tasks.CreateOfficeSubtaskAsAgent(
+			ctx, runCtx.AgentID, input.ParentTaskID, input.AssigneeAgentID, input.Title, input.Description,
+		)
+	}
+	return a.deps.Tasks.CreateOfficeTaskAsAgent(
+		ctx, runCtx.AgentID, runCtx.WorkspaceID, input.ProjectID, input.AssigneeAgentID, input.Title, input.Description,
+	)
+}
+
+func (a *Actions) validateTaskRelations(ctx context.Context, workspaceID string, input CreateTaskInput) error {
+	if input.ProjectID != "" {
+		if err := a.validateTaskProject(ctx, workspaceID, input.ProjectID); err != nil {
+			return err
+		}
+	}
+	if input.ParentTaskID != "" {
+		parentWorkspaceID, err := a.deps.Tasks.GetTaskWorkspaceID(ctx, input.ParentTaskID)
+		if err != nil || parentWorkspaceID != workspaceID {
+			return ErrWorkspaceOutOfScope
+		}
+		parentProjectID, err := a.deps.Tasks.GetTaskProjectID(ctx, input.ParentTaskID)
+		if err != nil || input.ProjectID != "" && input.ProjectID != parentProjectID {
+			return ErrWorkspaceOutOfScope
+		}
+	}
+	if input.AssigneeAgentID != "" {
+		if a.deps.AgentModifier == nil {
+			return fmt.Errorf("%w: agents", ErrRuntimeDependencyMissing)
+		}
+		agent, err := a.deps.AgentModifier.GetAgentInstance(ctx, input.AssigneeAgentID)
+		if err != nil || agent == nil || agent.ID != input.AssigneeAgentID || agent.WorkspaceID != workspaceID {
+			return ErrWorkspaceOutOfScope
+		}
+	}
+	return nil
+}
+
+func (a *Actions) validateTaskProject(ctx context.Context, workspaceID, projectID string) error {
+	if a.deps.Projects == nil {
+		return fmt.Errorf("%w: projects", ErrRuntimeDependencyMissing)
+	}
+	projects, err := a.deps.Projects.ListProjects(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, project := range projects {
+		if project != nil && project.ID == projectID && project.WorkspaceID == workspaceID {
+			return nil
+		}
+	}
+	return ErrWorkspaceOutOfScope
 }
 
 // TaskStatusUpdater is the task status mutation dependency used by runtime actions.
 type TaskStatusUpdater interface {
 	UpdateTaskStatusAsAgent(ctx context.Context, update TaskStatusUpdate) error
+}
+
+// PendingApprovalsError identifies a status update redirected to review because
+// one or more required approvers have not approved it yet.
+type PendingApprovalsError interface {
+	error
+	PendingApproverIDs() []string
+}
+
+// StatusValidationError identifies caller-correctable task status input.
+type StatusValidationError interface {
+	error
+	IsTaskStatusValidationError()
 }
 
 // AgentCreator is the agent mutation dependency used by runtime actions.
@@ -41,6 +183,12 @@ type AgentCreator interface {
 		callerAgent *models.AgentInstance,
 		reason string,
 	) error
+}
+
+// ProjectManager is the project dependency used by runtime actions.
+type ProjectManager interface {
+	ListProjects(ctx context.Context, workspaceID string) ([]*models.Project, error)
+	CreateProject(ctx context.Context, project *models.Project) error
 }
 
 // ApprovalRequester is the approval creation dependency used by runtime actions.
@@ -71,10 +219,95 @@ type ActionDependencies struct {
 	Tasks         TaskCreator
 	TaskStatus    TaskStatusUpdater
 	Agents        AgentCreator
+	Projects      ProjectManager
 	Approvals     ApprovalRequester
 	Runs          RunSpawner
 	AgentModifier AgentModifier
 	Skills        SkillManager
+}
+
+// CreateProjectInput contains fields an agent may provide when creating a project.
+type CreateProjectInput struct {
+	Name               string   `json:"name"`
+	Description        string   `json:"description"`
+	LeadAgentProfileID string   `json:"lead_agent_profile_id"`
+	Color              string   `json:"color"`
+	BudgetCents        int      `json:"budget_cents"`
+	Repositories       []string `json:"repositories"`
+	ExecutorConfig     string   `json:"executor_config"`
+}
+
+// ListProjects returns projects visible to the current run workspace.
+func (a *Actions) ListProjects(ctx context.Context, runCtx RunContext) ([]*models.Project, error) {
+	if !runCtx.Capabilities.Allows(CapabilityListProjects) {
+		return nil, ErrCapabilityDenied
+	}
+	if strings.TrimSpace(runCtx.WorkspaceID) == "" {
+		return nil, ErrWorkspaceOutOfScope
+	}
+	if a.deps.Projects == nil {
+		return nil, fmt.Errorf("%w: projects", ErrRuntimeDependencyMissing)
+	}
+	return a.deps.Projects.ListProjects(ctx, runCtx.WorkspaceID)
+}
+
+// CreateProject creates a project in the current run workspace.
+func (a *Actions) CreateProject(
+	ctx context.Context,
+	runCtx RunContext,
+	input CreateProjectInput,
+) (*models.Project, error) {
+	if !runCtx.Capabilities.Allows(CapabilityCreateProject) {
+		return nil, ErrCapabilityDenied
+	}
+	if strings.TrimSpace(runCtx.WorkspaceID) == "" {
+		return nil, ErrWorkspaceOutOfScope
+	}
+	if a.deps.Projects == nil {
+		return nil, fmt.Errorf("%w: projects", ErrRuntimeDependencyMissing)
+	}
+	leadAgentProfileID, err := a.validateProjectLead(ctx, runCtx.WorkspaceID, input.LeadAgentProfileID)
+	if err != nil {
+		return nil, err
+	}
+	repositories, err := models.EncodeRepositories(input.Repositories)
+	if err != nil {
+		return nil, err
+	}
+	project := &models.Project{
+		WorkspaceID:        runCtx.WorkspaceID,
+		Name:               input.Name,
+		Description:        input.Description,
+		Status:             models.ProjectStatusActive,
+		LeadAgentProfileID: leadAgentProfileID,
+		Color:              input.Color,
+		BudgetCents:        input.BudgetCents,
+		Repositories:       repositories,
+		ExecutorConfig:     input.ExecutorConfig,
+	}
+	if err := a.deps.Projects.CreateProject(ctx, project); err != nil {
+		return nil, err
+	}
+	return project, nil
+}
+
+func (a *Actions) validateProjectLead(
+	ctx context.Context,
+	workspaceID string,
+	leadAgentProfileID string,
+) (string, error) {
+	leadAgentProfileID = strings.TrimSpace(leadAgentProfileID)
+	if leadAgentProfileID == "" {
+		return "", nil
+	}
+	if a.deps.AgentModifier == nil {
+		return "", fmt.Errorf("%w: agents", ErrRuntimeDependencyMissing)
+	}
+	agent, err := a.deps.AgentModifier.GetAgentInstance(ctx, leadAgentProfileID)
+	if err != nil || agent == nil || agent.ID != leadAgentProfileID || agent.WorkspaceID != workspaceID {
+		return "", ErrWorkspaceOutOfScope
+	}
+	return agent.ID, nil
 }
 
 // Actions exposes the syscall-style mutation surface for an Office agent run.

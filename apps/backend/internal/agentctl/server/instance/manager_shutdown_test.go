@@ -153,7 +153,7 @@ func TestStopInstanceRetainsPortWhenHTTPServerCloseFails(t *testing.T) {
 			shutdownErr: context.DeadlineExceeded,
 			closeErr:    closeErr,
 		},
-		manager: &fakeProcessManager{stopErr: cleanupOnlyError{err: errors.New("temp cleanup failed")}},
+		manager: &fakeProcessManager{stopErr: errors.New("process teardown failed")},
 	}
 
 	mgr.mu.Lock()
@@ -167,7 +167,7 @@ func TestStopInstanceRetainsPortWhenHTTPServerCloseFails(t *testing.T) {
 	require.Error(t, err)
 }
 
-func TestStopInstanceReleasesPortAfterTempCleanupFailure(t *testing.T) {
+func TestStopInstanceRetainsPortAfterProcessTeardownFailure(t *testing.T) {
 	log := newTestLogger(t)
 	mgr := NewManager(&config.Config{
 		Ports:    config.PortConfig{Base: 12345, Max: 12345},
@@ -176,8 +176,8 @@ func TestStopInstanceReleasesPortAfterTempCleanupFailure(t *testing.T) {
 
 	port, err := mgr.portAlloc.Allocate("process-cleanup-failure")
 	require.NoError(t, err)
-	processErr := errors.New("agent temp cleanup failed")
-	procMgr := &fakeProcessManager{stopErr: cleanupOnlyError{err: processErr}}
+	processErr := errors.New("process teardown failed")
+	procMgr := &fakeProcessManager{stopErr: legacyResourceReleaseError{err: processErr}}
 	server := &fakeHTTPServer{}
 	inst := &Instance{
 		ID:        "process-cleanup-failure",
@@ -196,17 +196,17 @@ func TestStopInstanceReleasesPortAfterTempCleanupFailure(t *testing.T) {
 	require.True(t, procMgr.stopped)
 	require.True(t, server.shutdown)
 	_, ok := mgr.GetInstance(inst.ID)
-	require.True(t, ok, "cleanup-only failure must retain a retry tombstone")
-	reusedPort, err := mgr.portAlloc.Allocate("next-instance")
-	require.NoError(t, err)
-	require.Equal(t, port, reusedPort)
+	require.True(t, ok, "process teardown failure must retain the instance for retry")
+	_, err = mgr.portAlloc.Allocate("next-instance")
+	require.Error(t, err, "process teardown failure must retain the instance port")
 
 	procMgr.stopErr = nil
 	require.NoError(t, mgr.StopInstance(context.Background(), inst.ID))
 	_, ok = mgr.GetInstance(inst.ID)
 	require.False(t, ok)
-	_, err = mgr.portAlloc.Allocate("third-instance")
-	require.Error(t, err, "retry must not release a port that was reassigned")
+	reusedPort, err := mgr.portAlloc.Allocate("third-instance")
+	require.NoError(t, err)
+	require.Equal(t, port, reusedPort)
 }
 
 func TestStopHTTPServerTreatsCanceledShutdownAsStoppedAfterClose(t *testing.T) {
@@ -245,13 +245,15 @@ type fakeProcessManager struct {
 	stopped bool
 }
 
-type cleanupOnlyError struct {
+// legacyResourceReleaseError proves a process teardown error cannot authorize
+// releasing the instance's port while its process ownership is unresolved.
+type legacyResourceReleaseError struct {
 	err error
 }
 
-func (e cleanupOnlyError) Error() string { return e.err.Error() }
-func (e cleanupOnlyError) Unwrap() error { return e.err }
-func (e cleanupOnlyError) CanReleaseInstanceResources() bool {
+func (e legacyResourceReleaseError) Error() string { return e.err.Error() }
+func (e legacyResourceReleaseError) Unwrap() error { return e.err }
+func (e legacyResourceReleaseError) CanReleaseInstanceResources() bool {
 	return true
 }
 

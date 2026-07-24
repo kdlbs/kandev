@@ -477,6 +477,25 @@ func (s *Service) shouldDropCompletedExecutionStreamEvent(payload *lifecycle.Age
 // Returns the session row after a successful write (refreshed from DB when possible); callers
 // that need authoritative UpdatedAt should use the return value, not the preloaded input.
 func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID string, nextState models.TaskSessionState, errorMessage string, allowWakeFromWaiting bool, preloadedSession ...*models.TaskSession) *models.TaskSession {
+	updated, _ := s.updateTaskSessionStateWithHook(
+		ctx, taskID, sessionID, nextState, errorMessage, allowWakeFromWaiting, nil, preloadedSession...,
+	)
+	return updated
+}
+
+// updateTaskSessionStateWithHook is updateTaskSessionState with an optional
+// callback that runs only after the state CAS succeeds and before the state
+// change is published. It lets a caller attach state-specific UI metadata
+// without creating it when a concurrent terminal transition won the race.
+func (s *Service) updateTaskSessionStateWithHook(
+	ctx context.Context,
+	taskID, sessionID string,
+	nextState models.TaskSessionState,
+	errorMessage string,
+	allowWakeFromWaiting bool,
+	onChanged func(),
+	preloadedSession ...*models.TaskSession,
+) (*models.TaskSession, bool) {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -484,25 +503,28 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 		var err error
 		session, err = s.repo.GetTaskSession(ctx, sessionID)
 		if err != nil {
-			return nil
+			return nil, false
 		}
 	}
 	if session.State == models.TaskSessionStateWaitingForInput && nextState == models.TaskSessionStateRunning && !allowWakeFromWaiting {
-		return session
+		return session, false
 	}
 	oldState := session.State
 	switch session.State {
 	case models.TaskSessionStateCompleted, models.TaskSessionStateFailed, models.TaskSessionStateCancelled:
-		return session
+		return session, false
 	}
 	if session.State == nextState {
-		return session
+		return session, false
 	}
 	session, authoritativeUpdatedAt, changed := s.persistTaskSessionState(
 		ctx, sessionID, session, nextState, errorMessage,
 	)
 	if !changed {
-		return session
+		return session, false
+	}
+	if onChanged != nil {
+		onChanged()
 	}
 	if authoritativeUpdatedAt == nil {
 		s.logger.Warn("skipping session state_changed publish; could not read authoritative updated_at",
@@ -520,7 +542,7 @@ func (s *Service) updateTaskSessionState(ctx context.Context, taskID, sessionID 
 
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
-	return session
+	return session, true
 }
 
 func (s *Service) persistTaskSessionState(
@@ -590,6 +612,7 @@ func (s *Service) transitionTaskSessionState(
 	taskID, sessionID string,
 	nextState models.TaskSessionState,
 	errorMessage string,
+	onChanged func(),
 ) (bool, models.TaskSessionState, error) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -611,6 +634,9 @@ func (s *Service) transitionTaskSessionState(
 	}
 	if !changed {
 		return false, refreshed.State, nil
+	}
+	if onChanged != nil {
+		onChanged()
 	}
 	s.publishTaskSessionStateChanged(
 		ctx,
@@ -970,7 +996,9 @@ func (s *Service) setSessionStarting(ctx context.Context, taskID string, session
 		}
 		allowedTerminalRecovery := !promoteTask &&
 			session.State == models.TaskSessionStateStarting &&
-			current.State == models.TaskSessionStateFailed
+			(current.State == models.TaskSessionStateFailed ||
+				(current.State == models.TaskSessionStateCancelled &&
+					models.IsArchiveCancelReason(current.ErrorMessage)))
 		if isTerminalSessionState(current.State) && !allowedTerminalRecovery {
 			return &executor.SessionStateSupersededError{SessionID: session.ID, State: current.State}
 		}
@@ -1089,7 +1117,7 @@ func (s *Service) writeTaskReviewState(ctx context.Context, taskID, completedSes
 			zap.String("task_id", taskID),
 			zap.Error(err))
 		return
-	} else if dbTask != nil && dbTask.AssigneeAgentProfileID != "" {
+	} else if dbTask != nil && dbTask.IsFromOffice {
 		s.logger.Debug("skipping REVIEW transition for office task",
 			zap.String("task_id", taskID))
 		return
@@ -1184,7 +1212,7 @@ func (s *Service) writeTaskReviewStateOnCancel(ctx context.Context, taskID, sess
 		}
 		return
 	}
-	if dbTask.AssigneeAgentProfileID != "" {
+	if dbTask.IsFromOffice {
 		return
 	}
 	if taskArchived(dbTask) {
@@ -1327,7 +1355,7 @@ func (s *Service) reconcileTaskStateForRuntimeLocked(
 	if taskArchived(task) {
 		return nil
 	}
-	if state == v1.TaskStateInProgress && task != nil && task.AssigneeAgentProfileID != "" {
+	if state == v1.TaskStateInProgress && task != nil && task.IsFromOffice {
 		return nil
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -1572,7 +1600,7 @@ func (s *Service) handleOfficeTurnComplete(
 		return false
 	}
 	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil || task.AssigneeAgentProfileID == "" {
+	if err != nil || task == nil || !task.IsFromOffice {
 		return false
 	}
 

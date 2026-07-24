@@ -78,7 +78,7 @@ function StepDetails({ step, blockCommand }: { step: PrepareStepInfo; blockComma
         </pre>
       )}
       {step.output && (
-        <pre className="text-muted-foreground/60 max-h-48 overflow-auto whitespace-pre text-xs">
+        <pre className="text-muted-foreground/60 max-h-48 max-w-full overflow-y-auto whitespace-pre-wrap break-words text-xs">
           {stripAnsi(step.output)}
         </pre>
       )}
@@ -101,7 +101,7 @@ function StepWarning({ warning, warningDetail }: { warning: string; warningDetai
             Details
           </button>
           {detailExpanded && (
-            <pre className="text-amber-500/60 mt-0.5 overflow-x-auto whitespace-pre text-xs">
+            <pre className="text-amber-500/60 mt-0.5 max-w-full whitespace-pre-wrap break-words text-xs">
               {warningDetail}
             </pre>
           )}
@@ -116,7 +116,7 @@ function StepMessages({ step }: { step: PrepareStepInfo }) {
     <>
       {step.warning && <StepWarning warning={step.warning} warningDetail={step.warningDetail} />}
       {step.error && (
-        <pre className="text-destructive mt-0.5 overflow-x-auto whitespace-pre text-xs">
+        <pre className="text-destructive mt-0.5 max-w-full whitespace-pre-wrap break-words text-xs">
           {step.error}
         </pre>
       )}
@@ -140,13 +140,15 @@ function StepRow({ step }: { step: PrepareStepInfo }) {
 
   return (
     <div className="text-xs">
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
         <div className="flex-shrink-0">
           <StepIcon status={step.status} hasWarning={Boolean(step.warning)} />
         </div>
         <span className={nameClass}>{step.name || "Preparing..."}</span>
         {inlineCommand && (
-          <code className="text-muted-foreground/50 font-mono text-[10px]">{inlineCommand}</code>
+          <code className="text-muted-foreground/50 min-w-0 break-all font-mono text-[10px]">
+            {inlineCommand}
+          </code>
         )}
         {duration && <span className="text-muted-foreground/40 text-[10px]">{duration}</span>}
         {hasExpandable && (
@@ -279,11 +281,9 @@ function HeaderIcon({ status }: { status: EffectiveStatus }) {
 
 function getHeaderLabel(status: EffectiveStatus, prepareState: SessionPrepareState): string {
   if (status === "preparing") return "Preparing environment...";
-  if (status === "failed") return prepareState.errorMessage || "Environment preparation failed";
+  if (status === "failed") return "Environment setup failed";
   if (status === "completed_with_error") {
-    const failed = prepareState.steps.find((s) => s.status === "failed");
-    // `||` (not `??`) so an empty-string error also falls through to the name fallback.
-    return failed?.error || `${failed?.name ?? "Environment prepared"} — step failed`;
+    return "Environment setup finished with errors";
   }
   if (status === "completed_with_warnings") {
     const warningSteps = prepareState.steps.filter((s) => s.warning);
@@ -452,13 +452,21 @@ function logPrepareSnapshotChange(
   });
 }
 
+function hasPrepareDetails(
+  visibleStepCount: number,
+  hasSessionInfo: boolean,
+  hasFailureDetails: boolean,
+): boolean {
+  return visibleStepCount > 0 || hasSessionInfo || hasFailureDetails;
+}
+
 export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   const { status, prepareState } = usePrepareStatus(sessionId);
   const session = useAppStore((state) => state.taskSessions.items[sessionId]);
   const setupScriptSteps = useSetupScriptSteps(sessionId);
-  // Only the clean-success status auto-collapses. Anything with running/error/
-  // warning context stays open by default so the user sees what's happening.
-  const autoExpand = status !== "completed";
+  // Keep active progress and warnings visible. Failure diagnostics remain
+  // secondary until the user explicitly asks to inspect them.
+  const autoExpand = status === "preparing" || status === "completed_with_warnings";
   const [expanded, setExpanded] = useExpandedFlag(sessionId, autoExpand);
 
   // Track status/expand transitions over the panel's lifetime — the
@@ -496,20 +504,55 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
   const headerLabel = getHeaderLabel(status, prepareState);
   const isErrorStatus = status === "failed" || status === "completed_with_error";
   const headerClass = cn("text-xs", isErrorStatus ? "text-destructive" : "text-muted-foreground");
+  const hasFailureDetails = isErrorStatus && Boolean(prepareState.errorMessage);
+  const hasExpandableContent = hasPrepareDetails(
+    visibleSteps.length,
+    hasSessionInfo,
+    hasFailureDetails,
+  );
 
   return (
-    <div data-testid="prepare-progress-panel" data-status={status} data-expanded={expanded}>
+    <div
+      data-testid="prepare-progress-panel"
+      data-status={status}
+      data-expanded={expanded}
+      className="min-w-0 max-w-full"
+    >
       <ExpandableRow
         icon={<HeaderIcon status={status} />}
         header={
-          <span data-testid="prepare-progress-toggle" className={headerClass}>
-            {headerLabel}
-          </span>
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+            <span
+              data-testid="prepare-progress-toggle"
+              className={cn(headerClass, "min-w-0 break-words font-medium")}
+            >
+              {headerLabel}
+            </span>
+            {hasExpandableContent && (
+              <button
+                type="button"
+                aria-expanded={expanded}
+                aria-label={expanded ? "Hide preparation details" : "Show preparation details"}
+                className="min-h-11 cursor-pointer text-xs text-muted-foreground underline-offset-4 hover:underline sm:min-h-0"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setExpanded(!expanded);
+                }}
+              >
+                {expanded ? "Hide details" : "Show details"}
+              </button>
+            )}
+          </div>
         }
-        hasExpandableContent={visibleSteps.length > 0 || hasSessionInfo}
+        hasExpandableContent={hasExpandableContent}
         isExpanded={expanded}
         onToggle={() => setExpanded(!expanded)}
       >
+        {hasFailureDetails && (
+          <pre className="mb-2 max-h-48 max-w-full overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 text-xs text-muted-foreground">
+            {prepareState.errorMessage}
+          </pre>
+        )}
         <div className="space-y-1">
           {visibleSteps.map((step, i) => (
             <StepRow key={i} step={step} />

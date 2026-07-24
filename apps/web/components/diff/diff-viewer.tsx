@@ -47,6 +47,12 @@ interface DiffViewerProps {
   onToggleExpandUnchanged?: () => void;
   /** Multi-repo subpath for the file (e.g. "kandev"); empty for single-repo. */
   repo?: string;
+  taskId?: string | null;
+  repositoryId?: string | null;
+  status?: string | null;
+  previousPath?: string | null;
+  publishedBranch?: string | null;
+  externalBaseBranch?: string | null;
 }
 
 const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
@@ -68,6 +74,12 @@ const SCALAR_PROP_KEYS: (keyof DiffViewerProps)[] = [
   "expandUnchanged",
   "onToggleExpandUnchanged",
   "repo",
+  "taskId",
+  "repositoryId",
+  "status",
+  "previousPath",
+  "publishedBranch",
+  "externalBaseBranch",
 ];
 
 const DATA_KEYS: (keyof FileDiffData)[] = ["filePath", "diff", "oldContent", "newContent"];
@@ -102,7 +114,7 @@ function useAutoLoadExpansion(
   const hasValidData = !!(
     state.fileDiffMetadata?.deletionLines?.length && state.fileDiffMetadata?.additionLines?.length
   );
-  return enableExpansion && isExpansionContentLoaded && hasValidData;
+  return enableExpansion && isExpansionContentLoaded && state.canExpand && hasValidData;
 }
 
 function arePropsEqual(prevProps: DiffViewerProps, nextProps: DiffViewerProps): boolean {
@@ -166,6 +178,13 @@ type WiringArgs = {
   toggleExpandUnchanged: () => void;
   wrapperRef: React.RefObject<HTMLDivElement | null>;
   repo?: string;
+  taskId?: string | null;
+  sessionId?: string | null;
+  repositoryId?: string | null;
+  status?: string | null;
+  previousPath?: string | null;
+  publishedBranch?: string | null;
+  externalBaseBranch?: string | null;
 };
 
 /**
@@ -212,34 +231,53 @@ function useDiffViewerWiring(args: WiringArgs) {
     expandUnchanged: args.expandUnchanged,
     onToggleExpandUnchanged: canUseExpansion ? args.toggleExpandUnchanged : undefined,
     repo: args.repo,
+    taskId: args.taskId,
+    sessionId: args.sessionId,
+    repositoryId: args.repositoryId,
+    status: args.status,
+    previousPath: args.previousPath,
+    publishedBranch: args.publishedBranch,
+    baseBranch: args.externalBaseBranch,
   });
   return { ...opts, renderAnnotation };
 }
 
-export const DiffViewer = memo(function DiffViewer({
-  data,
-  enableComments = false,
-  sessionId,
-  onCommentAdd,
-  onCommentDelete,
-  onCommentUpdate,
-  onCommentRun,
-  comments: externalComments,
-  className,
-  compact = false,
-  hideHeader = false,
-  onOpenFile,
-  onPreviewMarkdown,
-  onRevert,
-  enableAcceptReject = false,
-  onRevertBlock,
-  wordWrap: wordWrapProp,
-  enableExpansion = false,
-  baseRef,
-  expandUnchanged: expandUnchangedProp,
-  onToggleExpandUnchanged: onToggleExpandUnchangedProp,
-  repo,
-}: DiffViewerProps) {
+function externalLinkContext(props: DiffViewerProps) {
+  return {
+    taskId: props.taskId,
+    repositoryId: props.repositoryId,
+    status: props.status,
+    previousPath: props.previousPath,
+    publishedBranch: props.publishedBranch,
+    externalBaseBranch: props.externalBaseBranch,
+  };
+}
+
+export const DiffViewer = memo(function DiffViewer(props: DiffViewerProps) {
+  const {
+    data,
+    enableComments = false,
+    sessionId,
+    onCommentAdd,
+    onCommentDelete,
+    onCommentUpdate,
+    onCommentRun,
+    comments: externalComments,
+    className,
+    compact = false,
+    hideHeader = false,
+    onOpenFile,
+    onPreviewMarkdown,
+    onRevert,
+    enableAcceptReject = false,
+    onRevertBlock,
+    wordWrap: wordWrapProp,
+    enableExpansion = false,
+    baseRef,
+    expandUnchanged: expandUnchangedProp,
+    onToggleExpandUnchanged: onToggleExpandUnchangedProp,
+    repo,
+  } = props;
   const [wordWrapLocal, setWordWrap] = useState(DEFAULT_DIFF_WORD_WRAP);
   const wordWrap = wordWrapProp ?? wordWrapLocal;
   const [expandUnchangedLocal, setExpandUnchangedLocal] = useState(false);
@@ -285,6 +323,8 @@ export const DiffViewer = memo(function DiffViewer({
       toggleExpandUnchanged,
       wrapperRef,
       repo,
+      sessionId,
+      ...externalLinkContext(props),
     });
 
   const controlledSelection = state.showCommentForm

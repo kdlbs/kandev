@@ -84,7 +84,8 @@ function makeUnloadedSettings(): UserSettingsState {
     terminalFontFamily: null,
     terminalFontSize: null,
     changesPanelLayout: "tree",
-    systemMetricsDisplay: { showInTopbar: false },
+    systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     voiceMode: {
       enabled: true,
       engine: "auto",

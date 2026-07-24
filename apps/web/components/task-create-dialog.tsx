@@ -47,6 +47,9 @@ import { resetTaskCreateLastUsedSync } from "@/components/task-create-dialog-han
 import { useAppStore } from "@/components/state-provider";
 import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
+import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
+
+const PROMPT_INSERTED_MESSAGE = "Enhanced prompt inserted.";
 
 export interface TaskCreateDialogProps {
   open: boolean;
@@ -130,8 +133,11 @@ function CreateModeBody(props: DialogFormBodyProps) {
     onToggleFreshBranch,
     workflowAgentLocked,
     repositories,
+    onRefreshRepositories,
+    repositoriesRefreshing,
     freshBranchAvailable,
     isLocalExecutor,
+    localRepositoryCreation,
   } = props;
   const showTaskName = shouldShowTaskTitleField(isCreateMode, isEditMode, isTaskStarted);
   const taskNameAutoFocus = !isEditMode && !fs.useRemote;
@@ -153,6 +159,9 @@ function CreateModeBody(props: DialogFormBodyProps) {
         userSettingsLoaded={props.userSettingsLoaded}
         onToggleNoRepository={props.onToggleNoRepository}
         onWorkspacePathChange={props.onWorkspacePathChange}
+        localRepositoryCreation={localRepositoryCreation}
+        onRefreshRepositories={onRefreshRepositories}
+        repositoriesRefreshing={repositoriesRefreshing}
       />
       {showTaskName && (
         <InlineTaskName
@@ -247,21 +256,57 @@ function DialogFormBody(props: DialogFormBodyProps) {
   );
 }
 
-function useEnhanceForDialog(fs: DialogFormState) {
+function useEnhanceForDialog(
+  fs: DialogFormState,
+  taskId: string | null | undefined,
+  open: boolean,
+) {
   const isConfigured = useIsUtilityConfigured();
+  const { toast } = useToast();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId: null,
     taskTitle: fs.taskName,
   });
+  const applyDescription = useCallback(
+    (value: string) => {
+      const input = fs.descriptionInputRef.current;
+      if (!input) {
+        return false;
+      }
+      input.setValue(value);
+      const applied = input.getValue() === value;
+      if (applied) {
+        fs.setHasDescription(value.trim().length > 0);
+      }
+      return applied;
+    },
+    [fs],
+  );
+  const promptDelivery = usePromptResultDelivery({
+    scopeKey: `task-create:${open}:${fs.openCycle}:${taskId ?? ""}`,
+    getCurrent: () => fs.descriptionInputRef.current?.getValue() ?? null,
+    apply: applyDescription,
+  });
   const onEnhance = useCallback(() => {
-    const current = fs.descriptionInputRef.current?.getValue()?.trim();
-    if (!current) return;
-    enhancePrompt(current, (enhanced) => {
-      fs.descriptionInputRef.current?.setValue(enhanced);
-      fs.setHasDescription(true);
+    const current = fs.descriptionInputRef.current?.getValue() ?? "";
+    if (!current.trim()) return;
+    const generation = promptDelivery.captureScope();
+    void enhancePrompt(current, (result) => {
+      const inserted = promptDelivery.deliver(current, result, generation);
+      if (inserted) {
+        toast({ description: PROMPT_INSERTED_MESSAGE, variant: "success" });
+      }
+      return inserted;
     });
-  }, [enhancePrompt, fs]);
-  return { onEnhance, isLoading: isEnhancingPrompt, isConfigured };
+  }, [enhancePrompt, fs.descriptionInputRef, promptDelivery, toast]);
+  return {
+    onEnhance,
+    isLoading: isEnhancingPrompt,
+    isConfigured,
+    pendingResult: promptDelivery.pendingResult,
+    onApplyPending: promptDelivery.applyPending,
+    onCopyPending: promptDelivery.copyPending,
+  };
 }
 
 function useJiraImportHandler(fs: DialogFormState) {
@@ -392,6 +437,7 @@ export function useTaskCreateDialogSetup(
   const isCreateMode = mode === "create";
   const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
   const fs = useDialogFormState(open, workspaceId, workflowId, initialValues);
+  const upsertWorkspaceRepository = useAppStore((state) => state.upsertRepository);
   const { toast } = useToast();
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const {
@@ -401,6 +447,7 @@ export function useTaskCreateDialogSetup(
     snapshots,
     repositories,
     repositoriesLoading,
+    refreshRepositories,
     taskCreateLastUsed,
     userSettingsLoaded,
     computed,
@@ -428,7 +475,11 @@ export function useTaskCreateDialogSetup(
     preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
   });
   useLockedFieldSync(open, workflowId, initialValues, fs);
-  const handlers = useDialogHandlers(fs, repositories);
+  const handlers = useDialogHandlers(fs, repositories, {
+    workspaceId,
+    executors,
+    upsertWorkspaceRepository,
+  });
   const submitHandlers = useSubmitHandlersWiring({
     props,
     fs,
@@ -463,6 +514,7 @@ export function useTaskCreateDialogSetup(
     snapshots,
     repositories,
     repositoriesLoading,
+    refreshRepositories,
     computed,
     handlers,
     submitHandlers,
@@ -471,7 +523,7 @@ export function useTaskCreateDialogSetup(
     taskCreateLastUsed,
     userSettingsLoaded,
     guardedHandleSubmit,
-    enhance: useEnhanceForDialog(fs),
+    enhance: useEnhanceForDialog(fs, props.taskId, props.open),
     handleJiraImport: useJiraImportHandler(fs),
     handleLinearImport: useLinearImportHandler(fs),
   };

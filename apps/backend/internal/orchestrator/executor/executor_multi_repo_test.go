@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -97,6 +98,92 @@ func TestLaunchPreparedSession_MultiRepo_PopulatesRequestRepositories(t *testing
 	// Legacy single-repo top-level fields stay populated from the primary.
 	if captured.RepositoryPath != "/repos/frontend" {
 		t.Errorf("expected primary repo path on top-level field, got %q", captured.RepositoryPath)
+	}
+}
+
+func TestLaunchPreparedSession_MultiRepo_LaunchFailureReportsFailingSecondaryRepositoryID(t *testing.T) {
+	repo := newMockRepository()
+	const taskID = "task-multi-launch-failure"
+	const sessionID = "session-multi-launch-failure"
+	seedMultiRepoTask(t, repo, taskID)
+	repo.taskRepositories["tr-2"].CheckoutBranch = "feature/foo"
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	launchErr := errors.New("fatal: couldn't find remote ref feature/foo")
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	var callbackRepositoryID string
+	exec.SetOnLaunchFailed(func(_ context.Context, callbackTaskID, callbackSessionID, repositoryID string, callbackErr error) {
+		if callbackTaskID != taskID || callbackSessionID != sessionID {
+			t.Errorf("unexpected callback target: task=%q session=%q", callbackTaskID, callbackSessionID)
+		}
+		if !errors.Is(callbackErr, launchErr) {
+			t.Errorf("unexpected callback error: %v", callbackErr)
+		}
+		callbackRepositoryID = repositoryID
+	})
+
+	_, err := exec.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID: taskID, WorkspaceID: "ws-1", Title: "Multi",
+	}, sessionID, LaunchOptions{AgentProfileID: "profile-123", StartAgent: false})
+	if !errors.Is(err, launchErr) {
+		t.Fatalf("LaunchPreparedSession error = %v, want %v", err, launchErr)
+	}
+	if callbackRepositoryID != "repo-back" {
+		t.Fatalf("launch failure repository ID = %q, want failing secondary repository %q", callbackRepositoryID, "repo-back")
+	}
+}
+
+func TestFailingLaunchRepositoryID_UsesExactBranchToken(t *testing.T) {
+	req := &LaunchAgentRequest{Repositories: []RepoSpec{{
+		RepositoryID:   "repo-secondary",
+		CheckoutBranch: "feature/foo",
+	}}}
+
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "remote ref exact match",
+			err:  errors.New("fatal: couldn't find remote ref feature/foo"),
+			want: "repo-secondary",
+		},
+		{
+			name: "quoted branch exact match",
+			err:  errors.New("branch \"feature/foo\" not found locally or on remote"),
+			want: "repo-secondary",
+		},
+		{
+			name: "pathspec exact match",
+			err:  errors.New("error: pathspec 'feature/foo' did not match any file(s) known to git"),
+			want: "repo-secondary",
+		},
+		{
+			name: "remote ref prefix collision",
+			err:  errors.New("fatal: couldn't find remote ref feature/foo-deleted"),
+			want: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := failingLaunchRepositoryID(req, tt.err); got != tt.want {
+				t.Fatalf("failingLaunchRepositoryID() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -243,6 +330,67 @@ func TestLaunchPreparedSession_MultiRepo_ReusesPerRepoWorktreeIDsFromEnvironment
 	}
 	if captured.Repositories[1].WorktreeID != "wt-back" {
 		t.Errorf("back WorktreeID = %q, want wt-back", captured.Repositories[1].WorktreeID)
+	}
+}
+
+// TestResumeSession_MultiRepo_PopulatesRequestRepositories is the resume-path
+// counterpart of TestLaunchPreparedSession_MultiRepo_PopulatesRequestRepositories.
+// buildResumeRequest loads task via the raw repository GetTask, which never
+// populates Task.Repositories (that's a separate one-to-many table loaded
+// only via ListTaskRepositories — see resolveAllRepoInfo). applyResumeMultiRepoConfig
+// must not gate on Task.Repositories: doing so silently drops every repo but
+// the primary on ANY resume of a multi-repo task, regardless of why the
+// session needed resuming.
+func TestResumeSession_MultiRepo_PopulatesRequestRepositories(t *testing.T) {
+	repo := newMockRepository()
+	const taskID = "task-multi-resume"
+	const sessionID = "session-multi-resume"
+	seedMultiRepoTask(t, repo, taskID)
+	seedWorktreeExecutor(repo)
+
+	// Mirrors the raw repository GetTask: no Repositories slice attached.
+	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Multi Resume"}
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		AgentProfileID: "profile-123",
+		ExecutorID:     models.ExecutorIDWorktree,
+		RepositoryID:   "repo-front",
+		State:          models.TaskSessionStateCancelled,
+		ErrorMessage:   models.SessionArchiveTreeCancelReason,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	var captured *LaunchAgentRequest
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			captured = req
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-resume-multi",
+				WorktreePath:     "/tasks/x",
+				Worktrees: []RepoWorktreeResult{
+					{RepositoryID: "repo-front", WorktreeID: "wt-front", WorktreeBranch: "feat/x-1", WorktreePath: "/tasks/x/frontend"},
+					{RepositoryID: "repo-back", WorktreeID: "wt-back", WorktreeBranch: "feat/x-2", WorktreePath: "/tasks/x/backend"},
+				},
+			}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions[sessionID], false); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+
+	if captured == nil {
+		t.Fatal("expected launch agent to be called")
+	}
+	if len(captured.Repositories) != 2 {
+		t.Fatalf("expected req.Repositories length 2 (both repos recreated on resume), got %d: %+v",
+			len(captured.Repositories), captured.Repositories)
+	}
+	if captured.Repositories[0].RepositoryID != "repo-front" || captured.Repositories[1].RepositoryID != "repo-back" {
+		t.Errorf("unexpected repo order: %+v", captured.Repositories)
 	}
 }
 

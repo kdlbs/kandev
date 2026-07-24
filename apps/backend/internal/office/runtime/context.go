@@ -5,8 +5,11 @@ package runtime
 type Capabilities struct {
 	CanPostComments     bool     `json:"post_comment"`
 	CanUpdateTaskStatus bool     `json:"update_task_status"`
+	CanCreateTasks      bool     `json:"create_task"`
 	CanCreateSubtasks   bool     `json:"create_subtask"`
 	CanCreateAgents     bool     `json:"create_agent"`
+	CanListProjects     bool     `json:"list_projects"`
+	CanCreateProjects   bool     `json:"create_project"`
 	CanRequestApproval  bool     `json:"request_approval"`
 	CanReadMemory       bool     `json:"read_memory"`
 	CanWriteMemory      bool     `json:"write_memory"`

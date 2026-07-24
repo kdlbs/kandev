@@ -363,6 +363,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"terminal_font_size":              settings.TerminalFontSize,
 		"changes_panel_layout":            settings.ChangesPanelLayout,
 		"system_metrics_display":          settings.SystemMetricsDisplay,
+		"app_status_bar_order":            normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"voice_mode":                      settings.VoiceMode,
 	})
 }
@@ -463,6 +464,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ChangesPanelLayout = "tree"
 		settings.SidebarViews = []models.SidebarView{}
 		settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{})
+		settings.AppStatusBarOrder = normalizeAppStatusBarOrder(models.AppStatusBarOrder{})
 		settings.VoiceMode = defaultVoiceModeSettings()
 		return settings, nil
 	}
@@ -505,6 +507,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		TerminalFontSize            int                                 `json:"terminal_font_size"`
 		ChangesPanelLayout          string                              `json:"changes_panel_layout"`
 		SystemMetricsDisplay        models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
+		AppStatusBarOrder           models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		VoiceMode                   *storedVoiceMode                    `json:"voice_mode"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
@@ -584,6 +587,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.TerminalFontSize = payload.TerminalFontSize
 	settings.VoiceMode = mergeVoiceModeDefaults(payload.VoiceMode)
 	settings.SystemMetricsDisplay = payload.SystemMetricsDisplay
+	settings.AppStatusBarOrder = normalizeAppStatusBarOrder(payload.AppStatusBarOrder)
 	if payload.ChangesPanelLayout == "flat" {
 		settings.ChangesPanelLayout = "flat"
 	} else {
@@ -603,4 +607,14 @@ func normalizeSidebarTaskPrefs(prefs models.SidebarTaskPrefs) models.SidebarTask
 		prefs.SubtaskOrderByParentID = map[string][]string{}
 	}
 	return prefs
+}
+
+func normalizeAppStatusBarOrder(order models.AppStatusBarOrder) models.AppStatusBarOrder {
+	if order.LeftItemIDs == nil {
+		order.LeftItemIDs = []string{}
+	}
+	if order.RightItemIDs == nil {
+		order.RightItemIDs = []string{}
+	}
+	return order
 }

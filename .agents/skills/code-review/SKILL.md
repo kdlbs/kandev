@@ -7,11 +7,12 @@ description: Review changed code for quality, security, and architecture complia
 
 ## Planner Entry
 
-The user-started primary session delegates this
-procedure to the registered `code-review` worker and reviews its findings. It
-assigns any fixes to an implementer and delegates security-sensitive follow-up
-to `security-auditor`; it does not review or edit the change directly. An
-explicitly assigned review worker continues below and does not spawn workers.
+The user-started primary session reviews small, localized changes directly and
+uses current-head PR AI review as the routine independent semantic evidence.
+Delegate to the registered `code-review` worker only for exceptional
+architecture, cross-cutting, high-risk, or insufficiently reviewed changes.
+Assign fixes or security follow-up to workers only when their scope warrants it.
+An explicitly assigned review worker continues below and does not spawn workers.
 
 Review the current changes in the codebase (Go backend + Vite/React SPA monorepo). Every finding needs a `file_path:line_number` reference, an explanation of *why* it matters, and a concrete fix.
 

@@ -1,9 +1,14 @@
-import { test, expect } from "../../fixtures/test-base";
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+import { test, expect, type SeedData } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import {
   assertLocatorWithinViewportX,
   assertNoDocumentHorizontalOverflow,
 } from "../../helpers/layout-assertions";
-import { GITLAB_PROJECT, seedGitLabReview } from "../../helpers/gitlab";
+import { GITLAB_HOST, GITLAB_PROJECT, seedGitLabReview } from "../../helpers/gitlab";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { GitLabPage } from "../../pages/gitlab-page";
 import { GitLabSettingsPage } from "../../pages/gitlab-settings-page";
 import { KanbanPage } from "../../pages/kanban-page";
@@ -17,6 +22,43 @@ async function expectTouchTarget(locator: ReturnType<GitLabPage["mrRow"]>, label
   expect(box.height, `${label} height`).toBeGreaterThanOrEqual(44);
 }
 
+async function seedMultiRepoGitLabTask(
+  apiClient: ApiClient,
+  seedData: SeedData,
+  tmpDir: string,
+  mrIID: number,
+) {
+  await seedGitLabReview(apiClient, seedData.workspaceId, mrIID, "Mobile contextual GitLab MR");
+  await apiClient.updateRepository(seedData.repositoryId, {
+    provider: "gitlab",
+    provider_host: GITLAB_HOST,
+    provider_owner: "platform",
+    provider_name: "kandev",
+  });
+  const secondaryRepoDir = path.join(tmpDir, "repos", "mobile-gitlab-secondary");
+  fs.mkdirSync(secondaryRepoDir, { recursive: true });
+  const gitEnv = makeGitEnv(tmpDir);
+  execSync("git init -b main", { cwd: secondaryRepoDir, env: gitEnv });
+  execSync('git commit --allow-empty -m "init"', { cwd: secondaryRepoDir, env: gitEnv });
+  const secondaryRepo = await apiClient.createRepository(
+    seedData.workspaceId,
+    secondaryRepoDir,
+    "main",
+    {
+      name: "Mobile GitLab secondary",
+      provider: "gitlab",
+      provider_host: GITLAB_HOST,
+      provider_owner: "platform",
+      provider_name: "docs",
+    },
+  );
+  return apiClient.createTask(seedData.workspaceId, "Mobile contextual GitLab link", {
+    workflow_id: seedData.workflowId,
+    workflow_step_id: seedData.startStepId,
+    repository_ids: [seedData.repositoryId, secondaryRepo.id],
+  });
+}
+
 test.describe("Mobile GitLab parity", () => {
   test("browses, quick launches, reviews, subscribes, and unlinks without overflow", async ({
     testPage,
@@ -28,7 +70,7 @@ test.describe("Mobile GitLab parity", () => {
     await seedGitLabReview(apiClient, seedData.workspaceId, 111, "Mobile GitLab review");
     await apiClient.updateRepository(seedData.repositoryId, {
       provider: "gitlab",
-      provider_host: "https://gitlab.example.test",
+      provider_host: GITLAB_HOST,
       provider_owner: "platform",
       provider_name: "kandev",
     });
@@ -71,6 +113,97 @@ test.describe("Mobile GitLab parity", () => {
 
     await panel.getByRole("button", { name: "Unlink merge request" }).tap();
     await expect(testPage.getByTestId("mr-topbar-button")).toHaveCount(0);
+    await expect(testPage.getByTestId("mobile-mr-review-panel")).toHaveCount(0);
+    await expect(testPage.getByTestId("session-chat")).toBeVisible();
+    await expect(testPage.getByRole("button", { name: "Chat", exact: true })).toHaveClass(
+      /text-primary/,
+    );
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          "window.__KANDEV_E2E_STORE__?.getState().mobileSession.activePanelBySessionId[window.__KANDEV_E2E_STORE__?.getState().tasks.activeSessionId ?? '']",
+        ),
+      )
+      .toBe("chat");
+  });
+
+  test("links a GitLab MR from the visible task actions menu", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await testPage.setViewportSize({ width: 393, height: 851 });
+    const mrIID = 113;
+    const title = "Mobile contextual GitLab link";
+    const task = await seedMultiRepoGitLabTask(apiClient, seedData, backend.tmpDir, mrIID);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(testPage.getByTestId("mr-topbar-button")).toHaveCount(0);
+
+    await testPage.getByTestId("mobile-session-menu").click();
+    const taskDrawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const taskRow = taskDrawer.getByTestId("sidebar-task-item").filter({ hasText: title });
+    await expect(taskRow).toBeVisible({ timeout: 10_000 });
+    const taskActions = taskRow.getByRole("button", { name: "Task actions" });
+    await expect(taskActions).toBeVisible();
+    await expectTouchTarget(taskActions, "task actions button");
+    await taskActions.click();
+
+    const linkTrigger = testPage.getByRole("menuitem", { name: "Link", exact: true });
+    await expect(linkTrigger).toBeVisible();
+    await linkTrigger.click();
+
+    const gitLabItem = testPage.getByRole("menuitem", { name: "GitLab Merge Request" });
+    await expect(gitLabItem).toBeVisible();
+    await expectTouchTarget(gitLabItem, "GitLab merge request link action");
+    const nestedMenu = gitLabItem.locator("xpath=ancestor::*[@role='menu'][1]");
+    await nestedMenu.evaluate((element) =>
+      Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => undefined)),
+      ),
+    );
+    const menuBox = await nestedMenu.boundingBox();
+    const viewport = testPage.viewportSize();
+    if (!menuBox || !viewport) throw new Error("mobile GitLab link menu has no layout box");
+    expect(menuBox.x).toBeGreaterThanOrEqual(8);
+    expect(menuBox.x).toBeLessThanOrEqual(18);
+    expect(menuBox.width).toBeGreaterThanOrEqual(viewport.width - 36);
+    expect(viewport.width - (menuBox.x + menuBox.width)).toBeGreaterThanOrEqual(8);
+    expect(viewport.width - (menuBox.x + menuBox.width)).toBeLessThanOrEqual(18);
+    expect(menuBox.y).toBeGreaterThanOrEqual(0);
+    expect(menuBox.y + menuBox.height).toBeLessThanOrEqual(viewport.height);
+    expect(viewport.height - (menuBox.y + menuBox.height)).toBeGreaterThanOrEqual(8);
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile GitLab task link menu");
+
+    await gitLabItem.click();
+    const linkDialog = testPage.getByRole("dialog", { name: "Link GitLab merge request" });
+    await expect(linkDialog).toBeVisible();
+    await assertLocatorWithinViewportX(linkDialog, "mobile GitLab link dialog");
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile GitLab link dialog");
+    await expect(linkDialog.getByRole("combobox", { name: "Task repository" })).toContainText(
+      GITLAB_PROJECT,
+    );
+    await linkDialog
+      .getByLabel("Merge request URL")
+      .fill(`${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${mrIID}`);
+    await linkDialog.getByRole("button", { name: "Link merge request" }).click();
+
+    const mrButton = testPage.getByTestId("mr-topbar-button");
+    await expect(mrButton).toHaveAttribute("data-mr-iid", String(mrIID));
+    await expect(mrButton).toHaveAttribute("data-mr-state", "opened");
+    const response = await apiClient.rawRequest("GET", `/api/v1/gitlab/tasks/${task.id}/mrs`);
+    expect(response.ok).toBe(true);
+    const linked = (await response.json()) as {
+      task_mrs: Array<{ repository_id?: string }>;
+    };
+    expect(linked.task_mrs).toEqual([
+      expect.objectContaining({ repository_id: seedData.repositoryId }),
+    ]);
   });
 
   test("watch controls remain touch sized and persist a pause", async ({

@@ -551,11 +551,16 @@ type TaskRuntimeStateReconcileFunc func(ctx context.Context, taskID, sessionID s
 // publish events (e.g. WebSocket notifications) alongside the DB update.
 type SessionStateChangeFunc func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error
 
-// SessionStateTransitionFunc performs a guarded session-state transition and
-// reports whether the requested state was accepted plus the final observed
-// state. Coordinator stop uses this stricter callback so terminal races and
-// persistence failures cannot be mistaken for accepted cancellation.
-type SessionStateTransitionFunc func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) (changed bool, finalState models.TaskSessionState, err error)
+// SessionStateTransitionFunc performs a guarded session-state transition,
+// invokes onChanged after persistence but before publication, and reports the
+// final observed state.
+type SessionStateTransitionFunc func(
+	ctx context.Context,
+	taskID, sessionID string,
+	state models.TaskSessionState,
+	errorMessage string,
+	onChanged func(),
+) (changed bool, finalState models.TaskSessionState, err error)
 
 // SessionStartingFunc is called when the executor has prepared/resumed an
 // execution and needs to mark the session STARTING while preserving other
@@ -587,8 +592,9 @@ type TaskReviewStateReconcileFunc func(ctx context.Context, taskID, completedSes
 type AgentStartFailedFunc func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) (handled bool)
 
 // LaunchFailedFunc is called when session launch fails before the agent starts.
-// Useful for creating user-facing status messages tied to launch errors.
-type LaunchFailedFunc func(ctx context.Context, taskID, sessionID string, err error)
+// repositoryID identifies the repository whose launch failed. Useful for
+// creating repository-scoped user-facing status messages tied to launch errors.
+type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID string, err error)
 
 // PrimarySessionSetFunc is called when the first session for a task is marked
 // primary. This lets the orchestrator publish a task.updated event so the

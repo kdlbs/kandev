@@ -222,6 +222,7 @@ func (c *PATClient) ListReviewRequestedPRs(ctx context.Context, scope, filter, c
 	prs := make([]*PR, len(result.Items))
 	for i, item := range result.Items {
 		prs[i] = convertSearchItemToPR(
+			item.ID, item.NodeID,
 			item.Number, item.Title, item.HTMLURL, item.State,
 			item.User.Login, item.RepositoryURL, item.PullRequest.MergedAt,
 			item.Draft, item.CreatedAt, item.UpdatedAt,
@@ -253,6 +254,7 @@ func (c *PATClient) SearchPRsPaged(ctx context.Context, filter, customQuery stri
 	prs := make([]*PR, len(result.Items))
 	for i, item := range result.Items {
 		prs[i] = convertSearchItemToPR(
+			item.ID, item.NodeID,
 			item.Number, item.Title, item.HTMLURL, item.State,
 			item.User.Login, item.RepositoryURL, item.PullRequest.MergedAt,
 			item.Draft, item.CreatedAt, item.UpdatedAt,
@@ -981,6 +983,8 @@ type patIssue struct {
 }
 
 type patSearchItem struct {
+	ID            int64     `json:"id"`
+	NodeID        string    `json:"node_id"`
 	Number        int       `json:"number"`
 	Title         string    `json:"title"`
 	HTMLURL       string    `json:"html_url"`

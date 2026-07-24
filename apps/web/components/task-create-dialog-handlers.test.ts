@@ -1,10 +1,128 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { Executor, Repository } from "@/lib/types/http";
 import {
+  applyCreatedLocalRepository,
+  findDirectLocalExecutorProfile,
   queueTaskCreateLastUsedFromPayload,
   readQueuedTaskCreateLastUsedState,
   resetTaskCreateLastUsedSync,
   syncTaskCreateLastUsed,
 } from "./task-create-dialog-handlers";
+
+const WORKTREE_PROFILE_ID = "worktree-profile";
+const LOCAL_PROFILE_ID = "local-profile";
+
+function executor(
+  id: string,
+  type: Executor["type"],
+  profiles: Array<{ id: string; name: string; executor_type?: Executor["type"] }>,
+): Executor {
+  return {
+    id,
+    type,
+    name: id,
+    profiles: profiles.map((profile) => ({
+      ...profile,
+      executor_id: id,
+      prepare_script: "",
+      cleanup_script: "",
+      created_at: "",
+      updated_at: "",
+    })),
+    status: "active",
+    is_system: false,
+    created_at: "",
+    updated_at: "",
+  };
+}
+
+function repository(id: string): Repository {
+  return {
+    id,
+    workspace_id: "ws-1",
+    name: "alpha",
+    source_type: "local",
+    local_path: "/work/alpha",
+    default_branch: "main",
+    created_at: "",
+    updated_at: "",
+  } as Repository;
+}
+
+describe("local repository creation selection", () => {
+  it("keeps the selected profile when it already runs directly on the local host", () => {
+    const selection = findDirectLocalExecutorProfile(
+      [
+        executor("worktree", "worktree", [{ id: WORKTREE_PROFILE_ID, name: "Worktree" }]),
+        executor("local", "local", [{ id: LOCAL_PROFILE_ID, name: "Local" }]),
+      ],
+      LOCAL_PROFILE_ID,
+    );
+
+    expect(selection).toEqual({
+      executorId: "local",
+      executorProfileId: LOCAL_PROFILE_ID,
+      executorProfileName: "Local",
+      requiresSwitch: false,
+    });
+  });
+
+  it("chooses a direct-local profile when the selected profile is incompatible", () => {
+    const selection = findDirectLocalExecutorProfile(
+      [
+        executor("worktree", "worktree", [{ id: WORKTREE_PROFILE_ID, name: "Worktree" }]),
+        executor("local", "local_pc", [{ id: LOCAL_PROFILE_ID, name: "This computer" }]),
+      ],
+      WORKTREE_PROFILE_ID,
+    );
+
+    expect(selection).toMatchObject({
+      executorId: "local",
+      executorProfileId: LOCAL_PROFILE_ID,
+      requiresSwitch: true,
+    });
+  });
+
+  it("returns null when no direct-local profile exists", () => {
+    expect(
+      findDirectLocalExecutorProfile(
+        [executor("worktree", "worktree", [{ id: WORKTREE_PROFILE_ID, name: "Worktree" }])],
+        WORKTREE_PROFILE_ID,
+      ),
+    ).toBeNull();
+  });
+
+  it("patches only the originating row and switches executor state", () => {
+    const updateRepository = vi.fn();
+    const setExecutorId = vi.fn();
+    const setExecutorProfileId = vi.fn();
+    const upsertWorkspaceRepository = vi.fn();
+    const created = repository("repo-new");
+
+    applyCreatedLocalRepository({
+      fs: { updateRepository, setExecutorId, setExecutorProfileId },
+      rowKey: "row-2",
+      repository: created,
+      workspaceId: "ws-1",
+      upsertWorkspaceRepository,
+      executorSelection: {
+        executorId: "local",
+        executorProfileId: LOCAL_PROFILE_ID,
+        executorProfileName: "Local",
+        requiresSwitch: true,
+      },
+    });
+
+    expect(updateRepository).toHaveBeenCalledWith("row-2", {
+      repositoryId: "repo-new",
+      localPath: undefined,
+      branch: "main",
+    });
+    expect(setExecutorId).toHaveBeenCalledWith("local");
+    expect(setExecutorProfileId).toHaveBeenCalledWith(LOCAL_PROFILE_ID);
+    expect(upsertWorkspaceRepository).toHaveBeenCalledWith("ws-1", created);
+  });
+});
 
 describe("syncTaskCreateLastUsed", () => {
   beforeEach(() => {

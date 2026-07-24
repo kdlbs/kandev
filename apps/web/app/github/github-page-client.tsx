@@ -503,7 +503,7 @@ export function GitHubPageClient({
   };
 
   return (
-    <div className="h-screen w-full flex flex-col bg-background">
+    <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <PageHeader onOpenMobileSidebar={loaded && authed ? onOpenMobileSidebar : undefined} />
       {!loaded && <div className="p-6 text-sm text-muted-foreground">Checking GitHub status…</div>}
       {loaded && !authed && (

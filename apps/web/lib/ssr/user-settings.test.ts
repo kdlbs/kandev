@@ -3,6 +3,7 @@ import {
   buildCoreFields,
   mapUserSettingsResponse,
   parseChangesPanelLayout,
+  parseSystemMetricsDisplay,
   parseVoiceMode,
 } from "./user-settings";
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
@@ -10,6 +11,31 @@ import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 
 describe("buildCoreFields", () => {
+  it("normalizes the simplified metrics preference and defaults old rows to detailed", () => {
+    expect(parseSystemMetricsDisplay({ show_in_topbar: true, simplified: true } as never)).toEqual({
+      showInTopbar: true,
+      simplified: true,
+    });
+    expect(parseSystemMetricsDisplay(undefined)).toEqual({
+      showInTopbar: false,
+      simplified: false,
+    });
+  });
+
+  it("maps portable app status bar order", () => {
+    const settings = {
+      app_status_bar_order: {
+        left_item_ids: ["builtin:connection", "plugin:left"],
+        right_item_ids: ["builtin:metrics"],
+      },
+    } as unknown as Parameters<typeof buildCoreFields>[0];
+
+    expect(buildCoreFields(settings).appStatusBarOrder).toEqual({
+      leftItemIds: ["builtin:connection", "plugin:left"],
+      rightItemIds: ["builtin:metrics"],
+    });
+  });
+
   it("maps terminal_font_family to terminalFontFamily", () => {
     const settings = {
       workspace_id: toWorkspaceId(""),
@@ -117,6 +143,13 @@ describe("buildTerminalFields via buildCoreFields", () => {
 });
 
 describe("mapUserSettingsResponse", () => {
+  it("defaults portable app status bar order to empty arrays", () => {
+    expect(mapUserSettingsResponse(null).appStatusBarOrder).toEqual({
+      leftItemIds: [],
+      rightItemIds: [],
+    });
+  });
+
   it("defaults missing and unknown MCP task agent profile preferences", () => {
     const missing = mapUserSettingsResponse(null);
     const unknown = mapUserSettingsResponse({

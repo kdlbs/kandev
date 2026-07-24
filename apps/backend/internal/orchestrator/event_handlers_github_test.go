@@ -20,6 +20,7 @@ type mockGitHubService struct {
 	taskPR                *github.TaskPR
 	taskPRs               []*github.TaskPR
 	taskPRErr             error
+	taskPRListFunc        func(context.Context, []string) (map[string][]*github.TaskPR, error)
 	triggerPRSyncAllPRs   []*github.TaskPR
 	triggerPRSyncAllErr   error
 	triggerPRSyncAllCalls int
@@ -91,7 +92,10 @@ func (m *mockGitHubService) GetTaskPR(_ context.Context, _ string) (*github.Task
 	m.getTaskPRCalls++
 	return m.taskPR, m.taskPRErr
 }
-func (m *mockGitHubService) ListTaskPRs(_ context.Context, taskIDs []string) (map[string][]*github.TaskPR, error) {
+func (m *mockGitHubService) ListTaskPRs(ctx context.Context, taskIDs []string) (map[string][]*github.TaskPR, error) {
+	if m.taskPRListFunc != nil {
+		return m.taskPRListFunc(ctx, taskIDs)
+	}
 	if m.taskPRErr != nil {
 		return nil, m.taskPRErr
 	}

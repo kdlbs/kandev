@@ -1,16 +1,54 @@
 import type { Message } from "@/lib/types/http";
+import type { EntityReference } from "@/lib/types/entity-reference";
+import type { MessagesState } from "@/lib/state/slices/session/types";
+import { entityReferencesFromMetadata } from "@/lib/entity-references/message-references";
 
-/** Extract the user's previously sent text messages for a session, newest-first.
- *  Consecutive duplicates *in the original message stream* are collapsed —
- *  duplicates separated by an assistant or tool turn stay, since the user
- *  meaningfully repeated themselves and should be able to recall the older
- *  one from history. Empty/whitespace-only messages are skipped. */
-export function extractUserHistory(messages: readonly Message[]): string[] {
-  const out: string[] = [];
+export type MessageHistoryEntry = {
+  content: string;
+  entityReferences: EntityReference[];
+};
+
+type MessageHistoryStoreState = {
+  messages: MessagesState;
+};
+
+function sameEntityReference(left: EntityReference, right: EntityReference): boolean {
+  return (
+    left.version === right.version &&
+    left.ref === right.ref &&
+    left.provider === right.provider &&
+    left.kind === right.kind &&
+    left.id === right.id &&
+    left.key === right.key &&
+    left.title === right.title &&
+    left.url === right.url &&
+    left.scope === right.scope
+  );
+}
+
+function sameHistoryEntries(
+  left: readonly MessageHistoryEntry[],
+  right: readonly MessageHistoryEntry[],
+): boolean {
+  if (left.length !== right.length) return false;
+  return left.every((entry, index) => {
+    const other = right[index];
+    return (
+      entry.content === other.content &&
+      entry.entityReferences.length === other.entityReferences.length &&
+      entry.entityReferences.every((reference, referenceIndex) =>
+        sameEntityReference(reference, other.entityReferences[referenceIndex]),
+      )
+    );
+  });
+}
+
+export function extractUserHistoryEntries(messages: readonly Message[]): MessageHistoryEntry[] {
+  const out: MessageHistoryEntry[] = [];
   for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.author_type !== "user" || m.type !== "message") continue;
-    const content = m.content ?? "";
+    const message = messages[i];
+    if (message.author_type !== "user" || message.type !== "message") continue;
+    const content = message.content ?? "";
     if (!content.trim()) continue;
     const newer = messages[i + 1];
     const isAdjacentUserDuplicate =
@@ -18,9 +56,32 @@ export function extractUserHistory(messages: readonly Message[]): string[] {
       newer.type === "message" &&
       (newer.content ?? "") === content;
     if (isAdjacentUserDuplicate) continue;
-    out.push(content);
+    out.push({ content, entityReferences: entityReferencesFromMetadata(message.metadata) });
   }
   return out;
+}
+
+/** Build a Zustand selector whose result stays referentially stable while
+ * agent messages stream. React's external-store contract requires the same
+ * snapshot object when the derived user history has not changed. */
+export function createMessageHistorySelector(sessionId: string | null) {
+  let previous: MessageHistoryEntry[] = [];
+  return (state: MessageHistoryStoreState): MessageHistoryEntry[] => {
+    const messages = sessionId ? state.messages.bySession[sessionId] : undefined;
+    const next = extractUserHistoryEntries(messages ?? []);
+    if (sameHistoryEntries(previous, next)) return previous;
+    previous = next;
+    return previous;
+  };
+}
+
+/** Extract the user's previously sent text messages for a session, newest-first.
+ *  Consecutive duplicates *in the original message stream* are collapsed —
+ *  duplicates separated by an assistant or tool turn stay, since the user
+ *  meaningfully repeated themselves and should be able to recall the older
+ *  one from history. Empty/whitespace-only messages are skipped. */
+export function extractUserHistory(messages: readonly Message[]): string[] {
+  return extractUserHistoryEntries(messages).map((entry) => entry.content);
 }
 
 export type HistoryState = {
@@ -85,17 +146,29 @@ export type SearchHit = {
   score: number;
 };
 
+function historyEntryContent(entry: string | MessageHistoryEntry): string {
+  return typeof entry === "string" ? entry : entry.content;
+}
+
 /** Score every history entry against `query` and return matches sorted
  *  best-first. An empty query returns every entry in newest-first order
  *  (preserving the original index). */
-export function searchHistory(history: readonly string[], query: string): SearchHit[] {
+export function searchHistory(
+  history: readonly (string | MessageHistoryEntry)[],
+  query: string,
+): SearchHit[] {
   if (!query) {
-    return history.map((content, index) => ({ index, content, score: 0 }));
+    return history.map((entry, index) => ({
+      index,
+      content: historyEntryContent(entry),
+      score: 0,
+    }));
   }
   const hits: SearchHit[] = [];
   for (let i = 0; i < history.length; i++) {
-    const score = fuzzyScore(query, history[i]);
-    if (score !== null) hits.push({ index: i, content: history[i], score });
+    const content = historyEntryContent(history[i]);
+    const score = fuzzyScore(query, content);
+    if (score !== null) hits.push({ index: i, content, score });
   }
   hits.sort((a, b) => b.score - a.score);
   return hits;

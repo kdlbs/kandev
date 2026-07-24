@@ -10,6 +10,7 @@ const (
 	PermCanCreateTasks     = "can_create_tasks"
 	PermCanAssignTasks     = "can_assign_tasks"
 	PermCanCreateAgents    = "can_create_agents"
+	PermCanCreateProjects  = "can_create_projects"
 	PermCanApprove         = "can_approve"
 	PermCanManageOwnSkills = "can_manage_own_skills"
 	PermMaxSubtaskDepth    = "max_subtask_depth"
@@ -24,6 +25,7 @@ func AllPermissionKeys() []string {
 		PermCanCreateTasks,
 		PermCanAssignTasks,
 		PermCanCreateAgents,
+		PermCanCreateProjects,
 		PermCanApprove,
 		PermCanManageOwnSkills,
 		PermMaxSubtaskDepth,
@@ -45,6 +47,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateTasks:     true,
 			PermCanAssignTasks:     true,
 			PermCanCreateAgents:    true,
+			PermCanCreateProjects:  true,
 			PermCanApprove:         true,
 			PermCanManageOwnSkills: true,
 			PermMaxSubtaskDepth:    3,
@@ -54,6 +57,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateTasks:     true,
 			PermCanAssignTasks:     true,
 			PermCanCreateAgents:    false,
+			PermCanCreateProjects:  false,
 			PermCanApprove:         false,
 			PermCanManageOwnSkills: true,
 			PermMaxSubtaskDepth:    1,
@@ -63,6 +67,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateTasks:     true,
 			PermCanAssignTasks:     true,
 			PermCanCreateAgents:    false,
+			PermCanCreateProjects:  false,
 			PermCanApprove:         false,
 			PermCanManageOwnSkills: false,
 			PermMaxSubtaskDepth:    1,
@@ -72,6 +77,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateTasks:     false,
 			PermCanAssignTasks:     true,
 			PermCanCreateAgents:    false,
+			PermCanCreateProjects:  false,
 			PermCanApprove:         true,
 			PermCanManageOwnSkills: true,
 			PermMaxSubtaskDepth:    1,
@@ -81,6 +87,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateTasks:     true,
 			PermCanAssignTasks:     false,
 			PermCanCreateAgents:    false,
+			PermCanCreateProjects:  false,
 			PermCanApprove:         false,
 			PermCanManageOwnSkills: true,
 			PermMaxSubtaskDepth:    1,
@@ -90,6 +97,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateTasks:     true,
 			PermCanAssignTasks:     false,
 			PermCanCreateAgents:    false,
+			PermCanCreateProjects:  false,
 			PermCanApprove:         false,
 			PermCanManageOwnSkills: true,
 			PermMaxSubtaskDepth:    1,
@@ -99,6 +107,7 @@ func defaultPermsForRole(role AgentRole) map[string]interface{} {
 			PermCanCreateTasks:     true,
 			PermCanAssignTasks:     false,
 			PermCanCreateAgents:    false,
+			PermCanCreateProjects:  false,
 			PermCanApprove:         false,
 			PermCanManageOwnSkills: false,
 			PermMaxSubtaskDepth:    1,

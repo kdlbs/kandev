@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/test-base";
+import { restoreSeedRepositoryOrigin, test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("PR watcher missing branch", () => {
@@ -15,12 +15,14 @@ test.describe("PR watcher missing branch", () => {
    *   - Environment preparation fails because the branch doesn't exist
    *   - Assert the guidance message appears in chat
    */
-  test("shows guidance message when PR branch is deleted", async ({
+  test("shows one focused recovery panel when PR branch is deleted", async ({
     testPage,
     apiClient,
     seedData,
-  }) => {
+  }, testInfo) => {
     test.setTimeout(90_000);
+
+    restoreSeedRepositoryOrigin(seedData);
 
     // --- Setup mock GitHub ---
     await apiClient.mockGitHubReset();
@@ -44,21 +46,23 @@ test.describe("PR watcher missing branch", () => {
 
     // Create a task as the PR watcher would: with a checkout_branch that
     // no longer exists on remote (PR was merged, branch deleted).
-    const task = await apiClient.createTask(
+    const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "PR #999: Already merged feature",
+      seedData.agentProfileId,
       {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
         repositories: [
           {
             repository_id: seedData.repositoryId,
             base_branch: "main",
             checkout_branch: prBranch,
+            pr_number: 999,
           },
         ],
         metadata: {
-          agent_profile_id: seedData.agentProfileId,
           pr_number: 999,
           pr_branch: prBranch,
           pr_repo: "testorg/testrepo",
@@ -87,18 +91,42 @@ test.describe("PR watcher missing branch", () => {
 
     const session = new SessionPage(testPage);
 
-    // --- Assert the guidance message appears in chat ---
-    // The MissingBranchMessage component renders with archive/delete action buttons.
-    await expect(session.chat.getByText("no longer exists", { exact: false })).toBeVisible({
-      timeout: 30_000,
-    });
+    // --- Assert the primary recovery message appears once in chat ---
+    const chat = session.activeChat();
+    const recovery = chat.getByTestId("missing-branch-recovery");
+    await expect(recovery).toHaveCount(1, { timeout: 30_000 });
+    await expect(
+      recovery.getByRole("heading", { name: "Branch is no longer available" }),
+    ).toBeVisible();
+    await expect(recovery).toContainText(prBranch);
+    await expect(recovery).toContainText("merged or deleted");
+
+    // The actionable recovery panel replaces the generic failed-agent banner.
+    await expect(
+      chat.getByRole("status", { name: /Session failed|Environment setup failed/i }),
+    ).toHaveCount(0);
+
+    // Diagnostics stay secondary until the user explicitly expands them.
+    const technicalDetails = recovery.locator("details");
+    const technicalOutput = technicalDetails.locator("pre");
+    await expect(technicalDetails).not.toHaveAttribute("open");
+    await expect(technicalOutput).not.toBeVisible();
+    await recovery.getByText("Technical details", { exact: true }).click();
+    await expect(technicalDetails).toHaveAttribute("open", "");
+    await expect(technicalOutput).toBeVisible();
+    await expect(technicalOutput).toContainText("couldn't find remote ref pull/999/head");
 
     // Verify the action buttons are present
-    await expect(session.chat.getByTestId("missing-branch-archive-button")).toBeVisible({
+    await expect(recovery.getByTestId("missing-branch-archive-button")).toBeVisible({
       timeout: 5_000,
     });
-    await expect(session.chat.getByTestId("missing-branch-delete-button")).toBeVisible({
+    await expect(recovery.getByTestId("missing-branch-delete-button")).toBeVisible({
       timeout: 5_000,
+    });
+
+    await testPage.screenshot({
+      path: testInfo.outputPath("missing-pr-branch-desktop.png"),
+      fullPage: true,
     });
 
     // Verify the session state via API — should be FAILED

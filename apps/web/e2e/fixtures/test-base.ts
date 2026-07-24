@@ -1,5 +1,5 @@
 import { type Page } from "@playwright/test";
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { backendFixture, type BackendContext } from "./backend";
@@ -14,6 +14,10 @@ export type SeedData = {
   startStepId: string;
   steps: WorkflowStep[];
   repositoryId: string;
+  /** Local repository path used by the standard E2E fixture. */
+  repositoryPath: string;
+  /** Offline bare origin for tests that must exercise remote-ref failures. */
+  repositoryRemoteURL: string;
   agentProfileId: string;
   /** Executor profile ID for the worktree executor — use to create tasks with git worktree isolation. */
   worktreeExecutorProfileId: string;
@@ -91,9 +95,14 @@ export const test = backendFixture.extend<
 
       // Create a minimal git repository inside backend.tmpDir (the backend's HOME).
       // This ensures discoveryRoots() allows the path for branch listing.
+      // It also has an offline bare origin with main, so tests can distinguish
+      // a genuinely missing remote ref from an unavailable Git host.
+      const remoteDir = path.join(backend.tmpDir, "repos", "e2e-remote.git");
       const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
+      fs.mkdirSync(path.dirname(remoteDir), { recursive: true });
       fs.mkdirSync(repoDir, { recursive: true });
       const gitEnv = makeGitEnv(backend.tmpDir);
+      execSync(`git init --bare -b main "${remoteDir}"`, { env: gitEnv });
       execSync("git init -b main", { cwd: repoDir, env: gitEnv });
       fs.writeFileSync(
         path.join(repoDir, "walkthrough_base.txt"),
@@ -101,6 +110,8 @@ export const test = backendFixture.extend<
       );
       execSync("git add walkthrough_base.txt", { cwd: repoDir, env: gitEnv });
       execSync('git commit -m "init"', { cwd: repoDir, env: gitEnv });
+      execSync(`git remote add origin "file://${remoteDir}"`, { cwd: repoDir, env: gitEnv });
+      execSync("git push origin main", { cwd: repoDir, env: gitEnv });
       const repo = await apiClient.createRepository(workspace.id, repoDir);
 
       // Agent registry seeding (runInitialAgentSetup → discovery) is
@@ -144,6 +155,8 @@ export const test = backendFixture.extend<
         startStepId: startStep.id,
         steps: sorted,
         repositoryId: repo.id,
+        repositoryPath: repoDir,
+        repositoryRemoteURL: `file://${remoteDir}`,
         agentProfileId,
         worktreeExecutorProfileId,
       });
@@ -239,6 +252,19 @@ export const test = backendFixture.extend<
     { auto: true },
   ],
 });
+
+/**
+ * Restores the fixture's offline origin after a GitLab E2E cleanup removes it.
+ * This lets focused tests distinguish a deleted remote ref from a transport error.
+ */
+export function restoreSeedRepositoryOrigin(seedData: SeedData) {
+  const baseArgs = ["-C", seedData.repositoryPath, "remote"];
+  try {
+    execFileSync("git", [...baseArgs, "set-url", "origin", seedData.repositoryRemoteURL]);
+  } catch {
+    execFileSync("git", [...baseArgs, "add", "origin", seedData.repositoryRemoteURL]);
+  }
+}
 
 // Reset the active workspace pointer before every test so that specs which
 // do not use the testPage fixture (e.g. API-only routing tests) start from

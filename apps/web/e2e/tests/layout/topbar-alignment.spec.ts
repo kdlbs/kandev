@@ -23,7 +23,7 @@ async function heightOf(page: Page, testId: string): Promise<number> {
   return box.height;
 }
 
-async function enableTopbarMetrics(apiClient: ApiClient): Promise<void> {
+async function enableStatusMetrics(apiClient: ApiClient): Promise<void> {
   await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
     system_metrics_display: { show_in_topbar: true },
   });
@@ -77,12 +77,12 @@ test.describe("Sidebar header / top bar alignment", () => {
     expect(Math.abs(headerBottom - topbarBottom)).toBeLessThanOrEqual(1);
   });
 
-  test("task metrics match the height of the task action controls", async ({
+  test("task metrics render inside the fixed-height app status bar", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    await enableTopbarMetrics(apiClient);
+    await enableStatusMetrics(apiClient);
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Metrics Alignment Task",
@@ -100,25 +100,19 @@ test.describe("Sidebar header / top bar alignment", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    await expect(testPage.getByTestId("topbar-metrics")).toBeVisible();
-    await expect(testPage.getByTestId("layout-preset-trigger")).toBeVisible();
-    expect(await heightOf(testPage, "topbar-metrics")).toBe(
-      await heightOf(testPage, "layout-preset-trigger"),
-    );
+    await expect(testPage.getByTestId("app-status-metrics")).toBeVisible();
+    expect(await heightOf(testPage, "app-status-bar")).toBe(24);
   });
 
-  test("Kanban metrics match the height of the Kanban action controls", async ({
+  test("Kanban metrics render inside the fixed-height app status bar", async ({
     testPage,
     apiClient,
   }) => {
-    await enableTopbarMetrics(apiClient);
+    await enableStatusMetrics(apiClient);
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
-    await expect(testPage.getByTestId("topbar-metrics")).toBeVisible();
-    await expect(testPage.getByTestId("view-toggle-kanban")).toBeVisible();
-    expect(await heightOf(testPage, "topbar-metrics")).toBe(
-      await heightOf(testPage, "view-toggle-kanban"),
-    );
+    await expect(testPage.getByTestId("app-status-metrics")).toBeVisible();
+    expect(await heightOf(testPage, "app-status-bar")).toBe(24);
   });
 });

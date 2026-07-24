@@ -181,10 +181,6 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
     worktreePath,
     repo,
     enableComments = false,
-    onToggleMarkdownPreview,
-    onSave,
-    onReloadFromAgent,
-    onDelete,
   } = props;
   const { resolvedTheme } = useTheme();
   const { wrapperRef, language, state, lsp, diffStats, options } = useMonacoCodeEditorSetup(props);
@@ -200,6 +196,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
     <div ref={wrapperRef} className="flex h-full flex-col rounded-lg">
       <MonacoEditorToolbar
         path={path}
+        repositoryName={repo}
         worktreePath={worktreePath}
         isDirty={isDirty}
         isSaving={isSaving}
@@ -216,10 +213,10 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
         onToggleLsp={lsp.toggleLsp}
         onToggleWrap={() => state.setWrapEnabled(!state.wrapEnabled)}
         onToggleDiffIndicators={() => state.setShowDiffIndicators(!state.showDiffIndicators)}
-        onSave={onSave}
-        onReloadFromAgent={onReloadFromAgent}
-        onDelete={onDelete}
-        onToggleMarkdownPreview={onToggleMarkdownPreview}
+        onSave={props.onSave}
+        onReloadFromAgent={props.onReloadFromAgent}
+        onDelete={props.onDelete}
+        onToggleMarkdownPreview={props.onToggleMarkdownPreview}
       />
       <div className="flex-1 overflow-hidden relative" ref={editorAreaRef}>
         <Editor

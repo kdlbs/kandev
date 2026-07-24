@@ -10,7 +10,7 @@ Sources:
 
 ## Skills
 
-Cursor supports Agent Skills as reusable `SKILL.md` packages. Project skills are generated under `.cursor/skills/` by Cursor's migration flow, and skills follow the standard folder shape:
+Cursor supports Agent Skills as reusable `SKILL.md` packages. It discovers project skills from both `.cursor/skills/` and the shared `.agents/skills/` source Kandev uses directly; no `.cursor/skills` mirror or symlink is required. Cursor's migration flow can also generate project skills under `.cursor/skills/`, which follows the standard folder shape:
 
 ```text
 .cursor/skills/<name>/SKILL.md

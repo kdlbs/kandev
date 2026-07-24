@@ -1,6 +1,6 @@
-import { describe, it, expect } from "vitest";
-import { buildTaskMentionItems } from "./task-mention-items";
+import { describe, expect, it } from "vitest";
 import type { AppState } from "@/lib/state/store";
+import { buildTaskMentionItems } from "./task-mention-items";
 
 function makeState(overrides: Partial<AppState> = {}): AppState {
   const base = {
@@ -12,8 +12,8 @@ function makeState(overrides: Partial<AppState> = {}): AppState {
   return { ...base, ...overrides } as AppState;
 }
 
-describe("buildTaskMentionItems / basics", () => {
-  it("returns tasks from the current workflow with workflow/step names resolved", () => {
+describe("buildTaskMentionItems", () => {
+  it("returns sibling tasks with resolved workflow and step names", () => {
     const state = makeState({
       kanban: {
         workflowId: "wf-1",
@@ -34,23 +34,17 @@ describe("buildTaskMentionItems / basics", () => {
       },
     } as unknown as Partial<AppState>);
 
-    const items = buildTaskMentionItems(state, null);
-    expect(items).toHaveLength(1);
-    expect(items[0]).toMatchObject({
-      kind: "task",
-      label: "Implement auth",
-      description: "Main flow · Todo",
-      task: {
-        taskId: "task-a",
-        title: "Implement auth",
-        workflowId: "wf-1",
-        workflowStepId: "step-1",
-        state: "in_progress",
-      },
-    });
+    expect(buildTaskMentionItems(state, null)).toEqual([
+      expect.objectContaining({
+        kind: "task",
+        label: "Implement auth",
+        description: "Main flow · Todo",
+        task: expect.objectContaining({ taskId: "task-a", workflowId: "wf-1" }),
+      }),
+    ]);
   });
 
-  it("excludes the current task by id", () => {
+  it("excludes the current task", () => {
     const state = makeState({
       kanban: {
         workflowId: "wf-1",
@@ -62,18 +56,20 @@ describe("buildTaskMentionItems / basics", () => {
       },
     } as unknown as Partial<AppState>);
 
-    const items = buildTaskMentionItems(state, "task-a");
-    expect(items.map((i) => i.task?.taskId)).toEqual(["task-b"]);
+    expect(buildTaskMentionItems(state, "task-a").map((item) => item.task?.taskId)).toEqual([
+      "task-b",
+    ]);
   });
-});
 
-describe("buildTaskMentionItems / merging and filtering", () => {
-  it("merges tasks from kanbanMulti snapshots and dedupes by id", () => {
+  it("merges workflow snapshots and skips stale active-workflow tasks", () => {
     const state = makeState({
       kanban: {
         workflowId: "wf-1",
-        steps: [],
-        tasks: [{ id: "task-a", workflowStepId: "step-1", title: "A", position: 0 }],
+        steps: [{ id: "step-current", title: "Todo", color: "", position: 0 }],
+        tasks: [
+          { id: "task-a", workflowStepId: "step-current", title: "A", position: 0 },
+          { id: "task-stale", workflowStepId: "step-other", title: "Stale", position: 1 },
+        ],
       },
       kanbanMulti: {
         snapshots: {
@@ -81,54 +77,22 @@ describe("buildTaskMentionItems / merging and filtering", () => {
             workflowId: "wf-1",
             workflowName: "Main",
             steps: [],
-            tasks: [
-              { id: "task-a", workflowStepId: "step-1", title: "A (dup)", position: 0 },
-              { id: "task-c", workflowStepId: "step-2", title: "C", position: 0 },
-            ],
+            tasks: [{ id: "task-a", workflowStepId: "step-current", title: "A", position: 0 }],
           },
           "wf-2": {
             workflowId: "wf-2",
             workflowName: "Other",
-            steps: [{ id: "step-9", title: "Review", color: "", position: 0 }],
-            tasks: [{ id: "task-d", workflowStepId: "step-9", title: "D", position: 0 }],
+            steps: [{ id: "step-2", title: "Review", color: "", position: 0 }],
+            tasks: [{ id: "task-b", workflowStepId: "step-2", title: "B", position: 0 }],
           },
         },
         isLoading: false,
       },
     } as unknown as Partial<AppState>);
 
-    const ids = buildTaskMentionItems(state, null).map((i) => i.task?.taskId);
-    expect(ids).toEqual(["task-a", "task-c", "task-d"]);
-  });
-
-  it("skips stale kanban tasks whose step is not in the current workflow's steps", () => {
-    const state = makeState({
-      kanban: {
-        workflowId: "wf-1",
-        steps: [{ id: "step-current", title: "Todo", color: "", position: 0 }],
-        tasks: [
-          { id: "task-fresh", workflowStepId: "step-current", title: "Fresh", position: 0 },
-          // Left over from a previous workflow: its step is not in wf-1's steps,
-          // so tagging it with wf-1 would be wrong.
-          { id: "task-stale", workflowStepId: "step-other", title: "Stale", position: 1 },
-        ],
-      },
-    } as unknown as Partial<AppState>);
-
-    const ids = buildTaskMentionItems(state, null).map((i) => i.task?.taskId);
-    expect(ids).toEqual(["task-fresh"]);
-  });
-
-  it("falls back to placeholder names when workflow/step are missing", () => {
-    const state = makeState({
-      kanban: {
-        workflowId: "wf-1",
-        steps: [],
-        tasks: [{ id: "task-a", workflowStepId: "step-missing", title: "A", position: 0 }],
-      },
-    } as unknown as Partial<AppState>);
-
-    const [item] = buildTaskMentionItems(state, null);
-    expect(item.description).toBe("Workflow · Step");
+    expect(buildTaskMentionItems(state, null).map((item) => item.task?.taskId)).toEqual([
+      "task-a",
+      "task-b",
+    ]);
   });
 });

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -106,7 +108,7 @@ func (p *LocalPreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, onP
 			step = beginStep("Checkout branch")
 			step.Command = fmt.Sprintf("git fetch origin %s && git checkout %s", effectiveBranch, effectiveBranch)
 			reportProgress(onProgress, step, stepIdx, totalSteps)
-			output, err := checkoutBranch(ctx, workspacePath, effectiveBranch)
+			output, err := checkoutBranch(ctx, workspacePath, effectiveBranch, gitCredentialValues(req.Env))
 			if err != nil {
 				errMsg := fmt.Sprintf("failed to checkout branch %q: %s", effectiveBranch, output)
 				completeStepError(&step, errMsg)
@@ -171,19 +173,60 @@ func readCurrentBranchForLocal(workDir string) string {
 // Best-effort fetch first so newly-created remote branches are visible, then
 // the checkout. If the local branch doesn't exist but the remote tracking
 // branch does (from the fetch), git creates a local branch tracking it.
-func checkoutBranch(ctx context.Context, workDir, branch string) (string, error) {
+func checkoutBranch(ctx context.Context, workDir, branch string, sensitiveValues []string) (string, error) {
 	fetchCmd := exec.CommandContext(ctx, "git", "fetch", "origin", branch)
 	fetchCmd.Dir = workDir
-	_ = subproc.RunGit(ctx, fetchCmd) // fetch failure is non-fatal, fall back to local
+	fetchOut, fetchErr := subproc.RunGitCombinedOutput(ctx, fetchCmd)
 
 	cmd := exec.CommandContext(ctx, "git", "checkout", branch)
 	cmd.Dir = workDir
 	out, err := subproc.RunGitCombinedOutput(ctx, cmd)
-	outStr := strings.TrimSpace(string(out))
+	outStr := redactCheckoutOutput(strings.TrimSpace(string(out)), sensitiveValues)
 	if err != nil {
+		if fetchErr != nil {
+			fetchDetail := redactCheckoutOutput(strings.TrimSpace(string(fetchOut)), sensitiveValues)
+			outStr = fmt.Sprintf("fetch branch failed: %v: %s\ncheckout branch failed: %s", fetchErr, fetchDetail, outStr)
+		}
 		return outStr, worktree.ClassifyGitError(outStr, err)
 	}
 	return outStr, nil
+}
+
+var credentialURLPattern = regexp.MustCompile(`(?i)(https?://)[^\s/@]+@`)
+
+// redactCheckoutOutput removes credentials from git diagnostics before they
+// are persisted or shown to a user. Git commonly echoes the configured remote
+// URL on fetch failures, and local executor remotes may contain URL userinfo.
+func redactCheckoutOutput(output string, sensitiveValues []string) string {
+	redacted := credentialURLPattern.ReplaceAllString(output, "${1}[REDACTED]@")
+	for _, value := range sensitiveValues {
+		if value != "" {
+			redacted = strings.ReplaceAll(redacted, value, "[REDACTED]")
+		}
+	}
+	return redacted
+}
+
+// gitCredentialValues returns request environment values that may authenticate
+// git operations. Longest values go first so overlapping values are fully
+// replaced rather than leaving a suffix exposed.
+func gitCredentialValues(env map[string]string) []string {
+	values := make([]string, 0)
+	for key, value := range env {
+		if value != "" && isSensitiveGitEnvKey(key) {
+			values = append(values, value)
+		}
+	}
+	sort.Slice(values, func(i, j int) bool { return len(values[i]) > len(values[j]) })
+	return values
+}
+
+func isSensitiveGitEnvKey(key string) bool {
+	key = strings.ToUpper(key)
+	return strings.Contains(key, "TOKEN") ||
+		strings.Contains(key, "SECRET") ||
+		strings.Contains(key, "PASSWORD") ||
+		strings.HasSuffix(key, "_KEY")
 }
 
 // setupScriptStreamInterval is the minimum gap between streaming-output callbacks

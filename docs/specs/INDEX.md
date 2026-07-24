@@ -66,6 +66,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [parent-child-message-interrupt](tasks/parent-child-message-interrupt.md) | shipped |
 | [parent-child-task-stop](tasks/parent-child-task-stop.md) | shipped |
 | [mcp-task-agent-profile-default](tasks/mcp-task-agent-profile-default/spec.md) | shipped |
+| [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 
 ## agents/ — agent governance
 
@@ -117,10 +118,13 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [review-file-status](ui/review-file-status.md) | building |
 | [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
+| [entity-reference-composer](ui/entity-reference-composer.md) | draft |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
+| [app-status-bar](ui/app-status-bar.md) | draft |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |
+| [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -138,6 +142,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 
 | Spec | Status |
 |---|---|
+| [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
 | [improve-kandev](improve-kandev/spec.md) | draft |
 | [homebrew-core](homebrew-core/spec.md) | draft |

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -118,7 +117,7 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 		checkoutArgs = append(checkoutArgs, ":(literal,exclude)"+sp)
 	}
 
-	checkoutCmd := exec.CommandContext(ctx, "git", checkoutArgs...)
+	checkoutCmd := newGitCommand(ctx, checkoutArgs...)
 	checkoutCmd.Dir = worktreePath
 	if output, err := runGitCmdCombinedOutput(ctx, checkoutCmd); err != nil {
 		m.logger.Error("git checkout failed after git-crypt setup",
@@ -136,7 +135,7 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 	// Restore submodule entries in the index that were excluded from checkout.
 	// Without this, git status shows them as staged deletions.
 	for _, sp := range submodulePaths {
-		resetCmd := exec.CommandContext(ctx, "git", "reset", "HEAD", "--", sp)
+		resetCmd := newGitCommand(ctx, "reset", "HEAD", "--", sp)
 		resetCmd.Dir = worktreePath
 		if output, err := runGitCmdCombinedOutput(ctx, resetCmd); err != nil {
 			m.logger.Debug("failed to reset submodule index entry",
@@ -162,7 +161,7 @@ func (m *Manager) unlockGitCryptAndCheckout(ctx context.Context, worktreePath st
 // resolveGitDir runs git rev-parse with the given flag (e.g. --git-dir,
 // --git-common-dir) and returns the resolved absolute path.
 func resolveGitDir(ctx context.Context, worktreePath, flag string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", flag)
+	cmd := newGitCommand(ctx, "rev-parse", flag)
 	cmd.Dir = worktreePath
 	out, err := runGitCmdOutput(ctx, cmd)
 	if err != nil {
@@ -204,7 +203,7 @@ func isGitCryptUnlocked(gitCryptDir string) bool {
 // enableWorktreeConfig enables the worktreeConfig extension so that
 // --worktree flag works with git config in linked worktrees.
 func enableWorktreeConfig(ctx context.Context, worktreePath string) error {
-	cmd := exec.CommandContext(ctx, "git", "config", "extensions.worktreeConfig", "true")
+	cmd := newGitCommand(ctx, "config", "extensions.worktreeConfig", "true")
 	cmd.Dir = worktreePath
 	if out, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 		return fmt.Errorf("git config extensions.worktreeConfig: %s: %w", string(out), err)
@@ -226,7 +225,7 @@ func configureGitCryptFilters(ctx context.Context, worktreePath string) error {
 		{"diff.git-crypt.textconv", "git-crypt diff"},
 	}
 	for _, kv := range configs {
-		cmd := exec.CommandContext(ctx, "git", "config", "--worktree", kv[0], kv[1])
+		cmd := newGitCommand(ctx, "config", "--worktree", kv[0], kv[1])
 		cmd.Dir = worktreePath
 		if out, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 			return fmt.Errorf("git config %s: %s: %w", kv[0], string(out), err)
@@ -260,7 +259,7 @@ func disableGitCryptFilters(ctx context.Context, worktreePath string) error {
 		{"diff.git-crypt.textconv", "cat"},
 	}
 	for _, kv := range configs {
-		cmd := exec.CommandContext(ctx, "git", "config", kv[0], kv[1])
+		cmd := newGitCommand(ctx, "config", kv[0], kv[1])
 		cmd.Dir = worktreePath
 		if out, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 			return fmt.Errorf("git config %s: %s: %w", kv[0], string(out), err)

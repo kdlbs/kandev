@@ -12,6 +12,7 @@ import { useSessionAgentctl } from "@/hooks/domains/session/use-session-agentctl
 import { useTaskFocus } from "@/hooks/domains/session/use-task-focus";
 import { useAppStore } from "@/components/state-provider";
 import { useEnsureTaskSession } from "@/hooks/domains/session/use-ensure-task-session";
+import { useExternalVcsFileLinkHydration } from "@/hooks/domains/workspace/use-external-vcs-file-link";
 import { fetchTask } from "@/lib/api";
 import { useTasks } from "@/hooks/use-tasks";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -135,7 +136,7 @@ export function useMergedAgentState(
 function TaskLoadingState() {
   return (
     <div
-      className="flex h-screen w-full items-center justify-center bg-background px-4"
+      className="flex h-full min-h-0 w-full items-center justify-center bg-background px-4"
       data-testid="task-loading-state"
     >
       <div className="flex min-h-24 min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
@@ -149,7 +150,7 @@ function TaskLoadingState() {
 function TaskLoadErrorState() {
   return (
     <div
-      className="flex h-screen w-full items-center justify-center bg-background px-4"
+      className="flex h-full min-h-0 w-full items-center justify-center bg-background px-4"
       data-testid="task-load-error-state"
     >
       <div className="flex min-h-24 max-w-sm min-w-0 flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
@@ -283,6 +284,7 @@ function useTaskPageData(
     agent,
     effectiveSessionId,
     repository,
+    repositories: effectiveRepositories,
     ensureSession,
     onTaskUnarchived,
   };
@@ -310,9 +312,11 @@ export function TaskPageContent({
     agent,
     effectiveSessionId,
     repository,
+    repositories,
     ensureSession,
     onTaskUnarchived,
   } = useTaskPageData(initialTask, initialTaskId, sessionId, initialRepositories);
+  useExternalVcsFileLinkHydration(task, repositories);
 
   const workflowSteps = useWorkflowStepsMapped();
   const sessionPanel = useSessionPanelState(effectiveSessionId);

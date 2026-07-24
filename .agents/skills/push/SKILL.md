@@ -7,17 +7,17 @@ description: Push an already verified and committed branch. With --fixup, return
 
 ## Planner Entry
 
-The user-started primary session delegates any
-required verification and commit first, then assigns the push to an
-`implementer` worker. With `--fixup`, the planner coordinates `/pr-fixup`
-workers after the push. It does not run Git or GitHub commands directly.
+The planner may push a routine verified commit directly. With `--fixup`, it
+keeps long monitoring on delegated `pr-poller`; delegate delivery only when it
+has a material isolation or coordination benefit.
 
 An explicitly assigned push worker pushes only the already verified and
 committed branch and does not spawn other workers.
 
 ## Available skills
 
-- **`/commit`** — Planner-side prerequisite for verified, committed changes.
+- **`/commit`** — Creates the artifact and hook receipt before verification.
+- **`/verify`** — Mandatory post-commit gate for the exact current `HEAD`.
 - **`/pr-fixup`** — Wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push again.
 
 ## Options
@@ -35,11 +35,15 @@ Push the already committed branch to its remote.
 **Create a todo/task for each step below and mark them as completed as you go.**
 
 1. **Uncommitted changes:** If there are dirty or staged changes, stop and tell
-   the planner that verification and commit assignments are required first.
+   the planner that a new commit and verification run are required first.
 
-2. **Safety check:** Verify the current branch is NOT `main` or `master`. If it is, stop and ask the user — direct pushes to the default branch should go through a PR.
+2. **Verification evidence:** Require a successful post-commit `verify` result
+   whose reported `HEAD` exactly equals current `HEAD`. If the checkout or
+   commit changed afterward, stop and require fresh verification.
 
-3. **Push** the current branch:
+3. **Safety check:** Verify the current branch is NOT `main` or `master`. If it is, stop and ask the user — direct pushes to the default branch should go through a PR.
+
+4. **Push** the current branch:
    ```bash
    git push
    ```
@@ -53,7 +57,7 @@ Push the already committed branch to its remote.
    example `git push git@github.com:<owner>/<repo>.git <branch>`, or tell the
    user the token needs `workflow` scope.
 
-4. **Report** the pushed commit hash and branch.
+5. **Report** the pushed commit hash and branch.
 
-5. **If `--fixup`:** Return the pushed branch state to the planner so it can
+6. **If `--fixup`:** Return the pushed branch state to the planner so it can
    coordinate `/pr-fixup`. Do not poll, fix, verify, or spawn another worker.

@@ -69,8 +69,18 @@ function carryForwardCoreSettings(current: DisplaySettings) {
     tasksListSort: current.tasksListSort ?? DEFAULT_TASKS_LIST_SORT,
     tasksListGroup: current.tasksListGroup ?? DEFAULT_TASKS_LIST_GROUP,
     changesPanelLayout: current.changesPanelLayout ?? "tree",
-    systemMetricsDisplay: current.systemMetricsDisplay ?? { showInTopbar: false },
+    ...carryForwardAppStatusSettings(current),
     voiceMode: current.voiceMode ?? { ...DEFAULT_VOICE_MODE_STATE },
+  };
+}
+
+function carryForwardAppStatusSettings(current: DisplaySettings) {
+  return {
+    systemMetricsDisplay: current.systemMetricsDisplay ?? {
+      showInTopbar: false,
+      simplified: false,
+    },
+    appStatusBarOrder: current.appStatusBarOrder ?? { leftItemIds: [], rightItemIds: [] },
   };
 }
 

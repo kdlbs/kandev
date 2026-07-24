@@ -71,6 +71,7 @@
 }
 
 :root {
+  --app-status-bar-height: 0px;
   --font-geist-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-sans: "Figtree", "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-geist-mono:
@@ -129,6 +130,12 @@
 
   --git-addition: 63 185 80;
   --git-deletion: 244 112 103;
+}
+
+@media (min-width: 640px) {
+  :root {
+    --app-status-bar-height: 1.5rem;
+  }
 }
 
 .dark {
@@ -349,6 +356,47 @@
 *::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
   background-clip: padding-box;
+}
+
+.task-sidebar-scroll[data-can-scroll-down="true"] {
+  mask-image: linear-gradient(to bottom, black 0, black calc(100% - 3.5rem), transparent 100%);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black calc(100% - 3.5rem),
+    transparent 100%
+  );
+}
+
+.task-sidebar-scroll-root [data-slot="scroll-area-scrollbar"] {
+  z-index: 1;
+  background: transparent;
+}
+
+.task-sidebar-scroll-root [data-slot="scroll-area-thumb"] {
+  background: var(--scrollbar-thumb);
+}
+
+.task-sidebar-scroll-root [data-slot="scroll-area-thumb"]:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .task-sidebar-scroll-root [data-slot="scroll-area-scrollbar"] {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+
+  .task-sidebar-scroll-root:is(:hover, :focus-within) .task-sidebar-scroll {
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+
+  .task-sidebar-scroll-root:is(:hover, :focus-within) [data-slot="scroll-area-scrollbar"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
 }
 
 /* xterm.js scrollbar styling */

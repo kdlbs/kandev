@@ -1,9 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { renderHook } from "@testing-library/react";
+import { scrollToFileAndClear } from "./task-changes-panel";
 import {
-  shouldCloseFileDiffPanel,
   filterVisibleFiles,
-  scrollToFileAndClear,
-} from "./task-changes-panel";
+  resolveSelectedFileRepositoryName,
+  shouldBlockChangesForPR,
+  shouldDeferReviewStateForPR,
+  shouldCloseFileDiffPanel,
+  useAutoCloseWhenEmpty,
+} from "./task-changes-panel-state";
 import type { ReviewFile } from "@/components/review/types";
 
 const PATH = "src/foo.ts";
@@ -160,6 +165,87 @@ describe("filterVisibleFiles", () => {
     expect(result).toHaveLength(1);
     expect(result[0].repository_name).toBe("frontend");
     expect(result[0].source).toBe("pr");
+  });
+
+  it("exact PR identity wins when the timeline group label is not the repository name", () => {
+    const rawPRFiles = [{ ...file("README.md", "pr"), repository_name: "widgets" }];
+    const result = filterVisibleFiles(
+      [],
+      fileOpts("README.md", "pr", "widgets · feat/second", {
+        rawPRFiles,
+        prKey: "acme/widgets/42",
+      }),
+    );
+
+    expect(result).toEqual(rawPRFiles);
+  });
+});
+
+describe("shouldDeferReviewStateForPR", () => {
+  it("defers review marks while the visible source is waiting for PR files", () => {
+    expect(shouldDeferReviewStateForPR(true, true, "all")).toBe(true);
+    expect(shouldDeferReviewStateForPR(true, true, "pr")).toBe(true);
+  });
+
+  it("keeps local review marks stable during an unrelated PR fetch", () => {
+    expect(shouldDeferReviewStateForPR(true, true, "uncommitted")).toBe(false);
+    expect(shouldDeferReviewStateForPR(true, true, "committed")).toBe(false);
+  });
+});
+
+describe("shouldBlockChangesForPR", () => {
+  it("keeps local files visible while the selected PR is loading or failed", () => {
+    expect(shouldBlockChangesForPR("all", [file("local.ts", "uncommitted")])).toBe(false);
+  });
+
+  it("blocks an all-source view when only PR files are visible", () => {
+    expect(shouldBlockChangesForPR("all", [file("pr.ts", "pr")])).toBe(true);
+  });
+
+  it("blocks a PR-only view until the selected PR is ready", () => {
+    expect(shouldBlockChangesForPR("pr", [])).toBe(true);
+  });
+});
+
+describe("resolveSelectedFileRepositoryName", () => {
+  it("uses the selected PR file identity instead of a timeline group label", () => {
+    expect(
+      resolveSelectedFileRepositoryName(
+        "pr",
+        "acme/widgets/42",
+        "widgets · feature/second",
+        "widgets-feature-second",
+      ),
+    ).toBe("widgets-feature-second");
+  });
+
+  it("falls back to the router repository name for non-PR source views", () => {
+    expect(resolveSelectedFileRepositoryName("uncommitted", undefined, "backend", "widgets")).toBe(
+      "backend",
+    );
+  });
+});
+
+describe("useAutoCloseWhenEmpty", () => {
+  it("keeps a PR-backed panel open across a loading-to-empty transition", () => {
+    const onBecameEmpty = vi.fn();
+    const initialProps = {
+      mode: "all" as const,
+      filePath: undefined,
+      sourceFilter: "all" as const,
+      gitStatus: undefined,
+      visibleCount: 1,
+      prDiffLoading: false,
+      onBecameEmpty,
+    };
+    const { rerender } = renderHook((props) => useAutoCloseWhenEmpty(props), {
+      initialProps,
+    });
+
+    rerender({ ...initialProps, visibleCount: 0, prDiffLoading: true });
+    rerender({ ...initialProps, visibleCount: 0, prDiffLoading: false });
+
+    expect(onBecameEmpty).not.toHaveBeenCalled();
   });
 });
 

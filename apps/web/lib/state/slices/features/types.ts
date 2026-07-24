@@ -7,6 +7,7 @@
 export type FeatureFlags = {
   office: boolean;
   plugins: boolean;
+  appStatusBar: boolean;
 };
 
 export type FeatureName = keyof FeatureFlags;

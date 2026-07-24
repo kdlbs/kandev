@@ -266,6 +266,7 @@ func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 		"s1",
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -291,6 +292,7 @@ func TestTransitionTaskSessionStateReportsPersistenceFailure(t *testing.T) {
 		"s1",
 		models.TaskSessionStateCancelled,
 		"coordinator stop",
+		nil,
 	)
 
 	require.ErrorIs(t, err, writeFailure)
@@ -1507,6 +1509,89 @@ func TestWriteTaskReviewStateOnCancelSkipsWhenSessionListFails(t *testing.T) {
 		"cancel REVIEW writes must fail closed when sibling session reconciliation fails")
 }
 
+func TestRuntimeStateOwnershipUsesCanonicalOfficeProjection(t *testing.T) {
+	tests := []struct {
+		name           string
+		isFromOffice   bool
+		assignee       string
+		wantReview     bool
+		wantInProgress bool
+	}{
+		{name: "unassigned Office task", isFromOffice: true},
+		{name: "assigned Kanban task", assignee: "assigned-agent", wantReview: true, wantInProgress: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "")
+			session, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			session.State = models.TaskSessionStateWaitingForInput
+			require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+			taskRepo := newMockTaskRepo()
+			seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+			svc := createTestService(repo, newMockStepGetter(), taskRepo)
+			svc.repo = ownershipOverrideRepo{
+				sessionExecutorStore: repo,
+				tasks: map[string]*models.Task{"t1": {
+					ID: "t1", IsFromOffice: tt.isFromOffice, AssigneeAgentProfileID: tt.assignee,
+				}},
+			}
+
+			svc.writeTaskReviewState(ctx, "t1", "s1")
+			reviewWritten := taskRepo.updatedStates["t1"] == v1.TaskStateReview
+			require.Equal(t, tt.wantReview, reviewWritten)
+
+			taskRepo.updatedStates = make(map[string]v1.TaskState)
+			require.NoError(t, repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateStarting, ""))
+			require.NoError(t, svc.reconcileTaskStateForRuntime(ctx, "t1", "s1", v1.TaskStateInProgress))
+			inProgressWritten := taskRepo.updatedStates["t1"] == v1.TaskStateInProgress
+			require.Equal(t, tt.wantInProgress, inProgressWritten)
+		})
+	}
+}
+
+func TestCancelStateOwnershipUsesCanonicalOfficeProjection(t *testing.T) {
+	tests := []struct {
+		name         string
+		isFromOffice bool
+		assignee     string
+		wantReview   bool
+	}{
+		{name: "unassigned Office task", isFromOffice: true},
+		{name: "assigned Kanban task", assignee: "assigned-agent", wantReview: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "")
+			session, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			session.State = models.TaskSessionStateWaitingForInput
+			require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+			taskRepo := newMockTaskRepo()
+			seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
+			svc := createTestService(repo, newMockStepGetter(), taskRepo)
+			svc.repo = ownershipOverrideRepo{
+				sessionExecutorStore: repo,
+				tasks: map[string]*models.Task{"t1": {
+					ID: "t1", IsFromOffice: tt.isFromOffice, AssigneeAgentProfileID: tt.assignee,
+				}},
+			}
+
+			svc.writeTaskReviewStateOnCancel(ctx, "t1", "s1")
+			reviewWritten := taskRepo.updatedStates["t1"] == v1.TaskStateReview
+			require.Equal(t, tt.wantReview, reviewWritten)
+		})
+	}
+}
+
 func TestToolUpdateFromFailedExecutionDoesNotCreateMessage(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1767,6 +1852,43 @@ func TestSetSessionStartingAllowsTerminalResumeWithoutTaskPromotion(t *testing.T
 	require.Equal(t, models.TaskSessionStateStarting, updated.State)
 	require.Nil(t, updated.CompletedAt)
 	require.Empty(t, taskRepo.stateWrites)
+}
+
+// TestSetSessionStartingAllowsArchiveCancelledResumeWithoutPromotion covers
+// sessions cancelled by an archive (Service.ArchiveTask or the cascade
+// archive path), which carry a distinct ErrorMessage; unlike an explicit
+// user/coordinator stop, these must recover into STARTING like a Failed
+// session so Resume works normally once the task is unarchived (bug:
+// "Can't resume this un-archived task").
+func TestSetSessionStartingAllowsArchiveCancelledResumeWithoutPromotion(t *testing.T) {
+	for _, reason := range []string{models.SessionArchiveCancelReason, models.SessionArchiveTreeCancelReason} {
+		t.Run(reason, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedSession(t, repo, "t1", "s1", "step1")
+
+			current, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			current.State = models.TaskSessionStateCancelled
+			current.ErrorMessage = reason
+			require.NoError(t, repo.UpdateTaskSession(ctx, current))
+
+			next := *current
+			next.State = models.TaskSessionStateStarting
+			next.ErrorMessage = ""
+			next.UpdatedAt = time.Now().UTC()
+
+			taskRepo := newMockTaskRepo()
+			svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+			require.NoError(t, svc.setSessionStarting(ctx, "t1", &next, false))
+
+			updated, err := repo.GetTaskSession(ctx, "s1")
+			require.NoError(t, err)
+			require.Equal(t, models.TaskSessionStateStarting, updated.State)
+			require.Empty(t, taskRepo.stateWrites)
+		})
+	}
 }
 
 // Pins the call-site wiring: cancelled office turn must NOT leave the session at IDLE.

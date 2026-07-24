@@ -341,6 +341,23 @@ describe("addFileDiffPanel — preview behavior", () => {
     expect(preview.isActive).toBe(true);
   });
 
+  it("does not reuse a pinned diff for the same path from a different PR", () => {
+    actions.addFileDiffPanel(SHARED_PATH, {
+      pin: true,
+      repositoryName: "backend",
+      prKey: "acme/backend/41",
+    });
+
+    actions.addFileDiffPanel(SHARED_PATH, {
+      repositoryName: "backend",
+      prKey: "acme/backend/42",
+    });
+
+    const preview = api.getPanel(PREVIEW_DIFF_ID) as unknown as MockPanel;
+    expect(preview).toBeDefined();
+    expect(preview.params.prKey).toBe("acme/backend/42");
+  });
+
   it("promotePreviewToPinned sets promoted flag on the preview diff", () => {
     actions.addFileDiffPanel(PATH_A);
     actions.promotePreviewToPinned("file-diff");

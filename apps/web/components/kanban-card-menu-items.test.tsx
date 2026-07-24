@@ -98,6 +98,7 @@ describe("buildKanbanCardMenuEntries — external issue links", () => {
       stepsByWorkflowId: {},
       onLinkPullRequest: vi.fn(),
       onLinkIssue: vi.fn(),
+      onLinkMergeRequest: vi.fn(),
       onLinkJiraTicket: vi.fn(),
       onLinkLinearIssue: vi.fn(),
       onLinkSentryIssue: vi.fn(),
@@ -109,6 +110,7 @@ describe("buildKanbanCardMenuEntries — external issue links", () => {
     expect(itemLabels(linkMenu)).toEqual([
       "GitHub Pull Request",
       "GitHub Issue",
+      "GitLab Merge Request",
       "Jira Ticket",
       "Linear Issue",
       "Sentry Issue",

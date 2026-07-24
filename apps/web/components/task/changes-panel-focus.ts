@@ -7,6 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { AppState } from "@/lib/state/store";
 import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import { getEnvLayout } from "@/lib/local-storage";
 import { djb2Hash } from "@/lib/utils/hash";
 
 type DockviewPanel = NonNullable<ReturnType<DockviewApi["getPanel"]>>;
@@ -250,6 +251,7 @@ export function applyChangesPanelAutoFocusState(args: {
   environmentIdBySessionId: Record<string, string>;
   previousMarkers: Record<string, ChangesMarker>;
   pendingEnvKeys: Set<string>;
+  hasSavedLayout?: boolean;
   isRestoringLayout: boolean;
   getIsRestoringLayout?: () => boolean;
   activate: () => ActivateChangesPanelResult;
@@ -261,6 +263,7 @@ export function applyChangesPanelAutoFocusState(args: {
     environmentIdBySessionId,
     previousMarkers,
     pendingEnvKeys,
+    hasSavedLayout = false,
     isRestoringLayout,
     getIsRestoringLayout,
     activate,
@@ -286,7 +289,12 @@ export function applyChangesPanelAutoFocusState(args: {
 
   const isCurrentlyRestoringLayout = () => isRestoringLayout || getIsRestoringLayout?.() === true;
 
-  if (activeEnvKey && !isCurrentlyRestoringLayout() && pendingEnvKeys.has(activeEnvKey)) {
+  // A saved env layout records the user's active panel. Pending Changes
+  // attention may choose the first panel for an unseen env, but must not
+  // override that explicit focus when the user returns to a task.
+  if (activeEnvKey && hasSavedLayout) {
+    pendingEnvKeys.delete(activeEnvKey);
+  } else if (activeEnvKey && !isCurrentlyRestoringLayout() && pendingEnvKeys.has(activeEnvKey)) {
     const result = activate();
     if (
       shouldClearPendingChangesFocus(result) &&
@@ -307,6 +315,7 @@ export function useChangesPanelAutoFocus(activeEnvKey: string | null) {
   const previousMarkersRef = useRef<Record<string, ChangesMarker>>({});
   const pendingEnvKeysRef = useRef<Set<string>>(new Set());
   const previousActiveEnvKeyRef = useRef<string | null>(null);
+  const hasSavedLayout = activeEnvKey !== null && getEnvLayout(activeEnvKey) !== null;
 
   useEffect(() => {
     previousActiveEnvKeyRef.current = applyChangesPanelAutoFocusState({
@@ -316,9 +325,17 @@ export function useChangesPanelAutoFocus(activeEnvKey: string | null) {
       environmentIdBySessionId,
       previousMarkers: previousMarkersRef.current,
       pendingEnvKeys: pendingEnvKeysRef.current,
+      hasSavedLayout,
       isRestoringLayout,
       getIsRestoringLayout: () => useDockviewStore.getState().isRestoringLayout,
       activate: () => activateChangesPanel(api),
     });
-  }, [signalsByEnv, activeEnvKey, api, isRestoringLayout, environmentIdBySessionId]);
+  }, [
+    signalsByEnv,
+    activeEnvKey,
+    api,
+    isRestoringLayout,
+    environmentIdBySessionId,
+    hasSavedLayout,
+  ]);
 }

@@ -110,8 +110,26 @@ export function startSSHServer(
  * Tear down the container started by startSSHServer. Safe to call even if
  * the container has already exited.
  */
-export function stopSSHServer(handle: SSHServerHandle): void {
-  spawnSync("docker", ["rm", "-f", handle.containerName], { stdio: "ignore" });
+type DockerCommand = (args: string[]) => void;
+
+export function stopSSHServer(
+  handle: SSHServerHandle,
+  runDocker: DockerCommand = (args) => {
+    spawnSync("docker", args, { stdio: "ignore" });
+  },
+): void {
+  // The sshd entrypoint chowns this bind mount to the container user. Hand it
+  // back to the test runner so the backend fixture can remove its exact root.
+  const owner = fs.statSync(handle.workDir);
+  runDocker([
+    "exec",
+    handle.containerName,
+    "chown",
+    "-R",
+    `${owner.uid}:${owner.gid}`,
+    "/home/kandev/.kandev",
+  ]);
+  runDocker(["rm", "-f", handle.containerName]);
 }
 
 /**

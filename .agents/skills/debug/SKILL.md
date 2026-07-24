@@ -10,10 +10,9 @@ Diagnose efficiently and safely. Debugging produces evidence and a root-cause hy
 
 ## Planner Entry
 
-In the user-started primary session, delegate the
-triage, evidence gathering, and diagnosis below to one `implementer` worker with
-production edits forbidden. Review its evidence and decide whether to create a
-separate `/fix` assignment. Do not run the diagnostic procedure directly.
+The planner performs first-pass triage directly. Delegate only a concrete broad
+or long/noisy debugging question after local triage to one `implementer` with
+production edits forbidden; then decide whether `/fix` is needed.
 
 An explicitly assigned worker follows the remaining procedure, cleans up its
 temporary artifacts, reports evidence, and does not spawn other workers.

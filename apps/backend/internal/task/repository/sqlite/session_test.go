@@ -17,6 +17,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// newRepoForSessionTests creates a fresh SQLite-backed Repository in a
+// temporary directory for use by session tests, closing the connection via
+// t.Cleanup.
 func newRepoForSessionTests(t *testing.T) *Repository {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "session-test.db")
@@ -77,6 +80,10 @@ func insertAgentMsg(t *testing.T, repo *Repository, id, sessionID, turnID, autho
 	}
 }
 
+// TestRenameTaskSession verifies RenameTaskSession rejects a missing
+// session, updates and clears the session name (with ToAPI omitting an
+// empty name), and that a name set via CreateTaskSession round-trips
+// through ListTaskSessions.
 func TestRenameTaskSession(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -139,6 +146,12 @@ func TestRenameTaskSession(t *testing.T) {
 	}
 }
 
+// TestTaskSessionNotFoundErrorsAreTyped verifies that GetTaskSession,
+// UpdateTaskSession, UpdateTaskSessionState, and UpdateTaskSessionBaseCommit
+// all return ErrTaskSessionNotFound for a missing session, that
+// GetTaskSessionByTaskAndAgent translates not-found to (nil, nil), and that
+// GetPrimarySessionByTaskID returns ErrNoPrimarySession, while operations on
+// an existing session succeed.
 func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -176,6 +189,10 @@ func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
 	}
 }
 
+// TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce verifies that on SQLite
+// SetSessionMetadataKeyIfAbsent stores the value on first call and reports
+// no write (leaving the original value in place) on a subsequent call with
+// the same key.
 func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	seedForMsgTest(t, repo, "task-baseline", "session-baseline", "turn-baseline")
@@ -206,6 +223,81 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestSetSessionMetadataKeyIfAbsentIfStateSQLiteRequiresFailedSession(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-recovery", "session-recovery", "turn-recovery")
+	ctx := context.Background()
+
+	stored, err := repo.SetSessionMetadataKeyIfAbsentIfState(
+		ctx, "session-recovery", "missing_pr_branch_recovery_claimed", true, models.TaskSessionStateFailed,
+	)
+	if err != nil {
+		t.Fatalf("claim before failed state: %v", err)
+	}
+	if stored {
+		t.Fatal("claim should reject a session that is not FAILED")
+	}
+	if err := repo.UpdateTaskSessionState(ctx, "session-recovery", models.TaskSessionStateFailed, "missing branch"); err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentIfState(
+		ctx, "session-recovery", "missing_pr_branch_recovery_claimed", true, models.TaskSessionStateFailed,
+	)
+	if err != nil {
+		t.Fatalf("claim after failed state: %v", err)
+	}
+	if !stored {
+		t.Fatal("claim should store after FAILED state")
+	}
+	stored, err = repo.SetSessionMetadataKeyIfAbsentIfState(
+		ctx, "session-recovery", "missing_pr_branch_recovery_claimed", true, models.TaskSessionStateFailed,
+	)
+	if err != nil {
+		t.Fatalf("repeat claim: %v", err)
+	}
+	if stored {
+		t.Fatal("repeat claim should not overwrite")
+	}
+}
+
+func TestRemoveSessionMetadataKeyIfStateSQLiteRequiresFailedSession(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-recovery", "session-recovery", "turn-recovery")
+	ctx := context.Background()
+	const key = "missing_pr_branch_recovery_claimed"
+
+	if err := repo.SetSessionMetadataKey(ctx, "session-recovery", key, true); err != nil {
+		t.Fatalf("seed claim: %v", err)
+	}
+	removed, err := repo.RemoveSessionMetadataKeyIfState(ctx, "session-recovery", key, models.TaskSessionStateFailed)
+	if err != nil {
+		t.Fatalf("remove before failed state: %v", err)
+	}
+	if removed {
+		t.Fatal("remove should reject a session that is not FAILED")
+	}
+	if err := repo.UpdateTaskSessionState(ctx, "session-recovery", models.TaskSessionStateFailed, "missing branch"); err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	removed, err = repo.RemoveSessionMetadataKeyIfState(ctx, "session-recovery", key, models.TaskSessionStateFailed)
+	if err != nil {
+		t.Fatalf("remove after failed state: %v", err)
+	}
+	if !removed {
+		t.Fatal("remove should delete the failed-session claim")
+	}
+	session, err := repo.GetTaskSession(ctx, "session-recovery")
+	if err != nil {
+		t.Fatalf("get session after remove: %v", err)
+	}
+	if _, exists := session.Metadata[key]; exists {
+		t.Fatal("removed claim remains in session metadata")
+	}
+}
+
+// TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB verifies the
+// Postgres dialect's write-once query uses jsonb_set/jsonb_extract_path
+// rather than SQLite's json_set/json_type/json functions.
 func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
 	query := setSessionMetadataKeyIfAbsentQuery(dialect.PGX)
 	if strings.Contains(query, "json_set") || strings.Contains(query, "json_type") || strings.Contains(query, "json(?)") {
@@ -216,6 +308,10 @@ func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
 	}
 }
 
+// TestListTaskSessionWorktreesFiltersInactiveRows verifies that
+// ListTaskSessionWorktrees and ListWorktreesBySessionIDs exclude worktree
+// rows marked deleted via either the status column or a set deleted_at
+// timestamp, returning only the still-active worktree.
 func TestListTaskSessionWorktreesFiltersInactiveRows(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -281,6 +377,10 @@ func TestListTaskSessionWorktreesFiltersInactiveRows(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskSessionWorktreeBranchByRepositoryScopesUpdate verifies
+// UpdateTaskSessionWorktreeBranchByRepository updates the branch only for
+// the worktree matching the given repository, leaving other repositories'
+// worktrees on the same session unchanged.
 func TestUpdateTaskSessionWorktreeBranchByRepositoryScopesUpdate(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -727,6 +827,8 @@ func insertSession(t *testing.T, repo *Repository, sessionID, taskID, state stri
 	}
 }
 
+// sessionState reads and returns the state column of the task_sessions row
+// for the given session ID, failing the test if the row cannot be read.
 func sessionState(t *testing.T, repo *Repository, sessionID string) string {
 	t.Helper()
 	var state string
@@ -737,6 +839,11 @@ func sessionState(t *testing.T, repo *Repository, sessionID string) string {
 	return state
 }
 
+// TestCancelActiveTaskSessionIsTerminalSafe verifies CancelActiveTaskSession
+// transitions a RUNNING session to CANCELLED and returns the stored
+// updated_at as the cancellation timestamp, while a session already in a
+// terminal state (COMPLETED) is left unchanged and reported as not
+// cancelled.
 func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -776,6 +883,10 @@ func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskSessionStateIfCurrentRejectsStaleActiveWriter verifies that
+// after a session is cancelled, a conditional UpdateTaskSessionStateIfCurrent
+// call from a writer still expecting the prior RUNNING state is rejected and
+// the session remains CANCELLED.
 func TestUpdateTaskSessionStateIfCurrentRejectsStaleActiveWriter(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -805,6 +916,11 @@ func TestUpdateTaskSessionStateIfCurrentRejectsStaleActiveWriter(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskSessionIfCurrentStateRejectsStaleFullRowWriter verifies that
+// after a session is cancelled out from under a full-row writer, a
+// subsequent UpdateTaskSessionIfCurrentState call using the writer's stale
+// in-memory state is rejected, leaving the session CANCELLED with its
+// executor ID unset.
 func TestUpdateTaskSessionIfCurrentStateRejectsStaleFullRowWriter(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -832,6 +948,10 @@ func TestUpdateTaskSessionIfCurrentStateRejectsStaleFullRowWriter(t *testing.T) 
 	require.Empty(t, stored.ExecutorID)
 }
 
+// TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite
+// verifies that UpdateTaskSessionWithMetadata returns an error and leaves
+// both the session state and existing metadata untouched when the supplied
+// metadata cannot be marshalled.
 func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -862,6 +982,10 @@ func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *
 	}
 }
 
+// TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeys verifies that
+// UpdateTaskSessionIfCurrentStateRemovingMetadataKeys removes the requested
+// metadata key while preserving other keys when the session's current state
+// matches the expected state.
 func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeys(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -886,6 +1010,10 @@ func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeys(t *testing.T) {
 	require.Equal(t, "newer", stored.Metadata["keep"])
 }
 
+// TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeysStateMismatch
+// verifies that UpdateTaskSessionIfCurrentStateRemovingMetadataKeys is a
+// no-op, leaving all metadata untouched, when the expected state does not
+// match the session's current state.
 func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeysStateMismatch(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -910,6 +1038,9 @@ func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeysStateMismatch(t *tes
 	require.Equal(t, "untouched", stored.Metadata["keep"])
 }
 
+// TestDismissLastAgentErrorDoesNotOverwriteNewerError verifies that
+// DismissLastAgentError ignores a dismiss request for a stale error once a
+// newer error has been recorded, leaving the newer error undismissed.
 func TestDismissLastAgentErrorDoesNotOverwriteNewerError(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -950,6 +1081,10 @@ func TestDismissLastAgentErrorDoesNotOverwriteNewerError(t *testing.T) {
 	}
 }
 
+// TestDismissLastAgentErrorMatchesEquivalentTimestampText verifies that
+// DismissLastAgentError matches the stored error even when its occurred_at
+// timestamp was persisted as RFC3339Nano text rather than the parsed
+// time.Time value, and marks it dismissed.
 func TestDismissLastAgentErrorMatchesEquivalentTimestampText(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -990,6 +1125,9 @@ func TestDismissLastAgentErrorMatchesEquivalentTimestampText(t *testing.T) {
 	}
 }
 
+// sessionCancellationMetadata reads and returns the error_message,
+// completed_at, and updated_at columns of the task_sessions row for the
+// given session ID.
 func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID string) (string, sql.NullTime, time.Time) {
 	t.Helper()
 	var errorMessage string
@@ -1004,6 +1142,10 @@ func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID strin
 	return errorMessage, completedAt, updatedAt
 }
 
+// assertReapedSession asserts that the session was transitioned to
+// CANCELLED with error_message "task archived", a completed_at timestamp
+// set, and updated_at at or after reapedAfter, recording any mismatch as a
+// test failure.
 func assertReapedSession(t *testing.T, repo *Repository, sessionID string, reapedAfter time.Time) {
 	t.Helper()
 	if got := sessionState(t, repo, sessionID); got != "CANCELLED" {
@@ -1023,9 +1165,9 @@ func assertReapedSession(t *testing.T, repo *Repository, sessionID string, reape
 
 // TestCancelActiveTaskSessionsByTaskID verifies the archive reaper transitions
 // only the target task's still-active sessions to CANCELLED, leaves terminal
-// sessions and other tasks untouched, and reports the rows changed. It also
-// confirms the repo-delete guard reports the repository as free afterward —
-// the end-to-end purpose of the reap.
+// sessions and other tasks untouched, and reports exactly the sessions it
+// changed. It also confirms the repo-delete guard reports the repository as
+// free afterward — the end-to-end purpose of the reap.
 func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -1041,14 +1183,28 @@ func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	seedRepoLink(t, repo, "ws-r", "repo-other", "task-other", "sess-o1", "RUNNING")
 
 	reapedAfter := time.Now().UTC()
-	reaped, err := repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
+	sessions, err := repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if reaped != 4 {
-		t.Errorf("expected 4 active sessions reaped, got %d", reaped)
+	wantIDs := []string{"sess-r1", "sess-r2", "sess-r3", "sess-r4"}
+	var gotIDs []string
+	for _, sess := range sessions {
+		gotIDs = append(gotIDs, sess.ID)
+		if sess.TaskID != "task-r" {
+			t.Errorf("session %s TaskID = %q, want task-r", sess.ID, sess.TaskID)
+		}
+		if sess.State != models.TaskSessionStateCancelled {
+			t.Errorf("session %s State = %q, want CANCELLED", sess.ID, sess.State)
+		}
+		if sess.UpdatedAt.Before(reapedAfter) {
+			t.Errorf("session %s UpdatedAt = %s, want >= %s", sess.ID, sess.UpdatedAt, reapedAfter)
+		}
 	}
-	for _, sessionID := range []string{"sess-r1", "sess-r2", "sess-r3", "sess-r4"} {
+	if !sameStringSet(gotIDs, wantIDs) {
+		t.Errorf("cancelled ids = %v, want %v", gotIDs, wantIDs)
+	}
+	for _, sessionID := range wantIDs {
 		assertReapedSession(t, repo, sessionID, reapedAfter)
 	}
 	if got := sessionState(t, repo, "sess-r5"); got != "COMPLETED" {
@@ -1069,11 +1225,33 @@ func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	}
 
 	// Idempotent: a second call changes nothing.
-	reaped, err = repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
+	sessions, err = repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
 	if err != nil {
 		t.Fatalf("unexpected error on second call: %v", err)
 	}
-	if reaped != 0 {
-		t.Errorf("expected 0 rows on idempotent re-run, got %d", reaped)
+	if len(sessions) != 0 {
+		t.Errorf("expected 0 sessions on idempotent re-run, got %v", sessions)
 	}
+}
+
+// sameStringSet reports whether got and want contain the same strings,
+// ignoring order and duplicates count-for-count — used to compare the set of
+// cancelled session IDs against an expected set regardless of return order.
+func sameStringSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	set := make(map[string]int, len(want))
+	for _, s := range want {
+		set[s]++
+	}
+	for _, s := range got {
+		set[s]--
+	}
+	for _, count := range set {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }

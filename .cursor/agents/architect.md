@@ -1,6 +1,6 @@
 ---
 name: architect
-description: Provide a frontier-model second opinion on unusually risky Kandev architecture and planning.
+description: User-requested independent frontier second opinion; planner owns normal architecture and plans.
 model: grok-4.5
 readonly: true
 ---

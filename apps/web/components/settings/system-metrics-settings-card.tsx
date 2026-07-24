@@ -16,7 +16,7 @@ const METRIC_OPTIONS: Array<{ id: SystemMetricId; label: string }> = [
   { id: "memory_percent", label: "Memory %" },
   { id: "disk_percent", label: "Disk %" },
   { id: "cpu_temp", label: "CPU temp" },
-  { id: "io_load", label: "Load avg" },
+  { id: "io_load", label: "System load (1 min)" },
 ];
 
 const DEFAULT_METRICS_SETTINGS: SystemMetricsGlobalSettings = {
@@ -30,10 +30,16 @@ export function SystemMetricsSettingsCard({
   showInTopbar,
   isShowInTopbarDirty,
   onShowInTopbarChange,
+  simplified,
+  isSimplifiedDirty,
+  onSimplifiedChange,
 }: {
   showInTopbar: boolean;
   isShowInTopbarDirty?: boolean;
   onShowInTopbarChange: (checked: boolean) => void;
+  simplified: boolean;
+  isSimplifiedDirty?: boolean;
+  onSimplifiedChange: (checked: boolean) => void;
 }) {
   const [settings, setSettings] = useState<SystemMetricsGlobalSettings>(DEFAULT_METRICS_SETTINGS);
   const [savedSettings, setSavedSettings] =
@@ -82,19 +88,24 @@ export function SystemMetricsSettingsCard({
   };
 
   return (
-    <SettingsCard isDirty={isDirty || Boolean(isShowInTopbarDirty)}>
+    <SettingsCard isDirty={isDirty || Boolean(isShowInTopbarDirty) || Boolean(isSimplifiedDirty)}>
       <CardHeader>
         <CardTitle className="text-base">Resource Metrics</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         <p className="max-w-3xl text-sm text-muted-foreground">
           Useful when Kandev is self-hosted on a remote server and you want a lightweight view of
-          the machine resources from the kanban or task topbar.
+          the machine resources from the global status bar or phone Status drawer.
         </p>
         <MetricsDisplayToggle
           checked={showInTopbar}
           isDirty={Boolean(isShowInTopbarDirty)}
           onCheckedChange={onShowInTopbarChange}
+        />
+        <SimplifiedMetricsToggle
+          checked={simplified}
+          isDirty={Boolean(isSimplifiedDirty)}
+          onCheckedChange={onSimplifiedChange}
         />
         <MetricsSamplerControls
           settings={settings}
@@ -115,6 +126,33 @@ export function SystemMetricsSettingsCard({
   );
 }
 
+function SimplifiedMetricsToggle({
+  checked,
+  isDirty,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  isDirty: boolean;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4">
+      <div className="space-y-1">
+        <Label htmlFor="simplified-system-metrics">Simplified metrics</Label>
+        <p className="text-xs text-muted-foreground">
+          Removes the Host marker and progress bars while retaining metric icons and values.
+        </p>
+      </div>
+      <Switch
+        id="simplified-system-metrics"
+        checked={checked}
+        data-settings-dirty={isDirty}
+        onCheckedChange={onCheckedChange}
+      />
+    </div>
+  );
+}
+
 function MetricsDisplayToggle({
   checked,
   isDirty,
@@ -127,9 +165,9 @@ function MetricsDisplayToggle({
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="space-y-1">
-        <Label htmlFor="show-system-metrics">Show in topbars</Label>
+        <Label htmlFor="show-system-metrics">Show host metrics in status bar</Label>
         <p className="text-xs text-muted-foreground">
-          Collection starts only while at least one client displays metrics.
+          Shows Kandev host values only. Collection starts while a client displays them.
         </p>
       </div>
       <Switch
@@ -246,7 +284,8 @@ function ExecutionMetricsToggle({
       <div className="space-y-1">
         <Label htmlFor="collect-execution-metrics">Collect execution environment metrics</Label>
         <p className="text-xs text-muted-foreground">
-          Adds agentctl values for Docker, SSH, Sprites, and remote executors.
+          Makes agentctl values available to plugins and other consumers. The built-in status bar
+          remains host-only.
         </p>
       </div>
       <Switch

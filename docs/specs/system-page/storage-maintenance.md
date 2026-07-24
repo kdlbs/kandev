@@ -140,26 +140,26 @@ Decision: [ADR-2026-07-19-workspace-symlink-entries](../../decisions/2026-07-19-
 
 ### Agent session temporary data
 
-- Each agent instance receives an isolated operating-system temporary directory at
-  `<system-temp>/kandev-agent/<readable-prefix>-<identity-digest>` through `TMPDIR`, `TMP`, and
-  `TEMP`. The deterministic name includes the raw session ID, instance ID, and port so distinct
-  instance identities cannot collide after unsafe characters are sanitized.
-- The directory is owned by that agent instance and remains available while its agent, shell,
-  VS Code, or workspace subprocesses may still be running.
-- Instance teardown first closes every process-start admission path, including requests already in
-  flight, then removes the owned session directory only after each process leader and its owned
-  process tree are reaped. On Unix this includes verified process-group disappearance; Windows uses
-  the executor's existing process-tree termination primitive.
-  Teardown validates that the target is a non-root child of the Kandev agent-temp root and never
-  removes the shared root or a sibling session directory.
-- Cleanup runs whenever the owning agentctl instance is permanently deleted, including task/session
-  archive and delete stops and when teardown observes that the main agent process has already
-  stopped. A later resume creates a new instance and does not depend on the prior instance's scratch
-  files. A cleanup failure is reported without broadening deletion to another path. The instance
-  and port remain reserved only when HTTP shutdown or process reaping is unresolved; a
-  temporary-directory-only failure retains a retry tombstone but releases the execution port.
-- Session temporary data is ephemeral and is not quarantined, restored, or included in task
-  recovery. See [ADR 0045](../../decisions/0045-install-wide-storage-maintenance.md).
+- Host-local agent instances inherit `TMPDIR`, `TMP`, and `TEMP` from the Kandev service unchanged.
+  Kandev does not create or inject a per-instance temporary root. When the service leaves those
+  variables unset, agents and their child tools use the operating system default temporary
+  location; when an operator configures them for the service, every host-local agent shares that
+  configured location.
+- Tool-managed caches may therefore be shared when the tool's own default uses the temporary
+  location. Persistent caches remain governed by their own variables and policies: in particular,
+  Go's default `GOCACHE` is separate from `TMPDIR`, and Kandev only injects its managed Go-cache path
+  when the existing Storage setting is explicitly enabled.
+- Kandev-specific files that require collision-free identity must use an explicit unique path or
+  filename. A future collision in one tool is fixed at that tool boundary; it does not justify
+  replacing the complete temporary environment for every agent child process.
+- Archive/delete teardown still closes process admission and reaps each owned process tree. It does
+  not recursively delete arbitrary files from the inherited system temporary directory because
+  those files are shared and cannot be attributed safely to one task.
+- Existing `/tmp/kandev-agent/*` directories created by older versions are legacy host data. The
+  Storage scheduler does not delete them by name or age, and new agent runs do not add to that root.
+  Operators may remove confirmed-inactive legacy data through their normal host temporary-file
+  policy or a deliberate one-time maintenance procedure. See
+  [ADR 0045](../../decisions/0045-install-wide-storage-maintenance.md).
 
 ### Docker storage
 
@@ -460,6 +460,14 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 - **GIVEN** `/root/.cache/go-build` is the service user's default Go cache and is not adopted,
   **WHEN** storage analysis runs, **THEN** its path and bytes are reported read-only while cleanup
   remains unavailable for that path.
+- **GIVEN** the Kandev service has no temporary-directory variables configured, **WHEN** two
+  host-local agents start, **THEN** neither instance receives an injected `TMPDIR`, `TMP`, or `TEMP`
+  value and their tools use the operating system defaults.
+- **GIVEN** an operator sets `TMPDIR`, `TMP`, or `TEMP` on the Kandev service, **WHEN** a host-local
+  agent starts, **THEN** it inherits those values unchanged rather than receiving a per-instance
+  replacement.
+- **GIVEN** a task is archived or deleted, **WHEN** its local instance tears down, **THEN** Kandev
+  reaps its owned processes but does not sweep the shared default temporary directory.
 - **GIVEN** the Docker daemon reports image-layer usage, **WHEN** storage analysis runs, **THEN**
   image-layer bytes are shown separately from build-cache and managed-container writable bytes.
 - **GIVEN** an exited container has `kandev.managed=true` and its task is positively absent,
@@ -484,6 +492,10 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 - Cleaning remote SSH executor filesystems; remote maintenance requires a separate explicit design.
 - Restoring uncommitted files after their quarantine retention has expired.
 - Automatically cleaning a pre-existing user Go cache without explicit path adoption.
+- Age-based or name-based deletion of unmarked `/tmp/kandev-agent/*` directories.
+- A Kandev-owned general-purpose sweeper for the operating system's shared temporary directory.
+- Guaranteed compatibility with tools that require a fixed, globally unique name in shared temp;
+  those tools need a scoped path override when a real collision is observed.
 
 ## Implementation plan
 

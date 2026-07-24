@@ -86,6 +86,33 @@ test.describe("Clarification flow", () => {
     await expect(session.chat).not.toContainText("linesecond line");
   });
 
+  test("custom answer row ignores a hidden stale session chat", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Active Chat Locator",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // Dockview can retain a prior session's chat in the DOM after its tab is
+    // hidden. The custom-answer row must come from the visible chat only.
+    await testPage.locator("body").evaluate((body) => {
+      body.insertAdjacentHTML(
+        "beforeend",
+        '<div data-testid="session-chat" style="display: none"><div data-testid="clarification-custom-input">stale custom answer</div></div>',
+      );
+    });
+
+    await expect(session.clarificationCustomInput()).toHaveCount(1);
+  });
+
   test("skip clarification", async ({ testPage, apiClient, seedData }) => {
     const session = await seedClarificationTask(
       testPage,
@@ -100,7 +127,7 @@ test.describe("Clarification flow", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
 
-  test("timeout detaches clarification but keeps overlay for deferred answer", async ({
+  test("timeout detaches clarification and accepts a custom deferred answer", async ({
     testPage,
     apiClient,
     seedData,
@@ -154,9 +181,17 @@ test.describe("Clarification flow", () => {
     );
     expect(primarySession?.state).toBe("WAITING_FOR_INPUT");
 
-    // Agent moved on; a late answer goes through the event fallback as a new prompt.
-    await session.clarificationOption("PostgreSQL").click();
+    // Agent moved on; a late custom answer remains editable and goes through
+    // the event fallback as a new prompt.
+    const input = session.clarificationInput();
+    await expect(input).toBeEnabled();
+    await session.clarificationCustomInput().click({ position: { x: 4, y: 4 } });
+    await expect(input).toBeFocused();
+    await input.pressSequentially("Use the embedded database for this task");
+    await expect(input).toHaveValue("Use the embedded database for this task");
+    await input.press("Enter");
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.chat).toContainText("Use the embedded database for this task");
   });
 
   test("options render label and description on separate rows", async ({

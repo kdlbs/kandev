@@ -36,7 +36,7 @@ test.describe("Task creation: custom prompt autocomplete", () => {
 
     const menu = testPage.getByText(MENU_TITLE);
     await expect(menu).toBeVisible({ timeout: 5_000 });
-    await expect(testPage.getByRole("button", { name: new RegExp(PROMPT_NAME) })).toBeVisible();
+    await expect(testPage.getByRole("option", { name: new RegExp(PROMPT_NAME) })).toBeVisible();
 
     await textarea.press("Enter");
 

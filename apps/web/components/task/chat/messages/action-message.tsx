@@ -10,6 +10,7 @@ import {
   IconSparkles,
   IconGitCommit,
   IconX,
+  IconChevronDown,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@kandev/ui/button";
@@ -41,6 +42,8 @@ type ActionMeta = {
   is_auth_error?: boolean;
   auth_methods?: RecoveryAuthMethod[];
   error_output?: string;
+  failure_kind?: string;
+  missing_branch?: string;
 };
 
 function isSessionActive(state?: TaskSessionState) {
@@ -56,12 +59,28 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       ? (state.taskSessions.items[comment.session_id]?.state ?? undefined)
       : undefined,
   );
+  const sessionError = useAppStore((state) =>
+    comment.session_id
+      ? (state.taskSessions.items[comment.session_id]?.error_message as string | undefined)
+      : undefined,
+  );
   const metadata = comment.metadata as ActionMeta | undefined;
   const isWarning = metadata?.variant === "warning";
   const message = comment.content || "An error occurred";
 
   // Hide once session is active again (recovery succeeded)
   if (isSessionActive(sessionState)) return null;
+
+  if (metadata?.failure_kind === "missing_pr_branch") {
+    return (
+      <MissingBranchRecovery
+        metadata={metadata}
+        taskId={comment.task_id}
+        fallbackMessage={message}
+        technicalDetails={sessionError}
+      />
+    );
+  }
 
   const iconClass = isWarning ? "text-amber-500" : "text-red-500";
   const textClass = isWarning
@@ -75,7 +94,7 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
           <IconAlertTriangle className={cn("h-4 w-4", iconClass)} />
         </div>
         <div className="flex-1 min-w-0 pt-0.5">
-          <div className={cn("text-xs font-mono", textClass)}>{message}</div>
+          <div className={cn("text-xs break-words", textClass)}>{message}</div>
           <ActionMessageDetails metadata={metadata} />
           {metadata?.actions && metadata.actions.length > 0 && (
             <ActionButtons actions={metadata.actions} taskId={comment.task_id} />
@@ -86,7 +105,73 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   );
 });
 
-function ActionMessageDetails({ metadata }: { metadata: ActionMeta | undefined }) {
+function MissingBranchRecovery({
+  metadata,
+  taskId,
+  fallbackMessage,
+  technicalDetails,
+}: {
+  metadata: ActionMeta;
+  taskId?: string;
+  fallbackMessage: string;
+  technicalDetails?: string;
+}) {
+  const branch = metadata.missing_branch?.trim();
+  return (
+    <section
+      data-testid="missing-branch-recovery"
+      role="alert"
+      className="w-full min-w-0 rounded-md border border-amber-500/25 bg-amber-500/[0.06] p-3 sm:p-4"
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <IconAlertTriangle
+          className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500"
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-medium text-foreground">Branch is no longer available</h3>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {branch ? (
+              <>
+                This task points to <code className="break-all text-foreground">{branch}</code>, but
+                that branch could not be found on the remote repository. It may have been merged or
+                deleted.
+              </>
+            ) : (
+              fallbackMessage
+            )}
+          </p>
+          <ActionMessageDetails metadata={metadata} technicalDetails={technicalDetails} />
+          {metadata.actions && metadata.actions.length > 0 && (
+            <ActionButtons actions={metadata.actions} taskId={taskId} />
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function TechnicalDetails({ children }: { children: string }) {
+  return (
+    <details className="mt-2 min-w-0 text-xs text-muted-foreground">
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 sm:min-h-8">
+        <IconChevronDown className="h-3.5 w-3.5" />
+        Technical details
+      </summary>
+      <pre className="max-h-[300px] max-w-full overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/50 p-2 font-mono text-[11px]">
+        {children}
+      </pre>
+    </details>
+  );
+}
+
+function ActionMessageDetails({
+  metadata,
+  technicalDetails,
+}: {
+  metadata: ActionMeta | undefined;
+  technicalDetails?: string;
+}) {
   const [hostShellOpen, setHostShellOpen] = useState(false);
   const [hostShellCommand, setHostShellCommand] = useState<string | undefined>(undefined);
 
@@ -106,13 +191,10 @@ function ActionMessageDetails({ metadata }: { metadata: ActionMeta | undefined }
   }, []);
 
   if (!metadata) return null;
+  const errorOutput = metadata.error_output || technicalDetails;
   return (
     <>
-      {metadata.error_output && (
-        <pre className="mt-1.5 text-[11px] font-mono text-muted-foreground bg-muted/50 rounded p-2 overflow-auto max-h-[300px] whitespace-pre-wrap break-words">
-          {metadata.error_output}
-        </pre>
-      )}
+      {errorOutput && <TechnicalDetails>{errorOutput}</TechnicalDetails>}
       {metadata.is_auth_error && metadata.auth_methods && metadata.auth_methods.length > 0 && (
         <AuthMethodsPanel
           methods={metadata.auth_methods}
@@ -133,7 +215,7 @@ function ActionMessageDetails({ metadata }: { metadata: ActionMeta | undefined }
 
 function ActionButtons({ actions, taskId }: { actions: MessageAction[]; taskId?: string }) {
   return (
-    <div className="mt-2 flex items-center gap-2">
+    <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
       {actions.map((action, i) => (
         <ActionButton key={action.test_id ?? i} action={action} messageTaskId={taskId} />
       ))}
@@ -206,7 +288,7 @@ function ActionButton({
       variant="outline"
       size="sm"
       className={cn(
-        "h-7 text-xs cursor-pointer gap-1.5",
+        "h-auto min-h-11 w-full gap-1.5 text-xs cursor-pointer sm:min-h-8 sm:w-auto",
         isDestructive && "text-destructive hover:text-destructive",
       )}
       disabled={disabled}

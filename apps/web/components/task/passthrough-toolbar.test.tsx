@@ -204,9 +204,9 @@ vi.mock("./chat/chat-input-container", async () => {
               }
               if (event.key === "Enter") {
                 event.preventDefault();
-                const result = (props.onSubmit as (message: string) => Promise<void> | void)?.(
-                  value,
-                );
+                const result = (
+                  props.onSubmit as (payload: { message: string }) => Promise<void> | void
+                )?.({ message: value });
                 if (result && typeof result.then === "function") {
                   void result.catch(() => undefined);
                 }

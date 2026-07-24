@@ -1,6 +1,6 @@
 # 0045: Install-wide storage maintenance uses typed ownership providers and quarantine
 
-**Status:** accepted (amended 2026-07-19)
+**Status:** accepted (amended 2026-07-22)
 **Date:** 2026-07-14
 **Area:** backend, frontend, infra
 
@@ -44,20 +44,28 @@ pending archive job and restores a matching quarantined workspace when possible.
 does not delete historical archived-task worktree rows or branch metadata used by PR #1687's branch
 recovery.
 
-Agentctl session temporary roots are a separate lifecycle-owned resource. They remain beneath the
-operating system's temporary directory under a readable, collision-resistant digest of the raw
-session and instance identity so concurrent sessions have isolated sockets, compiler work files,
-and command scratch space without mixing ephemeral data into `KANDEV_HOME_DIR`. After agent, shell,
-VS Code, and workspace subprocesses are reaped during permanent instance teardown, agentctl deletes
-only that instance's validated owned root. A later session resume creates a replacement instance
-and does not depend on the prior instance's scratch. Session temp data is not quarantined because it
-is explicitly ephemeral and contains no task recovery state.
+Host-local agent instances inherit the Kandev service's `TMPDIR`, `TMP`, and `TEMP` environment
+unchanged. Agentctl does not replace those values with a per-instance directory and does not claim
+ownership of files written to the shared operating-system temporary location. An operator-level
+temporary-directory override remains authoritative for the whole service; with no override, normal
+platform defaults apply.
 
-Terminal instance teardown closes process admission before its ownership sweep. A failed HTTP
-shutdown or process-tree reap retains a stopping instance tombstone and its allocated port so a
-replacement cannot adopt unresolved runtime resources. A temporary-directory-only deletion failure
-is reported but does not retain the execution port. Ordinary agent stop/start remains restartable;
-the irreversible admission close belongs to instance teardown.
+This boundary is intentionally separate from persistent tool-cache ownership. Go's default
+`GOCACHE`, for example, is already a shared user cache and is not derived from `TMPDIR`; Kandev only
+injects its managed cache path when that existing Storage option is explicitly enabled. Tools that
+derive reusable caches from the system temp directory may now share them across agents instead of
+duplicating them beneath per-instance roots.
+
+Terminal instance teardown still closes process admission and reaps the owned process tree, but it
+does not sweep shared temp contents. Kandev-specific sockets, locks, or scratch paths that require
+isolation must carry an explicit collision-resistant name at their own boundary. A demonstrated
+tool-specific collision may justify a narrow override for that tool, not a replacement of the
+temporary environment inherited by every child process.
+
+Directories under `/tmp/kandev-agent/*` created by older versions are legacy host data. New agent
+instances no longer add to that root. Storage maintenance does not delete legacy entries by name or
+age because the existing directories lack durable ownership evidence; host temporary-file policy or
+a deliberate stopped-service cleanup remains the authority for that historical footprint.
 
 ## Consequences
 
@@ -72,8 +80,13 @@ the irreversible admission close belongs to instance teardown.
   reclaimable bytes for the operator.
 - The existing Office GC package and startup wiring are removed or reduced to adapters over the
   System storage service to avoid two competing sweepers.
-- Session teardown reclaims its temporary storage immediately and independently of scheduled
-  maintenance, while path containment prevents removal of the shared temp root or sibling sessions.
+- Node, Playwright, and similar temp-derived caches may be reused across agent instances instead of
+  being duplicated under a task-scoped temp root.
+- Transient compiler work, test databases, plugin fixtures, sockets, and other scratch still exist;
+  they move to the inherited shared temp location and are governed by tool cleanup plus host policy.
+- Kandev loses per-task attribution and exact recursive deletion for arbitrary temp contents. This
+  is an accepted tradeoff because operators prefer cache sharing and normal host temp lifecycle.
+- Existing `/tmp/kandev-agent` usage is not reclaimed automatically by this change.
 
 ## Alternatives Considered
 
@@ -93,5 +106,13 @@ the irreversible admission close belongs to instance teardown.
 - **Store session scratch data under `KANDEV_HOME_DIR`.** Rejected because it mixes transient
   process data with persistent application state and makes backups, retention, and disk accounting
   retain data that should disappear at teardown or reboot.
-- **Share one temporary directory across agent sessions.** Rejected because filenames, sockets, and
-  compiler work directories can collide and teardown cannot safely determine which files it owns.
+- **Give every agent instance its own `TMPDIR`, `TMP`, and `TEMP`.** Rejected after operational
+  evidence showed duplicated Node/Playwright caches, explicitly redirected Go caches, and abandoned
+  E2E/compiler scratch consuming many GiB beneath long-lived agent roots. It improves attribution
+  and defensive isolation, but prevents useful cache sharing and makes interrupted task roots a
+  concentrated storage leak.
+- **Keep per-instance temp roots but mount shared subdirectories for selected caches.** Rejected for
+  now because cache discovery is tool-specific and creates a growing allowlist. Persistent caches
+  such as `GOCACHE` retain their dedicated policy; observed collisions can receive narrow fixes.
+- **Delete old `/tmp/kandev-agent/*` entries by name or age.** Rejected because neither proves task
+  archival, installation ownership, process liveness, or protection from path replacement.

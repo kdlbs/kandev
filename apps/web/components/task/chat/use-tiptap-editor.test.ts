@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { TIPTAP_EDITOR_TEXT_SIZE_CLASS, decideSubmitShortcut } from "./use-tiptap-editor";
+import { Extension } from "@tiptap/core";
+import {
+  TIPTAP_EDITOR_TEXT_SIZE_CLASS,
+  buildEditorExtensions,
+  decideSubmitShortcut,
+} from "./use-tiptap-editor";
+import * as tiptapEditor from "./use-tiptap-editor";
 import { decideHistoryNav } from "./tiptap-editor-history";
 
 describe("TIPTAP_EDITOR_TEXT_SIZE_CLASS", () => {
@@ -7,6 +13,44 @@ describe("TIPTAP_EDITOR_TEXT_SIZE_CLASS", () => {
     expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("text-base");
     expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("lg:text-sm");
     expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toContain("md:text-sm");
+  });
+});
+
+describe("editor extensions", () => {
+  it("exposes the extension builder for editor-contract verification", () => {
+    expect(typeof (tiptapEditor as Record<string, unknown>).buildEditorExtensions).toBe("function");
+  });
+
+  it("installs the separate entityReference atom", () => {
+    const extensions = buildEditorExtensions({
+      mentionSuggestion: {},
+      slashSuggestion: {},
+      submitKeymap: Extension.create({ name: "submit-test" }),
+      historyKeymap: Extension.create({ name: "history-test" }),
+    });
+
+    expect(extensions.map((extension) => extension.name)).toContain("entityReference");
+  });
+
+  it("registers the # suggestion plugin independently from @ and slash", () => {
+    const entityReferenceSuggestion = { char: "#" };
+    const build = buildEditorExtensions as unknown as (args: {
+      mentionSuggestion: object;
+      slashSuggestion: object;
+      entityReferenceSuggestion: object;
+      submitKeymap: Extension;
+      historyKeymap: Extension;
+    }) => ReturnType<typeof buildEditorExtensions>;
+    const extensions = build({
+      mentionSuggestion: { char: "@" },
+      slashSuggestion: { char: "/" },
+      entityReferenceSuggestion,
+      submitKeymap: Extension.create({ name: "submit-test" }),
+      historyKeymap: Extension.create({ name: "history-test" }),
+    });
+    const contextMention = extensions.find((extension) => extension.name === "contextMention");
+
+    expect(contextMention?.options.suggestions).toContain(entityReferenceSuggestion);
   });
 });
 

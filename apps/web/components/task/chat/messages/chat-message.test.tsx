@@ -3,6 +3,8 @@ import type { ReactNode } from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 import { ChatMessage } from "./chat-message";
+import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
+import type { EntityReference } from "@/lib/types/entity-reference";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -22,6 +24,7 @@ const PNG_BASE64 =
 const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
 const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
 const PROMPT_MENTION_TESTID = "custom-prompt-mention";
+const ENTITY_REFERENCE_TESTID = "entity-reference-chip";
 
 afterEach(() => {
   cleanup();
@@ -49,6 +52,21 @@ function customPrompt(name: string): CustomPrompt {
     builtin: false,
     created_at: MESSAGE_TIMESTAMP,
     updated_at: MESSAGE_TIMESTAMP,
+  };
+}
+
+function issueReference(overrides: Partial<EntityReference> = {}): EntityReference {
+  return {
+    version: 1,
+    ref: "mention:v1:jira:issue:https%3A%2F%2Fjira.example:10001",
+    provider: "jira",
+    kind: "issue",
+    id: "10001",
+    key: "ENG[1]",
+    title: "Fix the login flow",
+    url: "https://jira.example/browse/ENG-1?q=hello world(test)",
+    scope: "https://jira.example",
+    ...overrides,
   };
 }
 
@@ -155,6 +173,74 @@ describe("ChatMessage prompt mentions", () => {
     expect(checkbox.checked).toBe(true);
     expect(checkbox.closest("li")?.className).toContain("task-list-item");
     expect(screen.getByRole("cell").getAttribute("style")).toContain("text-align: center");
+  });
+});
+
+describe("ChatMessage entity references", () => {
+  it("renders an exact generated Markdown link as an accessible clickable chip", () => {
+    const reference = issueReference();
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            content: entityReferenceMarkdown(reference),
+            metadata: { entity_references: [reference] },
+          })}
+          label="Message"
+          className=""
+          onOpenFile={vi.fn()}
+        />
+      </Wrapper>,
+    );
+
+    const chip = screen.getByTestId(ENTITY_REFERENCE_TESTID);
+    expect(chip.getAttribute("aria-label")).toBe("Open #ENG[1]: Fix the login flow");
+    expect(chip.getAttribute("href")).toBe(
+      "https://jira.example/browse/ENG-1?q=hello%20world%28test%29",
+    );
+    expect(chip.getAttribute("target")).toBe("_blank");
+  });
+
+  it.each([
+    ["missing metadata", undefined, "[#ENG\\[1\\]](https://jira.example/browse/ENG-1)"],
+    [
+      "malformed metadata",
+      { entity_references: [{ ...issueReference(), version: 2 }] },
+      entityReferenceMarkdown(issueReference()),
+    ],
+    [
+      "wrong label",
+      { entity_references: [issueReference()] },
+      "[#Wrong](https://jira.example/browse/ENG-1?q=hello%20world%28test%29)",
+    ],
+    [
+      "wrong URL",
+      { entity_references: [issueReference()] },
+      "[#ENG\\[1\\]](https://evil.example/ENG-1)",
+    ],
+    [
+      "formatted lookalike label",
+      { entity_references: [issueReference()] },
+      "[**#ENG\\[1\\]**](https://jira.example/browse/ENG-1?q=hello%20world%28test%29)",
+    ],
+  ])("keeps %s as ordinary Markdown", (_name, metadata, content) => {
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({ content, metadata })}
+          label="Message"
+          className=""
+          onOpenFile={vi.fn()}
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.queryByTestId(ENTITY_REFERENCE_TESTID)).toBeNull();
+    expect(screen.getByRole("link")).not.toBeNull();
   });
 });
 

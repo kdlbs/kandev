@@ -90,6 +90,50 @@ func TestEnsureSession_ReturnsExistingNewest_NoPrimary(t *testing.T) {
 	}
 }
 
+func TestFindOfficeSessionForResumeUsesCanonicalOfficeProjection(t *testing.T) {
+	tests := []struct {
+		name         string
+		isFromOffice bool
+		assignee     string
+		viewer       string
+		wantOffice   bool
+	}{
+		{name: "unassigned Office task with agent viewer", isFromOffice: true, viewer: "profile1", wantOffice: true},
+		{name: "assigned Kanban task", assignee: "profile1", wantOffice: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := setupTestRepo(t)
+			seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+			session, err := repo.GetTaskSession(ctx, "session1")
+			if err != nil {
+				t.Fatalf("get session: %v", err)
+			}
+			session.AgentProfileID = "profile1"
+			if err := repo.UpdateTaskSession(ctx, session); err != nil {
+				t.Fatalf("update session: %v", err)
+			}
+
+			svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+			svc.repo = ownershipOverrideRepo{
+				sessionExecutorStore: repo,
+				tasks: map[string]*models.Task{"task1": {
+					ID: "task1", IsFromOffice: tt.isFromOffice, AssigneeAgentProfileID: tt.assignee,
+				}},
+			}
+			if tt.viewer != "" {
+				ctx = WithViewerAgent(ctx, tt.viewer)
+			}
+			got := svc.findOfficeSessionForResume(ctx, "task1")
+			if (got != nil) != tt.wantOffice {
+				t.Fatalf("office session found = %v, want %v", got != nil, tt.wantOffice)
+			}
+		})
+	}
+}
+
 func TestEnsureSession_Concurrent_ReturnsSameExistingSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

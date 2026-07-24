@@ -28,3 +28,21 @@ func TestMockClientSeedsWorkspaceReadState(t *testing.T) {
 		t.Fatalf("mock state projects=%+v work=%+v prs=%+v feedback=%+v", projects, work, prs, feedback)
 	}
 }
+
+func TestMockClientPaginatesPullRequests(t *testing.T) {
+	mock := NewMockClient()
+	mock.Seed(MockState{PullRequests: []PullRequest{
+		{ID: 1, ProjectID: "p1", Status: activePullRequestState},
+		{ID: 2, ProjectID: "p1", Status: activePullRequestState},
+	}})
+
+	page, err := mock.ListPullRequests(t.Context(), PullRequestFilter{
+		ProjectID: "p1", Status: activePullRequestState, Skip: 1, Top: 1,
+	})
+	if err != nil {
+		t.Fatalf("list pull requests: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ID != 2 {
+		t.Fatalf("items = %#v, want second pull request only", page.Items)
+	}
+}

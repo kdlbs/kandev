@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/models"
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/office/shared"
 )
 
@@ -211,6 +212,21 @@ func TestUpdateTaskStatus_NoApprovers_NoGate(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
+	}
+}
+
+func TestUpdateTaskStatus_InvalidStatusReturnsTypedValidationError(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "invalid-status", "ws-g", "Invalid", "todo", 2)
+
+	err := deps.svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
+		TaskID:    "invalid-status",
+		NewStatus: "not-a-status",
+	})
+
+	var validationErr officeruntime.StatusValidationError
+	if !errors.As(err, &validationErr) {
+		t.Fatalf("err = %v, want runtime.StatusValidationError", err)
 	}
 }
 

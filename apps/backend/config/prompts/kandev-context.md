@@ -1,5 +1,5 @@
 KANDEV MCP TOOLS — You have access to the following MCP tools from the "kandev" server.
-Always use the exact tool names shown below (they include the _kandev suffix).
+The exact `_kandev` names below are the canonical MCP protocol names. Agent clients may show a server-qualified form in their display or tool registry; treat that form as a client-specific alias for the same tool, not a separate capability, and use the exact form exposed by the active client.
 
 Kandev Task ID: {task_id}
 Kandev Session ID: {session_id}

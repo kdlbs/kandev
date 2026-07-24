@@ -81,7 +81,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		TerminalFontFamily:          req.TerminalFontFamily,
 		TerminalFontSize:            req.TerminalFontSize,
 		ChangesPanelLayout:          req.ChangesPanelLayout,
-		SystemMetricsDisplay:        req.SystemMetricsDisplay,
+		SystemMetricsDisplay:        systemMetricsDisplayPatch(req.SystemMetricsDisplay),
+		AppStatusBarOrder:           req.AppStatusBarOrder,
 		VoiceMode:                   req.VoiceMode,
 	})
 	if err != nil {
@@ -91,6 +92,16 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		Settings:     dto.FromUserSettings(settings),
 		ShellOptions: shellOptionsForOS(),
 	}, nil
+}
+
+func systemMetricsDisplayPatch(patch *dto.SystemMetricsDisplaySettingsPatch) *service.SystemMetricsDisplaySettingsPatch {
+	if patch == nil {
+		return nil
+	}
+	return &service.SystemMetricsDisplaySettingsPatch{
+		ShowInTopbar: patch.ShowInTopbar,
+		Simplified:   patch.Simplified,
+	}
 }
 
 func shellOptionsForOS() []dto.ShellOption {
