@@ -138,6 +138,57 @@ test.describe("sidebar scrolling", () => {
     await expect(session.sidebar.locator(OVERLAY_SCROLLBAR_SELECTOR)).toHaveCount(0);
   });
 
+  test("keeps long task titles and hover actions inside the sidebar", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const longTitle =
+      "Long sidebar title that should scroll on hover and leave room for task actions ".repeat(4);
+    const task = await apiClient.createTask(seedData.workspaceId, longTitle, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const scrollContainer = testPage.getByTestId("task-sidebar-scroll");
+    const taskRow = session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: longTitle });
+    const titleText = taskRow.getByText(longTitle, { exact: true });
+    const titleViewport = titleText.locator("..");
+    const actions = taskRow.getByRole("button", { name: "Task actions" });
+
+    await expect(taskRow).toBeVisible();
+    const overflow = await titleViewport.evaluate((element) => ({
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
+
+    await titleViewport.hover();
+    await expect
+      .poll(() => titleText.evaluate((element) => element.style.transform))
+      .toMatch(/^translateX\(-/);
+    await expect(actions.locator("..")).toHaveCSS("opacity", "1");
+    await expect(actions).toBeInViewport();
+
+    const [containerBox, rowBox, titleBox, actionBox] = await Promise.all([
+      scrollContainer.boundingBox(),
+      taskRow.boundingBox(),
+      titleViewport.boundingBox(),
+      actions.boundingBox(),
+    ]);
+    if (!containerBox || !rowBox || !titleBox || !actionBox) {
+      throw new Error("Long-title sidebar row has no layout box");
+    }
+    expect(rowBox.x + rowBox.width).toBeLessThanOrEqual(containerBox.x + containerBox.width + 1);
+    expect(rowBox.x + rowBox.width - (actionBox.x + actionBox.width)).toBeGreaterThanOrEqual(11);
+    expect(actionBox.x - (titleBox.x + titleBox.width)).toBeGreaterThanOrEqual(7);
+  });
+
   test("clicking another task does not reset the sidebar scroll position", async ({
     testPage,
     apiClient,

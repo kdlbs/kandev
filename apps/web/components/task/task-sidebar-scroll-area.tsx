@@ -43,7 +43,11 @@ export function TaskSidebarScrollArea({ children }: { children: ReactNode }) {
       className="task-sidebar-scroll-root min-h-0 flex-1"
       viewportProps={{
         ref: scrollRef,
-        className: "task-sidebar-scroll",
+        // Radix uses an intrinsic-width table wrapper so generic scroll areas
+        // can grow horizontally. Sidebar rows must stay viewport-width instead:
+        // otherwise a long title pushes its actions beyond the visible edge and
+        // never overflows its own ScrollOnOverflow container.
+        className: "task-sidebar-scroll [&>div]:!block [&>div]:!min-w-0 [&>div]:!w-full",
         "data-can-scroll-down": canScrollDown,
         "data-testid": "task-sidebar-scroll",
       }}
