@@ -77,13 +77,16 @@ export function usePRFeedbackBackgroundSync(pr: TaskPR | null): void {
 }
 
 /**
- * Popover-side reader: returns the cached feedback + fires an on-demand
- * refetch whenever the popover transitions from closed to open. The
- * background-sync hook keeps the cache fresh in the meantime, so this
- * mostly serves as a safety net for the very first hover (before any
- * sync has fired).
+ * Popover-side reader: returns cached feedback, then refreshes both that
+ * feedback and the TaskPR summary whenever the popover opens. Refreshing both
+ * sources together keeps the trigger's status icon aligned with the checks
+ * shown inside the popover.
  */
-export function usePRCIPopover(pr: TaskPR | null, enabled: boolean): Result {
+export function usePRCIPopover(
+  pr: TaskPR | null,
+  enabled: boolean,
+  refreshTaskPR?: () => void,
+): Result {
   const key = pr ? prFeedbackKey(pr) : null;
   const cached = useAppStore((state) => (key ? (state.prFeedbackCache.byKey[key] ?? null) : null));
   const { refetch, isFetching } = useFeedbackFetch(pr);
@@ -92,8 +95,12 @@ export function usePRCIPopover(pr: TaskPR | null, enabled: boolean): Result {
   useEffect(() => {
     const opened = enabled && !wasEnabledRef.current;
     wasEnabledRef.current = enabled;
-    if (opened) queueMicrotask(refetch);
-  }, [enabled, refetch]);
+    if (!opened) return;
+    queueMicrotask(() => {
+      refetch();
+      refreshTaskPR?.();
+    });
+  }, [enabled, refetch, refreshTaskPR]);
 
   return {
     feedback: cached?.feedback ?? null,

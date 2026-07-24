@@ -100,11 +100,11 @@ export const PRTopbarButton = memo(function PRTopbarButton() {
   // useTaskPR fetches if not in store and returns the full per-task list so
   // multi-repo tasks can surface every PR (one button for single-repo, a
   // dropdown summary for 2+ so the topbar doesn't blow up horizontally).
-  const { prs } = useTaskPR(activeTaskId);
+  const { prs, refresh } = useTaskPR(activeTaskId);
 
   if (prs.length === 0) return null;
-  if (prs.length === 1) return <PRSingleButton pr={prs[0]} />;
-  return <PRMultiButton prs={prs} />;
+  if (prs.length === 1) return <PRSingleButton pr={prs[0]} refreshTaskPR={refresh} />;
+  return <PRMultiButton prs={prs} refreshTaskPR={refresh} />;
 });
 
 /**
@@ -128,7 +128,7 @@ function usePopoverInteractions() {
   return { usesTouchDrawer, ...hover };
 }
 
-function PRSingleButton({ pr }: { pr: TaskPR }) {
+function PRSingleButton({ pr, refreshTaskPR }: { pr: TaskPR; refreshTaskPR: () => void }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
@@ -197,13 +197,13 @@ function PRSingleButton({ pr }: { pr: TaskPR }) {
         onMouseLeave={onContentLeave}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <PRCIPopover pr={pr} enabled={open} />
+        <PRCIPopover pr={pr} enabled={open} refreshTaskPR={refreshTaskPR} />
       </PopoverContent>
     </Popover>
   );
 }
 
-function PRMultiButton({ prs }: { prs: TaskPR[] }) {
+function PRMultiButton({ prs, refreshTaskPR }: { prs: TaskPR[]; refreshTaskPR: () => void }) {
   // Click still drives the dropdown (the explicit "jump to this PR's panel"
   // affordance, and the only interaction on touch). Hover adds the aggregate
   // CI popover with a tab per PR — desktop only, suppressed on touch where
@@ -289,6 +289,7 @@ function PRMultiButton({ prs }: { prs: TaskPR[] }) {
         <MultiPRCIPopover
           prs={prs}
           enabled={open}
+          refreshTaskPR={refreshTaskPR}
           onOpenDetailPanel={(pr) => {
             addPRPanel(prTaskKey(pr), activeSessionId);
             onOpenChange(false);

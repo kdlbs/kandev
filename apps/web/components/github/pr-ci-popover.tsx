@@ -540,16 +540,22 @@ export function PRCIPopover({
   pr,
   enabled,
   onOpenDetailPanel,
+  refreshTaskPR,
 }: {
   pr: TaskPR;
   enabled: boolean;
   onOpenDetailPanel?: () => void;
+  refreshTaskPR?: () => void;
 }) {
   const ghStatus = useAppStore((s) => s.githubStatus.status);
   const authLost = ghStatus !== null && !ghStatus.authenticated;
   // Trigger an initial status load from the same hook the rest of the app uses.
   useGitHubStatus();
-  const { feedback, isFetching, lastUpdatedAt, refetch } = usePRCIPopover(pr, enabled && !authLost);
+  const { feedback, isFetching, lastUpdatedAt, refetch } = usePRCIPopover(
+    pr,
+    enabled && !authLost,
+    refreshTaskPR,
+  );
   const onAddAsContext = useAddCheckToContext(pr);
 
   return (
