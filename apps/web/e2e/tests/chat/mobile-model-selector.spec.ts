@@ -98,5 +98,13 @@ test.describe("Mobile chat model selector", () => {
     expect(popoverBox).not.toBeNull();
     expect(popoverBox!.x).toBeGreaterThanOrEqual(0);
     expect(popoverBox!.x + popoverBox!.width).toBeLessThanOrEqual(viewport!.width);
+
+    // Regression coverage: tapping a model row (a cmdk CommandItem) must select it,
+    // not just arrow-key + Enter. This closes the gap that let a WebKit/touch-only
+    // pointer-selection bug ship — the trigger label above and the config-option
+    // taps do not exercise selecting a model row itself. The popover stays open
+    // after a model tap because an extra config option (effort) is present.
+    await testPage.getByRole("option", { name: /Mock Smart/ }).tap();
+    await expect(trigger).toHaveText("Mock Smart / Low");
   });
 });

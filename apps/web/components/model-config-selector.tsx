@@ -175,12 +175,40 @@ function ModelRow({
   selected: boolean;
   onSelect: (value: string) => void;
 }) {
+  // Deduplicate rapid duplicate selects coming from both pointer fallbacks
+  // and cmdk's native onSelect; small time window prevents double-invokes.
+  const lastSelectAt = useRef<number>(0);
+  const handleSelect = (value: string) => {
+    const now = Date.now();
+    if (now - lastSelectAt.current < 300) return;
+    lastSelectAt.current = now;
+    onSelect(value);
+  };
+
   return (
     <CommandItem
       value={model.id}
       keywords={[model.name, model.description ?? "", model.id]}
-      onSelect={() => onSelect(model.id)}
-      className="relative pr-7"
+      onSelect={() => handleSelect(model.id)}
+      // cursor-pointer overrides CommandItem's default cursor-default: WebKit-based
+      // engines (iOS Safari, Tauri's WebKitGTK/WKWebView shell) only synthesize a
+      // `click` event from a tap/pointer press when the element looks interactive,
+      // and a non-pointer cursor is one of the signals that suppresses that
+      // synthesis. Without it, cmdk's onClick-driven onSelect() never fires on
+      // pointer/touch — only keyboard (Enter) selection, which doesn't depend on a
+      // synthesized click, keeps working.
+      // As a defensive fallback, synthesize a selection on touch/pen pointer up
+      // events so mobile WebKit and other embedded shells receive the selection
+      // even if their click synthesis path fails.
+      onPointerUp={(e) => {
+        if (e.pointerType === "touch" || e.pointerType === "pen") {
+          // Prevent any browser default that might interfere and call the
+          // de-duplicated handler.
+          e.preventDefault();
+          handleSelect(model.id);
+        }
+      }}
+      className="relative cursor-pointer pr-7"
     >
       <div className="flex min-w-0 flex-1 items-center">
         <div className="min-w-0 flex-1">
