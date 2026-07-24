@@ -34,7 +34,14 @@ test.describe("Chat message timestamp tooltip (mobile)", () => {
     const chat = session.activeChat();
     await expect(chat.getByText(SEEDED_MESSAGE)).toBeVisible({ timeout: 15_000 });
 
-    const timestamp = chat.locator("time[datetime]").last();
+    // Scope to the seeded message's own row so a later message/footer with
+    // its own <time>/trigger can't satisfy the assertions without the
+    // seeded row.
+    const messageRow = chat
+      .locator("[data-agent-message-body][data-message-id]")
+      .filter({ hasText: SEEDED_MESSAGE })
+      .locator("xpath=..");
+    const timestamp = messageRow.locator("time[datetime]");
     await expect(timestamp).toBeVisible();
     const dateTimeAttr = await timestamp.getAttribute("datetime");
 
@@ -45,7 +52,7 @@ test.describe("Chat message timestamp tooltip (mobile)", () => {
       dateTimeAttr,
     );
 
-    const trigger = chat.getByTestId("message-timestamp-trigger").last();
+    const trigger = messageRow.getByTestId("message-timestamp-trigger");
     await expect(trigger).toBeVisible();
 
     const drawer = testPage.getByTestId("message-timestamp-drawer");

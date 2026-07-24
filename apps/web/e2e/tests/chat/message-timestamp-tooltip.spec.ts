@@ -33,7 +33,13 @@ test.describe("Chat message timestamp tooltip", () => {
     const chat = session.activeChat();
     await expect(chat.getByText(SEEDED_MESSAGE)).toBeVisible({ timeout: 15_000 });
 
-    const timestamp = chat.locator("time[datetime]").last();
+    // Scope to the seeded message's own row so a later message/footer with
+    // its own <time> can't satisfy the assertions without the seeded row.
+    const messageRow = chat
+      .locator("[data-agent-message-body][data-message-id]")
+      .filter({ hasText: SEEDED_MESSAGE })
+      .locator("xpath=..");
+    const timestamp = messageRow.locator("time[datetime]");
     await timestamp.hover();
     await testPage.waitForTimeout(1500);
     await prCapture.screenshot("message-relative-timestamp-hover", {
