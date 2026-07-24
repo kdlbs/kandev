@@ -105,25 +105,47 @@ type scopeFixture struct {
 	scope      func(ctx context.Context, taskID string) (context.Context, error)
 	userA      scopedOwner
 	userB      scopedOwner
+	// unowned is a workspace with an empty owner_id — created before auth was
+	// enabled, or since by an internal (unscoped) caller, because
+	// CreateWorkspace only stamps an owner for scoped callers.
+	unowned scopedOwner
 }
 
 func newScopeFixture(t *testing.T, authEnabled bool) *scopeFixture {
 	t.Helper()
+	return newScopeFixtureWith(t, authEnabled, stubIdentityLookup{
+		"user-a": {UserID: "user-a", Role: authn.RoleMember},
+		"user-b": {UserID: "user-b", Role: authn.RoleAdmin},
+	})
+}
+
+// newScopeFixtureWithoutAccounts models both owners having been disabled or
+// deleted while their agents kept running.
+func newScopeFixtureWithoutAccounts(t *testing.T) *scopeFixture {
+	t.Helper()
+	return newScopeFixtureWith(t, true, stubIdentityLookup{})
+}
+
+func newScopeFixtureWith(t *testing.T, authEnabled bool, identities stubIdentityLookup) *scopeFixture {
+	t.Helper()
 	svc, repo := newTestTaskService(t)
 	userA := seedOwnedTask(t, svc, repo, "a", "user-a")
 	userB := seedOwnedTask(t, svc, repo, "b", "user-b")
+	unowned := seedOwnedTask(t, svc, repo, "unowned", "")
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 	dispatcher := ws.NewDispatcher()
 	dispatcher.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	dispatcher.RegisterFunc(ws.ActionMCPGetTaskConversation, h.handleGetTaskConversation)
 
-	identities := stubIdentityLookup{
-		"user-a": {UserID: "user-a", Role: authn.RoleMember},
-		"user-b": {UserID: "user-b", Role: authn.RoleAdmin},
-	}
 	resolver := mcpscope.NewResolver(repo, identities, func() bool { return authEnabled }, testLogger(t))
-	return &scopeFixture{dispatcher: dispatcher, scope: resolver.Scope, userA: userA, userB: userB}
+	return &scopeFixture{
+		dispatcher: dispatcher,
+		scope:      resolver.Scope,
+		userA:      userA,
+		userB:      userB,
+		unowned:    unowned,
+	}
 }
 
 // dispatchAs runs one MCP request over the stream of the agent session that
@@ -203,6 +225,65 @@ func TestInSessionMCPUnscopedWhenAuthDisabled(t *testing.T) {
 	})
 
 	assert.Equal(t, ws.MessageTypeResponse, resp.Type)
+}
+
+// TestInSessionMCPUnownedStreamCannotReadOwnedWorkflow closes the gap where an
+// agent whose own workspace has no owner was handed an identity-free context.
+// The task service reads "no identity" as an internal caller and serves
+// everything, so such a stream could name any user's workflow. It must reach
+// only unowned rows.
+func TestInSessionMCPUnownedStreamCannotReadOwnedWorkflow(t *testing.T) {
+	f := newScopeFixture(t, true)
+
+	resp := f.dispatchAs(t, f.unowned.taskID, ws.ActionMCPListTasks, map[string]interface{}{
+		"workflow_id": f.userB.workflowID,
+	})
+
+	assert.Equal(t, ws.MessageTypeError, resp.Type,
+		"an unowned-workspace agent must not read an owned workflow")
+}
+
+// TestInSessionMCPUnownedStreamReadsOwnUnownedWorkflow is the other half: the
+// pre-auth compatibility contract keeps unowned rows readable, so bounding the
+// scope must not lock the agent out of its own workspace.
+func TestInSessionMCPUnownedStreamReadsOwnUnownedWorkflow(t *testing.T) {
+	f := newScopeFixture(t, true)
+
+	resp := f.dispatchAs(t, f.unowned.taskID, ws.ActionMCPListTasks, map[string]interface{}{
+		"workflow_id": f.unowned.workflowID,
+	})
+
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, float64(1), payload["total"])
+}
+
+// TestInSessionMCPUnownedStreamReadsOwnConversation guards the message-content
+// path for the same stream.
+func TestInSessionMCPUnownedStreamReadsOwnConversation(t *testing.T) {
+	f := newScopeFixture(t, true)
+
+	resp := f.dispatchAs(t, f.unowned.taskID, ws.ActionMCPGetTaskConversation, map[string]interface{}{
+		"task_id": f.unowned.taskID,
+		"limit":   10,
+	})
+
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, float64(1), payload["total"])
+}
+
+// TestInSessionMCPDeniesWhenOwnerAccountInactive covers an admin disabling a
+// user while their agent is still running: revoking sessions and PATs must also
+// cut off the in-session MCP surface.
+func TestInSessionMCPDeniesWhenOwnerAccountInactive(t *testing.T) {
+	f := newScopeFixtureWithoutAccounts(t)
+
+	_, err := f.scope(context.Background(), f.userA.taskID)
+
+	require.Error(t, err, "an inactive owner must deny the dispatch, not scope to them")
 }
 
 // TestInSessionMCPIgnoresPayloadSessionForScoping is the privilege-escalation

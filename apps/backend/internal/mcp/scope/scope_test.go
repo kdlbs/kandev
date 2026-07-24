@@ -3,11 +3,15 @@ package scope
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
 type fakeTaskOwnerLookup struct {
@@ -104,10 +108,13 @@ func TestScopeNoOpWhenAuthDisabled(t *testing.T) {
 	}
 }
 
-// TestScopeNoOpForUnownedWorkspace matches the task service's visibility rule:
-// rows with an empty owner_id, created before auth was enabled, stay visible
-// to everyone until the setup wizard claims them.
-func TestScopeNoOpForUnownedWorkspace(t *testing.T) {
+// TestScopeUnownedWorkspaceStaysBounded covers a workspace with no owner —
+// created before auth was enabled, or since by an internal (unscoped) caller.
+// Such rows stay publicly visible by the compatibility contract, but the stream
+// must NOT be handed an identity-free context: that reads as an internal caller
+// and grants every user's data. It gets an ID no account can hold, so the
+// service's "empty owner_id or my own ID" rule limits it to unowned rows.
+func TestScopeUnownedWorkspaceStaysBounded(t *testing.T) {
 	lookup := ownedFixture()
 	lookup.workspaces["ws-1"].OwnerID = ""
 	r := newResolver(t, lookup, fakeIdentityLookup{}, true)
@@ -116,12 +123,22 @@ func TestScopeNoOpForUnownedWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Scope: %v", err)
 	}
-	if _, ok := authn.IdentityFromContext(ctx); ok {
-		t.Error("an unclaimed workspace must stay unscoped")
+
+	identity := identityOf(t, ctx)
+	if identity.UserID != unownedScopeUserID {
+		t.Errorf("UserID = %q, want the unowned sentinel %q", identity.UserID, unownedScopeUserID)
+	}
+	if identity.Synthetic {
+		t.Error("the sentinel must not be synthetic — synthetic reads as unscoped")
+	}
+	if identity.Role == authn.RoleAdmin {
+		t.Error("the sentinel must not carry the admin role")
 	}
 }
 
-func TestScopeNoOpForTaskWithoutWorkspace(t *testing.T) {
+// TestScopeTaskWithoutWorkspaceStaysBounded is the same reasoning for a task
+// that has no workspace at all.
+func TestScopeTaskWithoutWorkspaceStaysBounded(t *testing.T) {
 	lookup := ownedFixture()
 	lookup.tasks["task-1"].WorkspaceID = ""
 	r := newResolver(t, lookup, fakeIdentityLookup{}, true)
@@ -130,8 +147,27 @@ func TestScopeNoOpForTaskWithoutWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Scope: %v", err)
 	}
-	if _, ok := authn.IdentityFromContext(ctx); ok {
-		t.Error("a task with no workspace has no owner to scope to")
+
+	if got := identityOf(t, ctx).UserID; got != unownedScopeUserID {
+		t.Errorf("UserID = %q, want the unowned sentinel %q", got, unownedScopeUserID)
+	}
+}
+
+// TestUnownedScopeUserIDCannotBeAStoredAccount pins the sentinel's one
+// requirement: it must not collide with a real user ID (UUIDs, or the
+// default-user row promoted by the setup wizard).
+func TestUnownedScopeUserIDCannotBeAStoredAccount(t *testing.T) {
+	if unownedScopeUserID == "" {
+		t.Fatal("the sentinel must be non-empty, or callerScope reports unscoped")
+	}
+	if !strings.Contains(unownedScopeUserID, ":") {
+		t.Errorf("sentinel %q should keep a colon so it cannot be a UUID", unownedScopeUserID)
+	}
+	if _, err := uuid.Parse(unownedScopeUserID); err == nil {
+		t.Errorf("sentinel %q parses as a UUID and could collide with a real account", unownedScopeUserID)
+	}
+	if unownedScopeUserID == userstore.DefaultUserID {
+		t.Error("sentinel collides with the default-user row")
 	}
 }
 
@@ -188,23 +224,51 @@ func TestScopeFailsClosedOnWorkspaceLookupError(t *testing.T) {
 	}
 }
 
-// TestScopeUsesLeastPrivilegeWhenOwnerAccountMissing covers a deleted or
-// disabled owner: still scope to their user ID (so foreign workspaces stay
-// hidden) but with the lowest role.
-func TestScopeUsesLeastPrivilegeWhenOwnerAccountMissing(t *testing.T) {
+// TestScopeDeniesWhenOwnerAccountInactive covers a deleted or disabled owner.
+// Disabling a user revokes their sessions and PATs, so a still-running agent
+// session would otherwise be the one remaining way into their workspace —
+// deny the dispatch instead of minting an identity on their behalf.
+func TestScopeDeniesWhenOwnerAccountInactive(t *testing.T) {
 	r := newResolver(t, ownedFixture(), fakeIdentityLookup{}, true)
 
-	ctx, err := r.Scope(context.Background(), "task-1")
-	if err != nil {
-		t.Fatalf("Scope: %v", err)
+	if _, err := r.Scope(context.Background(), "task-1"); err == nil {
+		t.Fatal("expected an error so the dispatch is denied for an inactive owner")
 	}
+}
 
-	identity := identityOf(t, ctx)
-	if identity.UserID != "user-a" {
-		t.Errorf("UserID = %q, want the owner ID so scoping still applies", identity.UserID)
+// TestScopeFailsClosedOnMissingTaskRow and its workspace sibling cover a
+// lookup that reports "not found" as (nil, nil) rather than an error. An
+// unscoped context here would let a stream whose task was deleted mid-session
+// read everything.
+func TestScopeFailsClosedOnMissingTaskRow(t *testing.T) {
+	lookup := &fakeTaskOwnerLookup{
+		tasks:      map[string]*models.Task{},
+		workspaces: map[string]*models.Workspace{},
 	}
-	if identity.Role != authn.RoleMember {
-		t.Errorf("Role = %q, want member", identity.Role)
+	r := newResolver(t, lookup, fakeIdentityLookup{}, true)
+
+	if _, err := r.Scope(context.Background(), "task-gone"); err == nil {
+		t.Fatal("expected an error for a missing task row")
+	}
+}
+
+func TestScopeFailsClosedOnMissingWorkspaceRow(t *testing.T) {
+	lookup := ownedFixture()
+	delete(lookup.workspaces, "ws-1")
+	r := newResolver(t, lookup, fakeIdentityLookup{}, true)
+
+	if _, err := r.Scope(context.Background(), "task-1"); err == nil {
+		t.Fatal("expected an error for a missing workspace row")
+	}
+}
+
+// TestScopeFailsClosedWithoutIdentityLookup guards the wiring: a resolver with
+// no identity lookup must deny, not fall back to unscoped.
+func TestScopeFailsClosedWithoutIdentityLookup(t *testing.T) {
+	r := NewResolver(ownedFixture(), nil, func() bool { return true }, testLogger(t))
+
+	if _, err := r.Scope(context.Background(), "task-1"); err == nil {
+		t.Fatal("expected an error when no identity lookup is wired")
 	}
 }
 

@@ -32,6 +32,12 @@ a login screen or any behavioral change.
    the same unscoped bucket; `internal/mcp/scope` now resolves the stream's
    task owner and attaches that real identity before dispatch (the owning task
    comes from the `AgentExecution`, never from the agent-supplied payload).
+   Because "no identity" means full access, that path never returns an
+   identity-free context under enforced auth: an unowned workspace is scoped to
+   a sentinel user ID that reaches unowned rows only, and an unresolvable owner
+   — deleted task/workspace row, or an account since deleted or disabled —
+   denies the dispatch. Disabling a user revokes their sessions and PATs, so
+   their still-running agent session must lose this surface too.
 3. **Opaque DB-backed credentials, not JWTs.** Sessions (`kandev_session`
    HttpOnly SameSite=Lax cookie) and personal access tokens (`kandev_pat_*`)
    are 256-bit random values stored as SHA-256 digests. Instant revocation
