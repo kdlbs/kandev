@@ -41,7 +41,9 @@ describe("FileBrowserToolbar workspace actions", () => {
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     fireEvent.click(trigger);
 
-    const addSources = screen.getByRole("menuitem", { name: /Add sources/i });
+    const addSources = screen.getByRole("menuitem", {
+      name: /Add Repositories to workspace/i,
+    });
     expect(addSources.hasAttribute("data-disabled")).toBe(true);
     expect(addSources.className).toContain("min-h-11");
     expect(screen.getByText("Wait for the active agent turn to finish")).toBeTruthy();
@@ -75,7 +77,7 @@ describe("FileBrowserToolbar workspace actions", () => {
     const trigger = screen.getByRole("button", { name: "Workspace actions" });
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add sources" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add Repositories to workspace" }));
 
     await waitFor(() => expect(onAddSources).toHaveBeenCalledWith(trigger));
     expect(openerRef.current).toBe(trigger);
@@ -104,7 +106,7 @@ describe("FileBrowserToolbar workspace actions", () => {
     const trigger = screen.getByRole("button", { name: "Workspace actions" });
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     fireEvent.click(trigger);
-    fireEvent.click(screen.getByRole("menuitem", { name: "Add sources" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Add Repositories to workspace" }));
     await waitFor(() => expect(onAddSources).toHaveBeenCalledOnce());
 
     const drawer = document.createElement("div");

@@ -75,7 +75,9 @@ test.describe("Attach local workspace sources", () => {
     expect(workspaceActionsBox).not.toBeNull();
     expect(workspaceActionsBox!.width).toBeLessThanOrEqual(44);
     await workspaceActions.click();
-    const addSources = testPage.getByRole("menuitem", { name: "Add sources" });
+    const addSources = testPage.getByRole("menuitem", {
+      name: "Add Repositories to workspace",
+    });
     const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
     await expect(addSources).toBeEnabled();
     await expect(openFolder).toBeEnabled();
@@ -90,10 +92,25 @@ test.describe("Attach local workspace sources", () => {
     ]);
     await expect(openFolder).not.toBeVisible();
     await workspaceActions.click();
-    await testPage.getByRole("menuitem", { name: "Add sources" }).click();
+    await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
     const dialog = testPage.getByTestId("add-workspace-sources-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByTestId("source-mode-local")).toHaveAttribute("aria-checked", "true");
+    await dialog.getByRole("button", { name: "Saved repository" }).click();
+    const savedRepositoryRow = dialog.getByTestId("workspace-source-row").first();
+    await expect(savedRepositoryRow.getByRole("alert")).toHaveCount(0);
+    await expect(savedRepositoryRow.getByRole("textbox", { name: "Checkout branch" })).toHaveCount(
+      0,
+    );
+    await savedRepositoryRow.getByTestId("repo-chip-trigger").click();
+    await expect(testPage.getByTestId("repo-refresh-button")).toBeVisible();
+    await expect(testPage.getByTestId("create-local-repository-button")).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await dialog.getByTestId("add-workspace-sources-submit").click();
+    const savedRepositoryError = savedRepositoryRow.getByRole("alert");
+    await expect(savedRepositoryError).toHaveText("Choose a repository and base branch.");
+    await expect(savedRepositoryError).toHaveCSS("font-size", "12px");
+    await savedRepositoryRow.getByRole("button", { name: "Remove source" }).click();
     await dialog.getByRole("button", { name: "Local Git repository" }).click();
     await dialog.getByRole("button", { name: "Local folder" }).click();
     const rows = dialog.getByTestId("workspace-source-row");
@@ -195,7 +212,9 @@ test.describe("Attach local workspace sources", () => {
     const workspaceActions = testPage.getByTestId("files-workspace-actions");
     await expect(workspaceActions).toBeEnabled();
     await workspaceActions.click();
-    const action = testPage.getByRole("menuitem", { name: "Add sources" });
+    const action = testPage.getByRole("menuitem", {
+      name: "Add Repositories to workspace",
+    });
     await expect(action).toBeDisabled();
     await expect(action).toContainText(
       "Wait for the active turn or tool call to finish before adding sources.",

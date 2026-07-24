@@ -173,7 +173,7 @@ function WorkspaceActionsMenu({
       </Tooltip>
       <DropdownMenuContent
         align="end"
-        className="w-56"
+        className="w-72"
         onCloseAutoFocus={(event) => {
           if (!openSourcesAfterCloseRef.current) return;
           event.preventDefault();
@@ -191,7 +191,7 @@ function WorkspaceActionsMenu({
         >
           <IconPlus className="h-3.5 w-3.5" />
           <span className="min-w-0">
-            <span className="block">Add sources</span>
+            <span className="block">Add Repositories to workspace</span>
             {disabledReason && (
               <span className="block text-[10px] text-muted-foreground normal-case">
                 {disabledReason}
