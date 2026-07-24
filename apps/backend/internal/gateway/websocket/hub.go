@@ -325,6 +325,25 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 	h.sendToClients(data, recipients, msg.Action)
 }
 
+// BroadcastToWorkspaceOrDrop routes like BroadcastToWorkspace but, when auth is
+// enforced and the workspace is unknown, DROPS the message instead of falling
+// back to a global broadcast. Every Office notification is workspace-scoped, so
+// an office payload whose workspace could not be resolved must never cross user
+// boundaries. With auth disabled (single user) it degrades to a plain global
+// broadcast, preserving today's behavior.
+func (h *Hub) BroadcastToWorkspaceOrDrop(workspaceID string, msg *ws.Message) {
+	if workspaceID == "" && h.workspaceScopeEnforced() {
+		return // fail closed: no unattributed office fan-out under auth
+	}
+	h.BroadcastToWorkspace(workspaceID, msg)
+}
+
+// workspaceScopeEnforced reports whether per-user auth is currently on.
+func (h *Hub) workspaceScopeEnforced() bool {
+	enforced := h.authPolicy.Enforced
+	return enforced != nil && enforced()
+}
+
 // getSubscribersLocked reads subscribers for an ID from a subscriber map under the read lock.
 func (h *Hub) getSubscribersLocked(m map[string]map[*Client]bool, id string) []*Client {
 	h.mu.RLock()

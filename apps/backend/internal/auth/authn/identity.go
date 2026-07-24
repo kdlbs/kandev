@@ -77,6 +77,26 @@ func FromGin(c *gin.Context) (Identity, bool) {
 	return IdentityFromContext(c.Request.Context())
 }
 
+// RequireRealIdentity aborts unless the request carries a non-synthetic
+// authenticated identity. While authentication is disabled the middleware
+// injects a synthetic single-user admin (see httpmw.SyntheticIdentity) that
+// carries RoleAdmin — so RequireAdmin alone would let anyone hitting a
+// not-yet-enabled instance mint a PAT or plant an admin that survives
+// enablement and hijacks first-run setup. Guarding credential- and
+// user-management routes with this closes that hole; public bootstrap routes
+// (setup/login/me/invite-accept) are intentionally NOT guarded by it. It
+// responds 404 so the management surface simply does not exist while disabled.
+func RequireRealIdentity() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		id, ok := FromGin(c)
+		if !ok || id.Synthetic {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		c.Next()
+	}
+}
+
 // RequireAdmin aborts with 403 unless the request identity is an admin.
 // Requests without any identity are rejected with 401.
 func RequireAdmin() gin.HandlerFunc {

@@ -651,7 +651,7 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createFeaturesSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createAuthSlice(set as any, get as any, api as any),
+      ...createAuthSlice(set as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createSystemSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

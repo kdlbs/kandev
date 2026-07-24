@@ -44,25 +44,33 @@ type Handlers struct {
 func RegisterRoutes(router *gin.Engine, svc *auth.Service, log *logger.Logger) {
 	h := &Handlers{svc: svc, log: log}
 	group := router.Group("/api/v1/auth")
+	// Public bootstrap + credential-issuing endpoints (allowlisted in httpmw).
 	group.POST("/setup", h.setup)
 	group.POST("/login", h.login)
 	group.POST("/logout", h.logout)
 	group.GET("/me", h.me)
-	group.PATCH("/password", h.changePassword)
-	group.GET("/sessions", h.listSessions)
-	group.DELETE("/sessions/:id", h.revokeSession)
-	group.GET("/tokens", h.listTokens)
-	group.POST("/tokens", h.mintToken)
-	group.DELETE("/tokens/:id", h.revokeToken)
 	group.GET("/invites/preview", h.previewInvite)
 	group.POST("/invites/accept", h.acceptInvite)
 
-	admin := group.Group("", authn.RequireAdmin())
+	// Credential/session management requires a real (non-synthetic) session:
+	// while auth is disabled the synthetic admin must not mint PATs or manage
+	// sessions — those credentials would outlive enablement.
+	managed := group.Group("", authn.RequireRealIdentity())
+	managed.PATCH("/password", h.changePassword)
+	managed.GET("/sessions", h.listSessions)
+	managed.DELETE("/sessions/:id", h.revokeSession)
+	managed.GET("/tokens", h.listTokens)
+	managed.POST("/tokens", h.mintToken)
+	managed.DELETE("/tokens/:id", h.revokeToken)
+
+	// RequireAdmin allows the synthetic admin, so RequireRealIdentity must
+	// precede it to keep these locked while auth is disabled.
+	admin := group.Group("", authn.RequireRealIdentity(), authn.RequireAdmin())
 	admin.GET("/invites", h.listInvites)
 	admin.POST("/invites", h.createInvite)
 	admin.DELETE("/invites/:id", h.deleteInvite)
 
-	users := router.Group("/api/v1/users", authn.RequireAdmin())
+	users := router.Group("/api/v1/users", authn.RequireRealIdentity(), authn.RequireAdmin())
 	users.GET("", h.listUsers)
 	users.POST("", h.createUser)
 	users.PATCH("/:id", h.updateUser)

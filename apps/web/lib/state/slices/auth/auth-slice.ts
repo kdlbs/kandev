@@ -15,9 +15,10 @@ export const defaultAuthState: AuthSliceState = {
 
 type ImmerSet = Parameters<StateCreator<AuthSlice, [["zustand/immer", never]], [], AuthSlice>>[0];
 
-export const createAuthSlice: StateCreator<AuthSlice, [["zustand/immer", never]], [], AuthSlice> = (
-  set: ImmerSet,
-) => ({
+// The auth slice only needs `set` (no cross-slice reads), so it is typed as a
+// plain single-arg creator rather than the full 3-arg StateCreator. `set`
+// keeps the immer-enabled recipe typing via ImmerSet.
+export const createAuthSlice = (set: ImmerSet): AuthSlice => ({
   ...defaultAuthState,
   setAuthState: (state) =>
     set((draft) => {

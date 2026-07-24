@@ -202,6 +202,39 @@ func TestSetupRejectedWhenDisabled(t *testing.T) {
 	}
 }
 
+// TestManagementRoutesRejectSyntheticIdentity locks the P1: while auth is
+// disabled the middleware injects a synthetic admin (RoleAdmin). Because
+// RequireAdmin alone would let it through, an attacker hitting a not-yet-enabled
+// instance could mint a PAT or plant an admin that survives enablement and
+// hijacks first-run setup. RequireRealIdentity must reject these with 404.
+func TestManagementRoutesRejectSyntheticIdentity(t *testing.T) {
+	router, _ := newAPIFixture(t, false) // disabled mode ⇒ synthetic admin identity
+	client := &apiClient{t: t, router: router}
+
+	cases := []struct {
+		method, path string
+		body         any
+	}{
+		{http.MethodPost, "/api/v1/auth/tokens", map[string]any{"name": "pwn"}},
+		{http.MethodGet, "/api/v1/auth/tokens", nil},
+		{http.MethodGet, "/api/v1/auth/sessions", nil},
+		{http.MethodPatch, "/api/v1/auth/password", map[string]any{"current_password": "x", "new_password": "password123"}},
+		{http.MethodPost, "/api/v1/users", map[string]any{"email": "evil@b.c", "password": "password123", "role": "admin"}},
+		{http.MethodGet, "/api/v1/users", nil},
+		{http.MethodPost, "/api/v1/auth/invites", map[string]any{"email": "evil@b.c"}},
+	}
+	for _, tc := range cases {
+		rec := client.do(tc.method, tc.path, tc.body)
+		if rec.Code != http.StatusNotFound {
+			t.Errorf("%s %s under disabled auth: %d, want 404", tc.method, tc.path, rec.Code)
+		}
+	}
+	// Public bootstrap routes stay reachable while disabled.
+	if rec := client.do(http.MethodGet, "/api/v1/auth/me", nil); rec.Code != http.StatusOK {
+		t.Errorf("/me under disabled auth: %d, want 200", rec.Code)
+	}
+}
+
 func TestValidationErrors(t *testing.T) {
 	router, _ := newAPIFixture(t, true)
 	client := &apiClient{t: t, router: router}
