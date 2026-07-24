@@ -1,7 +1,7 @@
 ---
 id: "01-schema-and-repository"
 title: "Review run/finding schema, models, and repository"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

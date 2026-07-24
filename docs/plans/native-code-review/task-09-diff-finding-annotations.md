@@ -1,7 +1,7 @@
 ---
 id: "09-diff-finding-annotations"
 title: "Render findings as anchored diff annotations, with stale handling"
-status: pending
+status: done
 wave: 6
 depends_on: ["08-frontend-state-and-types"]
 plan: "plan.md"

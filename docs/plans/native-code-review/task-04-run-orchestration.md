@@ -1,7 +1,7 @@
 ---
 id: "04-run-orchestration"
 title: "Review run orchestration: resolver, batching, prompt, parser"
-status: pending
+status: done
 wave: 3
 depends_on: ["02-djb2-and-diff-collection", "03-review-service-and-events"]
 plan: "plan.md"

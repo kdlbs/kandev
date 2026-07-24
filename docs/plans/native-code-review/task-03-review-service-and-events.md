@@ -1,7 +1,7 @@
 ---
 id: "03-review-service-and-events"
 title: "ReviewService, validation, and bus/WS events"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-schema-and-repository"]
 plan: "plan.md"

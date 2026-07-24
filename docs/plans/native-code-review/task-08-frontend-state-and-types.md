@@ -1,7 +1,7 @@
 ---
 id: "08-frontend-state-and-types"
 title: "Frontend review types, API client, store slice, WS handlers, helpers"
-status: pending
+status: done
 wave: 5
 depends_on: ["06-ws-actions-and-dtos"]
 plan: "plan.md"

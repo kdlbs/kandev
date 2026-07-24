@@ -1,7 +1,7 @@
 ---
 id: "07-workflow-step-action"
 title: "run_code_review workflow step entry action"
-status: pending
+status: done
 wave: 4
 depends_on: ["04-run-orchestration"]
 plan: "plan.md"

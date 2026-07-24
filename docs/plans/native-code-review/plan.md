@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/native-code-review/spec.md
 created: 2026-07-24
-status: draft
+status: building
 ---
 
 # Implementation Plan: Native Code Review
@@ -126,25 +126,25 @@ Findings are a new task-scoped persisted entity that reuses the existing anchore
 
 ```
 Wave 1 (parallel):
-- [ ] [task-01-schema-and-repository](task-01-schema-and-repository.md)
-- [ ] [task-02-djb2-and-diff-collection](task-02-djb2-and-diff-collection.md)
+- [x] [task-01-schema-and-repository](task-01-schema-and-repository.md)
+- [x] [task-02-djb2-and-diff-collection](task-02-djb2-and-diff-collection.md)
 
 Wave 2:
-- [ ] [task-03-review-service-and-events](task-03-review-service-and-events.md)
+- [x] [task-03-review-service-and-events](task-03-review-service-and-events.md)
 
 Wave 3 (parallel):
-- [ ] [task-04-run-orchestration](task-04-run-orchestration.md)
-- [ ] [task-05-mcp-publish-tool](task-05-mcp-publish-tool.md)
+- [x] [task-04-run-orchestration](task-04-run-orchestration.md)
+- [x] [task-05-mcp-publish-tool](task-05-mcp-publish-tool.md)
 
 Wave 4 (parallel):
-- [ ] [task-06-ws-actions-and-dtos](task-06-ws-actions-and-dtos.md)
-- [ ] [task-07-workflow-step-action](task-07-workflow-step-action.md)
+- [x] [task-06-ws-actions-and-dtos](task-06-ws-actions-and-dtos.md)
+- [x] [task-07-workflow-step-action](task-07-workflow-step-action.md)
 
 Wave 5:
-- [ ] [task-08-frontend-state-and-types](task-08-frontend-state-and-types.md)
+- [x] [task-08-frontend-state-and-types](task-08-frontend-state-and-types.md)
 
 Wave 6:
-- [ ] [task-09-diff-finding-annotations](task-09-diff-finding-annotations.md)
+- [x] [task-09-diff-finding-annotations](task-09-diff-finding-annotations.md)
 
 Wave 7:
 - [ ] [task-10-review-surface-controls](task-10-review-surface-controls.md)

@@ -1,7 +1,7 @@
 ---
 id: "02-djb2-and-diff-collection"
 title: "Go djb2 hash and task changed-file collection"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

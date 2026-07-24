@@ -1,7 +1,7 @@
 ---
 id: "05-mcp-publish-tool"
 title: "publish_review_findings_kandev MCP tool"
-status: pending
+status: done
 wave: 3
 depends_on: ["03-review-service-and-events"]
 plan: "plan.md"

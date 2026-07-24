@@ -1,7 +1,7 @@
 ---
 id: "06-ws-actions-and-dtos"
 title: "Review WS actions, DTOs, and E2E reset cascade"
-status: pending
+status: done
 wave: 4
 depends_on: ["04-run-orchestration"]
 plan: "plan.md"
