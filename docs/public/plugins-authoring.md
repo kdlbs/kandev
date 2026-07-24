@@ -308,6 +308,9 @@ interface PluginRegistry {
   registerComponent(slot: string, Component: React.ComponentType<{ slotProps?: unknown }>): void;
   // WS action handler, bridged into the existing lib/ws dispatch.
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
+  // Bind a handler to a keybinding declared in this plugin's manifest
+  // (ui.keybindings[].id). See "Keybindings" below.
+  registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
 }
 
 interface NavItem {
@@ -364,6 +367,19 @@ interface PluginHostApi {
   theme: "light" | "dark";
   // Soft SPA navigation (history push/replace), same as the app's own router.
   navigate(href: string, options?: { replace?: boolean }): void;
+  // Imperatively opens a modal window. See "Modal windows" below.
+  openModal(options: PluginModalOptions): PluginModalHandle;
+}
+
+interface PluginModalOptions {
+  title?: string;                     // rendered in DialogHeader/DialogTitle; omit for no title
+  content: React.ComponentType;       // reuses the slot-component contract
+  size?: "sm" | "md" | "lg" | "xl";    // default "md"
+  dismissible?: boolean;               // overlay click / Escape; default true
+}
+
+interface PluginModalHandle {
+  close(): void; // no-op if already closed
 }
 ```
 
@@ -380,6 +396,28 @@ here for routes that opt out and render their own chrome), and
 `TaskCreateDialog`, so a plugin can hand off task creation to kandev's real
 create-task flow (repo/branch/agent pickers, validation) instead of POSTing
 directly. See `apps/web/lib/plugins/host-api.ts` for the exact current list.
+
+### Modal windows
+
+`host.openModal(options)` imperatively opens a host-owned Dialog — rendered
+by a `<PluginModalHost/>` mounted once at the app root, isolated behind its
+own error boundary, and auto-closed if the plugin is disabled or uninstalled
+while it's open. It's independent of keybindings: call it from a keybinding
+handler, a nav route, a slot component, or a WS handler. It complements the
+declarative `host.ui.Dialog` — reach for `host.ui.Dialog` when a dialog is
+embedded in a slot's own render tree, and `host.openModal` when you need to
+pop one open imperatively from anywhere in your plugin's code.
+
+```js
+const handle = host.openModal({
+  title: "Acme settings",
+  content: SettingsPanel,
+  size: "lg",
+});
+
+// later, e.g. after the panel calls back on save:
+handle.close();
+```
 
 ## Named slots
 
@@ -593,6 +631,39 @@ ordering API. Enable, disable, and uninstall update the live surface without a
 reload, and each contribution has its own error boundary. A full-bleed route
 (`topbar: false`) owns its own chrome; mount the host Status trigger there if that
 route should expose Status.
+
+## Keybindings
+
+Declare each keybinding in `manifest.yaml`'s `ui.keybindings` (requires
+`ui.bundle`), then bind a handler at runtime with `registry.registerKeybinding`:
+
+```yaml
+ui:
+  bundle: "/ui/bundle.js"
+  keybindings:
+    - id: "open-panel"                    # plugin-local slug: ^[a-z0-9][a-z0-9-]*$
+      default: "mod+shift+j"              # combo grammar, see below
+      description: "Open the Acme panel"
+```
+
+```js
+registry.registerKeybinding("open-panel", () => {
+  host.openModal({ title: "Acme panel", content: AcmePanel });
+});
+```
+
+The `default` combo is `+`-separated: zero or more modifiers from
+`mod | ctrl | cmd | meta | alt | option | shift` (`mod` resolves to ⌘ on
+macOS and Ctrl elsewhere) plus exactly one non-modifier key. `shift` may not
+combine with a digit or symbol key — the browser reports the shifted glyph
+for those keys (e.g. `shift+1` reports `!`), so the combo could never match.
+
+A plugin keybinding is **user-overridable** at **Settings > Keyboard
+Shortcuts**, namespaced `plugin:{pluginId}:{id}` so two plugins can each
+declare their own `open-panel` id without colliding. If a plugin's effective
+combo conflicts with a core kandev shortcut, the core shortcut always wins —
+the plugin handler is skipped for that combo — and the conflict is surfaced
+in that same settings page so the user can rebind it.
 
 ## Three integration patterns
 
