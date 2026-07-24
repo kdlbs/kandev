@@ -12,25 +12,22 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
-	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
-// provideAuthService wires the opt-in authentication service: mode state from
-// the system settings store, credentials from the auth store, accounts from
-// the user store, and the setup-wizard ownership backfills.
+// provideAuthService wires the opt-in authentication service. Whether auth is
+// enforced is read from cfg.Features.Auth (the `features.auth` runtime flag,
+// already resolved at startup); credentials come from the auth store, accounts
+// from the user store, and the setup-wizard ownership backfills from task +
+// secrets. dbPool is retained for signature symmetry with the other providers.
 func provideAuthService(
 	ctx context.Context,
 	cfg *config.Config,
-	dbPool *db.Pool,
+	_ *db.Pool,
 	repos *Repositories,
 	log *logger.Logger,
 ) (*auth.Service, error) {
-	settingsStore, err := systemsettings.NewStore(dbPool)
-	if err != nil {
-		return nil, err
-	}
 	backfills := []auth.BackfillFunc{
 		// Pre-auth workspaces (owner_id='') become the admin's at setup.
 		repos.Task.ClaimUnownedWorkspaces,
@@ -46,7 +43,6 @@ func provideAuthService(
 		Cfg:       cfg,
 		Store:     repos.Auth,
 		Users:     repos.UserAccounts,
-		Settings:  settingsStore,
 		Backfills: backfills,
 		Log:       log,
 	})
@@ -108,6 +104,7 @@ func warnIfExposedWithoutAuth(cfg *config.Config, svc *auth.Service, log *logger
 		return
 	}
 	log.Warn("server is reachable on non-loopback interfaces WITHOUT authentication; "+
-		"enable it in Settings > System > Authentication or set KANDEV_AUTH_REQUIRED=true",
+		"enable the Authentication feature toggle (Settings > System > Feature Toggles) "+
+		"or set KANDEV_FEATURES_AUTH=true",
 		zap.Strings("binds", binds))
 }

@@ -132,41 +132,6 @@ func (h *Handlers) acceptInvite(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
-// --- auth settings (enable/disable) ---
-
-func (h *Handlers) getSettings(c *gin.Context) {
-	c.JSON(http.StatusOK, gin.H{
-		"mode":         h.svc.Mode(),
-		"env_required": h.svc.EnvRequired(),
-	})
-}
-
-type patchSettingsRequest struct {
-	Enabled *bool `json:"enabled"`
-}
-
-func (h *Handlers) patchSettings(c *gin.Context) {
-	var req patchSettingsRequest
-	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
-		return
-	}
-	if !*req.Enabled && h.svc.EnvRequired() {
-		c.JSON(http.StatusConflict, gin.H{"error": "authentication is required by KANDEV_AUTH_REQUIRED and cannot be disabled from settings"})
-		return
-	}
-	mode, err := h.svc.SetEnabled(c.Request.Context(), *req.Enabled)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update auth settings"})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"mode":           mode,
-		"env_required":   h.svc.EnvRequired(),
-		"setup_required": mode == "setup",
-	})
-}
-
 // --- admin user management ---
 
 type createUserRequest struct {

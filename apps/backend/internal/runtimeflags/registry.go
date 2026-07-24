@@ -45,13 +45,14 @@ var definitions = []RuntimeFlagDefinition{
 		Key:         featureAuthKey,
 		EnvVar:      envFeaturesAuth,
 		Kind:        KindFeature,
-		Label:       "Authentication",
-		Description: "Shows the opt-in authentication and multi-user settings surfaces (Users, Authentication, Account).",
+		Label:       "Authentication & users",
+		Description: "Requires every visitor to sign in and gives each user their own private workspaces. The first person to sign in after enabling becomes the admin.",
 		Stability:   StabilityExperimental,
-		RiskLevel:   RiskMedium,
-		RiskDescription: "This flag only reveals the authentication management UI. Turning it off does NOT " +
-			"disable enforcement for an instance where authentication was already enabled — that is " +
-			"controlled from Settings > System > Authentication (or KANDEV_AUTH_REQUIRED).",
+		RiskLevel:   RiskHigh,
+		RiskDescription: "Turning this ON locks the instance behind a login after restart — the first visitor " +
+			"completes a setup wizard and becomes the admin, and existing workspaces/secrets are assigned to " +
+			"them. Turning it OFF after restart makes the instance open to anyone who can reach it again. " +
+			"Enable it before exposing kandev on a shared or public network.",
 		RestartRequired: true,
 		Mutable:         true,
 	},

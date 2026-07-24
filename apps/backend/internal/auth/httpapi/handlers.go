@@ -15,11 +15,12 @@
 //	DELETE /api/v1/auth/invites/:id      admin
 //	GET    /api/v1/auth/invites/preview  public (token inspection for the accept page)
 //	POST   /api/v1/auth/invites/accept   public
-//	GET    /api/v1/auth/settings         admin
-//	PATCH  /api/v1/auth/settings         admin (enable/disable authentication)
 //	GET    /api/v1/users                 admin
 //	POST   /api/v1/users                 admin
 //	PATCH  /api/v1/users/:id             admin
+//
+// Authentication is enabled/disabled through the `features.auth` runtime flag
+// (Settings > System > Feature Toggles), not an endpoint here.
 package httpapi
 
 import (
@@ -60,8 +61,6 @@ func RegisterRoutes(router *gin.Engine, svc *auth.Service, log *logger.Logger) {
 	admin.GET("/invites", h.listInvites)
 	admin.POST("/invites", h.createInvite)
 	admin.DELETE("/invites/:id", h.deleteInvite)
-	admin.GET("/settings", h.getSettings)
-	admin.PATCH("/settings", h.patchSettings)
 
 	users := router.Group("/api/v1/users", authn.RequireAdmin())
 	users.GET("", h.listUsers)

@@ -14,10 +14,14 @@ a login screen or any behavioral change.
 
 ## Decision
 
-1. **Opt-in via mode state machine** (`disabled` → `setup` → `enabled`),
-   persisted in the system settings store (`auth.mode`) and force-enabled by
-   `KANDEV_AUTH_REQUIRED=true`. The `KANDEV_FEATURES_AUTH` flag gates only
-   the settings UI surfaces, never enforcement.
+1. **Opt-in via the `features.auth` runtime feature toggle**, resolved into
+   `cfg.Features.Auth` at startup (env `KANDEV_FEATURES_AUTH` > DB override >
+   profile default). The effective mode is *derived* from it, not persisted
+   separately: `flag off → disabled`, `flag on + no admin → setup`, `flag on
+   + admin exists → enabled`. Enablement lives in the existing Feature Toggles
+   system — there is no bespoke `auth.mode` setting or Authentication page.
+   (An earlier iteration split "reveal UI" and "enforce" into two controls;
+   they were collapsed into the one flag.)
 2. **Synthetic identity in disabled mode.** The global HTTP middleware (and
    WS gateway) inject `Identity{default-user, admin, Synthetic}` when auth is
    off. Downstream code branches on identity, never on mode — internal

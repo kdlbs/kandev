@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -21,31 +20,10 @@ import (
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
-type fakeSettings struct {
-	mu     sync.Mutex
-	values map[string][]byte
-}
-
-func (f *fakeSettings) Get(_ context.Context, key string) ([]byte, bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	v, ok := f.values[key]
-	return v, ok, nil
-}
-
-func (f *fakeSettings) Save(_ context.Context, key string, value []byte) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.values == nil {
-		f.values = map[string][]byte{}
-	}
-	f.values[key] = value
-	return nil
-}
-
 // newAPIFixture builds the full production HTTP stack for auth: global
-// middleware + auth API routes on one router.
-func newAPIFixture(t *testing.T) (*gin.Engine, *auth.Service) {
+// middleware + auth API routes on one router. authEnabled maps to the
+// features.auth flag (on ⇒ setup mode until the wizard runs).
+func newAPIFixture(t *testing.T, authEnabled bool) (*gin.Engine, *auth.Service) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	conn, err := sqlx.Open("sqlite3", ":memory:")
@@ -63,9 +41,10 @@ func newAPIFixture(t *testing.T) (*gin.Engine, *auth.Service) {
 		t.Fatalf("auth store: %v", err)
 	}
 	cfg := &config.Config{}
+	cfg.Features.Auth = authEnabled
 	cfg.Auth.SessionTTLHours = 720
 	svc, err := auth.NewService(context.Background(), auth.Deps{
-		Cfg: cfg, Store: store, Users: users, Settings: &fakeSettings{},
+		Cfg: cfg, Store: store, Users: users,
 	})
 	if err != nil {
 		t.Fatalf("auth service: %v", err)
@@ -123,34 +102,22 @@ func decode(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
 	return out
 }
 
-// TestFullLifecycle drives the entire opt-in flow through HTTP:
-// disabled → enable (synthetic admin) → setup wizard → cookie session →
-// invite a member → member login and restrictions → logout.
+// TestFullLifecycle drives the opt-in flow through HTTP with the features.auth
+// flag on: setup mode → wizard → cookie session → invite a member → member
+// restrictions → logout. Enabling/disabling auth itself is a runtime feature
+// flag (Feature Toggles), not an API call, so it is not exercised here.
 func TestFullLifecycle(t *testing.T) {
-	router, svc := newAPIFixture(t)
+	router, _ := newAPIFixture(t, true)
 	client := &apiClient{t: t, router: router}
 
-	// Disabled mode: /auth/me reports the synthetic admin.
-	rec := client.do(http.MethodGet, "/api/v1/auth/me", nil)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("me: %d", rec.Code)
-	}
-	me := decode(t, rec)
-	if me["mode"] != "disabled" || me["authenticated"] != true {
-		t.Fatalf("disabled-mode me = %v", me)
-	}
-
-	// Enable auth (synthetic admin is allowed to).
-	rec = client.do(http.MethodPatch, "/api/v1/auth/settings", map[string]any{"enabled": true})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("enable: %d body=%s", rec.Code, rec.Body.String())
-	}
-	if body := decode(t, rec); body["setup_required"] != true {
-		t.Fatalf("expected setup_required, got %v", body)
+	// Setup mode: anonymous /auth/me reports it, protected APIs are blocked.
+	me := decode(t, client.do(http.MethodGet, "/api/v1/auth/me", nil))
+	if me["mode"] != "setup" || me["authenticated"] != false {
+		t.Fatalf("setup-mode me = %v", me)
 	}
 
 	// Setup wizard creates the admin and sets the session cookie.
-	rec = client.do(http.MethodPost, "/api/v1/auth/setup", map[string]any{
+	rec := client.do(http.MethodPost, "/api/v1/auth/setup", map[string]any{
 		"email": "admin@x.dev", "password": "adminpass123", "display_name": "Admin",
 	})
 	if rec.Code != http.StatusOK {
@@ -196,8 +163,8 @@ func TestFullLifecycle(t *testing.T) {
 	if rec := member.do(http.MethodGet, "/api/v1/users", nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("member list users: %d, want 403", rec.Code)
 	}
-	if rec := member.do(http.MethodPatch, "/api/v1/auth/settings", map[string]any{"enabled": false}); rec.Code != http.StatusForbidden {
-		t.Fatalf("member disable auth: %d, want 403", rec.Code)
+	if rec := member.do(http.MethodPost, "/api/v1/auth/invites", map[string]any{"role": "admin"}); rec.Code != http.StatusForbidden {
+		t.Fatalf("member create invite: %d, want 403", rec.Code)
 	}
 
 	// Member self-service: PAT mint + list.
@@ -223,24 +190,11 @@ func TestFullLifecycle(t *testing.T) {
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("bad login: %d", rec.Code)
 	}
-
-	// Admin disables auth again — back to disabled mode.
-	rec = client.do(http.MethodPatch, "/api/v1/auth/settings", map[string]any{"enabled": false})
-	if rec.Code != http.StatusOK {
-		t.Fatalf("disable: %d", rec.Code)
-	}
-	if svc.Mode() != auth.ModeDisabled {
-		t.Fatalf("mode = %s, want disabled", svc.Mode())
-	}
-	anonymous := &apiClient{t: t, router: router}
-	me = decode(t, anonymous.do(http.MethodGet, "/api/v1/auth/me", nil))
-	if me["mode"] != "disabled" || me["authenticated"] != true {
-		t.Fatalf("post-disable me = %v", me)
-	}
 }
 
-func TestSetupRejectedWhenNotInSetupMode(t *testing.T) {
-	router, _ := newAPIFixture(t)
+func TestSetupRejectedWhenDisabled(t *testing.T) {
+	// Flag off ⇒ disabled mode ⇒ setup unavailable.
+	router, _ := newAPIFixture(t, false)
 	client := &apiClient{t: t, router: router}
 	rec := client.do(http.MethodPost, "/api/v1/auth/setup", map[string]any{"email": "a@b.c", "password": "password123"})
 	if rec.Code != http.StatusConflict {
@@ -249,10 +203,7 @@ func TestSetupRejectedWhenNotInSetupMode(t *testing.T) {
 }
 
 func TestValidationErrors(t *testing.T) {
-	router, svc := newAPIFixture(t)
-	if _, err := svc.SetEnabled(context.Background(), true); err != nil {
-		t.Fatal(err)
-	}
+	router, _ := newAPIFixture(t, true)
 	client := &apiClient{t: t, router: router}
 	rec := client.do(http.MethodPost, "/api/v1/auth/setup", map[string]any{"email": "not-an-email", "password": "password123"})
 	if rec.Code != http.StatusBadRequest {

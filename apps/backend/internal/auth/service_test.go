@@ -3,7 +3,6 @@ package auth
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -15,36 +14,13 @@ import (
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
-type fakeSettings struct {
-	mu     sync.Mutex
-	values map[string][]byte
-}
-
-func (f *fakeSettings) Get(_ context.Context, key string) ([]byte, bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	v, ok := f.values[key]
-	return v, ok, nil
-}
-
-func (f *fakeSettings) Save(_ context.Context, key string, value []byte) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.values == nil {
-		f.values = map[string][]byte{}
-	}
-	f.values[key] = value
-	return nil
-}
-
 type serviceFixture struct {
 	svc       *Service
 	users     userstore.Repository
-	settings  *fakeSettings
 	backfills *[]string
 }
 
-func newServiceFixture(t *testing.T, required bool) *serviceFixture {
+func newServiceFixture(t *testing.T, authEnabled bool) *serviceFixture {
 	t.Helper()
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -60,16 +36,14 @@ func newServiceFixture(t *testing.T, required bool) *serviceFixture {
 	if err != nil {
 		t.Fatalf("auth store: %v", err)
 	}
-	settings := &fakeSettings{}
 	claimed := []string{}
 	cfg := &config.Config{}
-	cfg.Auth.Required = required
+	cfg.Features.Auth = authEnabled
 	cfg.Auth.SessionTTLHours = 720
 	svc, err := NewService(context.Background(), Deps{
-		Cfg:      cfg,
-		Store:    authStore,
-		Users:    users,
-		Settings: settings,
+		Cfg:   cfg,
+		Store: authStore,
+		Users: users,
 		Backfills: []BackfillFunc{func(_ context.Context, ownerID string) error {
 			claimed = append(claimed, ownerID)
 			return nil
@@ -78,7 +52,17 @@ func newServiceFixture(t *testing.T, required bool) *serviceFixture {
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	return &serviceFixture{svc: svc, users: users, settings: settings, backfills: &claimed}
+	return &serviceFixture{svc: svc, users: users, backfills: &claimed}
+}
+
+// enableAuth flips the features.auth flag on and recomputes the mode, the way
+// a restart with the runtime flag enabled would.
+func enableAuth(t *testing.T, f *serviceFixture) {
+	t.Helper()
+	f.svc.cfg.Features.Auth = true
+	if err := f.svc.refreshMode(context.Background()); err != nil {
+		t.Fatalf("refresh mode: %v", err)
+	}
 }
 
 func TestModeDisabledByDefault(t *testing.T) {
@@ -88,23 +72,20 @@ func TestModeDisabledByDefault(t *testing.T) {
 	}
 }
 
-func TestModeSetupWhenRequiredWithoutAdmin(t *testing.T) {
+func TestModeSetupWhenEnabledWithoutAdmin(t *testing.T) {
 	f := newServiceFixture(t, true)
 	if got := f.svc.Mode(); got != ModeSetup {
 		t.Fatalf("mode = %s, want setup", got)
 	}
 }
 
-func TestSetEnabledEntersSetupThenSetupPromotesDefaultUser(t *testing.T) {
+func TestEnableThenSetupPromotesDefaultUser(t *testing.T) {
 	f := newServiceFixture(t, false)
 	ctx := context.Background()
 
-	mode, err := f.svc.SetEnabled(ctx, true)
-	if err != nil {
-		t.Fatalf("set enabled: %v", err)
-	}
-	if mode != ModeSetup {
-		t.Fatalf("mode = %s, want setup", mode)
+	enableAuth(t, f)
+	if f.svc.Mode() != ModeSetup {
+		t.Fatalf("mode = %s, want setup", f.svc.Mode())
 	}
 
 	user, token, err := f.svc.Setup(ctx, "Admin@Example.com", "hunter2secure", "The Admin", "ua", "127.0.0.1")
@@ -136,11 +117,8 @@ func TestSetEnabledEntersSetupThenSetupPromotesDefaultUser(t *testing.T) {
 
 func setupEnabled(t *testing.T, f *serviceFixture) {
 	t.Helper()
-	ctx := context.Background()
-	if _, err := f.svc.SetEnabled(ctx, true); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := f.svc.Setup(ctx, "admin@x.dev", "adminpass123", "Admin", "", ""); err != nil {
+	enableAuth(t, f)
+	if _, _, err := f.svc.Setup(context.Background(), "admin@x.dev", "adminpass123", "Admin", "", ""); err != nil {
 		t.Fatal(err)
 	}
 }

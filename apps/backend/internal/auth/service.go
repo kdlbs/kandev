@@ -37,12 +37,7 @@ const (
 	ModeEnabled Mode = "enabled"
 )
 
-// settingsKeyMode is the system-settings key persisting the opt-in toggle.
-const settingsKeyMode = "auth.mode"
-
 const (
-	modeValueEnabled = "enabled"
-
 	minPasswordLength = 8
 
 	loginRateWindow   = 5 * time.Minute
@@ -65,12 +60,6 @@ var (
 	ErrValidation         = errors.New("invalid input")
 )
 
-// SettingsStore is the narrow slice of internal/system/settings used here.
-type SettingsStore interface {
-	Get(ctx context.Context, key string) ([]byte, bool, error)
-	Save(ctx context.Context, key string, value []byte) error
-}
-
 // BackfillFunc claims pre-auth unowned resources (workspaces, secrets) for the
 // admin created by the setup wizard. Wired in backendapp to avoid coupling the
 // auth service to the task/secrets packages.
@@ -81,17 +70,21 @@ type Deps struct {
 	Cfg       *config.Config
 	Store     *store.Store
 	Users     userstore.AccountRepository
-	Settings  SettingsStore
 	Backfills []BackfillFunc
 	Log       *logger.Logger
 }
 
 // Service implements authentication flows and mode resolution.
+//
+// Authentication is turned on/off through the `features.auth` runtime feature
+// flag (Settings > System > Feature Toggles, or KANDEV_FEATURES_AUTH). The
+// effective flag value has already been resolved into cfg.Features.Auth at
+// startup (env > DB override > profile default), so the service simply reads
+// it — there is no separate auth-enable setting.
 type Service struct {
 	cfg       *config.Config
 	store     *store.Store
 	users     userstore.AccountRepository
-	settings  SettingsStore
 	backfills []BackfillFunc
 	log       *logger.Logger
 	limiter   *loginLimiter
@@ -116,7 +109,6 @@ func NewService(ctx context.Context, deps Deps) (*Service, error) {
 		cfg:       deps.Cfg,
 		store:     deps.Store,
 		users:     deps.Users,
-		settings:  deps.Settings,
 		backfills: deps.Backfills,
 		log:       deps.Log,
 		limiter:   newLoginLimiter(loginRateWindow, loginRateAttempts),
@@ -153,18 +145,14 @@ func (s *Service) SessionTTL() time.Duration {
 	return time.Duration(hours) * time.Hour
 }
 
-// refreshMode recomputes the mode cache from env + persisted setting + the
-// presence of an admin identity.
+// refreshMode recomputes the mode cache from the effective `features.auth`
+// flag and the presence of an admin identity:
+//
+//	flag off              → Disabled (single-user, today's behavior)
+//	flag on, no admin yet → Setup    (first visitor runs the wizard)
+//	flag on, admin exists → Enabled
 func (s *Service) refreshMode(ctx context.Context) error {
-	required := s.cfg.Auth.Required
-	if !required {
-		raw, ok, err := s.settings.Get(ctx, settingsKeyMode)
-		if err != nil {
-			return err
-		}
-		required = ok && strings.TrimSpace(string(raw)) == modeValueEnabled
-	}
-	if !required {
+	if !s.cfg.Features.Auth {
 		s.mode.Store(ModeDisabled)
 		return nil
 	}
@@ -179,27 +167,6 @@ func (s *Service) refreshMode(ctx context.Context) error {
 	}
 	return nil
 }
-
-// SetEnabled flips the persisted opt-in toggle and returns the new mode.
-// Enabling on an instance with no admin identity yields ModeSetup — the
-// caller should immediately run the setup wizard.
-func (s *Service) SetEnabled(ctx context.Context, enabled bool) (Mode, error) {
-	value := "disabled"
-	if enabled {
-		value = modeValueEnabled
-	}
-	if err := s.settings.Save(ctx, settingsKeyMode, []byte(value)); err != nil {
-		return s.Mode(), err
-	}
-	if err := s.refreshMode(ctx); err != nil {
-		return s.Mode(), err
-	}
-	return s.Mode(), nil
-}
-
-// EnvRequired reports whether KANDEV_AUTH_REQUIRED forces authentication on
-// (the settings toggle cannot disable it then).
-func (s *Service) EnvRequired() bool { return s.cfg.Auth.Required }
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))

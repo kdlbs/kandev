@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -19,29 +18,9 @@ import (
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
-type fakeSettings struct {
-	mu     sync.Mutex
-	values map[string][]byte
-}
-
-func (f *fakeSettings) Get(_ context.Context, key string) ([]byte, bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	v, ok := f.values[key]
-	return v, ok, nil
-}
-
-func (f *fakeSettings) Save(_ context.Context, key string, value []byte) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.values == nil {
-		f.values = map[string][]byte{}
-	}
-	f.values[key] = value
-	return nil
-}
-
-func newTestService(t *testing.T) *auth.Service {
+// newTestService builds an auth service with the features.auth flag set to
+// authEnabled (on ⇒ setup mode until an admin is created via setupAdmin).
+func newTestService(t *testing.T, authEnabled bool) *auth.Service {
 	t.Helper()
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -58,9 +37,10 @@ func newTestService(t *testing.T) *auth.Service {
 		t.Fatalf("auth store: %v", err)
 	}
 	cfg := &config.Config{}
+	cfg.Features.Auth = authEnabled
 	cfg.Auth.SessionTTLHours = 720
 	svc, err := auth.NewService(context.Background(), auth.Deps{
-		Cfg: cfg, Store: store, Users: users, Settings: &fakeSettings{},
+		Cfg: cfg, Store: store, Users: users,
 	})
 	if err != nil {
 		t.Fatalf("auth service: %v", err)
@@ -96,13 +76,11 @@ func doRequest(router *gin.Engine, method, path string, mutate ...func(*http.Req
 	return rec
 }
 
-func enableWithAdmin(t *testing.T, svc *auth.Service) (cookieToken string) {
+// setupAdmin completes the setup wizard on a flag-on (setup-mode) service and
+// returns the admin's session-cookie token.
+func setupAdmin(t *testing.T, svc *auth.Service) (cookieToken string) {
 	t.Helper()
-	ctx := context.Background()
-	if _, err := svc.SetEnabled(ctx, true); err != nil {
-		t.Fatal(err)
-	}
-	_, token, err := svc.Setup(ctx, "admin@x.dev", "adminpass123", "Admin", "", "")
+	_, token, err := svc.Setup(context.Background(), "admin@x.dev", "adminpass123", "Admin", "", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +88,7 @@ func enableWithAdmin(t *testing.T, svc *auth.Service) (cookieToken string) {
 }
 
 func TestDisabledModeInjectsSyntheticAdmin(t *testing.T) {
-	svc := newTestService(t)
+	svc := newTestService(t, false)
 	router := newTestRouter(svc)
 
 	rec := doRequest(router, http.MethodGet, "/api/v1/probe")
@@ -124,8 +102,8 @@ func TestDisabledModeInjectsSyntheticAdmin(t *testing.T) {
 }
 
 func TestEnabledModeBlocksAPIWithoutCredentials(t *testing.T) {
-	svc := newTestService(t)
-	enableWithAdmin(t, svc)
+	svc := newTestService(t, true)
+	setupAdmin(t, svc)
 	router := newTestRouter(svc)
 
 	if rec := doRequest(router, http.MethodGet, "/api/v1/probe"); rec.Code != http.StatusUnauthorized {
@@ -134,8 +112,8 @@ func TestEnabledModeBlocksAPIWithoutCredentials(t *testing.T) {
 }
 
 func TestEnabledModeSessionCookieAuthenticates(t *testing.T) {
-	svc := newTestService(t)
-	token := enableWithAdmin(t, svc)
+	svc := newTestService(t, true)
+	token := setupAdmin(t, svc)
 	router := newTestRouter(svc)
 
 	rec := doRequest(router, http.MethodGet, "/api/v1/probe", func(r *http.Request) {
@@ -150,8 +128,8 @@ func TestEnabledModeSessionCookieAuthenticates(t *testing.T) {
 }
 
 func TestEnabledModePATAuthenticates(t *testing.T) {
-	svc := newTestService(t)
-	enableWithAdmin(t, svc)
+	svc := newTestService(t, true)
+	setupAdmin(t, svc)
 	_, pat, err := svc.MintToken(context.Background(), userstore.DefaultUserID, "ci", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -170,8 +148,8 @@ func TestEnabledModePATAuthenticates(t *testing.T) {
 // class from the plan's allowlist spec. 404 = middleware passed through
 // (route unregistered), 401 = middleware denied.
 func TestEnabledModeAllowlistMatrix(t *testing.T) {
-	svc := newTestService(t)
-	enableWithAdmin(t, svc)
+	svc := newTestService(t, true)
+	setupAdmin(t, svc)
 	router := newTestRouter(svc)
 
 	cases := []struct {
@@ -224,10 +202,8 @@ func TestEnabledModeAllowlistMatrix(t *testing.T) {
 }
 
 func TestSetupModeAllowsOnlyBootstrapSurfaces(t *testing.T) {
-	svc := newTestService(t)
-	if _, err := svc.SetEnabled(context.Background(), true); err != nil {
-		t.Fatal(err)
-	}
+	// Flag on but no admin yet ⇒ setup mode.
+	svc := newTestService(t, true)
 	if svc.Mode() != auth.ModeSetup {
 		t.Fatalf("mode = %s, want setup", svc.Mode())
 	}
@@ -245,8 +221,8 @@ func TestSetupModeAllowsOnlyBootstrapSurfaces(t *testing.T) {
 }
 
 func TestInvalidCredentialsAreRejected(t *testing.T) {
-	svc := newTestService(t)
-	enableWithAdmin(t, svc)
+	svc := newTestService(t, true)
+	setupAdmin(t, svc)
 	router := newTestRouter(svc)
 
 	rec := doRequest(router, http.MethodGet, "/api/v1/probe", func(r *http.Request) {

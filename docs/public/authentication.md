@@ -7,11 +7,11 @@ description: "Enable opt-in authentication, manage users and invites, and use pe
 
 Kandev ships as a single-user local tool with authentication **disabled** — nothing changes for laptop installs. When several people share one Kandev server, enable authentication to give each person their own account and their own private workspaces.
 
-> Feature flag: the authentication settings surfaces are gated by the `auth` feature toggle (`KANDEV_FEATURES_AUTH`) while the feature rolls out. Enforcement itself is controlled by the steps below, not by the flag.
+Authentication is a **runtime feature toggle** — the same system as the other feature flags — so there is no separate "Authentication" configuration page.
 
 ## What changes when authentication is on
 
-- Everyone signs in with email + password. Browser sessions last 30 days (sliding) and can be revoked from `Settings > Account`.
+- Everyone signs in with email + password. Browser sessions last 30 days (sliding) and can be revoked from `Settings > Account`. The signed-in user is shown in the bottom-left of the sidebar, with a log-out menu.
 - **Workspaces become per-user.** You only see workspaces you own — including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup.
 - Secrets are per-user. Executors, agent profiles, environments, and integration configuration remain shared across the instance.
 - Admins manage users and instance settings, but do **not** see other users' workspaces.
@@ -19,15 +19,17 @@ Kandev ships as a single-user local tool with authentication **disabled** — no
 
 ## Enabling authentication
 
-**From the UI:** open `Settings > System > Authentication` and turn it on. You are taken to the setup wizard — the account you create becomes the admin, and all existing workspaces, settings, and secrets carry over to it.
+**From the UI:** open `Settings > System > Feature Toggles`, turn on **Authentication & users**, and restart Kandev when prompted (it is a restart-required flag, like the other feature toggles). After the restart the instance is in setup mode: the setup wizard appears and the account you create becomes the admin. All existing workspaces, settings, and secrets carry over to that admin.
 
 **From the environment** (fresh servers, Docker, Kubernetes): set
 
 ```bash
-KANDEV_AUTH_REQUIRED=true
+KANDEV_FEATURES_AUTH=true
 ```
 
-The instance boots into setup mode: the **first visitor** creates the admin account. Complete the wizard immediately after deploying. With `KANDEV_AUTH_REQUIRED=true`, authentication cannot be disabled from the UI.
+The instance boots into setup mode and the **first visitor** creates the admin account. Complete the wizard immediately after deploying. When the flag is forced on by the environment variable, it cannot be turned off from the UI.
+
+To turn authentication **off** again, an admin flips the same toggle off (and restarts), or the environment variable is unset. Ownership data is retained.
 
 A server that listens on non-loopback interfaces with authentication disabled logs a startup warning.
 
@@ -61,7 +63,3 @@ External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configur
 - One owner per workspace — no sharing or team workspaces yet.
 - Local accounts only for now; the account model is ready for OIDC/SSO later.
 - Authentication does not replace TLS. Terminate HTTPS in front of Kandev (the session cookie is marked `Secure` when the request arrives over TLS or `X-Forwarded-Proto: https`).
-
-## Disabling again
-
-An admin can turn authentication off in `Settings > System > Authentication` (unless `KANDEV_AUTH_REQUIRED` forces it). Data and ownership are retained; everyone who can reach the instance has full access again.

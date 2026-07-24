@@ -17,14 +17,17 @@ the local single-user install with a login screen it never asked for.
 ## What
 
 - **Opt-in.** Authentication is OFF by default. A disabled instance behaves
-  byte-identically to pre-auth Kandev — no login, no visible auth UI beyond
-  the settings toggle (gated by the `auth` feature flag).
-- **Enablement.** An admin enables auth from `Settings > System >
-  Authentication`, or a deployment sets `KANDEV_AUTH_REQUIRED=true`. Either
-  path enters **setup mode**: the first visitor completes a wizard
-  (email + password) and becomes the admin. The wizard promotes the existing
-  single-user profile — settings, workspaces, and secrets carry over to the
-  admin account.
+  byte-identically to pre-auth Kandev — no login, no auth UI.
+- **Enablement is a runtime feature toggle.** Authentication is turned on/off
+  through the `features.auth` runtime flag ("Authentication & users" in
+  `Settings > System > Feature Toggles`, or `KANDEV_FEATURES_AUTH=true`) — a
+  restart-required flag like the other feature toggles, with no separate
+  Authentication settings page. Turning it on (and restarting) enters **setup
+  mode**: the first visitor completes a wizard (email + password) and becomes
+  the admin. The wizard promotes the existing single-user profile — settings,
+  workspaces, and secrets carry over to the admin account. The effective mode
+  is derived: `flag off → disabled`, `flag on + no admin → setup`,
+  `flag on + admin exists → enabled`.
 - **Accounts.** Local email + password (argon2id). The identity schema is
   provider-based so OIDC/SSO can be added later without migration. Roles:
   `admin` (user management, auth settings, destructive system operations,

@@ -18,8 +18,9 @@ test.describe.serial("auth screenshots", () => {
 
   test.beforeAll(async ({ backend }) => {
     fs.mkdirSync(SHOT_DIR, { recursive: true });
-    // Auth required + the settings-UI feature flag on so the admin surfaces render.
-    await backend.restart({ KANDEV_AUTH_REQUIRED: "true", KANDEV_FEATURES_AUTH: "true" });
+    // The features.auth flag turns authentication on (setup mode) and reveals
+    // the admin surfaces.
+    await backend.restart({ KANDEV_FEATURES_AUTH: "true" });
   });
 
   test.afterAll(async ({ backend }) => {
@@ -64,16 +65,18 @@ test.describe.serial("auth screenshots", () => {
     await ctx.close();
   });
 
-  test("03 authentication settings", async ({ browser, backend }) => {
+  test("03 feature toggles (auth control)", async ({ browser, backend }) => {
     const ctx = await browser.newContext({
       baseURL: backend.frontendUrl,
       viewport: { width: 1280, height: 900 },
     });
     await login(ctx, backend.baseUrl, ADMIN);
     const page = await ctx.newPage();
-    await page.goto("/settings/system/authentication");
-    await expect(page.getByTestId("authentication-settings-card")).toBeVisible({ timeout: 15_000 });
-    await shot(page, "04-settings-authentication");
+    // Authentication is enabled/disabled from the Feature Toggles page — the
+    // "Authentication & users" flag — not a dedicated settings section.
+    await page.goto("/settings/system/feature-toggles");
+    await expect(page.getByTestId("feature-toggles-settings")).toBeVisible({ timeout: 15_000 });
+    await shot(page, "04-feature-toggles");
     await ctx.close();
   });
 

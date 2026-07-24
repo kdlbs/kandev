@@ -11,7 +11,7 @@ import {
 
 /**
  * Opt-in authentication lifecycle. Runs in the dedicated `auth` Playwright
- * project: the worker's backend is restarted with KANDEV_AUTH_REQUIRED=true,
+ * project: the worker's backend is restarted with KANDEV_FEATURES_AUTH=true,
  * so it must never share a worker with the default suite (which assumes an
  * open backend). Serial: later tests depend on the admin created in setup.
  *
@@ -24,7 +24,7 @@ test.describe.serial("opt-in authentication", () => {
   const MEMBER = { email: "member@e2e.dev", password: "memberpass123", displayName: "Member" };
 
   test.beforeAll(async ({ backend }) => {
-    await backend.restart({ KANDEV_AUTH_REQUIRED: "true" });
+    await backend.restart({ KANDEV_FEATURES_AUTH: "true" });
   });
 
   test.afterAll(async ({ backend }) => {
@@ -224,10 +224,11 @@ test.describe.serial("opt-in authentication", () => {
     await login(memberContext, backend.baseUrl, MEMBER);
 
     expect((await memberContext.request.get(`${backend.baseUrl}/api/v1/users`)).status()).toBe(403);
+    // Admin-only invite creation is also forbidden for members.
     expect(
       (
-        await memberContext.request.patch(`${backend.baseUrl}/api/v1/auth/settings`, {
-          data: { enabled: false },
+        await memberContext.request.post(`${backend.baseUrl}/api/v1/auth/invites`, {
+          data: { role: "admin" },
         })
       ).status(),
     ).toBe(403);

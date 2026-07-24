@@ -52,9 +52,8 @@ func (s *Service) Setup(ctx context.Context, email, password, displayName, userA
 		// A concurrent setup already created the admin identity.
 		return nil, "", ErrSetupNotAvailable
 	}
-	if err := s.settings.Save(ctx, settingsKeyMode, []byte(modeValueEnabled)); err != nil {
-		return nil, "", err
-	}
+	// An admin identity now exists, so refreshMode derives Enabled from the
+	// (still-on) features.auth flag — no separate toggle to persist.
 	if err := s.refreshMode(ctx); err != nil {
 		return nil, "", err
 	}
@@ -63,7 +62,7 @@ func (s *Service) Setup(ctx context.Context, email, password, displayName, userA
 		return nil, "", err
 	}
 	if s.log != nil {
-		s.log.Info("authentication enabled via setup wizard", zap.String("admin_email", email))
+		s.log.Info("authentication setup completed", zap.String("admin_email", email))
 	}
 	return user, token, nil
 }

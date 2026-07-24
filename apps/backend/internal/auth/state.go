@@ -15,19 +15,15 @@ type StatePayload struct {
 	Mode string `json:"mode"`
 	// Authenticated is true when the request carried a valid session or PAT.
 	// Always true in disabled mode (synthetic single-user identity).
-	Authenticated bool `json:"authenticated"`
-	// EnvRequired marks KANDEV_AUTH_REQUIRED=true deployments: the settings
-	// toggle cannot disable authentication then.
-	EnvRequired bool             `json:"env_required"`
-	User        *usermodels.User `json:"user,omitempty"`
+	Authenticated bool             `json:"authenticated"`
+	User          *usermodels.User `json:"user,omitempty"`
 }
 
 // StateFor builds the StatePayload for a request identity (nil identity =
 // unauthenticated visitor).
 func (s *Service) StateFor(ctx context.Context, identity *authn.Identity) StatePayload {
 	payload := StatePayload{
-		Mode:        string(s.Mode()),
-		EnvRequired: s.EnvRequired(),
+		Mode: string(s.Mode()),
 	}
 	if identity == nil {
 		return payload

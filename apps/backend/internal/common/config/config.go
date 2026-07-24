@@ -296,16 +296,12 @@ type DockerConfig struct {
 	VolumeBasePath string `mapstructure:"volumeBasePath"`
 }
 
-// AuthConfig holds authentication configuration.
+// AuthConfig holds authentication configuration. Whether authentication is
+// enforced is controlled by the `features.auth` runtime flag
+// (KANDEV_FEATURES_AUTH), not here — these are only session-mechanics knobs.
 type AuthConfig struct {
 	JWTSecret     string `mapstructure:"jwtSecret"`
 	TokenDuration int    `mapstructure:"tokenDuration"` // in seconds
-
-	// Required forces user authentication regardless of the persisted
-	// `auth.mode` system setting. Set via KANDEV_AUTH_REQUIRED=true. When the
-	// instance has no admin identity yet, a required-auth boot enters setup
-	// mode (first visitor creates the admin account).
-	Required bool `mapstructure:"required"`
 
 	// SessionTTLHours is the sliding lifetime of a browser session. A session
 	// is extended whenever it is used with less than TTL-24h remaining.
@@ -363,11 +359,13 @@ type FeaturesConfig struct {
 	// keeps the config and KANDEV_FEATURES_APP_STATUS_BAR environment name aligned.
 	AppStatusBar bool `mapstructure:"app_status_bar" json:"appStatusBar"`
 
-	// Auth gates the opt-in authentication + multi-user settings surfaces
-	// (Settings > System > Users / Authentication, Settings > Account).
-	// Enforcement itself is driven by the persisted `auth.mode` system setting
-	// (or KANDEV_AUTH_REQUIRED), not by this flag — the flag only controls
-	// whether the UI to enable/manage authentication is visible.
+	// Auth is the on/off switch for opt-in authentication and per-user
+	// workspaces. When on, every visitor must sign in (the first becomes the
+	// admin via a setup wizard) and workspaces are private per user; the
+	// Users/Account settings surfaces also become visible. Set via the
+	// runtime feature toggle KANDEV_FEATURES_AUTH (Settings > System > Feature
+	// Toggles). Off by default so kandev stays single-user until a deployment
+	// opts in.
 	Auth bool `mapstructure:"auth" json:"auth"`
 }
 
@@ -526,8 +524,7 @@ func setDefaults(v *viper.Viper) {
 
 	// Auth defaults
 	v.SetDefault("auth.jwtSecret", "")
-	v.SetDefault("auth.tokenDuration", 3600) // 1 hour
-	v.SetDefault("auth.required", false)
+	v.SetDefault("auth.tokenDuration", 3600)  // 1 hour
 	v.SetDefault("auth.sessionTTLHours", 720) // 30 days, sliding
 	v.SetDefault("auth.cookieName", "kandev_session")
 

@@ -57,14 +57,14 @@ features:
     dev:  "false"
     e2e:  "true"
 
-  # Opt-in authentication + multi-user settings surfaces. The flag only
-  # reveals the Users/Authentication/Account settings UI; enforcement is the
-  # persisted `auth.mode` system setting (or KANDEV_AUTH_REQUIRED=true).
-  # Off in e2e: the default Playwright suite runs unauthenticated; the
-  # dedicated auth project opts in per-spec via backend.restart(env).
+  # Opt-in authentication + per-user workspaces. This flag IS the on/off
+  # switch: when on, every visitor must sign in (the first becomes admin via
+  # a setup wizard) and workspaces are private per user. Off everywhere by
+  # default so kandev stays single-user until a deployment opts in. The
+  # dedicated auth e2e project turns it on per-spec via backend.restart(env).
   KANDEV_FEATURES_AUTH:
     prod: "false"
-    dev:  "true"
+    dev:  "false"
     e2e:  "false"
 
 # ── Mock providers ────────────────────────────────────────────────
