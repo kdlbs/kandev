@@ -155,7 +155,7 @@ test.describe("sidebar scrolling", () => {
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
-    const scrollContainer = testPage.getByTestId("task-sidebar-scroll");
+    const scrollContainer = session.sidebar.getByTestId("task-sidebar-scroll");
     const taskRow = session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: longTitle });
     const titleText = taskRow.getByText(longTitle, { exact: true });
     const titleViewport = titleText.locator("..");
