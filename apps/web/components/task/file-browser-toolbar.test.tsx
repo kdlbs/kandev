@@ -38,7 +38,6 @@ describe("FileBrowserToolbar workspace actions", () => {
     );
 
     const trigger = screen.getByRole("button", { name: "Workspace actions" });
-    expect(trigger.className).toContain("min-h-11");
     fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
     fireEvent.click(trigger);
 

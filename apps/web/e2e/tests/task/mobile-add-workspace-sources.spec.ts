@@ -67,6 +67,8 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   const entryBox = await entryPoint.boundingBox();
   expect(entryBox).not.toBeNull();
   expect(entryBox!.height).toBeGreaterThanOrEqual(44);
+  expect(entryBox!.width).toBeGreaterThanOrEqual(44);
+  expect(entryBox!.width).toBeLessThanOrEqual(48);
   await entryPoint.tap();
   const addSources = testPage.getByRole("menuitem", { name: "Add sources" });
   const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
