@@ -121,6 +121,28 @@ func (s *Service) ResolveBearer(ctx context.Context, token string) (authn.Identi
 	return authn.Identity{UserID: user.ID, Role: roleOf(user), TokenID: record.ID}, true
 }
 
+// IdentityForUser resolves a stored user ID to the identity that user carries
+// on an authenticated request, without needing one of their credentials.
+//
+// It exists for callers that already know *whose* work they are performing but
+// have no request to authenticate: in-session agent MCP calls arrive over the
+// agent's own WebSocket stream, so the owning user is derived from the stream's
+// task rather than from a cookie or PAT (see internal/mcp/scope). The returned
+// identity is real — never synthetic — so per-user scoping applies to it.
+//
+// Returns false while authentication is disabled (callers keep the pre-auth
+// unscoped behavior) and when the account is missing or no longer active.
+func (s *Service) IdentityForUser(ctx context.Context, userID string) (authn.Identity, bool) {
+	if s == nil || userID == "" || s.Mode() == ModeDisabled {
+		return authn.Identity{}, false
+	}
+	user, err := s.activeUser(ctx, userID)
+	if err != nil {
+		return authn.Identity{}, false
+	}
+	return authn.Identity{UserID: user.ID, Role: roleOf(user)}, true
+}
+
 // ListSessions returns the user's sessions for the account page.
 func (s *Service) ListSessions(ctx context.Context, userID string) ([]*store.Session, error) {
 	return s.store.ListSessionsByUser(ctx, userID)

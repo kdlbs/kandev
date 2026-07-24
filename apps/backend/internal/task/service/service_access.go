@@ -13,8 +13,10 @@ import (
 // Every user-facing service entry point calls one of the authorize* helpers.
 // Scoping keys off the request-context identity placed there by the auth
 // middleware:
-//   - no identity in ctx  → internal caller (event bus, pollers, MCP stream,
-//     office schedulers) → unscoped, exactly as before the auth feature
+//   - no identity in ctx  → internal caller (event bus, pollers, office
+//     schedulers) → unscoped, exactly as before the auth feature. In-session
+//     agent MCP calls used to land here too; they now arrive with the task
+//     owner's identity attached by internal/mcp/scope.
 //   - synthetic identity  → auth disabled → unscoped (today's behavior)
 //   - real identity       → workspaces are visible only to their owner;
 //     rows with an empty owner_id (created pre-auth) stay visible to everyone

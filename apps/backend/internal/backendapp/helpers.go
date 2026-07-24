@@ -53,6 +53,7 @@ import (
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
@@ -1358,6 +1359,20 @@ func registerMCPAndDebugRoutes(
 
 	p.lifecycleMgr.SetMCPHandler(p.gateway.Dispatcher)
 	p.log.Debug("MCP handler configured for agent lifecycle manager")
+
+	// In-session MCP calls reach this same dispatcher over the agent's own WS
+	// stream, which carries no credential — so scope them to the user who owns
+	// the stream's task. Without this the handlers run with no identity, which
+	// the task service treats as an internal caller and serves unscoped.
+	if p.authSvc != nil {
+		p.lifecycleMgr.SetMCPIdentityScoper(mcpscope.NewResolver(
+			p.taskRepo,
+			p.authSvc,
+			func() bool { return p.authSvc.Mode() != auth.ModeDisabled },
+			p.log,
+		).Scope)
+		p.log.Debug("In-session MCP dispatch scoped to task owner")
+	}
 
 	// External MCP endpoint — exposes config tools + create_task to external coding
 	// agents (Claude Code, Cursor, etc.) at /mcp on the backend HTTP server.

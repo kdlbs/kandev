@@ -349,6 +349,22 @@ func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 	m.streamManager.mcpHandler = handler
 }
 
+// SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
+// tool calls.
+//
+// Unlike the external /mcp endpoint — where the agent presents a personal
+// access token and the auth middleware resolves the identity — MCP requests
+// relayed over an agent's own stream carry no credential. Without this hook
+// they reach the task service with no identity, which that service reads as an
+// internal caller and serves unscoped, so an agent supplying another user's
+// task_id or workflow_id would be given their data.
+//
+// Set once during startup wiring, before agents start making MCP calls. Leave
+// unset to keep dispatch unscoped (single-user instances).
+func (m *Manager) SetMCPIdentityScoper(scoper MCPIdentityScoper) {
+	m.streamManager.mcpIdentityScoper = scoper
+}
+
 // SetSessionAccessChecker installs the per-user session visibility check used
 // by GetOrEnsureExecution and EnsurePassthroughExecution. The checker must
 // return nil for contexts without a request identity (internal callers). Set
