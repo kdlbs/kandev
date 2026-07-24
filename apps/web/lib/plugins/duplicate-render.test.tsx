@@ -29,6 +29,7 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     ui: {},
     theme: "light",
     navigate: () => {},
+    openModal: () => ({ close: () => {} }),
   };
 }
 

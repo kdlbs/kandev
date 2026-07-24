@@ -488,6 +488,34 @@ describe("idempotent reload: no duplicate registrations without an explicit unlo
   });
 });
 
+describe("generation fence forwards every registry method, not just the slot ones", () => {
+  const PLUGIN_KEYBIND_ID = "plugin-keybind-a";
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_KEYBIND_ID);
+  });
+
+  it("forwards registerKeybinding (and any non-hardcoded register* method) through the fence so it is not dropped", async () => {
+    const handler = () => {};
+    const importer = fakeImporterFor({
+      [BUNDLE_JS_URL]: (win) =>
+        (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_KEYBIND_ID, {
+          initialize: (registry: PluginRegistry) => {
+            registry.registerKeybinding("open-modal", handler);
+          },
+        }),
+    });
+
+    await loadPlugins(
+      [activePlugin({ id: PLUGIN_KEYBIND_ID, bundleUrl: BUNDLE_JS_URL })],
+      makeHostFactory,
+      importer,
+    );
+
+    expect(pluginRegistry.getKeybindingHandlers().map((entry) => entry.id)).toContain("open-modal");
+  });
+});
+
 describe("overlapping loads for the same plugin: newest-initiated load wins", () => {
   const PLUGIN_CONC_A_ID = "plugin-conc-a";
   const PLUGIN_CONC_B_ID = "plugin-conc-b";

@@ -104,28 +104,25 @@ function isCurrentLoad(id: string, generation: number): boolean {
  * load has been superseded by a newer one (`isCurrent()` is false). Guards the
  * window where a plugin registers *after* an `await` inside `initialize()`: a
  * stale async initializer must not append onto the successor's registrations.
+ *
+ * Wraps every method reflectively rather than naming each one, so any register*
+ * added to the `PluginRegistry` contract (e.g. `registerKeybinding`) is fenced
+ * automatically instead of being silently dropped from the forwarded object.
  */
 function generationFencedRegistry(
   registry: PluginRegistry,
   isCurrent: () => boolean,
 ): PluginRegistry {
-  return {
-    registerRoute: (path, Component, options) => {
-      if (isCurrent()) registry.registerRoute(path, Component, options);
-    },
-    registerNavItem: (item) => {
-      if (isCurrent()) registry.registerNavItem(item);
-    },
-    registerSettingsRoute: (path, Component) => {
-      if (isCurrent()) registry.registerSettingsRoute(path, Component);
-    },
-    registerComponent: (slot, Component) => {
-      if (isCurrent()) registry.registerComponent(slot, Component);
-    },
-    registerWsHandler: (action, handler) => {
-      if (isCurrent()) registry.registerWsHandler(action, handler);
-    },
-  };
+  const fenced: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(registry)) {
+    fenced[key] =
+      typeof value === "function"
+        ? (...args: unknown[]) => {
+            if (isCurrent()) (value as (...callArgs: unknown[]) => unknown)(...args);
+          }
+        : value;
+  }
+  return fenced as unknown as PluginRegistry;
 }
 
 /** Defines `window.registerKandevPlugin` before any bundle loads. Idempotent. */
