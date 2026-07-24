@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -227,5 +229,38 @@ func mustExec(t *testing.T, db *sqlx.DB, stmt string) {
 	t.Helper()
 	if _, err := db.Exec(stmt); err != nil {
 		t.Fatalf("exec: %v", err)
+	}
+}
+
+// TestJSONShapeOmitsDigests pins the API wire shape: credential digests must
+// never serialize, and timestamp/name fields use snake_case keys the frontend
+// reads (regression for "Invalid Date" / empty name in the tokens UI).
+func TestJSONShapeOmitsDigests(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	token := &APIToken{ID: "t1", UserID: "u1", Name: "ci", Prefix: "ab12cd34", TokenHash: "SECRET_HASH", CreatedAt: now}
+	raw, err := json.Marshal(token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(raw)
+	if strings.Contains(got, "SECRET_HASH") || strings.Contains(got, "token_sha256") {
+		t.Fatalf("token hash leaked in JSON: %s", got)
+	}
+	for _, key := range []string{`"name":"ci"`, `"created_at":`, `"prefix":"ab12cd34"`} {
+		if !strings.Contains(got, key) {
+			t.Fatalf("missing %s in %s", key, got)
+		}
+	}
+
+	invite := &Invite{ID: "i1", TokenHash: "INV_HASH", Email: "a@b.c", Role: "member"}
+	rawInvite, _ := json.Marshal(invite)
+	if strings.Contains(string(rawInvite), "INV_HASH") || strings.Contains(string(rawInvite), "token_sha256") {
+		t.Fatalf("invite hash leaked in JSON: %s", rawInvite)
+	}
+
+	identity := &LoginIdentity{ID: "id1", UserID: "u1", PasswordHash: "PW_HASH"}
+	rawID, _ := json.Marshal(identity)
+	if strings.Contains(string(rawID), "PW_HASH") || strings.Contains(string(rawID), "password_hash") {
+		t.Fatalf("password hash leaked in JSON: %s", rawID)
 	}
 }
