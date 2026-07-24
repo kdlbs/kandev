@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, type RefObject } from "react";
+import { useCallback, useRef, type RefObject } from "react";
 
 export function useDialogOpenerFocus({
   open,
@@ -29,9 +29,5 @@ export function useDialogOpenerFocus({
     },
     [openerRef],
   );
-  useEffect(() => {
-    if (!open) restoreOpenerFocus();
-  }, [open, restoreOpenerFocus]);
-
   return { requestFocusRestoration, restoreOpenerFocus };
 }

@@ -522,3 +522,77 @@ describe("task.updated repository clearing", () => {
     expect(task?.repositories).toEqual([]);
   });
 });
+
+describe("task.updated executor preservation", () => {
+  const executorMetadata = {
+    primaryExecutorId: "executor-1",
+    primaryExecutorType: "worktree",
+    primaryExecutorName: "Worktree",
+    isRemoteExecutor: false,
+  };
+
+  it("preserves executor metadata when a partial update omits executor fields", () => {
+    const existingTask = {
+      id: "t1",
+      workflowStepId: "step1",
+      title: "Old title",
+      position: 0,
+      primarySessionId: "session-1",
+      ...executorMetadata,
+    };
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [existingTask],
+      } as unknown as AppState["kanban"],
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [existingTask] },
+        },
+      } as unknown as AppState["kanbanMulti"],
+    });
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeMessage({
+        ...makeTask("t1", "session-1"),
+        title: "Renamed task",
+      }),
+    );
+
+    const state = store.getState();
+    const kanbanTask = state.kanban.tasks.find((task) => task.id === "t1");
+    const snapshotTask = state.kanbanMulti.snapshots.wf1.tasks.find((task) => task.id === "t1");
+    expect(kanbanTask).toMatchObject(executorMetadata);
+    expect(snapshotTask).toMatchObject(executorMetadata);
+  });
+
+  it("clears executor metadata when the primary session is explicitly cleared", () => {
+    const existingTask = {
+      id: "t1",
+      workflowStepId: "step1",
+      title: "Task",
+      position: 0,
+      primarySessionId: "session-1",
+      ...executorMetadata,
+    };
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [existingTask],
+      } as unknown as AppState["kanban"],
+    });
+
+    registerTasksHandlers(store)["task.updated"]!(makeMessage(makeTask("t1", null)));
+
+    expect(store.getState().kanban.tasks[0]).toMatchObject({
+      primarySessionId: undefined,
+      primaryExecutorId: undefined,
+      primaryExecutorType: undefined,
+      primaryExecutorName: undefined,
+      isRemoteExecutor: false,
+    });
+  });
+});

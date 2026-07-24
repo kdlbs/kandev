@@ -48,6 +48,22 @@ function mergeTaskUpdate(
   ) {
     merged.primarySessionPendingAction = existing.primarySessionPendingAction;
   }
+  const primarySessionCleared =
+    hasPayloadField(payload, "primary_session_id") && payload.primary_session_id === null;
+  if (!primarySessionCleared) {
+    if (!hasPayloadField(payload, "primary_executor_id")) {
+      merged.primaryExecutorId = existing.primaryExecutorId;
+    }
+    if (!hasPayloadField(payload, "primary_executor_type")) {
+      merged.primaryExecutorType = existing.primaryExecutorType;
+    }
+    if (!hasPayloadField(payload, "primary_executor_name")) {
+      merged.primaryExecutorName = existing.primaryExecutorName;
+    }
+    if (!hasPayloadField(payload, "is_remote_executor")) {
+      merged.isRemoteExecutor = existing.isRemoteExecutor;
+    }
+  }
   return merged;
 }
 

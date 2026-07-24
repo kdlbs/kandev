@@ -194,7 +194,6 @@ describe("AddWorkspaceSourcesDialog", () => {
 
       await waitFor(() => expect(opener.disabled).toBe(false));
       await waitFor(() => expect(surface.getAttribute("data-state")).not.toBe("open"));
-      if (mobile) await waitFor(() => expect(document.activeElement).toBe(opener));
       await finishClose(surface, mobile);
       expect(screen.queryByTestId(surfaceTestId)).toBeNull();
       await waitFor(() => expect(document.activeElement).toBe(opener));
