@@ -101,6 +101,7 @@ type CreateWorkspaceRequest struct {
 	DefaultEnvironmentID        *string `json:"default_environment_id,omitempty"`
 	DefaultAgentProfileID       *string `json:"default_agent_profile_id,omitempty"`
 	DefaultConfigAgentProfileID *string `json:"default_config_agent_profile_id,omitempty"`
+	BootstrapKanbanWorkflow     bool
 }
 
 // UpdateWorkspaceRequest contains the data for updating a workspace

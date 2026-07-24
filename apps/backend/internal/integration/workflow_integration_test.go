@@ -51,7 +51,7 @@ func TestWorkflowCRUD(t *testing.T) {
 
 		workflows, ok := payload["workflows"].([]interface{})
 		require.True(t, ok)
-		assert.Len(t, workflows, 1)
+		assert.Len(t, workflows, 2)
 	})
 }
 

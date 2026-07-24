@@ -94,6 +94,7 @@ Per-workspace credentials and triage triggers for external services.
 
 | Spec | Status |
 |---|---|
+| [creation](workspaces/creation.md) | building |
 | [deletion](workspaces/deletion.md) | shipped |
 | [local-repositories](workspaces/local-repositories.md) | shipped |
 

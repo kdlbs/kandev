@@ -87,6 +87,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Wire workflow step creator to task service for board creation
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
+	// Standard Kanban workspace creation is coordinated by the task SQLite
+	// repository so workspace, workflow, and steps share one transaction.
+	taskSvc.SetWorkspaceBootstrapper(repos.Task)
 
 	// Wire workflow step getter to task service for MoveTask
 	taskSvc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: workflowSvc})

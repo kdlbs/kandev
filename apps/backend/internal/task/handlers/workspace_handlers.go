@@ -101,6 +101,7 @@ func (h *WorkspaceHandlers) httpCreateWorkspace(c *gin.Context) {
 		DefaultEnvironmentID:        body.DefaultEnvironmentID,
 		DefaultAgentProfileID:       body.DefaultAgentProfileID,
 		DefaultConfigAgentProfileID: body.DefaultConfigAgentProfileID,
+		BootstrapKanbanWorkflow:     true,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "workspace not created")
@@ -221,6 +222,7 @@ func (h *WorkspaceHandlers) wsCreateWorkspace(ctx context.Context, msg *ws.Messa
 		DefaultEnvironmentID:        req.DefaultEnvironmentID,
 		DefaultAgentProfileID:       req.DefaultAgentProfileID,
 		DefaultConfigAgentProfileID: req.DefaultConfigAgentProfileID,
+		BootstrapKanbanWorkflow:     true,
 	})
 	if err != nil {
 		h.logger.Error("failed to create workspace", zap.Error(err))

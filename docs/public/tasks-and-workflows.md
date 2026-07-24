@@ -23,15 +23,18 @@ Workflow position and runtime state are different. Moving a card changes its wor
 
 ## Prepare a workspace
 
-A new workspace created by a user does not automatically receive a workflow.
+A new workspace created from **Settings → Workspaces** automatically receives a **Kanban** workflow
+with the built-in Kanban steps, so it can accept tasks immediately.
 
 1. Open **Settings → Workspaces** and select **Add Workspace**.
 2. Enter the required workspace name.
 3. Open the workspace's **Repositories** page and add existing local repositories the workspace needs. You can also initialize a new empty repository while creating a task. Remote URLs are not registered on this page; enter them through **New Task → Remote**.
-4. Open its **Workflows** page and create, import, or synchronize a workflow.
+4. Open its **Workflows** page to review the default **Kanban** workflow. Create, import, or synchronize another workflow when the workspace needs a different process.
 5. On **Workspace Settings**, optionally choose a **Default Executor** and **Default Agent Profile**. Both default to **No default** unless configured.
 
-The initial database bootstrap can include a **Default Workspace** and a simple development workflow. Do not assume a later workspace inherits them.
+The initial database bootstrap can include a **Default Workspace** and a **Development** workflow.
+Later user-created workspaces receive **Kanban** instead; they do not inherit other workflows or
+settings from the default workspace.
 
 ## Create a task
 
