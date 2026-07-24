@@ -166,7 +166,15 @@ type Fetcher func(ctx context.Context) (tag, url string, err error)
 // a user-store package) so this package stays free of unrelated wiring —
 // callers close over whatever targeting (broadcast-to-all, broadcast-to-user)
 // makes sense for their deployment.
-type Broadcaster func(msg *ws.Message)
+//
+// The returned bool reports only whether at least one client was connected
+// (eligible to receive) at broadcast time — Hub.Broadcast has no per-client
+// ack, so this cannot guarantee actual receipt (a client can still drop the
+// connection between the eligibility check and the send). It is precise
+// enough to close the common gap: the poller's immediate on-Start tick can
+// run before any WS client has connected, which would otherwise mark a
+// release "notified" that nobody was ever eligible to see.
+type Broadcaster func(msg *ws.Message) (eligible bool)
 
 // Option customises Service construction without growing NewService's public
 // parameter list.
@@ -473,7 +481,12 @@ func (s *Service) notifyIfNewUpdate(ctx context.Context, tag, releaseURL string)
 		s.log.Warn("updates: build notification message failed", zap.Error(err))
 		return
 	}
-	broadcast(msg)
+	if !broadcast(msg) {
+		// No client was connected to receive this — don't mark the release
+		// notified. The next poll tick (or a manual "Check now") will retry
+		// once at least one client is connected.
+		return
+	}
 	if werr := persistence.WriteNotifiedUpdateVersion(s.pool.Writer(), tag); werr != nil {
 		s.log.Warn("updates: persist notified version failed", zap.Error(werr))
 	}

@@ -17,9 +17,13 @@ let settingsRequest: Promise<UpdateNotificationSettings> | null = null;
 
 function loadSettings(): Promise<UpdateNotificationSettings> {
   if (!settingsRequest) {
-    settingsRequest = fetchUpdateNotificationSettings({ cache: "no-store" }).catch(
-      () => FALLBACK_SETTINGS,
-    );
+    settingsRequest = fetchUpdateNotificationSettings({ cache: "no-store" }).catch((err) => {
+      // Allow the next notification to retry the fetch instead of being
+      // stuck on the fallback (and never re-checking the user's real saved
+      // preference) for the rest of the session.
+      settingsRequest = null;
+      throw err;
+    });
   }
   return settingsRequest;
 }
@@ -52,8 +56,14 @@ export function useUpdateAvailableToast() {
       if (settings) {
         current = settings;
       } else {
-        current = await loadSettings();
-        setSettings(current);
+        try {
+          current = await loadSettings();
+          setSettings(current);
+        } catch {
+          // Don't cache the fallback in the store — a future notification
+          // should still see `settings` as unset and retry the fetch.
+          current = FALLBACK_SETTINGS;
+        }
       }
       if (!current.enabled) return;
 

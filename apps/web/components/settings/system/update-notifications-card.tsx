@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
@@ -8,10 +8,7 @@ import { useAppStore } from "@/components/state-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useToast } from "@/components/toast-provider";
-import {
-  fetchUpdateNotificationSettings,
-  saveUpdateNotificationSettings,
-} from "@/lib/api/domains/system-api";
+import { saveUpdateNotificationSettings } from "@/lib/api/domains/system-api";
 import type { UpdateNotificationChannel, UpdateNotificationSettings } from "@/lib/types/system";
 
 // Matches the backend default (DefaultNotifySettings). Only used while the
@@ -42,26 +39,20 @@ function useUpdateNotificationSettingsDraft() {
   const { toast } = useToast();
   const [saved, setSaved] = useState<UpdateNotificationSettings>(stored ?? DEFAULT_SETTINGS);
   const [draft, setDraft] = useState<UpdateNotificationSettings>(saved);
-  const [loaded, setLoaded] = useState(stored !== null);
+  // Boot-payload hydration (see settings-routes.tsx: loadSettingsInitialState)
+  // resolves asynchronously and may land after this component's first
+  // render. Sync draft/saved from the store exactly once, the first time a
+  // real value shows up, so an in-flight boot fetch doesn't get shadowed by
+  // DEFAULT_SETTINGS. Never resync afterward so in-progress edits survive
+  // unrelated store updates (including this hook's own save round-trip).
+  const hydratedFromStoreRef = useRef(stored !== null);
 
   useEffect(() => {
-    if (loaded) return;
-    let cancelled = false;
-    fetchUpdateNotificationSettings({ cache: "no-store" })
-      .then((settings) => {
-        if (cancelled) return;
-        setSaved(settings);
-        setDraft(settings);
-        setStored(settings);
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (!cancelled) setLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [loaded, setStored]);
+    if (hydratedFromStoreRef.current || stored === null) return;
+    hydratedFromStoreRef.current = true;
+    setSaved(stored);
+    setDraft(stored);
+  }, [stored]);
 
   const revision = JSON.stringify(draft);
   const isDirty = revision !== JSON.stringify(saved);

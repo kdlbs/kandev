@@ -68,6 +68,7 @@ import {
 } from "@/components/plugins/plugin-error-boundary";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { listWorkflows } from "@/lib/api/domains/kanban-api";
+import { fetchUpdateNotificationSettings } from "@/lib/api/domains/system-api";
 import {
   fetchUserSettings,
   listAgentDiscovery,
@@ -85,7 +86,7 @@ import {
   resolveSettingsActiveWorkspaceId,
 } from "@/lib/routing/route-bootstrap";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
-import type { AppState } from "@/lib/state/store";
+import type { HydrationState } from "@/lib/state/store";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type {
   ListWorkspacesResponse,
@@ -96,7 +97,7 @@ import type {
   WorkflowTemplate,
   Workspace,
 } from "@/lib/types/http";
-import type { LicenseEntry } from "@/lib/types/system";
+import type { LicenseEntry, UpdateNotificationSettings } from "@/lib/types/system";
 
 type RouteRenderer = () => ReactNode;
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
@@ -117,6 +118,7 @@ type SettingsInitialStateData = {
   availableAgents: Awaited<ReturnType<typeof listAvailableAgents>>["agents"];
   availableTools: NonNullable<Awaited<ReturnType<typeof listAvailableAgents>>["tools"]>;
   userSettingsResponse: UserSettingsResponse | null;
+  updateNotificationSettings: UpdateNotificationSettings | null;
 };
 
 const licenseEntries = licenses as LicenseEntry[];
@@ -442,16 +444,24 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
   return null;
 }
 
-async function loadSettingsInitialState(): Promise<Partial<AppState>> {
-  const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
-    await Promise.all([
-      listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-      listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
-      listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
-      listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
-      listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
-      fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    ]);
+async function loadSettingsInitialState(): Promise<HydrationState> {
+  const [
+    workspaces,
+    executors,
+    agents,
+    discovery,
+    available,
+    userSettingsResponse,
+    updateNotificationSettings,
+  ] = await Promise.all([
+    listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+    listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
+    listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
+    listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
+    listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
+    fetchUserSettings({ cache: "no-store" }).catch(() => null),
+    fetchUpdateNotificationSettings({ cache: "no-store" }).catch(() => null),
+  ]);
 
   return buildSettingsInitialStateForRoute({
     workspaces: workspaces.workspaces,
@@ -461,6 +471,7 @@ async function loadSettingsInitialState(): Promise<Partial<AppState>> {
     availableAgents: available.agents,
     availableTools: available.tools ?? [],
     userSettingsResponse,
+    updateNotificationSettings,
   });
 }
 
@@ -472,7 +483,8 @@ export function buildSettingsInitialStateForRoute({
   availableAgents,
   availableTools,
   userSettingsResponse,
-}: SettingsInitialStateData): Partial<AppState> {
+  updateNotificationSettings,
+}: SettingsInitialStateData): HydrationState {
   const workspaceItems = workspaces.map(mapWorkspaceItem);
   const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
     workspaceItems,
@@ -499,6 +511,7 @@ export function buildSettingsInitialStateForRoute({
       loaded: true,
     },
     settingsData: { executorsLoaded: true, agentsLoaded: true },
+    system: { updateNotificationSettings },
     ...(mappedUserSettings.loaded
       ? {
           userSettings: {

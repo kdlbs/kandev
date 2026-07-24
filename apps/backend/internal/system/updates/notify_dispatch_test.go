@@ -5,17 +5,21 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/persistence"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // capturingBroadcaster records every message handed to it so tests can
-// assert whether (and what) the service broadcast.
+// assert whether (and what) the service broadcast, and can simulate "no
+// client connected" by setting eligible=false.
 type capturingBroadcaster struct {
 	messages []*ws.Message
+	eligible bool
 }
 
-func (c *capturingBroadcaster) broadcast(msg *ws.Message) {
+func (c *capturingBroadcaster) broadcast(msg *ws.Message) bool {
 	c.messages = append(c.messages, msg)
+	return c.eligible
 }
 
 // newNotifyTestService wires a Service against a stub GitHub release server
@@ -29,7 +33,7 @@ func newNotifyTestService(t *testing.T, tag, url string) (svc *Service, bc *capt
 	notifyStore = newTestNotifyStore(t)
 	svc = NewService(pool, "v1.0.0", srv.Client(), logger.Default(), WithNotifyStore(notifyStore))
 	svc.SetReleaseURL(srv.URL)
-	bc = &capturingBroadcaster{}
+	bc = &capturingBroadcaster{eligible: true}
 	svc.SetBroadcaster(bc.broadcast)
 	return svc, bc, notifyStore
 }
@@ -91,6 +95,42 @@ func TestService_Check_DedupesRepeatedBroadcastForSameVersion(t *testing.T) {
 
 	if len(bc.messages) != 1 {
 		t.Fatalf("expected exactly 1 broadcast across repeated polls of the same version, got %d", len(bc.messages))
+	}
+}
+
+func TestService_Check_DoesNotPersistNotified_WhenNoClientEligible(t *testing.T) {
+	// Regression test for the immediate on-Start poller tick landing before
+	// any WS client has connected: Hub.Broadcast has no delivery guarantee,
+	// so a release must not be marked notified until a broadcast reports at
+	// least one eligible client — otherwise the first real client to
+	// connect would never see the one-time notification for that release.
+	svc, bc, _ := newNotifyTestService(t, "v1.0.1", "https://example/v1.0.1")
+	bc.eligible = false
+
+	if _, err := svc.fetchAndPersist(context.Background()); err != nil {
+		t.Fatalf("fetchAndPersist (no clients): %v", err)
+	}
+	if len(bc.messages) != 1 {
+		t.Fatalf("expected the broadcast attempt to still happen, got %d messages", len(bc.messages))
+	}
+	if notified, err := persistence.ReadNotifiedUpdateVersion(svc.pool.Reader()); err != nil {
+		t.Fatalf("ReadNotifiedUpdateVersion: %v", err)
+	} else if notified != "" {
+		t.Fatalf("expected no version marked notified while ineligible, got %q", notified)
+	}
+
+	// A later tick with a client now connected must still deliver it.
+	bc.eligible = true
+	if _, err := svc.fetchAndPersist(context.Background()); err != nil {
+		t.Fatalf("fetchAndPersist (client connected): %v", err)
+	}
+	if len(bc.messages) != 2 {
+		t.Fatalf("expected a retried broadcast once eligible, got %d messages", len(bc.messages))
+	}
+	if notified, err := persistence.ReadNotifiedUpdateVersion(svc.pool.Reader()); err != nil {
+		t.Fatalf("ReadNotifiedUpdateVersion: %v", err)
+	} else if notified != "v1.0.1" {
+		t.Fatalf("expected v1.0.1 marked notified after eligible retry, got %q", notified)
 	}
 }
 

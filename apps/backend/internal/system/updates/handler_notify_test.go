@@ -109,3 +109,19 @@ func TestHandleSaveNotifySettings_MalformedJSONReturns400(t *testing.T) {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 }
+
+func TestHandleSaveNotifySettings_NoNotifyStoreReturns500(t *testing.T) {
+	pool := newTestPool(t)
+	svc := NewService(pool, "v1.0.0", nil, logger.Default()) // no WithNotifyStore
+	r := newNotifyRouter(svc)
+
+	body, _ := json.Marshal(NotifySettings{Enabled: true, Channel: NotifyChannelBoth})
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/system/updates/notification-settings", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+}

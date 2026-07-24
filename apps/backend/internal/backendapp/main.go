@@ -29,6 +29,7 @@ import (
 	// Event bus
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	ws "github.com/kandev/kandev/pkg/websocket"
 
 	// GitHub integration
 	azuredevopspkg "github.com/kandev/kandev/internal/azuredevops"
@@ -782,7 +783,17 @@ func startGatewayAndServe(
 		systemSvc.Metrics.SetExecutionProvider(lifecycleMetricProvider{manager: lifecycleMgr})
 	}
 	if systemSvc.Updates != nil {
-		systemSvc.Updates.SetBroadcaster(gateway.Hub.Broadcast)
+		systemSvc.Updates.SetBroadcaster(func(msg *ws.Message) bool {
+			// GetClientCount is checked first so a truly empty hub never
+			// enqueues onto the broadcast channel; between this check and
+			// the send a client could still disconnect, so this reports
+			// eligibility, not a delivery guarantee.
+			if gateway.Hub.GetClientCount() == 0 {
+				return false
+			}
+			gateway.Hub.Broadcast(msg)
+			return true
+		})
 	}
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })

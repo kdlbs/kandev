@@ -5,13 +5,11 @@ import { ToastProvider } from "@/components/toast-provider";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { UpdateNotificationsCard } from "./update-notifications-card";
 
-const mockFetch = vi.fn();
 const mockSave = vi.fn();
 const TOGGLE_NAME = "Enable update notifications";
 const DIRTY_ATTRIBUTE = "data-settings-dirty";
 
 vi.mock("@/lib/api/domains/system-api", () => ({
-  fetchUpdateNotificationSettings: (...args: unknown[]) => mockFetch(...args),
   saveUpdateNotificationSettings: (...args: unknown[]) => mockSave(...args),
 }));
 
@@ -32,7 +30,6 @@ function renderCard(initial?: { enabled: boolean; channel: string }) {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockFetch.mockResolvedValue({ enabled: true, channel: "both" });
   mockSave.mockImplementation((settings) => Promise.resolve(settings));
 });
 
@@ -41,22 +38,20 @@ afterEach(() => {
 });
 
 describe("UpdateNotificationsCard", () => {
-  it("renders the saved enable toggle and channel from hydrated state without fetching", async () => {
+  it("renders the saved enable toggle and channel from hydrated state", async () => {
     renderCard({ enabled: true, channel: "desktop" });
 
     const toggle = await screen.findByRole("switch", { name: TOGGLE_NAME });
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByText("Desktop notification")).toBeTruthy();
-    expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it("fetches settings when no hydrated state is available", async () => {
-    mockFetch.mockResolvedValue({ enabled: false, channel: "in_view" });
+  it("falls back to the backend default without fetching when no hydrated state is available", async () => {
     renderCard();
 
-    await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(1));
     const toggle = await screen.findByRole("switch", { name: TOGGLE_NAME });
-    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("Both")).toBeTruthy();
   });
 
   it("hides the channel selector once disabled and persists through the floating Save action", async () => {

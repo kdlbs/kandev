@@ -140,6 +140,7 @@ function buildState(
     availableAgents: [],
     availableTools: [],
     userSettingsResponse: null,
+    updateNotificationSettings: null,
     ...overrides,
   });
 }

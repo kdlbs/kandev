@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import type { UpdateAvailableNotification } from "@/lib/state/slices/ui/types";
 import type { UpdateNotificationSettings } from "@/lib/types/system";
+import type { useUpdateAvailableToast as UseUpdateAvailableToastHook } from "./use-update-available-toast";
 
 let mockNotification: UpdateAvailableNotification | null = null;
 let mockSettings: UpdateNotificationSettings | null = null;
@@ -37,7 +38,7 @@ vi.mock("@/lib/api/domains/system-api", () => ({
   fetchUpdateNotificationSettings: (...args: unknown[]) => mockFetchSettings(...args),
 }));
 
-import { useUpdateAvailableToast } from "./use-update-available-toast";
+let useUpdateAvailableToast: typeof UseUpdateAvailableToastHook;
 
 async function flushMicrotasks() {
   await Promise.resolve();
@@ -45,11 +46,24 @@ async function flushMicrotasks() {
 }
 
 describe("useUpdateAvailableToast", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    // The hook module caches in-flight settings fetches in a module-scoped
+    // variable (`settingsRequest`) so concurrent hook instances share one
+    // request. Reset the module and re-import per test so that cache
+    // doesn't leak a resolved/rejected promise from a previous test into
+    // this one (e.g. the fetch-failure test below would otherwise silently
+    // reuse a prior test's already-resolved fetch and never exercise the
+    // catch branch).
+    vi.resetModules();
     mockNativeIsAvailable.mockReturnValue(false);
     mockNotification = null;
     mockSettings = null;
+    // Dynamic import is required here (not a static one): vi.resetModules()
+    // above clears Vitest's module registry, and only a fresh import()
+    // after that call picks up a new module instance with the module-scoped
+    // `settingsRequest` cache reset to null.
+    ({ useUpdateAvailableToast } = await import("./use-update-available-toast"));
   });
 
   it("does nothing when there is no notification", () => {
@@ -134,7 +148,14 @@ describe("useUpdateAvailableToast", () => {
     await flushMicrotasks();
     await flushMicrotasks();
 
+    expect(mockFetchSettings).toHaveBeenCalledTimes(1);
     expect(mockToast).toHaveBeenCalledTimes(1);
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({ description: expect.stringContaining("v1.2.3") }),
+    );
+    // The fallback must not be persisted to the store - a later notification
+    // should still see settings as unset and retry the real fetch.
+    expect(mockSetSettings).not.toHaveBeenCalled();
   });
 
   it("deduplicates repeated notifications for the same version", async () => {
