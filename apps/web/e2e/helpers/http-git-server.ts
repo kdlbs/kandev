@@ -6,6 +6,11 @@ import path from "node:path";
 type HTTPGitFixture = {
   remoteURL: string;
   /**
+   * Backend-only config that survives restarts without colliding with
+   * repoclone's command-scoped credential configuration.
+   */
+  backendEnv: Record<string, string>;
+  /**
    * Test-executor-only Git configuration that rewrites the trusted public
    * origin to this fixture's bridge-reachable HTTP server.
    */
@@ -13,12 +18,22 @@ type HTTPGitFixture = {
   close: () => Promise<void>;
 };
 
+export type HTTPGitFixtureOptions = {
+  onListening?: (port: number) => void;
+  writeBackendGitConfig?: (file: string, content: string) => void;
+  closeServer?: (server: Server) => Promise<void>;
+};
+
 /**
  * Serves a disposable bare repository from the Docker bridge gateway. This
  * exercises the same HTTP clone path used by Docker and SSH executors without
  * relying on an external provider or developer checkout.
  */
-export async function startHTTPGitFixture(root: string, name: string): Promise<HTTPGitFixture> {
+export async function startHTTPGitFixture(
+  root: string,
+  name: string,
+  options: HTTPGitFixtureOptions = {},
+): Promise<HTTPGitFixture> {
   const remoteDir = path.join(root, "fixture", `${name}.git`);
   const checkout = path.join(root, `${name}-checkout`);
   fs.mkdirSync(checkout, { recursive: true });
@@ -37,20 +52,40 @@ export async function startHTTPGitFixture(root: string, name: string): Promise<H
 
   const server = createStaticGitServer(root);
   const port = await listen(server);
-  const fixtureOrigin = `http://${dockerBridgeGateway()}:${port}/`;
-  return {
-    // The source endpoint must receive the real GitLab identity so the
-    // production trusted-origin validation remains exercised. Disposable test
-    // executor profiles and their isolated backend fixture rewrite Git's clone
-    // transport to this local HTTP server.
-    remoteURL: `https://gitlab.com/fixture/${name}.git`,
-    gitConfigEnvVars: [
-      { key: "GIT_CONFIG_COUNT", value: "1" },
-      { key: "GIT_CONFIG_KEY_0", value: `url.${fixtureOrigin}.insteadOf` },
-      { key: "GIT_CONFIG_VALUE_0", value: "https://gitlab.com/" },
-    ],
-    close: () => closeServer(server),
-  };
+  try {
+    options.onListening?.(port);
+    const fixtureOrigin = `http://${dockerBridgeGateway()}:${port}/`;
+    const remoteURL = `https://gitlab.com/fixture/${name}.git`;
+    const backendGitConfigPath = path.join(root, "fixture", `${name}.gitconfig`);
+    const config = `[url "${fixtureOrigin}fixture/${name}.git"]\n\tinsteadOf = ${remoteURL}\n`;
+    (options.writeBackendGitConfig ?? fs.writeFileSync)(backendGitConfigPath, config);
+    return {
+      // The source endpoint must receive the real GitLab identity so the
+      // production trusted-origin validation remains exercised. Disposable test
+      // executor profiles and their isolated backend fixture rewrite Git's clone
+      // transport to this local HTTP server.
+      remoteURL,
+      backendEnv: { GIT_CONFIG_GLOBAL: backendGitConfigPath },
+      gitConfigEnvVars: [
+        { key: "GIT_CONFIG_COUNT", value: "1" },
+        { key: "GIT_CONFIG_KEY_0", value: `url.${fixtureOrigin}.insteadOf` },
+        { key: "GIT_CONFIG_VALUE_0", value: "https://gitlab.com/" },
+      ],
+      // Leave the config under the backend fixture root until that fixture has
+      // released its environment and stopped its process, then removes the root.
+      close: () => closeServer(server),
+    };
+  } catch (setupError) {
+    try {
+      await (options.closeServer ?? closeServer)(server);
+    } catch (closeError) {
+      throw new AggregateError(
+        [setupError, closeError],
+        "HTTP Git fixture setup failed and its server did not close",
+      );
+    }
+    throw setupError;
+  }
 }
 
 function createStaticGitServer(root: string): Server {

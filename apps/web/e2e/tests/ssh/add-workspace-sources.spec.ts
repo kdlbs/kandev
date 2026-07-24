@@ -5,10 +5,6 @@ import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import fs from "node:fs";
 
-function fixtureBackendEnv(fixture: { gitConfigEnvVars: Array<{ key: string; value: string }> }) {
-  return Object.fromEntries(fixture.gitConfigEnvVars.map(({ key, value }) => [key, value]));
-}
-
 async function cleanupFixture(
   fixture: { close: () => Promise<void> },
   releaseBackendEnv?: () => Promise<void>,
@@ -45,7 +41,7 @@ test.describe("SSH executor — attach workspace sources", () => {
     const fixture = await startHTTPGitFixture(backend.tmpDir, "ssh-second-source");
     let releaseBackendEnv: (() => Promise<void>) | undefined;
     try {
-      releaseBackendEnv = await backend.useEnv(fixtureBackendEnv(fixture));
+      releaseBackendEnv = await backend.useEnv(fixture.backendEnv);
       const fixtureProfile = await apiClient.createExecutorProfile(seedData.sshExecutorId, {
         name: "E2E SSH HTTP Git fixture",
         config: {},
