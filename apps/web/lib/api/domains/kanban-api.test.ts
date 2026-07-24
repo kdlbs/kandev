@@ -54,14 +54,16 @@ describe("attachTaskWorkspaceSources", () => {
       ),
     ).resolves.toMatchObject({ task_id: "task-1", workspace_path: "/workspace/task-1" });
 
-    expect(fetchSpy).toHaveBeenCalledWith("http://api.test/api/v1/tasks/task-1/workspace-sources", {
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe("http://api.test/api/v1/tasks/task-1/workspace-sources");
+    expect(init).toMatchObject({
       method: "POST",
       body: JSON.stringify({
         sources: [{ kind: "folder", local_path: "/docs", display_name: "docs" }],
       }),
-      cache: undefined,
-      headers: { "Content-Type": "application/json" },
     });
+    expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
   });
 
   it("preserves normalized API errors for retry UI", async () => {
