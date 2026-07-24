@@ -37,7 +37,7 @@ func corsMiddleware() gin.HandlerFunc {
 			c.Header("Access-Control-Allow-Origin", "*")
 		}
 		c.Header("Access-Control-Allow-Methods", "GET, POST, PATCH, PUT, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, Upgrade, Connection, Sec-WebSocket-Key, Sec-WebSocket-Version, Sec-WebSocket-Protocol")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization, X-Kandev-Interim-Settings-Interlock, Upgrade, Connection, Sec-WebSocket-Key, Sec-WebSocket-Version, Sec-WebSocket-Protocol")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)

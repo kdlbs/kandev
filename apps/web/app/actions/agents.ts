@@ -1,6 +1,8 @@
-"use server";
+"use client";
 
 import { getBackendConfig } from "@/lib/config";
+import { fetchJson } from "@/lib/api/client";
+import { readInterimSettingsInterlockToken } from "@/src/boot-payload";
 import type {
   Agent,
   AgentProfile,
@@ -17,6 +19,7 @@ import { normalizeAgentProfile } from "@/lib/api/domains/agent-profile-normalize
 type ProfilePermissions = Record<PermissionKey, boolean>;
 
 const { apiBaseUrl } = getBackendConfig();
+const interimSettingsInterlockHeader = "X-Kandev-Interim-Settings-Interlock";
 
 function normalizeAgentInPlace(agent: Agent): Agent {
   return {
@@ -25,7 +28,7 @@ function normalizeAgentInPlace(agent: Agent): Agent {
   };
 }
 
-async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+function agentSettingsRequest<T>(url: string, init?: RequestInit): Promise<T> {
   // Pin the URL origin to the configured backend so a tainted path segment
   // (agent ID from a form, profile ID from a route param) cannot redirect
   // the request to a different host. Closes the CodeQL SSRF finding.
@@ -34,33 +37,15 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
   if (parsed.origin !== allowed.origin) {
     throw new Error(`Refusing to fetch outside configured backend origin: ${parsed.origin}`);
   }
-  const response = await fetch(parsed.toString(), {
-    ...options,
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.headers ?? {}),
-    },
-  });
-  if (!response.ok) {
-    throw new Error(`Request failed: ${response.status} ${response.statusText}`);
-  }
-  if (response.status === 204) {
-    return undefined as T;
-  }
-  const text = await response.text();
-  if (!text) {
-    return undefined as T;
-  }
-  return JSON.parse(text) as T;
+  return fetchJson<T>(parsed.toString(), { cache: "no-store", init });
 }
 
 export async function listAgentDiscoveryAction(): Promise<ListAgentDiscoveryResponse> {
-  return fetchJson<ListAgentDiscoveryResponse>(`${apiBaseUrl}/api/v1/agents/discovery`);
+  return agentSettingsRequest<ListAgentDiscoveryResponse>(`${apiBaseUrl}/api/v1/agents/discovery`);
 }
 
 export async function listAgentsAction(): Promise<ListAgentsResponse> {
-  const res = await fetchJson<ListAgentsResponse>(`${apiBaseUrl}/api/v1/agents`);
+  const res = await agentSettingsRequest<ListAgentsResponse>(`${apiBaseUrl}/api/v1/agents`);
   return { ...res, agents: (res.agents ?? []).map(normalizeAgentInPlace) };
 }
 
@@ -79,7 +64,7 @@ export async function createAgentAction(payload: {
     } & ProfilePermissions
   >;
 }): Promise<Agent> {
-  const res = await fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents`, {
+  const res = await agentSettingsRequest<Agent>(`${apiBaseUrl}/api/v1/agents`, {
     method: "POST",
     body: JSON.stringify(payload),
   });
@@ -94,7 +79,7 @@ export async function updateAgentAction(
     mcp_config_path?: string | null;
   },
 ): Promise<Agent> {
-  const res = await fetchJson<Agent>(`${apiBaseUrl}/api/v1/agents/${id}`, {
+  const res = await agentSettingsRequest<Agent>(`${apiBaseUrl}/api/v1/agents/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -102,7 +87,7 @@ export async function updateAgentAction(
 }
 
 export async function deleteAgentAction(id: string) {
-  await fetchJson<void>(`${apiBaseUrl}/api/v1/agents/${id}`, { method: "DELETE" });
+  await agentSettingsRequest<void>(`${apiBaseUrl}/api/v1/agents/${id}`, { method: "DELETE" });
 }
 
 export async function createAgentProfileAction(
@@ -118,10 +103,13 @@ export async function createAgentProfileAction(
     env_vars?: ProfileEnvVar[];
   } & ProfilePermissions,
 ): Promise<AgentProfile> {
-  const raw = await fetchJson<unknown>(`${apiBaseUrl}/api/v1/agents/${agentId}/profiles`, {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
+  const raw = await agentSettingsRequest<unknown>(
+    `${apiBaseUrl}/api/v1/agents/${agentId}/profiles`,
+    {
+      method: "POST",
+      body: JSON.stringify(payload),
+    },
+  );
   return normalizeAgentProfile(raw);
 }
 
@@ -140,7 +128,7 @@ export async function updateAgentProfileAction(
     env_vars?: ProfileEnvVar[];
   },
 ): Promise<AgentProfile> {
-  const raw = await fetchJson<unknown>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {
+  const raw = await agentSettingsRequest<unknown>(`${apiBaseUrl}/api/v1/agent-profiles/${id}`, {
     method: "PATCH",
     body: JSON.stringify(payload),
   });
@@ -168,10 +156,14 @@ export async function deleteAgentProfileAction(
   force?: boolean,
 ): Promise<DeleteProfileResult> {
   const url = `${apiBaseUrl}/api/v1/agent-profiles/${id}${force ? "?force=true" : ""}`;
+  const token = readInterimSettingsInterlockToken();
   const response = await fetch(url, {
     method: "DELETE",
     cache: "no-store",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { [interimSettingsInterlockHeader]: token } : {}),
+    },
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
@@ -197,7 +189,7 @@ export async function deleteAgentProfileAction(
 export async function getAgentProfileMcpConfigAction(
   profileId: string,
 ): Promise<AgentProfileMcpConfig> {
-  return fetchJson<AgentProfileMcpConfig>(
+  return agentSettingsRequest<AgentProfileMcpConfig>(
     `${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`,
   );
 }
@@ -210,7 +202,7 @@ export async function updateAgentProfileMcpConfigAction(
     meta?: Record<string, unknown>;
   },
 ): Promise<AgentProfileMcpConfig> {
-  return fetchJson<AgentProfileMcpConfig>(
+  return agentSettingsRequest<AgentProfileMcpConfig>(
     `${apiBaseUrl}/api/v1/agent-profiles/${profileId}/mcp-config`,
     {
       method: "POST",
@@ -237,7 +229,7 @@ export async function previewAgentCommandAction(
   agentName: string,
   payload: CommandPreviewRequest,
 ): Promise<CommandPreviewResponse> {
-  return fetchJson<CommandPreviewResponse>(
+  return agentSettingsRequest<CommandPreviewResponse>(
     `${apiBaseUrl}/api/v1/agent-command-preview/${agentName}`,
     {
       method: "POST",

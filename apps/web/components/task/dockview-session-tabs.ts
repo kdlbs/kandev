@@ -533,31 +533,35 @@ type AutoSessionTabRefs = {
 function activateSessionPanel(
   api: DockviewApi,
   effectiveSessionId: string,
-  sessionPanelExistedBefore: boolean,
+  activation: {
+    sessionPanelExistedBefore: boolean;
+    activePanelIdBeforeEnsure: string | null;
+  },
   refs: AutoSessionTabRefs,
   tid: string | null,
 ): ReturnType<DockviewApi["getPanel"]> {
   const activePanel = api.getPanel(`session:${effectiveSessionId}`);
   if (!activePanel) return activePanel;
 
-  const currentActivePanelId = api.activePanel?.id ?? null;
+  const activePanelIdAfterReorder = api.activePanel?.id ?? null;
   const shouldActivate = shouldActivateSessionPanel({
-    sessionPanelExistedBefore,
+    sessionPanelExistedBefore: activation.sessionPanelExistedBefore,
     prevTaskId: refs.prevTaskIdRef.current,
     prevSessionId: refs.prevSessionIdRef.current,
     currentTaskId: tid,
     currentSessionId: effectiveSessionId,
-    currentActivePanelId,
+    currentActivePanelId: activation.activePanelIdBeforeEnsure,
   });
   if (isDebug()) {
     debug("useAutoSessionTab: activation decision", {
       effectiveSessionId,
       shouldActivate,
-      sessionPanelExistedBefore,
+      sessionPanelExistedBefore: activation.sessionPanelExistedBefore,
       prevTaskId: refs.prevTaskIdRef.current,
       prevSessionId: refs.prevSessionIdRef.current,
       currentTaskId: tid,
-      currentActivePanelId,
+      activePanelIdBeforeEnsure: activation.activePanelIdBeforeEnsure,
+      activePanelIdAfterReorder,
       activeGroupId: activePanel.group.id,
     });
   }
@@ -763,6 +767,9 @@ export function runAutoSessionTabEffect(
 
   const initialPosition = resolveInitialPosition(api);
   const sessionPanelExistedBefore = !!api.getPanel(`session:${effectiveSessionId}`);
+  // Preserve the restored/user-selected panel before adding and reordering the
+  // session tab. Dockview's same-group move briefly activates a sibling even
+  // with skipSetActive, so reading api.activePanel afterward loses this intent.
   const activePanelIdBeforeEnsure = api.activePanel?.id ?? null;
   const preserveActivePanel = shouldPreserveActivePanel(
     sessionPanelExistedBefore,
@@ -788,7 +795,7 @@ export function runAutoSessionTabEffect(
   const activePanel = activateSessionPanel(
     api,
     effectiveSessionId,
-    sessionPanelExistedBefore,
+    { sessionPanelExistedBefore, activePanelIdBeforeEnsure },
     refs,
     tid,
   );

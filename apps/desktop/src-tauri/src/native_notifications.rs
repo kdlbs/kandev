@@ -91,7 +91,12 @@ impl NativeNotificationState {
 /// Event identities this bridge will display. Session-scoped events require
 /// a non-empty task_id (they're gated on task context); the update-available
 /// event has no task and must omit it.
-const SESSION_EVENT_PREFIXES: [&str; 2] = ["session.waiting_for_input:", "session.failed:"];
+const SESSION_EVENT_PREFIXES: [&str; 4] = [
+    "session.waiting_for_input:",
+    "session.failed:",
+    "session.turn_finished:",
+    "session.clarification_requested:",
+];
 const UPDATE_AVAILABLE_PREFIX: &str = "system.update_available:";
 
 fn validate_request(request: &NativeNotificationRequest) -> Result<(), String> {
@@ -172,8 +177,8 @@ mod tests {
     fn request(event_id: &str, task_id: &str) -> NativeNotificationRequest {
         NativeNotificationRequest {
             event_id: event_id.to_string(),
-            title: "Task needs your input".to_string(),
-            body: "Waiting".to_string(),
+            title: "Agent needs your answer".to_string(),
+            body: "The agent asked a question.".to_string(),
             task_id: Some(task_id.to_string()),
             session_id: Some("session-1".to_string()),
         }
@@ -192,7 +197,7 @@ mod tests {
     #[test]
     fn event_identity_is_delivered_at_most_once() {
         let state = NativeNotificationState::default();
-        let request = request("session.waiting_for_input:session-1", "task-1");
+        let request = request("session.clarification_requested:session-1", "task-1");
 
         assert!(state.claim(&request.event_id));
         assert!(!state.claim(&request.event_id));
@@ -217,6 +222,16 @@ mod tests {
             validate_request(&request),
             Err("unsupported native notification event".to_string())
         );
+    }
+
+    #[test]
+    fn bridge_accepts_semantic_session_events() {
+        for event_id in [
+            "session.turn_finished:turn-1",
+            "session.clarification_requested:request-1",
+        ] {
+            assert_eq!(validate_request(&request(event_id, "task-1")), Ok(()));
+        }
     }
 
     #[test]

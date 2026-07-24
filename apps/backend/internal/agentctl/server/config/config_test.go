@@ -2,6 +2,27 @@ package config
 
 import "testing"
 
+func TestValidateCommandArgs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "valid preserves empty argument", args: []string{"runner", "", "two words"}},
+		{name: "empty argv", args: nil, want: true},
+		{name: "empty executable", args: []string{"", "arg"}, want: true},
+		{name: "whitespace executable", args: []string{" \t", "arg"}, want: true},
+		{name: "flag executable", args: []string{"--runner", "arg"}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCommandArgs(tc.args)
+			if (err != nil) != tc.want {
+				t.Fatalf("ValidateCommandArgs(%#v) error = %v, want error=%v", tc.args, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestConsumeNonce(t *testing.T) {
 	t.Run("valid nonce returns token and burns nonce", func(t *testing.T) {
 		cfg := &Config{

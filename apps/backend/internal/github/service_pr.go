@@ -32,6 +32,21 @@ func (s *Service) SubmitReview(ctx context.Context, owner, repo string, number i
 	return s.client.SubmitReview(ctx, owner, repo, number, event, body)
 }
 
+// RequestReviewers requests reviews and evicts the affected PR caches so the
+// next feedback/status fetch reflects GitHub's new requested reviewer state.
+func (s *Service) RequestReviewers(ctx context.Context, owner, repo string, number int, reviewers []string) error {
+	if s.client == nil {
+		return ErrNoClient
+	}
+	if err := s.client.RequestReviewers(ctx, owner, repo, number, reviewers); err != nil {
+		return err
+	}
+	key := prStatusCacheKey(owner, repo, number)
+	s.prFeedbackCache.invalidateKey(key)
+	s.prStatusCache.invalidateKey(key)
+	return nil
+}
+
 // MergePR merges a pull request. mergeMethod is one of "merge", "squash",
 // "rebase"; an empty string asks the service to pick the first method the
 // repo allows. The caller is expected to refresh PR feedback after a

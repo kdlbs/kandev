@@ -626,6 +626,17 @@ func (c *PATClient) SubmitReview(ctx context.Context, owner, repo string, number
 	return c.post(ctx, endpoint, jsonBody)
 }
 
+func (c *PATClient) RequestReviewers(ctx context.Context, owner, repo string, number int, reviewers []string) error {
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, number)
+	jsonBody, err := json.Marshal(struct {
+		Reviewers []string `json:"reviewers"`
+	}{Reviewers: reviewers})
+	if err != nil {
+		return fmt.Errorf("marshal requested reviewers payload: %w", err)
+	}
+	return c.post(ctx, endpoint, jsonBody)
+}
+
 func (c *PATClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
 	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d/merge", owner, repo, number)
 	payload := map[string]string{}

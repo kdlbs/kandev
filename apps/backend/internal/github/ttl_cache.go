@@ -22,6 +22,11 @@ type ttlEntry struct {
 	expiresAt time.Time
 }
 
+type cacheKeyEpoch struct {
+	epoch  uint64
+	active int
+}
+
 // ttlCache is a tiny TTL map guarded by singleflight to coalesce concurrent
 // misses for the same key. When size exceeds the cap, entries with the
 // earliest expiry are dropped — good enough for a sub-minute window.
@@ -32,21 +37,23 @@ type ttlEntry struct {
 // the cache — otherwise the new user could see stale repos from the prior
 // user for up to one TTL.
 type ttlCache struct {
-	mu      sync.Mutex
-	entries map[string]ttlEntry
-	sf      singleflight.Group
-	ttl     time.Duration
-	maxSize int
-	now     func() time.Time
-	gen     uint64
+	mu        sync.Mutex
+	entries   map[string]ttlEntry
+	sf        singleflight.Group
+	ttl       time.Duration
+	maxSize   int
+	now       func() time.Time
+	gen       uint64
+	keyEpochs map[string]cacheKeyEpoch
 }
 
 func newTTLCache() *ttlCache {
 	return &ttlCache{
-		entries: make(map[string]ttlEntry),
-		ttl:     defaultCacheTTL,
-		maxSize: defaultCacheMaxSize,
-		now:     time.Now,
+		entries:   make(map[string]ttlEntry),
+		ttl:       defaultCacheTTL,
+		maxSize:   defaultCacheMaxSize,
+		now:       time.Now,
+		keyEpochs: make(map[string]cacheKeyEpoch),
 	}
 }
 
@@ -112,6 +119,7 @@ func (c *ttlCache) clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.entries = make(map[string]ttlEntry)
+	c.keyEpochs = make(map[string]cacheKeyEpoch)
 	c.gen++
 }
 
@@ -141,6 +149,46 @@ func (c *ttlCache) setIfCurrentGeneration(key string, value any, gen uint64) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.gen != gen {
+		return
+	}
+	if len(c.entries) >= c.maxSize {
+		c.evictLocked()
+	}
+	c.entries[key] = ttlEntry{value: value, expiresAt: c.now().Add(c.ttl)}
+}
+
+func (c *ttlCache) beginFill(key string) (uint64, uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state := c.keyEpochs[key]
+	state.active++
+	c.keyEpochs[key] = state
+	return c.gen, state.epoch
+}
+
+func (c *ttlCache) endFill(key string, gen uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.gen != gen {
+		return
+	}
+	state, ok := c.keyEpochs[key]
+	if !ok {
+		return
+	}
+	state.active--
+	if state.active == 0 {
+		delete(c.keyEpochs, key)
+		return
+	}
+	c.keyEpochs[key] = state
+}
+
+func (c *ttlCache) setIfCurrentVersions(key string, value any, gen, keyEpoch uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	state, ok := c.keyEpochs[key]
+	if c.gen != gen || !ok || state.epoch != keyEpoch {
 		return
 	}
 	if len(c.entries) >= c.maxSize {
@@ -191,7 +239,23 @@ func (c *ttlCache) del(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.entries, key)
+	c.keyEpochs = make(map[string]cacheKeyEpoch)
 	c.gen++
+}
+
+// invalidateKey removes a single key without changing the cache-wide
+// generation. A pending fill for that key cannot write back because its key
+// epoch no longer matches, while fills for unrelated keys remain cacheable.
+func (c *ttlCache) invalidateKey(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.entries, key)
+	state, ok := c.keyEpochs[key]
+	if !ok {
+		return
+	}
+	state.epoch++
+	c.keyEpochs[key] = state
 }
 
 // cachedErr wraps an error stored in a ttlCache so that a deterministic
@@ -213,14 +277,12 @@ func (c *ttlCache) doOrFetch(key string, fetch func() (any, error)) (any, error)
 	if v, ok := c.get(key); ok {
 		return v, nil
 	}
-	gen := c.generation()
-	// Key the singleflight on the generation as well as the cache key. Without
-	// the generation prefix, a caller arriving after clear() would join an
-	// already-in-flight fetch from the previous generation and receive its
-	// stale result — singleflight's whole point is shared results. Bumping
-	// gen on clear() guarantees the post-clear caller mints its own fetch
-	// instead of inheriting the old one.
-	sfKey := fmt.Sprintf("%d|%s", gen, key)
+	gen, keyEpoch := c.beginFill(key)
+	defer c.endFill(key, gen)
+	// Key singleflight on the cache-wide generation and per-key epoch. A
+	// post-clear or post-key-invalidation caller must mint a fresh fill instead
+	// of joining a stale in-flight result.
+	sfKey := fmt.Sprintf("%d|%d|%s", gen, keyEpoch, key)
 	v, err, _ := c.sf.Do(sfKey, func() (any, error) {
 		if v, ok := c.get(key); ok {
 			return v, nil
@@ -229,7 +291,7 @@ func (c *ttlCache) doOrFetch(key string, fetch func() (any, error)) (any, error)
 		if err != nil {
 			return nil, err
 		}
-		c.setIfCurrentGeneration(key, v, gen)
+		c.setIfCurrentVersions(key, v, gen, keyEpoch)
 		return v, nil
 	})
 	return v, err

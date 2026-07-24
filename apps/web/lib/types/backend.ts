@@ -249,9 +249,17 @@ export type TaskSessionStateChangedPayload = {
   task_environment_id?: string;
 };
 
-export type TaskSessionWaitingForInputPayload = {
+export type TaskSessionNotificationPayload = {
   task_id: string;
   session_id: string;
+  occurrence_id: string;
+  title: string;
+  body: string;
+};
+
+export type OfficeInboxItemNotificationPayload = {
+  task_id?: string;
+  session_id?: string;
   title: string;
   body: string;
 };
@@ -498,10 +506,15 @@ export type BackendMessageMap = OfficeBackendMessageMap &
       "session.state_changed",
       TaskSessionStateChangedPayload
     >;
-    "session.waiting_for_input": BackendMessage<
-      "session.waiting_for_input",
-      TaskSessionWaitingForInputPayload
+    "session.turn_finished": BackendMessage<
+      "session.turn_finished",
+      TaskSessionNotificationPayload
     >;
+    "session.clarification_requested": BackendMessage<
+      "session.clarification_requested",
+      TaskSessionNotificationPayload
+    >;
+    "office.inbox_item": BackendMessage<"office.inbox_item", OfficeInboxItemNotificationPayload>;
     "session.agentctl_starting": BackendMessage<
       "session.agentctl_starting",
       TaskSessionAgentctlPayload

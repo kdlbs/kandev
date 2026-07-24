@@ -190,7 +190,6 @@ const (
 	ActionSessionMessageUpdated    = "session.message.updated"
 	ActionSessionMessageDeleted    = "session.message.deleted"
 	ActionSessionStateChanged      = "session.state_changed"
-	ActionSessionWaitingForInput   = "session.waiting_for_input"
 	ActionSessionAgentctlStarting  = "session.agentctl_starting"
 	ActionSessionAgentctlReady     = "session.agentctl_ready"
 	ActionSessionAgentctlError     = "session.agentctl_error"
@@ -392,6 +391,12 @@ const (
 	ActionMCPStopTask            = "mcp.stop_task"
 	ActionMCPSpawnSession        = "mcp.spawn_session"
 	ActionMCPGetTaskConversation = "mcp.get_task_conversation"
+)
+
+const (
+	ActionSessionTurnFinished           = "session.turn_finished"
+	ActionSessionClarificationRequested = "session.clarification_requested"
+	ActionOfficeInboxItem               = "office.inbox_item"
 )
 
 // GitHub integration actions

@@ -77,6 +77,9 @@ type Client interface {
 	// event is one of "APPROVE", "COMMENT", "REQUEST_CHANGES".
 	SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error
 
+	// RequestReviewers requests reviews from GitHub users on a pull request.
+	RequestReviewers(ctx context.Context, owner, repo string, number int, reviewers []string) error
+
 	// MergePR merges a pull request. mergeMethod is one of "merge", "squash", "rebase".
 	MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error
 

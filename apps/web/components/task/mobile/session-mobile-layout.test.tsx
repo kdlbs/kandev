@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { render, renderHook, act, screen } from "@testing-library/react";
+import { useState } from "react";
 import type { OpenFileTab } from "@/lib/types/backend";
 
 vi.mock("@/components/toast-provider", () => ({
@@ -11,7 +12,33 @@ vi.mock("../file-browser-hooks", () => ({
   fetchAndOpenFile: (...args: unknown[]) => fetchAndOpenFileMock(...args),
 }));
 
-import { useMobilePanelHandlers } from "./session-mobile-layout";
+vi.mock("@/hooks/use-visual-viewport-offset", () => ({
+  useVisualViewportOffset: () => ({ keyboardOpen: false, bottomOffset: 0 }),
+}));
+
+vi.mock("@/components/review/review-pr-selector", () => ({
+  ReviewPRSelector: ({ onSelectPR }: { onSelectPR: (pr: { id: string }) => void }) => (
+    <button type="button" onClick={() => onSelectPR({ id: "pr-b" })}>
+      Select PR B
+    </button>
+  ),
+}));
+
+vi.mock("@/components/github/pr-detail-panel", async () => {
+  const React = await import("react");
+  return {
+    PRDetailPanelComponent: ({ params }: { params: { prKey: string } }) => {
+      const [feedback] = React.useState(`feedback for ${params.prKey}`);
+      return <button type="button">{feedback}</button>;
+    },
+  };
+});
+
+import {
+  MobilePanelArea,
+  resolveMobileReviewSource,
+  useMobilePanelHandlers,
+} from "./session-mobile-layout";
 
 const MOCK_FILE: OpenFileTab = {
   path: "src/foo.ts",
@@ -181,5 +208,56 @@ describe("useMobilePanelHandlers request cancellation", () => {
     rerender({ sid: "s2" });
 
     expect(firstOptions.signal.aborted).toBe(true);
+  });
+});
+
+describe("resolveMobileReviewSource", () => {
+  it("prefers GitHub when a task has both review providers", () => {
+    expect(resolveMobileReviewSource(true, true)).toBe("github");
+  });
+
+  it("makes GitHub Review available without a GitLab MR", () => {
+    expect(resolveMobileReviewSource(true, false)).toBe("github");
+  });
+
+  it("keeps GitLab Review when no GitHub PR exists", () => {
+    expect(resolveMobileReviewSource(false, true)).toBe("gitlab");
+  });
+});
+
+describe("MobilePanelArea PR identity", () => {
+  it("remounts PR detail feedback before the selected PR changes", () => {
+    function MobileReviewHarness() {
+      const [prKey, setPrKey] = useState("pr-a");
+      return (
+        <MobilePanelArea
+          currentMobilePanel="review"
+          activeTaskId="task-1"
+          isPassthroughMode={false}
+          effectiveSessionId="session-1"
+          selectedFile={null}
+          selectedDiff={null}
+          handleOpenFileFromChat={vi.fn()}
+          handleClearSelectedDiff={vi.fn()}
+          handleOpenFile={vi.fn()}
+          handlePanelChangeAndClearSheet={vi.fn()}
+          topNavHeight="3.5rem"
+          bottomNavHeight="3.25rem"
+          reviewSource="github"
+          prKey={prKey}
+          reviewPRs={[]}
+          selectedReviewPR={null}
+          onSelectReviewPR={() => setPrKey("pr-b")}
+        />
+      );
+    }
+
+    render(<MobileReviewHarness />);
+    expect(screen.getByRole("button", { name: "feedback for pr-a" })).not.toBeNull();
+
+    act(() => screen.getByRole("button", { name: "Select PR B" }).click());
+
+    expect(screen.queryByRole("button", { name: "feedback for pr-a" })).toBeNull();
+    expect(screen.getByRole("button", { name: "feedback for pr-b" })).not.toBeNull();
   });
 });

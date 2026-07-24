@@ -57,7 +57,11 @@ test.describe("Subtask basics", () => {
     await expect(subtaskCard.getByText("Parent Task")).toBeVisible();
   });
 
-  test("create subtask from sidebar header button", async ({ testPage, apiClient, seedData }) => {
+  test("create subtask from the sidebar task context menu", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     // Create a task with an agent so we have a session to navigate to
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -78,11 +82,7 @@ test.describe("Subtask basics", () => {
     // Wait for agent to complete
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    // Open the New Subtask dialog from the sidebar New Task row's trailing
-    // subtask affordance (shown while viewing a task).
-    const subtaskButton = testPage.getByTestId("sidebar-new-subtask");
-    await expect(subtaskButton).toBeVisible({ timeout: 5_000 });
-    await subtaskButton.click();
+    await session.openCreateSubtaskForSidebarTask("Subtask Parent");
 
     // The compact NewSubtaskDialog should open with pre-filled title containing numeric suffix
     const titleInput = testPage.getByTestId("subtask-title-input");
@@ -222,7 +222,7 @@ test.describe("MCP subtask creation", () => {
     ).toBe(seedData.repositoryId);
   });
 
-  test("user creates subtask via sidebar button", async ({ testPage }) => {
+  test("user creates subtask via the sidebar task context menu", async ({ testPage }) => {
     // 1. Create parent task via UI dialog with a simple agent script
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -247,8 +247,8 @@ test.describe("MCP subtask creation", () => {
     await session.waitForLoad();
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
 
-    // 4. Open the New Subtask dialog from the sidebar New Task subtask affordance.
-    await testPage.getByTestId("sidebar-new-subtask").click();
+    // 4. Open the New Subtask dialog from the parent task's context menu.
+    await session.openCreateSubtaskForSidebarTask("Subtask Button Parent");
     const subtaskTitleInput = testPage.getByTestId("subtask-title-input");
     await expect(subtaskTitleInput).toBeVisible();
 
@@ -290,7 +290,7 @@ test.describe("MCP subtask creation", () => {
     });
 
     // 2. Create a parent task on repo A with a simple agent script so we can
-    //    open its session and reach the subtask split-button.
+    //    open its session and reach the task context menu.
     const parentTask = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "UI Override Parent",
@@ -308,8 +308,8 @@ test.describe("MCP subtask creation", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    // 3. Open the New Subtask dialog from the sidebar New Task subtask affordance.
-    await testPage.getByTestId("sidebar-new-subtask").click();
+    // 3. Open the New Subtask dialog from the parent task's context menu.
+    await session.openCreateSubtaskForSidebarTask("UI Override Parent");
 
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
@@ -643,7 +643,7 @@ test.describe("Subtask dialog feature parity", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Open the subtask dialog and toggle to GitHub URL mode.
-    await testPage.getByTestId("sidebar-new-subtask").click();
+    await session.openCreateSubtaskForSidebarTask("Subtask GH URL Parent");
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
 
@@ -758,7 +758,7 @@ test.describe("Subtask dialog feature parity", () => {
     //    reopening the popover each tick because cmdk's listbox snapshots
     //    options at open time and won't update if discovery resolves while
     //    the popover is already showing.
-    await testPage.getByTestId("sidebar-new-subtask").click();
+    await session.openCreateSubtaskForSidebarTask("Subtask Discovered Parent");
     await expect(testPage.getByTestId("subtask-title-input")).toBeVisible({ timeout: 5_000 });
 
     const discoveredOption = testPage
@@ -822,7 +822,7 @@ test.describe("Subtask dialog feature parity", () => {
     // 3. Open the subtask dialog. The first chip is seeded with the parent's
     //    repo. Click the "+ add repository" button to append a second chip,
     //    then point that chip at repo B.
-    await testPage.getByTestId("sidebar-new-subtask").click();
+    await session.openCreateSubtaskForSidebarTask("Subtask MultiRepo Parent");
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
 

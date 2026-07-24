@@ -266,6 +266,10 @@ export class SessionPage {
     await taskRow.click({ button: "right" });
   }
 
+  async openCreateSubtaskForSidebarTask(title: string): Promise<void> {
+    await this.openSidebarMenuAndClick(title, "Create Subtask");
+  }
+
   async sendSidebarTaskToWorkflow(
     title: string,
     workflowId: string,
@@ -576,6 +580,21 @@ export class SessionPage {
    * current GitHub user authored the PR (self-approval is rejected upstream). */
   prApproveButton(): Locator {
     return this.page.getByTestId("pr-approve-button");
+  }
+
+  /** Submitted review row scoped by its normalized GitHub author login. */
+  prSubmittedReview(author: string): Locator {
+    return this.page.getByTestId(`pr-submitted-review-${author.trim().toLowerCase()}`);
+  }
+
+  /** Pending reviewer row scoped by its normalized GitHub author login. */
+  prPendingReviewer(author: string): Locator {
+    return this.page.getByTestId(`pr-pending-reviewer-${author.trim().toLowerCase()}`);
+  }
+
+  /** Re-request action scoped by its normalized GitHub author login. */
+  prReRequestReviewButton(author: string): Locator {
+    return this.page.getByTestId(`pr-rerequest-review-${author.trim().toLowerCase()}`);
   }
 
   // --- PR CI accessors: desktop hover popover + chip + mobile chip drawer ---

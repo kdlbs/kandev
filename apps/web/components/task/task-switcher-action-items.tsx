@@ -1,6 +1,6 @@
 "use client";
 
-import { IconArchive, IconLoader, IconTrash, IconUnlink } from "@tabler/icons-react";
+import { IconArchive, IconLoader, IconSubtask, IconTrash, IconUnlink } from "@tabler/icons-react";
 import { ContextMenuItem, ContextMenuSeparator } from "@kandev/ui/context-menu";
 
 export function TaskArchiveItem({
@@ -32,6 +32,28 @@ export function TaskArchiveItem({
     <ContextMenuItem disabled={disabled} onSelect={() => onArchiveTask(taskId)}>
       <IconArchive className="mr-2 h-4 w-4" />
       Archive
+    </ContextMenuItem>
+  );
+}
+
+export function TaskCreateSubtaskItem({
+  task,
+  disabled,
+  onCreateSubtask,
+}: {
+  task: { id: string; title: string };
+  disabled?: boolean;
+  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
+}) {
+  if (!onCreateSubtask) return null;
+  return (
+    <ContextMenuItem
+      data-testid="task-context-create-subtask"
+      disabled={disabled}
+      onSelect={() => onCreateSubtask(task.id, task.title)}
+    >
+      <IconSubtask className="mr-2 h-4 w-4" />
+      Create Subtask
     </ContextMenuItem>
   );
 }

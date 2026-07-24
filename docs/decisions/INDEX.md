@@ -44,7 +44,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0036 | [Normalize ACP shell output at the adapter boundary](0036-normalize-acp-shell-output-at-adapter-boundary.md)                        | accepted   | backend, frontend, protocol | 2026-07-14 |
 | 0037 | [Resource-aware frontend unit tests](0037-resource-aware-frontend-unit-tests.md)                                                     | accepted   | frontend, infra             | 2026-07-14 |
 | 0038 | [Quick Chat Repository Isolation](0038-quick-chat-repository-isolation.md)                                                           | accepted   | backend, frontend           | 2026-07-14 |
-| 0039 | [Native desktop integration boundary](0039-native-desktop-integration-boundary.md)                                                  | accepted   | desktop, frontend, backend, infra | 2026-07-15 |
+| 0039 | [Native desktop integration boundary](0039-native-desktop-integration-boundary.md)                                                  | accepted (amended 2026-07-24) | desktop, frontend, backend, infra | 2026-07-15 |
 | 0040 | [Separate updater integrity from OS publisher identity](0040-separate-updater-integrity-from-os-publisher-identity.md)              | accepted   | desktop, infra, workflow    | 2026-07-15 |
 | 0041 | [Backend-owned portable user settings](0041-backend-owned-portable-user-settings.md)                                               | accepted   | backend, frontend           | 2026-07-15 |
 | 0042 | [Project shell output and fetch it on demand](0042-project-shell-output-and-fetch-on-demand.md)                                    | accepted   | backend, frontend, protocol | 2026-07-16 |
@@ -59,6 +59,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-23-opencode-review-evidence-trust | [Trusted OpenCode Review Evidence](2026-07-23-opencode-review-evidence-trust.md) | accepted | workflow, infra | 2026-07-23 |
 | 2026-07-23-planner-direct-small-work | [Planner Direct Small Work](2026-07-23-planner-direct-small-work.md) | accepted | workflow | 2026-07-23 |
 | 2026-07-23-post-commit-hook-aware-verification | [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md) | accepted | workflow | 2026-07-23 |
+| 2026-07-24-operator-owned-agent-launcher-settings | [Operator-Owned Agent Launcher Settings](2026-07-24-operator-owned-agent-launcher-settings.md) | accepted | backend, frontend, protocol | 2026-07-24 |
 | 2026-07-18-turn-configuration-snapshots | [Attribute runtime configuration to turns](2026-07-18-turn-configuration-snapshots.md) | accepted | backend, frontend | 2026-07-18 |
 | 2026-07-22-gpg-signed-release-tags | [GPG-signed release tags](2026-07-22-gpg-signed-release-tags.md) | accepted | infra, workflow | 2026-07-22 |
 | 2026-07-19-reject-mcp-actions-on-raw-websocket | [Reject MCP Actions on the Raw WebSocket](2026-07-19-reject-mcp-actions-on-raw-websocket.md) | accepted | backend, protocol | 2026-07-19 |
@@ -68,3 +69,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-20-repository-provider-origin-identity | [Persist Provider Origin In Repository Identity](2026-07-20-repository-provider-origin-identity.md) | accepted | backend, frontend | 2026-07-20 |
 | 2026-07-21-portable-status-bar-order | [Portable Status Bar Order](2026-07-21-portable-status-bar-order.md) | accepted | backend, frontend, protocol | 2026-07-21 |
 | 2026-07-21-work-item-reference-search | [Backend-normalized work-item references](2026-07-21-work-item-reference-search.md) | accepted | backend, frontend, protocol | 2026-07-21 |
+| 2026-07-24-semantic-notification-events | [Semantic notification events come from domain occurrences](2026-07-24-semantic-notification-events.md) | accepted | backend, frontend, desktop | 2026-07-24 |

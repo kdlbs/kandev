@@ -97,6 +97,10 @@ func (c *NoopClient) SubmitReview(context.Context, string, string, int, string, 
 	return ErrNoClient
 }
 
+func (c *NoopClient) RequestReviewers(context.Context, string, string, int, []string) error {
+	return ErrNoClient
+}
+
 func (c *NoopClient) MergePR(context.Context, string, string, int, string) error {
 	return ErrNoClient
 }

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +29,7 @@ type stubClient struct {
 	getIssueFunc          func(ctx context.Context, owner, repo string, number int) (*Issue, error)
 	mergePRFn             func(ctx context.Context, owner, repo string, number int, mergeMethod string) error
 	getRepoMergeMethodsFn func() (RepoMergeMethods, error)
+	requestReviewersFn    func(ctx context.Context, owner, repo string, number int, reviewers []string) error
 }
 
 func (s *stubClient) IsAuthenticated(context.Context) (bool, error) { return true, nil }
@@ -90,6 +92,13 @@ func (s *stubClient) ListPRCommits(context.Context, string, string, int) ([]PRCo
 	return nil, nil
 }
 func (s *stubClient) SubmitReview(context.Context, string, string, int, string, string) error {
+	return nil
+}
+
+func (s *stubClient) RequestReviewers(ctx context.Context, owner, repo string, number int, reviewers []string) error {
+	if s.requestReviewersFn != nil {
+		return s.requestReviewersFn(ctx, owner, repo, number, reviewers)
+	}
 	return nil
 }
 func (s *stubClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
@@ -1310,6 +1319,15 @@ func TestHttpMergePR_NoClient_Returns503(t *testing.T) {
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
 	}
+	var response struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != "github_not_configured" {
+		t.Fatalf("response code = %q, want github_not_configured", response.Code)
+	}
 }
 
 // TestHttpSubmitReview_SelfApproveReturns422 exercises the full controller →
@@ -1343,6 +1361,134 @@ func TestHttpSubmitReview_SelfApproveReturns422(t *testing.T) {
 	}
 	if resp.Error != ErrSelfApprove.Error() {
 		t.Errorf("expected error %q, got %q", ErrSelfApprove.Error(), resp.Error)
+	}
+}
+
+func TestHttpRequestReviewers_RequestsReviewers(t *testing.T) {
+	client := NewMockClient()
+	router, _ := setupControllerTest(client)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/requested-reviewers", strings.NewReader(`{"reviewers":["octocat"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Requested bool `json:"requested"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.Requested {
+		t.Fatal("expected requested=true")
+	}
+}
+
+func TestHttpRequestReviewers_NormalizesReviewersBeforeClientDelegation(t *testing.T) {
+	client := NewMockClient()
+	router, _ := setupControllerTest(client)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/requested-reviewers", strings.NewReader(`{"reviewers":[" OctoCat ","octocat","hubot ","HUBOT"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got, want := client.requestedReviews[0].Reviewers, []string{"OctoCat", "hubot"}; !slices.Equal(got, want) {
+		t.Fatalf("reviewers sent to client = %#v, want %#v", got, want)
+	}
+}
+
+func TestHttpRequestReviewers_RejectsInvalidInput(t *testing.T) {
+	router, _ := setupControllerTest(NewMockClient())
+	for _, tc := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "zero PR number", path: "/api/v1/github/prs/acme/widget/0/requested-reviewers", body: `{"reviewers":["octocat"]}`},
+		{name: "empty reviewers", path: "/api/v1/github/prs/acme/widget/42/requested-reviewers", body: `{"reviewers":[]}`},
+		{name: "blank reviewer", path: "/api/v1/github/prs/acme/widget/42/requested-reviewers", body: `{"reviewers":[" "]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestHttpRequestReviewers_RejectsBoundedInputBeforeClientDelegation(t *testing.T) {
+	overCountReviewers := make([]string, 51)
+	for i := range overCountReviewers {
+		overCountReviewers[i] = fmt.Sprintf("reviewer-%d", i)
+	}
+	overCountBody, err := json.Marshal(map[string][]string{"reviewers": overCountReviewers})
+	if err != nil {
+		t.Fatalf("marshal over-count body: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "malformed JSON", body: `{"reviewers":[`},
+		{name: "oversized body", body: `{"reviewers":["` + strings.Repeat("a", 64*1024) + `"]}`},
+		{name: "over-count reviewers", body: string(overCountBody)},
+		{name: "overlong login", body: `{"reviewers":["` + strings.Repeat("a", 257) + `"]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewMockClient()
+			router, _ := setupControllerTest(client)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/requested-reviewers", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			if len(client.requestedReviews) != 0 {
+				t.Fatalf("client received reviewers: %#v", client.requestedReviews)
+			}
+		})
+	}
+}
+
+func TestHttpRequestReviewers_ErrNoClientReturns503(t *testing.T) {
+	router, _ := setupControllerTest(nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/requested-reviewers", strings.NewReader(`{"reviewers":["octocat"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHttpRequestReviewers_UpstreamErrorReturns500(t *testing.T) {
+	router, _ := setupControllerTest(&stubClient{
+		requestReviewersFn: func(context.Context, string, string, int, []string) error {
+			return errors.New("GitHub rejected reviewers")
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/requested-reviewers", strings.NewReader(`{"reviewers":["octocat"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

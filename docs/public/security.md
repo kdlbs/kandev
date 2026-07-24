@@ -51,6 +51,19 @@ Use separate profiles for different trust levels. Do not give a routine document
 
 An agent profile combines a CLI, model, mode, flags, environment values, secret references, permissions, and optional MCP servers. Treat it as a reusable authority package.
 
+The configurable ACP command prefix is currently a launch-customization
+feature, not an isolation boundary. Kandev does not yet have a separate
+authenticated operator session for profile mutations, so an agent that can
+reach the main HTTP API may attempt the same profile edits as the UI. Do not
+rely on the prefix to confine a hostile agent until the operator-owned settings
+boundary in
+[ADR-2026-07-24-operator-owned-agent-launcher-settings](../decisions/2026-07-24-operator-owned-agent-launcher-settings.md)
+is enforced. The current per-boot token is a deliberately replayable interim
+CSRF and accidental-mutation interlock, not authentication: an intentional
+agent can fetch and replay it. It does not close this direct-client path, and
+an ambient browser login is insufficient while agent-controlled previews can
+share the operator origin.
+
 1. Create a profile for one purpose, such as local implementation, read-focused review, or unattended maintenance.
 2. Select the least-privileged Git, provider, and cloud credentials that purpose needs.
 3. Leave approval or sandbox bypasses disabled unless the executor is disposable and the task is trusted.

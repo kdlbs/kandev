@@ -494,9 +494,16 @@ export function useSidebarActions(store: StoreApi) {
   const linkActions = useSidebarLinkActions(store);
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
+  const [creatingSubtask, setCreatingSubtask] = useState<{ id: string; title: string } | null>(
+    null,
+  );
 
   const handleRenameTask = useCallback((taskId: string, currentTitle: string) => {
     setRenamingTask({ id: taskId, title: currentTitle });
+  }, []);
+
+  const handleCreateSubtask = useCallback((taskId: string, taskTitle: string) => {
+    setCreatingSubtask({ id: taskId, title: taskTitle });
   }, []);
 
   const handleRenameSubmit = useCallback(
@@ -522,6 +529,9 @@ export function useSidebarActions(store: StoreApi) {
     setRenamingTask,
     handleRenameTask,
     handleRenameSubmit,
+    creatingSubtask,
+    setCreatingSubtask,
+    handleCreateSubtask,
     ...linkActions,
     ...archiveActions,
     ...deleteActions,

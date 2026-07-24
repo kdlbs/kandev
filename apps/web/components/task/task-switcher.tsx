@@ -58,6 +58,7 @@ type TaskSwitcherProps = {
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
+  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
@@ -143,6 +144,7 @@ type TaskRowProps = {
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
+  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
@@ -199,6 +201,7 @@ function TaskRow({
   onSelectTask,
   onRenameTask,
   onArchiveTask,
+  onCreateSubtask,
   onDeleteTask,
   onDetachTask,
   onMoveToStep,
@@ -229,6 +232,7 @@ function TaskRow({
       steps={taskSteps}
       onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
+      onCreateSubtask={onCreateSubtask}
       onDeleteTask={onDeleteTask}
       onDetachTask={onDetachTask}
       {...taskLinkHandlerProps(props)}
@@ -404,6 +408,7 @@ type GroupSectionProps = {
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
+  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
@@ -445,6 +450,7 @@ function GroupSection({
   onSelectTask,
   onRenameTask,
   onArchiveTask,
+  onCreateSubtask,
   onDeleteTask,
   onDetachTask,
   onLinkPullRequest,
@@ -484,6 +490,7 @@ function GroupSection({
       onSelectTask,
       onRenameTask,
       onArchiveTask,
+      onCreateSubtask,
       onDeleteTask,
       onDetachTask,
       onLinkPullRequest,
@@ -541,6 +548,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onSelectTask,
   onRenameTask,
   onArchiveTask,
+  onCreateSubtask,
   onDeleteTask,
   onDetachTask,
   onLinkPullRequest,
@@ -598,6 +606,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onSelectTask={onSelectTask}
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
+          onCreateSubtask={onCreateSubtask}
           onDeleteTask={onDeleteTask}
           onDetachTask={onDetachTask}
           onLinkPullRequest={onLinkPullRequest}
