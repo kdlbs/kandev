@@ -111,7 +111,7 @@ test.describe("Task creation", () => {
           auth_specs: [
             {
               id: agent.name,
-              display_name: profile.agent_display_name,
+              display_name: profile.agentDisplayName,
               methods: [{ method_id: "test-token", type: "env", env_var: "TEST_TOKEN" }],
             },
           ],
