@@ -76,10 +76,9 @@ test.describe("Mobile agent profile config selector", () => {
         timeout: 15_000,
       });
 
-      // Direct DB-path verification: fetch the profile and assert the
-      // persisted command_prefix.
+      // API-path verification confirms the normalized persisted value.
       const stored = await apiClient.getAgentProfile(profile.id);
-      expect((stored as unknown as { command_prefix?: string }).command_prefix).toBe("greywall --");
+      expect(stored.commandPrefix).toBe("greywall --");
 
       // Clearing a previously-saved prefix must persist an empty value.
       await testPage.getByTestId("command-prefix-input").fill("");
@@ -95,9 +94,7 @@ test.describe("Mobile agent profile config selector", () => {
         timeout: 15_000,
       });
       const storedAfterClear = await apiClient.getAgentProfile(profile.id);
-      expect(
-        (storedAfterClear as unknown as { command_prefix?: string }).command_prefix ?? "",
-      ).toBe("");
+      expect(storedAfterClear.commandPrefix ?? "").toBe("");
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
     }

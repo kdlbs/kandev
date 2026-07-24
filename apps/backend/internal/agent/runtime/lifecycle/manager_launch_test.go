@@ -11,8 +11,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -136,6 +138,15 @@ func (a *cliFlagTestAgent) BuildCommand(_ agents.CommandOptions) agents.Command 
 	return agents.Cmd("copilot", "--acp").Build()
 }
 
+type invalidCommandTestAgent struct {
+	testAgent
+	command agents.Command
+}
+
+func (a *invalidCommandTestAgent) BuildCommand(_ agents.CommandOptions) agents.Command {
+	return a.command
+}
+
 func TestBuildAgentCommand_CLIFlagsAppended(t *testing.T) {
 	mgr := newTestManager(t)
 	ag := &cliFlagTestAgent{}
@@ -240,6 +251,141 @@ func TestBuildAgentCommand_CommandPrefix(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "greywall -- amp threads continue --allow-all-tools", cmds.continue_)
 	})
+}
+
+func TestBuildAgentCommand_RejectsInvalidBuiltArgv(t *testing.T) {
+	mgr := newTestManager(t)
+	tests := []struct {
+		name  string
+		agent *invalidCommandTestAgent
+	}{
+		{
+			name:  "initial executable is a flag",
+			agent: &invalidCommandTestAgent{command: agents.NewCommand("--not-an-executable")},
+		},
+		{
+			name: "continue executable is whitespace",
+			agent: &invalidCommandTestAgent{
+				command: agents.NewCommand("agent"),
+				testAgent: testAgent{runtimeConfig: &agents.RuntimeConfig{SessionConfig: agents.SessionConfig{
+					ContinueSessionCmd: agents.NewCommand("   "),
+				}}},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, tt.agent, false)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestManager_LaunchRejectsInvalidBuiltArgvBeforeRegistration(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent *invalidCommandTestAgent
+	}{
+		{
+			name: "initial executable is a flag",
+			agent: &invalidCommandTestAgent{
+				testAgent: testAgent{id: "invalid-command", enabled: true},
+				command:   agents.NewCommand("--not-an-executable"),
+			},
+		},
+		{
+			name: "continue executable is whitespace",
+			agent: &invalidCommandTestAgent{
+				testAgent: testAgent{
+					id:      "invalid-command",
+					enabled: true,
+					runtimeConfig: &agents.RuntimeConfig{SessionConfig: agents.SessionConfig{
+						ContinueSessionCmd: agents.NewCommand("   "),
+					}},
+				},
+				command: agents.NewCommand("agent"),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolver := &countingProfileResolver{info: &AgentProfileInfo{
+				ProfileID: "profile-invalid-command",
+				AgentName: tt.agent.ID(),
+			}}
+			mgr, backend := newEnvironmentExecutionTestManagerWithProfileResolver(t, nil, resolver)
+			require.NoError(t, mgr.registry.Register(tt.agent))
+			var configureCalls, startCalls atomic.Int32
+			backend.client = newLaunchRollbackAgentctlClient(t, mgr.logger, &configureCalls, &startCalls)
+
+			execution, err := mgr.Launch(context.Background(), &LaunchRequest{
+				TaskID:         "task-invalid-command",
+				SessionID:      "session-invalid-command",
+				AgentProfileID: "profile-invalid-command",
+				ExecutorType:   string(models.ExecutorTypeLocal),
+				IsEphemeral:    true,
+			})
+			require.Nil(t, execution)
+			require.ErrorContains(t, err, "validate")
+			require.Equal(t, int32(1), backend.createCount.Load())
+			require.Equal(t, int32(1), backend.stopCount.Load())
+			require.True(t, backend.forceStopped.Load())
+			_, found := mgr.executionStore.GetBySessionID("session-invalid-command")
+			require.False(t, found)
+			require.Zero(t, configureCalls.Load())
+			require.Zero(t, startCalls.Load())
+		})
+	}
+}
+
+func TestManager_LaunchBuildExecutionFailureRollsBackCreatedInstance(t *testing.T) {
+	resolver := &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID:     "profile-1",
+		AgentName:     "auggie",
+		CommandPrefix: `greywall "unterminated`,
+	}}
+	mgr, backend := newEnvironmentExecutionTestManagerWithProfileResolver(t, nil, resolver)
+	var configureCalls, startCalls atomic.Int32
+	backend.client = newLaunchRollbackAgentctlClient(t, mgr.logger, &configureCalls, &startCalls)
+
+	execution, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-launch-rollback",
+		SessionID:      "session-launch-rollback",
+		AgentProfileID: "profile-1",
+		ExecutorType:   string(models.ExecutorTypeLocal),
+		IsEphemeral:    true,
+	})
+	require.Nil(t, execution)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "resolve command_prefix")
+	require.Equal(t, int32(1), backend.createCount.Load(), "instance must be created before command construction fails")
+	require.Equal(t, int32(1), backend.stopCount.Load(), "created instance must be stopped exactly once")
+	require.True(t, backend.forceStopped.Load(), "failed instance cleanup must force runtime teardown")
+	_, found := mgr.executionStore.GetBySessionID("session-launch-rollback")
+	require.False(t, found, "failed execution must never be registered")
+	require.Zero(t, configureCalls.Load(), "command construction failure must not configure agentctl")
+	require.Zero(t, startCalls.Load(), "command construction failure must not start agentctl")
+}
+
+func newLaunchRollbackAgentctlClient(t *testing.T, log *logger.Logger, configureCalls, startCalls *atomic.Int32) *agentctl.Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/agent/configure":
+			configureCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case "/api/v1/start":
+			startCalls.Add(1)
+			_, _ = w.Write([]byte(`{"success":true}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return newTestAgentctlClient(t, server.URL, log)
 }
 
 func TestBuildEnvForExecution_ResolvesSecretBackedProfileEnv(t *testing.T) {
@@ -491,6 +637,30 @@ func TestConfigureAndStartAgent_DoesNotSendTaskDescriptionEnv(t *testing.T) {
 	}
 }
 
+func TestConfigureAndStartAgent_SendsStructuredArgv(t *testing.T) {
+	mgr := newTestManager(t)
+	var captured []string
+	client := newConfigureArgsCaptureAgentctlClient(t, newTestLogger(), &captured)
+	execution := &AgentExecution{
+		ID:             "exec-argv",
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+		AgentCommand:   "runner two words  C:\\tools\\agent.exe",
+		AgentArgs:      []string{"runner", "two words", "", `C:\tools\agent.exe`},
+		WorkspacePath:  t.TempDir(),
+		agentctl:       client,
+	}
+
+	if _, err := mgr.configureAndStartAgent(context.Background(), execution, "never"); err != nil {
+		t.Fatalf("configure and start agent: %v", err)
+	}
+	want := []string{"runner", "two words", "", `C:\tools\agent.exe`}
+	if !reflect.DeepEqual(captured, want) {
+		t.Fatalf("configured argv = %#v, want %#v", captured, want)
+	}
+}
+
 func TestConfigureAndStartAgent_SpillsLargeWakePayloadEnv(t *testing.T) {
 	mgr := newTestManager(t)
 	var configuredEnv map[string]string
@@ -586,7 +756,38 @@ func newConfigureCaptureAgentctlClient(t *testing.T, log *logger.Logger, capture
 	}))
 	t.Cleanup(server.Close)
 
-	parsed, err := url.Parse(server.URL)
+	return newTestAgentctlClient(t, server.URL, log)
+}
+
+func newConfigureArgsCaptureAgentctlClient(t *testing.T, log *logger.Logger, captured *[]string) *agentctl.Client {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/agent/configure":
+			var req struct {
+				AgentArgs []string `json:"agent_args"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Errorf("decode configure request: %v", err)
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			*captured = req.AgentArgs
+			_, _ = w.Write([]byte(`{"success":true}`))
+		case "/api/v1/start":
+			_, _ = w.Write([]byte(`{"success":true,"command":"runner"}`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return newTestAgentctlClient(t, server.URL, log)
+}
+
+func newTestAgentctlClient(t *testing.T, serverURL string, log *logger.Logger) *agentctl.Client {
+	t.Helper()
+	parsed, err := url.Parse(serverURL)
 	if err != nil {
 		t.Fatalf("parse test server URL: %v", err)
 	}
@@ -1011,6 +1212,11 @@ func TestLaunchResolveWorkspacePath_WorktreeWithoutRepoFallsBackToScratch(t *tes
 // path and StartAgentProcess() then failed with "no agent command configured".
 func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID:     "profile-1",
+		AgentName:     "auggie",
+		CommandPrefix: `"/opt/wrapper dir/wrapper" --`,
+	}}
 
 	// Inject a workspace-only execution: AgentCommand is intentionally empty,
 	// matching what createExecution produces when called from
@@ -1035,6 +1241,9 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, existing, got, "Launch must reuse the workspace-only execution, not create a new one")
 	require.NotEmpty(t, got.AgentCommand, "AgentCommand must be populated by promotion")
+	require.GreaterOrEqual(t, len(got.AgentArgs), 2, "promotion must populate structured argv")
+	require.Equal(t, []string{"/opt/wrapper dir/wrapper", "--"}, got.AgentArgs[:2],
+		"promotion must preserve the prefix argv token containing spaces")
 	require.Equal(t, "acp-session-abc", got.ACPSessionID, "ACPSessionID must be carried over from the request")
 	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
 }

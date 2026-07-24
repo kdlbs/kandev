@@ -11,6 +11,9 @@ type BootPayload struct {
 	InitialState map[string]any      `json:"initialState"`
 	RouteData    map[string]any      `json:"routeData,omitempty"`
 	Errors       []BootError         `json:"errors,omitempty"`
+	// InterimSettingsInterlockToken is a replayable per-boot SPA CSRF and
+	// accidental-mutation interlock. It is not an authentication credential.
+	InterimSettingsInterlockToken string `json:"interimSettingsInterlockToken,omitempty"`
 	// Plugins lists every active, UI-bundle-declaring plugin, per
 	// docs/plans/plugins/PLUGIN-API.md ("Loading model"). Populated
 	// only when the plugins feature flag is on; the flag itself is not

@@ -137,6 +137,7 @@ func TestValidateCommandPrefix(t *testing.T) {
 		{name: "unterminated quote rejected", prefix: `greywall "unterminated`, wantErr: true},
 		{name: "trailing backslash rejected", prefix: `greywall foo\`, wantErr: true},
 		{name: "only-empty-quotes rejected", prefix: `""`, wantErr: true},
+		{name: "whitespace executable rejected", prefix: `"   " --arg`, wantErr: true},
 		{name: "leading flag rejected", prefix: `--foo greywall`, wantErr: true},
 		{name: "leading dash rejected", prefix: `-x sandbox`, wantErr: true},
 	}
@@ -324,5 +325,36 @@ func TestCreateAgentProfiles_RejectsBadCommandPrefix(t *testing.T) {
 	}}, &testAgent{id: "test-agent", name: "test-agent"})
 	if !errors.Is(err, ErrInvalidCommandPrefix) {
 		t.Fatalf("expected ErrInvalidCommandPrefix, got %v", err)
+	}
+	if len(st.created) != 0 {
+		t.Fatalf("bad nested profile create made %d profile writes", len(st.created))
+	}
+}
+
+func TestCreateAgent_RejectsBadNestedProfileBeforeAnyWrite(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	ctrl := newTestController(map[string]agents.Agent{
+		"test-agent": &testAgent{
+			id:          "test-agent",
+			name:        "test-agent",
+			displayName: "Test Agent",
+			enabled:     true,
+		},
+	})
+	st := newFakeStore()
+	ctrl.repo = st
+
+	_, err := ctrl.CreateAgent(context.Background(), CreateAgentRequest{
+		Name: "test-agent",
+		Profiles: []CreateAgentProfileRequest{{
+			Name:          "Bad",
+			CommandPrefix: `--not-a-launcher`,
+		}},
+	})
+	if !errors.Is(err, ErrInvalidCommandPrefix) {
+		t.Fatalf("expected ErrInvalidCommandPrefix, got %v", err)
+	}
+	if len(st.agents) != 0 || len(st.created) != 0 {
+		t.Fatalf("bad create made writes: agents=%d profiles=%d", len(st.agents), len(st.created))
 	}
 }
