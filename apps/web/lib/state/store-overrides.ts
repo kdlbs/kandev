@@ -70,6 +70,7 @@ export function buildStateOverrides(m: DefaultState) {
     linearIssueWatches: m.linearIssueWatches,
     office: m.office,
     features: m.features,
+    auth: m.auth,
     automations: m.automations,
     automationRuns: m.automationRuns,
     system: m.system,

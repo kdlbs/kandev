@@ -22,7 +22,7 @@ import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
 import { hasHydratedKanbanRouteState } from "@/lib/routing/kanban-route-hydration";
-import { usePathname, useSearchParams } from "@/lib/routing/client-router";
+import { useRouter, usePathname, useSearchParams } from "@/lib/routing/client-router";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import {
   PluginErrorBoundary,
@@ -74,9 +74,15 @@ type SpaRoute =
   | { kind: "stats"; range?: RangeKey }
   | { kind: "settings"; pathname: string }
   | { kind: "office"; pathname: string }
-  | { kind: "plugin"; path: string };
+  | { kind: "plugin"; path: string }
+  | { kind: "login" }
+  | { kind: "setup" }
+  | { kind: "invite"; token?: string };
 
-type DataBackedSpaRoute = Exclude<SpaRoute, { kind: "kanban" | "settings" | "office" }>;
+type DataBackedSpaRoute = Exclude<
+  SpaRoute,
+  { kind: "kanban" | "settings" | "office" | "login" | "setup" | "invite" }
+>;
 
 type RouteDataState = {
   activeWorkspaceId: string | null;
@@ -136,6 +142,12 @@ function resolveTopLevelRoute(normalized: string, searchParams: URLSearchParams)
       return { kind: "jira" };
     case "/linear":
       return { kind: "linear" };
+    case "/login":
+      return { kind: "login" };
+    case "/setup":
+      return { kind: "setup" };
+    case "/invite":
+      return { kind: "invite", token: searchParams.get("token") ?? undefined };
     case "/stats": {
       const range = searchParams.get("range");
       return { kind: "stats", range: range && isRangeKey(range) ? range : undefined };
@@ -173,6 +185,12 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   const searchParams = useSearchParams();
   const route = resolveSpaRoute(pathname, searchParams);
 
+  // Reaching /login, /setup, or /invite here means the pre-auth gate in
+  // main.tsx already decided the app shell should render (authenticated, or
+  // auth disabled) — those paths are stale, so bounce to the kanban home.
+  if (route.kind === "login" || route.kind === "setup" || route.kind === "invite") {
+    return <AuthRouteRedirect />;
+  }
   if (route.kind === "plugin") {
     return <PluginRoute path={route.path} />;
   }
@@ -207,6 +225,14 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   }
 
   return <DataBackedRoute route={route} routeData={routeData} />;
+}
+
+function AuthRouteRedirect() {
+  const router = useRouter();
+  useEffect(() => {
+    router.replace("/");
+  }, [router]);
+  return null;
 }
 
 /**

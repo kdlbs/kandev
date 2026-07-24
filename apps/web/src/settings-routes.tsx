@@ -46,6 +46,10 @@ import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
 import { SpritesSettings } from "@/components/settings/sprites-settings";
 import { AboutCard } from "@/components/settings/system/about-card";
+import { ApiTokens } from "@/components/settings/account/api-tokens";
+import { AuthenticationSettings } from "@/components/settings/system/authentication-settings";
+import { SecuritySettings } from "@/components/settings/account/security-settings";
+import { UsersTable } from "@/components/settings/system/users-table";
 import { BackupsTable } from "@/components/settings/system/backups-table";
 import { DatabaseStatsCard } from "@/components/settings/system/database-stats-card";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
@@ -159,6 +163,38 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/integrations/sentry": () => renderIntegrationSettingsRoute("sentry"),
   "/settings/integrations/slack": () => renderIntegrationSettingsRoute("slack"),
   "/settings/system": () => <SettingsRedirect to="/settings/system/status" />,
+  "/settings/system/users": () => (
+    <SystemPageShell
+      title="Users"
+      description="Manage accounts, roles, and invite links for this instance."
+    >
+      <UsersTable />
+    </SystemPageShell>
+  ),
+  "/settings/system/authentication": () => (
+    <SystemPageShell
+      title="Authentication"
+      description="Turn sign-in on or off for this Kandev instance."
+    >
+      <AuthenticationSettings />
+    </SystemPageShell>
+  ),
+  "/settings/account/security": () => (
+    <SystemPageShell
+      title="Profile & password"
+      description="Change your password and review devices signed in to your account."
+    >
+      <SecuritySettings />
+    </SystemPageShell>
+  ),
+  "/settings/account/tokens": () => (
+    <SystemPageShell
+      title="API tokens"
+      description="Personal access tokens for scripts and CLIs acting as you."
+    >
+      <ApiTokens />
+    </SystemPageShell>
+  ),
   "/settings/system/about": () => (
     <SystemPageShell title="About" description="Version, build metadata, and links.">
       <AboutCard />

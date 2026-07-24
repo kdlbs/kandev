@@ -29,6 +29,7 @@ import {
   createLinearSlice,
   createOfficeSlice,
   createFeaturesSlice,
+  createAuthSlice,
   createAutomationsSlice,
   createSystemSlice,
   createPluginsSlice,
@@ -45,6 +46,7 @@ import {
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultAuthState,
   defaultAutomationsState,
   defaultSystemState,
   defaultPluginsState,
@@ -74,6 +76,7 @@ import {
   type SystemSliceActions,
   type AutomationsSliceActions,
   type FeaturesSliceActions,
+  type AuthSliceActions,
   type GitHubSliceActions,
   type AzureDevOpsSliceActions,
   type PluginsSliceActions,
@@ -218,6 +221,9 @@ export type AppState = {
 
   // Feature flags slice
   features: (typeof defaultFeaturesState)["features"];
+
+  // Auth slice (actions merged via AuthSliceActions intersection on AppState)
+  auth: (typeof defaultAuthState)["auth"];
 
   // Automations slice
   automations: (typeof defaultAutomationsState)["automations"];
@@ -610,6 +616,7 @@ export type AppState = {
   AzureDevOpsSliceActions &
   SystemSliceActions &
   FeaturesSliceActions &
+  AuthSliceActions &
   AutomationsSliceActions &
   PluginsSliceActions;
 
@@ -643,6 +650,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createOfficeSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createFeaturesSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createAuthSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createSystemSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
