@@ -758,7 +758,9 @@ File changes are batched for up to 100 ms and flushed immediately at 50 entries.
 | Routing key | Action | Notes |
 |-------------|--------|-------|
 | subscribed user | `user.settings.updated` | Requires `user.subscribe`. |
-| subscribed user | `session.waiting_for_input` | Local user notification with task/session/title/body fields; it is not delivered by `session.subscribe`. |
+| subscribed user | `session.turn_finished` | Local user notification for a completed agent turn, with task/session/occurrence/title/body fields; the turn ID is sent as both the envelope `id` and payload `occurrence_id`. It is not delivered by `session.subscribe`. |
+| subscribed user | `session.clarification_requested` | Local user notification for a structured agent question that needs an answer, with task/session/occurrence/title/body fields; the clarification pending ID is sent as both the envelope `id` and payload `occurrence_id`. It is not delivered by `session.subscribe`. |
+| subscribed user | `office.inbox_item` | Local notification for a selected Office inbox event, with title/body fields. |
 | subscribed run | `run.event.appended` | Future events only; there is no replay cursor. |
 | metrics subscribers | `system.metrics.updated` | Live resource snapshot; collection interest follows subscribers. |
 

@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -299,19 +300,38 @@ func provideGateway(
 	notificationSvc := notificationservice.NewService(notificationRepo, taskRepo, gateway.Hub, log)
 	notificationCtrl := notificationcontroller.NewController(notificationSvc)
 	if eventBus != nil {
-		_, err = eventBus.Subscribe(events.TaskSessionStateChanged, func(ctx context.Context, event *bus.Event) error {
+		_, err = eventBus.Subscribe(events.TurnCompleted, func(ctx context.Context, event *bus.Event) error {
 			data, ok := event.Data.(map[string]interface{})
 			if !ok {
 				return nil
 			}
 			taskID, _ := data["task_id"].(string)
 			sessionID, _ := data["session_id"].(string)
-			newState, _ := data["new_state"].(string)
-			notificationSvc.HandleTaskSessionStateChanged(ctx, taskID, sessionID, newState)
+			turnID, _ := data["id"].(string)
+			if isAbandonedTurnCompletion(data) {
+				return nil
+			}
+			notificationSvc.HandleTaskTurnFinished(ctx, taskID, sessionID, turnID)
 			return nil
 		})
 		if err != nil {
-			log.Error("Failed to subscribe to task session notifications", zap.Error(err))
+			log.Error("Failed to subscribe to turn notifications", zap.Error(err))
+		}
+
+		_, err = eventBus.Subscribe(events.MessageAdded, func(ctx context.Context, event *bus.Event) error {
+			data, ok := event.Data.(map[string]interface{})
+			if !ok {
+				return nil
+			}
+			taskID, sessionID, pendingID, eligible := clarificationNotificationOccurrence(data)
+			if !eligible {
+				return nil
+			}
+			notificationSvc.HandleClarificationRequested(ctx, taskID, sessionID, pendingID)
+			return nil
+		})
+		if err != nil {
+			log.Error("Failed to subscribe to clarification notifications", zap.Error(err))
 		}
 
 		_, err = eventBus.Subscribe(events.OfficeInboxItem, func(ctx context.Context, event *bus.Event) error {
@@ -338,6 +358,29 @@ func provideGateway(
 	}
 
 	return gateway, notificationSvc, notificationCtrl, terminalSvc, nil
+}
+
+func isAbandonedTurnCompletion(data map[string]interface{}) bool {
+	startedAt, started := data["started_at"].(time.Time)
+	completedAt, completed := data["completed_at"].(*time.Time)
+	return started && completed && completedAt != nil && startedAt.Equal(*completedAt)
+}
+
+func clarificationNotificationOccurrence(data map[string]interface{}) (taskID, sessionID, pendingID string, ok bool) {
+	if data["type"] != "clarification_request" || data["requests_input"] != true || data["author_type"] != "agent" {
+		return "", "", "", false
+	}
+	metadata, metadataOK := data["metadata"].(map[string]interface{})
+	pendingID, pendingOK := metadata["pending_id"].(string)
+	if !metadataOK || !pendingOK || pendingID == "" {
+		return "", "", "", false
+	}
+	taskID, taskOK := data["task_id"].(string)
+	sessionID, sessionOK := data["session_id"].(string)
+	if !taskOK || !sessionOK || taskID == "" || sessionID == "" {
+		return "", "", "", false
+	}
+	return taskID, sessionID, pendingID, true
 }
 
 type createdChangeAssociationRouter struct {

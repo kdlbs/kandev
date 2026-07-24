@@ -28,7 +28,7 @@ type UpsertProviderRequest struct {
 	Type    string                 `json:"type"`
 	Config  map[string]interface{} `json:"config,omitempty"`
 	Enabled *bool                  `json:"enabled,omitempty"`
-	Events  []string               `json:"events,omitempty"`
+	Events  *[]string              `json:"events,omitempty"`
 }
 
 type UpdateProviderRequest struct {

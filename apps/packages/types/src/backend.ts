@@ -17,7 +17,9 @@ export type BackendMessageType =
   | "column.created"
   | "column.updated"
   | "column.deleted"
-  | "task_session.waiting_for_input";
+  | "session.turn_finished"
+  | "session.clarification_requested"
+  | "office.inbox_item";
 
 export type BackendMessage<T extends BackendMessageType, P> = {
   id?: string;
@@ -78,9 +80,17 @@ export type SystemErrorPayload = {
   code?: string;
 };
 
-export type TaskSessionWaitingForInputPayload = {
+export type TaskSessionNotificationPayload = {
   task_id: string;
-  task_session_id: string;
+  session_id: string;
+  occurrence_id: string;
+  title: string;
+  body: string;
+};
+
+export type OfficeInboxItemNotificationPayload = {
+  task_id?: string;
+  session_id?: string;
   title: string;
   body: string;
 };
@@ -133,8 +143,10 @@ export type BackendMessageMap = {
   "column.created": BackendMessage<"column.created", ColumnPayload>;
   "column.updated": BackendMessage<"column.updated", ColumnPayload>;
   "column.deleted": BackendMessage<"column.deleted", ColumnPayload>;
-  "task_session.waiting_for_input": BackendMessage<
-    "task_session.waiting_for_input",
-    TaskSessionWaitingForInputPayload
+  "session.turn_finished": BackendMessage<"session.turn_finished", TaskSessionNotificationPayload>;
+  "session.clarification_requested": BackendMessage<
+    "session.clarification_requested",
+    TaskSessionNotificationPayload
   >;
+  "office.inbox_item": BackendMessage<"office.inbox_item", OfficeInboxItemNotificationPayload>;
 };

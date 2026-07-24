@@ -9,7 +9,6 @@ const mockSetNotificationProvidersLoading = vi.fn();
 const mockToast = vi.fn();
 let mockProviders: Array<Record<string, unknown>> = [];
 let mockProvidersLoaded = true;
-const WAITING_EVENT = "session.waiting_for_input";
 
 vi.mock("@/lib/api", () => ({
   listNotificationProviders: vi.fn(),
@@ -57,7 +56,7 @@ describe("useSessionFailureToast native delivery", () => {
     expect(mockClearNotification).toHaveBeenCalledWith(null);
   });
 
-  it("also emits one native failure notification when the local preference allows it", () => {
+  it("also emits one native failure notification when the local provider is enabled", () => {
     const invoke = vi.fn().mockResolvedValue("shown");
     (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__ = {
       invoke,
@@ -68,7 +67,7 @@ describe("useSessionFailureToast native delivery", () => {
         id: "local",
         type: "local",
         enabled: true,
-        events: [WAITING_EVENT],
+        events: [],
       },
     ];
     mockNotification = { sessionId: "s-native", taskId: "t-1", message: "boom" };
@@ -100,7 +99,7 @@ describe("useSessionFailureToast native delivery", () => {
         id: "local",
         type: "local",
         enabled: false,
-        events: [WAITING_EVENT],
+        events: [],
       },
     ];
     mockNotification = { sessionId: "s-disabled", taskId: "t-1", message: "boom" };
@@ -126,12 +125,12 @@ describe("useSessionFailureToast native delivery", () => {
           type: "local",
           config: {},
           enabled: true,
-          events: [WAITING_EVENT],
+          events: [],
           created_at: "2026-07-15T00:00:00Z",
           updated_at: "2026-07-15T00:00:00Z",
         },
       ],
-      events: [WAITING_EVENT],
+      events: [],
       apprise_available: false,
     });
     mockNotification = { sessionId: "s-lazy", taskId: "t-1", message: "boom" };
@@ -141,7 +140,7 @@ describe("useSessionFailureToast native delivery", () => {
     await waitFor(() => expect(invoke).toHaveBeenCalledTimes(1));
     expect(mockSetNotificationProviders).toHaveBeenCalledWith({
       items: expect.any(Array),
-      events: [WAITING_EVENT],
+      events: [],
       appriseAvailable: false,
       loaded: true,
       loading: false,

@@ -145,7 +145,14 @@ Kandev has no registered public URL scheme, file association, or command-line de
 
 External `http`, `https`, and `mailto` destinations open through the system browser or mail client. The desktop bridge rejects URLs with embedded credentials, unsupported schemes, `localhost`/subdomains of `localhost`, loopback IPs, and unspecified IPs; Kandev routes, previews, downloads, and blob URLs remain in the WebView. RFC 1918/private-LAN hosts are not categorically blocked by this validator.
 
-Native notifications are limited to a session waiting for input or failing, and respect the application's notification preference and OS permission. Requests carry task/session identifiers for validation and event de-duplication, but the desktop registers no notification activation/deep-link handler. Clicking a notification is therefore not a supported navigation path.
+Native notifications are limited to selected agent-turn-finished and
+agent-needs-an-answer events, plus session failures. Semantic session events
+respect each provider's event selections. Session failures remain an independent
+safety alert whenever the Local provider is enabled. Delivery also respects the
+application's notification preference and OS permission. Requests carry
+task/session and semantic event identifiers for validation and event
+de-duplication, but the desktop registers no notification activation/deep-link
+handler. Clicking a notification is therefore not a supported navigation path.
 
 ## Troubleshooting
 
