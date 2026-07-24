@@ -808,6 +808,34 @@ func (s *Server) showWalkthroughHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) publishReviewFindingsHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		findingsRaw, ok := req.GetArguments()["findings"]
+		if !ok {
+			return mcp.NewToolResultError(
+				"findings is required (array of {file, line, severity, category, title, body} objects)"), nil
+		}
+
+		payload := map[string]interface{}{
+			"task_id":  taskID,
+			"summary":  req.GetString("summary", ""),
+			"findings": findingsRaw,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPPublishReviewFindings, payload, &result); err != nil {
+			// A validation failure rejects the whole batch, so the agent can fix
+			// the offending entry and call again.
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(fmt.Sprintf("Review findings published:\n%s", string(data))), nil
+	}
+}
+
 func (s *Server) getWalkthroughHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID, err := s.resolveTaskID(req)

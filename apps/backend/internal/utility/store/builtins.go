@@ -38,7 +38,12 @@ var builtinDefs = []builtinDef{
 	{"builtin-pr-description", "pr-description", "Generate a PR description based on commits and changes", "pr-description"},
 	{"builtin-enhance-prompt", "enhance-prompt", "Enhance and expand a user prompt with context and clarity", "enhance-prompt"},
 	{"builtin-summarize-session", "summarize-session", "Summarize a session conversation for context handover", "summarize-session"},
+	{"builtin-code-review", "code-review", "Review the task's changed files and return anchored findings", "code-review"},
 }
+
+// CodeReviewAgentID is the built-in utility agent that supplies the default
+// reviewer identity for a native code-review pass.
+const CodeReviewAgentID = "builtin-code-review"
 
 // builtinSeedAgentID is the inference-agent ID embedded in seeded built-in
 // rows. Kept aligned with the schema DEFAULT so a row that survives every
