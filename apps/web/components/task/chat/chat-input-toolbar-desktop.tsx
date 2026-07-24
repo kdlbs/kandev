@@ -141,6 +141,7 @@ function DesktopRightSection(props: {
   hideAgentControls: boolean;
   planModeEnabled: boolean;
   isAgentBusy: boolean;
+  canCancelAgent?: boolean;
   hasContent: boolean;
   onImplementPlan?: (fresh: boolean) => void;
   isDisabled: boolean;
@@ -178,6 +179,7 @@ function DesktopRightSection(props: {
         )}
         <SubmitButton
           isAgentBusy={props.isAgentBusy}
+          canCancelAgent={props.canCancelAgent}
           hasContent={props.hasContent}
           isDisabled={props.isDisabled}
           submitDisabledReason={props.submitDisabledReason}
@@ -261,6 +263,7 @@ export function DesktopChatInputToolbar(props: DesktopToolbarProps) {
         hideAgentControls={props.hideAgentControls}
         planModeEnabled={props.planModeEnabled}
         isAgentBusy={props.isAgentBusy}
+        canCancelAgent={props.canCancelAgent}
         hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
         isDisabled={props.isDisabled}

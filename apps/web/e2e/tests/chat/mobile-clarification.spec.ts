@@ -10,6 +10,32 @@ import { seedClarificationSession } from "../../helpers/clarification";
 test.describe("Mobile clarification multiline answer", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
+  test("queues inline composer input while the structured question remains answerable", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Clarify Composer Queue",
+      { scenario: "clarification" },
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    const composer = session.activeChat().getByTestId("chat-input-editor");
+    await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+    await composer.fill("Queue this from phone", { timeout: 30_000 });
+    await testPage.getByTestId("submit-message-button").tap();
+
+    await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await testPage.getByTestId("queue-chip").tap();
+    await expect(testPage.getByTestId("queued-ghost-list")).toBeVisible();
+    await expect(testPage.getByTestId("queue-drain-next")).not.toBeVisible();
+  });
+
   test("Enter inserts a newline and the Send button submits the multiline answer", async ({
     testPage,
     apiClient,

@@ -1,17 +1,28 @@
+import { renderHook } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import {
   buildContextFilesContext,
   buildTaskMentionsContext,
   sendMessageRequest,
+  useMessageHandler,
 } from "./use-message-handler";
 import type { AppState } from "@/lib/state/store";
 import type { TaskMentionData } from "./use-inline-mention";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
 const getWebSocketClientMock = vi.hoisted(() => vi.fn());
+const queueMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: getWebSocketClientMock,
+}));
+
+vi.mock("@/hooks/domains/session/use-queue", () => ({
+  useQueue: () => ({ queue: queueMock }),
+}));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ getState: () => ({}) }),
 }));
 
 const IMPROVE_HARNESS_PROMPT = "improve-harness";
@@ -250,5 +261,28 @@ describe("sendMessageRequest", () => {
       },
       10000,
     );
+  });
+});
+
+describe("useMessageHandler", () => {
+  it("queues regular composer input while a clarification is pending", async () => {
+    const request = vi.fn();
+    getWebSocketClientMock.mockReturnValue({ request });
+    const { result } = renderHook(() =>
+      useMessageHandler({
+        resolvedSessionId: "session-1",
+        taskId: "task-1",
+        sessionModel: null,
+        activeModel: null,
+        hasPendingClarification: true,
+      }),
+    );
+
+    await result.current.handleSendMessage({ message: "Queue this after I answer" });
+
+    expect(queueMock).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "Queue this after I answer", taskId: "task-1" }),
+    );
+    expect(request).not.toHaveBeenCalled();
   });
 });

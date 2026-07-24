@@ -54,6 +54,23 @@ describe("useChatInputContainer", () => {
 
     expect(result.current.submitDisabledReason).toBe("The agent is still being set up.");
   });
+
+  it("keeps queueing enabled for an interactive clarification during stale startup", () => {
+    const { result } = renderInputState({
+      isStarting: true,
+      isPreparingEnvironment: true,
+      placeholder: "Queue instructions while the question is pending...",
+      pendingClarification: { id: "clarification-1" } as never,
+      onClarificationResolved: vi.fn(),
+    });
+
+    expect(result.current.isDisabled).toBe(false);
+    expect(result.current.submitDisabled).toBe(false);
+    expect(result.current.submitDisabledReason).toBeUndefined();
+    expect(result.current.inputPlaceholder).toBe(
+      "Queue instructions while the question is pending...",
+    );
+  });
 });
 
 describe("shouldShowChatFocusHint", () => {

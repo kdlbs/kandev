@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 
 type SubmitButtonProps = {
   isAgentBusy: boolean;
+  canCancelAgent?: boolean;
   hasContent: boolean;
   isDisabled: boolean;
   submitDisabledReason?: string;
@@ -92,6 +93,7 @@ function SendSubmitButton({
 
 export function SubmitButton({
   isAgentBusy,
+  canCancelAgent = isAgentBusy,
   hasContent,
   isDisabled,
   submitDisabledReason,
@@ -125,7 +127,7 @@ export function SubmitButton({
 
   return (
     <div className="flex items-center gap-1">
-      {isAgentBusy && (
+      {canCancelAgent && (
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

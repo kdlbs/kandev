@@ -40,6 +40,7 @@ type MobileToolbarProps = {
   contextFiles: ContextFile[];
   onToggleFile: (file: ContextFile) => void;
   isAgentBusy: boolean;
+  canCancelAgent?: boolean;
   hasContent: boolean;
   onImplementPlan?: (fresh: boolean) => void;
   onEnhancePrompt?: () => void;
@@ -181,6 +182,7 @@ export function MobileChatInputToolbar(props: MobileToolbarProps) {
         )}
         <SubmitButton
           isAgentBusy={props.isAgentBusy}
+          canCancelAgent={props.canCancelAgent}
           hasContent={props.hasContent}
           isDisabled={props.isDisabled}
           submitDisabledReason={props.submitDisabledReason}

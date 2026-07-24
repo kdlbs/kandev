@@ -33,6 +33,34 @@ useRegularMode();
 test.describe("Clarification flow", () => {
   test.describe.configure({ retries: 1 });
 
+  test("queues regular composer input while the question stays pending", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Composer Queue",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    const composer = session.activeChat().getByTestId("chat-input-editor");
+    await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+    await expect(testPage.getByTestId("cancel-agent-button")).toBeVisible();
+
+    await composer.fill("Queue this after I answer", { timeout: 30_000 });
+    await testPage.getByTestId("submit-message-button").click();
+
+    await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await testPage.getByTestId("queue-chip").click();
+    await expect(testPage.getByTestId("queued-ghost-list")).toBeVisible();
+    await expect(testPage.getByTestId("queue-drain-next")).not.toBeVisible();
+  });
+
   test("select option (happy path)", async ({ testPage, apiClient, seedData }) => {
     const session = await seedClarificationTask(
       testPage,
