@@ -51,6 +51,58 @@ func TestTokenise(t *testing.T) {
 	}
 }
 
+func TestValidateCommandPrefix(t *testing.T) {
+	cases := []struct {
+		name    string
+		prefix  string
+		wantErr bool
+	}{
+		{name: "empty means no launcher"},
+		{name: "whitespace means no launcher", prefix: "  \t "},
+		{name: "launcher command", prefix: "greywall --"},
+		{name: "unterminated quote", prefix: `greywall "unterminated`, wantErr: true},
+		{name: "empty quoted executable", prefix: `'' --arg`, wantErr: true},
+		{name: "whitespace executable", prefix: `"   " --arg`, wantErr: true},
+		{name: "flag executable", prefix: "--not-a-launcher", wantErr: true},
+		{name: "leading-space flag executable", prefix: `"  --not-a-launcher"`, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCommandPrefix(tc.prefix)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateCommandArgs(t *testing.T) {
+	cases := []struct {
+		name    string
+		args    []string
+		wantErr bool
+	}{
+		{name: "valid executable with empty secondary argument", args: []string{"runner", ""}},
+		{name: "empty argv", wantErr: true},
+		{name: "whitespace executable", args: []string{"  \t "}, wantErr: true},
+		{name: "flag executable", args: []string{" --not-a-launcher"}, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCommandArgs(tc.args)
+			if tc.wantErr && err == nil {
+				t.Fatal("expected error")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestResolve(t *testing.T) {
 	flags := []models.CLIFlag{
 		{Flag: "--allow-all-tools", Enabled: true},

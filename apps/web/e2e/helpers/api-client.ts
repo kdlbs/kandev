@@ -9,6 +9,7 @@ import type {
   MCPTaskAgentProfileDefault,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
+import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
 import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
 import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type {
@@ -29,6 +30,7 @@ import type {
   SSHTestRequest,
   SSHTestResult,
 } from "../../lib/types/http-ssh";
+import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 
 // --- GitHub Mock Types ---
 
@@ -227,7 +229,7 @@ export class ApiClient {
   async rawRequest(method: string, path: string, body?: unknown): Promise<Response> {
     return fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: await this.requestHeaders(method, body),
       body: body ? JSON.stringify(body) : undefined,
     });
   }
@@ -235,7 +237,7 @@ export class ApiClient {
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: await this.requestHeaders(method, body),
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -243,6 +245,19 @@ export class ApiClient {
       throw new Error(`API ${method} ${path} failed (${res.status}): ${text}`);
     }
     return res.json() as Promise<T>;
+  }
+
+  private async requestHeaders(
+    method: string,
+    body?: unknown,
+  ): Promise<Record<string, string> | undefined> {
+    const headers: Record<string, string> = body ? { "Content-Type": "application/json" } : {};
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())) {
+      headers["X-Kandev-Interim-Settings-Interlock"] = await loadInterimSettingsInterlockToken(
+        this.baseUrl,
+      );
+    }
+    return Object.keys(headers).length > 0 ? headers : undefined;
   }
 
   private async activeWorkspaceId(): Promise<string | undefined> {
@@ -384,7 +399,17 @@ export class ApiClient {
   }
 
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {
-    return this.request("GET", "/api/v1/agents");
+    const response = await this.request<{ agents: Agent[]; total: number }>(
+      "GET",
+      "/api/v1/agents",
+    );
+    return {
+      ...response,
+      agents: response.agents.map((agent) => ({
+        ...agent,
+        profiles: (agent.profiles ?? []).map(normalizeAgentProfile),
+      })),
+    };
   }
 
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
@@ -426,11 +451,8 @@ export class ApiClient {
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
     },
-  ): Promise<{
-    id: string;
-    cli_flags: Array<{ description: string; flag: string; enabled: boolean }>;
-  }> {
-    return this.request("POST", `/api/v1/agents/${agentId}/profiles`, {
+  ): Promise<AgentProfile> {
+    const response = await this.request<unknown>("POST", `/api/v1/agents/${agentId}/profiles`, {
       name,
       model: opts.model,
       mode: opts.mode,
@@ -440,6 +462,7 @@ export class ApiClient {
       command_prefix: opts.command_prefix,
       env_vars: opts.env_vars,
     });
+    return normalizeAgentProfile(response);
   }
 
   async getAgentProfile(profileId: string): Promise<AgentProfile> {

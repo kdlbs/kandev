@@ -13,7 +13,7 @@ export type CapturedNotification = {
  * The e2e setupPage fixture overrides `window.Notification` with a stub that
  * never displays a real OS-level toast (those are noisy on developer
  * machines - Chromium pops the macOS notification center on every agent
- * "waiting for input" event during a run). The stub instead records each
+ * configured session event during a run). The stub instead records each
  * attempted notification on `window.__kandevTestNotifications` so tests can
  * assert on what *would* have notified.
  *

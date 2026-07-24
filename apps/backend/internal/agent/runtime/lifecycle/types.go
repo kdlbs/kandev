@@ -43,6 +43,8 @@ type AgentExecution struct {
 	ACPSessionID         string               // ACP session ID to resume, if available
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents like Amp)
+	AgentArgs            []string             // Structured argv for AgentCommand
+	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
 	Status               v1.AgentStatus
 	StartedAt            time.Time

@@ -35,6 +35,41 @@ func Tokenise(raw string) ([]string, error) {
 	return st.tokens, nil
 }
 
+// ValidateCommandPrefix verifies an optional launcher command prefix. Empty
+// input means no launcher; otherwise argv[0] must be a non-blank executable
+// name rather than a flag. This is shared by profile save/preview and runtime
+// launch paths so legacy persisted profiles cannot bypass launcher policy.
+func ValidateCommandPrefix(prefix string) error {
+	if strings.TrimSpace(prefix) == "" {
+		return nil
+	}
+	tokens, err := Tokenise(prefix)
+	if err != nil {
+		return err
+	}
+	if err := ValidateCommandArgs(tokens); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ValidateCommandArgs rejects argv that cannot safely identify an executable.
+// It intentionally permits empty secondary arguments because they can be
+// meaningful values passed to an otherwise valid command.
+func ValidateCommandArgs(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("agent command cannot be empty")
+	}
+	executable := strings.TrimSpace(args[0])
+	if executable == "" {
+		return fmt.Errorf("agent command executable is invalid")
+	}
+	if strings.HasPrefix(executable, "-") {
+		return fmt.Errorf("first token %q must be a launcher command, not a flag", args[0])
+	}
+	return nil
+}
+
 // tokeniseState carries the scanner state between step calls.
 type tokeniseState struct {
 	tokens  []string

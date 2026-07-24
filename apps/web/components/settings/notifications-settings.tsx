@@ -41,7 +41,7 @@ function DesktopNotificationsSection({
         <div>
           <div className="text-base font-medium">Desktop Notifications</div>
           <p className="text-sm text-muted-foreground">
-            Notify this device when an agent needs your input.
+            Notify this device when a selected agent turn, question, or Office event occurs.
           </p>
         </div>
         <div className="flex items-center gap-2">

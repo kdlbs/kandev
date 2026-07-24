@@ -2,16 +2,33 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/goleak"
 	"go.uber.org/zap"
 )
+
+func TestBuildHTTPServerAbortsWhenInterlockTokenGenerationFails(t *testing.T) {
+	wantErr := errors.New("entropy unavailable")
+	original := newInterimSettingsInterlockToken
+	newInterimSettingsInterlockToken = func() (string, error) { return "", wantErr }
+	t.Cleanup(func() { newInterimSettingsInterlockToken = original })
+
+	server, err := buildHTTPServer(&config.Config{}, testLogger(t), nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("buildHTTPServer error = %v, want %v", err, wantErr)
+	}
+	if server != nil {
+		t.Fatal("buildHTTPServer returned a server after token generation failed")
+	}
+}
 
 func testLogger(t *testing.T) *logger.Logger {
 	t.Helper()

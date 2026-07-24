@@ -84,7 +84,10 @@ impl NativeNotificationState {
 }
 
 fn validate_request(request: &NativeNotificationRequest) -> Result<(), String> {
-    if !request.event_id.starts_with("session.waiting_for_input:")
+    if !request.event_id.starts_with("session.turn_finished:")
+        && !request
+            .event_id
+            .starts_with("session.clarification_requested:")
         && !request.event_id.starts_with("session.failed:")
     {
         return Err("unsupported native notification event".to_string());
@@ -154,8 +157,8 @@ mod tests {
     fn request(event_id: &str, task_id: &str) -> NativeNotificationRequest {
         NativeNotificationRequest {
             event_id: event_id.to_string(),
-            title: "Task needs your input".to_string(),
-            body: "Waiting".to_string(),
+            title: "Agent needs your answer".to_string(),
+            body: "The agent asked a question.".to_string(),
             task_id: task_id.to_string(),
             session_id: Some("session-1".to_string()),
         }
@@ -164,7 +167,7 @@ mod tests {
     #[test]
     fn event_identity_is_delivered_at_most_once() {
         let state = NativeNotificationState::default();
-        let request = request("session.waiting_for_input:session-1", "task-1");
+        let request = request("session.clarification_requested:session-1", "task-1");
 
         assert!(state.claim(&request.event_id));
         assert!(!state.claim(&request.event_id));
@@ -182,13 +185,13 @@ mod tests {
     }
 
     #[test]
-    fn bridge_rejects_events_outside_the_two_notification_types() {
-        let request = request("office.inbox_item:item-1", "task-1");
-
-        assert_eq!(
-            validate_request(&request),
-            Err("unsupported native notification event".to_string())
-        );
+    fn bridge_accepts_semantic_session_events() {
+        for event_id in [
+            "session.turn_finished:turn-1",
+            "session.clarification_requested:request-1",
+        ] {
+            assert_eq!(validate_request(&request(event_id, "task-1")), Ok(()));
+        }
     }
 
     #[test]

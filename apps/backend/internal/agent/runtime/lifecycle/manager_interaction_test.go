@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
@@ -23,6 +25,15 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+type restartProfileResolver struct {
+	profile *AgentProfileInfo
+	err     error
+}
+
+func (r *restartProfileResolver) ResolveProfile(_ context.Context, _ string) (*AgentProfileInfo, error) {
+	return r.profile, r.err
+}
 
 type restartMockAgentctlServer struct {
 	server *httptest.Server
@@ -284,6 +295,159 @@ func TestManager_RestartAgentProcess_Success(t *testing.T) {
 	}
 	if !slices.Contains(eventTypes, events.AgentContextReset) {
 		t.Fatalf("expected %q event, got %v", events.AgentContextReset, eventTypes)
+	}
+}
+
+func TestManager_RestartAgentProcess_InvalidReplacementLeavesCurrentProcessUntouched(t *testing.T) {
+	tests := []struct {
+		name     string
+		resolver ProfileResolver
+	}{
+		{
+			name:     "unresolvable profile",
+			resolver: &restartProfileResolver{err: errors.New("profile unavailable")},
+		},
+		{
+			name: "malformed persisted command prefix",
+			resolver: &restartProfileResolver{profile: &AgentProfileInfo{
+				ProfileID:     "profile-1",
+				AgentName:     "auggie",
+				CommandPrefix: `greywall "unterminated`,
+			}},
+		},
+		{
+			name: "persisted prefix has an empty quoted executable",
+			resolver: &restartProfileResolver{profile: &AgentProfileInfo{
+				ProfileID:     "profile-1",
+				AgentName:     "auggie",
+				CommandPrefix: `'' --arg`,
+			}},
+		},
+		{
+			name: "persisted prefix has a whitespace executable",
+			resolver: &restartProfileResolver{profile: &AgentProfileInfo{
+				ProfileID:     "profile-1",
+				AgentName:     "auggie",
+				CommandPrefix: `"   " --arg`,
+			}},
+		},
+		{
+			name: "persisted prefix starts with a flag",
+			resolver: &restartProfileResolver{profile: &AgentProfileInfo{
+				ProfileID:     "profile-1",
+				AgentName:     "auggie",
+				CommandPrefix: `--not-a-launcher`,
+			}},
+		},
+		{
+			name: "persisted prefix starts with a space-prefixed flag",
+			resolver: &restartProfileResolver{profile: &AgentProfileInfo{
+				ProfileID:     "profile-1",
+				AgentName:     "auggie",
+				CommandPrefix: `"  --not-a-launcher"`,
+			}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := newTestManager(t)
+			mgr.profileResolver = tt.resolver
+			mock := newRestartMockAgentctlServer(t, false, false)
+			client := createTestClient(t, mock.server.URL)
+			t.Cleanup(client.Close)
+
+			execution := &AgentExecution{
+				ID:              "exec-invalid-restart",
+				TaskID:          "task-1",
+				SessionID:       "session-1",
+				AgentProfileID:  "profile-1",
+				ACPSessionID:    "old-acp-session",
+				AgentCommand:    "auggie --resume old-acp-session",
+				ContinueCommand: "auggie continue old-acp-session",
+				AgentArgs:       []string{"auggie", "--resume", "old-acp-session"},
+				ContinueArgs:    []string{"auggie", "continue", "old-acp-session"},
+				Status:          v1.AgentStatusRunning,
+				ErrorMessage:    "existing error",
+				agentctl:        client,
+				promptDoneCh:    make(chan PromptCompletionSignal, 1),
+			}
+			require.NoError(t, mgr.executionStore.Add(execution))
+
+			err := mgr.RestartAgentProcess(context.Background(), execution.ID)
+			require.Error(t, err)
+			require.Empty(t, mock.getHTTPActions(), "invalid replacement must not stop, configure, or start the current process")
+
+			current, found := mgr.executionStore.Get(execution.ID)
+			require.True(t, found)
+			require.Equal(t, v1.AgentStatusRunning, current.Status)
+			require.Equal(t, "old-acp-session", current.ACPSessionID)
+			require.Equal(t, "auggie --resume old-acp-session", current.AgentCommand)
+			require.Equal(t, []string{"auggie", "--resume", "old-acp-session"}, current.AgentArgs)
+			require.Equal(t, "existing error", current.ErrorMessage)
+		})
+	}
+}
+
+func TestManager_RestartAgentProcess_InvalidBuiltReplacementLeavesCurrentProcessUntouched(t *testing.T) {
+	tests := []struct {
+		name  string
+		agent *invalidCommandTestAgent
+	}{
+		{
+			name:  "initial executable is a flag",
+			agent: &invalidCommandTestAgent{command: agents.NewCommand("--not-an-executable")},
+		},
+		{
+			name: "continue executable is whitespace",
+			agent: &invalidCommandTestAgent{
+				command: agents.NewCommand("agent"),
+				testAgent: testAgent{runtimeConfig: &agents.RuntimeConfig{SessionConfig: agents.SessionConfig{
+					ContinueSessionCmd: agents.NewCommand("   "),
+				}}},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mgr := newTestManager(t)
+			tt.agent.id = "invalid-restart"
+			require.NoError(t, mgr.registry.Register(tt.agent))
+			mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{
+				ProfileID: "profile-1",
+				AgentName: tt.agent.ID(),
+			}}
+			mock := newRestartMockAgentctlServer(t, false, false)
+			client := createTestClient(t, mock.server.URL)
+			t.Cleanup(client.Close)
+
+			execution := &AgentExecution{
+				ID:             "exec-invalid-built-restart",
+				TaskID:         "task-1",
+				SessionID:      "session-1",
+				AgentProfileID: "profile-1",
+				ACPSessionID:   "old-acp-session",
+				AgentCommand:   "agent --resume old-acp-session",
+				AgentArgs:      []string{"agent", "--resume", "old-acp-session"},
+				Status:         v1.AgentStatusRunning,
+				ErrorMessage:   "existing error",
+				agentctl:       client,
+				promptDoneCh:   make(chan PromptCompletionSignal, 1),
+			}
+			require.NoError(t, mgr.executionStore.Add(execution))
+
+			err := mgr.RestartAgentProcess(context.Background(), execution.ID)
+			require.Error(t, err)
+			require.Empty(t, mock.getHTTPActions())
+
+			current, found := mgr.executionStore.Get(execution.ID)
+			require.True(t, found)
+			require.Equal(t, v1.AgentStatusRunning, current.Status)
+			require.Equal(t, "old-acp-session", current.ACPSessionID)
+			require.Equal(t, []string{"agent", "--resume", "old-acp-session"}, current.AgentArgs)
+			require.Equal(t, "existing error", current.ErrorMessage)
+		})
 	}
 }
 

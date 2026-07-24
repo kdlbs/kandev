@@ -20,9 +20,10 @@ import (
 )
 
 const (
-	EventTaskSessionWaitingForInput = "session.waiting_for_input"
-	EventOfficeInboxItem            = "office.inbox_item"
-	desktopNativeNotificationsEnv   = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS"
+	EventTaskSessionTurnFinished       = "session.turn_finished"
+	EventTaskSessionClarificationAsked = "session.clarification_requested"
+	EventOfficeInboxItem               = "office.inbox_item"
+	desktopNativeNotificationsEnv      = "KANDEV_DESKTOP_NATIVE_NOTIFICATIONS"
 )
 
 var ErrProviderNotFound = errors.New("notification provider not found")
@@ -66,7 +67,7 @@ func (s *Service) AppriseAvailable() bool {
 }
 
 func (s *Service) AvailableEvents() []string {
-	return []string{EventTaskSessionWaitingForInput, EventOfficeInboxItem}
+	return []string{EventTaskSessionTurnFinished, EventTaskSessionClarificationAsked, EventOfficeInboxItem}
 }
 
 func (s *Service) ListProviders(ctx context.Context, userID string) ([]*models.Provider, map[string][]string, error) {
@@ -166,8 +167,16 @@ type ProviderUpdate struct {
 	Events  *[]string
 }
 
-func (s *Service) HandleTaskSessionStateChanged(ctx context.Context, taskID, sessionID, newState string) {
-	if newState != "WAITING_FOR_INPUT" {
+func (s *Service) HandleTaskTurnFinished(ctx context.Context, taskID, sessionID, turnID string) {
+	s.handleSemanticOccurrence(ctx, taskID, sessionID, turnID, EventTaskSessionTurnFinished)
+}
+
+func (s *Service) HandleClarificationRequested(ctx context.Context, taskID, sessionID, pendingID string) {
+	s.handleSemanticOccurrence(ctx, taskID, sessionID, pendingID, EventTaskSessionClarificationAsked)
+}
+
+func (s *Service) handleSemanticOccurrence(ctx context.Context, taskID, sessionID, occurrenceID, eventType string) {
+	if occurrenceID == "" {
 		return
 	}
 	userID := userstore.DefaultUserID
@@ -176,20 +185,21 @@ func (s *Service) HandleTaskSessionStateChanged(ctx context.Context, taskID, ses
 		s.logger.Error("failed to load notification providers", zap.Error(err))
 		return
 	}
-	title, body := s.buildWaitingForInputMessage(ctx, taskID)
+	title, body := s.buildSemanticMessage(ctx, taskID, eventType)
 	for _, provider := range providers {
 		if !provider.Enabled {
 			continue
 		}
 		events := subscriptions[provider.ID]
-		if !containsEvent(events, EventTaskSessionWaitingForInput) {
+		if !containsEvent(events, eventType) {
 			continue
 		}
 		delivery := &models.Delivery{
 			UserID:        userID,
 			ProviderID:    provider.ID,
-			EventType:     EventTaskSessionWaitingForInput,
+			EventType:     eventType,
 			TaskSessionID: sessionID,
+			OccurrenceID:  occurrenceID,
 		}
 		inserted, err := s.repo.InsertDelivery(ctx, delivery)
 		if err != nil {
@@ -199,14 +209,16 @@ func (s *Service) HandleTaskSessionStateChanged(ctx context.Context, taskID, ses
 		if !inserted {
 			continue
 		}
-		if err := s.dispatchProvider(ctx, provider, waitingForInputPayload{
+		if err := s.dispatchProvider(ctx, provider, notificationPayload{
 			TaskID:        taskID,
 			TaskSessionID: sessionID,
+			OccurrenceID:  occurrenceID,
+			EventType:     eventType,
 			Title:         title,
 			Body:          body,
 		}); err != nil {
 			s.logger.Warn("notification delivery failed", zap.String("provider_id", provider.ID), zap.Error(err))
-			_ = s.repo.DeleteDelivery(ctx, provider.ID, EventTaskSessionWaitingForInput, sessionID)
+			_ = s.repo.DeleteDelivery(ctx, provider.ID, eventType, occurrenceID)
 		}
 	}
 }
@@ -253,32 +265,34 @@ func (s *Service) dispatchGenericNotification(ctx context.Context, provider *mod
 	})
 }
 
-type waitingForInputPayload struct {
+type notificationPayload struct {
 	TaskID        string
 	TaskSessionID string
+	OccurrenceID  string
+	EventType     string
 	Title         string
 	Body          string
 }
 
-func (s *Service) dispatchProvider(ctx context.Context, provider *models.Provider, payload waitingForInputPayload) error {
+func (s *Service) dispatchProvider(ctx context.Context, provider *models.Provider, payload notificationPayload) error {
 	adapter := s.providers[provider.Type]
 	if adapter == nil {
 		return fmt.Errorf("unknown provider type: %s", provider.Type)
 	}
 	return adapter.Send(ctx, providers.Message{
-		EventType:     EventTaskSessionWaitingForInput,
+		EventType:     payload.EventType,
 		Title:         payload.Title,
 		Body:          payload.Body,
 		TaskID:        payload.TaskID,
 		TaskSessionID: payload.TaskSessionID,
+		OccurrenceID:  payload.OccurrenceID,
 		UserID:        userstore.DefaultUserID,
 		Config:        provider.Config,
 	})
 }
 
-func (s *Service) buildWaitingForInputMessage(ctx context.Context, taskID string) (string, string) {
-	title := "Task needs your input"
-	body := "An agent is waiting for your input."
+func (s *Service) buildSemanticMessage(ctx context.Context, taskID, eventType string) (string, string) {
+	title, body := semanticMessageCopy(eventType, "")
 	if taskID == "" || s.taskRepo == nil {
 		return title, body
 	}
@@ -287,9 +301,22 @@ func (s *Service) buildWaitingForInputMessage(ctx context.Context, taskID string
 		return title, body
 	}
 	if task.Title != "" {
-		body = fmt.Sprintf("An agent is waiting for your input on \"%s\".", task.Title)
+		_, body = semanticMessageCopy(eventType, task.Title)
 	}
 	return title, body
+}
+
+func semanticMessageCopy(eventType, taskTitle string) (string, string) {
+	if eventType == EventTaskSessionClarificationAsked {
+		if taskTitle == "" {
+			return "Agent needs your answer", "The agent asked a question."
+		}
+		return "Agent needs your answer", fmt.Sprintf("The agent asked a question on \"%s\".", taskTitle)
+	}
+	if taskTitle == "" {
+		return "Agent turn finished", "The agent finished a turn."
+	}
+	return "Agent turn finished", fmt.Sprintf("The agent finished a turn on \"%s\".", taskTitle)
 }
 
 func (s *Service) ensureDefaultProviders(ctx context.Context, userID string) error {
@@ -320,7 +347,7 @@ func (s *Service) ensureDefaultProviders(ctx context.Context, userID string) err
 			return err
 		}
 		if err := s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{
-			EventTaskSessionWaitingForInput,
+			EventTaskSessionClarificationAsked,
 			EventOfficeInboxItem,
 		}); err != nil {
 			return err
@@ -354,7 +381,7 @@ func (s *Service) ensureSystemProvider(ctx context.Context, userID string) error
 		return err
 	}
 	return s.repo.ReplaceSubscriptions(ctx, provider.ID, userID, []string{
-		EventTaskSessionWaitingForInput,
+		EventTaskSessionClarificationAsked,
 		EventOfficeInboxItem,
 	})
 }
@@ -369,7 +396,7 @@ func (s *Service) TestProvider(ctx context.Context, providerID string) error {
 		return fmt.Errorf("unknown provider type: %s", provider.Type)
 	}
 	return adapter.Send(ctx, providers.Message{
-		EventType: EventTaskSessionWaitingForInput,
+		EventType: EventTaskSessionClarificationAsked,
 		Title:     "Test notification",
 		Body:      "If you can read this, notifications are working.",
 		Config:    provider.Config,
@@ -386,8 +413,9 @@ func (s *Service) validateProvider(providerType models.ProviderType, config map[
 
 func (s *Service) validateEvents(events []string) error {
 	allowed := map[string]struct{}{
-		EventTaskSessionWaitingForInput: {},
-		EventOfficeInboxItem:            {},
+		EventTaskSessionTurnFinished:       {},
+		EventTaskSessionClarificationAsked: {},
+		EventOfficeInboxItem:               {},
 	}
 	for _, event := range events {
 		if _, ok := allowed[event]; !ok {

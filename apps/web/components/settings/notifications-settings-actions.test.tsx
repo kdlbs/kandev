@@ -16,6 +16,8 @@ const mocks = vi.hoisted(() => ({
   setNotificationProviders: vi.fn(),
 }));
 const PAGER_URL = "json://pager";
+const CLARIFICATION_EVENT = "session.clarification_requested";
+const SEMANTIC_NOTIFICATION_EVENTS = [CLARIFICATION_EVENT, "session.turn_finished"];
 
 vi.mock("@/lib/api", () => ({
   createNotificationProvider: mocks.createNotificationProvider,
@@ -35,11 +37,16 @@ const savedProvider: NotificationProvider = {
   updated_at: "",
 };
 
+let notificationProviders = [savedProvider];
+let notificationEvents = ["task.completed"];
+let notificationProvidersLoaded = true;
+
 vi.mock("@/hooks/domains/settings/use-notification-providers", () => ({
   useNotificationProviders: () => ({
-    providers: [savedProvider],
-    events: ["task.completed"],
+    providers: notificationProviders,
+    events: notificationEvents,
     appriseAvailable: true,
+    loaded: notificationProvidersLoaded,
   }),
 }));
 
@@ -64,10 +71,86 @@ const createdProvider: NotificationProvider = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  notificationProviders = [savedProvider];
+  notificationEvents = ["task.completed"];
+  notificationProvidersLoaded = true;
   mocks.createNotificationProvider.mockResolvedValue(createdProvider);
 });
 
-describe("notification provider drafts", () => {
+describe("notification provider draft hydration", () => {
+  it("hydrates a cold provider load into the draft", () => {
+    notificationProviders = [];
+    notificationEvents = [];
+    notificationProvidersLoaded = false;
+    const { result, rerender } = renderHook(useHarness);
+
+    notificationProviders = [savedProvider];
+    notificationEvents = SEMANTIC_NOTIFICATION_EVENTS;
+    notificationProvidersLoaded = true;
+    rerender();
+
+    expect(result.current.state.providers).toEqual([savedProvider]);
+    expect(result.current.state.baselineProviders).toEqual([savedProvider]);
+    expect(result.current.state.notificationEvents).toEqual(SEMANTIC_NOTIFICATION_EVENTS);
+  });
+
+  it("hydrates the first provider load while retaining a typed create draft", async () => {
+    notificationProviders = [];
+    notificationEvents = [];
+    notificationProvidersLoaded = false;
+    const { result, rerender } = renderHook(useHarness);
+
+    act(() => {
+      result.current.actions.openAppriseForm("create");
+      result.current.state.setAppriseName("Pager");
+      result.current.state.setAppriseUrls(PAGER_URL);
+    });
+
+    notificationProviders = [savedProvider];
+    notificationEvents = SEMANTIC_NOTIFICATION_EVENTS;
+    notificationProvidersLoaded = true;
+    rerender();
+
+    expect(result.current.state.providers).toEqual([savedProvider]);
+    expect(result.current.state.baselineProviders).toEqual([savedProvider]);
+    expect(result.current.state.appriseName).toBe("Pager");
+    expect(result.current.state.appriseUrls).toBe(PAGER_URL);
+
+    await act(() => result.current.saveRequest.run());
+
+    expect(result.current.state.providers).toEqual([savedProvider, createdProvider]);
+    expect(mocks.setNotificationProviders).toHaveBeenCalledWith(
+      expect.objectContaining({ items: [savedProvider, createdProvider] }),
+    );
+  });
+
+  it("does not replace an edited draft when providers refresh", () => {
+    const { result, rerender } = renderHook(useHarness);
+    act(() => result.current.actions.handleAppriseNameEdit(savedProvider.id, "Draft name"));
+
+    const refreshedProvider = { ...savedProvider, name: "Server refresh" };
+    notificationProviders = [refreshedProvider];
+    rerender();
+
+    expect(result.current.state.providers[0]?.name).toBe("Draft name");
+    expect(result.current.state.baselineProviders[0]?.name).toBe(savedProvider.name);
+  });
+
+  it("hydrates a deferred provider refresh after discarding the draft", () => {
+    const { result, rerender } = renderHook(useHarness);
+    act(() => result.current.actions.handleAppriseNameEdit(savedProvider.id, "Draft name"));
+    const refreshedProvider = { ...savedProvider, name: "Server refresh" };
+    notificationProviders = [refreshedProvider];
+    rerender();
+
+    act(() => result.current.actions.discard());
+
+    expect(result.current.state.providers).toEqual([refreshedProvider]);
+    expect(result.current.state.baselineProviders).toEqual([refreshedProvider]);
+  });
+});
+
+describe("notification provider draft saving", () => {
   it("stages a new Apprise provider until the shared save runs", async () => {
     const { result } = renderHook(useHarness);
 
@@ -85,6 +168,7 @@ describe("notification provider drafts", () => {
       expect.objectContaining({
         name: "Pager",
         config: { urls: [PAGER_URL] },
+        events: [CLARIFICATION_EVENT],
       }),
     );
     expect(result.current.state.providers).toContainEqual(createdProvider);
