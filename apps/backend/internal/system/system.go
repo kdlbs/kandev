@@ -96,9 +96,11 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		log.Error("Failed to initialize system settings store", zap.Error(err))
 	}
 	var metricsSvc *metrics.Service
+	updatesOpts := []updates.Option{updates.WithHomeDir(homeDir), updates.WithJobs(tracker)}
 	if settingsStore != nil {
 		metricsStore := metrics.NewStore(settingsStore)
 		metricsSvc = metrics.NewService(metricsStore, metrics.NewCollector())
+		updatesOpts = append(updatesOpts, updates.WithNotifyStore(updates.NewNotifyStore(settingsStore)))
 	}
 
 	return &Service{
@@ -109,7 +111,7 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		Backups:  backupsSvc,
 		Logs:     logs.NewService(logDir, logFile, log),
 		Metrics:  metricsSvc,
-		Updates:  updates.NewService(pool, build.Version, nil, log, updates.WithHomeDir(homeDir), updates.WithJobs(tracker)),
+		Updates:  updates.NewService(pool, build.Version, nil, log, updatesOpts...),
 		Restart:  restart.NewManagerFromEnv(),
 	}
 }
@@ -147,6 +149,8 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	g.GET("/updates", updates.HandleGet(s.Updates))
 	g.POST("/updates/check", updates.HandleCheck(s.Updates))
 	g.POST("/updates/apply", updates.HandleApply(s.Updates))
+	g.GET("/updates/notification-settings", updates.HandleGetNotifySettings(s.Updates))
+	g.PUT("/updates/notification-settings", updates.HandleSaveNotifySettings(s.Updates))
 	g.GET("/restart-capability", restart.HandleCapability(s.Restart))
 	g.POST("/restart", restart.HandleRequest(s.Restart))
 

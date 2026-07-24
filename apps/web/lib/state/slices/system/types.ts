@@ -5,6 +5,7 @@ import type {
   SnapshotInfo,
   LogFileInfo,
   UpdatesResponse,
+  UpdateNotificationSettings,
   SystemJob,
   SystemMetricsSnapshot,
   StorageMaintenanceRun,
@@ -33,6 +34,7 @@ export type SystemSliceState = {
     backups: SystemBackupsState;
     logs: SystemLogsState;
     updates: UpdatesResponse | null;
+    updateNotificationSettings: UpdateNotificationSettings | null;
     jobs: SystemJobsMap;
     metrics: SystemMetricsSnapshot | null;
     storage: {
@@ -51,6 +53,7 @@ export type SystemSliceActions = {
   setSystemLogs: (files: LogFileInfo[]) => void;
   setSystemLogTail: (lines: string[]) => void;
   setSystemUpdates: (updates: UpdatesResponse) => void;
+  setSystemUpdateNotificationSettings: (settings: UpdateNotificationSettings) => void;
   upsertSystemJob: (job: SystemJob) => void;
   clearSystemJob: (jobId: string) => void;
   setSystemMetricsSnapshot: (snapshot: SystemMetricsSnapshot) => void;

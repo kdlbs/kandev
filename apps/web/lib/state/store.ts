@@ -243,6 +243,7 @@ export type AppState = {
   quickChat: (typeof defaultUIState)["quickChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   taskDeletedNotification: (typeof defaultUIState)["taskDeletedNotification"];
+  updateAvailableNotification: (typeof defaultUIState)["updateAvailableNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
@@ -402,6 +403,7 @@ export type AppState = {
   setQuickChatInitialPrompt: UIA["setQuickChatInitialPrompt"];
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
+  setUpdateAvailableNotification: (n: UISliceTypes.UpdateAvailableNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;

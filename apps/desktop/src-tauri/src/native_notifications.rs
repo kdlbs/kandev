@@ -15,7 +15,12 @@ pub struct NativeNotificationRequest {
     pub event_id: String,
     pub title: String,
     pub body: String,
-    pub task_id: String,
+    /// Present for session-scoped events (waiting-for-input, failed).
+    /// Absent for account/app-scoped events such as an available update,
+    /// which has no associated task. `#[serde(default)]` accepts payloads
+    /// that omit the key entirely (e.g. `JSON.stringify` drops `undefined`).
+    #[serde(default)]
+    pub task_id: Option<String>,
     pub session_id: Option<String>,
 }
 
@@ -83,21 +88,34 @@ impl NativeNotificationState {
     }
 }
 
+/// Event identities this bridge will display. Session-scoped events require
+/// a non-empty task_id (they're gated on task context); the update-available
+/// event has no task and must omit it.
+const SESSION_EVENT_PREFIXES: [&str; 2] = ["session.waiting_for_input:", "session.failed:"];
+const UPDATE_AVAILABLE_PREFIX: &str = "system.update_available:";
+
 fn validate_request(request: &NativeNotificationRequest) -> Result<(), String> {
-    if !request.event_id.starts_with("session.waiting_for_input:")
-        && !request.event_id.starts_with("session.failed:")
-    {
+    let is_session_event = SESSION_EVENT_PREFIXES
+        .iter()
+        .any(|prefix| request.event_id.starts_with(prefix));
+    let is_update_event = request.event_id.starts_with(UPDATE_AVAILABLE_PREFIX);
+    if !is_session_event && !is_update_event {
         return Err("unsupported native notification event".to_string());
     }
     if request.event_id.len() > 256
         || request.title.is_empty()
         || request.title.len() > 160
         || request.body.len() > 1000
-        || request.task_id.is_empty()
-        || request.task_id.len() > 256
         || request.session_id.as_ref().is_some_and(|id| id.len() > 256)
+        || request.task_id.as_ref().is_some_and(|id| id.len() > 256)
     {
         return Err("invalid native notification payload".to_string());
+    }
+    if is_session_event {
+        match request.task_id.as_deref() {
+            Some(id) if !id.is_empty() => {}
+            _ => return Err("invalid native notification payload".to_string()),
+        }
     }
     Ok(())
 }
@@ -156,8 +174,18 @@ mod tests {
             event_id: event_id.to_string(),
             title: "Task needs your input".to_string(),
             body: "Waiting".to_string(),
-            task_id: task_id.to_string(),
+            task_id: Some(task_id.to_string()),
             session_id: Some("session-1".to_string()),
+        }
+    }
+
+    fn update_available_request(event_id: &str) -> NativeNotificationRequest {
+        NativeNotificationRequest {
+            event_id: event_id.to_string(),
+            title: "Update available".to_string(),
+            body: "Kandev v1.2.3 is available.".to_string(),
+            task_id: None,
+            session_id: None,
         }
     }
 
@@ -182,13 +210,40 @@ mod tests {
     }
 
     #[test]
-    fn bridge_rejects_events_outside_the_two_notification_types() {
+    fn bridge_rejects_events_outside_supported_notification_types() {
         let request = request("office.inbox_item:item-1", "task-1");
 
         assert_eq!(
             validate_request(&request),
             Err("unsupported native notification event".to_string())
         );
+    }
+
+    #[test]
+    fn bridge_accepts_update_available_events_without_task_id() {
+        let request = update_available_request("system.update_available:v1.2.3");
+
+        assert_eq!(validate_request(&request), Ok(()));
+    }
+
+    #[test]
+    fn bridge_rejects_session_events_missing_task_id() {
+        let mut request = request("session.waiting_for_input:session-1", "task-1");
+        request.task_id = None;
+
+        assert_eq!(
+            validate_request(&request),
+            Err("invalid native notification payload".to_string())
+        );
+    }
+
+    #[test]
+    fn update_available_identity_is_delivered_at_most_once() {
+        let state = NativeNotificationState::default();
+        let request = update_available_request("system.update_available:v1.2.3");
+
+        assert!(state.claim(&request.event_id));
+        assert!(!state.claim(&request.event_id));
     }
 
     #[test]

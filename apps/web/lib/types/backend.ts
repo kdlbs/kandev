@@ -149,6 +149,11 @@ export type SystemErrorPayload = {
   code?: string;
 };
 
+export type UpdateAvailablePayload = {
+  version: string;
+  url?: string;
+};
+
 export type WorkspacePayload = {
   id: string;
   name: string;
@@ -476,6 +481,7 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "system.error": BackendMessage<"system.error", SystemErrorPayload>;
     "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
     "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
+    "system.update_available": BackendMessage<"system.update_available", UpdateAvailablePayload>;
     "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
     "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
     "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;

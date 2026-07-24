@@ -781,6 +781,9 @@ func startGatewayAndServe(
 		gateway.Hub.SetSystemMetricsInterestTracker(systemSvc.Metrics)
 		systemSvc.Metrics.SetExecutionProvider(lifecycleMetricProvider{manager: lifecycleMgr})
 	}
+	if systemSvc.Updates != nil {
+		systemSvc.Updates.SetBroadcaster(gateway.Hub.Broadcast)
+	}
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
 	gateways.RegisterSystemNotifications(ctx, eventBus, gateway.Hub, log)

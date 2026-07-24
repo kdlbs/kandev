@@ -56,6 +56,7 @@ import { LogViewer } from "@/components/settings/system/log-viewer";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
+import { UpdateNotificationsCard } from "@/components/settings/system/update-notifications-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
 import { TerminalSettings } from "@/components/settings/terminal-settings";
 import { VoiceModeSettings } from "@/components/settings/voice-mode-settings";
@@ -400,6 +401,7 @@ function renderUpdatesRoute() {
       description="Current vs latest release plus the full kandev changelog."
     >
       <UpdatesCard />
+      <UpdateNotificationsCard />
     </SystemPageShell>
   );
 }

@@ -224,6 +224,7 @@ const (
 	ActionExecutorPrepareProgress  = "executor.prepare.progress"
 	ActionExecutorPrepareCompleted = "executor.prepare.completed"
 	ActionSystemMetricsUpdated     = "system.metrics.updated"
+	ActionUpdateAvailable          = "system.update_available"
 
 	ActionAgentProfileDeleted = "agent.profile.deleted"
 	ActionAgentProfileCreated = "agent.profile.created"
