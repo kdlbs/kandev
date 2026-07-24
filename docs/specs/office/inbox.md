@@ -121,7 +121,11 @@ A sibling `execution_state` JSON field tracks current stage, which participants 
 
 ### Notifications
 
-A new event type `office.inbox_item` is added alongside the existing `session.waiting_for_input` event. Users subscribe per provider at `/settings/general`. Defaults: Local (browser) and System (OS) auto-subscribed when Office is enabled. Notification content: item type, summary, deep link to `/office/inbox`.
+A new event type `office.inbox_item` is available alongside
+`session.turn_finished` and `session.clarification_requested`. Users subscribe
+per provider at `/settings/general`. Defaults: Local (browser) and System (OS)
+auto-subscribed when Office is enabled. Notification content: item type,
+summary, deep link to `/office/inbox`.
 
 ### Approval flow
 
