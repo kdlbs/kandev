@@ -37,6 +37,18 @@ export function useSessionReadTracking(
   // visible; reset to null on hide so the next time this (or another)
   // session becomes visible, a fresh anchor is captured.
   const visibleSessionRef = useRef<string | null>(null);
+  // Tracks the (sessionId, messageId) of the most recently *dispatched*
+  // mark-read request. The backend's cursor write is atomically monotonic
+  // (see UpdateTaskSessionLastReadMessageID), but that only protects the
+  // persisted row — not an in-flight HTTP response, which is a snapshot
+  // frozen at the moment its own GetTaskSession ran. Two overlapping
+  // requests (an older m2, then a newer m3) can still have their responses
+  // arrive in either order; if m2's (now-stale) response resolves after
+  // m3's, applying it verbatim would regress the local store back to m2
+  // even though the database is correctly at m3. Comparing against this
+  // ref when a response resolves discards any response that's no longer
+  // the latest dispatched request for this session.
+  const latestDispatchRef = useRef<{ sessionId: string; messageId: string } | null>(null);
 
   useEffect(() => {
     if (!sessionId || !isVisible) {
@@ -53,8 +65,15 @@ export function useSessionReadTracking(
     if (!latestMessageId) return;
     const currentCursor = store.getState().taskSessions.items[sessionId]?.last_read_message_id;
     if (currentCursor === latestMessageId) return;
+    latestDispatchRef.current = { sessionId, messageId: latestMessageId };
     void markSessionRead(sessionId, latestMessageId)
-      .then((response) => setTaskSession(response.session))
+      .then((response) => {
+        const dispatch = latestDispatchRef.current;
+        const isStale =
+          !dispatch || dispatch.sessionId !== sessionId || dispatch.messageId !== latestMessageId;
+        if (isStale) return;
+        setTaskSession(response.session);
+      })
       .catch((err: unknown) => {
         console.error("Failed to mark session read", err);
       });

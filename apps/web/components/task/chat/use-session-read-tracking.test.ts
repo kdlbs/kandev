@@ -129,4 +129,47 @@ describe("useSessionReadTracking", () => {
     await waitFor(() => expect(consoleError).toHaveBeenCalled());
     consoleError.mockRestore();
   });
+
+  it("discards a stale mark-read response that resolves after a newer one, so the local cursor never regresses", async () => {
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+
+    // Two overlapping requests: an older m2 whose response we control via a
+    // deferred promise, and a newer m3 that resolves immediately. m3's
+    // response lands first, then m2's stale response resolves last.
+    let resolveM2: ((value: { session: TaskSession }) => void) | undefined;
+    const m2Response = new Promise<{ session: TaskSession }>((resolve) => {
+      resolveM2 = resolve;
+    });
+    mockMarkSessionRead.mockImplementation((_sessionId: string, messageId: string) => {
+      if (messageId === "m2") return m2Response;
+      return Promise.resolve({ session: session({ last_read_message_id: messageId }) });
+    });
+
+    const { rerender } = renderHook(
+      ({ latest }: { latest: string }) => useSessionReadTracking("session-1", true, latest),
+      { initialProps: { latest: "m2" } },
+    );
+    await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m2"));
+
+    // A newer message arrives while m2's request is still in flight — this
+    // dispatches and resolves the m3 request before m2 settles.
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    rerender({ latest: "m3" });
+    await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m3"));
+    await waitFor(() =>
+      expect(mockSetTaskSession).toHaveBeenCalledWith(
+        expect.objectContaining({ last_read_message_id: "m3" }),
+      ),
+    );
+    mockSetTaskSession.mockClear();
+
+    // The delayed, now-stale m2 response finally resolves. It must be
+    // discarded rather than regressing the store back to m2.
+    resolveM2?.({ session: session({ last_read_message_id: "m2" }) });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(mockSetTaskSession).not.toHaveBeenCalled();
+  });
 });
