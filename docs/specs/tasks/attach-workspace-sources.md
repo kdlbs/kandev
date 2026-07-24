@@ -63,14 +63,14 @@ Repository attachments continue to use `task_repositories`; their current unique
 
 Arbitrary folder attachments use `task_workspace_folders`:
 
-| Field                      | Contract                                             |
-| -------------------------- | ---------------------------------------------------- |
-| `id`                       | Stable attachment identity.                          |
-| `task_id`                  | Owning task; cascade-deleted with the task.          |
-| `local_path`               | Canonical absolute path selected on the Kandev host. |
-| `display_name`             | Sanitized, non-empty top-level workspace entry name. |
-| `position`                 | Stable order among folder attachments.               |
-| `created_at`, `updated_at` | Audit timestamps.                                    |
+| Field | Contract |
+| --- | --- |
+| `id` | Stable attachment identity. |
+| `task_id` | Owning task; cascade-deleted with the task. |
+| `local_path` | Canonical absolute path selected on the Kandev host. |
+| `display_name` | Sanitized, non-empty top-level workspace entry name. |
+| `position` | Stable order among folder attachments. |
+| `created_at`, `updated_at` | Audit timestamps. |
 
 `(task_id, local_path)` and `(task_id, display_name)` are unique. The effective source projection
 combines ordered `task_repositories` and `task_workspace_folders`; it does not replace repository
@@ -126,17 +126,17 @@ persisted in source URLs or copied into agent-visible metadata.
 
 ## Failure modes
 
-| Condition                                                      | Observable behavior                                                                                                                                 |
-| -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A turn or tool call is active                                  | The UI disables the action when known; a racing request returns `409` without mutation.                                                             |
-| Any source is invalid or duplicated                            | The full batch is rejected before persistence or materialization.                                                                                   |
-| A host materializer fails                                      | New filesystem entries and source records are rolled back; existing task contents remain.                                                           |
-| A container/remote repository clone fails                      | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source.           |
-| A container/remote task submits a folder source                | The request returns `422` without persistence or filesystem changes.                                                                                |
-| Agentctl cannot rescan the new root                            | The attachment fails rather than reporting success with a stale Files tree.                                                                         |
-| A requested file move or rename crosses canonical source roots | The request is rejected before either source is mutated.                                                                                            |
-| A persisted local folder later disappears                      | The current live environment keeps its existing materialization; a new/reset environment surfaces the missing source and does not silently omit it. |
-| The client disconnects during materialization                  | Rollback runs on a detached bounded context and the eventual task event reflects durable state.                                                     |
+| Condition | Observable behavior |
+| --- | --- |
+| A turn or tool call is active | The UI disables the action when known; a racing request returns `409` without mutation. |
+| Any source is invalid or duplicated | The full batch is rejected before persistence or materialization. |
+| A host materializer fails | New filesystem entries and source records are rolled back; existing task contents remain. |
+| A container/remote repository clone fails | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source. |
+| A container/remote task submits a folder source | The request returns `422` without persistence or filesystem changes. |
+| Agentctl cannot rescan the new root | The attachment fails rather than reporting success with a stale Files tree. |
+| A requested file move or rename crosses canonical source roots | The request is rejected before either source is mutated. |
+| A persisted local folder later disappears | The current live environment keeps its existing materialization; a new/reset environment surfaces the missing source and does not silently omit it. |
+| The client disconnects during materialization | Rollback runs on a detached bounded context and the eventual task event reflects durable state. |
 
 ## Persistence guarantees
 
