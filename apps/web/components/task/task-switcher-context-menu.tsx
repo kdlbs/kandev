@@ -28,6 +28,7 @@ import {
   TaskMoveContextMenuItems,
   type TaskMoveWorkflow,
 } from "@/components/task/task-move-context-menu";
+import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { TaskColorMenu } from "./task-switcher-color-menu";
 import { TaskArchiveItem, TaskDeleteItem, TaskDetachItem } from "./task-switcher-action-items";
@@ -242,6 +243,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
         onBulkArchive={onBulkArchive}
       />
       <TaskColorMenu taskId={task.id} disabled={isDeleting} />
+      <TaskNestContextMenuItems task={task} disabled={isDeleting} />
       <TaskLinkMenu disabled={isDeleting} {...selectTaskLinkActions(task, closeMenu, props)} />
       <TaskMoveItems
         task={task}
