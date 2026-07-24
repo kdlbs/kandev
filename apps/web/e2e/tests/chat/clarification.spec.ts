@@ -33,7 +33,7 @@ useRegularMode();
 test.describe("Clarification flow", () => {
   test.describe.configure({ retries: 1 });
 
-  test("queues regular composer input while the question stays pending", async ({
+  test("keeps a pending question open while typing a digit in the regular composer", async ({
     testPage,
     apiClient,
     seedData,
@@ -51,7 +51,9 @@ test.describe("Clarification flow", () => {
     await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
     await expect(testPage.getByTestId("cancel-agent-button")).toBeVisible();
 
-    await composer.fill("Queue this after I answer", { timeout: 30_000 });
+    await composer.pressSequentially("Queue this after I answer 1", { timeout: 30_000 });
+    await expect(composer).toContainText("Queue this after I answer 1");
+    await expect(session.clarificationOverlay()).toBeVisible();
     await testPage.getByTestId("submit-message-button").click();
 
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });

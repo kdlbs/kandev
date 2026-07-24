@@ -10,7 +10,7 @@ import { seedClarificationSession } from "../../helpers/clarification";
 test.describe("Mobile clarification multiline answer", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
-  test("queues inline composer input while the structured question remains answerable", async ({
+  test("keeps a pending question open while typing a digit in the inline composer", async ({
     testPage,
     apiClient,
     seedData,
@@ -26,7 +26,9 @@ test.describe("Mobile clarification multiline answer", () => {
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
     const composer = session.activeChat().getByTestId("chat-input-editor");
     await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
-    await composer.fill("Queue this from phone", { timeout: 30_000 });
+    await composer.pressSequentially("Queue this from phone 1", { timeout: 30_000 });
+    await expect(composer).toContainText("Queue this from phone 1");
+    await expect(session.clarificationOverlay()).toBeVisible();
     await testPage.getByTestId("submit-message-button").tap();
 
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
