@@ -132,6 +132,7 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     prInfoByUrl: {
       info: () => undefined,
       loading: () => false,
+      error: () => undefined,
       ensure: () => undefined,
       clear: () => undefined,
     },
