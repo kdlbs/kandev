@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	sshAgentctlHealthTimeout = 20 * time.Second
-	sshAgentctlLoopbackHost  = "127.0.0.1"
+	sshAgentctlHealthTimeout  = 20 * time.Second
+	sshAgentctlCleanupTimeout = 20 * time.Second
+	sshAgentctlLoopbackHost   = "127.0.0.1"
 
 	sshStatusRunning      = "running"
 	sshStatusUnknown      = "unknown"
@@ -423,10 +424,14 @@ func (r *SSHExecutor) buildResumedInstance(req *ExecutorCreateRequest, state *ss
 	}
 }
 
-// StopInstance kills the per-session agentctl on the remote, closes the local
-// port forward, and releases this session's hold on the pooled SSH connection.
-// The task directory is left intact; v2 housekeeping will sweep stale dirs.
-func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, _ bool) error {
+// StopInstance closes the local port forward and SSH connection for every
+// stop. It preserves the remote agentctl only for graceful backend shutdown,
+// so a restart can reconnect using the persisted remote PID, port, and token.
+// User stops, rollbacks, force, failed-agent, terminal, and stale-replacement
+// stops all kill agentctl.
+// The task directory is always left intact; v2 housekeeping will sweep stale
+// dirs.
+func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	if instance == nil {
 		return nil
 	}
@@ -442,14 +447,37 @@ func (r *SSHExecutor) StopInstance(ctx context.Context, instance *ExecutorInstan
 	if state.forwarder != nil {
 		_ = state.forwarder.Close()
 	}
+	if !sshShouldStopRemoteAgentctl(instance, force) {
+		r.logger.Info("preserving SSH agentctl after agent stop",
+			zap.String("instance_id", instance.InstanceID),
+			zap.String("stop_reason", instance.StopReason))
+		if state.client != nil {
+			_ = state.client.Close()
+		}
+		return nil
+	}
+
 	// Use the same SSH client we used for CreateInstance — if it's still
 	// alive we can kill the remote agentctl gracefully; otherwise just drop
 	// the connection on the floor.
 	if state.client != nil {
-		_ = stopRemoteAgentctl(ctx, state.client, state.remoteDir, state.pid)
+		cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
+		_ = stopRemoteAgentctl(cleanupCtx, state.client, state.remoteDir, state.pid)
+		cancel()
 		_ = state.client.Close()
 	}
 	return nil
+}
+
+func sshShouldStopRemoteAgentctl(instance *ExecutorInstance, force bool) bool {
+	if instance == nil {
+		return false
+	}
+	return force || instance.AgentStopFailed || instance.StopReason != StopReasonBackendShutdown
+}
+
+func sshRemoteCleanupContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), sshAgentctlCleanupTimeout)
 }
 
 // RecoverInstances re-opens SSH connections for sessions that were live before

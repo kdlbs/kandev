@@ -159,3 +159,77 @@ func TestResumedSSHAgentctlInstanceID(t *testing.T) {
 		})
 	}
 }
+
+func TestSSHStopInstanceKillsRemoteAgentctlOnlyWhenCleanupIsRequired(t *testing.T) {
+	tests := []struct {
+		name     string
+		force    bool
+		instance *ExecutorInstance
+		want     bool
+	}{
+		{
+			name: "backend shutdown preserves resumable agentctl",
+			instance: &ExecutorInstance{
+				StopReason: StopReasonBackendShutdown,
+			},
+		},
+		{
+			name:     "non-shutdown stop kills agentctl",
+			instance: &ExecutorInstance{},
+			want:     true,
+		},
+		{
+			name:  "force stop kills agentctl",
+			force: true,
+			instance: &ExecutorInstance{
+				StopReason: StopReasonBackendShutdown,
+			},
+			want: true,
+		},
+		{
+			name: "failed agent stop kills agentctl",
+			instance: &ExecutorInstance{
+				StopReason:      StopReasonBackendShutdown,
+				AgentStopFailed: true,
+			},
+			want: true,
+		},
+		{
+			name: "terminal task deletion kills agentctl",
+			instance: &ExecutorInstance{
+				StopReason: StopReasonTaskDeleted,
+			},
+			want: true,
+		},
+		{
+			name: "stale replacement cleanup kills agentctl",
+			instance: &ExecutorInstance{
+				StopReason: stopReasonStaleExecutionCleanup,
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sshShouldStopRemoteAgentctl(tt.instance, tt.force); got != tt.want {
+				t.Fatalf("sshShouldStopRemoteAgentctl() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSSHRemoteCleanupContextIgnoresCanceledParentAndIsBounded(t *testing.T) {
+	parent, parentCancel := context.WithCancel(context.Background())
+	parentCancel()
+
+	cleanupCtx, cleanupCancel := sshRemoteCleanupContext(parent)
+	defer cleanupCancel()
+
+	if err := cleanupCtx.Err(); err != nil {
+		t.Fatalf("cleanup context should remain usable after parent cancellation, got %v", err)
+	}
+	if _, ok := cleanupCtx.Deadline(); !ok {
+		t.Fatal("cleanup context should be bounded")
+	}
+}
