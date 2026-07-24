@@ -490,6 +490,49 @@ func TestExtractTarGz_WriteThroughSymlinkChainBlocked(t *testing.T) {
 	}
 }
 
+func TestExtractTarGz_SymlinkUnderSymlinkedParentRejected(t *testing.T) {
+	// A symlink entry whose parent is itself a symlink lands one level
+	// shallower than its archive path, so a relative target validated against
+	// the archive path resolves somewhere else on disk: "a/x" -> ".." checks
+	// out against parent "a" but really points at destDir's parent once it is
+	// created at "x". Nothing can be written through it (os.Root refuses to
+	// follow it), but it must not be left in the install tree either.
+	var buf bytes.Buffer
+	gzWriter := gzip.NewWriter(&buf)
+	tarWriter := tar.NewWriter(gzWriter)
+
+	_ = tarWriter.WriteHeader(&tar.Header{
+		Name:     "a",
+		Typeflag: tar.TypeSymlink,
+		Linkname: ".",
+	})
+	_ = tarWriter.WriteHeader(&tar.Header{
+		Name:     "a/x",
+		Typeflag: tar.TypeSymlink,
+		Linkname: "..",
+	})
+
+	_ = tarWriter.Close()
+	_ = gzWriter.Close()
+
+	parent := t.TempDir()
+	destDir := filepath.Join(parent, "install")
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		t.Fatalf("failed to create destDir: %v", err)
+	}
+
+	if err := extractTarGz(&buf, destDir); err == nil {
+		t.Error("expected error for symlink created under a symlinked parent, got nil")
+	}
+
+	// The link must not exist at its real (shallower) location either.
+	shallow := filepath.Join(destDir, "x")
+	if _, err := os.Lstat(shallow); !os.IsNotExist(err) {
+		target, _ := os.Readlink(shallow)
+		t.Errorf("escaping symlink left in install tree: %s -> %q (lstat err: %v)", shallow, target, err)
+	}
+}
+
 func TestResolveTarget_Unsupported(t *testing.T) {
 	s := &GithubTarballStrategy{
 		config: GithubTarballConfig{

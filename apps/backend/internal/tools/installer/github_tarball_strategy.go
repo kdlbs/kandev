@@ -227,8 +227,14 @@ func extractSymlinkEntry(root *os.Root, cleanName string, header *tar.Header) er
 		return fmt.Errorf("symlink target must not be absolute: %s -> %s", header.Name, header.Linkname)
 	}
 
+	if err := rejectSymlinkedParents(root, cleanName); err != nil {
+		return err
+	}
+
 	// Resolve the target relative to the symlink's own directory, both
 	// expressed relative to destDir. Anything that climbs to ".." has left it.
+	// Sound only because the parent check above pins the link's on-disk
+	// location to its archive path.
 	linkTarget := filepath.Join(filepath.Dir(cleanName), header.Linkname)
 	if linkTarget == ".." || strings.HasPrefix(linkTarget, ".."+string(os.PathSeparator)) {
 		return fmt.Errorf("symlink target escapes destination: %s -> %s", header.Name, header.Linkname)
@@ -237,6 +243,50 @@ func extractSymlinkEntry(root *os.Root, cleanName string, header *tar.Header) er
 	// Remove existing symlink/file before creating (handles re-installs)
 	_ = root.Remove(cleanName)
 	return root.Symlink(header.Linkname, cleanName)
+}
+
+// rejectSymlinkedParents requires every parent component of name to be a real
+// directory rather than a symlink.
+//
+// root.Symlink follows symlinked parents, so an entry named "a/x" lands at "x"
+// when "a" is itself a symlink to ".". The link is still created inside destDir
+// — root guarantees that much — but one directory level shallower than its
+// archive path, which changes what a relative target resolves to: "a/x" -> ".."
+// passes a check computed against parent "a" and then resolves to destDir's
+// parent from its real home. Nothing can be written through such a link during
+// extraction (root refuses to follow it), but it persists in the install tree
+// for any later consumer that walks it with ordinary os calls.
+//
+// Requiring real parents keeps an entry's archive path and its on-disk location
+// identical, which is the assumption the target check depends on.
+func rejectSymlinkedParents(root *os.Root, name string) error {
+	dir := filepath.Dir(name)
+	if dir == "." {
+		return nil
+	}
+
+	prefix := ""
+	for _, part := range strings.Split(filepath.ToSlash(dir), "/") {
+		if prefix == "" {
+			prefix = part
+		} else {
+			prefix += "/" + part
+		}
+
+		info, err := root.Lstat(prefix)
+		if os.IsNotExist(err) {
+			// Not created yet; root.Symlink will fail on the missing parent
+			// rather than resolving through anything unexpected.
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("failed to inspect symlink parent %s: %w", prefix, err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("symlink %s has a symlinked parent directory: %s", name, prefix)
+		}
+	}
+	return nil
 }
 
 func writeFileFromTar(tr *tar.Reader, root *os.Root, name string, mode os.FileMode) error {
