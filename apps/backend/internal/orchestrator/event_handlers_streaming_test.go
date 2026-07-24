@@ -827,6 +827,33 @@ func TestStatuslessToolUpdateDoesNotCreateTurn(t *testing.T) {
 	require.Zero(t, openTurnCount(t, repo, "session1"))
 }
 
+func TestResumedSessionStatusDoesNotCreateTurnForWaitingSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleSessionStatusEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task1",
+		SessionID: "session1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:          "session_status",
+			SessionStatus: streams.SessionStatusResumed,
+		},
+	})
+
+	require.Zero(t, openTurnCount(t, repo, "session1"),
+		"resume status metadata must not create a phantom active turn")
+}
+
 func TestToolUpdateFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -155,7 +155,7 @@ func (s *Service) handleSessionStatusEvent(ctx context.Context, payload *lifecyc
 	}
 	if err := s.messageCreator.CreateSessionMessage(
 		ctx, taskID, statusMsg, sessionID,
-		string(v1.MessageTypeStatus), s.getActiveTurnID(sessionID), nil, false,
+		string(v1.MessageTypeStatus), s.currentTurnIDForSession(ctx, sessionID), nil, false,
 	); err != nil {
 		s.logger.Error("failed to create session status message",
 			zap.String("task_id", taskID),
