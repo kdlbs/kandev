@@ -109,6 +109,12 @@ export function setKanbanPreviewState(state: Partial<KanbanPreviewState>): void 
   }
 }
 
+/** Clear the persisted task-preview selection while preserving the user's saved width. */
+export function resetKanbanPreviewState(): void {
+  removeLocalStorage(KANBAN_PREVIEW_KEYS.OPEN);
+  removeLocalStorage(KANBAN_PREVIEW_KEYS.SELECTED_TASK);
+}
+
 const PLAN_NOTIFICATION_KEY = "kandev.plan.lastSeenByTask";
 
 export type PlanNotificationState = Record<string, string | null>;

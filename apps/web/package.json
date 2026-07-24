@@ -7,6 +7,7 @@
     "dev": "vite --host 0.0.0.0",
     "prebuild": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "build": "vite build",
+    "build:browser-demo": "VITE_KANDEV_BROWSER_DEMO=true VITE_KANDEV_BASE_PATH=/browser-demo/app/ vite build",
     "build:vite": "vite build",
     "start": "vite preview --host 0.0.0.0",
     "lint": "eslint --max-warnings 0",

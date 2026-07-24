@@ -23,6 +23,7 @@ blob-report/
 
 # production
 /build
+/dist-browser-demo/
 
 # misc
 .DS_Store

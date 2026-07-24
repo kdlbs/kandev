@@ -188,6 +188,14 @@ function TaskStateIcon({
       />
     );
   }
+  if (sessionState === "IDLE") {
+    return (
+      <IconCircleCheck
+        data-testid="task-state-ready"
+        className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
+      />
+    );
+  }
   if (computeIsPreparing(state, sessionState)) {
     return (
       <IconCircleDashed

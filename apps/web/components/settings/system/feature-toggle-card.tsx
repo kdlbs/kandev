@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -14,6 +15,7 @@ type FeatureToggleCardProps = {
   saving: boolean;
   onChange: (next: boolean) => void;
   onReset: () => void;
+  action?: ReactNode;
 };
 
 export function FeatureToggleCard({
@@ -22,6 +24,7 @@ export function FeatureToggleCard({
   saving,
   onChange,
   onReset,
+  action,
 }: FeatureToggleCardProps) {
   const disabled = saving || flag.env_locked || !flag.mutable;
   return (
@@ -59,6 +62,7 @@ export function FeatureToggleCard({
             <IconRefresh className="mr-1 h-3.5 w-3.5" />
             Use default
           </Button>
+          {action}
           {flag.env_locked && (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <IconLock className="h-3.5 w-3.5" />

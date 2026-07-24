@@ -26,6 +26,7 @@ name: release
 #
 # Required secrets for public releases:
 #   HOMEBREW_TAP_DEPLOY_KEY  — SSH private key for kdlbs/homebrew-kandev deploy key
+#   LANDING_REPOSITORY_DISPATCH_TOKEN — fine-grained token with Contents write access to kdlbs/landing
 # Optional secrets for signed desktop artifacts. If these are incomplete, the
 # workflow still builds unsigned desktop artifacts and warns in release notes.
 #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / KEYCHAIN_PASSWORD — macOS Developer ID signing
@@ -431,6 +432,31 @@ jobs:
           name: web-bundle
           path: apps/web/dist
           include-hidden-files: true
+
+      - name: Build browser demo
+        env:
+          KANDEV_VERSION: ${{ needs.prepare.outputs.tag }}
+        run: ./scripts/browser-demo/build-web-demo.sh apps/web/dist-browser-demo
+
+      - name: Package browser demo
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release-assets
+          tar -czf dist/release-assets/kandev-browser-demo.tar.gz \
+            -C apps/web/dist-browser-demo .
+          actual_bytes="$(stat -c %s dist/release-assets/kandev-browser-demo.tar.gz)"
+          max_bytes=26214400
+          echo "Browser demo compressed size: $actual_bytes bytes (max: $max_bytes)"
+          if [ "$actual_bytes" -gt "$max_bytes" ]; then
+            echo "::error::Browser demo exceeds the 25 MiB compressed-size budget." >&2
+            exit 1
+          fi
+          (cd dist/release-assets && sha256sum kandev-browser-demo.tar.gz > kandev-browser-demo.tar.gz.sha256)
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
+        with:
+          name: browser-demo
+          path: dist/release-assets/kandev-browser-demo.tar.gz*
 
   build-bundles:
     name: Build platform bundle (${{ matrix.platform }})
@@ -1440,7 +1466,7 @@ jobs:
 
   publish-release:
     name: Publish GitHub release
-    needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]
+    needs: [prepare, build-web, build-bundles, build-desktop, docker-universal-manifest]
     if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
@@ -1528,6 +1554,11 @@ jobs:
           path: dist/release-assets
           merge-multiple: true
 
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          name: browser-demo
+          path: dist/release-assets
+
       - name: Verify release assets
         run: |
           set -euo pipefail
@@ -1545,6 +1576,8 @@ jobs:
             fi
           done
           bash "$DESKTOP_ASSET_VERIFIER" dist/release-assets
+          test -f dist/release-assets/kandev-browser-demo.tar.gz
+          (cd dist/release-assets && sha256sum -c kandev-browser-demo.tar.gz.sha256)
           ls -lh dist/release-assets
 
       - name: Generate and verify updater manifest
@@ -1585,8 +1618,26 @@ jobs:
             dist/release-assets/kandev-windows-*.tar.gz
             dist/release-assets/kandev-windows-*.tar.gz.sha256
             dist/release-assets/kandev-desktop-*
+            dist/release-assets/kandev-browser-demo.tar.gz
+            dist/release-assets/kandev-browser-demo.tar.gz.sha256
             dist/release-assets/latest.json
           preserve_order: true
+
+  deploy-browser-demo:
+    name: Deploy browser demo
+    needs: [prepare, publish-release]
+    if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch landing deployment
+        env:
+          GH_TOKEN: ${{ secrets.LANDING_REPOSITORY_DISPATCH_TOKEN }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          test -n "$GH_TOKEN"
+          gh api --method POST repos/kdlbs/landing/dispatches \
+            --field event_type=kandev_release \
+            --field "client_payload[tag]=$RELEASE_TAG"
 
   publish-npm:
     name: Publish npm packages

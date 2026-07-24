@@ -9,6 +9,7 @@ const REVIEW_ICON_TEST_ID = "task-state-review";
 const RUNNING_ICON_TEST_ID = "task-state-running";
 const WAITING_FOR_INPUT_ICON_TEST_ID = "task-state-waiting-for-input";
 const PENDING_PERMISSION_ICON_TEST_ID = "task-state-pending-permission";
+const READY_ICON_TEST_ID = "task-state-ready";
 const AGENT_ERROR_ICON_TEST_ID = "task-agent-error-icon";
 const PREPARING_PHASE = "preparing";
 const PREPARING_SPINNER_CLASS = "text-muted-foreground/40";
@@ -35,8 +36,33 @@ function expectPreparingSpinner(): void {
   expect(icon.classList.contains(SLOW_SPIN_CLASS)).toBe(true);
 }
 
+describe("TaskItem ready status icon", () => {
+  it("shows the green ready check when the session is idle", () => {
+    renderTaskItem({ state: "IN_PROGRESS", sessionState: "IDLE" });
+
+    const icon = screen.getByTestId(READY_ICON_TEST_ID);
+    expect(icon.classList.contains("text-green-500")).toBe(true);
+    expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId("task-state-backlog")).toBeNull();
+  });
+
+  it("keeps pending clarification ahead of the idle ready state", () => {
+    renderTaskItem({ sessionState: "IDLE", hasPendingClarification: true });
+
+    expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(READY_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("keeps pending permission ahead of the idle ready state", () => {
+    renderTaskItem({ sessionState: "IDLE", hasPendingPermission: true });
+
+    expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(READY_ICON_TEST_ID)).toBeNull();
+  });
+});
+
 describe("TaskItem status icon", () => {
-  it("keeps the review check when the session is idle after a turn", () => {
+  it("keeps the review check when waiting without a pending action", () => {
     renderTaskItem({ sessionState: "WAITING_FOR_INPUT" });
 
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
