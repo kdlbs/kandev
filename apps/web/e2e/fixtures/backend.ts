@@ -3,6 +3,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
@@ -48,6 +49,11 @@ export type BackendContext = {
    * agents, WS connections) is lost.
    */
   restart: (envOverrides?: Record<string, string>) => Promise<void>;
+  /**
+   * Applies test-owned process environment values to the current backend and
+   * every later restart until the returned release callback is awaited.
+   */
+  useEnv: (overrides: Record<string, string>) => Promise<() => Promise<void>>;
 };
 
 function observeProcessExit(proc?: ChildProcess): {
@@ -450,9 +456,10 @@ exec git "$@"
         // a clean copy each call instead of accumulating leftover keys (e.g.
         // KANDEV_MOCK_PROVIDERS, KANDEV_PROVIDER_FAILURES) from prior tests.
         const baselineEnv = { ...backendEnv } as Record<string, string>;
+        const scopedEnv = new BackendFixtureEnvOverrides();
 
         // --- Spawn backend ---
-        backendProc = spawnBackendProcess(backendEnv, debug, backendPort);
+        backendProc = spawnBackendProcess(scopedEnv.apply(baselineEnv), debug, backendPort);
         registerProcess(backendProc);
         await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
         const frontendUrl = baseUrl;
@@ -468,12 +475,7 @@ exec git "$@"
           // set by the routing specs would otherwise stick for the rest of
           // the worker's lifetime and register canonical agent IDs that
           // sibling specs count).
-          const nextEnv: Record<string, string> = { ...baselineEnv };
-          if (envOverrides) {
-            for (const [k, v] of Object.entries(envOverrides)) {
-              nextEnv[k] = v;
-            }
-          }
+          const nextEnv = scopedEnv.apply(baselineEnv, envOverrides);
           const runningProcess = backendProc;
           if (!runningProcess) throw new Error("Backend process is not running");
           await killProcessGroup(runningProcess);
@@ -487,7 +489,17 @@ exec git "$@"
           await waitForHealth(`${baseUrl}/health`, HEALTH_TIMEOUT_MS, backendProc);
         };
 
-        await use({ port: backendPort, baseUrl, frontendPort, frontendUrl, tmpDir, restart });
+        const useEnv = createScopedEnvUse(scopedEnv, restart);
+
+        await use({
+          port: backendPort,
+          baseUrl,
+          frontendPort,
+          frontendUrl,
+          tmpDir,
+          restart,
+          useEnv,
+        });
       });
     },
     { scope: "worker", timeout: 60_000 },
