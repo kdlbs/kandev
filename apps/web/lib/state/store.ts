@@ -80,7 +80,6 @@ import {
   type GitHubSliceActions,
   type AzureDevOpsSliceActions,
   type PluginsSliceActions,
-  type SessionSliceActions,
 } from "./slices";
 import type {
   AvailableCommand,
@@ -186,7 +185,6 @@ export type AppState = {
   sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
   promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
-  workspaceFilesRefresh: (typeof defaultSessionRuntimeState)["workspaceFilesRefresh"];
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
@@ -434,7 +432,6 @@ export type AppState = {
     metadata?: Record<string, unknown>,
   ) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
-  reconcileWorkspaceSourcesAdopted: SessionSliceActions["reconcileWorkspaceSourcesAdopted"];
   updateMessage: (message: Message) => void;
   removeMessage: (sessionId: string, messageId: string) => void;
   prependMessages: (
@@ -461,7 +458,6 @@ export type AppState = {
   setSessionWorktrees: (sessionId: string, worktreeIds: string[]) => void;
   setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => boolean;
   clearGitStatus: (sessionId: string) => void;
-  bumpWorkspaceFilesRefresh: (sessionId: string) => void;
   clearLegacyGitStatusEntry: (sessionId: string) => void;
   registerSessionEnvironment: (sessionId: string, environmentId: string) => void;
   setSessionCommits: (
@@ -619,6 +615,7 @@ export type AppState = {
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
 } & GitHubSliceActions &
+  import("./store-reexports").WorkspaceSourceStoreState &
   AzureDevOpsSliceActions &
   SystemSliceActions &
   FeaturesSliceActions &
