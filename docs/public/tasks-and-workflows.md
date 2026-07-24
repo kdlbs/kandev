@@ -52,11 +52,11 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 2. Select the workspace and workflow when Kandev cannot infer them. A regular non-ephemeral task must belong to a workflow.
 3. Select a source:
 
-   | Source     | Use it for                                        | Important behavior                                                                                                                                                                                                  |
-   | ---------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | **Repo**   | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task. |
-   | **Remote** | A remote repository                               | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL; then select the branch. Clone and fetch require valid credentials.                                                        |
-   | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable.                                           |
+   | Source | Use it for | Important behavior |
+   |---|---|---|
+   | **Repo** | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task. |
+   | **Remote** | A remote repository | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL; then select the branch. Clone and fetch require valid credentials. |
+   | **None** | Planning, research, or work outside Git | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable. |
 
 4. Select a compatible executor profile and agent profile. A workflow default agent profile locks the task-level agent selector. Executor and agent compatibility is validated before launch.
 5. Enter the initial description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode**; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. A nonempty description exposes the standard split actions.
