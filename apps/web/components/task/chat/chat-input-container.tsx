@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { useAppStore } from "@/components/state-provider";
 import type { ContextFile } from "@/lib/state/context-files-store";
-import type { Message } from "@/lib/types/http";
+import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { EntityReference } from "@/lib/types/entity-reference";
@@ -269,6 +269,15 @@ type EnhancePromptExtras = {
   onVoiceAutoSend?: () => void;
 };
 
+export function shouldShowCancelAgent(
+  isAgentBusy: boolean,
+  pendingClarification: Message | null | undefined,
+): boolean {
+  if (!pendingClarification) return isAgentBusy;
+  return !(pendingClarification.metadata as ClarificationRequestMetadata | undefined)
+    ?.agent_disconnected;
+}
+
 function buildEditorAreaProps(
   s: ContainerState,
   p: NormalizedChatInputProps,
@@ -283,7 +292,6 @@ function buildEditorAreaProps(
     isDisabled: s.isDisabled,
     submitDisabled: s.submitDisabled,
     submitDisabledReason: s.submitDisabledReason,
-    hasClarification: s.hasClarification,
     planModeEnabled: p.planModeEnabled,
     planModeAvailable: p.planModeAvailable ?? true,
     mcpServers: p.mcpServers ?? [],
@@ -299,7 +307,8 @@ function buildEditorAreaProps(
     addFiles: s.addFiles,
     fileInputRef: s.fileInputRef,
     showRequestChangesTooltip: p.showRequestChangesTooltip,
-    isAgentBusy: p.isAgentBusy,
+    isAgentBusy: p.isAgentBusy || !!(p.pendingClarification && p.onClarificationResolved),
+    canCancelAgent: shouldShowCancelAgent(p.isAgentBusy, p.pendingClarification),
     onPlanModeChange: p.onPlanModeChange,
     taskTitle: p.taskTitle,
     taskDescription: p.taskDescription,

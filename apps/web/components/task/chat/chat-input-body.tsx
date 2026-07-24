@@ -20,7 +20,6 @@ export type ChatInputEditorAreaProps = {
   isDisabled: boolean;
   submitDisabled: boolean;
   submitDisabledReason?: string;
-  hasClarification: boolean;
   planModeEnabled: boolean;
   planModeAvailable: boolean;
   mcpServers: string[];
@@ -41,6 +40,7 @@ export type ChatInputEditorAreaProps = {
   hideAgentControls?: boolean;
   hidePlanMode?: boolean;
   isAgentBusy: boolean;
+  canCancelAgent?: boolean;
   onPlanModeChange: (enabled: boolean) => void;
   taskTitle?: string;
   taskDescription: string;
@@ -125,7 +125,7 @@ function FileInput({
 
 export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
   const { inputRef, value, handleChange, handleSubmitWithReset, inputPlaceholder } = p;
-  const { isDisabled, hasClarification, planModeEnabled, planModeAvailable, mcpServers } = p;
+  const { isDisabled, planModeEnabled, planModeAvailable, mcpServers } = p;
   const { submitKey, setIsInputFocused, sessionId, taskId, planContextEnabled } = p;
   const { onAddContextFile, onToggleContextFile, addFiles, fileInputRef } = p;
   const { showRequestChangesTooltip, isAgentBusy, onPlanModeChange, taskTitle, taskDescription } =
@@ -155,7 +155,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
           onChange={handleChange}
           onSubmit={wrappedSubmit}
           placeholder={inputPlaceholder}
-          disabled={isDisabled || hasClarification}
+          disabled={isDisabled}
           planModeEnabled={planModeEnabled}
           submitKey={submitKey}
           onFocus={() => setIsInputFocused(true)}
@@ -182,6 +182,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         taskTitle={taskTitle}
         taskDescription={taskDescription}
         isAgentBusy={isAgentBusy}
+        canCancelAgent={p.canCancelAgent}
         hasContent={hasContent}
         isDisabled={p.submitDisabled}
         submitDisabledReason={p.submitDisabledReason}
