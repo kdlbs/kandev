@@ -232,3 +232,22 @@ func assertSuccessResponse(t *testing.T, client *Client, label string) {
 		t.Fatalf("%s: no response frame", label)
 	}
 }
+
+// Regression: workspace.* event payloads carry the workspace ID under "id"
+// (the payload IS the workspace DTO), not "workspace_id". The first
+// implementation missed this and broadcast admin workspace updates to every
+// user — caught by the auth E2E segregation spec.
+func TestExtractWorkspaceIDFieldShapes(t *testing.T) {
+	if got := extractWorkspaceID(map[string]interface{}{"workspace_id": "ws-1"}); got != "ws-1" {
+		t.Fatalf("workspace_id key: %q", got)
+	}
+	if got := extractWorkspaceID(map[string]interface{}{"id": "ws-1"}); got != "" {
+		t.Fatalf("bare id must NOT be treated as workspace context for generic events: %q", got)
+	}
+	if got := extractStringField(map[string]interface{}{"id": "ws-1"}, "id"); got != "ws-1" {
+		t.Fatalf("extractStringField: %q", got)
+	}
+	if got := extractWorkspaceID("not-a-map"); got != "" {
+		t.Fatalf("non-map payload: %q", got)
+	}
+}

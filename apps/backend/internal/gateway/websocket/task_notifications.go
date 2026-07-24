@@ -130,6 +130,16 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 
 		workspaceID := extractWorkspaceID(event.Data)
 		switch action {
+		case ws.ActionWorkspaceCreated, ws.ActionWorkspaceUpdated, ws.ActionWorkspaceDeleted:
+			// Workspace event payloads are the workspace DTO itself: the
+			// workspace ID lives under "id", not "workspace_id". Without this
+			// the extract comes back empty and the event would broadcast to
+			// every user (caught by the auth E2E segregation spec).
+			if workspaceID == "" {
+				workspaceID = extractStringField(event.Data, "id")
+			}
+			b.hub.BroadcastToWorkspace(workspaceID, msg)
+			return nil
 		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
 			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)
@@ -175,14 +185,20 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 // struct-shaped). Empty means "no workspace context" — the event is treated
 // as instance-wide and broadcast to everyone.
 func extractWorkspaceID(data interface{}) string {
-	if m, ok := data.(map[string]interface{}); ok {
-		if id, ok := m["workspace_id"].(string); ok {
-			return id
-		}
-		return ""
+	if id := extractStringField(data, "workspace_id"); id != "" {
+		return id
 	}
 	if provider, ok := data.(interface{ GetWorkspaceID() string }); ok {
 		return provider.GetWorkspaceID()
+	}
+	return ""
+}
+
+func extractStringField(data interface{}, key string) string {
+	if m, ok := data.(map[string]interface{}); ok {
+		if value, ok := m[key].(string); ok {
+			return value
+		}
 	}
 	return ""
 }
