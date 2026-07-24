@@ -26,6 +26,21 @@ type UpdateConfigRequest struct {
 	Config map[string]any `json:"config"`
 }
 
+// UpdateSettingsRequest is the PUT /api/plugins/settings body: the
+// instance-wide plugin preferences. AutoUpdateDefault is required (a bare
+// bool, not a pointer) — the endpoint sets the default outright.
+type UpdateSettingsRequest struct {
+	AutoUpdateDefault bool `json:"auto_update_default"`
+}
+
+// SetAutoUpdateRequest is the PUT /api/plugins/:id/auto-update body: the
+// per-plugin override. AutoUpdate is a tri-state — true/false force the plugin
+// on/off, and a null (or omitted) value clears the override so the plugin
+// inherits the instance-wide default again.
+type SetAutoUpdateRequest struct {
+	AutoUpdate *bool `json:"auto_update"`
+}
+
 // SyncResult is the body of a successful POST /api/plugins/sync (and the
 // return value of Service.Sync / Service.bootScan): what the filesystem
 // scan under the plugins directory found and did this run, per

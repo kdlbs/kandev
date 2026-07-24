@@ -184,17 +184,19 @@ type CarouselShortcutArgs = {
   onSubmit: () => void;
 };
 
+function isEditableTarget(target: EventTarget | null): target is HTMLElement {
+  return (
+    target instanceof HTMLElement &&
+    (target.isContentEditable || target.tagName === "INPUT" || target.tagName === "TEXTAREA")
+  );
+}
+
 // shouldIgnoreShortcut filters out events that the overlay must not handle:
-// keystrokes inside an input/textarea (the user is typing) and any modifier
+// keystrokes inside an editable control (the user is typing) and any modifier
 // combo (so we don't hijack browser shortcuts like Cmd/Ctrl+1..9 for tab
 // switching or Alt+ArrowLeft for back-navigation).
 function shouldIgnoreShortcut(e: KeyboardEvent): boolean {
-  if (
-    e.target instanceof HTMLElement &&
-    (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA")
-  ) {
-    return true;
-  }
+  if (isEditableTarget(e.target)) return true;
   return e.metaKey || e.ctrlKey || e.altKey || e.shiftKey;
 }
 
@@ -205,10 +207,7 @@ function shouldIgnoreShortcut(e: KeyboardEvent): boolean {
 function tryHandleMetaEnter(e: KeyboardEvent, canSubmit: boolean, onSubmit: () => void): boolean {
   if (e.key !== "Enter" || e.shiftKey || e.altKey) return false;
   if (!e.metaKey && !e.ctrlKey) return false;
-  const inEditable =
-    e.target instanceof HTMLElement &&
-    (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA");
-  if (inEditable) return true;
+  if (isEditableTarget(e.target)) return true;
   e.preventDefault();
   if (canSubmit) onSubmit();
   return true;

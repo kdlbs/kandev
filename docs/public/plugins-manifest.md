@@ -61,6 +61,10 @@ config_schema:
 ui:                                           # optional native frontend plugin
   bundle: "/ui/bundle.js"                    # root-relative
   styles: ["/ui/plugin.css"]                 # optional, root-relative
+  keybindings:                                # optional, requires ui.bundle
+    - id: "open-panel"                       # plugin-local: ^[a-z0-9][a-z0-9-]*$
+      default: "mod+shift+j"                 # combo grammar, see field reference
+      description: "Open the Acme panel"
 ```
 
 ## Field reference
@@ -96,6 +100,10 @@ ui:                                           # optional native frontend plugin
 | `ui.pages[].title` | yes* | string | Display title. |
 | `ui.pages[].path` | yes* | string | Route path for the page. |
 | `ui.pages[].surface` | yes* | string | Where the page mounts. Enum, one of: `settings` · `task-panel` · `main-nav`. Any other value is a validation error. |
+| `ui.keybindings` | no | object[] | Declares plugin keybindings bound at runtime via `registerKeybinding`. Requires `ui.bundle`. |
+| `ui.keybindings[].id` | yes* | string | Stable, plugin-local slug (*required when a keybinding entry is present). Must match `^[a-z0-9][a-z0-9-]*$` and be unique within this plugin's own `ui.keybindings` list — not globally; the effective shortcut is namespaced `plugin:{pluginId}:{id}`. |
+| `ui.keybindings[].default` | yes* | string | Default combo string. `+`-separated tokens: zero or more modifiers from `mod`, `ctrl`, `cmd`, `meta`, `alt`, `option`, `shift` (`mod` = ⌘ on macOS, Ctrl elsewhere) plus exactly one non-modifier key. `shift` may not combine with a digit or symbol key — the browser reports the shifted glyph for those keys, so the combo could never match. |
+| `ui.keybindings[].description` | yes* | string | Non-empty, human-readable label shown in **Settings > Keyboard Shortcuts**. |
 
 `ui.pages` is declarative manifest metadata only. A native bundle's runtime
 nav items, icons, and per-route title-bar chrome (`registerNavItem`,

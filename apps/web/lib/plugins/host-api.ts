@@ -71,6 +71,7 @@ import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { getBackendConfig } from "@/lib/config";
 import { softNavigate } from "@/lib/routing/client-router";
 import type { AppState } from "@/lib/state/store";
+import { pluginModalManager } from "./modal-manager";
 import type { PluginHostApi } from "./types";
 
 /**
@@ -189,6 +190,7 @@ export function buildHostApi(
     ui: PLUGIN_UI,
     theme,
     navigate: (href, options) => softNavigate(href, options?.replace ? "replace" : "push"),
+    openModal: (options) => pluginModalManager.openModal(pluginId, options),
   };
 }
 

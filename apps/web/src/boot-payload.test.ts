@@ -27,6 +27,7 @@ describe("readBootPayload", () => {
         initialState: {
           tasks: { activeTaskId: "task-1" },
         },
+        interimSettingsInterlockToken: "replayable-per-boot-value",
       },
     } as unknown as Window;
 
@@ -45,6 +46,7 @@ describe("readBootPayload", () => {
       initialState: {
         tasks: { activeTaskId: "task-1" },
       },
+      interimSettingsInterlockToken: "replayable-per-boot-value",
     });
   });
 

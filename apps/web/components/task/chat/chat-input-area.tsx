@@ -78,7 +78,7 @@ export function buildSubmitMessage({
   return finalMessage;
 }
 
-function resolveInputPlaceholder(
+export function resolveInputPlaceholder(
   isAgentBusy: boolean,
   activeDocumentType: string | undefined,
   planModeEnabled: boolean,
@@ -86,7 +86,7 @@ function resolveInputPlaceholder(
   needsRecovery: boolean,
 ): string {
   if (needsRecovery) return "Choose a recovery option above to continue...";
-  if (hasClarification) return "Answer the question above to continue...";
+  if (hasClarification) return "Queue instructions while the question is pending...";
   if (isAgentBusy) return "Queue instructions to the agent...";
   if (activeDocumentType === "file") return "Continue working on the file...";
   if (planModeEnabled) return "Continue working on the plan...";
@@ -141,6 +141,7 @@ function usePanelMessageHandler(panelState: ReturnType<typeof useChatPanelState>
     sessionModel,
     activeModel,
     isAgentBusy,
+    pendingClarification,
     activeDocument,
     planComments,
     contextFiles,
@@ -153,6 +154,7 @@ function usePanelMessageHandler(panelState: ReturnType<typeof useChatPanelState>
     activeModel,
     planModeEnabled: panelState.planModeEnabled,
     isAgentBusy,
+    hasPendingClarification: !!pendingClarification,
     activeDocument,
     planComments,
     contextFiles,
@@ -180,6 +182,7 @@ export function useSubmitHandler(
     clearEphemeral,
     addContextFile,
     planModeEnabled,
+    pendingClarification,
   } = panelState;
   const { handleSendMessage } = usePanelMessageHandler(panelState);
 
@@ -197,7 +200,7 @@ export function useSubmitHandler(
           messageComments,
         });
         const outbound = { ...payload, message: finalMessage };
-        if (onSend) {
+        if (onSend && !pendingClarification) {
           // Expand task mentions because onSend bypasses useMessageHandler.buildFinalMessage.
           const taskCtx = payload.inlineTaskMentions?.length
             ? buildTaskMentionsContext(payload.inlineTaskMentions, storeApi.getState())
@@ -229,6 +232,7 @@ export function useSubmitHandler(
     [
       isSending,
       onSend,
+      pendingClarification,
       storeApi,
       handleSendMessage,
       markCommentsSent,
@@ -431,6 +435,10 @@ function useChatInputDerived(
   return { planActions, executor, placeholder };
 }
 
+function canManuallyDrainQueue(pendingClarification: unknown, sessionState: string | null) {
+  return !pendingClarification && (sessionState === "WAITING_FOR_INPUT" || sessionState === "IDLE");
+}
+
 export function ChatInputArea({
   chatInputRef,
   clarificationKey,
@@ -450,7 +458,7 @@ export function ChatInputArea({
   const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled } = panelState;
   const composerWorkspaceId = useComposerWorkspaceId(resolvedSessionId, taskId);
   const sessionState = panelState.session?.state ?? null;
-  const canDrainQueue = sessionState === "WAITING_FOR_INPUT" || sessionState === "IDLE";
+  const canDrainQueue = canManuallyDrainQueue(panelState.pendingClarification, sessionState);
   const { planActions, executor, placeholder } = useChatInputDerived(
     panelState,
     chatInputRef,

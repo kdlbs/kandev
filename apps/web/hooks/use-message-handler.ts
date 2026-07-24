@@ -143,6 +143,7 @@ export interface UseMessageHandlerParams {
   activeModel: string | null;
   planModeEnabled?: boolean;
   isAgentBusy?: boolean;
+  hasPendingClarification?: boolean;
   activeDocument?: ActiveDocument | null;
   planComments?: PlanComment[];
   contextFiles?: ContextFile[];
@@ -209,6 +210,7 @@ export function useMessageHandler({
   activeModel,
   planModeEnabled = false,
   isAgentBusy = false,
+  hasPendingClarification = false,
   activeDocument = null,
   planComments = [],
   contextFiles = [],
@@ -256,7 +258,7 @@ export function useMessageHandler({
       const contextFilesMeta =
         realFiles.length > 0 ? realFiles.map((f) => ({ path: f.path, name: f.name })) : undefined;
 
-      if (isAgentBusy) {
+      if (isAgentBusy || hasPendingClarification) {
         const queueAttachments = payload.attachments?.map((att) => ({
           type: att.type,
           data: att.data,
@@ -300,6 +302,7 @@ export function useMessageHandler({
       sessionModel,
       planModeEnabled,
       isAgentBusy,
+      hasPendingClarification,
       queue,
       buildFinalMessage,
       storeApi,

@@ -182,23 +182,13 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
   // Track manual override state - null means "use auto behavior"
   const [manualExpandState, setManualExpandState] = useState<boolean | null>(null);
 
-  // Auto behavior: expand if active or if we have a result text to surface
-  // (silent Auggie-style subagents have no child messages, so we want the
-  // final summary visible without an extra click).
-  const autoExpanded = isActive || Boolean(resultText);
-
-  // Reset the manual override the first time a result_text arrives so a card
-  // the user collapsed while the subagent was running auto-opens to show the
-  // summary. "Adjust state during render" pattern (preferred over useEffect):
-  // https://react.dev/learn/you-might-not-need-an-effect — only fires on the
-  // empty -> non-empty transition; later user collapses persist.
-  const [prevResultText, setPrevResultText] = useState(resultText);
-  if (resultText !== prevResultText) {
-    setPrevResultText(resultText);
-    if (resultText && !prevResultText) {
-      setManualExpandState(null);
-    }
-  }
+  // Auto behavior: expand only while the subagent is active. On completion the
+  // card auto-collapses to its header + metadata row, matching subagents that
+  // stream child tool calls; the result text is one click away. Previously
+  // auto-expand was also keyed on result_text, which left silent (Auggie-style)
+  // subagents — the ones with no child messages — permanently expanded because
+  // result_text never clears.
+  const autoExpanded = isActive;
 
   // Derive expanded state: manual override takes precedence, otherwise use auto
   const isExpanded = manualExpandState ?? autoExpanded;

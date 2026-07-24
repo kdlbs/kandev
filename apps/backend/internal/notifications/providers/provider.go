@@ -10,6 +10,7 @@ type Message struct {
 	Body          string
 	TaskID        string
 	TaskSessionID string
+	OccurrenceID  string
 	UserID        string
 	Config        map[string]interface{}
 }

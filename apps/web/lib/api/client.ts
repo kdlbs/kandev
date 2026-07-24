@@ -1,4 +1,7 @@
 import { getBackendConfig } from "@/lib/config";
+import { readInterimSettingsInterlockToken } from "@/src/boot-payload";
+
+const interimSettingsInterlockHeader = "X-Kandev-Interim-Settings-Interlock";
 
 export type ApiRequestOptions = {
   baseUrl?: string;
@@ -60,11 +63,9 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
   const response = await fetch(url, {
     ...options?.init,
     cache: options?.cache,
+    // Send the session cookie for opt-in authentication.
     credentials: "include",
-    headers: {
-      "Content-Type": "application/json",
-      ...(options?.init?.headers ?? {}),
-    },
+    headers: buildRequestHeaders(options),
   });
   if (!response.ok) {
     if (response.status === 401) onUnauthorized?.();
@@ -74,6 +75,26 @@ export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOption
   const text = await response.text();
   if (!text) return undefined as T;
   return JSON.parse(text) as T;
+}
+
+// buildRequestHeaders assembles the JSON content-type header plus the
+// interim-settings interlock token on mutating requests.
+function buildRequestHeaders(options?: ApiRequestOptions): Headers {
+  const headers = requestHeaders(options?.init?.headers);
+  headers.set("Content-Type", "application/json");
+  if (isMutation(options?.init?.method)) {
+    const token = readInterimSettingsInterlockToken();
+    if (token) headers.set(interimSettingsInterlockHeader, token);
+  }
+  return headers;
+}
+
+function isMutation(method: string | undefined): boolean {
+  return ["POST", "PUT", "PATCH", "DELETE"].includes(method?.toUpperCase() ?? "GET");
+}
+
+function requestHeaders(headers: HeadersInit | undefined): Headers {
+  return new Headers(headers);
 }
 
 /**

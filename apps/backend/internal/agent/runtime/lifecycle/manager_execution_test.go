@@ -892,6 +892,7 @@ type createInstanceExecutor struct {
 	client       *agentctl.Client
 	createCount  atomic.Int32
 	stopCount    atomic.Int32
+	forceStopped atomic.Bool
 	lastRequest  *ExecutorCreateRequest
 	authToken    string
 	nonce        string
@@ -950,6 +951,7 @@ func (e *createInstanceExecutor) CreateInstance(ctx context.Context, req *Execut
 
 func (e *createInstanceExecutor) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	e.stopCount.Add(1)
+	e.forceStopped.Store(force)
 	return nil
 }
 

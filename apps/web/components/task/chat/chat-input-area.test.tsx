@@ -70,7 +70,7 @@ vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ send: vi.fn() }),
 }));
 
-import { useSubmitHandler } from "./chat-input-area";
+import { resolveInputPlaceholder, useSubmitHandler } from "./chat-input-area";
 
 beforeEach(() => {
   handleSendMessageMock.mockReset();
@@ -83,31 +83,40 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-describe("useSubmitHandler", () => {
-  function panelState(overrides = {}) {
-    return {
-      resolvedSessionId: "session-1",
-      taskId: "task-1",
-      sessionModel: null,
-      activeModel: null,
-      isAgentBusy: false,
-      activeDocument: null,
-      planComments: [],
-      pendingPRFeedback: [],
-      walkthroughComments: [],
-      contextFiles: [],
-      prompts: [],
-      markCommentsSent: vi.fn(),
-      clearSessionPlanComments: vi.fn(),
-      handleClearPRFeedback: vi.fn(),
-      handleClearWalkthroughComments: vi.fn(),
-      clearEphemeral: vi.fn(),
-      addContextFile: vi.fn(),
-      planModeEnabled: false,
-      ...overrides,
-    } as never;
-  }
+function panelState(overrides = {}) {
+  return {
+    resolvedSessionId: "session-1",
+    taskId: "task-1",
+    sessionModel: null,
+    activeModel: null,
+    isAgentBusy: false,
+    activeDocument: null,
+    planComments: [],
+    pendingPRFeedback: [],
+    walkthroughComments: [],
+    messageComments: [],
+    contextFiles: [],
+    prompts: [],
+    markCommentsSent: vi.fn(),
+    clearSessionPlanComments: vi.fn(),
+    handleClearPRFeedback: vi.fn(),
+    handleClearWalkthroughComments: vi.fn(),
+    clearEphemeral: vi.fn(),
+    addContextFile: vi.fn(),
+    planModeEnabled: false,
+    ...overrides,
+  } as never;
+}
 
+describe("resolveInputPlaceholder", () => {
+  it("invites queueing while a clarification remains pending", () => {
+    expect(resolveInputPlaceholder(false, undefined, false, true, false)).toBe(
+      "Queue instructions while the question is pending...",
+    );
+  });
+});
+
+describe("useSubmitHandler", () => {
   it("shows a toast when sending fails", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     handleSendMessageMock.mockRejectedValueOnce(new Error("WebSocket request timed out"));
@@ -123,6 +132,32 @@ describe("useSubmitHandler", () => {
         "The connection dropped or timed out. Refresh the task to confirm whether it went through.",
       variant: "error",
     });
+  });
+
+  it("queues through the shared handler instead of preview onSend while clarification is pending", async () => {
+    const onSend = vi.fn();
+    const { result } = renderHook(() =>
+      useSubmitHandler(panelState({ pendingClarification: { id: "clarification-1" } }), onSend),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "queued instruction" });
+    });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(handleSendMessageMock).toHaveBeenCalledWith({ message: "queued instruction" });
+  });
+
+  it("uses preview onSend when no clarification is pending", async () => {
+    const onSend = vi.fn();
+    const { result } = renderHook(() => useSubmitHandler(panelState(), onSend));
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "direct preview message" });
+    });
+
+    expect(onSend).toHaveBeenCalledWith({ message: "direct preview message" });
+    expect(handleSendMessageMock).not.toHaveBeenCalled();
   });
 
   it("reports deterministic preflight failures as not sent", async () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { pluginRegistry } from "./registry";
 
 const TASK_SIDEBAR_SLOT = "task-sidebar";
@@ -212,5 +212,72 @@ describe("pluginRegistry — route options and plugin names", () => {
     pluginRegistry.unregisterPlugin("plugin-a");
 
     expect(pluginRegistry.getPluginName("plugin-a")).toBeUndefined();
+  });
+});
+
+describe("pluginRegistry — keybinding handlers", () => {
+  afterEach(() => {
+    cleanup("plugin-a", "plugin-b");
+  });
+
+  it("registers a keybinding handler scoped to the owning plugin", () => {
+    const scopedA = pluginRegistry.forPlugin("plugin-a");
+    const scopedB = pluginRegistry.forPlugin("plugin-b");
+    const handlerA = () => {};
+    const handlerB = () => {};
+
+    scopedA.registerKeybinding("open", handlerA);
+    scopedB.registerKeybinding("open", handlerB);
+
+    expect(pluginRegistry.getKeybindingHandler("plugin-a", "open")).toBe(handlerA);
+    expect(pluginRegistry.getKeybindingHandler("plugin-b", "open")).toBe(handlerB);
+    expect(pluginRegistry.getKeybindingHandlers()).toEqual([
+      { id: "open", handler: handlerA, pluginId: "plugin-a" },
+      { id: "open", handler: handlerB, pluginId: "plugin-b" },
+    ]);
+  });
+
+  it("revokes keybinding handlers on unregisterPlugin", () => {
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+    scoped.registerKeybinding("open", () => {});
+
+    pluginRegistry.unregisterPlugin("plugin-a");
+
+    expect(pluginRegistry.getKeybindingHandlers()).toEqual([]);
+    expect(pluginRegistry.getKeybindingHandler("plugin-a", "open")).toBeUndefined();
+  });
+
+  it("warns when registering a handler for an id not declared in the manifest", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    pluginRegistry.setDeclaredKeybindingIds("plugin-a", ["open"]);
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+
+    scoped.registerKeybinding("not-declared", () => {});
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("not-declared"));
+    // The handler is still stored despite the warning.
+    expect(pluginRegistry.getKeybindingHandler("plugin-a", "not-declared")).toBeDefined();
+    warnSpy.mockRestore();
+  });
+
+  it("does not warn when the declared id list has not been synced yet", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+
+    scoped.registerKeybinding("anything", () => {});
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
+  });
+
+  it("does not warn when the id is declared in the manifest", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    pluginRegistry.setDeclaredKeybindingIds("plugin-a", ["open"]);
+    const scoped = pluginRegistry.forPlugin("plugin-a");
+
+    scoped.registerKeybinding("open", () => {});
+
+    expect(warnSpy).not.toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });

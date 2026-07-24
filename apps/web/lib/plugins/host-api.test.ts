@@ -140,4 +140,22 @@ describe("buildHostApi", () => {
     const host = buildHostApi("jira", createAppStore(), "light");
     expect(host.pluginId).toBe("jira");
   });
+
+  it("routes openModal to the modal manager, scoped to this plugin's id", async () => {
+    const { pluginModalManager } = await import("./modal-manager");
+    const host = buildHostApi("jira", createAppStore(), "light");
+
+    const before = pluginModalManager.getSnapshot().length;
+    const handle = host.openModal({ content: () => null, title: "Test" });
+
+    const snapshot = pluginModalManager.getSnapshot();
+    expect(snapshot).toHaveLength(before + 1);
+    expect(snapshot[snapshot.length - 1]).toMatchObject({
+      pluginId: "jira",
+      options: { title: "Test" },
+    });
+
+    handle.close();
+    expect(pluginModalManager.getSnapshot()).toHaveLength(before);
+  });
 });
