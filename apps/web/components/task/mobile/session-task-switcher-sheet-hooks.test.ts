@@ -62,7 +62,7 @@ function pendingPermission(id: string, sessionId: string): Message {
 describe("toSheetItem", () => {
   // The mobile task-switcher row must read the same task-level most-active-wins
   // aggregate the desktop sidebar and board card read, so a background-running
-  // secondary session is caught on mobile too (§spec:task-level-truth).
+  // secondary session is caught on mobile too.
   it("carries the task-level foreground_activity aggregate onto the mobile sheet row", () => {
     const item = toSheetItem(task({ foregroundActivity: "background" }), emptyCtx());
     expect(item.foregroundActivity).toBe("background");

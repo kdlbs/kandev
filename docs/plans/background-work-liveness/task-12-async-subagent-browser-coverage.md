@@ -1,11 +1,11 @@
 ---
 id: "12-async-subagent-browser-coverage"
 title: "Faithful async-subagent browser coverage"
-status: completed
+status: done
 wave: 12
 depends_on: ["10-preserve-prompt-cycle-identity", "11-account-async-subagent-completion"]
 plan: "plan.md"
-spec: "../../specs/fine-grained-background-running-status-indicator/spec.md"
+spec: "../../specs/platform/background-work-liveness.md"
 ---
 
 # Task 12: Faithful async-subagent browser coverage

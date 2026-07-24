@@ -97,9 +97,9 @@ export function KanbanTaskShell({
 
 // Open-task header row for the kanban simple view: a task-level status icon plus
 // the shared TaskHeader. Both reflect the MOST-ACTIVE-WINS activity aggregate so a
-// background-running task reads distinctly and never as done (§spec:task-level-indicator),
+// background-running task reads distinctly and never as done,
 // and carry the sidebar's rich "needs me" reading — pending clarification /
-// permission — so the header distinguishes waiting-for-input (§spec:waiting-for-input-parity).
+// permission — so the header distinguishes waiting-for-input.
 function simpleTaskHeaderData(task: Task | null) {
   return {
     primarySessionId: task?.primary_session_id,

@@ -360,14 +360,14 @@ func (s *Service) addTaskSessionEventFieldsWithActivity(ctx context.Context, tas
 }
 
 func (s *Service) addTaskForegroundActivityEventField(ctx context.Context, taskID string, data map[string]interface{}, activity *taskActivitySnapshot) *taskActivitySnapshot {
-	// Task-level MOST-ACTIVE-WINS activity aggregate (§spec:task-level-indicator).
+	// Task-level MOST-ACTIVE-WINS activity aggregate.
 	// Present as the value or explicit nil when the aggregate is KNOWN, so a coarse
 	// state change never leaves a stale background-running reading on the client, and
 	// recording it keeps the live-propagation dedup baseline in step with every task
 	// event. When the session set could not be loaded the aggregate is UNKNOWN: omit
 	// the field entirely and leave the dedup baseline untouched, so the WS merge
 	// preserves the client's last-known reading rather than clearing a still-working
-	// task to a coarse "done" (§spec:live-propagation-fallback safe fallback).
+	// task to a coarse "done".
 	if activity == nil {
 		current, known := s.computeTaskForegroundActivity(ctx, taskID)
 		activity = &taskActivitySnapshot{activity: current, known: known}

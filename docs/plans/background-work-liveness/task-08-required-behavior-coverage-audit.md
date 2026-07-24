@@ -5,7 +5,7 @@ status: done
 wave: 8
 depends_on: ["06-publish-completion-foreground-yield", "07-consolidate-session-input-mode"]
 plan: "plan.md"
-spec: "../../specs/fine-grained-background-running-status-indicator/spec.md"
+spec: "../../specs/platform/background-work-liveness.md"
 ---
 
 # Task 08: Required behavior coverage audit

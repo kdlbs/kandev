@@ -33,7 +33,7 @@ describe("TaskHeader", () => {
     expect(screen.getByText("Alice")).toBeTruthy();
   });
 
-  // §spec:task-level-indicator: the open-task header text badge reflects the
+  // the open-task header text badge reflects the
   // task-level activity aggregate — background-running reads distinctly and never
   // as a done state, even when the coarse workflow state is COMPLETED.
   it("reflects background-running in the badge instead of a done coarse state", () => {
@@ -53,7 +53,7 @@ describe("TaskHeader", () => {
     expect(screen.getByText("COMPLETED")).toBeTruthy();
   });
 
-  // §spec:waiting-for-input-parity: the header badge carries the sidebar's rich
+  // the header badge carries the sidebar's rich
   // "needs me" reading, distinct from done and from running.
   it("reads a plain WAITING_FOR_INPUT state as 'Waiting for input'", () => {
     render(<TaskHeader title="t" state={WAITING_FOR_INPUT} />);

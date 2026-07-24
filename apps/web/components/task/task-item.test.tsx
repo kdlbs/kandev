@@ -176,7 +176,7 @@ describe("TaskItem actions", () => {
 describe("TaskItem background-running indicator", () => {
   // The sidebar row reads the task record's most-active-wins aggregate
   // (`foregroundActivity`), not the single most-active client session's substate,
-  // so it agrees with the board/kanban card and open-task header (§spec:task-level-truth).
+  // so it agrees with the board/kanban card and open-task header.
   it("shows the background-running affordance (spinner, not a check) when the aggregate is background", () => {
     // The task's foreground turns are idle but spawned background work is live.
     // It must read distinctly from generating and never as the review/done check.
@@ -277,7 +277,7 @@ describe("TaskItem background-running indicator", () => {
 
   it("falls back to the generating spinner when the aggregate substate is unknown", () => {
     // Safe default: an unknown/null aggregate on a live turn must render generating,
-    // never done and never the background spinner (§spec:live-and-durable).
+    // never done and never the background spinner.
     renderTaskItem({
       state: "IN_PROGRESS",
       sessionState: "RUNNING",

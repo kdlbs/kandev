@@ -1,11 +1,11 @@
 ---
 id: "11-account-async-subagent-completion"
 title: "Account for async-subagent completion"
-status: completed
+status: done
 wave: 11
 depends_on: ["10-preserve-prompt-cycle-identity"]
 plan: "plan.md"
-spec: "../../specs/fine-grained-background-running-status-indicator/spec.md"
+spec: "../../specs/platform/background-work-liveness.md"
 ---
 
 # Task 11: Account for async-subagent completion

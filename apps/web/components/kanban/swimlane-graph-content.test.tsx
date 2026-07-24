@@ -40,7 +40,7 @@ function renderSwimlane(foregroundActivity?: ForegroundActivity | null) {
 describe("SwimlaneGraphContent — task-level background-running affordance", () => {
   it("shows the background spinner (IconLoader) for a background-running task chip, not the done check", () => {
     const { container } = renderSwimlane("background");
-    // §spec:task-level-indicator: the swimlane task chip reflects the task-level
+    // the swimlane task chip reflects the task-level
     // aggregate — background-running (IconLoader), never a done check for a task
     // still doing background work, even when the coarse state is COMPLETED.
     expect(container.querySelector(".tabler-icon-loader")).not.toBeNull();
@@ -61,7 +61,7 @@ describe("SwimlaneGraphContent — task-level background-running affordance", ()
   });
 });
 
-describe("SwimlaneGraphContent — waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+describe("SwimlaneGraphContent — waiting-for-input variants", () => {
   function renderWaiting(pendingAction: TaskPendingAction) {
     const task = {
       id: "task-1",

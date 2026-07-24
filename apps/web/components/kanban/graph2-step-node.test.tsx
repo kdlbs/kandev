@@ -48,7 +48,7 @@ function renderCurrentNode(foregroundActivity?: ForegroundActivity | null) {
 describe("Graph2StepNode — task-level background-running affordance", () => {
   it("shows the background spinner (IconLoader) for a background-running task, not the done check", () => {
     const { container } = renderCurrentNode("background");
-    // §spec:task-level-indicator: idle foreground + live background work reads as
+    // idle foreground + live background work reads as
     // background-running (segmented IconLoader), never the done check — even when
     // the coarse task state is COMPLETED.
     expect(container.querySelector(".tabler-icon-loader")).not.toBeNull();
@@ -70,7 +70,7 @@ describe("Graph2StepNode — task-level background-running affordance", () => {
   });
 });
 
-describe("Graph2StepNode — waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+describe("Graph2StepNode — waiting-for-input variants", () => {
   function renderWaitingNode(pendingAction: TaskPendingAction) {
     const task = {
       id: "task-1",

@@ -78,7 +78,7 @@ export function toSheetItem(
     // Task-level most-active-wins busy aggregate from the task record — the same
     // authoritative value the desktop sidebar (toSidebarItem) and board read, so the
     // mobile task-switcher row shows background-running and agrees with the board for
-    // multi-session tasks instead of missing it (§spec:task-level-truth).
+    // multi-session tasks instead of missing it.
     foregroundActivity: task.foregroundActivity,
     description: task.description,
     workflowId: task._workflowId,

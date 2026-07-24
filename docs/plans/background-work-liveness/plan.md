@@ -1,7 +1,7 @@
 ---
-spec: docs/specs/fine-grained-background-running-status-indicator/spec.md
+spec: docs/specs/platform/background-work-liveness.md
 created: 2026-07-21
-status: completed
+status: done
 ---
 
 # Implementation Plan: Background work liveness

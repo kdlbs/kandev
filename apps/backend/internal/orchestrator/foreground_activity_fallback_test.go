@@ -10,7 +10,7 @@ import (
 
 // The orchestrator's in-memory activity tracker (ADR-0049) is best-effort and
 // never persisted: after a backend restart every session's fine-grained substate
-// is UNKNOWN. §spec:live-propagation-fallback makes one guarantee absolute — an
+// is UNKNOWN. The safe fallback makes one guarantee absolute — an
 // unknown substate must NEVER resolve to "done" while the turn is still open.
 // TestForegroundActivity_ExportedValue already locks the per-session seam; these
 // tests wire the REAL orchestrator provider through the exact task-level

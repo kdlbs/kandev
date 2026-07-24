@@ -214,7 +214,7 @@ function KanbanCardBadges({ task }: { task: Task }) {
 
 // renderTaskStatusIcon resolves the card status icon, or null when the actions
 // cluster shows none (a resting done/todo task). The backend task-level
-// MOST-ACTIVE-WINS aggregate takes precedence (§spec:task-level-indicator): a
+// MOST-ACTIVE-WINS aggregate takes precedence: a
 // background-running task shows the distinct background affordance — even when its
 // primary session has finished and only a secondary session is still working, so
 // it reads as working, not done — while any generating session keeps the spinner.
@@ -238,7 +238,7 @@ export function renderTaskStatusIcon(
   // A "needs me" prompt (pending clarification / permission) must not be masked
   // by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
   // coarse running state. Live foreground activity still wins, handled inside
-  // getTaskStateIcon (§spec:waiting-for-input-parity).
+  // getTaskStateIcon.
   if (showRunningSpinner && !needsMe && task.foregroundActivity !== "background") {
     return <IconLoader2 className="h-4 w-4 text-blue-500 animate-spin" />;
   }

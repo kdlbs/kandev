@@ -5,7 +5,7 @@ status: done
 wave: 13
 depends_on: ["10-preserve-prompt-cycle-identity", "11-account-async-subagent-completion", "12-async-subagent-browser-coverage"]
 plan: "plan.md"
-spec: "../../specs/fine-grained-background-running-status-indicator/spec.md"
+spec: "../../specs/platform/background-work-liveness.md"
 ---
 
 # Task 13: Async lifecycle review and verification

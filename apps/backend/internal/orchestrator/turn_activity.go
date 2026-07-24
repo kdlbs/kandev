@@ -769,7 +769,7 @@ func (s *Service) publishForegroundActivityNow(
 	}
 	// Propagate the flip to the task-level aggregate so at-a-glance task surfaces
 	// (board card, task list) update live; emits task.updated only when the
-	// task-level three-state value actually changes (§spec:task-level-indicator).
+	// task-level three-state value actually changes.
 	s.publishTaskActivityIfChanged(ctx, taskID)
 }
 

@@ -29,7 +29,7 @@ describe("shouldShowReopenStateIcon", () => {
     expect(shouldShowReopenStateIcon("STARTING", null, false, true)).toBe(false);
   });
 
-  it("now surfaces the waiting-for-input affordance (§spec:waiting-for-input-parity)", () => {
+  it("now surfaces the waiting-for-input affordance", () => {
     // Previously WAITING_FOR_INPUT was silent; it now shows the "needs me" icon
     // so the reopen menu distinguishes waiting from done and running.
     expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null)).toBe(true);

@@ -57,7 +57,7 @@ const STATUS_LABELS: Record<SessionStatus, string> = {
 };
 
 // The session-icon tooltip reflects the message-derived "needs me" reading
-// (§spec:waiting-for-input-parity): a pending permission / clarification prompt
+// A pending permission or clarification prompt
 // names itself even when the coarse status is still "running" mid-turn. Stale
 // pending data cannot replace a starting or terminal lifecycle label.
 export function sessionStatusTooltip(

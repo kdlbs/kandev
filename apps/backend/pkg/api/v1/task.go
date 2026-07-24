@@ -63,7 +63,7 @@ const (
 
 // AggregateForegroundActivity reduces the per-session foreground activities of a
 // task's RUNNING sessions to a single task-level value using MOST-ACTIVE-WINS
-// (§spec:task-level-indicator):
+// The aggregate is:
 //
 //   - ForegroundActivityGenerating — any session is generating;
 //   - ForegroundActivityBackground — none is generating but at least one is

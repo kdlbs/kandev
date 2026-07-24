@@ -740,7 +740,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		// Stamp the task-level MOST-ACTIVE-WINS activity aggregate so the board
 		// card and task list show the background-running affordance on first paint
 		// / in a second tab, without holding the task's full session set client-side
-		// (§spec:task-level-indicator). No-op when no session is running.
+		// No-op when no session is running.
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
 		}

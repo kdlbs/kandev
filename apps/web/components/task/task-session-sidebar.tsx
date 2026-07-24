@@ -143,7 +143,7 @@ function toSidebarItem(
     // authoritative value the board card, list rows, graph nodes, and open-task
     // header read via getTaskStateIcon. Reading it here (instead of the single
     // most-active client session's substate) makes the sidebar agree with those
-    // surfaces for multi-session tasks and off-screen rows (§spec:task-level-truth).
+    // surfaces for multi-session tasks and off-screen rows.
     // Optional field: an absent aggregate reads the same as null (safe → not-background).
     foregroundActivity: task.foregroundActivity,
     description: task.description,

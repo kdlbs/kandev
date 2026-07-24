@@ -114,7 +114,7 @@ type TaskEventPublisher interface {
 	// PublishTaskActivityIfChanged recomputes the task-level MOST-ACTIVE-WINS
 	// activity aggregate and emits task.updated only when its three-state value
 	// changed — including a generating↔background flip that leaves the coarse
-	// state unchanged (§spec:task-level-indicator).
+	// state unchanged.
 	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
 }
 

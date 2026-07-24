@@ -108,7 +108,7 @@ func provideOrchestrator(
 
 	// Let the task service read the live per-session busy substate so it can
 	// compute the task-level MOST-ACTIVE-WINS activity aggregate carried on the
-	// boot payload and task.updated events (§spec:task-level-indicator).
+	// boot payload and task.updated events.
 	taskSvc.SetForegroundActivityProvider(orchestratorSvc)
 
 	// Publish task.updated when the first session is marked primary so the

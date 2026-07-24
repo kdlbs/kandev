@@ -40,7 +40,7 @@ describe("getTaskStateIcon", () => {
   });
 });
 
-describe("getTaskStateIcon — waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+describe("getTaskStateIcon — waiting-for-input variants", () => {
   //  clarification / plain waiting → message-question (needs me: answer)
   //  permission                    → shield-question (needs me: approve/deny)
   //  Both must read apart from done AND from both running affordances by SHAPE.
@@ -125,7 +125,7 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
   });
 
   it("safe fallback: an in-progress task with a MISSING aggregate reads not-done, never a check", () => {
-    // §spec:live-propagation-fallback safe default: a task whose turn is still
+    // safe default: a task whose turn is still
     // open (coarse IN_PROGRESS) but whose task-level aggregate is unknown — e.g.
     // the aggregate never reached this client, or the in-memory tracker reset on
     // a backend restart — must fall back to the working spinner, never the done
@@ -142,7 +142,7 @@ describe("getTaskStateIcon — task-level activity tri-state", () => {
   it("distinguishes background from BOTH generating and done by icon SHAPE, not hue alone", () => {
     // Icon TYPE (glyph) differs for all three, so the reading survives a
     // grayscale/desaturated scan for color-vision-deficient operators
-    // (§req:not-color-alone).
+    // The affordance remains distinguishable without color.
     const generating = iconType(getTaskStateIcon("IN_PROGRESS", undefined, false, "generating"));
     const background = iconType(getTaskStateIcon("IN_PROGRESS", undefined, false, "background"));
     const done = iconType(getTaskStateIcon("COMPLETED", undefined, false, null));
@@ -210,7 +210,7 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
   });
 
   it("distinguishes background-running from BOTH generating and done by icon SHAPE, not hue alone", () => {
-    // §req:not-color-alone: the three affordances must be separable in a
+    // the three affordances must be separable in a
     // grayscale/desaturated scan. Asserting the icon *component* (shape) differs
     // — independent of className/hue — guarantees the distinction survives for
     // color-vision-deficient operators. This locks getSessionStateIcon as the
@@ -224,7 +224,7 @@ describe("getSessionStateIcon — fine-grained busy tri-state", () => {
   });
 });
 
-describe("getSessionStateIcon — waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+describe("getSessionStateIcon — waiting-for-input variants", () => {
   it("reads a plain WAITING_FOR_INPUT session as the needs-me question, not a muted clock", () => {
     // Matches the sidebar: a finished turn awaiting a reply reads as "needs me".
     expect(iconType(getSessionStateIcon("WAITING_FOR_INPUT"))).toBe(IconMessageQuestion);
@@ -367,7 +367,7 @@ describe("shouldShowTaskRunningSpinner", () => {
 });
 
 describe("isTaskInFlight", () => {
-  // The destructive-action guard (§spec:destructive-action-guard) reads the same
+  // The destructive-action guard reads the same
   // task-level foreground_activity aggregate the board indicators show:
   // generating OR background-running ⇒ still working. Sharing this derivation with
   // getTaskStateIconConfig keeps the archive/delete warning in lockstep with the

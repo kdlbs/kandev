@@ -155,7 +155,7 @@ type TaskDTO struct {
 	PrimarySessionPendingAction *string             `json:"primary_session_pending_action"`
 	TaskPendingAction           *string             `json:"task_pending_action"`
 	// ForegroundActivity is the task-level MOST-ACTIVE-WINS activity aggregate
-	// across the task's sessions (§spec:task-level-indicator): "generating" when
+	// across the task's sessions: "generating" when
 	// any session is generating, "background" when none is generating but at
 	// least one RUNNING session is holding a turn open for background work, and
 	// empty (omitted) when no session is running — in which case task-level

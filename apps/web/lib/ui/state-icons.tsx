@@ -62,7 +62,7 @@ const SESSION_STATE_ICONS: Record<TaskSessionState, IconConfig> = {
 // agent is not done — visually separate from the static "generating" dot (a) by
 // its motion AND shape, and from the done checkmark (c) by its motion AND shape,
 // so the three read apart even in a grayscale/desaturated scan (not hue alone,
-// per §req:not-color-alone). The spinner (work in motion) reads as "something is
+// not by color alone. The spinner (work in motion) reads as "something is
 // still running in the background" while the foreground is idle; the solid dot
 // stays reserved for the foreground actively generating.
 //
@@ -78,13 +78,13 @@ const SESSION_BACKGROUND_ICON: IconConfig = {
 // The task-level generating affordance — the established running spinner
 // (IconLoader2, smooth arc). Rendered when the task-level MOST-ACTIVE-WINS
 // aggregate is "generating"; kept identical to the existing card spinner so the
-// generating look is unchanged (§spec:task-level-indicator).
+// generating look is unchanged.
 const TASK_GENERATING_ICON: IconConfig = {
   Icon: IconLoader2,
   className: STYLE_LOADING,
 };
 
-// The task-level background-running affordance (§spec:task-level-indicator):
+// The task-level background-running affordance:
 // spawned background work is running while the foreground turns are idle. It is a
 // violet segmented spinner (IconLoader) — distinct from the generating spinner
 // (IconLoader2, a blue smooth arc) by BOTH shape AND hue, and from the done check
@@ -92,7 +92,7 @@ const TASK_GENERATING_ICON: IconConfig = {
 // (board card, task-list row, graph/swimlane node) are dense, so the extra hue
 // separation makes background read apart from generating at a glance, while the
 // shape difference still carries the distinction in a grayscale/desaturated scan
-// (§req:not-color-alone). Violet is otherwise unused by the task states (blue =
+// Violet is otherwise unused by the task states (blue =
 // generating/loading, green = done, yellow = waiting, red = error), so it reads as
 // its own "still working in the background" state; the motion (a spinner) keeps it
 // from ever being mistaken for the done check.
@@ -191,7 +191,7 @@ function getTaskStateIconConfig(
   }
   // Explicit pending input wins first. Without it, the task-level
   // MOST-ACTIVE-WINS aggregate sits above the coarse task state, including a
-  // stale WAITING_FOR_INPUT state (§spec:task-level-indicator).
+  // stale WAITING_FOR_INPUT state.
   if (foregroundActivity === "generating") return TASK_GENERATING_ICON;
   if (foregroundActivity === "background") return TASK_BACKGROUND_ICON;
   if (isWaitingForInputState(state)) return TASK_STATE_ICONS.WAITING_FOR_INPUT;

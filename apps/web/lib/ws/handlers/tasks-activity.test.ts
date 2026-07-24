@@ -12,7 +12,7 @@ type Listener = (state: AppState) => void;
 // Self-contained harness (kept separate from tasks.test.ts, which already sits at
 // the file-length limit) covering the task-level MOST-ACTIVE-WINS activity
 // aggregate carried by task.updated — the live-propagation + safe-fallback path
-// the board card and task-list rows read (§spec:live-propagation-fallback).
+// the board card and task-list rows read.
 function makeStore(initial: Partial<AppState> = {}) {
   let state = {
     kanban: { workflowId: "wf1", steps: [], tasks: [] },

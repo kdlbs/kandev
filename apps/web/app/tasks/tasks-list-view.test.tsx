@@ -71,7 +71,7 @@ function renderList(task: Task, messagesBySession: Record<string, Message[]> = {
   );
 }
 
-describe("TasksListView row — waiting-for-input parity (§spec:waiting-for-input-parity)", () => {
+describe("TasksListView row — waiting-for-input parity", () => {
   it("renders the message-question for a pending clarification (path previously disabled)", () => {
     const { container } = renderList(makeTask({}), {
       "session-1": [message({ type: "clarification_request", metadata: { status: "pending" } })],

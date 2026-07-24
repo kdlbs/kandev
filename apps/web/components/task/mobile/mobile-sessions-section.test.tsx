@@ -123,7 +123,7 @@ describe("MobileSessionsPicker selection", () => {
 
 describe("MobileSessionsPicker activity precedence", () => {
   it("renders background-running distinctly — matching desktop, not a done check", () => {
-    // §spec:session-level-truth / §spec:state-vocabulary: a session whose
+    // A session whose
     // foreground turn is idle while spawned background work runs (RUNNING +
     // `background`) must read as background-running on mobile too — the shared
     // getSessionStateIcon spinner — distinct from generating and never a done
@@ -246,7 +246,7 @@ describe("MobileSessionsPicker pending lifecycle", () => {
     mocks.messagesBySession = {};
   });
 
-  it("carries the waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+  it("carries the waiting-for-input variants", () => {
     // A pending clarification and a pending permission each read distinctly on
     // the mobile session row — the question / shield glyphs — never a done check
     // or a running dot, matching the sidebar and desktop menus.

@@ -26,7 +26,7 @@ func (s *Service) SetForegroundActivityProvider(provider ForegroundActivityProvi
 }
 
 // computeTaskForegroundActivity resolves the task-level MOST-ACTIVE-WINS activity
-// aggregate for a task from its active sessions (§spec:task-level-indicator).
+// aggregate for a task from its active sessions.
 // RUNNING sessions contribute foreground activity; settled sessions contribute
 // only when their connected execution still reports detached background work.
 //
@@ -34,7 +34,7 @@ func (s *Service) SetForegroundActivityProvider(provider ForegroundActivityProvi
 // when the session set could not be loaded: the substate is then unavailable, and
 // callers must PRESERVE the last-known reading rather than clear it, so a transient
 // DB error never resolves a still-working task to a coarse "done"
-// (§spec:live-propagation-fallback safe fallback). A nil provider (feature not
+// The safe fallback applies. A nil provider (feature not
 // wired) is a known-empty result, not an error, and a running-but-empty aggregate
 // returns ("", true) so it clears as usual.
 func (s *Service) computeTaskForegroundActivity(ctx context.Context, taskID string) (v1.ForegroundActivity, bool) {
@@ -65,7 +65,7 @@ func (s *Service) computeTaskForegroundActivity(ctx context.Context, taskID stri
 // value last carried to the client — including a generating↔background flip that
 // leaves the coarse task/session state unchanged. This bounds the added
 // live-propagation traffic to an actual change of the aggregated value
-// (§spec:live-propagation-fallback tradeoff). Safe to call on every per-session
+// Safe to call on every per-session
 // activity flip; it no-ops when the task-level reading is unaffected. The emitted
 // task.updated re-records the value (via addTaskSessionEventFields →
 // recordTaskActivity), keeping the dedup map in step with every task event.
@@ -78,7 +78,7 @@ func (s *Service) PublishTaskActivityIfChanged(ctx context.Context, taskID strin
 		if !known {
 			// The session set could not be loaded: leave the last-known aggregate in
 			// place instead of emitting a spurious clear that could momentarily read
-			// "done" while a turn is still open (§spec:live-propagation-fallback).
+			// "done" while a turn is still open.
 			return
 		}
 

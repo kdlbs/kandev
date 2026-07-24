@@ -63,7 +63,7 @@ describe("renderTaskStatusIcon — task-level activity aggregate", () => {
   });
 });
 
-describe("renderTaskStatusIcon — waiting-for-input variants (§spec:waiting-for-input-parity)", () => {
+describe("renderTaskStatusIcon — waiting-for-input variants", () => {
   it("shows the message-question for a pending clarification, distinct from done and running", () => {
     const node = renderTaskStatusIcon(task({ state: "REVIEW" }), false, true, false);
     expect(iconType(node)).toBe(IconMessageQuestion);

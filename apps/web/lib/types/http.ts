@@ -320,7 +320,7 @@ export type Task = {
   task_pending_action?: TaskPendingAction | null;
   /**
    * Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions
-   * (§spec:task-level-indicator): "generating" when any session is generating,
+   * The aggregate is "generating" when any session is generating,
    * "background" when none is generating but at least one RUNNING session holds a
    * turn open for background work, and absent/`null` when no session is running
    * (task-level surfaces then fall through to the coarse task state). Computed on

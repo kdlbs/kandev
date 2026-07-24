@@ -272,7 +272,7 @@ func assertForegroundActivityAbsent(t *testing.T, data map[string]interface{}) {
 }
 
 // TestTaskUpdated_OmitsForegroundActivityWhenSessionSetUnavailable locks the safe
-// fallback (§spec:live-propagation-fallback): when the session set can't be loaded
+// fallback: when the session set can't be loaded
 // the aggregate is UNKNOWN, so the event omits the field entirely rather than
 // stamping an explicit nil that would clear the client to a coarse "done".
 func TestTaskUpdated_OmitsForegroundActivityWhenSessionSetUnavailable(t *testing.T) {

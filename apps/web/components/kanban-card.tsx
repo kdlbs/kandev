@@ -56,7 +56,7 @@ export interface Task {
   primarySessionPendingAction?: TaskPendingAction | null;
   taskPendingAction?: TaskPendingAction | null;
   /**
-   * Task-level MOST-ACTIVE-WINS activity aggregate (§spec:task-level-indicator);
+   * Task-level MOST-ACTIVE-WINS activity aggregate;
    * undefined/null when no session is running. Drives the background-running
    * affordance on the card status icon.
    */

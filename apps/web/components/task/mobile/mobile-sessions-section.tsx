@@ -78,7 +78,7 @@ function buildSessionRows(
 
 // The mobile sessions section reads the per-session substate through the same
 // shared vocabulary as the desktop session switcher and the reopen menu
-// (§spec:session-level-truth): getSessionStateIcon carries background-running
+// `getSessionStateIcon` carries background-running
 // as a spinner distinct — by SHAPE and MOTION, not hue alone — from generating
 // (a static dot) and from done (a check), so the three read apart even in a
 // grayscale scan. The label reinforces the distinction in words: while spawned

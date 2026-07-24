@@ -9,7 +9,7 @@ const ICON_LOADER2 = ".tabler-icon-loader-2";
 
 describe("TaskStateActions — open-task header status icon", () => {
   it("shows the background spinner (IconLoader) for a background-running task, not the done check", () => {
-    // §spec:task-level-indicator: the open-task header status icon reflects the
+    // the open-task header status icon reflects the
     // task-level aggregate — background-running (IconLoader), never a done check
     // for a task still doing background work, even when the coarse state is done.
     const { container } = render(
@@ -35,7 +35,7 @@ describe("TaskStateActions — open-task header status icon", () => {
     expect(container.querySelector(ICON_LOADER2)).toBeNull();
   });
 
-  // §spec:waiting-for-input-parity: the header status icon carries the sidebar's
+  // the header status icon carries the sidebar's
   // rich waiting reading, distinct from done and running by SHAPE.
   it("shows the message-question for a pending clarification", () => {
     const { container } = render(

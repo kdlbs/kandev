@@ -27,14 +27,14 @@ export type TaskHeaderProps = {
   /** Optional pill colour for the state badge. Falls back to outline. */
   stateBadgeVariant?: "default" | "secondary" | "outline" | "destructive";
   /**
-   * Task-level MOST-ACTIVE-WINS activity aggregate (§spec:task-level-indicator).
+   * Task-level MOST-ACTIVE-WINS activity aggregate.
    * When set it takes precedence over the coarse workflow state in the badge, so a
    * task still doing background work never reads as a done coarse state and stays
    * distinct from a generating task.
    */
   foregroundActivity?: ForegroundActivity | null;
   /**
-   * Message-derived "needs me" flags (§spec:waiting-for-input-parity). When set
+   * Message-derived "needs me" flags. When set
    * the badge reads the waiting variant distinctly ("Permission requested" /
    * "Waiting for input") instead of the raw coarse state, matching the sidebar.
    */

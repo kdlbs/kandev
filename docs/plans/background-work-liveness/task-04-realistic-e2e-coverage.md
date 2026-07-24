@@ -5,7 +5,7 @@ status: done
 wave: 4
 depends_on: ["03-client-state-contract"]
 plan: "plan.md"
-spec: "../../specs/fine-grained-background-running-status-indicator/spec.md"
+spec: "../../specs/platform/background-work-liveness.md"
 ---
 
 # Task 04: Realistic E2E coverage

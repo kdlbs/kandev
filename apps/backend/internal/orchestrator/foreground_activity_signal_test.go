@@ -319,7 +319,7 @@ func (r *recordingTaskEvents) PublishTaskActivityIfChanged(_ context.Context, ta
 
 // TestForegroundActivitySignal_PropagatesToTaskLevel proves each per-session flip
 // also drives the task-level MOST-ACTIVE-WINS recompute so at-a-glance task
-// surfaces (board card, task list) update live (§spec:task-level-indicator).
+// surfaces (board card, task list) update live.
 func TestForegroundActivitySignal_PropagatesToTaskLevel(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())

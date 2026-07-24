@@ -1,6 +1,6 @@
 # 0049: Fine-grained foreground-idle busy signal
 
-**Status:** accepted (amended 2026-07-21)
+**Status:** accepted (amended 2026-07-24)
 **Date:** 2026-07-11
 **Area:** backend, frontend, protocol
 
@@ -56,6 +56,14 @@ to the foreground only:
 - The claim is **held, not merely taken**, and is tracked independently of background-idle activity. It survives until agentctl accepts the prompt, so a background tool call landing while the prompt is in preflight or queued cannot reopen the gate underneath it. The lifecycle adapter reports that exact dispatch boundary before waiting for turn completion. Claim tokens bind the activity record and a monotonically increasing admission generation, so a delayed completion or release cannot mutate a newer claim for the same session. A failed pre-dispatch prompt reopens the gate only if no newer foreground output invalidated its captured foreground epoch. Every transition that changes the substate is broadcast, including a release and background work that becomes visible when a claim completes, so clients cannot remain stranded on the admission-time value.
 - Lifecycle prompt delivery is serialized per agent execution. Agentctl acknowledges transport dispatch before the adapter's prompt RPC completes, so adapter-level queuing alone does not protect lifecycle's shared completion channel and response buffers from concurrent callers. An execution-scoped mutex gives each prompt one waiter and one buffer set; dispatch-only sends leave a pending-completion barrier that the next send must consume before resetting those buffers.
 - Any top-level non-background tool activity marks the foreground as generating again, just like message and thinking frames. This closes the gate as soon as foreground execution resumes even when the next frame is a tool call rather than text.
+- All activity-bearing lifecycle and activity-refresh events use one FIFO per
+  task; different tasks may publish concurrently. Same-task reentrant
+  publication enqueues and returns. Repository reads and synchronous callbacks
+  occur outside the bookkeeping mutex. The last-delivered baseline advances
+  only after a successful publish, deletion clears that task's queue and
+  baseline state, and queued publication uses a bounded context independent of
+  caller cancellation. This preserves a monotonic observer sequence when
+  generating, background, and idle transitions arrive in quick succession.
 
 The distinction is surfaced to the operator as a fine-grained substate (`foreground_activity`: `generating` vs `background`) so the UI can communicate two independent facts — "you may type" *and* "work is still in progress" — instead of collapsing them into one busy/done bit:
 

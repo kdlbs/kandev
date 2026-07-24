@@ -274,6 +274,7 @@ describe("useMessageHandler", () => {
   it("queues regular composer input while a clarification is pending", async () => {
     const request = vi.fn();
     getWebSocketClientMock.mockReturnValue({ request });
+    selectedSession("WAITING_FOR_INPUT");
     const { result } = renderHook(() =>
       useMessageHandler({
         resolvedSessionId: "session-1",

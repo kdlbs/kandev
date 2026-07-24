@@ -231,7 +231,7 @@ type Service struct {
 	foregroundActivity ForegroundActivityProvider
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
-	// actual change of the aggregated three-state value (§spec:live-propagation-fallback).
+	// actual change of the aggregated three-state value.
 	taskActivityMu   sync.Mutex
 	lastTaskActivity map[string]v1.ForegroundActivity
 	// taskPublicationMu guards the per-task FIFO dispatchers. It is held only

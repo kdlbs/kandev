@@ -382,7 +382,7 @@ function TaskListRow({
   // Carry the sidebar's rich "needs me" reading to the list row: derive the
   // message-derived pending-clarification / pending-permission flags (with the
   // boot-payload snapshot fallback) instead of collapsing to the coarse state
-  // (§spec:waiting-for-input-parity).
+  // Waiting-for-input takes precedence over the work-state indicator.
   const pendingInput = useTaskPendingInput(task.primary_session_id, {
     taskId: task.id,
     taskPendingAction: task.task_pending_action,

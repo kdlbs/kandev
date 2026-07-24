@@ -10,7 +10,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// Fresh-load / second-tab correctness (§spec:live-propagation-fallback): the boot
+// Fresh-load / second-tab correctness: the boot
 // payload and the session/task DTOs must carry the current substate so first paint
 // is right WITHOUT waiting for a transition — and, after a restart, an untracked
 // in-flight session must serialize a not-done reading, never done. boot_state.go
