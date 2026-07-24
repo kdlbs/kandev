@@ -38,6 +38,11 @@ type Service struct {
 	logger      *logger.Logger
 	taskDeleter TaskDeleter // optional; nil-safe
 
+	// authorizeWorkspace gates automation access by workspace ownership
+	// (opt-in auth). Nil = unscoped (internal schedulers/pollers, auth
+	// disabled). Set via SetWorkspaceAuthorizer.
+	authorizeWorkspace func(ctx context.Context, workspaceID string) error
+
 	// runLocks serializes run creation (RecordRun, the concurrency-cap skip
 	// insert) against DeleteAllRuns per automation ID. Without this, a run
 	// created between DeleteAllRuns' task-id snapshot and its final row
@@ -67,6 +72,34 @@ func (s *Service) SetTaskDeleter(d TaskDeleter) {
 	s.taskDeleter = d
 }
 
+// SetWorkspaceAuthorizer wires the per-user workspace-access check (opt-in
+// auth). The authorizer must return nil for contexts without a request
+// identity (internal callers).
+func (s *Service) SetWorkspaceAuthorizer(fn func(ctx context.Context, workspaceID string) error) {
+	s.authorizeWorkspace = fn
+}
+
+func (s *Service) authorizeWs(ctx context.Context, workspaceID string) error {
+	if s.authorizeWorkspace == nil {
+		return nil
+	}
+	return s.authorizeWorkspace(ctx, workspaceID)
+}
+
+// authorizeAutomation loads an automation and authorizes its workspace,
+// returning ErrAutomationNotFound (via the store's not-found) for both a
+// missing automation and a foreign one — no existence leak.
+func (s *Service) authorizeAutomation(ctx context.Context, id string) error {
+	if s.authorizeWorkspace == nil {
+		return nil
+	}
+	a, err := s.store.GetAutomation(ctx, id)
+	if err != nil {
+		return err
+	}
+	return s.authorizeWorkspace(ctx, a.WorkspaceID)
+}
+
 // --- Automation CRUD ---
 
 // CreateAutomation creates an automation with its initial triggers.
@@ -76,6 +109,9 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	}
 	if req.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required")
+	}
+	if err := s.authorizeWs(ctx, req.WorkspaceID); err != nil {
+		return nil, err
 	}
 
 	maxRuns := req.MaxConcurrentRuns
@@ -138,16 +174,25 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 
 // GetAutomation retrieves an automation by ID.
 func (s *Service) GetAutomation(ctx context.Context, id string) (*Automation, error) {
+	if err := s.authorizeAutomation(ctx, id); err != nil {
+		return nil, err
+	}
 	return s.store.GetAutomation(ctx, id)
 }
 
 // ListAutomations returns all automations for a workspace.
 func (s *Service) ListAutomations(ctx context.Context, workspaceID string) ([]*Automation, error) {
+	if err := s.authorizeWs(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	return s.store.ListAutomations(ctx, workspaceID)
 }
 
 // UpdateAutomation applies partial updates.
 func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAutomationRequest) (*Automation, error) {
+	if err := s.authorizeAutomation(ctx, id); err != nil {
+		return nil, err
+	}
 	if err := s.store.UpdateAutomation(ctx, id, req); err != nil {
 		return nil, err
 	}
@@ -156,17 +201,26 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 
 // DeleteAutomation removes an automation.
 func (s *Service) DeleteAutomation(ctx context.Context, id string) error {
+	if err := s.authorizeAutomation(ctx, id); err != nil {
+		return err
+	}
 	return s.store.DeleteAutomation(ctx, id)
 }
 
 // EnableAutomation sets enabled = true.
 func (s *Service) EnableAutomation(ctx context.Context, id string) error {
+	if err := s.authorizeAutomation(ctx, id); err != nil {
+		return err
+	}
 	enabled := true
 	return s.store.UpdateAutomation(ctx, id, &UpdateAutomationRequest{Enabled: &enabled})
 }
 
 // DisableAutomation sets enabled = false.
 func (s *Service) DisableAutomation(ctx context.Context, id string) error {
+	if err := s.authorizeAutomation(ctx, id); err != nil {
+		return err
+	}
 	enabled := false
 	return s.store.UpdateAutomation(ctx, id, &UpdateAutomationRequest{Enabled: &enabled})
 }
@@ -177,6 +231,9 @@ func (s *Service) DisableAutomation(ctx context.Context, id string) error {
 func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*AutomationTrigger, error) {
 	if req.AutomationID == "" {
 		return nil, fmt.Errorf("automation_id is required")
+	}
+	if err := s.authorizeAutomation(ctx, req.AutomationID); err != nil {
+		return nil, err
 	}
 	t := &AutomationTrigger{
 		AutomationID: req.AutomationID,
@@ -192,24 +249,53 @@ func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*Auto
 
 // UpdateTrigger updates a trigger.
 func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTriggerRequest) error {
+	if err := s.authorizeTrigger(ctx, id); err != nil {
+		return err
+	}
 	return s.store.UpdateTrigger(ctx, id, req)
 }
 
 // DeleteTrigger removes a trigger.
 func (s *Service) DeleteTrigger(ctx context.Context, id string) error {
+	if err := s.authorizeTrigger(ctx, id); err != nil {
+		return err
+	}
 	return s.store.DeleteTrigger(ctx, id)
+}
+
+// authorizeTrigger resolves a trigger's automation and authorizes its
+// workspace.
+func (s *Service) authorizeTrigger(ctx context.Context, triggerID string) error {
+	if s.authorizeWorkspace == nil {
+		return nil
+	}
+	automationID, err := s.store.GetTriggerAutomationID(ctx, triggerID)
+	if err != nil {
+		return err
+	}
+	return s.authorizeAutomation(ctx, automationID)
 }
 
 // --- Run queries ---
 
 // ListRuns returns recent runs for an automation.
 func (s *Service) ListRuns(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
+	if err := s.authorizeAutomation(ctx, automationID); err != nil {
+		return nil, err
+	}
 	return s.store.ListRuns(ctx, automationID, limit)
 }
 
 // GetRun returns a single run by ID, or nil if not found.
 func (s *Service) GetRun(ctx context.Context, id string) (*AutomationRun, error) {
-	return s.store.GetRun(ctx, id)
+	run, err := s.store.GetRun(ctx, id)
+	if err != nil || run == nil {
+		return run, err
+	}
+	if err := s.authorizeAutomation(ctx, run.AutomationID); err != nil {
+		return nil, err
+	}
+	return run, nil
 }
 
 // automationRunLock returns an unlock func for the per-automation mutex that
@@ -409,6 +495,9 @@ func (s *Service) GetWebhookSecret(ctx context.Context, id string) (string, erro
 	}
 	if a == nil {
 		return "", fmt.Errorf("automation not found: %s", id)
+	}
+	if err := s.authorizeWs(ctx, a.WorkspaceID); err != nil {
+		return "", err
 	}
 	return a.WebhookSecret, nil
 }

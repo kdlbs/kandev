@@ -1702,6 +1702,10 @@ func buildHTTPServer(
 	// Opt-in authentication. Runs after CORS; in disabled mode it only
 	// injects the synthetic single-user identity (behavior unchanged).
 	router.Use(authhttpmw.Middleware(services.Auth))
+	// Per-user workspace ownership on the third-party integration route
+	// groups (jira/gitlab/github/...), which resolve a caller-supplied
+	// workspace_id with no gate of their own. No-op when auth is disabled.
+	router.Use(integrationWorkspaceScopeMiddleware(services.Auth, services.Task))
 
 	port := cfg.Server.Port
 	if port == 0 {

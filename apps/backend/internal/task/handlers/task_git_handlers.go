@@ -24,6 +24,9 @@ func (h *TaskHandlers) wsGetGitSnapshots(ctx context.Context, msg *ws.Message) (
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if err := h.service.AuthorizeSessionAccess(ctx, req.SessionID); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot access this session", nil)
+	}
 
 	snapshots, err := h.service.GetGitSnapshots(ctx, req.SessionID, req.Limit)
 	if err != nil {
@@ -50,6 +53,11 @@ func (h *TaskHandlers) wsGetSessionData(
 	}
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	// Per-user scoping: covers file-review reads and any other session-data
+	// reader routed through this wrapper.
+	if err := h.service.AuthorizeSessionAccess(ctx, req.SessionID); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot access this session", nil)
 	}
 	result, err := fn(ctx, req.SessionID)
 	if err != nil {

@@ -302,6 +302,15 @@ func (s *Store) CreateTrigger(ctx context.Context, t *AutomationTrigger) error {
 	return err
 }
 
+// GetTriggerAutomationID resolves the automation a trigger belongs to. Used by
+// the auth layer to authorize trigger mutations by workspace ownership.
+func (s *Store) GetTriggerAutomationID(ctx context.Context, triggerID string) (string, error) {
+	var automationID string
+	err := s.ro.GetContext(ctx, &automationID,
+		`SELECT automation_id FROM automation_triggers WHERE id = ?`, triggerID)
+	return automationID, err
+}
+
 // ListTriggers returns all triggers for an automation.
 func (s *Store) ListTriggers(ctx context.Context, automationID string) ([]AutomationTrigger, error) {
 	var triggers []AutomationTrigger

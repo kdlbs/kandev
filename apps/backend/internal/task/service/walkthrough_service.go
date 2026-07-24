@@ -44,6 +44,9 @@ type WalkthroughService struct {
 	repo     walkthroughRepo
 	eventBus bus.EventBus
 	logger   *logger.Logger
+	// authorizeTask gates walkthrough access by the task's workspace
+	// ownership (opt-in auth). Nil = unscoped (internal callers / auth off).
+	authorizeTask func(ctx context.Context, taskID string) error
 }
 
 // NewWalkthroughService creates a new walkthrough service.
@@ -53,6 +56,18 @@ func NewWalkthroughService(repo walkthroughRepo, eventBus bus.EventBus, log *log
 		eventBus: eventBus,
 		logger:   log.WithFields(zap.String("component", "walkthrough-service")),
 	}
+}
+
+// SetTaskAuthorizer wires the per-user task-access check (opt-in auth).
+func (s *WalkthroughService) SetTaskAuthorizer(fn func(ctx context.Context, taskID string) error) {
+	s.authorizeTask = fn
+}
+
+func (s *WalkthroughService) authorize(ctx context.Context, taskID string) error {
+	if s.authorizeTask == nil {
+		return nil
+	}
+	return s.authorizeTask(ctx, taskID)
 }
 
 // ShowWalkthroughRequest contains parameters for creating/replacing a walkthrough.
@@ -67,6 +82,9 @@ type ShowWalkthroughRequest struct {
 func (s *WalkthroughService) ShowWalkthrough(ctx context.Context, req ShowWalkthroughRequest) (*models.TaskWalkthrough, error) {
 	if req.TaskID == "" {
 		return nil, ErrTaskIDRequired
+	}
+	if err := s.authorize(ctx, req.TaskID); err != nil {
+		return nil, err
 	}
 	title, steps, err := normalizeWalkthroughRequest(req)
 	if err != nil {
@@ -154,6 +172,9 @@ func (s *WalkthroughService) GetWalkthrough(ctx context.Context, taskID string) 
 	if taskID == "" {
 		return nil, ErrTaskIDRequired
 	}
+	if err := s.authorize(ctx, taskID); err != nil {
+		return nil, err
+	}
 	return s.repo.GetTaskWalkthrough(ctx, taskID)
 }
 
@@ -161,6 +182,9 @@ func (s *WalkthroughService) GetWalkthrough(ctx context.Context, taskID string) 
 func (s *WalkthroughService) DeleteWalkthrough(ctx context.Context, taskID string) error {
 	if taskID == "" {
 		return ErrTaskIDRequired
+	}
+	if err := s.authorize(ctx, taskID); err != nil {
+		return err
 	}
 	existing, err := s.repo.GetTaskWalkthrough(ctx, taskID)
 	if err != nil {

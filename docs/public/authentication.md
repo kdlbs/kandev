@@ -57,9 +57,15 @@ External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configur
 
 `/health` (readiness probes), the login/setup/invite pages, `GET /api/v1/features`, and self-authenticating webhook receivers (automation webhooks with `X-Webhook-Secret`, office channel HMAC webhooks, plugin webhooks). Everything else requires a session or token.
 
+## What is isolated
+
+When authentication is on, everything in a workspace is private to its owner and returns "not found" to anyone else — even if they know the ID: workspaces, tasks, workflows, sessions, plans, walkthroughs, terminals, VS Code, port previews, git snapshots, secrets, **and the workspace's third-party integration settings (GitHub/GitLab/Jira/Linear/Sentry/Slack/Azure) and automations**. Admins manage users but do not see other users' workspaces.
+
+Shared across the instance (by design): executors, agent profiles, environments, editors, prompts, and system pages.
+
 ## Limitations
 
-- **Filesystem isolation is not enforced.** Worktrees and repositories live under one `~/.kandev` tree owned by the OS user running the backend. Authentication isolates users at the application layer; anyone with shell access to the server can read all files. Combine with OS-level access control for hard isolation.
+- **Filesystem and agent credentials are not isolated.** Worktrees and repositories live under one `~/.kandev` tree owned by the OS user running the backend, and agent CLI logins (`gh auth`, `claude login`, provider API keys) authenticate as that OS user — so all app-users share the same on-disk agent credentials, and anyone with shell access to the server can read all files. Authentication isolates users' kandev *data* at the application layer, not the filesystem or per-user agent auth. For hard isolation of agent credentials, run a separate kandev instance per user (or use OS-level access control / sandboxed executors).
 - One owner per workspace — no sharing or team workspaces yet.
 - Local accounts only for now; the account model is ready for OIDC/SSO later.
 - Authentication does not replace TLS. Terminate HTTPS in front of Kandev (the session cookie is marked `Secure` when the request arrives over TLS or `X-Forwarded-Proto: https`).

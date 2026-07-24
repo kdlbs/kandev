@@ -26,6 +26,11 @@ func (h *TaskHandlers) httpGetTaskContext(c *gin.Context) {
 		})
 		return
 	}
+	// Per-user scoping: the caller must own the task's workspace.
+	if err := h.service.AuthorizeTaskAccess(c.Request.Context(), taskID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+		return
+	}
 	ctx, err := h.handoffSvc.GetTaskContext(c.Request.Context(), taskID)
 	if err != nil {
 		h.logger.Warn("get task context", zap.String("task_id", taskID), zap.Error(err))

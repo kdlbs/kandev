@@ -499,6 +499,8 @@ type routeParams struct {
 func registerRoutes(p routeParams) {
 	workflowCtrl := workflowcontroller.NewController(p.services.Workflow)
 	planService := taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
+	// Per-user task scoping for plan reads/writes (opt-in auth).
+	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	clarificationStore := clarification.NewStore(2 * time.Hour)
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.eventBus, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
@@ -1129,6 +1131,74 @@ func officeWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.
 	}
 }
 
+// integrationWorkspacePrefixes are the workspace-scoped third-party
+// integration route groups. Their config/watch/data routes are keyed by a
+// caller-supplied workspace_id (query, or a /workspaces/:id/ path segment on
+// gitlab) with no per-user gate of their own, so this global middleware
+// authorizes ownership for them when auth is enabled.
+var integrationWorkspacePrefixes = []string{
+	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/", "/api/v1/slack/",
+	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
+}
+
+// integrationWorkspaceScopeMiddleware enforces workspace ownership on the
+// third-party integration route groups (opt-in auth). Their handlers read the
+// workspace from the request; internal pollers call the services directly (no
+// identity) and are unaffected. Mock subroutes (/api/v1/<x>/mock/...) are only
+// mounted in e2e/dev and carry no real credentials, but they still route
+// through here — the ownership check is harmless there because e2e runs with
+// auth disabled.
+func integrationWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
+			c.Next()
+			return
+		}
+		path := c.Request.URL.Path
+		if !hasIntegrationPrefix(path) {
+			c.Next()
+			return
+		}
+		wsID := c.Query("workspace_id")
+		if wsID == "" {
+			wsID = workspaceIDFromPath(path)
+		}
+		if wsID == "" {
+			c.Next()
+			return
+		}
+		if err := taskSvc.AuthorizeWorkspaceAccess(c.Request.Context(), wsID); err != nil {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+			return
+		}
+		c.Next()
+	}
+}
+
+func hasIntegrationPrefix(path string) bool {
+	for _, prefix := range integrationWorkspacePrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// workspaceIDFromPath extracts the ID from a `/workspaces/<id>/...` path
+// segment (gitlab's GET /api/v1/gitlab/workspaces/:workspaceID/task-mrs).
+func workspaceIDFromPath(path string) string {
+	const marker = "/workspaces/"
+	idx := strings.Index(path, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := path[idx+len(marker):]
+	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+		return rest[:slash]
+	}
+	return rest
+}
+
 func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
 	return func(ctx context.Context, taskID string) (string, bool) {
 		if taskRepo == nil || taskID == "" {
@@ -1256,6 +1326,7 @@ func registerMCPAndDebugRoutes(
 	handoffSvc *taskservice.HandoffService,
 ) {
 	walkthroughService := taskservice.NewWalkthroughService(p.taskRepo, p.eventBus, p.log)
+	walkthroughService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	mcpHandlers := mcphandlers.NewHandlers(
 		p.taskSvc, wfCtrl,
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,

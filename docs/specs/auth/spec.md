@@ -43,13 +43,19 @@ the local single-user install with a login screen it never asked for.
   use). No email server required. Admins can also create accounts directly.
 - **Segregation: per-user workspaces.** Every workspace has one owner. Users
   see and touch only their own workspaces — tasks, sessions, repositories,
-  workflows, terminals, previews, and WebSocket events included. Admins do
-  NOT see other users' workspaces (hard privacy; admin is a management role,
-  not a visibility role). Secrets are likewise per-user. Pre-auth data is
-  claimed by the admin at setup.
-- **Shared surfaces.** Executors, agent profiles, environments, integrations
-  configuration, and system pages remain instance-global; mutation of system
-  settings and feature toggles is admin-only when auth is enabled.
+  workflows, plans, walkthroughs, terminals, VS Code, port previews, git
+  snapshots, session turns/context, secrets, **third-party integration
+  settings (GitHub/GitLab/Jira/Linear/Sentry/Slack/Azure), automations**, and
+  WebSocket events included. Cross-user access returns 404 — knowing an ID
+  from another user's workspace does not grant access. Admins do NOT see other
+  users' workspaces (hard privacy; admin is a management role, not a
+  visibility role). Pre-auth data is claimed by the admin at setup.
+- **Shared surfaces (instance-global by design).** Executors, executor
+  profiles, environment definitions, agent profiles/agents, editors, prompts,
+  sprites, voice, notification providers, and system pages remain shared
+  across the instance; mutation of system settings and feature toggles is
+  admin-only when auth is enabled. **Note:** a shared agent profile means all
+  users share the agent's provider credentials — see the OS-level limit below.
 - **Public endpoints.** `/health`, the SPA shell/static assets, the boot
   payload (`/api/v1/app-state` — returns only `{features, auth}` for
   anonymous visitors), `/api/v1/features`, credential endpoints
@@ -77,9 +83,15 @@ the local single-user install with a login screen it never asked for.
 
 ## Known v1 limits
 
-- Filesystem isolation is NOT enforced: worktrees and repos live under one
-  `~/.kandev` tree readable by the OS user running the backend. DB-level
-  isolation is the boundary; per-user executor sandboxing is future work.
+- **Filesystem / agent-credential isolation is NOT enforced.** Worktrees and
+  repos live under one `~/.kandev` tree readable by the OS user running the
+  backend, and agent CLI logins (`gh auth`, `claude login`, provider API keys)
+  authenticate as that OS user — so all app-users share the same on-disk agent
+  credentials. Application-layer isolation (DB + the checks above) is the
+  boundary between users' *kandev data*; it does NOT sandbox the filesystem or
+  per-user agent auth. For hard isolation of agent credentials, run separate
+  kandev instances per user or use per-user OS accounts / sandboxed executors
+  (future work).
 - No workspace sharing/membership — one owner per workspace.
 - No OIDC/SSO yet (schema is ready).
 - Office workspace-scoped HTTP routes (those carrying a `:wsId`) are

@@ -141,6 +141,18 @@ test.describe.serial("opt-in authentication", () => {
       expect(memberWorkspaces.items.map((w) => w.id)).not.toContain(workspace.id);
     }
 
+    // Integration settings are also shielded: the member cannot read the
+    // admin's workspace-scoped integration config by supplying the ID.
+    for (const path of [
+      `/api/v1/jira/config?workspace_id=${workspace.id}`,
+      `/api/v1/github/status?workspace_id=${workspace.id}`,
+      `/api/v1/gitlab/status?workspace_id=${workspace.id}`,
+      `/api/v1/gitlab/workspaces/${workspace.id}/task-mrs`,
+    ]) {
+      const res = await memberContext.request.get(`${backend.baseUrl}${path}`);
+      expect(res.status(), `integration route ${path} must be shielded`).toBe(404);
+    }
+
     // Admin still sees it everywhere.
     const adminList = (await (
       await adminContext.request.get(`${backend.baseUrl}/api/v1/workspaces`)

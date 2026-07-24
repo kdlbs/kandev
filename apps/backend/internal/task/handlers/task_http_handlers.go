@@ -335,6 +335,11 @@ func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session id is required"})
 		return
 	}
+	// Per-user scoping: the caller must own the session's workspace.
+	if err := h.service.AuthorizeSessionAccess(c.Request.Context(), sessionID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return
+	}
 
 	turns, err := h.repo.ListTurnsBySession(c.Request.Context(), sessionID)
 	if err != nil {

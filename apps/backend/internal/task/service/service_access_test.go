@@ -5,11 +5,23 @@ import (
 	"errors"
 	"testing"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/auth/authn"
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func accessTestLogger(t *testing.T) *commonlogger.Logger {
+	t.Helper()
+	log, err := commonlogger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	return log
+}
 
 // Per-user workspace scoping matrix: user A must not see or mutate user B's
 // workspaces/tasks; internal (identity-less) and synthetic (auth disabled)
@@ -203,6 +215,37 @@ func TestMessageScopingBlocksForeignSession(t *testing.T) {
 	}
 	if _, err := svc.ListMessages(context.Background(), "sess-b"); err != nil {
 		t.Fatalf("internal ListMessages: %v", err)
+	}
+}
+
+// TestPlanAndWalkthroughScoping covers the plan/walkthrough services, which
+// carry their own task authorizer seam (wired to the task service).
+func TestPlanAndWalkthroughScoping(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+
+	log := accessTestLogger(t)
+	plan := NewPlanService(repo, nil, log)
+	plan.SetTaskAuthorizer(svc.AuthorizeTaskAccess)
+	if _, err := plan.GetPlan(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign plan get: %v", err)
+	}
+	if err := plan.DeletePlan(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign plan delete: %v", err)
+	}
+	// Owner and internal callers pass the gate (missing plan is nil/NotFound,
+	// not an auth error).
+	if _, err := plan.GetPlan(ctxAs("user-b"), "task-b"); errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("owner plan get must pass the auth gate: %v", err)
+	}
+
+	wt := NewWalkthroughService(repo, nil, log)
+	wt.SetTaskAuthorizer(svc.AuthorizeTaskAccess)
+	if _, err := wt.GetWalkthrough(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign walkthrough get: %v", err)
+	}
+	if err := wt.DeleteWalkthrough(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign walkthrough delete: %v", err)
 	}
 }
 
