@@ -108,7 +108,16 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
 function taskState(prs: TaskPR[], activeTask = false): Partial<AppState> {
   return {
     taskPRs: { byTaskId: { "task-1": prs } },
-    ...(activeTask ? { tasks: { activeTaskId: "task-1", activeSessionId: null } } : {}),
+    ...(activeTask
+      ? {
+          tasks: {
+            activeTaskId: "task-1",
+            activeSessionId: null,
+            pinnedSessionId: null,
+            lastSessionByTaskId: {},
+          },
+        }
+      : {}),
   };
 }
 
