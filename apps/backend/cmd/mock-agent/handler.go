@@ -358,7 +358,7 @@ func emitSleep(e *emitter, cmd string) {
 }
 
 // emitBackgroundWork reproduces the fine-grained busy signal window
-// (ADR-0038): the foreground emits a line, spawns a
+// (ADR-0049): the foreground emits a line, spawns a
 // top-level subagent Task that holds the turn open, then goes IDLE for the
 // requested duration (default 8s) with no foreground output — the exact state
 // where the orchestrator narrows the busy gate so the composer accepts input

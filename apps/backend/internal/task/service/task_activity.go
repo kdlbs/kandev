@@ -73,30 +73,32 @@ func (s *Service) PublishTaskActivityIfChanged(ctx context.Context, taskID strin
 	if taskID == "" || s.foregroundActivity == nil {
 		return
 	}
-	current, known := s.computeTaskForegroundActivity(ctx, taskID)
-	if !known {
-		// The session set could not be loaded: leave the last-known aggregate in
-		// place instead of emitting a spurious clear that could momentarily read
-		// "done" while a turn is still open (§spec:live-propagation-fallback).
-		return
-	}
-
-	s.taskActivityMu.Lock()
-	previous, seen := s.lastTaskActivity[taskID]
-	s.taskActivityMu.Unlock()
-	if seen && previous == current {
-		return
-	}
-
-	task, err := s.tasks.GetTask(ctx, taskID)
-	if err != nil || task == nil {
-		if err != nil {
-			s.logger.Warn("failed to load task for activity update",
-				zap.String("task_id", taskID), zap.Error(err))
+	s.enqueueTaskPublication(ctx, taskID, func(publicationCtx context.Context) {
+		current, known := s.computeTaskForegroundActivity(publicationCtx, taskID)
+		if !known {
+			// The session set could not be loaded: leave the last-known aggregate in
+			// place instead of emitting a spurious clear that could momentarily read
+			// "done" while a turn is still open (§spec:live-propagation-fallback).
+			return
 		}
-		return
-	}
-	s.PublishTaskUpdated(ctx, task)
+
+		s.taskActivityMu.Lock()
+		previous, seen := s.lastTaskActivity[taskID]
+		s.taskActivityMu.Unlock()
+		if seen && previous == current {
+			return
+		}
+
+		task, err := s.tasks.GetTask(publicationCtx, taskID)
+		if err != nil || task == nil {
+			if err != nil {
+				s.logger.Warn("failed to load task for activity update",
+					zap.String("task_id", taskID), zap.Error(err))
+			}
+			return
+		}
+		s.publishTaskEventNow(publicationCtx, "task.updated", task, nil, nil, nil, &taskActivitySnapshot{activity: current, known: true})
+	})
 }
 
 // recordTaskActivity remembers the aggregate carried on a task event so the next

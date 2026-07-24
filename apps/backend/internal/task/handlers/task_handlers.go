@@ -100,7 +100,7 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 		logger:       log.WithFields(zap.String("component", "task-task-handlers")),
 	}
 	// The orchestrator also surfaces the in-memory fine-grained busy substate
-	// (ADR-0038). Derive the narrow provider from it so the
+	// (ADR-0049). Derive the narrow provider from it so the
 	// session-fetch handlers can stamp foreground_activity onto RUNNING sessions
 	// without waiting for a WS flip. Nil (e.g. in tests) simply omits the field.
 	if fa, ok := orchestrator.(dto.ForegroundActivityProvider); ok {

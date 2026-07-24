@@ -1014,7 +1014,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 		// Mirror the in-memory fine-grained busy substate onto a RUNNING session
 		// so a fresh page-load / second tab sees the accept-input +
 		// working-in-background affordance without waiting for a WS flip
-		// (ADR-0038). No-op for non-RUNNING sessions.
+		// (ADR-0049). No-op for non-RUNNING sessions.
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichForegroundActivity(&dto, b.p.orchestratorSvc)
 		}

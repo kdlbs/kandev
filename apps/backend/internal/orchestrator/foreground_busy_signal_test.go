@@ -19,7 +19,7 @@ func emitForegroundIdle(svc *Service, taskID, sessionID string) {
 }
 
 // TestCheckSessionPromptable_BackgroundTaskAcceptsInput is the red
-// characterization test for ADR-0038: a session whose
+// characterization test for ADR-0049: a session whose
 // foreground turn is idle while a spawned background task is still running must
 // accept a new message, not be rejected as "already running".
 //
@@ -85,7 +85,7 @@ func TestForegroundToolCallClosesBackgroundIdleGate(t *testing.T) {
 // TestTurnActivity_ForegroundBackgroundTransitions locks in the state machine
 // behind isForegroundTurnGenerating.
 // TestForegroundActivity_ExportedValue covers the seam the page-load / list
-// serialization layer depends on (ADR-0038): the exported
+// serialization layer depends on (ADR-0049): the exported
 // ForegroundActivity mirror of the in-memory tracker. An untracked session — which
 // includes every session after a backend restart, since a restart ends the turn —
 // must report the safe "generating" default so a stale "you may type" can never be

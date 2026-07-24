@@ -10,7 +10,7 @@ import (
 // `Generic.Output = {"monitor": {...}}`, and streams.IsActiveMonitor (the
 // consumer, via the orchestrator's background-work classifier) reads it back to
 // decide whether a RUNNING session's foreground turn has yielded to background
-// work (ADR-0038).
+// work (ADR-0049).
 //
 // The two sides used to spell the map keys out independently, so a rename on
 // either side compiled cleanly and silently reverted Monitor sessions to the
@@ -84,7 +84,7 @@ func TestMonitorViewContract_SurvivesSerializationToOrchestrator(t *testing.T) {
 // out-of-band attestation — which it stamps solely on the path gated by ACP
 // `_meta.claudeCode.toolName`, metadata the model cannot reach — counts.
 //
-// This is what keeps ADR-0038's contract honest: an agent we don't recognize can't
+// This is what keeps ADR-0049's contract honest: an agent we don't recognize can't
 // relax its own busy gate by shaping its tool output.
 func TestMonitorViewContract_ArbitraryToolOutputIsNotMistakenForAMonitor(t *testing.T) {
 	// Exactly the map monitorOutputWrapper produces — but written by "the agent"

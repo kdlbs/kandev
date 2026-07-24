@@ -877,7 +877,7 @@ func TestWSAddMessageFailsWhenSessionReloadAfterOnTurnStartFails(t *testing.T) {
 }
 
 // fgActivityOrchestrator is a minimal OrchestratorService whose ForegroundActivity
-// is configurable, for testing the ADR-0038 message-add gate.
+// is configurable, for testing the ADR-0049 message-add gate.
 type fgActivityOrchestrator struct {
 	activity v1.ForegroundActivity
 }
@@ -1004,7 +1004,7 @@ func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {
 	}
 }
 
-// TestErrorForBlockedMessageSession_BackgroundIdleAccepts is the ADR-0038
+// TestErrorForBlockedMessageSession_BackgroundIdleAccepts is the ADR-0049
 // message-add gate: a RUNNING session whose foreground turn has yielded to
 // background work must NOT be blocked at the message.add layer (it flows on to
 // PromptTask), while a foreground-generating RUNNING session stays blocked.

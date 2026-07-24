@@ -105,8 +105,6 @@ On each in-scope surface, confirm the indicator differs from that surface's
 generating indicator and from its done indicator, and that the difference
 survives a grayscale/desaturated view.
 
-§req:success-criteria §req:quality-attributes §req:constraints
-
 ## Task-level indicator reflects live background work §spec:task-level-indicator
 
 *Status: complete*
@@ -187,8 +185,6 @@ shows generating while either session generates, background-running when one
 session is only running background work and none is generating, and done only
 when both are finished.
 
-§req:success-criteria §req:user-stories §req:priorities §req:quality-attributes
-
 ## Session-level indicators surface the substate uniformly §spec:session-level-indicator
 
 *Status: complete*
@@ -226,8 +222,6 @@ this is accepted because their silence today is precisely the defect.
 open the session-reopen menu and the session tab and confirm each shows the
 background-running affordance — distinct from generating and never a done check
 — matching what the session switcher shows for the same session.
-
-§req:success-criteria §req:user-stories §req:constraints
 
 ## Live propagation, fresh-load correctness, and safe fallback §spec:live-propagation-fallback
 
@@ -311,4 +305,19 @@ and confirm the board card and task list update without a coarse state change.
 Restart the backend mid-work and confirm no surface flips to "done" while the
 session's turn is still open.
 
-§req:success-criteria §req:quality-attributes §req:constraints
+## Destructive actions warn about live work §spec:destructive-action-guard
+
+Before deleting a task with foreground or recognized background work, the
+existing confirmation warns that work is still in progress. Archive uses the
+same warning only when the user has enabled archive confirmation. The
+**Confirm before archiving tasks** setting can bypass the archive dialog, as
+specified in [Task Archive Confirmation](../tasks/archive-confirmation.md). The
+warning uses the same task-level activity state as the status indicator, so it
+cannot disagree with the status the operator just saw. It warns rather than
+blocks the deliberate action; delete retains its existing confirmation flow.
+
+This prevents a false or overlooked done reading from causing accidental loss
+of active work for confirmed actions without changing the operator's established
+archive/delete choices. **Residual risk:** a confirmation-free archive can
+still proceed while work is active; that user-configured tradeoff is defined by
+the archive-confirmation specification.

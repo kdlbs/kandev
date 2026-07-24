@@ -12,7 +12,7 @@ import (
 )
 
 // TestPromptTask_BackgroundWorkAcceptsInput is the falsifiable acceptance proof
-// for ADR-0038, driven through
+// for ADR-0049, driven through
 // the REAL operator entrypoint (PromptTask) rather than checkSessionPromptable
 // in isolation — it reproduces the operator-lockout→fixed transition end to end
 // for both of Claude's background-work wire shapes.
@@ -146,7 +146,7 @@ func TestPromptTask_BackgroundWorkAcceptsInput(t *testing.T) {
 }
 
 // TestPromptTask_NonClaudeFramesStayBusy is the explicit non-Claude regression
-// assertion (ADR-0038 "byte-for-byte unchanged" default):
+// assertion (ADR-0049 "byte-for-byte unchanged" default):
 // a codex/opencode-shaped in-flight tool call is not recognized as background
 // work, so a RUNNING session driving one must keep rejecting operator input
 // exactly as it did before the fine-grained gate existed.

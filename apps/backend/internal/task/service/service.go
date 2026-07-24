@@ -234,6 +234,11 @@ type Service struct {
 	// actual change of the aggregated three-state value (§spec:live-propagation-fallback).
 	taskActivityMu   sync.Mutex
 	lastTaskActivity map[string]v1.ForegroundActivity
+	// taskPublicationMu guards the per-task FIFO dispatchers. It is held only
+	// while enqueueing/dequeueing; repository reads and synchronous EventBus
+	// delivery always happen after it is released.
+	taskPublicationMu sync.Mutex
+	taskPublications  map[string]*taskPublicationQueue
 	// cleanupDoneForTest lets unit tests wait for async cleanup; nil in production.
 	cleanupDoneForTest  chan struct{}
 	cleanupWorkerMu     sync.Mutex

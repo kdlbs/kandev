@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -19,6 +20,24 @@ type fakeActivityProvider struct {
 
 func (f *fakeActivityProvider) ForegroundActivity(sessionID string) v1.ForegroundActivity {
 	return f.byID[sessionID]
+}
+
+// blockingActivityEventBus pauses a generating publication until the test
+// releases it.
+type blockingActivityEventBus struct {
+	*MockEventBus
+	generatingEntered chan struct{}
+	releaseGenerating chan struct{}
+}
+
+func (b *blockingActivityEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	data, _ := event.Data.(map[string]interface{})
+	activity, _ := data["foreground_activity"].(string)
+	if activity == "generating" {
+		b.generatingEntered <- struct{}{}
+		<-b.releaseGenerating
+	}
+	return b.MockEventBus.Publish(ctx, subject, event)
 }
 
 // failingSessionLister decorates a real SessionRepository but fails the one query
@@ -150,6 +169,72 @@ func TestPublishTaskActivityIfChanged_EmitsOnlyOnAggregateChange(t *testing.T) {
 	svc.PublishTaskActivityIfChanged(ctx, "task-1")
 	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
 		t.Fatalf("no change must not re-emit, got %d events", len(events))
+	}
+}
+
+func TestPublishTaskActivityIfChanged_OrdersConcurrentAggregatePublications(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	createRunningSession(t, ctx, repo, "s1", "task-1", models.TaskSessionStateRunning)
+	createRunningSession(t, ctx, repo, "s2", "task-1", models.TaskSessionStateRunning)
+
+	provider := &fakeActivityProvider{byID: map[string]v1.ForegroundActivity{
+		"s1": v1.ForegroundActivityBackground,
+		"s2": v1.ForegroundActivityBackground,
+	}}
+	svc.SetForegroundActivityProvider(provider)
+	svc.PublishTaskActivityIfChanged(ctx, "task-1") // Establish the background baseline.
+	eventBus.ClearEvents()
+
+	blockingBus := &blockingActivityEventBus{
+		MockEventBus:      eventBus,
+		generatingEntered: make(chan struct{}, 1),
+		releaseGenerating: make(chan struct{}),
+	}
+	svc.eventBus = blockingBus
+
+	provider.byID["s1"] = v1.ForegroundActivityGenerating
+	firstDone := make(chan struct{})
+	go func() {
+		svc.PublishTaskActivityIfChanged(ctx, "task-1")
+		close(firstDone)
+	}()
+	<-blockingBus.generatingEntered
+
+	provider.byID["s1"] = v1.ForegroundActivityBackground
+	secondDone := make(chan struct{})
+	go func() {
+		svc.PublishTaskActivityIfChanged(ctx, "task-1")
+		close(secondDone)
+	}()
+
+	// The second caller queues behind the blocked first one and returns. The
+	// timeout is only a deadlock guard; channels establish the ordering.
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("newer activity publication did not queue behind the older publication")
+	}
+	if published := eventBus.GetPublishedEvents(); len(published) != 0 {
+		t.Fatalf("newer activity publication overtook the blocked older publication: %#v", published)
+	}
+
+	close(blockingBus.releaseGenerating)
+	<-firstDone
+	<-secondDone
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 2 {
+		t.Fatalf("published %d task activity events, want 2", len(published))
+	}
+	firstData, _ := published[0].Data.(map[string]interface{})
+	if got := foregroundActivityField(t, firstData); got != "generating" {
+		t.Fatalf("first activity = %#v, want generating", got)
+	}
+	secondData, _ := published[1].Data.(map[string]interface{})
+	if got := foregroundActivityField(t, secondData); got != "background" {
+		t.Fatalf("second activity = %#v, want background", got)
 	}
 }
 
