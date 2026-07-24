@@ -190,25 +190,6 @@ export async function getPRStatusesBatch(refs: PRStatusRef[], options?: ApiReque
   });
 }
 
-// Submit PR review
-export async function submitPRReview(
-  owner: string,
-  repo: string,
-  number: number,
-  event: "APPROVE" | "COMMENT" | "REQUEST_CHANGES",
-  body?: string,
-) {
-  return fetchJson<{ submitted: boolean }>(
-    `/api/v1/github/prs/${owner}/${repo}/${number}/reviews`,
-    {
-      init: {
-        method: "POST",
-        body: JSON.stringify({ event, body: body ?? "" }),
-      },
-    },
-  );
-}
-
 // Merge a pull request. Omit mergeMethod to let the backend pick the first
 // method the repo allows (avoids GitHub's "default to merge commit" 405 on
 // squash-only / rebase-only repos).

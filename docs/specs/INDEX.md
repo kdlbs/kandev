@@ -110,6 +110,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | Spec | Status |
 |---|---|
 | [ci-pr-automation](ui/ci-pr-automation.md) | draft |
+| [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
