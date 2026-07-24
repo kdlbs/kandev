@@ -22,6 +22,24 @@ test.describe("Mobile Status drawer", () => {
     await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
   });
 
+  test("keeps a single status signal compact", async ({ testPage, apiClient }) => {
+    const settingsResponse = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      system_metrics_display: { show_in_topbar: false },
+    });
+    expect(settingsResponse.ok).toBe(true);
+
+    await testPage.goto("/stats");
+    await testPage.getByTestId("app-status-drawer-trigger").click();
+
+    const drawer = testPage.getByTestId("app-status-drawer");
+    await expect(drawer).toBeVisible();
+    await expect(drawer.locator("[data-status-item-id]")).toHaveCount(1);
+    const dialog = testPage.getByRole("dialog", { name: "Status" });
+    const dialogBox = await dialog.boundingBox();
+    if (!dialogBox) throw new Error("single-signal Status drawer has no geometry");
+    expect(dialogBox.height).toBeLessThan(300);
+  });
+
   test("opens native Status paths without a persistent phone footer", async ({
     testPage,
     apiClient,
@@ -51,6 +69,10 @@ test.describe("Mobile Status drawer", () => {
 
     const drawer = testPage.getByTestId("app-status-drawer");
     await expect(drawer).toBeVisible();
+    const summary = drawer.getByTestId("app-status-drawer-summary");
+    await expect(summary.getByRole("heading", { name: "Status" })).toBeVisible();
+    await expect(summary).not.toContainText("Connection, system health, and workspace signals.");
+    await expect(drawer.getByTestId("app-status-drawer-scroll-region")).toBeVisible();
     await expect(drawer.getByTestId("app-status-connection")).toBeVisible();
     await expect(testPage.locator("#hello-status-left")).toContainText("mobile-drawer no-task");
     await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
@@ -94,10 +116,12 @@ test.describe("Mobile Status drawer", () => {
     expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
       await testPage.evaluate(() => document.documentElement.clientWidth),
     );
-    // Chromium may consume Escape immediately after the synthetic modifier drag.
-    await testPage
-      .locator('[data-slot="drawer-overlay"][data-state="open"]')
-      .click({ position: { x: 4, y: 4 } });
+    // A vertical modifier drag can resolve as Vaul's native swipe-to-dismiss.
+    // Either dismissal path must leave phone ordering untouched.
+    const overlay = testPage.locator('[data-slot="drawer-overlay"][data-state="open"]');
+    if (await overlay.isVisible()) {
+      await overlay.click({ position: { x: 4, y: 4 } });
+    }
     await expect(drawer).toBeHidden();
 
     const task = await apiClient.createTask(seedData.workspaceId, "Mobile status task", {
