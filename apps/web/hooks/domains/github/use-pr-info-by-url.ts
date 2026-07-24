@@ -37,12 +37,14 @@ export type PRInfo = {
 type URLState = {
   info: PRInfo | undefined;
   loading: boolean;
+  error?: Error;
 };
 
 export type UsePRInfoByURLResult = {
   ensure: (url: string) => void;
   info: (url: string) => PRInfo | undefined;
   loading: (url: string) => boolean;
+  error: (url: string) => Error | undefined;
   clear: (url: string) => void;
 };
 
@@ -140,13 +142,23 @@ function handleSuccess<T>(args: SuccessArgs<T>): void {
 
 /** Marks loaded on failure (we don't want to retry in a tight loop) and
  *  clears the loading flag. Callers that want to retry can clear() + ensure(). */
-function handleFailure(refs: Refs, setState: SetState, url: string, seq: number): void {
+function handleFailure(
+  refs: Refs,
+  setState: SetState,
+  url: string,
+  seq: number,
+  error: unknown,
+): void {
   if (!refs.mountedRef.current) return;
   if (refs.seqRef.current.get(url) !== seq) return;
   refs.loadedRef.current.add(url);
   setState((prev) => ({
     ...prev,
-    [url]: { info: prev[url]?.info, loading: false },
+    [url]: {
+      info: prev[url]?.info,
+      loading: false,
+      error: error instanceof Error ? error : new Error("Could not load GitHub metadata."),
+    },
   }));
 }
 
@@ -204,7 +216,7 @@ function runGitHubInfoRequest(args: {
     return;
   }
   request
-    .catch(() => handleFailure(refs, setState, url, seq))
+    .catch((error) => handleFailure(refs, setState, url, seq, error))
     .finally(() => finalizeRequest(refs, url, seq));
 }
 
@@ -272,6 +284,10 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     (rawUrl: string): boolean => Boolean(state[rawUrl.trim()]?.loading),
     [state],
   );
+  const error = useCallback(
+    (rawUrl: string): Error | undefined => state[rawUrl.trim()]?.error,
+    [state],
+  );
   const clear = useCallback((rawUrl: string) => {
     const url = rawUrl.trim();
     if (!url) return;
@@ -293,5 +309,5 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     });
   }, []);
 
-  return { ensure, info, loading, clear };
+  return { ensure, info, loading, error, clear };
 }

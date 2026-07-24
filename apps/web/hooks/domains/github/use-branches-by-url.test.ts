@@ -209,10 +209,26 @@ describe("useBranchesByURL cache behavior", () => {
 });
 
 describe("useBranchesByURL — failure & invalidation", () => {
-  it("retries on the next ensure() after a failed fetch", async () => {
-    // First fetch rejects — the hook MUST NOT mark the URL as loaded, so a
-    // subsequent ensure() for the same URL triggers a fresh fetch instead
-    // of short-circuiting on the cached failure.
+  it("retains a failure for its URL without losing a successful sibling", async () => {
+    const failure = new Error("GitHub rate limit exceeded");
+    fetchRepoBranchesMock
+      .mockResolvedValueOnce({ branches: [{ name: "main" }] })
+      .mockRejectedValueOnce(failure);
+    const { result } = renderHook(() => useBranchesByURL());
+
+    act(() => {
+      result.current.ensure(REPO_A);
+      result.current.ensure(REPO_B);
+    });
+
+    await waitFor(() => expect(result.current.loading(REPO_B)).toBe(false));
+    expect(result.current.branches(REPO_A)).toMatchObject([{ name: "main" }]);
+    expect(
+      (result.current as unknown as { error: (url: string) => Error | undefined }).error(REPO_B),
+    ).toBe(failure);
+  });
+
+  it("retries a failed fetch only after clear()", async () => {
     fetchRepoBranchesMock.mockRejectedValueOnce(new Error("network boom"));
 
     const { result } = renderHook(() => useBranchesByURL());
@@ -226,6 +242,12 @@ describe("useBranchesByURL — failure & invalidation", () => {
 
     fetchRepoBranchesMock.mockResolvedValueOnce({ branches: [{ name: "main" }] });
     act(() => {
+      result.current.ensure(REPO_A);
+    });
+    expect(fetchRepoBranchesMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      result.current.clear(REPO_A);
       result.current.ensure(REPO_A);
     });
     await waitFor(() => expect(result.current.branches(REPO_A)).toHaveLength(1));

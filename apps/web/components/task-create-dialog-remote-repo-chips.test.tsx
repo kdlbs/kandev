@@ -39,11 +39,13 @@ vi.mock("./task-create-dialog-remote-repo-chip", () => ({
     row,
     onRemove,
     onURLChange,
+    onRetry,
     selectedRepositoryIdentities = [],
   }: {
     row: TaskRemoteRepoRow;
     onRemove: () => void;
     onURLChange: ChipURLChange;
+    onRetry?: () => void;
     selectedRepositoryIdentities?: string[];
   }) => (
     <div
@@ -75,6 +77,11 @@ vi.mock("./task-create-dialog-remote-repo-chip", () => ({
       >
         paste
       </button>
+      {onRetry ? (
+        <button type="button" data-testid="remote-chip-retry" onClick={onRetry}>
+          retry
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -90,6 +97,7 @@ function makeBranchesByUrl(ensure = vi.fn()) {
   return {
     branches: () => [],
     loading: () => false,
+    error: () => undefined,
     ensure,
     clear: () => undefined,
   };
@@ -99,6 +107,7 @@ function makePrInfoByUrl(ensure = vi.fn()) {
   return {
     info: () => undefined,
     loading: () => false,
+    error: () => undefined,
     ensure,
     clear: () => undefined,
   };
@@ -222,6 +231,31 @@ describe("RemoteRepoChipsRow identity tracking", () => {
 });
 
 describe("RemoteRepoChipsRow controls", () => {
+  it("retries both resolution paths for the failed row", () => {
+    const branchEnsure = vi.fn();
+    const branchClear = vi.fn();
+    const prEnsure = vi.fn();
+    const prClear = vi.fn();
+    const fs = makeFs({
+      remoteRepos: [{ key: "remote-0", url: URL_AB, branch: "main", source: "paste" }],
+      branchesByUrl: {
+        ...makeBranchesByUrl(branchEnsure),
+        error: () => new Error("GitHub failed"),
+        clear: branchClear,
+      },
+      prInfoByUrl: { ...makePrInfoByUrl(prEnsure), clear: prClear },
+    });
+    renderInProvider(
+      <RemoteRepoChipsRow fs={fs} onUpdateRow={vi.fn()} onAddRow={vi.fn()} onRemoveRow={vi.fn()} />,
+    );
+
+    fireEvent.click(screen.getByTestId("remote-chip-retry"));
+    expect(branchClear).toHaveBeenCalledWith(URL_AB);
+    expect(prClear).toHaveBeenCalledWith(URL_AB);
+    expect(branchEnsure).toHaveBeenLastCalledWith(URL_AB, "");
+    expect(prEnsure).toHaveBeenLastCalledWith(URL_AB);
+  });
+
   it("renders one chip per row in fs.remoteRepos", () => {
     const fs = makeFs({
       remoteRepos: [

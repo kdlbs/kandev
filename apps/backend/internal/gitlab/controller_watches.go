@@ -3,6 +3,7 @@ package gitlab
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -353,9 +354,16 @@ func (c *Controller) httpListProjectBranches(ctx *gin.Context) {
 		ctx.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "project required"})
 		return
 	}
-	client, ok := c.workspaceClient(ctx)
-	if !ok {
-		return
+	workspaceID := c.workspaceID(ctx)
+	expectedHost := ctx.Query("expected_host")
+	client, err := c.service.ClientForWorkspaceHost(ctx.Request.Context(), workspaceID, expectedHost)
+	if err != nil {
+		if errors.Is(err, ErrNotConfigured) && isPublicGitLabHost(expectedHost) {
+			client = NewPATClient(DefaultHost, "")
+		} else {
+			writeWorkspaceClientActionError(ctx, err, "project branches")
+			return
+		}
 	}
 	branches, err := client.ListProjectBranches(ctx.Request.Context(), project)
 	if err != nil {
@@ -363,6 +371,11 @@ func (c *Controller) httpListProjectBranches(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"branches": branches})
+}
+
+func isPublicGitLabHost(host string) bool {
+	normalized, err := normalizeHostOrigin(host)
+	return err == nil && strings.EqualFold(normalized, DefaultHost)
 }
 
 func (c *Controller) httpGetProjectMergeMethods(ctx *gin.Context) {

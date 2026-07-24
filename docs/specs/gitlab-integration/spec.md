@@ -31,6 +31,10 @@ workflows are not usable end to end.
 - GitLab browse, task-link, review, watch, and write endpoints require an
   authoritative `workspace_id` and resolve that workspace's connection. Data
   or credentials from another workspace are never used as fallback.
+- Task creation is the narrow unauthenticated exception: branch discovery for
+  an explicitly entered public `gitlab.com` repository URL works without a
+  saved workspace connection. It does not expose private projects, browse
+  results, merge requests, issues, or write actions.
 - GitLab repository matching uses provider, normalized provider host, and full
   subgroup project path. Repositories with unknown or mismatched provider hosts
   are not eligible for GitLab linking or merge-request actions.
@@ -165,6 +169,10 @@ validated against any supplied value.
 
 ### Browse and review
 
+- `GET /projects/branches?workspace_id=<id>&project=<path>` uses the workspace
+  connection when configured. When the workspace is unconfigured and the
+  requested host is `gitlab.com`, it may list branches anonymously for the
+  explicitly named public project so Remote task creation can continue.
 - `GET /user/mrs?workspace_id=<id>&filter=<filter>&page=<n>&per_page=<n>` and
   `GET /user/issues?workspace_id=<id>&filter=<filter>&page=<n>&per_page=<n>`
   return the active workspace's paginated search results.
@@ -228,7 +236,9 @@ protocol action name for compatibility.
 - `409` indicates a workspace/resource invariant conflict that cannot be
   applied idempotently.
 - `422` indicates GitLab rejected a valid write, such as an ineligible reviewer.
-- `503` indicates the workspace connection is absent or currently unavailable.
+- `503` indicates the workspace connection is absent or currently unavailable,
+  except for anonymous branch discovery of an explicitly named public
+  `gitlab.com` project.
 - Provider error bodies and logs are sanitized and never include tokens or
   authenticated remote URLs.
 
@@ -323,6 +333,10 @@ protocol action name for compatibility.
 - **GIVEN** two workspaces connected to different GitLab hosts, **WHEN** each
   opens its GitLab page, **THEN** each sees only data fetched with its own host
   and credential.
+- **GIVEN** a workspace without a GitLab connection, **WHEN** the user enters a
+  public `gitlab.com` repository URL in Remote task creation, **THEN** Kandev
+  lists its branches anonymously without making any other GitLab browse or
+  write capability available.
 - **GIVEN** a legacy global GitLab host and token, **WHEN** Kandev starts after
   upgrade, **THEN** one deterministic workspace receives the config and secret
   and other workspaces remain unconfigured.

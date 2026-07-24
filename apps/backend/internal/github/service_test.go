@@ -133,6 +133,99 @@ func TestListRepoBranches_NoopClientFallback_NotFound(t *testing.T) {
 	}
 }
 
+func TestGetPRAndIssue_FallBackWithoutClient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/repos/owner/repo/pulls/7":
+			_, _ = w.Write([]byte(`{"number":7,"title":"Public PR","state":"open","head":{"ref":"feature"},"base":{"ref":"main"},"user":{"login":"alice"}}`))
+		case "/repos/owner/repo/issues/8":
+			_, _ = w.Write([]byte(`{"number":8,"title":"Public issue","state":"open","user":{"login":"alice"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	orig := anonymousAPIBase
+	anonymousAPIBase = srv.URL
+	defer func() { anonymousAPIBase = orig }()
+
+	for _, client := range []Client{nil, &NoopClient{}} {
+		svc := &Service{client: client}
+		pr, err := svc.GetPR(context.Background(), "owner", "repo", 7)
+		if err != nil {
+			t.Fatalf("GetPR() error = %v", err)
+		}
+		if pr.Title != "Public PR" {
+			t.Fatalf("GetPR() title = %q, want public PR", pr.Title)
+		}
+
+		issue, err := svc.GetIssue(context.Background(), "owner", "repo", 8)
+		if err != nil {
+			t.Fatalf("GetIssue() error = %v", err)
+		}
+		if issue.Title != "Public issue" {
+			t.Fatalf("GetIssue() title = %q, want public issue", issue.Title)
+		}
+	}
+}
+
+func TestGetPRAndIssue_AuthenticatedErrorsAreAuthoritative(t *testing.T) {
+	orig := anonymousAPIBase
+	anonymousAPIBase = "http://127.0.0.1:1"
+	defer func() { anonymousAPIBase = orig }()
+
+	prErr := &GitHubAPIError{StatusCode: http.StatusForbidden}
+	issueErr := &GitHubAPIError{StatusCode: http.StatusNotFound}
+	svc := &Service{client: &stubClient{
+		getPRFunc: func(context.Context, string, string, int) (*PR, error) { return nil, prErr },
+		getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
+			return nil, issueErr
+		},
+	}}
+
+	if _, err := svc.GetPR(context.Background(), "owner", "repo", 7); !errors.Is(err, prErr) {
+		t.Fatalf("GetPR() error = %v, want authenticated 403", err)
+	}
+	if _, err := svc.GetIssue(context.Background(), "owner", "repo", 8); !errors.Is(err, issueErr) {
+		t.Fatalf("GetIssue() error = %v, want authenticated 404", err)
+	}
+}
+
+func TestGetPRAndIssue_AnonymousStatusIsPreserved(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/pulls/") {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	orig := anonymousAPIBase
+	anonymousAPIBase = srv.URL
+	defer func() { anonymousAPIBase = orig }()
+
+	svc := &Service{}
+	for _, request := range []struct {
+		name   string
+		call   func() error
+		status int
+	}{
+		{name: "PR", call: func() error { _, err := svc.GetPR(t.Context(), "owner", "repo", 7); return err }, status: http.StatusForbidden},
+		{name: "issue", call: func() error { _, err := svc.GetIssue(t.Context(), "owner", "repo", 8); return err }, status: http.StatusNotFound},
+	} {
+		t.Run(request.name, func(t *testing.T) {
+			err := request.call()
+			var apiErr *GitHubAPIError
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != request.status {
+				t.Fatalf("error = %v, want GitHub API status %d", err, request.status)
+			}
+		})
+	}
+}
+
 func TestSortBranchesMainFirst(t *testing.T) {
 	tests := []struct {
 		input []string
@@ -170,17 +263,6 @@ func TestSortBranchesMainFirst(t *testing.T) {
 				t.Errorf("input=%v: got[%d]=%q, want %q", tc.input, i, b.Name, tc.want[i])
 			}
 		}
-	}
-}
-
-func TestGetPR_NilClient(t *testing.T) {
-	svc := &Service{client: nil}
-	_, err := svc.GetPR(context.Background(), "owner", "repo", 1)
-	if err == nil {
-		t.Fatal("expected error when client is nil")
-	}
-	if !errors.Is(err, ErrNoClient) {
-		t.Errorf("err = %v, want ErrNoClient", err)
 	}
 }
 

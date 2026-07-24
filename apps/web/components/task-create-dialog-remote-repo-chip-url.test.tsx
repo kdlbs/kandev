@@ -49,12 +49,13 @@ function openInput(): HTMLInputElement {
 }
 
 describe("RemoteRepoChip URL entry", () => {
-  it("writes a GitHub URL with source=paste on Enter", () => {
+  it("commits a trimmed GitHub URL exactly once on plain Enter", () => {
     const onURLChange = vi.fn();
     renderChip(onURLChange);
     const input = openInput();
-    fireEvent.change(input, { target: { value: "https://github.com/acme/api" } });
+    fireEvent.change(input, { target: { value: " https://github.com/acme/api " } });
     fireEvent.keyDown(input, { key: "Enter" });
+    expect(onURLChange).toHaveBeenCalledTimes(1);
     expect(onURLChange).toHaveBeenCalledWith("https://github.com/acme/api", "paste");
   });
 
@@ -67,30 +68,55 @@ describe("RemoteRepoChip URL entry", () => {
     expect(onURLChange).toHaveBeenCalledWith("git@gitlab.com:acme/api.git", "paste");
   });
 
-  it("commits a pasted GitHub URL immediately", () => {
+  it("does not submit URL input during IME composition or modified Enter", () => {
+    const onURLChange = vi.fn();
+    renderChip(onURLChange);
+    const input = openInput();
+    fireEvent.change(input, { target: { value: "https://github.com/acme/api" } });
+    fireEvent.keyDown(input, { key: "Enter", isComposing: true });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+
+    expect(onURLChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps a pasted GitHub URL editable until Enter", () => {
     const onURLChange = vi.fn();
     renderChip(onURLChange);
     const input = openInput();
     fireEvent.paste(input, { clipboardData: { getData: () => URL_FOO_BAR_PR } });
-    expect(onURLChange).toHaveBeenCalledWith(URL_FOO_BAR_PR, "paste");
+    expect(input.value).toBe(URL_FOO_BAR_PR);
+    expect(onURLChange).not.toHaveBeenCalled();
   });
 
-  it("commits a typed GitHub URL on blur", () => {
+  it("keeps a typed GitHub URL editable on blur", () => {
     const onURLChange = vi.fn();
     renderChip(onURLChange);
     const input = openInput();
     fireEvent.change(input, { target: { value: "https://github.com/foo/bar/issues/42" } });
     fireEvent.blur(input);
-    expect(onURLChange).toHaveBeenCalledWith("https://github.com/foo/bar/issues/42", "paste");
+    expect(input.value).toBe("https://github.com/foo/bar/issues/42");
+    expect(onURLChange).not.toHaveBeenCalled();
   });
 
-  it("commits a typed GitHub PR URL on Tab", () => {
+  it("keeps a typed GitHub PR URL editable on Tab", () => {
     const onURLChange = vi.fn();
     renderChip(onURLChange);
     const input = openInput();
     fireEvent.change(input, { target: { value: URL_FOO_BAR_PR } });
     fireEvent.keyDown(input, { key: "Tab" });
-    expect(onURLChange).toHaveBeenCalledWith(URL_FOO_BAR_PR, "paste");
+    expect(input.value).toBe(URL_FOO_BAR_PR);
+    expect(onURLChange).not.toHaveBeenCalled();
+  });
+
+  it("shows the Remote URL Enter hint for URL-shaped input", () => {
+    const onURLChange = vi.fn();
+    renderChip(onURLChange);
+    const input = openInput();
+    fireEvent.change(input, { target: { value: "https://github.com/foo/bar" } });
+
+    expect(screen.getByText("Remote URL")).toBeTruthy();
+    expect(screen.getByText(/press Enter to submit it/i)).toBeTruthy();
+    expect(onURLChange).not.toHaveBeenCalled();
   });
 
   it("surfaces an inline error for an unsupported provider URL", () => {

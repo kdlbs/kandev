@@ -67,7 +67,9 @@ func NewPATClient(host, token string) *PATClient {
 func (c *PATClient) Host() string { return c.host }
 
 func (c *PATClient) setHeaders(req *http.Request) {
-	req.Header.Set("PRIVATE-TOKEN", c.token)
+	if c.token != "" {
+		req.Header.Set("PRIVATE-TOKEN", c.token)
+	}
 	req.Header.Set("Accept", "application/json")
 }
 

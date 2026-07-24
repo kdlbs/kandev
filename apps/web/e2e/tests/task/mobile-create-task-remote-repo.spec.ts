@@ -28,9 +28,107 @@ async function expectPopoverFitsViewport(testPage: Page): Promise<void> {
   await expect(input).toHaveCSS("height", "44px");
 }
 
+async function expectNoDocumentHorizontalOverflow(testPage: Page): Promise<void> {
+  await expect
+    .poll(() =>
+      testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    )
+    .toBe(true);
+}
+
+async function expectLocatorFitsViewport(testPage: Page, testId: string): Promise<void> {
+  const viewport = testPage.viewportSize();
+  const box = await testPage.getByTestId(testId).boundingBox();
+  expect(viewport).not.toBeNull();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+  expect(box!.y).toBeGreaterThanOrEqual(0);
+  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
+}
+
 test.describe("Create task Remote repo picker on mobile", () => {
   test.beforeEach(async ({ apiClient }) => {
     await apiClient.mockGitHubReset();
+  });
+
+  test("stages a pasted URL until Enter without resolving it", async ({ testPage, apiClient }) => {
+    const owner = "phone-entry-owner";
+    const repo = "phone-entry-repo";
+    const url = `https://github.com/${owner}/${repo}`;
+    const branchPattern = `**/api/v1/github/repos/${owner}/${repo}/branches`;
+    let branchRequests = 0;
+    await apiClient.mockGitHubAddBranches(owner, repo, [{ name: "main" }]);
+    await testPage.route(branchPattern, async (route) => {
+      branchRequests += 1;
+      await route.continue();
+    });
+
+    await openRemotePicker(testPage);
+    const input = testPage.getByTestId("remote-repo-input");
+    await input.fill(`${url}-draft`);
+    await expect(input).toHaveValue(`${url}-draft`);
+    await expect(testPage.getByText("Remote URL", { exact: true })).toBeVisible();
+    await expect(testPage.getByText(/press Enter to submit it/i)).toBeVisible();
+    await expectPopoverFitsViewport(testPage);
+    expect(branchRequests).toBe(0);
+
+    await input.fill(url);
+    await input.press("Enter");
+
+    await expect(testPage.getByTestId("remote-repo-chip")).toHaveAttribute("data-remote-url", url);
+    await expect(testPage.getByTestId("remote-branch-chip-trigger")).toContainText("main");
+    await expect.poll(() => branchRequests).toBe(1);
+    await expectNoDocumentHorizontalOverflow(testPage);
+  });
+
+  test("keeps a failed URL row touch-usable and retries its branch resolution", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const owner = "phone-retry-owner";
+    const repo = "phone-retry-repo";
+    const url = `https://github.com/${owner}/${repo}`;
+    const branchPattern = `**/api/v1/github/repos/${owner}/${repo}/branches`;
+    let branchRequests = 0;
+    await apiClient.mockGitHubAddBranches(owner, repo, [{ name: "main" }]);
+    await testPage.route(branchPattern, async (route) => {
+      branchRequests += 1;
+      if (branchRequests === 1) {
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "Temporary provider outage" }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await openRemotePicker(testPage);
+    const input = testPage.getByTestId("remote-repo-input");
+    await input.fill(url);
+    await input.press("Enter");
+
+    const row = testPage.getByTestId("remote-repo-chip");
+    const retry = testPage.getByRole("button", { name: "Retry remote repository resolution" });
+    await expect(row).toHaveAttribute("data-remote-url", url);
+    await expect(testPage.getByRole("alert")).toContainText("Temporary provider outage");
+    await expect(retry).toBeVisible();
+    await expectLocatorFitsViewport(testPage, "remote-repo-chip-wrapper");
+    const retryBox = await retry.boundingBox();
+    expect(retryBox).not.toBeNull();
+    expect(retryBox!.height).toBeGreaterThanOrEqual(44);
+    await expectNoDocumentHorizontalOverflow(testPage);
+
+    await retry.tap();
+
+    await expect.poll(() => branchRequests).toBe(2);
+    await expect(testPage.getByRole("alert")).not.toBeVisible();
+    await expect(testPage.getByTestId("remote-branch-chip-trigger")).toContainText("main");
+    await expectNoDocumentHorizontalOverflow(testPage);
   });
 
   test("pastes a GitHub issue URL without clipping the picker", async ({ testPage, apiClient }) => {

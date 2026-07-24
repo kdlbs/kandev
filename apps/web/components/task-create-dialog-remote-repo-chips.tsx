@@ -79,10 +79,12 @@ export function RemoteRepoChipsRow({
             branches={fs.branchesByUrl.branches(row.url)}
             branchesLoading={fs.branchesByUrl.loading(row.url)}
             prInfo={fs.prInfoByUrl.info(row.url)}
+            resolutionError={fs.branchesByUrl.error(row.url) ?? fs.prInfoByUrl.error(row.url)}
             accessibleRepos={accessibleRepos}
             selectedRepositoryIdentities={selectedRepositoryIdentities}
             onURLChange={makeURLChange(onUpdateRow, row.key)}
             onBranchChange={(branch) => onUpdateRow(row.key, { branch })}
+            onRetry={() => retryRemoteResolution(fs, row.url, workspaceId)}
             onRemove={() => onRemoveRow(row.key)}
           />
         );
@@ -90,6 +92,13 @@ export function RemoteRepoChipsRow({
       <AddRowButton onAddRow={onAddRow} />
     </div>
   );
+}
+
+function retryRemoteResolution(fs: DialogFormState, url: string, workspaceId: string): void {
+  fs.branchesByUrl.clear(url);
+  fs.prInfoByUrl.clear(url);
+  fs.branchesByUrl.ensure(url, workspaceId);
+  fs.prInfoByUrl.ensure(url);
 }
 
 /**

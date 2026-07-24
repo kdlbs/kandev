@@ -243,6 +243,45 @@ describe("usePRInfoByURL — non-PR and issue URLs", () => {
 });
 
 describe("usePRInfoByURL — cache invalidation", () => {
+  it("retries failed metadata only after clear()", async () => {
+    fetchPRInfoMock.mockRejectedValueOnce(new Error("GitHub is unavailable"));
+    const { result } = renderHook(() => usePRInfoByURL());
+
+    act(() => {
+      result.current.ensure(PR_URL_A);
+    });
+    await waitFor(() => expect(result.current.loading(PR_URL_A)).toBe(false));
+
+    fetchPRInfoMock.mockResolvedValueOnce(makePR({ number: 42 }));
+    act(() => {
+      result.current.ensure(PR_URL_A);
+    });
+    expect(fetchPRInfoMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      result.current.clear(PR_URL_A);
+      result.current.ensure(PR_URL_A);
+    });
+    await waitFor(() => expect(result.current.info(PR_URL_A)?.prNumber).toBe(42));
+  });
+
+  it("retains a metadata failure for its URL without losing a successful sibling", async () => {
+    const failure = new Error("GitHub is unavailable");
+    fetchPRInfoMock.mockResolvedValueOnce(makePR({ number: 42 })).mockRejectedValueOnce(failure);
+    const { result } = renderHook(() => usePRInfoByURL());
+
+    act(() => {
+      result.current.ensure(PR_URL_A);
+      result.current.ensure(PR_URL_B);
+    });
+
+    await waitFor(() => expect(result.current.loading(PR_URL_B)).toBe(false));
+    expect(result.current.info(PR_URL_A)?.prNumber).toBe(42);
+    expect(
+      (result.current as unknown as { error: (url: string) => Error | undefined }).error(PR_URL_B),
+    ).toBe(failure);
+  });
+
   it("does not re-fetch when ensure() is called for an already-loaded URL", async () => {
     fetchPRInfoMock.mockResolvedValue(makePR({ number: 42 }));
 
@@ -286,7 +325,9 @@ describe("usePRInfoByURL — cache invalidation", () => {
     expect(result.current.info("https://github.com/who/what/pull/1")).toBeUndefined();
     expect(result.current.loading("https://github.com/who/what/pull/1")).toBe(false);
   });
+});
 
+describe("usePRInfoByURL — stale callback protection", () => {
   it("ignores a stale fetch resolved after clear() + ensure() restarted the request", async () => {
     // Simulates the race the per-URL sequence counter guards: the first
     // fetch is still in flight when the caller clear()s and re-ensure()s;

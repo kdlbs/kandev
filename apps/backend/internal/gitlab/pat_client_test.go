@@ -59,6 +59,24 @@ func TestPATClient_GetAuthenticatedUser(t *testing.T) {
 	}
 }
 
+func TestPATClient_AnonymousReadOmitsPrivateToken(t *testing.T) {
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("PRIVATE-TOKEN"); got != "" {
+			t.Fatalf("PRIVATE-TOKEN = %q, want absent", got)
+		}
+		_, _ = w.Write([]byte(`[{"name":"main"}]`))
+	}))
+	t.Cleanup(stop)
+
+	branches, err := NewPATClient(host, "").ListProjectBranches(t.Context(), "group/project")
+	if err != nil {
+		t.Fatalf("ListProjectBranches() error = %v", err)
+	}
+	if len(branches) != 1 || branches[0].Name != "main" {
+		t.Fatalf("branches = %#v, want main", branches)
+	}
+}
+
 func TestPATClient_GetAuthenticatedUser_AuthFailure(t *testing.T) {
 	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
