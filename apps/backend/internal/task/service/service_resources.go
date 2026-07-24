@@ -1162,6 +1162,9 @@ func dedupeRepositoriesByIdentity(repos []*models.Repository) []*models.Reposito
 // attempt to delete a repository that would otherwise be blocked by
 // DeleteRepository's ErrActiveTaskSessions sentinel.
 func (s *Service) CountActiveSessionsByRepository(ctx context.Context, id string) (int, error) {
+	if err := s.authorizeRepositoryID(ctx, id); err != nil {
+		return 0, err
+	}
 	if _, err := s.repoEntities.GetRepository(ctx, id); err != nil {
 		return 0, err
 	}
