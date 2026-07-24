@@ -32,6 +32,7 @@ import {
   createAutomationsSlice,
   createSystemSlice,
   createPluginsSlice,
+  createReviewSlice,
   defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
@@ -48,6 +49,7 @@ import {
   defaultAutomationsState,
   defaultSystemState,
   defaultPluginsState,
+  defaultReviewState,
   type WorkspaceState,
   type WorkflowsState,
   type ExecutorsState,
@@ -77,6 +79,7 @@ import {
   type GitHubSliceActions,
   type AzureDevOpsSliceActions,
   type PluginsSliceActions,
+  type ReviewSliceActions,
 } from "./slices";
 import type {
   AvailableCommand,
@@ -228,6 +231,9 @@ export type AppState = {
 
   // Plugins slice (actions merged via PluginsSliceActions intersection on AppState)
   plugins: (typeof defaultPluginsState)["plugins"];
+
+  // Review slice (actions merged via ReviewSliceActions intersection on AppState)
+  taskReview: (typeof defaultReviewState)["taskReview"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -613,7 +619,8 @@ export type AppState = {
   SystemSliceActions &
   FeaturesSliceActions &
   AutomationsSliceActions &
-  PluginsSliceActions;
+  PluginsSliceActions &
+  ReviewSliceActions;
 
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many
@@ -663,6 +670,8 @@ export function createAppStore(initialState?: HydrationState) {
       ...createAutomationsSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createPluginsSlice(set as any, get as any, api as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createReviewSlice(set as any, get as any, api as any),
       // Re-assert merged initial state so caller-supplied values win over slice defaults.
       ...buildStateOverrides(merged),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
