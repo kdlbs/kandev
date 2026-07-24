@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -188,6 +189,22 @@ func TestHandleAddBranchToTask_RejectsMultipleLocators(t *testing.T) {
 	resp, err := h.handleAddBranchToTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleAddWorkspaceSourcesRejectsUnknownKind(t *testing.T) {
+	h := &Handlers{}
+	msg := makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{
+		"task_id": "task-1",
+		"sources": []interface{}{map[string]interface{}{"kind": "unknown"}},
+	})
+
+	resp, err := h.handleAddWorkspaceSources(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestClassifyWorkspaceSourceErrorMapsRepositoryNotFound(t *testing.T) {
+	assert.Equal(t, ws.ErrorCodeNotFound, classifyWorkspaceSourceError(fmt.Errorf("wrapped: %w", repository.ErrRepositoryNotFound)))
 }
 
 func TestHandleCreateTask_MissingTitle(t *testing.T) {

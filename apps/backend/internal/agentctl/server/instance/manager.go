@@ -122,6 +122,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		RequiresProcessKill:    req.RequiresProcessKill,
 		StripEnv:               req.StripEnv,
 		BaseBranches:           req.BaseBranches,
+		WorkspaceSourceRoots:   req.WorkspaceSourceRoots,
 	}
 
 	m.logger.Info("CreateInstance: applying overrides",

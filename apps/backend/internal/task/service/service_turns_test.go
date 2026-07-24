@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/worktree"
 	"github.com/stretchr/testify/require"
 )
 
@@ -215,6 +217,239 @@ func TestGetWorkspaceInfoForSession_BasicFields(t *testing.T) {
 	}
 	if info.ACPSessionID != "acp-123" {
 		t.Errorf("expected ACPSessionID 'acp-123', got %q", info.ACPSessionID)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_ProjectsPersistedWorktreeIdentity(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-recovery", WorkspaceID: "ws-1", Name: "api", LocalPath: "/source/api", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-recovery", TaskID: "task-123", RepositoryID: "repo-recovery", BaseBranch: "main", CheckoutBranch: "feature/recovery",
+	}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-recovery", TaskID: "task-123", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID: "session-worktree-recovery", SessionID: "session-recovery", WorktreeID: "worktree-recovery", RepositoryID: "repo-recovery",
+		BranchSlug: "feature-recovery", WorktreePath: "/tasks/task-recovery/api-feature-recovery", CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-recovery")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
+	}
+	if len(info.WorkspaceRepositories) != 1 {
+		t.Fatalf("WorkspaceRepositories = %#v, want one repository", info.WorkspaceRepositories)
+	}
+	got := info.WorkspaceRepositories[0]
+	if got.WorktreeID != "worktree-recovery" || got.BranchSlug != "feature-recovery" || got.BranchIdentitySlug != "feature-recovery" {
+		t.Fatalf("recovery repository identity = %+v, want persisted worktree ID and branch slug", got)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_ProjectsDistinctWorktreesForSameRepositoryBranches(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-multi-recovery", WorkspaceID: "ws-1", Name: "api", LocalPath: "/source/api", DefaultBranch: "main",
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	for position, branch := range []string{"feature/one", "feature/two"} {
+		if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+			ID: fmt.Sprintf("task-repo-multi-%d", position), TaskID: "task-123", RepositoryID: "repo-multi-recovery",
+			BaseBranch: "main", CheckoutBranch: branch, Position: position,
+		}); err != nil {
+			t.Fatalf("CreateTaskRepository %q: %v", branch, err)
+		}
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-multi-recovery", TaskID: "task-123", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	for _, worktree := range []*models.TaskSessionWorktree{
+		{ID: "session-worktree-one", SessionID: "session-multi-recovery", WorktreeID: "worktree-one", RepositoryID: "repo-multi-recovery", BranchSlug: "feature-one", CreatedAt: now},
+		{ID: "session-worktree-two", SessionID: "session-multi-recovery", WorktreeID: "worktree-two", RepositoryID: "repo-multi-recovery", BranchSlug: "feature-two", CreatedAt: now},
+	} {
+		if err := repo.CreateTaskSessionWorktree(ctx, worktree); err != nil {
+			t.Fatalf("CreateTaskSessionWorktree %q: %v", worktree.BranchSlug, err)
+		}
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-multi-recovery")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
+	}
+	if len(info.WorkspaceRepositories) != 2 {
+		t.Fatalf("WorkspaceRepositories = %#v, want two branch-specific repositories", info.WorkspaceRepositories)
+	}
+	for _, got := range info.WorkspaceRepositories {
+		wantWorktreeID := map[string]string{"feature/one": "worktree-one", "feature/two": "worktree-two"}[got.CheckoutBranch]
+		if got.WorktreeID != wantWorktreeID || got.BranchSlug != got.BranchIdentitySlug {
+			t.Fatalf("recovery repository for %q = %+v, want worktree %q and matching branch identity", got.CheckoutBranch, got, wantWorktreeID)
+		}
+	}
+}
+
+func TestGetWorkspaceInfoForSession_LeavesLegacyRepositoryIdentityEmpty(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-legacy", WorkspaceID: "ws-1", Name: "api", LocalPath: "/source/api"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "task-repo-legacy", TaskID: "task-123", RepositoryID: "repo-legacy", BaseBranch: "main"}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-legacy", TaskID: "task-123", State: models.TaskSessionStateCompleted}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-legacy")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
+	}
+	got := info.WorkspaceRepositories[0]
+	if got.WorktreeID != "" || got.BranchSlug != "" || got.BranchIdentitySlug != "" {
+		t.Fatalf("legacy recovery identity = %+v, want empty persisted worktree fields", got)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_UsesRepositoryDefaultBranchIdentity(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-default-branch", WorkspaceID: "ws-1", Name: "api", LocalPath: "/source/api", DefaultBranch: "main"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: "task-repo-default-branch", TaskID: "task-123", RepositoryID: "repo-default-branch"}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-default-branch", TaskID: "task-123", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{ID: "session-worktree-default-branch", SessionID: "session-default-branch", WorktreeID: "worktree-default-branch", RepositoryID: "repo-default-branch", BranchSlug: "main", CreatedAt: now}); err != nil {
+		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-default-branch")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
+	}
+	if got := info.WorkspaceRepositories[0]; got.WorktreeID != "worktree-default-branch" || got.BranchIdentitySlug != "main" {
+		t.Fatalf("default branch recovery identity = %+v, want persisted main worktree", got)
+	}
+}
+
+func TestGetWorkspaceInfoForSession_UsesHashDisambiguatedBranchIdentities(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-hash-branches", WorkspaceID: "ws-1", Name: "api", LocalPath: "/source/api", DefaultBranch: "main"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	taskRepos := []*models.TaskRepository{
+		{ID: "task-repo-hash-one", TaskID: "task-123", RepositoryID: "repo-hash-branches", BaseBranch: "feature/a", Position: 0, Metadata: map[string]interface{}{"pr_number": 101}},
+		{ID: "task-repo-hash-two", TaskID: "task-123", RepositoryID: "repo-hash-branches", BaseBranch: "feature-a", Position: 1, Metadata: map[string]interface{}{"pr_number": 202}},
+	}
+	for _, taskRepo := range taskRepos {
+		if err := repo.CreateTaskRepository(ctx, taskRepo); err != nil {
+			t.Fatalf("CreateTaskRepository %q: %v", taskRepo.ID, err)
+		}
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-hash-branches", TaskID: "task-123", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	plans := worktree.BuildBranchIdentityPlans([]worktree.BranchIdentityInput{
+		{RepositoryID: "repo-hash-branches", BaseBranch: "feature/a", DefaultBranch: "main", PRNumber: 101, Position: 0},
+		{RepositoryID: "repo-hash-branches", BaseBranch: "feature-a", DefaultBranch: "main", PRNumber: 202, Position: 1},
+	})
+	for index, plan := range plans {
+		if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+			ID: fmt.Sprintf("session-worktree-hash-%d", index), SessionID: "session-hash-branches", WorktreeID: fmt.Sprintf("worktree-hash-%d", index),
+			RepositoryID: "repo-hash-branches", BranchSlug: plan.IdentitySlug, CreatedAt: now,
+		}); err != nil {
+			t.Fatalf("CreateTaskSessionWorktree %q: %v", plan.IdentitySlug, err)
+		}
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-hash-branches")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
+	}
+	if len(info.WorkspaceRepositories) != len(plans) {
+		t.Fatalf("WorkspaceRepositories = %#v, want %d branch-specific repositories", info.WorkspaceRepositories, len(plans))
+	}
+	for index, got := range info.WorkspaceRepositories {
+		if got.WorktreeID != fmt.Sprintf("worktree-hash-%d", index) || got.BranchSlug != plans[index].IdentitySlug || got.BranchIdentitySlug != plans[index].IdentitySlug {
+			t.Fatalf("hash-disambiguated recovery repository %d = %+v, want worktree %q and identity %q", index, got, fmt.Sprintf("worktree-hash-%d", index), plans[index].IdentitySlug)
+		}
+	}
+}
+
+func TestGetWorkspaceInfoForSession_ProjectsOnlyLifecycleValidRepositories(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	now := time.Now().UTC()
+	validPath := t.TempDir()
+
+	for _, repository := range []*models.Repository{
+		{ID: "repo-provider-recovery", WorkspaceID: "ws-1", Name: "kdlbs/kandev", LocalPath: validPath, DefaultBranch: "main"},
+		{ID: "repo-empty-path-recovery", WorkspaceID: "ws-1", Name: "ignored", DefaultBranch: "main"},
+	} {
+		if err := repo.CreateRepository(ctx, repository); err != nil {
+			t.Fatalf("CreateRepository %q: %v", repository.ID, err)
+		}
+	}
+	for position, repositoryID := range []string{"repo-provider-recovery", "repo-empty-path-recovery"} {
+		if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{ID: fmt.Sprintf("task-repo-validity-%d", position), TaskID: "task-123", RepositoryID: repositoryID, BaseBranch: "main", Position: position}); err != nil {
+			t.Fatalf("CreateTaskRepository %q: %v", repositoryID, err)
+		}
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-projection-validity", TaskID: "task-123", State: models.TaskSessionStateCompleted, StartedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{ID: "session-worktree-projection-validity", SessionID: "session-projection-validity", WorktreeID: "worktree-projection-validity", RepositoryID: "repo-provider-recovery", BranchSlug: "main", CreatedAt: now}); err != nil {
+		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+	}
+
+	info, err := svc.GetWorkspaceInfoForSession(ctx, "task-123", "session-projection-validity")
+	if err != nil {
+		t.Fatalf("GetWorkspaceInfoForSession: %v", err)
+	}
+	if len(info.WorkspaceRepositories) != 1 {
+		t.Fatalf("WorkspaceRepositories = %#v, want only the valid repository", info.WorkspaceRepositories)
+	}
+	got := info.WorkspaceRepositories[0]
+	if got.RepositoryPath != validPath || got.RepoName != "kdlbs-kandev" || filepath.Base(got.RepoName) != got.RepoName {
+		t.Fatalf("durable repository projection = %+v, want safe name and valid path", got)
+	}
+	if got.WorktreeID != "worktree-projection-validity" || got.BranchSlug != "main" || got.BranchIdentitySlug != "main" {
+		t.Fatalf("durable repository identity = %+v, want persisted worktree identity", got)
 	}
 }
 

@@ -53,10 +53,17 @@ export type CreateLocalRepositorySurfaceProps = {
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
   executorSelection: DirectLocalExecutorSelection | null;
+  context?: "task-create" | "workspace";
   onCreated: (repository: Repository) => void;
 };
 
-function executorNotice(selection: DirectLocalExecutorSelection | null): string {
+function executorNotice(
+  selection: DirectLocalExecutorSelection | null,
+  context: NonNullable<CreateLocalRepositorySurfaceProps["context"]>,
+): string {
+  if (context === "workspace") {
+    return "Creates an empty Git repository and registers it in this workspace.";
+  }
   if (!selection) {
     return "A direct local executor profile is required to create and use an empty repository.";
   }
@@ -139,11 +146,13 @@ function RepositoryLocationFields({
 
 type RepositoryFormDetailsProps = RepositoryLocationFieldsProps & {
   executorSelection: DirectLocalExecutorSelection | null;
+  context: NonNullable<CreateLocalRepositorySurfaceProps["context"]>;
   submitError: string | null;
 };
 
 function RepositoryFormDetails({
   executorSelection,
+  context,
   submitError,
   ...locationFields
 }: RepositoryFormDetailsProps) {
@@ -154,13 +163,13 @@ function RepositoryFormDetails({
       </div>
       <div
         className={
-          executorSelection
+          executorSelection || context === "workspace"
             ? "flex items-start gap-2 text-xs text-muted-foreground"
             : "flex items-start gap-2 text-xs text-destructive"
         }
       >
         <IconInfoCircle className="mt-0.5 size-3.5 shrink-0" />
-        <p>{executorNotice(executorSelection)}</p>
+        <p>{executorNotice(executorSelection, context)}</p>
       </div>
       {submitError ? (
         <div
@@ -200,6 +209,7 @@ function CreateRepositoryForm({
   open,
   workspaceId,
   executorSelection,
+  context = "task-create",
   onCreated,
   onDismiss,
 }: CreateLocalRepositorySurfaceProps & { onDismiss: () => void }) {
@@ -222,14 +232,13 @@ function CreateRepositoryForm({
   const nameError = validateLocalRepositoryName(name);
   const targetPath =
     parentPath && !nameError ? buildLocalRepositoryTargetPath(parentPath, name) : "";
-  const canSubmit = Boolean(
-    workspaceId && executorSelection && parentPath && !nameError && !submitting,
-  );
+  const executorReady = Boolean(executorSelection || context === "workspace");
+  const canSubmit = !!workspaceId && executorReady && !!parentPath && !nameError && !submitting;
 
   const handleSubmit = async (event: FormEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    if (!canSubmit || !workspaceId || !executorSelection) return;
+    if (!canSubmit || !workspaceId) return;
     setSubmitting(true);
     setSubmitError(null);
     try {
@@ -264,11 +273,6 @@ function CreateRepositoryForm({
     setEditingParentPath(true);
   };
 
-  const handleNameChange = (nextName: string) => {
-    setSubmitError(null);
-    setName(nextName);
-  };
-
   const handleCreateDirectory = async (folderName: string) => {
     if (!listing) return;
     setSubmitError(null);
@@ -285,8 +289,12 @@ function CreateRepositoryForm({
         parentPath={parentPath}
         targetPath={targetPath}
         executorSelection={executorSelection}
+        context={context}
         submitError={submitError}
-        onNameChange={handleNameChange}
+        onNameChange={(nextName) => {
+          setSubmitError(null);
+          setName(nextName);
+        }}
         onParentPathChange={handleParentPathChange}
         onLoadTypedDirectory={loadTypedDirectory}
       />

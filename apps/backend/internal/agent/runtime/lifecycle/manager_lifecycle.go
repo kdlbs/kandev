@@ -189,6 +189,11 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
+// StopReasonBackendShutdown identifies the graceful backend-shutdown path.
+// Executors may preserve resumable remote state for this reason only; user
+// stops and rollback cleanup deliberately retain their destructive semantics.
+const StopReasonBackendShutdown = "backend shutdown"
+
 // StopAllAgents attempts a graceful shutdown of all active agents concurrently.
 func (m *Manager) StopAllAgents(ctx context.Context) error {
 	m.shuttingDown.Store(true)
@@ -205,7 +210,7 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 		wg.Add(1)
 		go func(e *AgentExecution) {
 			defer wg.Done()
-			if err := m.StopAgent(ctx, e.ID, false); err != nil {
+			if err := m.StopAgentWithReason(ctx, e.ID, StopReasonBackendShutdown, false); err != nil {
 				errCh <- err
 				m.logger.Warn("failed to stop agent during shutdown",
 					zap.String("execution_id", e.ID),

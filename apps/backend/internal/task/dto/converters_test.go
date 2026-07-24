@@ -1,7 +1,9 @@
 package dto
 
 import (
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -36,6 +38,27 @@ func TestFromWorkflowStep_PreservesGenericEvents(t *testing.T) {
 	}
 	if action.Config["reason"] != "children_completed" {
 		t.Fatalf("action reason = %v, want children_completed", action.Config["reason"])
+	}
+}
+
+func TestFromTaskSerializesWorkspaceFolders(t *testing.T) {
+	now := time.Now().UTC()
+	got := FromTask(&models.Task{
+		ID: "task-folders",
+		WorkspaceFolders: []*models.TaskWorkspaceFolder{{
+			ID: "folder-1", TaskID: "task-folders", LocalPath: "/canonical/docs", DisplayName: "docs", Position: 2, CreatedAt: now, UpdatedAt: now,
+		}},
+	})
+	payload, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal task DTO: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("decode task DTO: %v", err)
+	}
+	if _, ok := fields["workspace_folders"]; !ok {
+		t.Fatalf("workspace_folders missing from task DTO: %s", payload)
 	}
 }
 

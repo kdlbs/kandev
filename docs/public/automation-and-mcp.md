@@ -145,7 +145,7 @@ Task mode currently registers these tool groups:
 | User interaction | Ask a structured question when the current agent/session supports it. |
 | Plans | Create, get, update, and delete the current task plan. |
 | Walkthroughs | Show, get, and delete the task's code walkthrough. |
-| Relationships and branches | List related tasks, add a branch/worktree to a task, and change a repository's diff base. |
+| Relationships and workspace sources | List related tasks, add a mixed repository/folder source batch to an idle task, use the legacy one-branch tool, and change a repository's diff base. |
 | Workflow signal | Signal step completion when an auto-advance step explicitly requires that signal. |
 
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.
@@ -158,7 +158,11 @@ Use `stop_task_kandev` only when the direct child should halt without a replacem
 
 After an accepted stop, Kandev attempts to move an unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states are preserved. Worktrees, task environments, commits, task records, descendants, and queued messages remain available, and the task can be started again later.
 
-`add_branch_to_task_kandev` works only with the Worktree executor. It can add another branch of the same repository or a second repository entirely. Select at most one of `repository_id`, `repository_url`, or `local_path`; `repository_url` accepts a GitHub repository URL, while the URL/path forms find or create that repository in the task's workspace. A locator is optional for a single-repository task and required to disambiguate a multi-repository task. The new repository/branch receives its own worktree. `update_repository_base_branch_kandev` changes the base used for Kandev's diff, not a pull request's target branch.
+`add_workspace_sources_kandev` adds one or more sources to an idle task and defaults `task_id` to the current task. Its `sources` input accepts the same atomic mixed batch as the Files panel: `repository` sources use exactly one saved repository ID, local Git path, or remote repository locator plus branch fields; `folder` sources use a local path and optional display name. Repository sources work on Worktree, Local/Local PC, Local Docker, SSH, and Sprites; folders work only on Worktree and Local/Local PC. The task must be repository-backed and have no active turn or tool call. Invalid, duplicate, unsupported, or failed sources roll back the entire batch.
+
+`add_branch_to_task_kandev` is preserved for compatibility with its one-repository/branch input. Use `add_workspace_sources_kandev` for all new automation. `update_repository_base_branch_kandev` changes the base used for Kandev's diff, not a pull request's target branch.
+
+The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
 `step_complete_kandev` is registered and discoverable in every task-mode session. Kandev includes its completion instruction, and acts on its signal, only on Kanban steps whose auto-advance action explicitly requires that signal. A user message arriving before transition can cancel that automatic move.
 

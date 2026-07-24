@@ -136,6 +136,16 @@ type TaskRepoRepository interface {
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 }
 
+// TaskWorkspaceFolderRepository handles canonical non-Git folder attachments.
+// It is intentionally separate from TaskRepoRepository to preserve existing
+// repository payload and Git-consumer contracts.
+type TaskWorkspaceFolderRepository interface {
+	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
+	ListTaskWorkspaceFoldersByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskWorkspaceFolder, error)
+	CreateWorkspaceSourceBatch(ctx context.Context, batch *models.WorkspaceSourceBatch) error
+	CompensateWorkspaceSourceBatch(ctx context.Context, batch *models.WorkspaceSourceBatch) error
+}
+
 // WorkflowRepository handles workflow CRUD.
 type WorkflowRepository interface {
 	CreateWorkflow(ctx context.Context, workflow *models.Workflow) error
@@ -280,6 +290,15 @@ type RepositoryEntityRepository interface {
 	// single-process race; it is not a substitute for a database-level
 	// uniqueness constraint against writers outside this process.
 	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
+}
+
+// RepositoryCleanupRepository performs guarded deletion of repositories
+// created during workspace-source attachment rollback.
+type RepositoryCleanupRepository interface {
+	// DeleteRepositoryIfUnreferenced soft-deletes a repository only when no
+	// task_repositories row currently adopts it. The predicate is part of the
+	// mutation so rollback cleanup cannot delete a repository another task won.
+	DeleteRepositoryIfUnreferenced(ctx context.Context, id string) (bool, error)
 }
 
 // ExecutorRepository handles executor CRUD, executor profiles, and running state.

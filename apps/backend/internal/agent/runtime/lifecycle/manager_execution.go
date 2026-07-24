@@ -15,6 +15,8 @@ import (
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // ErrSessionWorkspaceNotReady indicates the task session exists but does not yet
@@ -441,6 +443,22 @@ func (m *Manager) verifyPassthroughEnabled(ctx context.Context, sessionID, profi
 // createExecution creates an agentctl execution.
 // The agent subprocess is NOT started - call ConfigureAgent + Start explicitly.
 func (m *Manager) createExecution(ctx context.Context, taskID string, info *WorkspaceInfo) (*AgentExecution, error) {
+	if info == nil {
+		return nil, fmt.Errorf("workspace info is required")
+	}
+	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders); err != nil {
+		return nil, err
+	}
+	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
+		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories); err != nil {
+			return nil, err
+		}
+	}
+	if info.ExecutorType == string(models.ExecutorTypeWorktree) {
+		if err := m.reconcileWorkspaceWorktrees(ctx, taskID, info); err != nil {
+			return nil, err
+		}
+	}
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
 	if err != nil {
 		return nil, err
@@ -518,6 +536,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		AgentProfileID:                 executionProfileID,
 		OfficeAgentProfileID:           info.AgentProfileID,
 		WorkspacePath:                  info.WorkspacePath,
+		WorkspaceSourceRoots:           workspaceSourceRoots(info.WorkspaceFolders, info.WorkspaceRepositories),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
 		AutoApprovePermissions:         autoApprove,
@@ -527,6 +546,10 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		PreviousExecutionID:            info.AgentExecutionID,
 		AuthToken:                      m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
+	}
+
+	if err := resumeRemoteInstancePreflight(ctx, rt, req); err != nil {
+		return nil, err
 	}
 
 	runtimeInstance, err := rt.CreateInstance(ctx, req)
@@ -598,6 +621,32 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		zap.Stringer("runtime", execution.RuntimeName))
 
 	return execution, nil
+}
+
+func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string, info *WorkspaceInfo) error {
+	if len(info.WorkspaceRepositories) == 0 || m.worktreeMgr == nil {
+		return nil
+	}
+	if info.SessionID == "" || info.TaskDirName == "" {
+		return fmt.Errorf("worktree workspace is missing durable session or task directory")
+	}
+	for _, repository := range info.WorkspaceRepositories {
+		if repository.RepositoryPath == "" {
+			return fmt.Errorf("workspace repository %q source path is missing", repository.RepoName)
+		}
+		if _, err := m.worktreeMgr.Create(ctx, worktree.CreateRequest{
+			TaskID: taskID, SessionID: info.SessionID, RepositoryID: repository.RepositoryID,
+			RepositoryPath: repository.RepositoryPath, BaseBranch: repository.BaseBranch,
+			FallbackBaseBranch: repository.DefaultBranch, CheckoutBranch: repository.CheckoutBranch,
+			WorktreeID: repository.WorktreeID, TaskDirName: info.TaskDirName, WorkspaceID: info.WorkspaceID,
+			RepoName: repository.RepoName, WorktreeBranchPrefix: repository.WorktreeBranchPrefix,
+			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
+			BranchSlug: repository.BranchSlug, BranchIdentitySlug: repository.BranchIdentitySlug,
+		}); err != nil {
+			return fmt.Errorf("recreate workspace worktree %q: %w", repository.RepoName, err)
+		}
+	}
+	return nil
 }
 
 func workspaceExecutionProfileID(info *WorkspaceInfo) string {

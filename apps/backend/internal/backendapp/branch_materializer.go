@@ -35,7 +35,7 @@ type branchMaterializerRepo interface {
 // Defined as an interface so the materializer stays decoupled from the
 // lifecycle package.
 type agentctlRescanner interface {
-	RescanWorkspaceForSession(ctx context.Context, sessionID, workDir string) error
+	RescanWorkspaceForSession(ctx context.Context, sessionID, workDir string, sourceRoots ...[]string) error
 	NotifyWorktreeMaterialized(ctx context.Context, wt lifecycle.MaterializedWorktree)
 }
 
@@ -52,6 +52,15 @@ type branchMaterializer struct {
 	worktreeMgr *worktree.Manager
 	rescanner   agentctlRescanner
 	logger      *logger.Logger
+}
+
+type branchMaterialization struct {
+	environment  *models.TaskEnvironment
+	session      *models.TaskSession
+	worktree     *worktree.Worktree
+	repositoryID string
+	slug         string
+	taskID       string
 }
 
 func newBranchMaterializer(repo branchMaterializerRepo, mgr *worktree.Manager, lc *lifecycle.Manager, log *logger.Logger) *branchMaterializer {
@@ -73,19 +82,32 @@ func newBranchMaterializer(repo branchMaterializerRepo, mgr *worktree.Manager, l
 // rerun for the same (session, repo, branch_slug) triple and returns the
 // existing worktree.
 func (b *branchMaterializer) MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) error {
+	materialization, err := b.materializeUnfinalized(ctx, taskID, taskRepositoryID)
+	if err != nil || materialization == nil {
+		return err
+	}
+	b.finalize(materialization, ctx)
+	return nil
+}
+
+// materializeUnfinalized creates the worktree but deliberately does not
+// promote, rescan, or notify. Workspace-source batches call this phase for
+// every repository and publish only after their folders and live sessions have
+// all adopted the new root.
+func (b *branchMaterializer) materializeUnfinalized(ctx context.Context, taskID, taskRepositoryID string) (*branchMaterialization, error) {
 	if b == nil || b.worktreeMgr == nil {
-		return nil
+		return nil, nil
 	}
 	req, env, session, slug, ok, err := b.prepareMaterializeRequest(ctx, taskID, taskRepositoryID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	wt, err := b.worktreeMgr.Create(ctx, req)
 	if err != nil {
-		return fmt.Errorf("create worktree: %w", err)
+		return nil, fmt.Errorf("create worktree: %w", err)
 	}
 	b.logger.Info("materialized branch worktree",
 		zap.String("task_id", taskID),
@@ -93,8 +115,11 @@ func (b *branchMaterializer) MaterializeBranch(ctx context.Context, taskID, task
 		zap.String("worktree_id", wt.ID),
 		zap.String("path", wt.Path),
 		zap.String("branch", wt.Branch))
-	b.finalizeMaterialize(ctx, env, session, wt, req.RepositoryID, slug, taskID)
-	return nil
+	return &branchMaterialization{environment: env, session: session, worktree: wt, repositoryID: req.RepositoryID, slug: slug, taskID: taskID}, nil
+}
+
+func (b *branchMaterializer) finalize(materialization *branchMaterialization, ctx context.Context) {
+	b.finalizeMaterialize(ctx, materialization.environment, materialization.session, materialization.worktree, materialization.repositoryID, materialization.slug, materialization.taskID)
 }
 
 // prepareMaterializeRequest builds the worktree.CreateRequest plus the

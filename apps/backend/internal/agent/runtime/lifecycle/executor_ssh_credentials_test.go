@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -95,16 +96,27 @@ func TestParentDir(t *testing.T) {
 
 func TestBuildSSHEnvInitScript(t *testing.T) {
 	t.Run("empty map returns empty string", func(t *testing.T) {
-		if got := buildSSHEnvInitScript(nil); got != "" {
+		got, err := buildSSHEnvInitScript(nil)
+		if err != nil {
+			t.Fatalf("buildSSHEnvInitScript(nil): %v", err)
+		}
+		if got != "" {
 			t.Errorf("buildSSHEnvInitScript(nil) = %q, want \"\"", got)
 		}
-		if got := buildSSHEnvInitScript(map[string]string{}); got != "" {
+		got, err = buildSSHEnvInitScript(map[string]string{})
+		if err != nil {
+			t.Fatalf("buildSSHEnvInitScript(empty): %v", err)
+		}
+		if got != "" {
 			t.Errorf("buildSSHEnvInitScript(empty) = %q, want \"\"", got)
 		}
 	})
 
 	t.Run("single env var is shell-quoted on its own line", func(t *testing.T) {
-		got := buildSSHEnvInitScript(map[string]string{"FOO": "bar baz"})
+		got, err := buildSSHEnvInitScript(map[string]string{"FOO": "bar baz"})
+		if err != nil {
+			t.Fatalf("buildSSHEnvInitScript: %v", err)
+		}
 		// Each line is a POSIX shell assignment; the line break separates
 		// entries so `. /dev/stdin` under `set -a` exports each one.
 		if got != "FOO='bar baz'\n" {
@@ -113,7 +125,10 @@ func TestBuildSSHEnvInitScript(t *testing.T) {
 	})
 
 	t.Run("values with embedded single quotes are escaped", func(t *testing.T) {
-		got := buildSSHEnvInitScript(map[string]string{"TOKEN": "it's-a-secret"})
+		got, err := buildSSHEnvInitScript(map[string]string{"TOKEN": "it's-a-secret"})
+		if err != nil {
+			t.Fatalf("buildSSHEnvInitScript: %v", err)
+		}
 		// shellQuote replaces ' with '\'' for POSIX-safe escaping.
 		if !strings.Contains(got, `TOKEN='it'\''s-a-secret'`) {
 			t.Errorf("buildSSHEnvInitScript did not escape single quote: %q", got)
@@ -122,4 +137,56 @@ func TestBuildSSHEnvInitScript(t *testing.T) {
 			t.Errorf("buildSSHEnvInitScript missing trailing newline: %q", got)
 		}
 	})
+
+	for _, key := range []string{"BAD KEY", "BAD; touch /tmp/pwned", "BAD\nKEY", "$(touch /tmp/pwned)", "1BAD"} {
+		t.Run("rejects invalid key "+key, func(t *testing.T) {
+			script, err := buildSSHEnvInitScript(map[string]string{key: "secret"})
+			if err == nil {
+				t.Fatal("expected invalid key error")
+			}
+			if script != "" {
+				t.Errorf("invalid key appeared in script: %q", script)
+			}
+		})
+	}
+}
+
+func TestStartRemoteAgentctlRejectsInvalidEnvBeforeSSHLaunch(t *testing.T) {
+	_, _, err := startRemoteAgentctl(
+		context.Background(),
+		nil,
+		"bash",
+		"/usr/local/bin/agentctl",
+		"/workspace",
+		"/tmp/session",
+		map[string]string{"BAD; touch /tmp/pwned": "secret"},
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected invalid SSH environment key to abort agentctl launch")
+	}
+	if !strings.Contains(err.Error(), "invalid SSH environment variable key") {
+		t.Errorf("startRemoteAgentctl error = %q", err)
+	}
+}
+
+func TestSSHAgentctlLaunchEnvForcesLoopbackAndOmitsBearerToken(t *testing.T) {
+	env := sshAgentctlLaunchEnv(map[string]string{
+		"AGENTCTL_AUTH_TOKEN":  "profile-token",
+		"AGENTCTL_LISTEN_HOST": "0.0.0.0",
+		"OPENAI_API_KEY":       "key",
+	}, "bootstrap-nonce")
+
+	if got := env["AGENTCTL_BOOTSTRAP_NONCE"]; got != "bootstrap-nonce" {
+		t.Fatalf("AGENTCTL_BOOTSTRAP_NONCE = %q, want bootstrap nonce", got)
+	}
+	if got := env["AGENTCTL_LISTEN_HOST"]; got != "127.0.0.1" {
+		t.Fatalf("AGENTCTL_LISTEN_HOST = %q, want loopback", got)
+	}
+	if _, found := env["AGENTCTL_AUTH_TOKEN"]; found {
+		t.Fatal("SSH agentctl launch environment must not contain bearer token")
+	}
+	if got := env["OPENAI_API_KEY"]; got != "key" {
+		t.Fatalf("OPENAI_API_KEY = %q, want copied profile value", got)
+	}
 }

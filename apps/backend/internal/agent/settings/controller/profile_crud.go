@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -503,6 +504,8 @@ const (
 	reservedProfileEnvVarPrefix = "KANDEV_"
 )
 
+var posixEnvIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
 	if len(in) > maxProfileEnvVars {
 		return fmt.Errorf("%w: at most %d entries allowed", ErrInvalidProfileEnvVars, maxProfileEnvVars)
@@ -510,6 +513,9 @@ func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
 	seen := make(map[string]int, len(in))
 	for i, ev := range in {
 		key := strings.TrimSpace(ev.Key)
+		if key != ev.Key {
+			return fmt.Errorf("%w: env_vars[%d].key must be a POSIX environment identifier", ErrInvalidProfileEnvVars, i)
+		}
 		if err := validateEnvVarKey(key, i, seen); err != nil {
 			return err
 		}
@@ -528,8 +534,8 @@ func validateEnvVarKey(key string, i int, seen map[string]int) error {
 	if len(key) > maxProfileEnvVarKeyLen {
 		return fmt.Errorf("%w: env_vars[%d].key exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarKeyLen)
 	}
-	if strings.ContainsAny(key, "=\x00") {
-		return fmt.Errorf("%w: env_vars[%d].key must not contain '=' or null bytes", ErrInvalidProfileEnvVars, i)
+	if !posixEnvIdentifier.MatchString(key) {
+		return fmt.Errorf("%w: env_vars[%d].key must be a POSIX environment identifier", ErrInvalidProfileEnvVars, i)
 	}
 	if strings.HasPrefix(key, reservedProfileEnvVarPrefix) || key == reservedProfileEnvVarKey {
 		return fmt.Errorf("%w: env_vars[%d].key %q is reserved", ErrInvalidProfileEnvVars, i, key)

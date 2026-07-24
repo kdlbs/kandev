@@ -40,6 +40,7 @@ type AgentExecution struct {
 	ContainerID          string
 	ContainerIP          string               // IP address of the container for agentctl communication
 	WorkspacePath        string               // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots []string             // Canonical durable source roots permitted by agentctl file operations
 	ACPSessionID         string               // ACP session ID to resume, if available
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents like Amp)
@@ -477,6 +478,30 @@ type RepoLaunchSpec struct {
 	BranchIdentitySlug string
 }
 
+// WorkspaceFolderSpec is a durable host folder attachment projected into both
+// fresh launches and workspace-only resume construction.
+type WorkspaceFolderSpec struct {
+	Name      string
+	LocalPath string
+}
+
+// WorkspaceRepositorySpec is the durable host-side source needed to recreate
+// a task's owned repository entry after a restart.
+type WorkspaceRepositorySpec struct {
+	RepositoryID           string
+	RepositoryPath         string
+	RepoName               string
+	BaseBranch             string
+	DefaultBranch          string
+	CheckoutBranch         string
+	WorktreeID             string
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	PullBeforeWorktree     bool
+	BranchSlug             string
+	BranchIdentitySlug     string
+}
+
 // RouteOverride carries a fully resolved provider profile for one
 // routing-driven launch. Empty fields mean "use the base profile value"
 // — so when the dispatcher does NOT supply an override, launch behavior
@@ -569,7 +594,8 @@ type LaunchRequest struct {
 	// When non-empty it is the source of truth; the legacy single-repo top-level
 	// fields above are populated from Repositories[0] for callers that have not
 	// yet been updated.
-	Repositories []RepoLaunchSpec
+	Repositories     []RepoLaunchSpec
+	WorkspaceFolders []WorkspaceFolderSpec
 
 	// managedGoCachePath is resolved once before local preparation so setup
 	// scripts and the runtime instance cannot observe different settings.
@@ -676,14 +702,18 @@ type McpConfigProvider interface {
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
 type WorkspaceInfo struct {
-	TaskID             string
-	SessionID          string // Task session ID (from task_sessions table)
-	TaskEnvironmentID  string // Env this session belongs to (shared across sessions in same task)
-	WorkspacePath      string // Path to the workspace/repository
-	AgentProfileID     string // Stable Office agent identity (or the execution profile for legacy sessions)
-	ExecutionProfileID string // Concrete CLI profile selected for this execution
-	AgentID            string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID       string // Agent's session ID for conversation resumption (from session metadata)
+	TaskID                string
+	SessionID             string // Task session ID (from task_sessions table)
+	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
+	WorkspacePath         string // Path to the workspace/repository
+	WorkspaceFolders      []WorkspaceFolderSpec
+	WorkspaceRepositories []WorkspaceRepositorySpec
+	TaskDirName           string
+	WorkspaceID           string
+	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
+	ExecutionProfileID    string // Concrete CLI profile selected for this execution
+	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
 	// from session metadata, declared via the set_session_mode workflow action or
 	// a user toggle. Applied as a mode override at ACP session init so a fresh

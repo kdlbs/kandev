@@ -424,20 +424,21 @@ const (
 
 // Task represents a task in the database
 type Task struct {
-	ID             string                 `json:"id"`
-	WorkspaceID    string                 `json:"workspace_id"`
-	WorkflowID     string                 `json:"workflow_id"`
-	WorkflowStepID string                 `json:"workflow_step_id"`
-	Title          string                 `json:"title"`
-	Description    string                 `json:"description"`
-	State          v1.TaskState           `json:"state"`
-	Priority       string                 `json:"priority"`
-	Position       int                    `json:"position"` // Order within workflow step
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	Repositories   []*TaskRepository      `json:"repositories,omitempty"`
-	IsEphemeral    bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID       string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	ArchivedAt     *time.Time             `json:"archived_at,omitempty"`
+	ID               string                 `json:"id"`
+	WorkspaceID      string                 `json:"workspace_id"`
+	WorkflowID       string                 `json:"workflow_id"`
+	WorkflowStepID   string                 `json:"workflow_step_id"`
+	Title            string                 `json:"title"`
+	Description      string                 `json:"description"`
+	State            v1.TaskState           `json:"state"`
+	Priority         string                 `json:"priority"`
+	Position         int                    `json:"position"` // Order within workflow step
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	Repositories     []*TaskRepository      `json:"repositories,omitempty"`
+	WorkspaceFolders []*TaskWorkspaceFolder `json:"workspace_folders,omitempty"`
+	IsEphemeral      bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID         string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	ArchivedAt       *time.Time             `json:"archived_at,omitempty"`
 	// ArchivedByCascadeID is set when the task was archived as part of an
 	// office task-handoffs cascade (phase 6). UnarchiveTaskByCascade uses
 	// it to scope restoration to exactly the descendants this cascade
@@ -584,6 +585,43 @@ type TaskRepository struct {
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 	CreatedAt      time.Time              `json:"created_at"`
 	UpdatedAt      time.Time              `json:"updated_at"`
+}
+
+// TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
+// It stays separate from TaskRepository because folders are not Git sources.
+type TaskWorkspaceFolder struct {
+	ID          string    `json:"id"`
+	TaskID      string    `json:"task_id"`
+	LocalPath   string    `json:"local_path"`
+	DisplayName string    `json:"display_name"`
+	Position    int       `json:"position"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// WorkspaceSourceBatch identifies exactly the durable rows created by one
+// attachment operation, so a later materialization failure can compensate
+// without touching pre-existing sources.
+type WorkspaceSourceBatch struct {
+	TaskID            string                            `json:"task_id"`
+	Sources           []WorkspaceSource                 `json:"sources,omitempty"`
+	RepositoryUpdates []WorkspaceSourceRepositoryUpdate `json:"repository_updates,omitempty"`
+}
+
+// WorkspaceSourceRepositoryUpdate records a legacy association branch derived
+// during workspace-source validation. PreviousBaseBranch permits compensation
+// if later runtime materialization fails.
+type WorkspaceSourceRepositoryUpdate struct {
+	TaskRepositoryID   string `json:"task_repository_id"`
+	BaseBranch         string `json:"base_branch"`
+	PreviousBaseBranch string `json:"previous_base_branch"`
+}
+
+// WorkspaceSource carries exactly one durable source kind. Sources preserve
+// the caller's mixed order for global position allocation.
+type WorkspaceSource struct {
+	Repository *TaskRepository      `json:"repository,omitempty"`
+	Folder     *TaskWorkspaceFolder `json:"folder,omitempty"`
 }
 
 // MessageAuthorType represents who authored a message

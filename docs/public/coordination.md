@@ -9,12 +9,12 @@ Kandev can coordinate several agents without turning every unit of work into a s
 
 ## Choose a coordination boundary
 
-| Need | Use | Filesystem relationship | Independent workflow state |
-|---|---|---|---|
-| Another agent on the same files and goal | Additional named session | Shares the task environment | No |
-| A child deliverable that must see current uncommitted files | Subtask with **Inherit parent workspace** | Shares the parent's materialized workspace | Yes |
-| A child deliverable needing isolated files or a different repository | Subtask with **Create new workspace** | Gets its own materialized environment | Yes |
-| One deliverable spanning repositories | Multi-repository task | Separate worktree per attachment | No; one task workflow |
+| Need                                                                 | Use                                       | Filesystem relationship                    | Independent workflow state |
+| -------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------ | -------------------------- |
+| Another agent on the same files and goal                             | Additional named session                  | Shares the task environment                | No                         |
+| A child deliverable that must see current uncommitted files          | Subtask with **Inherit parent workspace** | Shares the parent's materialized workspace | Yes                        |
+| A child deliverable needing isolated files or a different repository | Subtask with **Create new workspace**     | Gets its own materialized environment      | Yes                        |
+| One deliverable spanning repositories                                | Multi-repository task                     | Separate worktree per attachment           | No; one task workflow      |
 
 Shared files make handoff cheap but allow concurrent edits to collide. Separate environments isolate file state, but only the executor determines whether host processes and credentials are also isolated.
 
@@ -34,7 +34,6 @@ Use an additional session when agents need the same task, repository attachments
 2. Choose **Add panel (+) → New Agent**, or run **New Agent** from the command panel.
 3. Select a compatible agent profile. Missing credentials link to the relevant **Settings → Executors** or **Settings → Agents** configuration.
 4. Choose context:
-
    - **Blank** starts without copied conversation context.
    - **Copy initial prompt** copies the task's initial prompt.
    - **Summarize session** asks the configured utility agent to summarize the current session. It is unavailable without a utility agent.
@@ -70,14 +69,14 @@ The dialog proposes `_Parent title_ / Subtask _N_`. Title and prompt are require
 
 Choose a workspace mode:
 
-| Mode | Default and inheritance | Use it when |
-|---|---|---|
-| **Inherit parent workspace** | Default when the parent has an active worktree. Reuses the parent's executor, repositories, worktrees, branch, and current uncommitted files. Repository and executor controls are hidden. | The child is a focused collaborator on the same file state. |
-| **Create new workspace** | Default when the parent has no active worktree branch. Lets you choose another configured/discovered repository, folder, remote URL, branch, and executor. | The child needs isolation, a different branch, or a different repository. |
+| Mode                         | Default and inheritance                                                                                                                                                                    | Use it when                                                               |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| **Inherit parent workspace** | Default when the parent has an active worktree. Reuses the parent's executor, repositories, worktrees, branch, and current uncommitted files. Repository and executor controls are hidden. | The child is a focused collaborator on the same file state.               |
+| **Create new workspace**     | Default when the parent has no active worktree branch. Lets you choose another configured/discovered repository, folder, remote URL, branch, and executor.                                 | The child needs isolation, a different branch, or a different repository. |
 
 The context choices are **Blank**, **Copy initial prompt**, and, when a utility agent is configured, **Summarize session**. Context supplies background; it does not create a shared conversation. Attachments and prompt enhancement are also available.
 
-The subtask dialog currently does not enforce agent/executor credential compatibility or disable non-worktree executors after two or more repository rows are selected. For an isolated multi-repository subtask, choose **git-worktree**. For every subtask, choose an agent profile configured on the inherited or selected executor; otherwise creation can succeed while agent launch or repository materialization fails.
+The subtask dialog currently does not enforce agent/executor credential compatibility. For an isolated multi-repository subtask, choose **Worktree**, **Local Docker**, **SSH**, or **Sprites**; Local/Local PC creation remains gated and Remote Docker is not implemented. For every subtask, choose an agent profile configured on the inherited or selected executor; otherwise creation can succeed while agent launch or repository materialization fails.
 
 Regular Kanban allows one subtask level: a root task can have children, but a child cannot have another child. Split further work into sibling subtasks, additional sessions, or a separate top-level task. Arbitrary-depth trees belong to the in-progress Office surface.
 
@@ -107,22 +106,22 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 
 `message_task_kandev` sends a message to another task's primary session by default. Supply a session ID to target a particular sibling session on the current task.
 
-| Target state | Result |
-|---|---|
-| Running or starting | Queues the message FIFO for a later turn. |
-| Waiting, idle, or completed | Starts a new turn immediately. |
-| Created but not started | Starts the session with the message. |
-| Failed or cancelled | Returns an error. |
+| Target state                | Result                                    |
+| --------------------------- | ----------------------------------------- |
+| Running or starting         | Queues the message FIFO for a later turn. |
+| Waiting, idle, or completed | Starts a new turn immediately.            |
+| Created but not started     | Starts the session with the message.      |
+| Failed or cancelled         | Returns an error.                         |
 
 The default delivery mode is queued. Each session accepts 10 queued messages by default; operators can change it with `KANDEV_QUEUE_MAX_PER_SESSION`, and a value of `0` or less disables the limit. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after a target turn completes.
 
 Choose the control by intent:
 
-| Intent | Operation | Result |
-|---|---|---|
-| Send information that can wait | `message_task_kandev` with queued delivery or no `delivery_mode` | The current turn continues and the message waits FIFO. |
-| Stop the current approach and give replacement work now | `message_task_kandev` with `delivery_mode: "interrupt"` | The direct parent requests immediate cancellation and redispatch. If that cannot proceed safely, the response reports the message as queued. |
-| Halt all current work with no replacement prompt | `stop_task_kandev` | The direct parent requests logical cancellation and graceful teardown without creating or dispatching a message. |
+| Intent                                                  | Operation                                                        | Result                                                                                                                                       |
+| ------------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Send information that can wait                          | `message_task_kandev` with queued delivery or no `delivery_mode` | The current turn continues and the message waits FIFO.                                                                                       |
+| Stop the current approach and give replacement work now | `message_task_kandev` with `delivery_mode: "interrupt"`          | The direct parent requests immediate cancellation and redispatch. If that cannot proceed safely, the response reports the message as queued. |
+| Halt all current work with no replacement prompt        | `stop_task_kandev`                                               | The direct parent requests logical cancellation and graceful teardown without creating or dispatching a message.                             |
 
 Only a direct parent may interrupt its child. Halt-only stop is stricter: it accepts only a same-workspace direct child, while self, siblings, ancestors other than the parent, deeper descendants, unrelated tasks, and cross-workspace callers are rejected. Use interrupt for stop-and-steer work. Reserve stop for halt-only intent.
 
@@ -159,7 +158,7 @@ For a human gate, use **On Turn Complete → Do nothing (wait for user)** and re
 
 ### Create a multi-repository task
 
-In **New Task**, add more **Repo** or **Remote** rows and select a base branch for each. Multi-repository creation currently supports only the **git-worktree** executor. Kandev materializes a worktree per repository and scopes Changes, review, and pull-request surfaces by repository.
+In **New Task**, add more **Repo** or **Remote** rows and select a base branch for each. Multi-repository creation supports **Worktree**, **Local Docker**, **SSH**, and **Sprites**. Local/Local PC creation remains gated while its initial-launch path cannot project sibling repositories, and Remote Docker is not implemented. Kandev scopes Changes, review, and pull-request surfaces by repository.
 
 Before starting, document:
 
@@ -169,19 +168,17 @@ Before starting, document:
 - the merge order for dependent changes; and
 - the test command required in each repository.
 
-### Add another branch after creation
+### Add sources after creation
 
-The regular task UI does not currently expose an after-creation add-branch form. A task agent using the **git-worktree** executor can call `add_branch_to_task_kandev`.
+For an idle, non-archived repository-backed task, use **Files → Workspace actions → Add Repositories to workspace**. Its **Local** mode shares task creation's saved/discovered local-repository selector, including refresh and create-repository actions, and offers local folders when the executor supports them; its **Remote** mode uses provider-backed repositories or pasted repository URLs. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer.
 
-- Identify exactly one repository by task repository ID, GitHub repository URL, or local path. Omit the locator only when the task has one unique repository.
-- For a multi-repository task, the repository locator is required.
-- An empty checkout branch creates a fresh feature branch from the selected base.
-- The base defaults to the repository's default branch when omitted.
-- A repository/base/checkout tuple must be unique on the task.
-- The tool can add a second branch from an attached repository or attach a branch from another repository.
-- A launched task must use the **git-worktree** executor. A task with no fixed environment yet is allowed through the prelaunch path, but it must ultimately use git-worktree for the added branch to be materialized as a sibling worktree.
+Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Folder sources are live host grants and work only on **Worktree** and **Local/Local PC**; they are unavailable to Docker and remote runtimes. Remote Docker remains unimplemented. Local Git sources need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use host repositories directly.
 
-On a live task, branch materialization is synchronous; if it fails, Kandev removes the new task-repository row and returns an error. On a prelaunch task, a materialization failure leaves the row in place and defers worktree creation to the next session launch. Branch names that differ but sanitize to the same on-disk slug are rejected because they would collide at the worktree path.
+Use a base branch for every repository attachment. Local/Local PC never changes the user-owned repository checkout.
+
+Kandev rejects the entire request if a source is invalid, duplicated, inaccessible, or cannot be materialized. A failure removes new source records and Kandev-owned materialization; existing task contents remain intact. Attachments persist across reload, relaunch, and reset. A missing persisted folder is surfaced during a new or reset environment rather than silently omitted.
+
+Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task. `add_branch_to_task_kandev` remains available for its legacy one-repository/branch input. Neither operation can run during an active turn or tool call.
 
 Use `update_repository_base_branch_kandev` with a task-repository ID to change the comparison base. The database update is authoritative. Resetting cached session bases, refreshing Changes, base commit, ahead/behind counts, and cumulative diff in a live tracker are best-effort side effects; a failure is logged without rolling back the new base, and the persisted value is rebuilt on the next session launch. The tool does not rewrite commits, switch the checkout, or change an existing pull request's target branch.
 
@@ -233,7 +230,7 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 - **Summarize session is missing:** configure a utility agent; otherwise use **Blank** or **Copy initial prompt**.
 - **Parallel agents overwrite work:** stop one writer, assign disjoint files, or create an isolated subtask workspace.
 - **Subtask cannot be created:** confirm title, prompt, compatible profile, workflow, and the one-level Kanban depth limit.
-- **Subtask creates but its agent or repositories fail to start:** the dialog does not enforce agent/executor compatibility. Confirm the agent is configured on that executor, and use **git-worktree** for two or more repository rows.
+- **Subtask creates but its agent or repositories fail to start:** the dialog does not enforce agent/executor compatibility. Confirm the agent is configured on that executor; multi-repository creation supports Worktree, Local Docker, SSH, and Sprites.
 - **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
 - **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.
 - **Interrupt is rejected:** only the target's direct parent may use interrupt delivery.
@@ -241,8 +238,8 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 - **Stop reports `stopped` but a process is still visible:** the response confirms logical cancellation and scheduled graceful teardown, not process exit.
 - **Agent cannot spawn on another task:** `spawn_session_kandev` is same-workspace only; create a task or use a normal targeted message instead.
 - **Parent does not advance after children finish:** the parent needs an active session in `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT` in addition to terminal direct children.
-- **A multi-repository executor is disabled:** multi-repository tasks require **git-worktree**.
-- **Add branch is rejected:** launched tasks require a worktree executor; multi-repository tasks require an unambiguous locator, repository URLs must be GitHub URLs, and sanitized branch slugs must be unique.
+- **A multi-repository executor is disabled:** Local/Local PC creation is still gated, or Remote Docker is not implemented. Choose Worktree, Local Docker, SSH, or Sprites.
+- **Adding repositories is rejected:** wait until the task has no active turn or tool call, check every source's locator and branch, and remove duplicate repository/branch pairs or folder paths. A Docker or remote task cannot attach a folder.
 - **Changed base did not refresh immediately:** the database value is saved even when live tracker refresh fails; the next session launch rebuilds the comparison state.
 - **Changed base did not retarget the PR:** the base-update tool changes Kandev's comparison context, not Git history or provider PR metadata.
 

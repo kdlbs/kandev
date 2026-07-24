@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -861,7 +863,103 @@ func TestCreateExecutionResolvesProfileOnceForEnvAndAutoApprove(t *testing.T) {
 	}
 }
 
+func TestCreateExecutionRunsRemoteResumePreflightBeforeCreatingWorkspaceExecution(t *testing.T) {
+	log := newTestLogger()
+	backend := &resumeTrackingExecutor{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		client:       newReadyAgentctlClient(t, log),
+	}
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+
+	metadata := map[string]interface{}{"ssh_host": "recovery.example", "ssh_port": 2222}
+	_, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
+		SessionID:        "session-1",
+		AgentID:          "auggie",
+		WorkspacePath:    "/workspace/task-1",
+		Metadata:         metadata,
+		AgentExecutionID: "previous-execution",
+	})
+	if err != nil {
+		t.Fatalf("createExecution returned error: %v", err)
+	}
+	if got, want := backend.calls, []string{"resume", "create"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("backend calls = %v, want %v", got, want)
+	}
+	if backend.createRequest == nil {
+		t.Fatal("CreateInstance was not called")
+	}
+	if got := backend.createRequest.PreviousExecutionID; got != "previous-execution" {
+		t.Fatalf("PreviousExecutionID = %q, want %q", got, "previous-execution")
+	}
+	if got := backend.createRequest.Metadata; !reflect.DeepEqual(got, metadata) {
+		t.Fatalf("Metadata = %#v, want %#v", got, metadata)
+	}
+}
+
+func TestCreateExecutionReturnsRemoteResumePreflightError(t *testing.T) {
+	log := newTestLogger()
+	backend := &resumeTrackingExecutor{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		client:       newReadyAgentctlClient(t, log),
+		resumeErr:    errors.New("remote unavailable"),
+	}
+	execRegistry := NewExecutorRegistry(log)
+	execRegistry.Register(backend)
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry, &MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+
+	_, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
+		SessionID:     "session-1",
+		AgentID:       "auggie",
+		WorkspacePath: "/workspace/task-1",
+	})
+	if !errors.Is(err, backend.resumeErr) {
+		t.Fatalf("createExecution error = %v, want remote resume error", err)
+	}
+	if !strings.Contains(err.Error(), "failed remote resume preflight") {
+		t.Fatalf("createExecution error = %q, want remote resume preflight context", err)
+	}
+	if got, want := backend.calls, []string{"resume"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("backend calls = %v, want %v", got, want)
+	}
+}
+
 // --- test helpers ---
+
+type resumeTrackingExecutor struct {
+	MockExecutor
+	client        *agentctl.Client
+	resumeErr     error
+	calls         []string
+	createRequest *ExecutorCreateRequest
+}
+
+func (e *resumeTrackingExecutor) ResumeRemoteInstance(_ context.Context, _ *ExecutorCreateRequest) error {
+	e.calls = append(e.calls, "resume")
+	return e.resumeErr
+}
+
+func (e *resumeTrackingExecutor) CreateInstance(_ context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	e.calls = append(e.calls, "create")
+	e.createRequest = req
+	return &ExecutorInstance{
+		InstanceID:    req.InstanceID,
+		TaskID:        req.TaskID,
+		SessionID:     req.SessionID,
+		RuntimeName:   e.Name(),
+		Client:        e.client,
+		WorkspacePath: req.WorkspacePath,
+	}, nil
+}
 
 type doneObservedContext struct {
 	context.Context

@@ -3,11 +3,12 @@ package events
 
 // Event types for tasks
 const (
-	TaskCreated      = "task.created"
-	TaskUpdated      = "task.updated"
-	TaskStateChanged = "task.state_changed"
-	TaskDeleted      = "task.deleted"
-	TaskMoved        = "task.moved" // Manual step change via MoveTask
+	TaskCreated                    = "task.created"
+	TaskUpdated                    = "task.updated"
+	TaskStateChanged               = "task.state_changed"
+	TaskDeleted                    = "task.deleted"
+	TaskMoved                      = "task.moved" // Manual step change via MoveTask
+	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
 )
 
 // Event types for office task tree controls.

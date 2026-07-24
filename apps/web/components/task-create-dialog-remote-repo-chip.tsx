@@ -39,6 +39,10 @@ import {
 import { remoteRepositoryMatchesSelection } from "./task-create-dialog-remote-repo-identity";
 
 export { selectedRemoteRepositoryIdentity } from "./task-create-dialog-remote-repo-identity";
+import {
+  looksLikeSupportedRemoteURL,
+  looksLikeURL,
+} from "@/components/workspace-source-picker/remote-url";
 
 const TRUNCATE_THRESHOLD = 30;
 
@@ -392,30 +396,6 @@ function visibleProviderRepositories(
     : accessible.repos;
   return { showProviderTabs, selectedProvider, visibleRepos };
 }
-
-function looksLikeURL(value: string): boolean {
-  if (!value) return false;
-  const withScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
-  try {
-    const parsed = new URL(withScheme);
-    return parsed.hostname.includes(".") && value.includes("/");
-  } catch {
-    return false;
-  }
-}
-
-function looksLikeSupportedRemoteURL(value: string): boolean {
-  if (/^git@(github\.com|gitlab\.com|ssh\.dev\.azure\.com):\S+$/i.test(value)) return true;
-  if (!looksLikeURL(value)) return false;
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
-  try {
-    const host = new URL(candidate).hostname.toLowerCase();
-    return host === "github.com" || host === "gitlab.com" || host === "dev.azure.com";
-  } catch {
-    return false;
-  }
-}
-
 function PickerList({
   accessible,
   selectedRepositoryIdentities,

@@ -222,6 +222,32 @@ func TestHTTPUpdateRepositoryIgnoresRemoteURL(t *testing.T) {
 	}
 }
 
+func TestHTTPListRepositoriesIncludesRemoteURL(t *testing.T) {
+	router, repo := newRepositoryHTTPTestRouter(t)
+	if err := repo.CreateRepository(context.Background(), &models.Repository{
+		ID: "remote-repository", WorkspaceID: "ws-1", Name: "api", RemoteURL: "https://git.example.com/acme/api.git",
+	}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/workspaces/ws-1/repositories", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusOK, response.Body.String())
+	}
+	var body struct {
+		Repositories []struct {
+			RemoteURL string `json:"remote_url"`
+		} `json:"repositories"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(body.Repositories) != 1 || body.Repositories[0].RemoteURL != "https://git.example.com/acme/api.git" {
+		t.Fatalf("remote_url missing from response: %s", response.Body.String())
+	}
+}
+
 type repositoryHandlerRemoteLister struct {
 	calls int
 }

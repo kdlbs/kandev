@@ -44,6 +44,7 @@ type executorStore interface {
 	// Task↔repo junction
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
+	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
 	// Session
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
@@ -372,13 +373,16 @@ type LaunchAgentRequest struct {
 	// When non-empty it is the source of truth and the legacy single-repo
 	// top-level fields above are populated from Repositories[0] for backwards
 	// compatibility with code paths that have not yet been updated.
-	Repositories []RepoSpec
+	Repositories     []RepoSpec
+	WorkspaceFolders []WorkspaceFolderSpec
 
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. nil when routing is disabled or this is a kanban
 	// launch.
 	RouteOverride *RouteOverride
 }
+
+type WorkspaceFolderSpec struct{ Name, LocalPath string }
 
 // RepoSpec describes one repository for a multi-repo task launch from the
 // orchestrator. Mirrors lifecycle.RepoLaunchSpec; kept as a separate type so

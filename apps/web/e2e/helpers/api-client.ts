@@ -1521,6 +1521,13 @@ export class ApiClient {
       checkout_branch?: string;
       position: number;
     }>;
+    workspace_folders?: Array<{
+      id: string;
+      task_id: string;
+      local_path: string;
+      display_name: string;
+      position: number;
+    }>;
   }> {
     return this.request("GET", `/api/v1/tasks/${taskId}`);
   }

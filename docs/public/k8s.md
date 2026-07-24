@@ -168,7 +168,7 @@ Local and Worktree profiles run agents inside the Kandev pod. Install agent CLIs
 
 The checked-in ConfigMap disables Local Docker. Do not add only a Docker socket mount: the current runtime also needs helper, credential-session, and local-clone bind sources to exist at identical paths on the Docker daemon host, and it currently selects a Linux/amd64 helper. See [containerized control plane limitation](docker.md#containerized-control-plane-limitation). A privileged Docker-in-Docker sidecar has a separate security and persistence model and no supplied Kandev manifest.
 
-SSH and Sprites profiles can run from Kubernetes if the pod can reach their endpoints and has the required secrets/helper bundle. SSH currently does not materialize attached repositories; review [SSH limitations](executors.md#current-repository-limitation). Remote Docker is unimplemented.
+SSH and Sprites profiles can run from Kubernetes if the pod can reach their endpoints and has the required secrets/helper bundle. SSH can materialize repository sources; review [SSH repository-source limits](executors.md#repository-sources-and-cleanup). Remote Docker is unimplemented.
 
 Interactive commands should run as the service user. With the base image, a Kubernetes exec starts as root, so use:
 

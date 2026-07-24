@@ -213,6 +213,7 @@ type mockStopTracker struct {
 	name              executor.Name
 	stopCalled        bool
 	stoppedInstanceID string
+	stopReason        string
 }
 
 func (m *mockStopTracker) Name() executor.Name { return m.name }
@@ -225,7 +226,30 @@ func (m *mockStopTracker) CreateInstance(ctx context.Context, req *ExecutorCreat
 func (m *mockStopTracker) StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error {
 	m.stopCalled = true
 	m.stoppedInstanceID = instance.InstanceID
+	m.stopReason = instance.StopReason
 	return nil
+}
+
+func TestManagerStopAllAgentsPassesBackendShutdownReason(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	mock := &mockStopTracker{name: "standalone"}
+	execRegistry.Register(mock)
+	mgr := NewManager(nil, &MockEventBus{}, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	if err := mgr.executionStore.Add(&AgentExecution{
+		ID:          "exec-1",
+		SessionID:   "session-1",
+		RuntimeName: "standalone",
+	}); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	if err := mgr.StopAllAgents(context.Background()); err != nil {
+		t.Fatalf("StopAllAgents: %v", err)
+	}
+	if mock.stopReason != StopReasonBackendShutdown {
+		t.Fatalf("StopInstance reason = %q, want %q", mock.stopReason, StopReasonBackendShutdown)
+	}
 }
 func (m *mockStopTracker) RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error) {
 	return nil, nil
