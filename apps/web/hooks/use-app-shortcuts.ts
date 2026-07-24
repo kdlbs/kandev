@@ -2,16 +2,8 @@
 
 import { useEffect } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
-import { matchesShortcut } from "@/lib/keyboard/utils";
+import { isEditableKeydownTarget, matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
-
-/** Returns true if the active element is a text input or contenteditable. */
-function isEditableTarget(e: KeyboardEvent): boolean {
-  const tag = (e.target as HTMLElement)?.tagName;
-  return (
-    tag === "INPUT" || tag === "TEXTAREA" || (e.target as HTMLElement)?.isContentEditable === true
-  );
-}
 
 /**
  * App-root keyboard shortcuts that must fire on every route — not just inside
@@ -25,13 +17,27 @@ function isEditableTarget(e: KeyboardEvent): boolean {
  *
  * The AppSidebar is hidden below the `md` breakpoint; on mobile the toggle still
  * flips store state but has no visible effect, which is fine.
+ *
+ * Core-vs-plugin precedence: must be mounted (in `components/global-commands.tsx`)
+ * before `usePluginShortcuts()` so this capture-phase listener registers — and
+ * therefore runs — first. `usePluginShortcuts` bails out on
+ * `event.defaultPrevented`, so a combo bound to both a core shortcut here and a
+ * plugin keybinding fires only the core action.
+ *
+ * Full precedence chain (a matching combo fires exactly one action):
+ * central `useAppShortcuts` (this hook, capture phase, mounted first) wins
+ * over plugin keybindings (`usePluginShortcuts`, capture phase, mounted
+ * second), which win over per-component core shortcuts registered via
+ * `useKeyboardShortcut` (bubble phase) — that hook also bails out on
+ * `event.defaultPrevented`.
  */
 export function useAppShortcuts() {
   const appStore = useAppStoreApi();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (isEditableTarget(e)) return;
+      if (e.defaultPrevented) return;
+      if (isEditableKeydownTarget(e)) return;
 
       const overrides = appStore.getState().userSettings.keyboardShortcuts;
       if (matchesShortcut(e, getShortcut("TOGGLE_SIDEBAR", overrides))) {

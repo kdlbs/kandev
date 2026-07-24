@@ -788,14 +788,15 @@ func startGatewayAndServe(
 	// ============================================
 	// HTTP SERVER
 	// ============================================
-	server := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
+	server, err := buildHTTPServer(cfg, log, gateway, repos, services, agentSettingsController,
 		lifecycleMgr, eventBus, orchestratorSvc, notificationCtrl, msgCreator, agentRegistry, hostUtilityMgr,
 		addCleanup, repoCloner, systemSvc, storageComposition.workspaceRestorer)
-
-	port := cfg.Server.Port
-	if port == 0 {
-		port = ports.Backend
+	if err != nil {
+		log.Error("Failed to build HTTP server", zap.Error(err))
+		return false
 	}
+
+	port := resolvedHTTPPort(cfg)
 	hosts, err := cfg.Server.ResolvedBinds()
 	if err != nil {
 		log.Error("Invalid server bind configuration", zap.Error(err))
@@ -1644,6 +1645,15 @@ func buildOfficeDashboardService(
 }
 
 // buildHTTPServer creates the HTTP server with all routes registered.
+var newInterimSettingsInterlockToken = httpmw.NewInterimSettingsInterlockToken
+
+func resolvedHTTPPort(cfg *config.Config) int {
+	if cfg.Server.Port != 0 {
+		return cfg.Server.Port
+	}
+	return ports.Backend
+}
+
 func buildHTTPServer(
 	cfg *config.Config,
 	log *logger.Logger,
@@ -1662,56 +1672,56 @@ func buildHTTPServer(
 	repoCloner *repoclone.Cloner,
 	systemSvc *systemsvc.Service,
 	workspaceRestorer taskhandlers.WorkspaceQuarantineRestorer,
-) *http.Server {
+) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
 	router.Use(httpmw.RequestLogger(log, "kandev"))
 	router.Use(httpmw.OtelTracing("kandev"))
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
-
-	port := cfg.Server.Port
-	if port == 0 {
-		port = ports.Backend
+	interimSettingsInterlockToken, err := newInterimSettingsInterlockToken()
+	if err != nil {
+		return nil, fmt.Errorf("generate interim settings interlock token: %w", err)
 	}
 
 	registerRoutes(routeParams{
-		router:                  router,
-		gateway:                 gateway,
-		taskSvc:                 services.Task,
-		taskRepo:                repos.Task,
-		officeRepo:              repos.Office,
-		analyticsRepo:           repos.Analytics,
-		orchestratorSvc:         orchestratorSvc,
-		lifecycleMgr:            lifecycleMgr,
-		hostUtilityMgr:          hostUtilityMgr,
-		eventBus:                eventBus,
-		services:                services,
-		systemSvc:               systemSvc,
-		workspaceRestorer:       workspaceRestorer,
-		runtimeFlagsSvc:         services.RuntimeFlags,
-		agentSettingsController: agentSettingsController,
-		agentSettingsRepo:       repos.AgentSettings,
-		agentList:               agentRegistry,
-		agentRegistry:           agentRegistry,
-		userCtrl:                usercontroller.NewController(services.User),
-		notificationCtrl:        notificationCtrl,
-		editorCtrl:              editorcontroller.NewController(services.Editor),
-		promptCtrl:              promptcontroller.NewController(services.Prompts),
-		utilityCtrl:             utilitycontroller.NewController(services.Utility),
-		msgCreator:              msgCreator,
-		secretsSvc:              secrets.NewService(repos.Secrets, log),
-		secretStore:             repos.Secrets,
-		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
-		addCleanup:              addCleanup,
-		repoCloner:              repoCloner,
-		version:                 Version,
-		webInternalURL:          cfg.Server.WebInternalURL,
-		devMode:                 cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
-		httpPort:                port,
-		features:                cfg.Features,
-		voice:                   cfg.Voice,
-		log:                     log,
+		router:                        router,
+		gateway:                       gateway,
+		taskSvc:                       services.Task,
+		taskRepo:                      repos.Task,
+		officeRepo:                    repos.Office,
+		analyticsRepo:                 repos.Analytics,
+		orchestratorSvc:               orchestratorSvc,
+		lifecycleMgr:                  lifecycleMgr,
+		hostUtilityMgr:                hostUtilityMgr,
+		eventBus:                      eventBus,
+		services:                      services,
+		systemSvc:                     systemSvc,
+		workspaceRestorer:             workspaceRestorer,
+		runtimeFlagsSvc:               services.RuntimeFlags,
+		agentSettingsController:       agentSettingsController,
+		agentSettingsRepo:             repos.AgentSettings,
+		agentList:                     agentRegistry,
+		agentRegistry:                 agentRegistry,
+		userCtrl:                      usercontroller.NewController(services.User),
+		notificationCtrl:              notificationCtrl,
+		editorCtrl:                    editorcontroller.NewController(services.Editor),
+		promptCtrl:                    promptcontroller.NewController(services.Prompts),
+		utilityCtrl:                   utilitycontroller.NewController(services.Utility),
+		msgCreator:                    msgCreator,
+		secretsSvc:                    secrets.NewService(repos.Secrets, log),
+		secretStore:                   repos.Secrets,
+		mcpConfigSvc:                  mcpconfig.NewService(repos.AgentSettings),
+		addCleanup:                    addCleanup,
+		repoCloner:                    repoCloner,
+		version:                       Version,
+		webInternalURL:                cfg.Server.WebInternalURL,
+		devMode:                       cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
+		httpPort:                      resolvedHTTPPort(cfg),
+		features:                      cfg.Features,
+		voice:                         cfg.Voice,
+		interimSettingsInterlockToken: interimSettingsInterlockToken,
+		log:                           log,
 	})
 
 	// Addr is intentionally left unset: bind addresses are resolved from
@@ -1722,7 +1732,7 @@ func buildHTTPServer(
 		Handler:      router,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),
 		WriteTimeout: cfg.Server.WriteTimeoutDuration(),
-	}
+	}, nil
 }
 
 // awaitShutdown waits for an OS signal then performs graceful shutdown.

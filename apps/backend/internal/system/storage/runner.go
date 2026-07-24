@@ -31,6 +31,7 @@ type RunnerConfig struct {
 	Activity  *activity.Coordinator
 	Store     RunStore
 	Providers []CleanupProvider
+	Overview  OverviewInvalidator
 	NewID     func() string
 	Now       func() time.Time
 }
@@ -39,6 +40,7 @@ type Runner struct {
 	activity  *activity.Coordinator
 	store     RunStore
 	providers []CleanupProvider
+	overview  OverviewInvalidator
 	newID     func() string
 	now       func() time.Time
 }
@@ -62,7 +64,7 @@ func NewRunner(config RunnerConfig) *Runner {
 	}
 	return &Runner{
 		activity: config.Activity, store: config.Store, providers: config.Providers,
-		newID: newID, now: now,
+		overview: config.Overview, newID: newID, now: now,
 	}
 }
 
@@ -173,6 +175,9 @@ func (r *Runner) finishRun(
 	run, err := r.transitionRun(ctx, id, state, marshalRunResult(result), message)
 	if err != nil {
 		return MaintenanceRun{}, err
+	}
+	if state == RunStateSucceeded && r.overview != nil {
+		r.overview.Invalidate()
 	}
 	return run, runErr
 }

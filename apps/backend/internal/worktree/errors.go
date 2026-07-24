@@ -113,14 +113,22 @@ func isRemoteRefMissingError(err error) bool {
 // based on the command output.
 func ClassifyGitError(output string, _ error) error {
 	trimmed := strings.TrimSpace(output)
+	lowerOutput := strings.ToLower(output)
 
 	switch {
 	case isBranchCheckedOutError(output):
 		return fmt.Errorf("%w: %s", ErrBranchCheckedOut, trimmed)
-	case containsAuthFailure(strings.ToLower(output)):
+	case containsAuthFailure(lowerOutput):
 		return fmt.Errorf("%w: %s", ErrAuthFailed, trimmed)
-	case strings.Contains(strings.ToLower(output), "non-fast-forward"):
+	case strings.Contains(lowerOutput, "non-fast-forward"):
 		return fmt.Errorf("%w: %s", ErrNonFastForward, trimmed)
+	case strings.Contains(lowerOutput, "filename too long"):
+		return fmt.Errorf(
+			"%w: Git could not materialize the worktree and may have hit a path-length limit. "+
+				"Kandev enabled Git long paths for this command; on Windows, enable Win32 long paths "+
+				"or use a shorter checkout path. Git output: %s",
+			ErrGitCommandFailed, trimmed,
+		)
 	default:
 		return fmt.Errorf("%w: %s", ErrGitCommandFailed, trimmed)
 	}

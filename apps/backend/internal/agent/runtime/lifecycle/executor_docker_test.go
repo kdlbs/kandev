@@ -3,10 +3,14 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
@@ -161,6 +165,38 @@ func TestDockerStopInstanceStopsContainerOnStaleCleanup(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "docker required for stale cleanup") {
 		t.Fatalf("StopInstance error = %v", err)
+	}
+}
+
+func TestRollbackLaunchExecutionForceKillsUnregisteredDockerContainer(t *testing.T) {
+	requests := make(chan string, 1)
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requests <- r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+
+	mgr := newTestManager(t)
+	mgr.rollbackLaunchExecution(context.Background(), dockerExec, &ExecutorInstance{
+		InstanceID:  "failed-instance",
+		ContainerID: "failed-container",
+	}, &AgentExecution{ID: "failed-execution", SessionID: "failed-session"}, "command construction failed")
+
+	select {
+	case got := <-requests:
+		require.Equal(t, http.MethodPost, strings.Fields(got)[0])
+		require.True(t, strings.HasSuffix(got, "/containers/failed-container/kill"), got)
+	default:
+		t.Fatal("rollback must force Docker cleanup for an unregistered failed instance")
 	}
 }
 

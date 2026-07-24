@@ -582,7 +582,11 @@ export function useTaskCreateDialogData(
   const taskCreateUserSettings = useEnsureUserSettings(open);
 
   useSettingsData(open);
-  const { repositories, isLoading: repositoriesLoading } = useRepositories(workspaceId, open);
+  const {
+    repositories,
+    isLoading: repositoriesLoading,
+    refresh: refreshRepositories,
+  } = useRepositories(workspaceId, open);
   // Per-repo branch loading lives in each chip now (RepoChipsRow). No
   // global branch query is needed here — the chip uses useRepositoryBranches
   // for its own row, and the store dedupes by repositoryId.
@@ -613,6 +617,7 @@ export function useTaskCreateDialogData(
     snapshots,
     repositories,
     repositoriesLoading,
+    refreshRepositories,
     branchesLoading,
     taskCreateLastUsed: taskCreateUserSettings.userSettings.taskCreateLastUsed,
     userSettingsLoaded: taskCreateUserSettings.loaded,

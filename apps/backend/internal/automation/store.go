@@ -14,6 +14,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 // Store provides SQLite persistence for automations.
@@ -438,12 +439,13 @@ func (s *Store) updateRunTerminalStatus(ctx context.Context, taskID string, stat
 }
 
 // ListRuns returns recent runs for an automation. A task_created run whose
-// generated task has been archived or no longer exists is reported as
-// cancelled — the task's outcome is unknown and it's no longer outstanding
-// work — without touching runs that already reached a real terminal
-// status. Falls back to the raw stored status when the tasks table isn't
-// present (isolated automation-only tests; production always has it,
-// migrated by the task repository before automation triggers can fire).
+// generated task has been archived is reported as archived; one whose task
+// is gone entirely or explicitly cancelled is reported as cancelled — see
+// listRunsWithTaskState for the full precedence — without touching runs
+// that already reached a real terminal status. Falls back to the raw
+// stored status when the tasks table isn't present (isolated
+// automation-only tests; production always has it, migrated by the task
+// repository before automation triggers can fire).
 func (s *Store) ListRuns(ctx context.Context, automationID string, limit int) ([]*AutomationRun, error) {
 	if limit <= 0 {
 		limit = 50
@@ -470,11 +472,36 @@ func (s *Store) listRunsWithTaskState(ctx context.Context, automationID string, 
 	// and displays as cancelled rather than its raw stored status —
 	// reachable today only through the e2e run-seeding endpoint, never in
 	// production.
+	//
+	// Three read-time overrides of a still-open task_created run, in
+	// priority order: (1) the task row is gone entirely — deleted, outcome
+	// unrecoverable — shown as cancelled; (2) the task was archived
+	// (archived_at set, via the UI or by the agent itself, e.g. an
+	// "archive this task" instruction) — shown as archived, which takes
+	// precedence over the session check below; (3) the task's current
+	// (is_primary) session is CANCELLED — set only when an agent run was
+	// manually stopped (coordinator/MCP stop_task, or the UI Stop button)
+	// — a deliberate cancellation, shown as cancelled. Task.state is
+	// deliberately NOT consulted here: stopping an agent leaves the task
+	// itself at whatever state the stop caller chose (e.g. REVIEW) and
+	// only ever marks the *session* CANCELLED — see
+	// orchestrator.handleAgentStopped's "we do NOT update task state
+	// here" note. Filtering on is_primary picks the task's current
+	// session, so a resumed-and-completed task isn't misclassified by a
+	// stale cancelled session left over from an earlier stop. EXISTS
+	// (rather than a LEFT JOIN) keeps the query correct even if the
+	// "at most one is_primary=1 row per task" invariant is ever violated
+	// — a join would fan out and duplicate the run.
 	var runs []*AutomationRun
 	err := s.ro.SelectContext(ctx, &runs, `
 		SELECT ar.id, ar.automation_id, ar.trigger_id, ar.trigger_type, ar.task_id,
 			CASE
-				WHEN ar.status = ? AND (t.id IS NULL OR t.archived_at IS NOT NULL) THEN ?
+				WHEN ar.status = ? AND t.id IS NULL THEN ?
+				WHEN ar.status = ? AND t.archived_at IS NOT NULL THEN ?
+				WHEN ar.status = ? AND EXISTS (
+					SELECT 1 FROM task_sessions ts
+					WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
+				) THEN ?
 				ELSE ar.status
 			END AS status,
 			ar.dedup_key, ar.trigger_data, ar.error_message, ar.created_at
@@ -482,7 +509,10 @@ func (s *Store) listRunsWithTaskState(ctx context.Context, automationID string, 
 		LEFT JOIN tasks t ON t.id = ar.task_id
 		WHERE ar.automation_id = ?
 		ORDER BY ar.created_at DESC LIMIT ?`,
-		string(RunStatusTaskCreated), string(RunStatusCancelled), automationID, limit)
+		string(RunStatusTaskCreated), string(RunStatusCancelled),
+		string(RunStatusTaskCreated), string(RunStatusArchived),
+		string(RunStatusTaskCreated), string(taskmodels.TaskSessionStateCancelled), string(RunStatusCancelled),
+		automationID, limit)
 	return runs, err
 }
 
@@ -508,11 +538,11 @@ func (s *Store) HasRunWithDedupKey(ctx context.Context, automationID, dedupKey s
 
 // CountActiveRuns returns the number of runs with task_created status for
 // an automation whose generated task is still open. A task_created run
-// whose task was archived or deleted no longer represents outstanding
-// work — the user closed it out some other way — so it must not keep
-// counting against max_concurrent_runs forever. Falls back to a plain
-// count when the tasks table isn't present (isolated automation-only
-// tests; production always has it).
+// whose task was archived, deleted, or explicitly cancelled no longer
+// represents outstanding work — the user (or agent) closed it out some
+// other way — so it must not keep counting against max_concurrent_runs
+// forever. Falls back to a plain count when the tasks table isn't present
+// (isolated automation-only tests; production always has it).
 func (s *Store) CountActiveRuns(ctx context.Context, automationID string) (int, error) {
 	count, err := s.countActiveRunsWithTaskState(ctx, automationID)
 	if db.IsMissingTableError(err) {
@@ -525,13 +555,20 @@ func (s *Store) countActiveRunsWithTaskState(ctx context.Context, automationID s
 	// Same non-empty-task_id assumption as listRunsWithTaskState above: an
 	// empty ar.task_id never matches a real task row either, so such a run
 	// silently falls out of the active count below instead of erroring.
+	// See listRunsWithTaskState for why the current (is_primary) session's
+	// state, not the task's own state, is the cancellation signal, and why
+	// NOT EXISTS rather than a LEFT JOIN.
 	var count int
 	err := s.ro.GetContext(ctx, &count, `
 		SELECT COUNT(*) FROM automation_runs ar
 		LEFT JOIN tasks t ON t.id = ar.task_id
 		WHERE ar.automation_id = ? AND ar.status = ?
-			AND t.id IS NOT NULL AND t.archived_at IS NULL`,
-		automationID, string(RunStatusTaskCreated))
+			AND t.id IS NOT NULL AND t.archived_at IS NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM task_sessions ts
+				WHERE ts.task_id = ar.task_id AND ts.is_primary = 1 AND ts.state = ?
+			)`,
+		automationID, string(RunStatusTaskCreated), string(taskmodels.TaskSessionStateCancelled))
 	return count, err
 }
 

@@ -67,3 +67,37 @@ func TestUpdateUserSettingsMapsMCPTaskAgentProfileDefault(t *testing.T) {
 		t.Fatalf("MCPTaskAgentProfileDefault = %q, want %q", response.Settings.MCPTaskAgentProfileDefault, want)
 	}
 }
+
+func TestSystemMetricsDisplayPatch(t *testing.T) {
+	t.Run("nil patch stays nil", func(t *testing.T) {
+		if got := systemMetricsDisplayPatch(nil); got != nil {
+			t.Fatalf("systemMetricsDisplayPatch(nil) = %#v, want nil", got)
+		}
+	})
+
+	t.Run("explicit values are retained", func(t *testing.T) {
+		showInTopbar := true
+		simplified := false
+		got := systemMetricsDisplayPatch(&dto.SystemMetricsDisplaySettingsPatch{
+			ShowInTopbar: &showInTopbar,
+			Simplified:   &simplified,
+		})
+		if got == nil || got.ShowInTopbar == nil || got.Simplified == nil {
+			t.Fatalf("systemMetricsDisplayPatch() = %#v, want both values", got)
+		}
+		if !*got.ShowInTopbar || *got.Simplified {
+			t.Fatalf("systemMetricsDisplayPatch() = %#v, want true and false", got)
+		}
+	})
+
+	t.Run("omitted simplified stays nil", func(t *testing.T) {
+		showInTopbar := true
+		got := systemMetricsDisplayPatch(&dto.SystemMetricsDisplaySettingsPatch{ShowInTopbar: &showInTopbar})
+		if got == nil || got.ShowInTopbar == nil || !*got.ShowInTopbar {
+			t.Fatalf("systemMetricsDisplayPatch() = %#v, want show_in_topbar=true", got)
+		}
+		if got.Simplified != nil {
+			t.Fatalf("Simplified = %v, want nil for omitted field", *got.Simplified)
+		}
+	})
+}

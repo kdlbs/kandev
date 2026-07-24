@@ -333,6 +333,67 @@ func TestLaunchPreparedSession_MultiRepo_ReusesPerRepoWorktreeIDsFromEnvironment
 	}
 }
 
+// TestResumeSession_MultiRepo_PopulatesRequestRepositories is the resume-path
+// counterpart of TestLaunchPreparedSession_MultiRepo_PopulatesRequestRepositories.
+// buildResumeRequest loads task via the raw repository GetTask, which never
+// populates Task.Repositories (that's a separate one-to-many table loaded
+// only via ListTaskRepositories — see resolveAllRepoInfo). applyResumeMultiRepoConfig
+// must not gate on Task.Repositories: doing so silently drops every repo but
+// the primary on ANY resume of a multi-repo task, regardless of why the
+// session needed resuming.
+func TestResumeSession_MultiRepo_PopulatesRequestRepositories(t *testing.T) {
+	repo := newMockRepository()
+	const taskID = "task-multi-resume"
+	const sessionID = "session-multi-resume"
+	seedMultiRepoTask(t, repo, taskID)
+	seedWorktreeExecutor(repo)
+
+	// Mirrors the raw repository GetTask: no Repositories slice attached.
+	repo.tasks[taskID] = &models.Task{ID: taskID, WorkspaceID: "ws-1", Title: "Multi Resume"}
+	repo.sessions[sessionID] = &models.TaskSession{
+		ID:             sessionID,
+		TaskID:         taskID,
+		AgentProfileID: "profile-123",
+		ExecutorID:     models.ExecutorIDWorktree,
+		RepositoryID:   "repo-front",
+		State:          models.TaskSessionStateCancelled,
+		ErrorMessage:   models.SessionArchiveTreeCancelReason,
+		StartedAt:      time.Now(),
+		UpdatedAt:      time.Now(),
+	}
+
+	var captured *LaunchAgentRequest
+	agentManager := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			captured = req
+			return &LaunchAgentResponse{
+				AgentExecutionID: "exec-resume-multi",
+				WorktreePath:     "/tasks/x",
+				Worktrees: []RepoWorktreeResult{
+					{RepositoryID: "repo-front", WorktreeID: "wt-front", WorktreeBranch: "feat/x-1", WorktreePath: "/tasks/x/frontend"},
+					{RepositoryID: "repo-back", WorktreeID: "wt-back", WorktreeBranch: "feat/x-2", WorktreePath: "/tasks/x/backend"},
+				},
+			}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions[sessionID], false); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+
+	if captured == nil {
+		t.Fatal("expected launch agent to be called")
+	}
+	if len(captured.Repositories) != 2 {
+		t.Fatalf("expected req.Repositories length 2 (both repos recreated on resume), got %d: %+v",
+			len(captured.Repositories), captured.Repositories)
+	}
+	if captured.Repositories[0].RepositoryID != "repo-front" || captured.Repositories[1].RepositoryID != "repo-back" {
+		t.Errorf("unexpected repo order: %+v", captured.Repositories)
+	}
+}
+
 func TestReuseExistingRepositoryWorktrees_EnvironmentRowsWinOverSessionRows(t *testing.T) {
 	repo := newMockRepository()
 	taskID := "task-env-wins"

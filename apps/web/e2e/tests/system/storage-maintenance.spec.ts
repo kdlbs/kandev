@@ -64,6 +64,39 @@ test.describe("System storage maintenance", () => {
     await expect.poll(() => fs.existsSync(cache.artifact)).toBe(false);
   });
 
+  test("reuses the cached snapshot until Analyze refreshes it", async ({ testPage }) => {
+    await testPage.goto("/settings/system/storage");
+    const analyzedTime = testPage.locator("time[datetime]").filter({ hasText: "Last analyzed" });
+    await expect(analyzedTime).toHaveText(/^Last analyzed .+/);
+    const initialAnalyzedAt = await analyzedTime.getAttribute("datetime");
+    expect(initialAnalyzedAt).toBeTruthy();
+
+    await testPage.reload();
+    await expect(analyzedTime).toHaveAttribute("datetime", initialAnalyzedAt!);
+
+    const scheduling = testPage.getByTestId("storage-scheduling-enabled");
+    const initialSchedulingState = await scheduling.getAttribute("data-state");
+    try {
+      await scheduling.click();
+      await testPage.getByRole("button", { name: "Save changes" }).click();
+      await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+      await expect(analyzedTime).toHaveAttribute("datetime", initialAnalyzedAt!);
+
+      await testPage.getByTestId("storage-analyze").click();
+      await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute(
+        "data-job-state",
+        "succeeded",
+      );
+      await expect.poll(() => analyzedTime.getAttribute("datetime")).not.toBe(initialAnalyzedAt);
+    } finally {
+      if ((await scheduling.getAttribute("data-state")) !== initialSchedulingState) {
+        await scheduling.click();
+        await testPage.getByRole("button", { name: "Save changes" }).click();
+        await expect(testPage.getByText("Storage policy saved")).toBeVisible();
+      }
+    }
+  });
+
   test("persists policy and analyzes, quarantines, and restores an orphan workspace", async ({
     testPage,
     backend,

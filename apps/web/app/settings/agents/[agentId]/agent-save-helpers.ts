@@ -36,6 +36,7 @@ export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<Ag
   if (patch.auto_approve !== undefined) next.autoApprove = patch.auto_approve;
   if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
   if (patch.cli_flags !== undefined) next.cliFlags = patch.cli_flags;
+  if (patch.command_prefix !== undefined) next.commandPrefix = patch.command_prefix;
   return next;
 }
 
@@ -209,6 +210,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cliPassthrough ?? false,
       cli_flags: profile.cliFlags ?? [],
+      command_prefix: profile.commandPrefix ?? "",
       env_vars: profile.envVars ?? [],
     })),
   });
@@ -284,6 +286,7 @@ async function savePersistedProfile(
       ...permissionsToProfilePatch(profile),
       cli_passthrough: profile.cliPassthrough ?? false,
       cli_flags: profile.cliFlags ?? [],
+      command_prefix: profile.commandPrefix ?? "",
       env_vars: profile.envVars ?? [],
     });
   }
@@ -315,6 +318,7 @@ async function saveExistingProfiles(
           ...permissionsToProfilePatch(profile),
           cli_passthrough: profile.cliPassthrough ?? false,
           cli_flags: profile.cliFlags ?? [],
+          command_prefix: profile.commandPrefix ?? "",
           env_vars: profile.envVars ?? [],
         });
         profileIds.set(profile.id, createdProfile.id);
@@ -481,6 +485,15 @@ export function mergeSavedAgentDraft(
   return { ...saved, ...current, id: saved.id, name: saved.name, profiles };
 }
 
+function isProfileCliConfigDirty(draft: DraftProfile, saved: AgentProfile): boolean {
+  return (
+    draft.cliPassthrough !== saved.cliPassthrough ||
+    !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? []) ||
+    (draft.commandPrefix ?? "") !== (saved.commandPrefix ?? "") ||
+    !areEnvVarsEqual(draft.envVars, saved.envVars)
+  );
+}
+
 export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boolean {
   if (!saved) return true;
   return (
@@ -489,8 +502,6 @@ export function isProfileDirty(draft: DraftProfile, saved?: AgentProfile): boole
     (draft.mode ?? "") !== (saved.mode ?? "") ||
     !areConfigOptionsEqual(draft.configOptions, saved.configOptions) ||
     arePermissionsDirty(draft, saved) ||
-    draft.cliPassthrough !== saved.cliPassthrough ||
-    !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? []) ||
-    !areEnvVarsEqual(draft.envVars, saved.envVars)
+    isProfileCliConfigDirty(draft, saved)
   );
 }

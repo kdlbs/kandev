@@ -28,7 +28,7 @@ func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
 	}
 	output := ensureShellOutput(payload)
 	if normalized.hasStdout {
-		output.Stdout = normalized.stdout
+		output.Stdout = stripLeadingCommandEcho(payload.Command, normalized.stdout)
 		output.StdoutTruncated = normalized.stdoutTruncated
 	}
 	if normalized.hasStderr {
@@ -41,6 +41,51 @@ func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
 	if normalized.exitCode != nil {
 		output.ExitCode = normalized.exitCode
 	}
+}
+
+// stripLeadingCommandEcho removes a leading terminal-prompt echo of the tool
+// call's command from captured shell output. Some providers capture command
+// output via a real terminal session whose input echo - rendered behind a
+// "$ " shell prompt - is concatenated directly onto the actual output,
+// duplicating the command the UI already renders above the output
+// disclosure. Matching requires the literal "$ " prompt marker: a bare
+// command-text prefix with no prompt is not stripped, because legitimate
+// output can coincidentally start with text identical to the command (e.g.
+// a file whose contents happen to begin with the command string).
+//
+// Used for final/terminal results, where the buffer is known to be complete:
+// a stdout consisting of nothing but the echoed command commits to an empty
+// result rather than leaving the redundant echo visible.
+func stripLeadingCommandEcho(command, stdout string) string {
+	return stripCommandEcho(command, stdout, true)
+}
+
+// stripPendingCommandEcho is the live-update counterpart of
+// stripLeadingCommandEcho. Incremental terminal_output/terminal_output_delta
+// chunks can split exactly between the echoed command and the separator that
+// precedes real output (read() boundaries are arbitrary), so a buffer that
+// currently equals nothing but the echo is left untouched - the separator or
+// real output may still be in flight - instead of collapsing to empty and
+// orphaning a later chunk's leading newline.
+func stripPendingCommandEcho(command, stdout string) string {
+	return stripCommandEcho(command, stdout, false)
+}
+
+func stripCommandEcho(command, stdout string, commitExactMatch bool) string {
+	if command == "" || stdout == "" {
+		return stdout
+	}
+	rest, ok := strings.CutPrefix(stdout, "$ "+command)
+	if !ok {
+		return stdout
+	}
+	if rest == "" && !commitExactMatch {
+		return stdout
+	}
+	if trimmed, ok := strings.CutPrefix(rest, "\r\n"); ok {
+		return trimmed
+	}
+	return strings.TrimPrefix(rest, "\n")
 }
 
 // NormalizeShellToolUpdate merges live and final ACP shell result fields into
@@ -57,6 +102,22 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 	}
 	shell := payload.ShellExec()
 	recognized := false
+	// isFinal tracks whether THIS update carries a definitive completion
+	// signal - either a raw result payload or a reported exit code (the ACP
+	// terminal extension can finalize a command with only the latter, no
+	// rawOutput at all). Either signal means the strip must commit even if
+	// the buffer is nothing but the echo, instead of deferring forever with
+	// no further update ever arriving to re-trigger the strict path.
+	isFinal := rawOutput != nil
+	// finalStdoutCommitted tracks whether Stdout already went through a
+	// commit (strict) strip pass earlier in this same call, via
+	// applyFinalShellResult. Re-stripping an already-normalized value below
+	// would eat a second, legitimate occurrence of the command text (e.g.
+	// real output that happens to repeat "$ cmd"). A later terminal_output
+	// field that clobbers Stdout with the provider's raw, unstripped
+	// snapshot (the rawOutput-clobber path) clears the flag, since that raw
+	// value still needs exactly one strip.
+	finalStdoutCommitted := false
 
 	if data, ok := terminalOutputData(meta, "terminal_output_delta"); ok {
 		appendShellStdout(shell, data)
@@ -69,10 +130,12 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 	if rawOutput != nil {
 		applyFinalShellResult(shell, rawOutput)
 		recognized = true
+		finalStdoutCommitted = true
 	}
 	if data, ok := terminalOutputData(meta, "terminal_output"); ok {
 		if rawOutput != nil {
 			replaceShellStdout(shell, data)
+			finalStdoutCommitted = false
 		} else {
 			replaceOrAppendTerminalOutput(shell, data)
 		}
@@ -81,6 +144,19 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 	if exitCode, ok := terminalExitCode(meta); ok {
 		ensureShellOutput(shell).ExitCode = intPtr(exitCode)
 		recognized = true
+		isFinal = true
+	}
+
+	if shell.Output != nil {
+		switch {
+		case isFinal && !finalStdoutCommitted:
+			// A definitive completion signal arrived, and Stdout hasn't
+			// already been committed-stripped this call: commit now, even
+			// if the buffer is nothing but the echo.
+			shell.Output.Stdout = stripLeadingCommandEcho(shell.Command, shell.Output.Stdout)
+		case !isFinal:
+			shell.Output.Stdout = stripPendingCommandEcho(shell.Command, shell.Output.Stdout)
+		}
 	}
 
 	return recognized
@@ -103,6 +179,8 @@ func syncShellTruncation(output *streams.ShellExecOutput) {
 
 func appendShellStdout(payload *streams.ShellExecPayload, data string) {
 	output := ensureShellOutput(payload)
+	rawBounded, _ := boundShellOutput(output.RawTerminalOutput + data)
+	output.RawTerminalOutput = rawBounded
 	bounded, truncated := boundShellOutput(output.Stdout + data)
 	output.Stdout = bounded
 	output.StdoutTruncated = output.StdoutTruncated || truncated
@@ -112,19 +190,29 @@ func appendShellStdout(payload *streams.ShellExecPayload, data string) {
 func replaceShellStdout(payload *streams.ShellExecPayload, data string) {
 	output := ensureShellOutput(payload)
 	bounded, truncated := boundShellOutput(data)
+	output.RawTerminalOutput = bounded
 	output.Stdout = bounded
 	output.StdoutTruncated = truncated
 	syncShellTruncation(output)
 }
 
+// replaceOrAppendTerminalOutput merges a new cumulative terminal_output
+// snapshot into the stored output. The prefix comparison uses
+// RawTerminalOutput - a raw parallel of Stdout that mirrors the same bounded
+// append/replace bookkeeping but is never echo-stripped - rather than the
+// displayed Stdout. Stdout can already have had a leading command echo
+// stripped by the end of a prior update; comparing a fresh raw cumulative
+// frame against that stripped value would never find a matching prefix,
+// misclassifying every later frame as a new chunk and duplicating output
+// (plus reintroducing the very echo this file strips).
 func replaceOrAppendTerminalOutput(payload *streams.ShellExecPayload, data string) {
-	current := ensureShellOutput(payload).Stdout
-	if current == "" || strings.HasPrefix(data, current) {
+	baseline := ensureShellOutput(payload).RawTerminalOutput
+	if baseline == "" || strings.HasPrefix(data, baseline) {
 		replaceShellStdout(payload, data)
 		return
 	}
 	// ACP does not identify cumulative terminal_output values. Treat values
-	// without the current prefix as new chunks so mixed update streams remain intact.
+	// without the baseline prefix as new chunks so mixed update streams remain intact.
 	appendShellStdout(payload, data)
 }
 

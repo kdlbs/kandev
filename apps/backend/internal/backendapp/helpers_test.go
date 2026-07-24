@@ -1642,6 +1642,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 		taskservice.RepositoryDiscoveryConfig{},
 	)
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
+	taskSvc.SetWorkspaceBootstrapper(taskRepo)
 	taskSvc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: workflowSvc})
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})

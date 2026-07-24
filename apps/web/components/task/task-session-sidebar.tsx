@@ -13,7 +13,8 @@ import { buildTaskSwitcherProps } from "./task-session-sidebar-switcher-props";
 import { SidebarFilterBar } from "./sidebar-filter/sidebar-filter-bar";
 import { MOCK_ITEMS, MOCK_SIDEBAR } from "./sidebar-mock-data";
 import { SidebarDialogs } from "./task-session-sidebar-dialogs";
-import { PanelRoot, PanelBody } from "./panel-primitives";
+import { PanelRoot } from "./panel-primitives";
+import { TaskSidebarScrollArea } from "./task-sidebar-scroll-area";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useWorkspaceSidebarTasks } from "@/hooks/domains/kanban/use-workspace-sidebar-tasks";
 import { useTaskActions, useArchiveAndSwitchTask } from "@/hooks/use-task-actions";
@@ -493,9 +494,16 @@ export function useSidebarActions(store: StoreApi) {
   const linkActions = useSidebarLinkActions(store);
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
+  const [creatingSubtask, setCreatingSubtask] = useState<{ id: string; title: string } | null>(
+    null,
+  );
 
   const handleRenameTask = useCallback((taskId: string, currentTitle: string) => {
     setRenamingTask({ id: taskId, title: currentTitle });
+  }, []);
+
+  const handleCreateSubtask = useCallback((taskId: string, taskTitle: string) => {
+    setCreatingSubtask({ id: taskId, title: taskTitle });
   }, []);
 
   const handleRenameSubmit = useCallback(
@@ -521,6 +529,9 @@ export function useSidebarActions(store: StoreApi) {
     setRenamingTask,
     handleRenameTask,
     handleRenameSubmit,
+    creatingSubtask,
+    setCreatingSubtask,
+    handleCreateSubtask,
     ...linkActions,
     ...archiveActions,
     ...deleteActions,
@@ -626,10 +637,10 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   return (
     <PanelRoot data-testid="task-sidebar">
       {!hideFilterBar && <SidebarFilterBar />}
-      <PanelBody className="space-y-4 p-0" data-testid="task-sidebar-scroll">
+      <TaskSidebarScrollArea>
         <TaskSwitcher {...switcherProps} />
         <PluginSlot name="task-sidebar" />
-      </PanelBody>
+      </TaskSidebarScrollArea>
       <SidebarDialogs
         actions={sidebarActions}
         repositories={repositories}

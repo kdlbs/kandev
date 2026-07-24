@@ -211,7 +211,7 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	// Cancel active runs first. Failures are logged and skipped — a
 	// stuck cancel must not block the archive cascade; the orchestrator
 	// will reconcile any orphan execution on its next tick.
-	s.cancelActiveRuns(ctx, all, "task tree archived")
+	s.cancelActiveRuns(ctx, all, models.SessionArchiveTreeCancelReason)
 
 	// Archive deepest first so parent_id pointers stay valid through
 	// the walk; not strictly required by the schema (no FK on parent_id)

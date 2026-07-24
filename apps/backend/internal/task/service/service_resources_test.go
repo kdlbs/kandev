@@ -12,11 +12,86 @@ import (
 	"testing"
 	"time"
 
+	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
+
+type failingWorkspaceBootstrapper struct {
+	err error
+}
+
+func (b *failingWorkspaceBootstrapper) CreateWorkspaceWithKanban(
+	context.Context,
+	*models.Workspace,
+) (*models.Workflow, error) {
+	return nil, b.err
+}
+
+func TestService_CreateWorkspaceKanbanBootstrapPublishesParentBeforeWorkflow(t *testing.T) {
+	svc, eventBus, _ := createTestService(t)
+
+	_, err := svc.CreateWorkspace(context.Background(), &CreateWorkspaceRequest{
+		Name:                    "Kanban",
+		BootstrapKanbanWorkflow: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 2 {
+		t.Fatalf("published events = %d, want 2", len(published))
+	}
+	if published[0].Type != events.WorkspaceCreated || published[1].Type != events.WorkflowCreated {
+		t.Fatalf("event order = %q, %q; want workspace.created, workflow.created", published[0].Type, published[1].Type)
+	}
+}
+
+func TestService_CreateWorkspaceLogsKanbanBootstrapFailures(t *testing.T) {
+	testCases := []struct {
+		name         string
+		bootstrapper WorkspaceBootstrapper
+		wantErr      string
+	}{
+		{
+			name:    "missing bootstrapper",
+			wantErr: "workspace bootstrapper is not configured",
+		},
+		{
+			name:         "bootstrap persistence failure",
+			bootstrapper: &failingWorkspaceBootstrapper{err: errors.New("insert failed")},
+			wantErr:      "insert failed",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _, _ := createTestService(t)
+			svc.SetWorkspaceBootstrapper(tc.bootstrapper)
+			core, logs := observer.New(zapcore.ErrorLevel)
+			log, err := commonlogger.NewFromZap(zap.New(core))
+			if err != nil {
+				t.Fatalf("create logger: %v", err)
+			}
+			svc.logger = log
+
+			_, err = svc.CreateWorkspace(context.Background(), &CreateWorkspaceRequest{
+				Name:                    "Kanban",
+				BootstrapKanbanWorkflow: true,
+			})
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("CreateWorkspace error = %v, want %q", err, tc.wantErr)
+			}
+			if logs.FilterMessage("failed to create workspace with Kanban bootstrap").Len() != 1 {
+				t.Fatalf("bootstrap failure log count = %d, want 1", logs.Len())
+			}
+		})
+	}
+}
 
 func TestService_CreateRepositoryCanonicalizesExplicitLocalPath(t *testing.T) {
 	svc, _, repo := createTestService(t)

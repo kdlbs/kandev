@@ -3,6 +3,7 @@ package worktree
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -46,6 +47,32 @@ func TestClassifyGitError_GenericFailure(t *testing.T) {
 	err := ClassifyGitError(output, fmt.Errorf("exit status 1"))
 	if !errors.Is(err, ErrGitCommandFailed) {
 		t.Fatalf("expected ErrGitCommandFailed, got: %v", err)
+	}
+}
+
+func TestClassifyGitError_PathTooLongIncludesWindowsGuidanceAndGitOutput(t *testing.T) {
+	output := "error: unable to create file generated/very/long/project.csproj: Filename too long\n" +
+		"fatal: Could not reset index file to revision 'HEAD'."
+	err := ClassifyGitError(output, fmt.Errorf("exit status 128"))
+
+	if !errors.Is(err, ErrGitCommandFailed) {
+		t.Fatalf("expected ErrGitCommandFailed, got: %v", err)
+	}
+	for _, want := range []string{"Windows", "long paths", "Filename too long", "Could not reset index file"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("classified error %q does not contain %q", err, want)
+		}
+	}
+}
+
+func TestClassifyGitError_ResetIndexAloneDoesNotClaimPathLimit(t *testing.T) {
+	output := "fatal: Could not reset index file to revision 'HEAD'."
+	err := ClassifyGitError(output, fmt.Errorf("exit status 128"))
+
+	for _, misleading := range []string{"Windows", "path-length limit", "Win32 long paths"} {
+		if strings.Contains(err.Error(), misleading) {
+			t.Fatalf("generic reset-index error %q contains misleading guidance %q", err, misleading)
+		}
 	}
 }
 

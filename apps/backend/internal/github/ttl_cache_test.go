@@ -258,3 +258,73 @@ func TestTTLCache_MaxSizeEviction(t *testing.T) {
 		t.Fatalf("cache exceeded maxSize: %d", len(cache.entries))
 	}
 }
+
+func TestTTLCache_InvalidateIdleKeysDoesNotRetainEpochMetadata(t *testing.T) {
+	cache := newTTLCache()
+	for i := 0; i < 1000; i++ {
+		cache.invalidateKey(fmt.Sprintf("pr-%d", i))
+	}
+	if got := len(cache.keyEpochs); got != 0 {
+		t.Fatalf("idle invalidation retained %d epoch entries, want 0", got)
+	}
+}
+
+func TestTTLCache_InvalidateInFlightFillReclaimsEpochMetadata(t *testing.T) {
+	cache := newTTLCache()
+	oldStarted := make(chan struct{})
+	freshStarted := make(chan struct{})
+	unrelatedStarted := make(chan struct{})
+	releaseOld := make(chan struct{})
+	releaseFresh := make(chan struct{})
+	releaseUnrelated := make(chan struct{})
+	oldDone := make(chan struct{})
+	freshDone := make(chan struct{})
+	unrelatedDone := make(chan struct{})
+
+	go func() {
+		defer close(oldDone)
+		_, _ = cache.doOrFetch("affected", func() (any, error) {
+			close(oldStarted)
+			<-releaseOld
+			return "stale", nil
+		})
+	}()
+	go func() {
+		defer close(unrelatedDone)
+		_, _ = cache.doOrFetch("unrelated", func() (any, error) {
+			close(unrelatedStarted)
+			<-releaseUnrelated
+			return "unrelated", nil
+		})
+	}()
+
+	<-oldStarted
+	<-unrelatedStarted
+	cache.invalidateKey("affected")
+
+	go func() {
+		defer close(freshDone)
+		_, _ = cache.doOrFetch("affected", func() (any, error) {
+			close(freshStarted)
+			<-releaseFresh
+			return "fresh", nil
+		})
+	}()
+	<-freshStarted
+	close(releaseFresh)
+	<-freshDone
+	close(releaseOld)
+	close(releaseUnrelated)
+	<-oldDone
+	<-unrelatedDone
+
+	if value, ok := cache.get("affected"); !ok || value != "fresh" {
+		t.Fatalf("affected cache = %v, %t; want fresh, true", value, ok)
+	}
+	if value, ok := cache.get("unrelated"); !ok || value != "unrelated" {
+		t.Fatalf("unrelated cache = %v, %t; want unrelated, true", value, ok)
+	}
+	if got := len(cache.keyEpochs); got != 0 {
+		t.Fatalf("completed fills retained %d epoch entries, want 0", got)
+	}
+}

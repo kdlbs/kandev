@@ -108,7 +108,11 @@ func TestProcessRunnerStopLogsSignalAttempts(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	cmd, env := fixtureShellExec("sleep 30")
+	// Ignore the graceful interrupt so the process stays alive through
+	// stopProcess's graceful window; otherwise a fast SIGINT exit can close
+	// proc.done and race the pre-cancelled context in the select, making the
+	// SIGKILL-escalation log this test asserts nondeterministic (flaky on CI).
+	cmd, env := fixtureShellExec("sleep-ignore-signals 30")
 	info, err := runner.Start(ctx, StartProcessRequest{
 		SessionID:  "session-1",
 		Kind:       "dev",

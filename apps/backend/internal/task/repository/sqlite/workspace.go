@@ -16,6 +16,11 @@ import (
 
 // CreateWorkspace creates a new workspace
 func (r *Repository) CreateWorkspace(ctx context.Context, workspace *models.Workspace) error {
+	r.prepareWorkspace(workspace)
+	return r.insertWorkspace(ctx, r.db, workspace)
+}
+
+func (r *Repository) prepareWorkspace(workspace *models.Workspace) {
 	if workspace.ID == "" {
 		workspace.ID = uuid.New().String()
 	}
@@ -25,8 +30,10 @@ func (r *Repository) CreateWorkspace(ctx context.Context, workspace *models.Work
 	if workspace.TaskPrefix == "" {
 		workspace.TaskPrefix = "KAN"
 	}
+}
 
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+func (r *Repository) insertWorkspace(ctx context.Context, exec sqlx.ExtContext, workspace *models.Workspace) error {
+	_, err := exec.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workspaces (
 			id,
 			name,
@@ -189,6 +196,16 @@ func (r *Repository) deleteWorkspaceCascade(
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM tasks
 		WHERE workspace_id = ?
+	`), id); err != nil {
+		return nil, nil, err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM workflow_steps
+		WHERE workflow_id IN (
+			SELECT id
+			FROM workflows
+			WHERE workspace_id = ?
+		)
 	`), id); err != nil {
 		return nil, nil, err
 	}

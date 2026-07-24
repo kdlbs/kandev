@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -38,6 +39,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/workspaces/:id/repositories", h.httpListRepositories)
 	api.POST("/workspaces/:id/repositories", h.httpCreateRepository)
+	api.POST("/workspaces/:id/repositories/initialize-local", h.httpInitializeLocalRepository)
 	api.GET("/workspaces/:id/repositories/discover", h.httpDiscoverRepositories)
 	// Unified branch listing — accepts either ?repository_id= for an imported
 	// workspace repo, or ?path= for an on-machine folder discovered but not
@@ -49,6 +51,7 @@ func (h *RepositoryHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workspaces/:id/repositories/local-status", h.httpLocalRepositoryStatus)
 	api.GET("/workspaces/:id/repositories/validate", h.httpValidateRepositoryPath)
 	api.GET("/fs/list-dir", h.httpListDirectory)
+	api.POST("/fs/create-dir", h.httpCreateDirectory)
 	api.GET("/repositories/:id", h.httpGetRepository)
 	api.GET("/repositories/:id/branches", h.httpListRepositoryBranches)
 	api.GET("/repositories/:id/active-session-count", h.httpGetRepositoryActiveSessionCount)
@@ -154,14 +157,51 @@ func (h *RepositoryHandlers) httpListDirectory(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to list directory"})
 		return
 	}
-	entries := make([]gin.H, 0, len(result.Entries))
-	for _, e := range result.Entries {
-		entries = append(entries, gin.H{"name": e.Name, "path": e.Path})
-	}
 	c.JSON(http.StatusOK, gin.H{
 		"path":      result.Path,
 		"parent":    result.Parent,
-		"entries":   entries,
+		"entries":   directoryEntriesResponse(result.Entries),
+		"choosable": result.Choosable,
+	})
+}
+
+func directoryEntriesResponse(entries []service.DirectoryEntry) []gin.H {
+	response := make([]gin.H, 0, len(entries))
+	for _, entry := range entries {
+		response = append(response, gin.H{"name": entry.Name, "path": entry.Path})
+	}
+	return response
+}
+
+type httpCreateDirectoryRequest struct {
+	ParentPath string `json:"parent_path"`
+	Name       string `json:"name"`
+}
+
+func (h *RepositoryHandlers) httpCreateDirectory(c *gin.Context) {
+	var body httpCreateDirectoryRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	result, err := h.service.CreateDirectory(c.Request.Context(), body.ParentPath, body.Name)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrDirectoryAlreadyExists):
+			c.JSON(http.StatusConflict, gin.H{"error": "folder already exists"})
+		case errors.Is(err, service.ErrInvalidDirectoryCreation),
+			errors.Is(err, service.ErrInvalidLocalRepositoryInitialization):
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid folder location or name"})
+		default:
+			h.logger.Warn("failed to create directory", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create folder"})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{
+		"path":      result.Path,
+		"parent":    result.Parent,
+		"entries":   directoryEntriesResponse(result.Entries),
 		"choosable": result.Choosable,
 	})
 }
@@ -278,6 +318,39 @@ type httpCreateRepositoryRequest struct {
 	CleanupScript          string `json:"cleanup_script"`
 	DevScript              string `json:"dev_script"`
 	CopyFiles              string `json:"copy_files"`
+}
+
+type httpInitializeLocalRepositoryRequest struct {
+	Name       string `json:"name"`
+	ParentPath string `json:"parent_path"`
+}
+
+func (h *RepositoryHandlers) httpInitializeLocalRepository(c *gin.Context) {
+	var body httpInitializeLocalRepositoryRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+	initialized, err := h.service.InitializeLocalRepository(c.Request.Context(), &service.InitializeLocalRepositoryRequest{
+		WorkspaceID: c.Param("id"),
+		Name:        body.Name,
+		ParentPath:  body.ParentPath,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidLocalRepositoryInitialization):
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		case errors.Is(err, repository.ErrWorkspaceNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		case errors.Is(err, service.ErrLocalRepositoryTargetExists):
+			c.JSON(http.StatusConflict, gin.H{"error": "repository target already exists"})
+		default:
+			h.logger.Error("failed to initialize local repository", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to initialize local repository"})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, dto.FromRepository(initialized))
 }
 
 func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {

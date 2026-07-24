@@ -100,7 +100,9 @@ Kandev supports native Git repositories and worktrees. Windows still imposes fil
 - repository setup, cleanup, dev, and executor prepare scripts must use syntax available to their selected Windows shell; POSIX shell snippets do not become PowerShell automatically;
 - creating symbolic links often requires Windows Developer Mode or an elevated account;
 - a repository `copyFiles` entry using `:symlink` can therefore warn/fail on Windows—use a normal copy unless live linkage is required and symlinks are enabled; and
-- path-length errors remain dependent on Windows and Git configuration. Prefer short repository/Kandev-home roots; only enable Git's long-path support if allowed by local policy.
+- Kandev invokes its managed Git worktree commands with command-scoped `core.longpaths=true`. It does not change Git's system, global, or repository configuration.
+
+Windows long-path policy and each application's long-path awareness still apply. External Git clients and tools do not inherit Kandev's command-scoped setting. If Kandev still reports `Filename too long`, enable Win32 long paths when allowed by local policy or use a shorter `KANDEV_HOME_DIR`. Configure `core.longpaths` separately only when an external Git client needs it.
 
 Kandev uses Windows Job Objects and process-tree termination for managed child cleanup. An abruptly killed terminal or externally launched child can still outlive a session; inspect Task Manager and executor resources before deleting a worktree.
 

@@ -79,6 +79,11 @@ Open **Settings > System > Storage** to inspect Kandev-managed disk usage and co
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
 while task resources are active or another maintenance run owns the cleanup gate.
 
+Storage analysis results are cached in the running backend for 15 minutes, so page reloads and
+policy saves reuse the displayed snapshot instead of scanning disk again. The page shows when that
+snapshot was last analyzed. Select **Analyze** to force a fresh scan; restarting the backend also
+clears the in-memory snapshot.
+
 Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
 period. Orphaned task workspaces move into Kandev's quarantine before permanent deletion; review
 the quarantine list to restore an entry or request deletion as a background job. Host-wide Docker
@@ -246,7 +251,7 @@ After restart, verify `/health`, **System > About**, **System > Status**, the da
 
 ## Resource metrics
 
-Configure sampling at **Settings > General > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count.
+Configure sampling at **Settings > General > Appearance > Resource Metrics**. Defaults are CPU, memory, and disk percentage every five seconds, backend disk path `/`, and execution-environment collection off. Valid intervals are 1–300 seconds; at least one of CPU, memory, disk, CPU temperature, or 1-minute system load remains selected. System load is the average number of tasks running or waiting for CPU during the last minute; compare it with the host's CPU core count. Enable **Simplified metrics** to show only each metric icon and value in the status bar or phone Status drawer, without the Host marker or percentage progress bars.
 
 Collection starts only while at least one connected client displays metrics in the global status bar. Phone clients subscribe only while their Status drawer is open. The built-in status surface renders the Kandev host source only. Enabling execution metrics also adds active Docker, SSH, and Sprites `agentctl` sources to the metrics stream for separately owned consumers such as plugins; execution disk sampling uses `/`. A provider hook also exists for remote Docker, but creating that runtime currently returns a not-implemented error. Missing platform APIs, container permissions, an invalid disk path, a disconnected executor, macOS/Windows temperature support, or Windows load-average support produce unavailable samples rather than quotas.
 

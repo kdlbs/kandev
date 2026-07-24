@@ -525,6 +525,8 @@ function VoiceShortcutCard() {
       <CardContent>
         <ShortcutRecorder
           shortcutId="VOICE_INPUT_TOGGLE"
+          label={CONFIGURABLE_SHORTCUTS.VOICE_INPUT_TOGGLE.label}
+          defaultShortcut={CONFIGURABLE_SHORTCUTS.VOICE_INPUT_TOGGLE.default}
           current={current}
           onChange={handleChange}
           onReset={handleReset}

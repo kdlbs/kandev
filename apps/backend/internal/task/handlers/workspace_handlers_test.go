@@ -30,6 +30,82 @@ type workspaceDeleteRepo struct {
 	getErr           error
 }
 
+type recordingWorkspaceBootstrapper struct {
+	workspaces []*models.Workspace
+	err        error
+}
+
+func (b *recordingWorkspaceBootstrapper) CreateWorkspaceWithKanban(_ context.Context, workspace *models.Workspace) (*models.Workflow, error) {
+	b.workspaces = append(b.workspaces, workspace)
+	if b.err != nil {
+		return nil, b.err
+	}
+	templateID := "simple"
+	return &models.Workflow{ID: "kanban", WorkspaceID: workspace.ID, Name: "Kanban", WorkflowTemplateID: &templateID}, nil
+}
+
+func newWorkspaceBootstrapService(t *testing.T, repo *mockRepository, bootstrapper service.WorkspaceBootstrapper) (*service.Service, *logger.Logger) {
+	t.Helper()
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo,
+		Tasks:      repo, TaskRepos: repo, Workflows: repo, Messages: repo, Turns: repo, Sessions: repo,
+		GitSnapshots: repo, RepoEntities: repo, Executors: repo, Environments: repo,
+		TaskEnvironments: repo, Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkspaceBootstrapper(bootstrapper)
+	return svc, log
+}
+
+func TestHTTPCreateWorkspaceCreatesKanbanWorkflow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &mockRepository{}
+	bootstrapper := &recordingWorkspaceBootstrapper{}
+	svc, log := newWorkspaceBootstrapService(t, repo, bootstrapper)
+
+	h := NewWorkspaceHandlers(svc, log)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/workspaces", strings.NewReader(`{"name":"Kanban"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateWorkspace(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Len(t, bootstrapper.workspaces, 1)
+}
+
+func TestWSCreateWorkspaceCreatesKanbanWorkflow(t *testing.T) {
+	repo := &mockRepository{}
+	bootstrapper := &recordingWorkspaceBootstrapper{}
+	svc, log := newWorkspaceBootstrapService(t, repo, bootstrapper)
+	h := NewWorkspaceHandlers(svc, log)
+	req, err := ws.NewRequest("request-1", ws.ActionWorkspaceCreate, map[string]string{"name": "Kanban"})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateWorkspace(context.Background(), req)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	require.Len(t, bootstrapper.workspaces, 1)
+}
+
+func TestHTTPCreateWorkspaceFailsWhenKanbanBootstrapFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &mockRepository{}
+	svc, log := newWorkspaceBootstrapService(t, repo, &recordingWorkspaceBootstrapper{err: errors.New("template unavailable")})
+	h := NewWorkspaceHandlers(svc, log)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/workspaces", strings.NewReader(`{"name":"Kanban"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateWorkspace(c)
+
+	require.Equal(t, http.StatusInternalServerError, rec.Code)
+}
+
 func (r *workspaceDeleteRepo) GetWorkspace(_ context.Context, id string) (*models.Workspace, error) {
 	r.getCalls++
 	if r.getErr != nil {

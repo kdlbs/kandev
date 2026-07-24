@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -116,6 +117,9 @@ func createTestServiceWithSessionsRepo(
 	if _, err := officesqlite.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
 		t.Fatalf("failed to apply office migrations: %v", err)
 	}
+	if _, err := workflowrepo.NewWithDB(sqlxDB, sqlxDB, nil); err != nil {
+		t.Fatalf("failed to initialize workflow repository: %v", err)
+	}
 	t.Cleanup(func() {
 		if err := sqlxDB.Close(); err != nil {
 			t.Errorf("failed to close sqlite db: %v", err)
@@ -142,6 +146,7 @@ func createTestServiceWithSessionsRepo(
 		Reviews:          repo,
 		ResourceCleanups: repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
+	svc.SetWorkspaceBootstrapper(repo)
 	if err := svc.StartTaskResourceCleanupWorker(context.Background()); err != nil {
 		t.Fatalf("failed to start task resource cleanup worker: %v", err)
 	}

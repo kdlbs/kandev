@@ -1,4 +1,8 @@
+import { execSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
+import { makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile sidebar task actions", () => {
@@ -250,6 +254,7 @@ test.describe("Mobile sidebar task actions", () => {
       "Rename",
       "Duplicate",
       "Archive",
+      "Create Subtask",
       "Color",
       "Link",
       "Move to",
@@ -260,6 +265,105 @@ test.describe("Mobile sidebar task actions", () => {
     await archiveItem.scrollIntoViewIfNeeded();
     await expect(archiveItem).toBeInViewport();
     await expect(diffStats).toBeVisible();
+  });
+
+  test("opens create subtask from the mobile task actions menu", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const parentTitle = "Mobile create subtask parent";
+    const task = await apiClient.seedTask(seedData.workspaceId, parentTitle, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/${task.task_id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").click();
+
+    const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
+    const taskRow = taskSheet.getByTestId("sidebar-task-item").filter({ hasText: parentTitle });
+    await taskRow.getByRole("button", { name: "Task actions" }).click();
+
+    const createSubtask = testPage.getByRole("menuitem", { name: "Create Subtask", exact: true });
+    await expect(createSubtask).toBeVisible();
+    await prCapture.screenshot("mobile-create-subtask-context-menu", {
+      caption: "Mobile task actions menu with Create Subtask",
+    });
+    await createSubtask.click();
+
+    const dialog = testPage.getByTestId("new-subtask-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(testPage.getByTestId("subtask-title-input")).toHaveValue(
+      /Mobile create subtask parent \/ Subtask 1/,
+    );
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(dialog).toBeHidden();
+  });
+
+  test("uses the selected non-active parent defaults for mobile subtasks", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const parentRepoDir = path.join(backend.tmpDir, "repos", "mobile-parent-repo");
+    fs.mkdirSync(parentRepoDir, { recursive: true });
+    const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: parentRepoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: parentRepoDir, env: gitEnv });
+    const parentRepo = await apiClient.createRepository(
+      seedData.workspaceId,
+      parentRepoDir,
+      "main",
+      { name: "Mobile parent repo" },
+    );
+    const activeTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile active task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile non-active parent",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [parentRepo.id],
+      },
+    );
+
+    await testPage.goto(`/t/${activeTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").click();
+
+    const taskSheet = testPage.getByRole("dialog", { name: "Tasks" });
+    const parentRow = taskSheet
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: "Mobile non-active parent" });
+    await parentRow.getByRole("button", { name: "Task actions" }).click();
+    await testPage.getByRole("menuitem", { name: "Create Subtask", exact: true }).click();
+
+    const dialog = testPage.getByTestId("new-subtask-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(testPage.getByTestId("repo-chip-trigger")).toContainText("Mobile parent repo");
+    await expect(testPage.getByTestId("subtask-title-input")).toHaveValue(
+      /Mobile non-active parent \/ Subtask 1/,
+    );
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   });
 
   test("moves a task to another step from the mobile task drawer", async ({

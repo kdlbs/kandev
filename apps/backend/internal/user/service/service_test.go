@@ -27,6 +27,25 @@ func rawClear() **json.RawMessage {
 	return ptr((*json.RawMessage)(nil))
 }
 
+func TestApplyBasicSettingsSystemMetricsDisplayPreservesOmittedFields(t *testing.T) {
+	settings := &models.UserSettings{
+		SystemMetricsDisplay: models.SystemMetricsDisplaySettings{
+			ShowInTopbar: false,
+			Simplified:   true,
+		},
+	}
+	req := &UpdateUserSettingsRequest{
+		SystemMetricsDisplay: &SystemMetricsDisplaySettingsPatch{ShowInTopbar: ptr(true)},
+	}
+
+	if err := applyBasicSettings(settings, req); err != nil {
+		t.Fatalf("apply basic settings: %v", err)
+	}
+	if !settings.SystemMetricsDisplay.Simplified {
+		t.Fatal("simplified = false, want existing value preserved when omitted")
+	}
+}
+
 func makeLayouts(n int) []models.SavedLayout {
 	layouts := make([]models.SavedLayout, n)
 	for i := range layouts {

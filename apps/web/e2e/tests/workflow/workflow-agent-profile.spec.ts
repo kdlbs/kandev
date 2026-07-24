@@ -27,7 +27,7 @@ test.describe("Workflow agent profile", () => {
     const { agents } = await apiClient.listAgents();
     const agentProfile = agents.flatMap((a) => a.profiles ?? [])[0];
     expect(agentProfile).toBeDefined();
-    const profileLabel = `${agentProfile.agent_display_name} \u2022 ${agentProfile.name}`;
+    const profileLabel = `${agentProfile.agentDisplayName} \u2022 ${agentProfile.name}`;
 
     // Open the select and pick the agent profile
     await profileSelect.click();
@@ -74,7 +74,7 @@ test.describe("Workflow agent profile", () => {
     const { agents } = await apiClient.listAgents();
     const agentProfile = agents.flatMap((a) => a.profiles ?? [])[0];
     expect(agentProfile).toBeDefined();
-    const profileLabel = `${agentProfile.agent_display_name} \u2022 ${agentProfile.name}`;
+    const profileLabel = `${agentProfile.agentDisplayName} \u2022 ${agentProfile.name}`;
 
     // Select an agent profile for this step
     await testPage.addStyleTag({

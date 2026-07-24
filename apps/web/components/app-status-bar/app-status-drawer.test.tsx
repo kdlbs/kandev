@@ -54,7 +54,7 @@ describe("AppStatusDrawer", () => {
         initialState={{
           userSettings: {
             ...defaultSettingsState.userSettings,
-            systemMetricsDisplay: { showInTopbar: true },
+            systemMetricsDisplay: { showInTopbar: true, simplified: false },
             appStatusBarOrder: {
               leftItemIds: [rightId, APP_STATUS_METRICS_ID],
               rightItemIds: [APP_STATUS_CONNECTION_ID, leftId],

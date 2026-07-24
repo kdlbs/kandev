@@ -24,8 +24,13 @@ name: release
 # Each package (kandev + 5 @kdlbs/runtime-* packages) must have this workflow
 # configured as its trusted publisher on npmjs.com (Settings → Publishing access).
 #
-# Required secrets for public releases:
-#   HOMEBREW_TAP_DEPLOY_KEY  — SSH private key for kdlbs/homebrew-kandev deploy key
+# Required repository secret for public releases:
+#   HOMEBREW_TAP_DEPLOY_KEY — SSH private key for kdlbs/homebrew-kandev deploy key
+# Required configuration in the `release` environment:
+#   RELEASE_GPG_PRIVATE_KEY — secret containing the ASCII-armored release tag signing key
+#   RELEASE_GPG_FINGERPRINT — variable containing the key's full fingerprint
+# Optional configuration in the `release` environment:
+#   RELEASE_GPG_PASSPHRASE — secret containing the private key passphrase
 # Optional secrets for signed desktop artifacts. If these are incomplete, the
 # workflow still builds unsigned desktop artifacts and warns in release notes.
 #   APPLE_CERTIFICATE / APPLE_CERTIFICATE_PASSWORD / KEYCHAIN_PASSWORD — macOS Developer ID signing
@@ -68,6 +73,7 @@ jobs:
   prepare:
     name: Prepare release (bump version, PR, tag)
     runs-on: ubuntu-latest
+    environment: ${{ (!inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '') && 'release' || 'release-validation' }}
     permissions:
       contents: write       # push release branch + tag
       pull-requests: write  # create + merge release PR (required by main ruleset)
@@ -80,6 +86,17 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Require main for normal release
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        env:
+          CURRENT_REF: ${{ github.ref }}
+        run: |
+          set -euo pipefail
+          if [ "$CURRENT_REF" != "refs/heads/main" ]; then
+            echo "Normal releases must be dispatched from refs/heads/main (got $CURRENT_REF)." >&2
+            exit 1
+          fi
 
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
@@ -314,7 +331,7 @@ jobs:
           pnpm -C apps install --no-frozen-lockfile
           git-cliff --tag "$TAG" -o CHANGELOG.md
 
-      - name: Create release PR + squash-merge + tag
+      - name: Create release PR + squash-merge
         if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -349,23 +366,125 @@ jobs:
           # polling for merge completion before the tag steps below.
           gh pr merge "$BRANCH" --squash --delete-branch --subject "$MSG" --body ""
 
-          # Pull the squashed commit into local main, then tag from it.
+          # Pull the squashed commit into local main. The signing key is not
+          # imported until all repository-controlled release work is complete.
           git fetch origin main
           git checkout main
           git reset --hard origin/main
-          git tag -a "$TAG" -m "release: $NEXT"
+
+      - name: Validate committed release signing public key
+        id: committed_release_gpg
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        run: |
+          set -euo pipefail
+          KEY_LISTING="$(gpg --batch --with-colons --show-keys .github/release-signing-key.asc)"
+          SECRET_KEY_RECORDS="$(printf '%s\n' "$KEY_LISTING" | awk -F: '$1 == "sec" || $1 == "ssb" { count++ } END { print count + 0 }')"
+          PUBLIC_KEY_RECORDS="$(printf '%s\n' "$KEY_LISTING" | awk -F: '$1 == "pub" { count++ } END { print count + 0 }')"
+          PRIMARY_FINGERPRINTS="$(printf '%s\n' "$KEY_LISTING" | awk -F: '
+            $1 == "pub" {
+              if (getline && $1 == "fpr") print $10
+            }
+          ')"
+          PRIMARY_FINGERPRINT_COUNT="$(printf '%s\n' "$PRIMARY_FINGERPRINTS" | awk 'NF { count++ } END { print count + 0 }')"
+
+          if [ "$SECRET_KEY_RECORDS" -ne 0 ]; then
+            echo ".github/release-signing-key.asc must not contain secret-key material." >&2
+            exit 1
+          fi
+          if [ "$PUBLIC_KEY_RECORDS" -eq 0 ]; then
+            echo ".github/release-signing-key.asc must contain one primary public key; none found." >&2
+            exit 1
+          fi
+          if [ "$PUBLIC_KEY_RECORDS" -ne 1 ] || [ "$PRIMARY_FINGERPRINT_COUNT" -ne 1 ]; then
+            echo ".github/release-signing-key.asc must contain exactly one primary public key and fingerprint." >&2
+            exit 1
+          fi
+
+          PUBLIC_FINGERPRINT="$PRIMARY_FINGERPRINTS"
+          if ! [[ "$PUBLIC_FINGERPRINT" =~ ^[A-F0-9]{40}$ ]]; then
+            echo ".github/release-signing-key.asc contains an invalid primary public-key fingerprint." >&2
+            exit 1
+          fi
+          echo "fingerprint=$PUBLIC_FINGERPRINT" >> "$GITHUB_OUTPUT"
+
+      - name: Import release tag signing key
+        id: import_release_gpg
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        uses: crazy-max/ghaction-import-gpg@2dc316deee8e90f13e1a351ab510b4d5bc0c82cd # v7.0.0
+        with:
+          gpg_private_key: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          passphrase: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+          git_user_signingkey: true
+          git_tag_gpgsign: true
+
+      - name: Validate release tag signing identity
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        env:
+          EXPECTED_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
+          COMMITTED_PUBLIC_FINGERPRINT: ${{ steps.committed_release_gpg.outputs.fingerprint }}
+          IMPORTED_FINGERPRINT: ${{ steps.import_release_gpg.outputs.fingerprint }}
+          TAGGER_NAME: ${{ steps.import_release_gpg.outputs.name }}
+          TAGGER_EMAIL: ${{ steps.import_release_gpg.outputs.email }}
+        run: |
+          set -euo pipefail
+          if [ -z "$EXPECTED_FINGERPRINT" ]; then
+            echo "RELEASE_GPG_FINGERPRINT is required in the release environment." >&2
+            exit 1
+          fi
+          if [ -z "$COMMITTED_PUBLIC_FINGERPRINT" ]; then
+            echo "The committed release public key did not report a fingerprint." >&2
+            exit 1
+          fi
+          if [ "$COMMITTED_PUBLIC_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "The committed release public key does not match RELEASE_GPG_FINGERPRINT." >&2
+            exit 1
+          fi
+          if [ -z "$IMPORTED_FINGERPRINT" ]; then
+            echo "The imported release signing key did not report a fingerprint." >&2
+            exit 1
+          fi
+          if [ "$IMPORTED_FINGERPRINT" != "$COMMITTED_PUBLIC_FINGERPRINT" ]; then
+            echo "The imported release signing key does not match the committed release public key." >&2
+            exit 1
+          fi
+          if [ "$IMPORTED_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "The imported release signing key does not match RELEASE_GPG_FINGERPRINT." >&2
+            exit 1
+          fi
+          if [ -z "$TAGGER_NAME" ] || [ -z "$TAGGER_EMAIL" ]; then
+            echo "The validated release signing key must contain a tagger name and email." >&2
+            exit 1
+          fi
+          git config user.name "$TAGGER_NAME"
+          git config user.email "$TAGGER_EMAIL"
+          git config user.signingkey "$IMPORTED_FINGERPRINT"
+
+      - name: Create and push signed release tag
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        env:
+          NEXT: ${{ steps.compute.outputs.version }}
+          TAG: ${{ steps.compute.outputs.tag }}
+        run: |
+          set -euo pipefail
+          MERGE_COMMIT="$(git rev-parse HEAD)"
+          echo "Release merge commit: $MERGE_COMMIT"
+          git tag -s "$TAG" -m "release: $NEXT"
+          git tag -v "$TAG"
 
           # Tag push: retry once for transient network blips. If both attempts
           # fail, main already has the bumped commit but no tag exists.
-          # Recover by manually pushing the tag from any clone pointing at the
-          # squashed merge commit:  git push origin "$TAG"
           git push origin "$TAG" || {
             echo "Tag push failed; retrying in 5s..." >&2
             sleep 5
             git push origin "$TAG" || {
               echo "ERROR: Tag push failed twice after PR merge succeeded." >&2
-              echo "  main is at $NEXT but the tag was not created on origin." >&2
-              echo "  Recover manually: git push origin $TAG" >&2
+              echo "  Release merge commit: $MERGE_COMMIT" >&2
+              echo "  Recover only with the configured release signing identity:" >&2
+              echo "    git checkout --detach $MERGE_COMMIT" >&2
+              echo "    git tag -s $TAG -m 'release: $NEXT'" >&2
+              echo "    git tag -v $TAG" >&2
+              echo "  Confirm the verified full fingerprint matches RELEASE_GPG_FINGERPRINT, then:" >&2
+              echo "    git push origin $TAG" >&2
               exit 1
             }
           }

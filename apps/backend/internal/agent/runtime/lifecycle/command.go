@@ -4,7 +4,6 @@ package lifecycle
 
 import (
 	"os"
-	"strings"
 
 	"github.com/kandev/kandev/internal/agent/agents"
 )
@@ -24,26 +23,36 @@ func NewCommandBuilder() *CommandBuilder {
 // each BuildCommand needing to remember to opt in.
 func (cb *CommandBuilder) BuildCommand(ag agents.Agent, opts agents.CommandOptions) agents.Command {
 	cmd := ag.BuildCommand(opts)
-	if len(opts.CLIFlagTokens) == 0 {
+	if len(opts.CLIFlagTokens) > 0 {
+		cmd = cmd.With().Flag(opts.CLIFlagTokens...).Build()
+	}
+	return prependCommandPrefix(cmd, opts.CommandPrefixTokens)
+}
+
+// prependCommandPrefix wraps the built command in a launcher prefix so the
+// agent subprocess runs under a sandbox (e.g. ["greywall", "--"] turns
+// "npx -y <pkg>" into "greywall -- npx -y <pkg>"). Returns cmd unchanged when
+// there is no prefix.
+func prependCommandPrefix(cmd agents.Command, prefixTokens []string) agents.Command {
+	if len(prefixTokens) == 0 {
 		return cmd
 	}
-	return cmd.With().Flag(opts.CLIFlagTokens...).Build()
+	args := make([]string, 0, len(prefixTokens)+len(cmd.Args()))
+	args = append(args, prefixTokens...)
+	args = append(args, cmd.Args()...)
+	return agents.NewCommand(args...)
 }
 
-// BuildCommandString builds a command as a single string (for standalone mode)
-func (cb *CommandBuilder) BuildCommandString(ag agents.Agent, opts agents.CommandOptions) string {
-	cmd := cb.BuildCommand(ag, opts)
-	return strings.Join(cmd.Args(), " ")
+// BuildCommandArgs builds the executable argv for an agent launch.
+func (cb *CommandBuilder) BuildCommandArgs(ag agents.Agent, opts agents.CommandOptions) []string {
+	return cb.BuildCommand(ag, opts).Args()
 }
 
-// BuildContinueCommandString builds the continue command with the same model/permission
-// flags as the initial command. Used by one-shot agents (Amp) where each follow-up prompt
-// needs a separate "threads continue" command. Returns empty string if the agent has no
-// ContinueSessionCmd configured.
-func (cb *CommandBuilder) BuildContinueCommandString(ag agents.Agent, opts agents.CommandOptions) string {
+// BuildContinueCommandArgs builds argv for a one-shot follow-up command.
+func (cb *CommandBuilder) BuildContinueCommandArgs(ag agents.Agent, opts agents.CommandOptions) []string {
 	sessionCfg := ag.Runtime().SessionConfig
 	if sessionCfg.ContinueSessionCmd.IsEmpty() {
-		return ""
+		return nil
 	}
 
 	// Start from the continue command base and apply the same flags as BuildCommand
@@ -52,8 +61,9 @@ func (cb *CommandBuilder) BuildContinueCommandString(ag agents.Agent, opts agent
 		Settings(ag.PermissionSettings(), opts.PermissionValues).
 		Flag(opts.CLIFlagTokens...).
 		Build()
+	cmd = prependCommandPrefix(cmd, opts.CommandPrefixTokens)
 
-	return strings.Join(cmd.Args(), " ")
+	return cmd.Args()
 }
 
 // ExpandSessionDir resolves the host-side directory that should be bind-

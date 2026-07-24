@@ -11,6 +11,7 @@ import {
   installPluginFromUrl,
   installPluginUpload,
   listPlugins,
+  setPluginAutoUpdate,
   syncPlugins,
   uninstallPlugin,
 } from "@/lib/api/domains/plugins-api";
@@ -102,6 +103,34 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
   };
 
   return { busyId, handleEnable, handleDisable };
+}
+
+/**
+ * Per-plugin auto-update override wiring: PUT /api/plugins/:id/auto-update,
+ * then upsert the returned record so the row's toggle reflects the new
+ * override. `value` is `true`/`false` to force the plugin on/off, or `null` to
+ * clear the override and inherit the instance-wide default again.
+ */
+function useAutoUpdateAction(upsertPlugin: (p: PluginRecord) => void) {
+  const [autoUpdateBusyId, setAutoUpdateBusyId] = useState<string | null>(null);
+
+  const handleSetAutoUpdate = async (plugin: PluginRecord, value: boolean | null) => {
+    setAutoUpdateBusyId(plugin.id);
+    try {
+      const updated = await setPluginAutoUpdate(plugin.id, value);
+      upsertPlugin(updated);
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : `Failed to update auto-update for ${plugin.display_name}`,
+      );
+    } finally {
+      setAutoUpdateBusyId(null);
+    }
+  };
+
+  return { autoUpdateBusyId, handleSetAutoUpdate };
 }
 
 function useUninstallAction(removePlugin: (id: string) => void) {
@@ -249,9 +278,10 @@ export function usePluginActions() {
   const setPlugins = useAppStore((s) => s.setPlugins);
 
   const enableDisable = useEnableDisableActions(upsertPlugin);
+  const autoUpdate = useAutoUpdateAction(upsertPlugin);
   const uninstall = useUninstallAction(removePlugin);
   const install = useInstallAction(upsertPlugin);
   const sync = useSyncAction(setPlugins);
 
-  return { ...enableDisable, ...uninstall, ...install, ...sync };
+  return { ...enableDisable, ...autoUpdate, ...uninstall, ...install, ...sync };
 }

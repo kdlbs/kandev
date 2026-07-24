@@ -104,6 +104,7 @@ func (r *sqliteRepository) initSchema() error {
 		budget_monthly_cents INTEGER NOT NULL DEFAULT 0,
 		settings TEXT NOT NULL DEFAULT '{}',
 		permissions TEXT NOT NULL DEFAULT '{}',
+		command_prefix TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	);
 
@@ -151,6 +152,12 @@ func (r *sqliteRepository) initSchema() error {
 	// Migration: ADR 0005 Wave A — enrich agent_profiles with office columns.
 	// Each ALTER is idempotent — duplicate-column errors are swallowed.
 	r.migrateOfficeEnrichmentColumns()
+
+	// command_prefix is added after the table-recreation migration above so a
+	// legacy DB that recreates agent_profiles (to drop the model CHECK) still
+	// ends up with the column — the recreation copies only pre-existing
+	// columns, so an ADD COLUMN that ran before it would be lost.
+	r.migrate.Apply("agent_profiles.command_prefix", `ALTER TABLE agent_profiles ADD COLUMN command_prefix TEXT NOT NULL DEFAULT ''`)
 
 	return nil
 }
@@ -489,7 +496,8 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 			status, pause_reason, last_run_finished_at,
 			max_concurrent_sessions, cooldown_sec, skip_idle_runs,
 			consecutive_failures, failure_threshold,
-			executor_preference, budget_monthly_cents, settings, permissions
+			executor_preference, budget_monthly_cents, settings, permissions,
+			command_prefix
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -499,7 +507,8 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 			?, ?, ?,
 			?, ?, ?,
 			?, ?,
-			?, ?, ?, ?
+			?, ?, ?, ?,
+			?
 		)
 	`),
 		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
@@ -513,6 +522,7 @@ func (r *sqliteRepository) CreateAgentProfile(ctx context.Context, profile *mode
 		enrich.maxConcurrentSessions, profile.CooldownSec, dialect.BoolToInt(profile.SkipIdleRuns),
 		profile.ConsecutiveFailures, enrich.failureThreshold,
 		enrich.executorPreference, profile.BudgetMonthlyCents, enrich.settings, enrich.permissions,
+		profile.CommandPrefix,
 	)
 	return err
 }
@@ -743,7 +753,8 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 			max_concurrent_sessions = ?, cooldown_sec = ?, skip_idle_runs = ?,
 			consecutive_failures = ?, failure_threshold = ?,
 			executor_preference = ?,
-			budget_monthly_cents = ?, settings = ?, permissions = ?
+			budget_monthly_cents = ?, settings = ?, permissions = ?,
+			command_prefix = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
@@ -757,6 +768,7 @@ func (r *sqliteRepository) UpdateAgentProfile(ctx context.Context, profile *mode
 		profile.ConsecutiveFailures, enrich.failureThreshold,
 		enrich.executorPreference,
 		profile.BudgetMonthlyCents, enrich.settings, enrich.permissions,
+		profile.CommandPrefix,
 		profile.ID)
 	if err != nil {
 		return err
@@ -805,7 +817,8 @@ const agentProfileSelectColumns = `
 		COALESCE(skip_idle_runs, 0), COALESCE(consecutive_failures, 0),
 		COALESCE(failure_threshold, 3), COALESCE(executor_preference, ''),
 		COALESCE(budget_monthly_cents, 0),
-		COALESCE(settings, '{}'), COALESCE(permissions, '{}')
+		COALESCE(settings, '{}'), COALESCE(permissions, '{}'),
+		COALESCE(command_prefix, '')
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -1015,6 +1028,7 @@ func scanAgentProfile(scanner interface {
 		&profile.BudgetMonthlyCents,
 		&profile.Settings,
 		&profile.Permissions,
+		&profile.CommandPrefix,
 	); err != nil {
 		return nil, err
 	}

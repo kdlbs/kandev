@@ -5,6 +5,21 @@
 import type { KeyboardShortcut, Platform } from "./constants";
 
 /**
+ * Returns true if the keydown event's target is a text input, textarea, or
+ * contenteditable element. Shared by every global keydown dispatcher
+ * (`useAppShortcuts`, `usePluginShortcuts`) so typing in a field never
+ * triggers a bound shortcut.
+ */
+export function isEditableKeydownTarget(event: KeyboardEvent): boolean {
+  const tag = (event.target as HTMLElement)?.tagName;
+  return (
+    tag === "INPUT" ||
+    tag === "TEXTAREA" ||
+    (event.target as HTMLElement)?.isContentEditable === true
+  );
+}
+
+/**
  * Detect the current platform
  */
 export function detectPlatform(): Platform {

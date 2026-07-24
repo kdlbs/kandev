@@ -358,6 +358,47 @@
   background-clip: padding-box;
 }
 
+.task-sidebar-scroll[data-can-scroll-down="true"] {
+  mask-image: linear-gradient(to bottom, black 0, black calc(100% - 3.5rem), transparent 100%);
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    black 0,
+    black calc(100% - 3.5rem),
+    transparent 100%
+  );
+}
+
+.task-sidebar-scroll-root [data-slot="scroll-area-scrollbar"] {
+  z-index: 1;
+  background: transparent;
+}
+
+.task-sidebar-scroll-root [data-slot="scroll-area-thumb"] {
+  background: var(--scrollbar-thumb);
+}
+
+.task-sidebar-scroll-root [data-slot="scroll-area-thumb"]:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .task-sidebar-scroll-root [data-slot="scroll-area-scrollbar"] {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+  }
+
+  .task-sidebar-scroll-root:is(:hover, :focus-within) .task-sidebar-scroll {
+    mask-image: none;
+    -webkit-mask-image: none;
+  }
+
+  .task-sidebar-scroll-root:is(:hover, :focus-within) [data-slot="scroll-area-scrollbar"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
 /* xterm.js scrollbar styling */
 .xterm .xterm-scrollable-element > .scrollbar {
   width: 10px !important;

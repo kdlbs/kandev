@@ -76,6 +76,7 @@ func (r *StoreProfileResolver) ResolveProfile(ctx context.Context, profileID str
 		DangerouslySkipPermissions: profile.DangerouslySkipPermissions,
 		AllowIndexing:              profile.AllowIndexing,
 		CLIFlags:                   profile.CLIFlags,
+		CommandPrefix:              profile.CommandPrefix,
 		EnvVars:                    profile.EnvVars,
 		CLIPassthrough:             profile.CLIPassthrough,
 		NativeSessionResume:        nativeSessionResume,

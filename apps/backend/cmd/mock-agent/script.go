@@ -64,6 +64,9 @@ func executeCommand(e *emitter, fullPrompt, line string) {
 
 	case strings.HasPrefix(line, "e2e:monitor_end("):
 		executeMonitorEnd(e, line)
+
+	case strings.HasPrefix(line, "e2e:shell_result("):
+		executeSimulatedShellResult(e, line)
 	}
 }
 
@@ -211,6 +214,32 @@ func executeSimulatedToolUse(e *emitter, line string) {
 func executeSimulatedToolResult(e *emitter, line string) {
 	content := extractStringArg(line, "e2e:tool_result(")
 	e.completeTool(acp.ToolCallId(state.lastToolID), map[string]any{"result": content})
+}
+
+// executeSimulatedShellResult emits an execute-kind (shell) tool call for
+// the given command and completes it with the given raw stdout text. Used to
+// reproduce a real provider whose captured stdout echoes the command before
+// the actual output - the ACP shell-output normalizer must strip that
+// leading echo so the transcript's command header and Output disclosure
+// don't show the command twice.
+// Format: e2e:shell_result("<command>", "<stdout>")
+//
+// rawInputCommandKey/rawOutputKey mirror the "command"/"output" keys a real
+// shell provider's tool_call/tool_call_update JSON uses.
+const (
+	rawInputCommandKey = "command"
+	rawOutputKey       = "output"
+)
+
+func executeSimulatedShellResult(e *emitter, line string) {
+	inner := extractParenContent(line, "e2e:shell_result(")
+	command, rest := extractFirstStringArg(inner)
+	rest = strings.TrimPrefix(strings.TrimSpace(rest), ",")
+	stdout, _ := extractFirstStringArg(strings.TrimSpace(rest))
+
+	toolID := nextToolID()
+	e.startTool(toolID, command, acp.ToolKindExecute, map[string]any{rawInputCommandKey: command})
+	e.completeTool(toolID, map[string]any{rawOutputKey: stdout})
 }
 
 // --- Argument parsing helpers ---

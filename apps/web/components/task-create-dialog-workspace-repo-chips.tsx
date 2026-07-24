@@ -1,7 +1,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { IconPlus, IconX, IconCode, IconGitBranch, IconCheck } from "@tabler/icons-react";
+import {
+  IconPlus,
+  IconX,
+  IconCode,
+  IconGitBranch,
+  IconFolderPlus,
+  IconCheck,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useBranches, type BranchSource } from "@/hooks/domains/workspace/use-repository-branches";
@@ -15,6 +22,7 @@ import {
   sortBranches,
   branchToOption,
   computeBranchPlaceholder,
+  type PillAction,
   type PillOption,
 } from "@/components/task-create-dialog-pill";
 import {
@@ -23,6 +31,32 @@ import {
   computeBranchDisabledReason,
 } from "@/components/task-create-dialog-branch-utils";
 import { useRepoBranchAutoselect } from "@/components/task-create-dialog-repo-branch-autoselect";
+
+type WorkspaceRepoChipsProps = {
+  rows: TaskRepoRow[];
+  repositories: Repository[];
+  discoveredRepositories?: LocalRepository[];
+  workspaceId: string | null;
+  branchLocked?: boolean;
+  isLocalExecutor?: boolean;
+  currentLocalBranch?: string;
+  currentLocalBranchLoading?: boolean;
+  freshBranchEnabled?: boolean;
+  canAddMore: boolean;
+  addHint?: string;
+  addLabel?: string;
+  allowDuplicateRepositories?: boolean;
+  freshBranchToggle?: React.ReactNode;
+  onAdd: () => void;
+  onRemove: (key: string) => void;
+  onRowRepositoryChange: (key: string, value: string) => void;
+  onRowBranchChange: (key: string, value: string) => void;
+  onCreateRepository?: (key: string) => void;
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
+  lastUsedBranch?: string | null;
+  userSettingsLoaded?: boolean;
+};
 
 /**
  * Renders the list of repo chips plus the trailing "+ add repository"
@@ -48,30 +82,12 @@ export function WorkspaceRepoChips({
   onRemove,
   onRowRepositoryChange,
   onRowBranchChange,
+  onCreateRepository,
+  onRefreshRepositories,
+  repositoriesRefreshing,
   lastUsedBranch,
   userSettingsLoaded,
-}: {
-  rows: TaskRepoRow[];
-  repositories: Repository[];
-  discoveredRepositories?: LocalRepository[];
-  workspaceId: string | null;
-  branchLocked?: boolean;
-  isLocalExecutor?: boolean;
-  currentLocalBranch?: string;
-  currentLocalBranchLoading?: boolean;
-  freshBranchEnabled?: boolean;
-  canAddMore: boolean;
-  addHint?: string;
-  addLabel?: string;
-  allowDuplicateRepositories?: boolean;
-  freshBranchToggle?: React.ReactNode;
-  onAdd: () => void;
-  onRemove: (key: string) => void;
-  onRowRepositoryChange: (key: string, value: string) => void;
-  onRowBranchChange: (key: string, value: string) => void;
-  lastUsedBranch?: string | null;
-  userSettingsLoaded?: boolean;
-}) {
+}: WorkspaceRepoChipsProps) {
   return (
     <>
       {rows.map((row) => (
@@ -102,6 +118,11 @@ export function WorkspaceRepoChips({
           })}
           onRepositoryChange={(value) => onRowRepositoryChange(row.key, value)}
           onBranchChange={(value) => onRowBranchChange(row.key, value)}
+          onCreateRepository={
+            rows.length === 1 && onCreateRepository ? () => onCreateRepository(row.key) : undefined
+          }
+          onRefreshRepositories={rows.length === 1 ? onRefreshRepositories : undefined}
+          repositoriesRefreshing={repositoriesRefreshing}
           onRemove={() => onRemove(row.key)}
         />
       ))}
@@ -230,6 +251,9 @@ type RepoChipProps = {
   onRepositoryChange: (value: string) => void;
   onBranchChange: (value: string) => void;
   onRemove: () => void;
+  onCreateRepository?: () => void;
+  onRefreshRepositories?: () => void;
+  repositoriesRefreshing?: boolean;
 };
 
 function useRepoChipData({
@@ -348,6 +372,15 @@ function computeRepoChipDisplay(
   return { repoLabel, repoTooltip };
 }
 
+function buildCreateRepositoryAction(onSelect?: () => void): PillAction | undefined {
+  if (!onSelect) return undefined;
+  return {
+    label: "Create new repository",
+    icon: <IconFolderPlus className="h-3.5 w-3.5" />,
+    onSelect,
+  };
+}
+
 function RepoChip({
   row,
   workspaceId,
@@ -364,6 +397,9 @@ function RepoChip({
   onRepositoryChange,
   onBranchChange,
   onRemove,
+  onCreateRepository,
+  onRefreshRepositories,
+  repositoriesRefreshing,
 }: RepoChipProps) {
   const { repoOptions, branchOptions, branchesLoading, refreshBranches } = useRepoChipData({
     row,
@@ -395,6 +431,7 @@ function RepoChip({
       className="inline-flex items-center rounded-md border border-input bg-input/20 dark:bg-input/30 pr-0.5"
       data-testid="repo-chip"
       data-repository-id={row.repositoryId || row.localPath || ""}
+      data-repo-row-key={row.key}
     >
       <Pill
         icon={<IconCode className="h-3 w-3 shrink-0 text-muted-foreground" />}
@@ -407,6 +444,10 @@ function RepoChip({
         testId="repo-chip-trigger"
         tooltip={repoTooltip}
         filter={scoreRepo}
+        action={buildCreateRepositoryAction(onCreateRepository)}
+        onRefresh={onRefreshRepositories}
+        refreshing={repositoriesRefreshing}
+        refreshLabel="repositories"
         flat
       />
       <Pill

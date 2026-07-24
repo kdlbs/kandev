@@ -26,7 +26,8 @@ export function useRepoBranchAutoselect({
   userSettingsLoaded?: boolean;
 }) {
   useEffect(() => {
-    if (!branchSource || branchesLoading || branches.length === 0 || rowBranch) return;
+    const hasSelectableBranch = branches.length > 0 || !!preferredDefaultBranch;
+    if (!branchSource || branchesLoading || !hasSelectableBranch || rowBranch) return;
     runAutoselect({
       branches,
       preferredDefaultBranch,

@@ -20,6 +20,7 @@ export type ChatInputToolbarProps = {
   taskTitle?: string;
   taskDescription: string;
   isAgentBusy: boolean;
+  canCancelAgent?: boolean;
   /** Whether the input has content to send (text, comments, or context) */
   hasContent?: boolean;
   isDisabled: boolean;
@@ -62,6 +63,7 @@ export type ChatInputToolbarProps = {
 
 function MinimalToolbar({
   isAgentBusy,
+  canCancelAgent,
   hasContent,
   isDisabled,
   submitDisabledReason,
@@ -72,6 +74,7 @@ function MinimalToolbar({
 }: Pick<
   ChatInputToolbarProps,
   | "isAgentBusy"
+  | "canCancelAgent"
   | "hasContent"
   | "isDisabled"
   | "submitDisabledReason"
@@ -85,6 +88,7 @@ function MinimalToolbar({
     <div className="flex items-center justify-end gap-1 px-1 pt-0 pb-0.5 border-t border-border">
       <SubmitButton
         isAgentBusy={isAgentBusy}
+        canCancelAgent={canCancelAgent}
         hasContent={hasContent ?? false}
         isDisabled={isDisabled}
         submitDisabledReason={submitDisabledReason}
@@ -122,6 +126,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
     return (
       <MinimalToolbar
         isAgentBusy={props.isAgentBusy}
+        canCancelAgent={props.canCancelAgent}
         hasContent={props.hasContent}
         isDisabled={props.isDisabled}
         submitDisabledReason={props.submitDisabledReason}
@@ -156,6 +161,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
         contextFiles={props.contextFiles}
         onToggleFile={props.onToggleFile ?? (() => {})}
         isAgentBusy={props.isAgentBusy}
+        canCancelAgent={props.canCancelAgent}
         hasContent={props.hasContent ?? false}
         onImplementPlan={props.onImplementPlan}
         onEnhancePrompt={props.onEnhancePrompt}

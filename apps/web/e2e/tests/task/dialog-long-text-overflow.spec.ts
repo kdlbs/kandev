@@ -89,7 +89,7 @@ test.describe("Dialog long text layout", () => {
     await newSessionDialog.getByRole("button", { name: "Cancel" }).click();
     await expect(newSessionDialog).not.toBeVisible();
 
-    await testPage.getByTestId("sidebar-new-subtask").click();
+    await session.openCreateSubtaskForSidebarTask("Long Text Dialog Parent");
     const subtaskDialog = testPage.getByTestId("new-subtask-dialog");
     await expect(subtaskDialog).toBeVisible();
     await testPage.getByTestId("subtask-title-input").fill(LONG_UNBROKEN_TEXT);

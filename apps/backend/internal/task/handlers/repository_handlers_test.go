@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -49,6 +51,115 @@ func TestHTTPCreateRepositoryRejectsInvalidLocalPathWithoutPersistence(t *testin
 	if len(repositories) != 0 {
 		t.Fatalf("invalid repository was persisted: %+v", repositories)
 	}
+}
+
+func TestHTTPInitializeLocalRepositoryCreatesRepository(t *testing.T) {
+	router, repo := newRepositoryHTTPTestRouter(t)
+	parentPath := t.TempDir()
+	body := []byte(`{"name":"new-project","parent_path":` + strconv.Quote(parentPath) + `}`)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/workspaces/ws-1/repositories/initialize-local",
+		bytes.NewReader(body),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+	var created struct {
+		ID            string `json:"id"`
+		WorkspaceID   string `json:"workspace_id"`
+		Name          string `json:"name"`
+		SourceType    string `json:"source_type"`
+		LocalPath     string `json:"local_path"`
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &created); err != nil {
+		t.Fatalf("Unmarshal response: %v", err)
+	}
+	wantPath := filepath.Join(parentPath, "new-project")
+	if created.WorkspaceID != "ws-1" || created.Name != "new-project" || created.SourceType != "local" ||
+		created.LocalPath != wantPath || created.DefaultBranch != "main" {
+		t.Fatalf("created repository = %+v, want workspace ws-1 local repository at %q on main", created, wantPath)
+	}
+	stored, err := repo.GetRepository(context.Background(), created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.LocalPath != wantPath || stored.DefaultBranch != "main" {
+		t.Fatalf("stored repository = %+v, want path %q on main", stored, wantPath)
+	}
+}
+
+func TestHTTPInitializeLocalRepositoryMapsClientErrors(t *testing.T) {
+	t.Run("invalid input", func(t *testing.T) {
+		router, _ := newRepositoryHTTPTestRouter(t)
+		response := performInitializeLocalRepositoryRequest(t, router, "ws-1", `{"name":"nested/name","parent_path":"/tmp"}`)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusBadRequest, response.Body.String())
+		}
+	})
+
+	t.Run("unknown workspace before mutation", func(t *testing.T) {
+		router, _ := newRepositoryHTTPTestRouter(t)
+		parent := t.TempDir()
+		body := `{"name":"new-project","parent_path":` + strconv.Quote(parent) + `}`
+		response := performInitializeLocalRepositoryRequest(t, router, "missing", body)
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusNotFound, response.Body.String())
+		}
+		if _, err := os.Stat(filepath.Join(parent, "new-project")); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("target stat error = %v, want not exist", err)
+		}
+	})
+
+	t.Run("existing target", func(t *testing.T) {
+		router, repo := newRepositoryHTTPTestRouter(t)
+		parent := t.TempDir()
+		target := filepath.Join(parent, "existing")
+		if err := os.Mkdir(target, 0o755); err != nil {
+			t.Fatalf("Mkdir target: %v", err)
+		}
+		marker := filepath.Join(target, "marker")
+		if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+			t.Fatalf("WriteFile marker: %v", err)
+		}
+		body := `{"name":"existing","parent_path":` + strconv.Quote(parent) + `}`
+		response := performInitializeLocalRepositoryRequest(t, router, "ws-1", body)
+		if response.Code != http.StatusConflict {
+			t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusConflict, response.Body.String())
+		}
+		content, err := os.ReadFile(marker)
+		if err != nil || string(content) != "keep" {
+			t.Fatalf("marker = %q, error %v; existing target was modified", content, err)
+		}
+		repositories, err := repo.ListRepositories(context.Background(), "ws-1")
+		if err != nil || len(repositories) != 0 {
+			t.Fatalf("repositories = %+v, error %v; want none", repositories, err)
+		}
+	})
+}
+
+func performInitializeLocalRepositoryRequest(
+	t *testing.T,
+	router *gin.Engine,
+	workspaceID string,
+	body string,
+) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/workspaces/"+workspaceID+"/repositories/initialize-local",
+		strings.NewReader(body),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	return response
 }
 
 func TestHTTPCreateRepositoryIgnoresRemoteURL(t *testing.T) {
@@ -173,6 +284,31 @@ func TestHTTPListDirectoryIncludesChoosableContract(t *testing.T) {
 	}
 	if body.Choosable == nil || !*body.Choosable {
 		t.Fatalf("choosable = %v, want true; body = %s", body.Choosable, response.Body.String())
+	}
+}
+
+func TestHTTPCreateDirectoryCreatesFolder(t *testing.T) {
+	router, _ := newRepositoryHTTPTestRouter(t)
+	parent := t.TempDir()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/fs/create-dir",
+		strings.NewReader(`{"parent_path":`+strconv.Quote(parent)+`,"name":"projects"}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body = %s", response.Code, http.StatusCreated, response.Body.String())
+	}
+	wantPath := filepath.Join(parent, "projects")
+	if info, err := os.Stat(wantPath); err != nil || !info.IsDir() {
+		t.Fatalf("created directory %q: info=%v error=%v", wantPath, info, err)
+	}
+	if !strings.Contains(response.Body.String(), strconv.Quote(wantPath)) {
+		t.Fatalf("response missing created path %q: %s", wantPath, response.Body.String())
 	}
 }
 

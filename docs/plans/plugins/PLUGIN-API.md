@@ -59,6 +59,21 @@ interface PluginHostApi {
   // path as the app router, so plugin pages can link into native routes
   // (e.g. /t/{taskId}) without a full reload.
   navigate(href: string, options?: { replace?: boolean }): void;
+  // Imperatively opens a modal window rendered by the host's <PluginModalHost/>
+  // (mounted once at the app root, isolated behind its own error boundary).
+  // Independent of keybindings — any plugin code path may call it.
+  openModal(options: PluginModalOptions): PluginModalHandle;
+}
+
+interface PluginModalOptions {
+  title?: string;                          // rendered in a DialogHeader/DialogTitle; omit for no header title
+  content: React.ComponentType<{ slotProps?: unknown }>; // reuses the slot-component contract
+  size?: "sm" | "md" | "lg" | "xl";         // maps to the host's Dialog width classes; default "md"
+  dismissible?: boolean;                    // overlay click / Escape close the modal; default true
+}
+
+interface PluginModalHandle {
+  close(): void; // closes this modal instance; no-op if already closed
 }
 ```
 
@@ -153,6 +168,25 @@ interface PluginRegistry {
   // WS action handler. Bridged into the existing lib/ws dispatch; called with the
   // decoded message payload for that action string.
   registerWsHandler(action: string, handler: (payload: unknown) => void): void;
+
+  // Binds a handler to a keybinding declared in this plugin's manifest
+  // (ui.keybindings[].id — { id, default, description }, see manifest schema).
+  // The host resolves the effective combo (user override if the user
+  // rebound it, else the manifest default) and dispatches globally, skipping
+  // editable targets the same way core app shortcuts do. Combos are
+  // user-overridable in Settings > Keyboard Shortcuts, namespaced
+  // `plugin:{pluginId}:{id}`. Binding an id the manifest didn't declare still
+  // stores the handler (a console warning is logged) since the dispatcher's
+  // effective-shortcut resolution keys off the manifest list.
+  //
+  // Combo grammar (manifest `default` and any user override): `+`-separated
+  // tokens, one of the modifiers `mod|ctrl|cmd|meta|alt|option|shift`
+  // (repeatable) plus exactly one key token. `mod` resolves to Cmd on macOS
+  // and Ctrl elsewhere (⌘/Ctrl). `shift` may not be combined with a digit or
+  // symbol key (e.g. `shift+1`, `shift+slash`) — Shift changes the character
+  // a browser reports for those keys, so the combo could never dispatch; both
+  // the manifest validator and the frontend parser reject it.
+  registerKeybinding(id: string, handler: (event: KeyboardEvent) => void): void;
 }
 ```
 

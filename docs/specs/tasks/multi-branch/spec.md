@@ -51,6 +51,7 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - Repo chips in chat-message renderers now key on `(repository_id, checkout_branch)` so multi-branch tasks render distinct chips instead of collapsing.
 - In the task-creation dialog, every workspace, discovered-on-disk, and remote provider repository picker shows an accent-colored check (with an accessible `Already added` label) when another repository row already selects that repository. The current row does not mark its own selection.
 - Marked options remain selectable so users can intentionally create a multi-branch task from one repository. Removing or changing the other row removes the marker immediately.
+- Repository-chip tooltips keep long local paths inside a viewport-safe, wrapping surface. Closing a repository picker does not reveal its tooltip until the pointer leaves and deliberately hovers the chip again.
 - Review surfaces expose one linked pull request at a time when a task has multiple PRs. A task-scoped selector defaults to the primary (oldest) PR, remembers an in-session override, and falls back to the primary PR when that override disappears.
 - Selecting a PR changes the remote PR diff contribution while preserving the existing source precedence: uncommitted worktree changes, then cumulative committed changes, then the selected PR. PR-only views and PR timeline rows resolve the exact PR rather than the task primary.
 - The selector is available on desktop, phone, and coarse-pointer tablet. Phone uses a touch-sized bottom-menu treatment inside the existing Review surface; switching keeps Review open and exposes selected-PR loading, empty, and retry states.
@@ -62,6 +63,8 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - **GIVEN** a task-creation Remote row selects a provider-backed repository, **WHEN** the user opens another Remote repository selector, **THEN** the same provider repository remains selectable and is visibly marked by the same compact accent-colored check.
 - **GIVEN** a repository is marked because another row selects it, **WHEN** the user changes or removes that other row, **THEN** the marker disappears from the open or next-opened selector.
 - **GIVEN** a row already selects a repository and no other row selects it, **WHEN** the user reopens that row's selector, **THEN** its current repository is not marked as a duplicate.
+- **GIVEN** a selected repository has a long unbroken local path, **WHEN** its tooltip opens, **THEN** the tooltip wraps the path and remains within the viewport instead of covering adjacent repository controls.
+- **GIVEN** a user selects a repository from a repository-chip picker, **WHEN** the picker closes while the pointer remains over the chip, **THEN** no repository tooltip opens until the pointer leaves and deliberately hovers the chip again.
 
 ## Non-goals
 
@@ -86,7 +89,7 @@ Workarounds (sibling tasks, manually managing two worktrees) lost shared context
 - `TestAddBranchToTask_HappyPath` — second branch appended after the fact lands as a new row.
 - `TestAddBranchToTask_RejectsDuplicate` — re-adding the same `(repo, branch)` errors.
 - `TestLaunchPreparedSession_MultiBranch_ReusesWorktreeIDsByBranchSlug` — a follow-on session for the same task reuses each existing branch worktree instead of preparing a new task directory.
-- Task-creation component and mobile E2E coverage prove the accessible, compact selected-repository marker for workspace/on-disk and Remote provider selectors while preserving option selection.
+- Task-creation component and mobile E2E coverage prove the accessible, compact selected-repository marker for workspace/on-disk and Remote provider selectors while preserving option selection, viewport-safe long-path tooltips, and post-selection tooltip suppression.
 - Web unit tests prove selected-PR default, override, task isolation, and removed-PR fallback behavior.
 - Desktop and mobile Playwright tests prove a two-PR task can switch Review from the primary PR to a sibling PR without stale files, overflow, or closing the surface.
 

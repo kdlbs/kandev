@@ -42,6 +42,7 @@ function profileFormData(
     allow_indexing: permissions.allow_indexing,
     cli_passthrough: profile.cliPassthrough ?? false,
     cli_flags: profile.cliFlags ?? [],
+    command_prefix: profile.commandPrefix ?? "",
   };
 }
 

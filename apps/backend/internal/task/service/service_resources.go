@@ -78,13 +78,30 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		DefaultConfigAgentProfileID: normalizeOptionalID(req.DefaultConfigAgentProfileID),
 	}
 
-	if err := s.workspaces.CreateWorkspace(ctx, workspace); err != nil {
+	var kanbanWorkflow *models.Workflow
+	if req.BootstrapKanbanWorkflow {
+		if s.workspaceBootstrapper == nil {
+			err := errors.New("workspace bootstrapper is not configured")
+			s.logger.Error("failed to create workspace with Kanban bootstrap", zap.Error(err))
+			return nil, err
+		}
+		workflow, err := s.workspaceBootstrapper.CreateWorkspaceWithKanban(ctx, workspace)
+		if err != nil {
+			s.logger.Error("failed to create workspace with Kanban bootstrap", zap.Error(err))
+			return nil, err
+		}
+		kanbanWorkflow = workflow
+	} else if err := s.workspaces.CreateWorkspace(ctx, workspace); err != nil {
 		s.logger.Error("failed to create workspace", zap.Error(err))
 		return nil, err
 	}
 
 	s.publishWorkspaceEvent(ctx, events.WorkspaceCreated, workspace)
 	s.logger.Info("workspace created", zap.String("workspace_id", workspace.ID), zap.String("name", workspace.Name))
+	if kanbanWorkflow != nil {
+		s.publishWorkflowEvent(ctx, events.WorkflowCreated, kanbanWorkflow)
+		s.logger.Info("workflow created", zap.String("workflow_id", kanbanWorkflow.ID), zap.String("name", kanbanWorkflow.Name))
+	}
 	return workspace, nil
 }
 
@@ -608,6 +625,22 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 	if err != nil {
 		return nil, err
 	}
+	return s.createRepository(ctx, req, localPath, true)
+}
+
+func (s *Service) createRepositoryWithCanonicalPath(
+	ctx context.Context,
+	req *CreateRepositoryRequest,
+) (*models.Repository, error) {
+	return s.createRepository(ctx, req, req.LocalPath, false)
+}
+
+func (s *Service) createRepository(
+	ctx context.Context,
+	req *CreateRepositoryRequest,
+	localPath string,
+	resolveProvider bool,
+) (*models.Repository, error) {
 	sourceType := req.SourceType
 	if sourceType == "" {
 		sourceType = sourceTypeLocal
@@ -652,17 +685,8 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 		CopyFiles:              req.CopyFiles,
 	}
 
-	// Auto-detect provider identity from the origin when it is available.
-	if repository.LocalPath != "" && (repository.Provider == "" || repository.ProviderHost == "") {
-		p, h, o, n := ResolveGitRemoteProviderIdentity(repository.LocalPath)
-		if repository.Provider == "" {
-			repository.Provider = p
-		}
-		if repository.Provider != "" && (strings.HasPrefix(h, "http://") || strings.HasPrefix(h, "https://")) {
-			repository.ProviderHost = h
-			repository.ProviderOwner = o
-			repository.ProviderName = n
-		}
+	if resolveProvider {
+		resolveRepositoryProviderIdentity(repository)
 	}
 
 	if err := s.repoEntities.CreateRepository(ctx, repository); err != nil {
@@ -673,6 +697,22 @@ func (s *Service) CreateRepository(ctx context.Context, req *CreateRepositoryReq
 	s.publishRepositoryEvent(ctx, events.RepositoryCreated, repository)
 	s.logger.Info("repository created", zap.String("repository_id", repository.ID))
 	return repository, nil
+}
+
+// resolveRepositoryProviderIdentity fills missing provider metadata from a local repository origin.
+func resolveRepositoryProviderIdentity(repository *models.Repository) {
+	if repository.LocalPath == "" || (repository.Provider != "" && repository.ProviderHost != "") {
+		return
+	}
+	p, h, o, n := ResolveGitRemoteProviderIdentity(repository.LocalPath)
+	if repository.Provider == "" {
+		repository.Provider = p
+	}
+	if repository.Provider != "" && (strings.HasPrefix(h, "http://") || strings.HasPrefix(h, "https://")) {
+		repository.ProviderHost = h
+		repository.ProviderOwner = o
+		repository.ProviderName = n
+	}
 }
 
 func (s *Service) GetRepository(ctx context.Context, id string) (*models.Repository, error) {

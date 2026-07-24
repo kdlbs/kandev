@@ -159,6 +159,14 @@ function renderFullToolbar(overrides: Partial<ChatInputToolbarProps> = {}) {
 // tears down a long-running tool (Claude Monitor, etc.) sends N cancel requests
 // to the backend, each producing a duplicate "Turn cancelled by user" message.
 describe("ChatInputToolbar cancel button", () => {
+  it("keeps the queue affordance without a cancel control after clarification detaches", () => {
+    renderFullToolbar({ isAgentBusy: true, canCancelAgent: false });
+
+    expect(screen.queryByTestId("cancel-agent-button")).toBeNull();
+    expect(screen.getByTestId("submit-message-button")).toBeTruthy();
+    expect(screen.getByText("Queue message")).toBeTruthy();
+  });
+
   it("disables itself and blocks duplicate clicks while cancel is in flight", async () => {
     const { promise, resolve } = deferred<void>();
     const onCancel = vi.fn(() => promise);

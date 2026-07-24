@@ -65,6 +65,7 @@ temp/
 # Keeps dev backend state (db, tasks, worktrees, repos) out of the user's
 # production ~/.kandev when developing kandev using kandev.
 /.kandev-dev/
+/.kandev/
 
 # Runtime scratch workspaces created for repo-less tasks. The lifecycle
 # manager places them at <homeDir>/tasks/<workspaceID>/<taskID>; in dev mode

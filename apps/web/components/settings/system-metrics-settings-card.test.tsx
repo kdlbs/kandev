@@ -24,11 +24,44 @@ afterEach(() => {
 });
 
 describe("SystemMetricsSettingsCard", () => {
+  it("explains the simplified metrics choice", () => {
+    const onSimplifiedChange = vi.fn();
+    render(
+      <SettingsSaveProvider>
+        <SystemMetricsSettingsCard
+          showInTopbar
+          onShowInTopbarChange={vi.fn()}
+          simplified={false}
+          isSimplifiedDirty
+          onSimplifiedChange={onSimplifiedChange}
+        />
+      </SettingsSaveProvider>,
+    );
+
+    const simplified = screen.getByRole("switch", { name: "Simplified metrics" });
+    expect(simplified.getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
+    expect(simplified.closest('[data-slot="card"]')?.getAttribute(DIRTY_ATTRIBUTE)).toBe("true");
+    expect(
+      screen.getByText(
+        "Removes the Host marker and progress bars while retaining metric icons and values.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+    fireEvent.click(simplified);
+    expect(onSimplifiedChange).toHaveBeenCalledWith(true);
+  });
+
   it("keeps metric changes local until Save changes is pressed", async () => {
     updateSystemMetricsSettingsMock.mockImplementation(async (next) => ({ settings: next }));
     render(
       <SettingsSaveProvider>
-        <SystemMetricsSettingsCard showInTopbar onShowInTopbarChange={vi.fn()} />
+        <SystemMetricsSettingsCard
+          showInTopbar
+          onShowInTopbarChange={vi.fn()}
+          simplified={false}
+          onSimplifiedChange={vi.fn()}
+        />
       </SettingsSaveProvider>,
     );
 

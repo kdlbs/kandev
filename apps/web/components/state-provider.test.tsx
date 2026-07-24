@@ -26,7 +26,7 @@ function EnableMetricsFromNestedProvider() {
       onClick={() =>
         setUserSettings({
           ...userSettings,
-          systemMetricsDisplay: { showInTopbar: true },
+          systemMetricsDisplay: { showInTopbar: true, simplified: false },
           loaded: true,
         })
       }
@@ -51,7 +51,7 @@ describe("StateProvider", () => {
           initialState={{
             userSettings: {
               ...defaultSettingsState.userSettings,
-              systemMetricsDisplay: { showInTopbar: false },
+              systemMetricsDisplay: { showInTopbar: false, simplified: false },
               loaded: true,
             },
           }}

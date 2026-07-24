@@ -39,6 +39,25 @@ func TestAppStatusBarOrderDTOAndPatchSemantics(t *testing.T) {
 	})
 }
 
+func TestUpdateUserSettingsRequestSystemMetricsDisplayPreservesOmittedFields(t *testing.T) {
+	var req UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"system_metrics_display":{"show_in_topbar":true}}`), &req); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+
+	encoded, err := json.Marshal(req.SystemMetricsDisplay)
+	if err != nil {
+		t.Fatalf("marshal system metrics display: %v", err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatalf("decode system metrics display: %v", err)
+	}
+	if _, ok := fields["simplified"]; ok {
+		t.Fatalf("simplified = %s, want omitted field to remain absent", fields["simplified"])
+	}
+}
+
 func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
 	for _, want := range []bool{true, false} {
 		dto := FromUserSettings(&models.UserSettings{ConfirmTaskArchive: want})

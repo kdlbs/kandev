@@ -94,6 +94,7 @@ Per-workspace credentials and triage triggers for external services.
 
 | Spec | Status |
 |---|---|
+| [creation](workspaces/creation.md) | building |
 | [deletion](workspaces/deletion.md) | shipped |
 | [local-repositories](workspaces/local-repositories.md) | shipped |
 
@@ -111,6 +112,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | Spec | Status |
 |---|---|
 | [ci-pr-automation](ui/ci-pr-automation.md) | draft |
+| [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
@@ -142,6 +144,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 
 | Spec | Status |
 |---|---|
+| [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
 | [improve-kandev](improve-kandev/spec.md) | draft |
 | [homebrew-core](homebrew-core/spec.md) | draft |

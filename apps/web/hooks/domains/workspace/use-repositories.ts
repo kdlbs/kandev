@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import type { Repository } from "@/lib/types/http";
 import { listRepositories } from "@/lib/api";
@@ -32,6 +32,19 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
   // a duplicate fetch for the same workspace; `cancelled` discards stale results
   // on workspace switch, and forcedRef/isLoaded gate re-fetches after success.
   const forcedRef = useRef<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    if (!enabled || !workspaceId) return;
+    setRepositoriesLoading(workspaceId, true);
+    try {
+      const response = await listRepositories(workspaceId, undefined, { cache: "no-store" });
+      setRepositories(workspaceId, response.repositories);
+    } catch {
+      // Keep the existing cached repositories when a manual refresh fails.
+    } finally {
+      setRepositoriesLoading(workspaceId, false);
+    }
+  }, [enabled, setRepositories, setRepositoriesLoading, workspaceId]);
 
   useEffect(() => {
     if (!enabled || !workspaceId) return;
@@ -88,5 +101,5 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     };
   }, [enabled, forceRefresh, isLoaded, setRepositories, setRepositoriesLoading, workspaceId]);
 
-  return { repositories, isLoading };
+  return { repositories, isLoading, refresh };
 }

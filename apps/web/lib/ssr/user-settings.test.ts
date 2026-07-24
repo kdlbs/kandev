@@ -3,6 +3,7 @@ import {
   buildCoreFields,
   mapUserSettingsResponse,
   parseChangesPanelLayout,
+  parseSystemMetricsDisplay,
   parseVoiceMode,
 } from "./user-settings";
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
@@ -10,6 +11,17 @@ import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 
 describe("buildCoreFields", () => {
+  it("normalizes the simplified metrics preference and defaults old rows to detailed", () => {
+    expect(parseSystemMetricsDisplay({ show_in_topbar: true, simplified: true } as never)).toEqual({
+      showInTopbar: true,
+      simplified: true,
+    });
+    expect(parseSystemMetricsDisplay(undefined)).toEqual({
+      showInTopbar: false,
+      simplified: false,
+    });
+  });
+
   it("maps portable app status bar order", () => {
     const settings = {
       app_status_bar_order: {

@@ -48,7 +48,9 @@ const draftFrom = (saved: AgentProfile, overrides: Partial<DraftProfile> = {}): 
 });
 
 const ALLOW_ALL_TOOLS_FLAG = "--allow-all-tools";
+const COMMAND_PREFIX = "greywall --";
 const PERSISTED_PROFILE_ID = toAgentProfileId("persisted-profile");
+const DRAFT_PROFILE_ID = toAgentProfileId("draft-profile");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -106,6 +108,16 @@ describe("toAgentProfilePatch", () => {
   it("omits undefined keys so partial patches do not clobber unrelated fields", () => {
     expect(toAgentProfilePatch({ cli_passthrough: false })).toEqual({ cliPassthrough: false });
     expect(toAgentProfilePatch({})).toEqual({});
+  });
+
+  it("maps command_prefix to commandPrefix", () => {
+    expect(toAgentProfilePatch({ command_prefix: COMMAND_PREFIX })).toEqual({
+      commandPrefix: COMMAND_PREFIX,
+    });
+  });
+
+  it("maps a cleared command_prefix (empty string) rather than dropping it", () => {
+    expect(toAgentProfilePatch({ command_prefix: "" })).toEqual({ commandPrefix: "" });
   });
 });
 
@@ -175,12 +187,35 @@ describe("isProfileDirty", () => {
     const draft = draftFrom(baseProfile, { auto_approve: true, autoApprove: false });
     expect(isProfileDirty(draft, baseProfile)).toBe(false);
   });
+
+  it("returns true when a command prefix is set on a profile that had none", () => {
+    const draft = draftFrom(baseProfile, { commandPrefix: COMMAND_PREFIX });
+    expect(isProfileDirty(draft, baseProfile)).toBe(true);
+  });
+
+  it("returns true when a previously saved command prefix is cleared", () => {
+    const saved: AgentProfile = { ...baseProfile, commandPrefix: COMMAND_PREFIX };
+    const draft = draftFrom(saved, { commandPrefix: "" });
+    expect(isProfileDirty(draft, saved)).toBe(true);
+  });
+
+  it("treats an undefined command prefix as equal to an empty string", () => {
+    const saved: AgentProfile = { ...baseProfile, commandPrefix: undefined };
+    const draft = draftFrom(saved, { commandPrefix: "" });
+    expect(isProfileDirty(draft, saved)).toBe(false);
+  });
+
+  it("returns false when the command prefix is unchanged", () => {
+    const saved: AgentProfile = { ...baseProfile, commandPrefix: COMMAND_PREFIX };
+    const draft = draftFrom(saved, { commandPrefix: COMMAND_PREFIX });
+    expect(isProfileDirty(draft, saved)).toBe(false);
+  });
 });
 
 describe("mergeSavedAgentDraft", () => {
   it("remaps created profile IDs while preserving edits made during save", () => {
     const submittedProfile = draftFrom(baseProfile, {
-      id: toAgentProfileId("draft-profile"),
+      id: DRAFT_PROFILE_ID,
       name: "Submitted name",
     });
     const submitted = agentWithProfiles([submittedProfile]);
@@ -206,7 +241,7 @@ describe("mergeSavedAgentDraft", () => {
   it("keeps existing profiles while remapping a newly created profile", () => {
     const existing = draftFrom(baseProfile, { id: toAgentProfileId("existing") });
     const submittedProfile = draftFrom(baseProfile, {
-      id: toAgentProfileId("draft-profile"),
+      id: DRAFT_PROFILE_ID,
       name: "Submitted",
     });
     const persisted = { ...submittedProfile, id: PERSISTED_PROFILE_ID };
@@ -229,7 +264,7 @@ describe("mergeSavedAgentDraft", () => {
 describe("saveNewAgent", () => {
   it("reconciles a created agent so a failed MCP write retries without another create", async () => {
     const draftProfile = draftFrom(baseProfile, {
-      id: toAgentProfileId("draft-profile"),
+      id: DRAFT_PROFILE_ID,
       mcp_config: {
         enabled: true,
         servers: '{"mcpServers":{"playwright":{"command":"npx"}}}',
@@ -323,6 +358,84 @@ describe("saveExistingAgent", () => {
     expect(updateAgentProfileAction).toHaveBeenCalledOnce();
     expect(updateAgentProfileMcpConfigAction).toHaveBeenCalledTimes(2);
     expect(savedDraft.profiles[1].mcp_config).toBeUndefined();
+  });
+});
+
+describe("command prefix save payloads", () => {
+  it("includes the command prefix when saving a dirty existing profile", async () => {
+    const savedAgent = agentWithProfiles([baseProfile]);
+    const draftProfile = draftFrom(baseProfile, { commandPrefix: COMMAND_PREFIX });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(updateAgentProfileAction).mockResolvedValue({
+      ...baseProfile,
+      commandPrefix: COMMAND_PREFIX,
+    });
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      baseProfile.id,
+      expect.objectContaining({ command_prefix: COMMAND_PREFIX }),
+    );
+  });
+
+  it("saves an empty command prefix when a previously-saved prefix is cleared", async () => {
+    const savedProfileWithPrefix: AgentProfile = { ...baseProfile, commandPrefix: COMMAND_PREFIX };
+    const savedAgent = agentWithProfiles([savedProfileWithPrefix]);
+    const draftProfile = draftFrom(savedProfileWithPrefix, { commandPrefix: "" });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(updateAgentProfileAction).mockResolvedValue({ ...baseProfile, commandPrefix: "" });
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(updateAgentProfileAction).toHaveBeenCalledWith(
+      baseProfile.id,
+      expect.objectContaining({ command_prefix: "" }),
+    );
+  });
+
+  it("includes the command prefix when creating a new agent's profile", async () => {
+    const draftProfile = draftFrom(baseProfile, {
+      id: DRAFT_PROFILE_ID,
+      commandPrefix: COMMAND_PREFIX,
+    });
+    const draftAgent = agentWithProfiles([draftProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(createAgentAction).mockResolvedValue(
+      agentWithProfiles([{ ...draftProfile, id: PERSISTED_PROFILE_ID }]),
+    );
+
+    await saveNewAgent(draftAgent, callbacks);
+
+    expect(createAgentAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        profiles: [expect.objectContaining({ command_prefix: COMMAND_PREFIX })],
+      }),
+    );
+  });
+
+  it("includes the command prefix when adding a new profile to an existing agent", async () => {
+    const savedAgent = agentWithProfiles([baseProfile]);
+    const newProfile = draftFrom(baseProfile, {
+      id: toAgentProfileId("draft-new-profile"),
+      name: "New profile",
+      commandPrefix: COMMAND_PREFIX,
+    });
+    const draftAgent = agentWithProfiles([baseProfile, newProfile]);
+    const { callbacks } = createTestCallbacks(draftAgent);
+    vi.mocked(createAgentProfileAction).mockResolvedValue({
+      ...newProfile,
+      id: PERSISTED_PROFILE_ID,
+    });
+
+    await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
+
+    expect(createAgentProfileAction).toHaveBeenCalledWith(
+      savedAgent.id,
+      expect.objectContaining({ command_prefix: COMMAND_PREFIX }),
+    );
   });
 });
 

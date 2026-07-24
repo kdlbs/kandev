@@ -131,6 +131,7 @@ describe("system storage slice", () => {
           managed_container_bytes: 0,
         },
       },
+      analyzed_at: "2026-07-23T12:00:00Z",
       last_run: null,
     } satisfies StorageOverviewResponse;
     store.getState().setSystemStorageOverview(overview);

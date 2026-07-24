@@ -771,6 +771,17 @@ func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number 
 	return nil
 }
 
+func (c *GHClient) RequestReviewers(ctx context.Context, owner, repo string, number int, reviewers []string) error {
+	args := []string{"api", fmt.Sprintf("repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, number), "-X", "POST"}
+	for _, reviewer := range reviewers {
+		args = append(args, "-f", "reviewers[]="+reviewer)
+	}
+	if _, err := c.run(ctx, args...); err != nil {
+		return fmt.Errorf("request reviewers on PR #%d: %w", number, err)
+	}
+	return nil
+}
+
 func (c *GHClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
 	endpoint := fmt.Sprintf("repos/%s/%s/pulls/%d/merge", owner, repo, number)
 	args := []string{"api", endpoint, "-X", "PUT"}

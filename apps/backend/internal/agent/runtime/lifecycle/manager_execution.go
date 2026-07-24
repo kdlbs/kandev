@@ -181,10 +181,16 @@ func awaitCoalescedResult(
 	ctx context.Context,
 	result <-chan singleflight.Result,
 ) (interface{}, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case completed := <-result:
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		if completed.Err != nil {
 			return nil, completed.Err
 		}
@@ -613,7 +619,7 @@ func (m *Manager) rollbackRacedExecution(ctx context.Context, rt ExecutorBackend
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
 	if rt != nil && runtimeInstance != nil {
-		if stopErr := rt.StopInstance(ctx, runtimeInstance, false); stopErr != nil {
+		if stopErr := rt.StopInstance(ctx, runtimeInstance, true); stopErr != nil {
 			m.logger.Warn("failed to stop raced runtime instance during rollback",
 				zap.String("execution_id", execution.ID),
 				zap.Error(stopErr))

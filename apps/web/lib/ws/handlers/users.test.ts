@@ -25,6 +25,21 @@ function userSettingsMessage(
 }
 
 describe("user settings websocket handler", () => {
+  it("normalizes the simplified metrics preference from live updates", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        system_metrics_display: { show_in_topbar: true, simplified: true } as never,
+      }),
+    );
+
+    expect(store.getState().userSettings.systemMetricsDisplay).toEqual({
+      showInTopbar: true,
+      simplified: true,
+    });
+  });
+
   it("replaces portable status order when present and preserves it when omitted", () => {
     const store = makeStore();
 

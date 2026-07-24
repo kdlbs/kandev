@@ -141,7 +141,7 @@ func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 }
 
 func (m *Manager) newNonInteractiveGitCmd(ctx context.Context, repoPath string, args ...string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",

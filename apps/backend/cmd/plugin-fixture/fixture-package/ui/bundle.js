@@ -4,8 +4,10 @@
  * imports, no bundled React — that calls `window.registerKandevPlugin(id,
  * plugin)` at evaluation time and, on `initialize(registry, host)`,
  * registers a nav item, a top-level route, a `task-sidebar` slot component,
- * a `main-top-bar` slot component, and a `task.created` WS handler. Uses
- * only host.React/host.jsx.
+ * a `main-top-bar` slot component, a `task.created` WS handler, and the
+ * `open-demo` keybinding (declared in manifest.yaml's `ui.keybindings`,
+ * default `mod+shift+k`) which opens a `host.openModal(...)` demo modal.
+ * Uses only host.React/host.jsx.
  *
  * The task-created counter lives in module scope (not component state) with
  * a tiny listener set, so it survives across route navigations (the page
@@ -90,6 +92,21 @@
       registry.registerComponent("app-status-bar-right", StatusSlot);
       registry.registerWsHandler("task.created", function () {
         incrementCount();
+      });
+
+      registry.registerKeybinding("open-demo", function () {
+        function DemoModalContent() {
+          return jsx(
+            "div",
+            { id: "hello-demo-modal", "data-testid": "hello-demo-modal" },
+            "Hello from the plugin modal",
+          );
+        }
+        host.openModal({
+          title: "Demo Modal",
+          content: DemoModalContent,
+          size: "md",
+        });
       });
     },
   });

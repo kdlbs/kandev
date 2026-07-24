@@ -111,6 +111,11 @@ type Service struct {
 	// marketplace is the plugin-discovery catalog service (nil until
 	// SetMarketplace is called by Provide). See marketplace.go.
 	marketplace *marketplace.Service
+
+	// settings persists instance-wide plugin preferences (the auto-update
+	// default). nil until SetSettings is called by Provide; the auto-update
+	// accessors treat a nil store as "default off, no overrides possible".
+	settings *settingsStore
 }
 
 // NewService wires a Service from its already-constructed dependencies.
@@ -661,6 +666,13 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		InstallPath: result.InstallPath,
 		Signed:      result.Signed,
 		InstalledAt: time.Now().UTC(),
+	}
+	// An in-place upgrade rebuilds the record from the new package's manifest,
+	// so the operator's per-plugin auto-update override (an operator choice,
+	// not a manifest fact) must be carried forward or an auto-update would
+	// silently reset the very toggle that triggered it.
+	if hadOldRec {
+		rec.AutoUpdate = oldRec.AutoUpdate
 	}
 	if err := s.store.Save(rec); err != nil {
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)

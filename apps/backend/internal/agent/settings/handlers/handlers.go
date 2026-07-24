@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -26,25 +27,27 @@ type Handlers struct {
 	controller *controller.Controller
 	hub        Broadcaster
 	logger     *logger.Logger
+	interlock  gin.HandlerFunc
 }
 
 type Broadcaster interface {
 	Broadcast(msg *ws.Message)
 }
 
-func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logger) *Handlers {
+func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) *Handlers {
 	return &Handlers{
 		controller: ctrl,
 		hub:        hub,
 		logger:     log.WithFields(zap.String("component", "agent-settings-handlers")),
+		interlock:  httpmw.InterimSettingsInterlock(interlockToken),
 	}
 }
 
-func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger) {
+func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) {
 	// Wire the install job store with the same broadcaster used by other
 	// agent-settings notifications so streaming install events reach the UI.
 	ctrl.SetJobBroadcaster(hub)
-	handlers := NewHandlers(ctrl, hub, log)
+	handlers := NewHandlers(ctrl, hub, log, interlockToken)
 	handlers.registerHTTP(router)
 }
 
@@ -54,22 +57,22 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agents/available", h.httpListAvailableAgents)
 	api.GET("/agents/usage", h.httpAgentSubscriptionUsage)
 	api.GET("/agents", h.httpListAgents)
-	api.POST("/agents", h.httpCreateAgent)
-	api.POST("/agents/tui", h.httpCreateCustomTUIAgent)
+	api.POST("/agents", h.interlock, h.httpCreateAgent)
+	api.POST("/agents/tui", h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/:id", h.httpGetAgent)
-	api.PATCH("/agents/:id", h.httpUpdateAgent)
-	api.DELETE("/agents/:id", h.httpDeleteAgent)
-	api.POST("/agents/:id/profiles", h.httpCreateProfile)
+	api.PATCH("/agents/:id", h.interlock, h.httpUpdateAgent)
+	api.DELETE("/agents/:id", h.interlock, h.httpDeleteAgent)
+	api.POST("/agents/:id/profiles", h.interlock, h.httpCreateProfile)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
-	api.POST("/agent-install/:agentName", h.httpInstallAgent)
+	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
-	api.PATCH("/agent-profiles/:id", h.httpUpdateProfile)
-	api.DELETE("/agent-profiles/:id", h.httpDeleteProfile)
+	api.PATCH("/agent-profiles/:id", h.interlock, h.httpUpdateProfile)
+	api.DELETE("/agent-profiles/:id", h.interlock, h.httpDeleteProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
-	api.POST("/agent-profiles/:id/mcp-config", h.httpUpdateProfileMcpConfig)
+	api.POST("/agent-profiles/:id/mcp-config", h.interlock, h.httpUpdateProfileMcpConfig)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -184,11 +187,12 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name     string                 `json:"name"`
-	Model    string                 `json:"model"`
-	Mode     string                 `json:"mode,omitempty"`
-	CLIFlags []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars  []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	Name          string                 `json:"name"`
+	Model         string                 `json:"model"`
+	Mode          string                 `json:"mode,omitempty"`
+	CLIFlags      []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars       []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -208,11 +212,12 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			return
 		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
-			Name:     profile.Name,
-			Model:    profile.Model,
-			Mode:     profile.Mode,
-			CLIFlags: profile.CLIFlags,
-			EnvVars:  profile.EnvVars,
+			Name:          profile.Name,
+			Model:         profile.Model,
+			Mode:          profile.Mode,
+			CLIFlags:      profile.CLIFlags,
+			EnvVars:       profile.EnvVars,
+			CommandPrefix: profile.CommandPrefix,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
@@ -221,6 +226,10 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		Profiles:    profiles,
 	})
 	if err != nil {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to create agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -373,6 +382,7 @@ type createProfileRequest struct {
 	CLIPassthrough bool                   `json:"cli_passthrough"`
 	CLIFlags       []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars        []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix  string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -396,9 +406,10 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
+		CommandPrefix:  body.CommandPrefix,
 	})
 	if err != nil {
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -425,6 +436,7 @@ type updateProfileRequest struct {
 	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
 	CLIFlags       *[]dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars        *[]dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix  *string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -448,13 +460,14 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
+		CommandPrefix:  body.CommandPrefix,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 			return
 		}
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -507,6 +520,7 @@ type commandPreviewRequest struct {
 	PermissionSettings map[string]bool  `json:"permission_settings"`
 	CLIPassthrough     bool             `json:"cli_passthrough"`
 	CLIFlags           []dto.CLIFlagDTO `json:"cli_flags"`
+	CommandPrefix      string           `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -527,6 +541,7 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 		PermissionSettings: body.PermissionSettings,
 		CLIPassthrough:     body.CLIPassthrough,
 		CLIFlags:           body.CLIFlags,
+		CommandPrefix:      body.CommandPrefix,
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))

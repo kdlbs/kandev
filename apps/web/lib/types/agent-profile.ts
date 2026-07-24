@@ -85,6 +85,12 @@ export type AgentProfile = {
   autoApprove: boolean;
   /** User-configurable CLI flags passed to the agent subprocess. */
   cliFlags: CLIFlag[];
+  /**
+   * Free-form tokens prepended to the agent subprocess launch command, e.g.
+   * `greywall --`. Used to wrap the ACP subprocess in a sandbox launcher.
+   * Shell-tokenised; empty means the agent runs directly.
+   */
+  commandPrefix?: string;
   /** Environment variables injected when this profile starts an agent session. */
   envVars?: ProfileEnvVar[];
   cliPassthrough: boolean;
@@ -156,6 +162,7 @@ export type AgentProfilePayload = {
   allow_indexing: boolean;
   auto_approve: boolean;
   cli_flags: CLIFlag[];
+  command_prefix?: string;
   env_vars?: ProfileEnvVar[];
   cli_passthrough: boolean;
   user_modified?: boolean;

@@ -18,7 +18,15 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 )
 
-const jsonNullLiteral = "null"
+const (
+	jsonNullLiteral = "null"
+
+	// These limits keep the trusted local API bounded without imposing GitHub's
+	// login syntax rules at this boundary.
+	maxRequestReviewersBodyBytes = 64 * 1024
+	maxRequestReviewerCount      = 50
+	maxRequestReviewerLoginBytes = 256
+)
 
 // Controller handles HTTP endpoints for GitHub integration.
 type Controller struct {
@@ -52,6 +60,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api.GET("/prs/:owner/:repo/:number/status", c.httpGetPRStatus)
 	api.POST("/prs/statuses", c.httpGetPRStatusesBatch)
 	api.POST("/prs/:owner/:repo/:number/reviews", c.httpSubmitReview)
+	api.POST("/prs/:owner/:repo/:number/requested-reviewers", c.httpRequestReviewers)
 	api.PUT("/prs/:owner/:repo/:number/merge", c.httpMergePR)
 	api.GET("/issues/:owner/:repo/:number/info", c.httpGetIssueInfo)
 
@@ -525,6 +534,57 @@ func (c *Controller) httpSubmitReview(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, gin.H{"submitted": true})
+}
+
+func (c *Controller) httpRequestReviewers(ctx *gin.Context) {
+	number, err := strconv.Atoi(ctx.Param("number"))
+	if err != nil || number <= 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid PR number"})
+		return
+	}
+	var req struct {
+		Reviewers []string `json:"reviewers"`
+	}
+	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, maxRequestReviewersBodyBytes)
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "reviewers must contain non-empty logins"})
+		return
+	}
+	reviewers, ok := normalizeReviewers(req.Reviewers)
+	if !ok {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "reviewers must contain non-empty logins"})
+		return
+	}
+	if err := c.service.RequestReviewers(ctx.Request.Context(), ctx.Param("owner"), ctx.Param("repo"), number, reviewers); err != nil {
+		if errors.Is(err, ErrNoClient) {
+			ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": "GitHub is not configured", "code": "github_not_configured"})
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"requested": true})
+}
+
+func normalizeReviewers(reviewers []string) ([]string, bool) {
+	if len(reviewers) == 0 || len(reviewers) > maxRequestReviewerCount {
+		return nil, false
+	}
+	normalized := make([]string, 0, len(reviewers))
+	seen := make(map[string]struct{}, len(reviewers))
+	for _, reviewer := range reviewers {
+		login := strings.TrimSpace(reviewer)
+		if login == "" || len(login) > maxRequestReviewerLoginBytes {
+			return nil, false
+		}
+		key := strings.ToLower(login)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, login)
+	}
+	return normalized, len(normalized) > 0
 }
 
 func (c *Controller) httpMergePR(ctx *gin.Context) {

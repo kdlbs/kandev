@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -41,6 +42,60 @@ func newTestServer(t *testing.T) *Server {
 	}
 	procMgr := process.NewManager(cfg, log)
 	return NewServer(cfg, procMgr, nil, nil, log)
+}
+
+func TestHandleAgentConfigure_PrefersPresentStructuredArgs(t *testing.T) {
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: t.TempDir()}
+	procMgr := process.NewManager(cfg, log)
+	server := NewServer(cfg, procMgr, nil, nil, log)
+
+	body := strings.NewReader(`{"command":"legacy command","agent_args":["runner","two words","","C:\\tools\\agent.exe"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/configure", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+
+	server.router.ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("configure status = %d, want %d: %s", resp.Code, http.StatusOK, resp.Body.String())
+	}
+	want := []string{"runner", "two words", "", `C:\tools\agent.exe`}
+	if got := cfg.AgentArgs; !slices.Equal(got, want) {
+		t.Fatalf("AgentArgs = %#v, want %#v", got, want)
+	}
+}
+
+func TestHandleAgentConfigure_UsesLegacyOnlyWhenArgsAbsent(t *testing.T) {
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: t.TempDir()}
+	server := NewServer(cfg, process.NewManager(cfg, log), nil, nil, log)
+
+	for _, tc := range []struct {
+		name string
+		body string
+		code int
+		want []string
+	}{
+		{name: "legacy absent", body: `{"command":"legacy  --flag"}`, code: http.StatusOK, want: []string{"legacy", "--flag"}},
+		{name: "present empty rejects", body: `{"command":"legacy --flag","agent_args":[]}`, code: http.StatusInternalServerError},
+		{name: "present flag executable rejects", body: `{"command":"legacy --flag","agent_args":["--flag"]}`, code: http.StatusInternalServerError},
+		{name: "present null rejects", body: `{"command":"legacy --flag","agent_args":null}`, code: http.StatusInternalServerError},
+		{name: "present empty continue rejects", body: `{"command":"runner","agent_args":["runner"],"continue_command":"legacy continue","continue_args":[]}`, code: http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/configure", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			resp := httptest.NewRecorder()
+			server.router.ServeHTTP(resp, req)
+			if resp.Code != tc.code {
+				t.Fatalf("configure status = %d, want %d: %s", resp.Code, tc.code, resp.Body.String())
+			}
+			if tc.want != nil && !slices.Equal(cfg.AgentArgs, tc.want) {
+				t.Fatalf("AgentArgs = %#v, want %#v", cfg.AgentArgs, tc.want)
+			}
+		})
+	}
 }
 
 // dialTestWS connects a WebSocket client to the test server's /api/v1/agent/stream endpoint.

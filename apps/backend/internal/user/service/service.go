@@ -72,9 +72,14 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontFamily          *string
 	TerminalFontSize            *int
 	ChangesPanelLayout          *string
-	SystemMetricsDisplay        *models.SystemMetricsDisplaySettings
+	SystemMetricsDisplay        *SystemMetricsDisplaySettingsPatch
 	AppStatusBarOrder           *models.AppStatusBarOrder
 	VoiceMode                   *models.VoiceModeSettings
+}
+
+type SystemMetricsDisplaySettingsPatch struct {
+	ShowInTopbar *bool
+	Simplified   *bool
 }
 
 func NewService(repo store.Repository, eventBus bus.EventBus, log *logger.Logger) *Service {
@@ -247,7 +252,12 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if req.SystemMetricsDisplay != nil {
-		settings.SystemMetricsDisplay = *req.SystemMetricsDisplay
+		if req.SystemMetricsDisplay.ShowInTopbar != nil {
+			settings.SystemMetricsDisplay.ShowInTopbar = *req.SystemMetricsDisplay.ShowInTopbar
+		}
+		if req.SystemMetricsDisplay.Simplified != nil {
+			settings.SystemMetricsDisplay.Simplified = *req.SystemMetricsDisplay.Simplified
+		}
 	}
 	if req.AppStatusBarOrder != nil {
 		settings.AppStatusBarOrder = *req.AppStatusBarOrder

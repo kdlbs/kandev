@@ -27,7 +27,7 @@ vi.mock("@/hooks/use-system-metrics-subscription", () => ({
   useSystemMetricsSubscription: subscribeMock,
 }));
 
-function renderMetrics(drawerOpen = false) {
+function renderMetrics(drawerOpen = false, simplified = false) {
   return render(
     <StateProvider
       initialState={
@@ -35,7 +35,7 @@ function renderMetrics(drawerOpen = false) {
           userSettings: {
             ...defaultSettingsState.userSettings,
             loaded: true,
-            systemMetricsDisplay: { showInTopbar: true },
+            systemMetricsDisplay: { showInTopbar: true, simplified },
           },
           system: {
             ...defaultSystemState.system,
@@ -120,6 +120,7 @@ describe("StatusSurfaceMetrics", () => {
     expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
     expect(screen.getByLabelText("Memory 51%")).toBeTruthy();
     expect(screen.getByLabelText("Disk 63%")).toBeTruthy();
+    expect(screen.getAllByTestId("system-metric-meter")).toHaveLength(3);
     const systemLoad = screen.getByLabelText("System load (1 min) 2.5");
     expect(systemLoad).toBeTruthy();
     fireEvent.focus(systemLoad);
@@ -146,5 +147,24 @@ describe("StatusSurfaceMetrics", () => {
 
     expect(subscribeMock).toHaveBeenCalledWith(true);
     expect(screen.getByLabelText("Host metrics").parentElement?.className).toContain("min-h-11");
+  });
+
+  it("omits the host marker and meters in simplified desktop mode", () => {
+    renderMetrics(false, true);
+
+    expect(screen.queryByLabelText("Host metrics")).toBeNull();
+    expect(screen.queryAllByTestId("system-metric-meter")).toHaveLength(0);
+    expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
+    expect(screen.getByLabelText("Memory 51%")).toBeTruthy();
+  });
+
+  it("omits the host marker and meters in simplified phone drawer mode", () => {
+    responsiveState.isMobile = true;
+    renderMetrics(true, true);
+
+    expect(screen.queryByLabelText("Host metrics")).toBeNull();
+    expect(screen.queryAllByTestId("system-metric-meter")).toHaveLength(0);
+    expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
+    expect(screen.getByLabelText("Memory 51%")).toBeTruthy();
   });
 });

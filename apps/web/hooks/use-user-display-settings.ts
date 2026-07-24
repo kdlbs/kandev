@@ -76,7 +76,10 @@ function carryForwardCoreSettings(current: DisplaySettings) {
 
 function carryForwardAppStatusSettings(current: DisplaySettings) {
   return {
-    systemMetricsDisplay: current.systemMetricsDisplay ?? { showInTopbar: false },
+    systemMetricsDisplay: current.systemMetricsDisplay ?? {
+      showInTopbar: false,
+      simplified: false,
+    },
     appStatusBarOrder: current.appStatusBarOrder ?? { leftItemIds: [], rightItemIds: [] },
   };
 }

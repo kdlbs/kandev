@@ -43,6 +43,8 @@ type AgentExecution struct {
 	ACPSessionID         string               // ACP session ID to resume, if available
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents like Amp)
+	AgentArgs            []string             // Structured argv for AgentCommand
+	ContinueArgs         []string             // Structured argv for ContinueCommand
 	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
 	Status               v1.AgentStatus
 	StartedAt            time.Time
@@ -653,6 +655,9 @@ type AgentProfileInfo struct {
 	// CLIFlags is the resolved user-configurable list of CLI flags for this
 	// profile. Passed verbatim to cliflags.Resolve at launch time.
 	CLIFlags []settingsmodels.CLIFlag
+	// CommandPrefix is an optional launcher prefix (e.g. "greywall --")
+	// shell-tokenised and prepended to the agent command at launch time.
+	CommandPrefix string
 	// EnvVars are user-configured environment variables for this profile.
 	EnvVars []settingsmodels.ProfileEnvVar
 

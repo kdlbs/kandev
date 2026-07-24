@@ -194,8 +194,8 @@ func (f *fakeStorageMutations) DeleteQuarantine(context.Context, string, string)
 
 type emptyStorageOverview struct{}
 
-func (emptyStorageOverview) Summary(context.Context) (storage.Summary, error) {
-	return storage.Summary{}, nil
+func (emptyStorageOverview) Get(context.Context) (storage.OverviewSnapshot, error) {
+	return storage.OverviewSnapshot{Summary: storage.Summary{}}, nil
 }
 
 func (emptyStorageOverview) Capabilities(context.Context, storage.StorageMaintenanceSettings) storage.Capabilities {
