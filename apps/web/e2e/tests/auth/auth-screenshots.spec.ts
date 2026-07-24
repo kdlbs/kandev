@@ -189,6 +189,17 @@ test.describe.serial("auth screenshots", () => {
     await page.goto("/");
     await page.waitForTimeout(2000);
     await shot(page, "11-member-app");
+    // Dismiss the first-run onboarding wizard (it overlays the sidebar), then
+    // hover the current-user chip to verify the border (not accent-fill) hover.
+    const skip = page.getByRole("button", { name: /skip/i });
+    if (await skip.isVisible().catch(() => false)) {
+      await skip.click();
+      await page.waitForTimeout(400);
+    }
+    const chip = page.getByTestId("current-user-chip");
+    await chip.hover();
+    await page.waitForTimeout(300);
+    await chip.screenshot({ path: path.join(SHOT_DIR, "12-user-chip-hover.png") });
     await ctx.close();
   });
 });

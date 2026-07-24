@@ -46,7 +46,7 @@ export function CurrentUserChip({ collapsed }: { collapsed: boolean }) {
           type="button"
           data-testid="current-user-chip"
           className={cn(
-            "flex items-center gap-1.5 rounded-md cursor-pointer hover:bg-accent transition-colors overflow-hidden",
+            "flex items-center gap-1.5 rounded-md cursor-pointer overflow-hidden border border-transparent transition-colors hover:border-border hover:bg-muted/50",
             collapsed ? "justify-center p-1" : "px-1.5 py-1 max-w-[140px]",
           )}
         >
