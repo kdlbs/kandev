@@ -18,7 +18,7 @@
 import { getBackendConfig } from "@/lib/config";
 import { pluginModalManager } from "./modal-manager";
 import { pluginRegistry } from "./registry";
-import type { ActivePlugin, KandevPlugin, PluginHostApi } from "./types";
+import type { ActivePlugin, KandevPlugin, PluginHostApi, PluginRegistry } from "./types";
 
 /** Builds the per-plugin `PluginHostApi` for a given pluginId. */
 export type PluginHostFactory = (pluginId: string) => PluginHostApi;
@@ -75,6 +75,59 @@ type PluginGlobalWindow = Window & {
 /** Bundles registered via `window.registerKandevPlugin`, keyed by pluginId. */
 const registeredPlugins = new Map<string, KandevPlugin>();
 
+/**
+ * Latest load "generation" claimed per pluginId. `loadPlugin` claims a fresh
+ * generation the moment it starts (before it awaits the dynamic import), so a
+ * later-initiated load always outranks an earlier one for the same plugin.
+ * Registry mutations are then fenced on this: a load that has been superseded
+ * — an older boot import resolving after a newer install/update already loaded
+ * (bootPlugins fires loadPlugins without awaiting it, and the settings update
+ * path calls loadPlugins independently) — must not revoke the successor's
+ * registrations or append its own stale ones. See `loadPlugin`.
+ */
+const loadGenerations = new Map<string, number>();
+
+/** Claims and returns a new, strictly-increasing load generation for `id`. */
+function claimLoadGeneration(id: string): number {
+  const next = (loadGenerations.get(id) ?? 0) + 1;
+  loadGenerations.set(id, next);
+  return next;
+}
+
+/** True while `generation` is still the newest claimed load for `id`. */
+function isCurrentLoad(id: string, generation: number): boolean {
+  return loadGenerations.get(id) === generation;
+}
+
+/**
+ * Wraps a scoped `PluginRegistry` so every register* call is dropped once this
+ * load has been superseded by a newer one (`isCurrent()` is false). Guards the
+ * window where a plugin registers *after* an `await` inside `initialize()`: a
+ * stale async initializer must not append onto the successor's registrations.
+ */
+function generationFencedRegistry(
+  registry: PluginRegistry,
+  isCurrent: () => boolean,
+): PluginRegistry {
+  return {
+    registerRoute: (path, Component, options) => {
+      if (isCurrent()) registry.registerRoute(path, Component, options);
+    },
+    registerNavItem: (item) => {
+      if (isCurrent()) registry.registerNavItem(item);
+    },
+    registerSettingsRoute: (path, Component) => {
+      if (isCurrent()) registry.registerSettingsRoute(path, Component);
+    },
+    registerComponent: (slot, Component) => {
+      if (isCurrent()) registry.registerComponent(slot, Component);
+    },
+    registerWsHandler: (action, handler) => {
+      if (isCurrent()) registry.registerWsHandler(action, handler);
+    },
+  };
+}
+
 /** Defines `window.registerKandevPlugin` before any bundle loads. Idempotent. */
 export function installPluginGlobal(win: Window = window): void {
   (win as PluginGlobalWindow).registerKandevPlugin = (id, plugin) => {
@@ -112,6 +165,9 @@ async function loadPlugin(
   initTimeoutMs: number,
 ): Promise<void> {
   const { apiBaseUrl } = getBackendConfig();
+  // Claim a generation before the (awaited) import so entry order — not
+  // import-resolve order — decides which load owns the registry.
+  const generation = claimLoadGeneration(plugin.id);
   try {
     injectStyles(plugin.id, plugin.styleUrls, apiBaseUrl);
     const registered = await resolveRegistration(plugin, importer, apiBaseUrl);
@@ -119,8 +175,33 @@ async function loadPlugin(
       console.error(`[plugins] "${plugin.id}" bundle did not call registerKandevPlugin`);
       return;
     }
+    // A newer load for this plugin started while we awaited the import — it now
+    // owns the registry. Bail before mutating anything so this stale load can't
+    // revoke the successor's registrations or initialize an older bundle over
+    // them (the boot-vs-update race Codex flagged).
+    if (!isCurrentLoad(plugin.id, generation)) return;
     const host = hostFactory(plugin.id);
-    const registry = pluginRegistry.forPlugin(plugin.id, plugin.name);
+    // Idempotent (re)load. The nav/route/slot registry is append-only, so
+    // running a plugin's initialize() a second time while its previous
+    // registrations are still live leaves duplicates — e.g. a plugin's
+    // chat-input-actions icon rendered twice. The disable/update paths already
+    // call unloadPlugin() first, but boot does not, and it can re-enter for a
+    // plugin that is already registered: a boot race (bootPlugins' fire-and-
+    // forget loadPlugins still in flight when an install/update reload runs), a
+    // dev HMR re-boot (fresh bootedStores guard against the persistent registry
+    // singleton), or a fresh store instance. Because resolveRegistration reuses
+    // the cached bundle registration, that re-entry re-runs initialize() and
+    // re-registers on top of the old entries. Revoke this plugin's prior
+    // registrations here so a reload always converges to exactly one set,
+    // whatever the caller did — a no-op on a genuine first load.
+    pluginRegistry.unregisterPlugin(plugin.id);
+    // Fence the scoped registry on this generation so that if an even-newer
+    // load supersedes us while initialize() is awaiting, a plugin that
+    // registers post-await can't append onto the successor.
+    const registry = generationFencedRegistry(
+      pluginRegistry.forPlugin(plugin.id, plugin.name),
+      () => isCurrentLoad(plugin.id, generation),
+    );
     await raceTimeout(Promise.resolve(registered.initialize(registry, host)), initTimeoutMs, () => {
       console.warn(
         `[plugins] "${plugin.id}" initialize() timed out after ${initTimeoutMs}ms; continuing without it`,
@@ -195,6 +276,9 @@ export function unloadPlugin(id: string, options?: { evictCache?: boolean }): vo
   } catch (error) {
     console.error(`[plugins] error destroying plugin "${id}"`, error);
   } finally {
+    // Supersede any in-flight load so a plugin whose initialize() is still
+    // awaiting can't re-register after we've disabled/uninstalled it.
+    claimLoadGeneration(id);
     pluginRegistry.unregisterPlugin(id);
     pluginModalManager.closeAllForPlugin(id);
     removeStyles(id);
