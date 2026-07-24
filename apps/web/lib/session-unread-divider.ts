@@ -53,3 +53,27 @@ export function findUnreadDividerItemId(
   }
   return null;
 }
+
+/**
+ * Returns the id of the newest message actually represented among items —
+ * i.e. the last message that made it into the rendered transcript — or null
+ * if items carries no message at all.
+ *
+ * Callers deriving the Slack-style read-cursor's "latest message" must use
+ * this instead of the raw backend message list's last row: some backend
+ * rows never render (a pending `clarification_request`, a hidden "Session
+ * resumed" status, setup script output, a collapsed todo snapshot, ...), so
+ * the raw list's tail can be a message findUnreadDividerItemId will never
+ * find among items — which it then (correctly, per its own contract) treats
+ * as "the whole loaded window is unread", drawing the divider before
+ * everything even though nothing visible is actually new. Deriving the
+ * cursor from the same render-item universe findUnreadDividerItemId
+ * searches keeps both sides in sync.
+ */
+export function lastRenderedMessageId(items: RenderItem[]): string | null {
+  for (let i = items.length - 1; i >= 0; i--) {
+    const ids = renderItemMessageIds(items[i]);
+    if (ids.length > 0) return ids[ids.length - 1];
+  }
+  return null;
+}

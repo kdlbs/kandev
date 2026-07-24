@@ -3061,6 +3061,14 @@ func TestService_MarkSessionReadRejectsUnknownMessage(t *testing.T) {
 	if _, err := svc.MarkSessionRead(ctx, sessionID, "task-description"); err == nil {
 		t.Fatal("expected MarkSessionRead to reject an unknown message id")
 	}
+
+	session, err := svc.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.LastReadMessageID != "" {
+		t.Fatalf("LastReadMessageID = %q, want unchanged empty cursor", session.LastReadMessageID)
+	}
 }
 
 // TestService_MarkSessionReadRejectsEmptyIDs verifies MarkSessionRead

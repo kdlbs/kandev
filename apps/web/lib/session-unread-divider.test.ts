@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
-import { findUnreadDividerItemId } from "./session-unread-divider";
+import { findUnreadDividerItemId, lastRenderedMessageId } from "./session-unread-divider";
 
 function makeMessage(id: string, content = ""): Message {
   return {
@@ -81,5 +81,38 @@ describe("findUnreadDividerItemId", () => {
     // message far older than what pagination has loaded so far.
     const items = [messageItem(makeMessage("m10")), messageItem(makeMessage("m11"))];
     expect(findUnreadDividerItemId(items, "m1-not-loaded")).toBe("m10");
+  });
+});
+
+describe("lastRenderedMessageId", () => {
+  it("returns null when there are no items", () => {
+    expect(lastRenderedMessageId([])).toBeNull();
+  });
+
+  it("returns the last standalone message's id", () => {
+    const items = [messageItem(makeMessage("m1")), messageItem(makeMessage("m2"))];
+    expect(lastRenderedMessageId(items)).toBe("m2");
+  });
+
+  it("skips trailing non-message items (prepare_progress) to find the last real message", () => {
+    const items = [messageItem(makeMessage("m1")), prepareProgress("prepare-1")];
+    expect(lastRenderedMessageId(items)).toBe("m1");
+  });
+
+  it("returns the last message inside a trailing turn_group", () => {
+    const items = [
+      messageItem(makeMessage("m1")),
+      turnGroup("turn-group-a1", [makeMessage("a1"), makeMessage("a2")]),
+    ];
+    expect(lastRenderedMessageId(items)).toBe("a2");
+  });
+
+  it("is unaffected by a trailing item that never rendered (e.g. filtered from the backend list)", () => {
+    // Mirrors the bug findUnreadDividerItemId's caller must avoid: the raw
+    // backend list's newest row (a hidden clarification/status/setup-output
+    // message) never became a render item, so it must not be reported here.
+    const items = [messageItem(makeMessage("m1")), messageItem(makeMessage("m2"))];
+    expect(lastRenderedMessageId(items)).toBe("m2");
+    expect(lastRenderedMessageId(items)).not.toBe("m3-hidden-from-render");
   });
 });

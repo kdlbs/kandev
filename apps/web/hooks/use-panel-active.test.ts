@@ -91,4 +91,25 @@ describe("usePanelActive", () => {
     rerender({ id: PANEL_ID });
     expect(result.current).toBe(false);
   });
+
+  it("rebinds to the new panel api when Dockview remounts (replaces) an existing portal entry", () => {
+    const PANEL_ID = "panel-remount";
+    const stale = acquirePanel(PANEL_ID, false);
+    const { result } = renderHook(() => usePanelActive(PANEL_ID));
+    expect(result.current).toBe(false);
+
+    // Simulate Dockview calling api.fromJSON() during a layout restore: the
+    // same panelId is re-acquired with a brand-new DockviewPanelApi,
+    // without the old one ever being released.
+    const fresh = acquirePanel(PANEL_ID, false);
+
+    act(() => fresh.fireActiveChange(true));
+    expect(result.current).toBe(true);
+
+    // The stale api's listener must have been torn down — firing it no
+    // longer moves the hook (it would incorrectly flip back to false
+    // without the resubscribe fix).
+    act(() => stale.fireActiveChange(false));
+    expect(result.current).toBe(true);
+  });
 });

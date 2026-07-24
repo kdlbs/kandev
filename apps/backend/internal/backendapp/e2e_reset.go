@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -55,6 +56,11 @@ func registerE2EResetRoutes(
 	// so tests can assert on session-state-derived behavior without a full
 	// agent stop/resume cycle.
 	api.POST("/task-sessions", handleE2ECreateTaskSession(repo, log))
+	// Force-sets a session's read cursor, bypassing the production mark-read
+	// endpoint's monotonic (forward-only) guard, so specs can deterministically
+	// seed "the user last read up through an earlier message" without a real
+	// background agent turn.
+	api.PATCH("/task-sessions/:id/read-cursor", handleE2ESetSessionReadCursor(repo, log))
 
 	log.Info("registered E2E endpoints (test-only)")
 }
@@ -439,5 +445,42 @@ func handleE2ECreateTaskSession(repo *sqliterepo.Repository, log *logger.Logger)
 		c.JSON(http.StatusCreated, gin.H{
 			"id": session.ID, taskIDPayloadKey: session.TaskID, statusKey: session.State,
 		})
+	}
+}
+
+type e2eSetSessionReadCursorRequest struct {
+	MessageID string `json:"message_id"`
+}
+
+// handleE2ESetSessionReadCursor force-sets a session's last_read_message_id
+// via a raw update, bypassing UpdateTaskSessionLastReadMessageID's monotonic
+// guard (production only ever advances the cursor forward — see
+// repository/sqlite/session.go). E2E specs use this to seed "the user last
+// read up through an earlier message" deterministically, since replaying an
+// older messageId through the real mark-read endpoint is now a rejected
+// no-op rather than a rewind.
+func handleE2ESetSessionReadCursor(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		sessionID := c.Param("id")
+		var body e2eSetSessionReadCursorRequest
+		if err := c.ShouldBindJSON(&body); err != nil || body.MessageID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "message_id is required"})
+			return
+		}
+		result, err := repo.DB().ExecContext(c.Request.Context(),
+			`UPDATE task_sessions SET last_read_message_id = ?, updated_at = ? WHERE id = ?`,
+			body.MessageID, time.Now().UTC(), sessionID,
+		)
+		if err != nil {
+			log.Error("e2e: failed to force-set session read cursor", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			c.JSON(http.StatusNotFound, gin.H{errKey: "session not found: " + sessionID})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"id": sessionID, "last_read_message_id": body.MessageID})
 	}
 }

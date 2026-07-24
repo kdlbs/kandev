@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
+import type { DockviewPanelApi } from "dockview-react";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 
 /**
@@ -33,8 +34,27 @@ import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 export function usePanelActive(panelId: string): boolean {
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
-      const unsubscribeManager = panelPortalManager.subscribe(onStoreChange);
-      const disposable = panelPortalManager.get(panelId)?.api?.onDidActiveChange(onStoreChange);
+      // Tracks which api our onDidActiveChange listener is currently bound
+      // to, so a manager notification (panel acquired/released/remounted
+      // anywhere) can detect when *this* panelId's api was replaced —
+      // Dockview does this during a layout restore/switch — and rebind
+      // rather than keep listening on the now-stale api.
+      let boundApi: DockviewPanelApi | null = null;
+      let disposable: { dispose: () => void } | null = null;
+
+      const rebindIfApiChanged = () => {
+        const api = panelPortalManager.get(panelId)?.api ?? null;
+        if (api === boundApi) return;
+        disposable?.dispose();
+        boundApi = api;
+        disposable = api?.onDidActiveChange(onStoreChange) ?? null;
+      };
+
+      rebindIfApiChanged();
+      const unsubscribeManager = panelPortalManager.subscribe(() => {
+        rebindIfApiChanged();
+        onStoreChange();
+      });
       return () => {
         unsubscribeManager();
         disposable?.dispose();

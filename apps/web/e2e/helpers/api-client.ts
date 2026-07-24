@@ -1718,16 +1718,17 @@ export class ApiClient {
   }
 
   /**
-   * Seeds the session's Slack-style read cursor directly via the backend
-   * mark-read endpoint. Used by e2e specs to deterministically simulate
-   * "the user last read up through messageId" without needing a real
-   * background agent turn to run while the session is out of view.
+   * Force-sets the session's read cursor directly, bypassing the production
+   * mark-read endpoint's forward-only (monotonic) guard. Used by e2e specs
+   * that need to seed "the user last read up through an earlier message"
+   * deterministically — rewinding through the real endpoint would now be
+   * rejected as a stale/out-of-order update.
    */
-  async markSessionRead(
+  async forceSetSessionReadCursor(
     sessionId: string,
     messageId: string,
-  ): Promise<{ session: { id: string; last_read_message_id?: string } }> {
-    return this.request("POST", `/api/v1/task-sessions/${sessionId}/mark-read`, {
+  ): Promise<{ id: string; last_read_message_id: string }> {
+    return this.request("PATCH", `/api/v1/e2e/task-sessions/${sessionId}/read-cursor`, {
       message_id: messageId,
     });
   }

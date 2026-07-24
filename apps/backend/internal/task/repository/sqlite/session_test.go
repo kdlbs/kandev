@@ -149,7 +149,9 @@ func TestRenameTaskSession(t *testing.T) {
 // TestUpdateTaskSessionLastReadMessageID verifies the read-cursor setter
 // rejects a missing session, persists the message id (round-tripping through
 // both GetTaskSession and ListTaskSessions, which scan via the single-row and
-// multi-row helpers respectively), and that ToAPI omits an empty cursor.
+// multi-row helpers respectively), that ToAPI omits an empty cursor, and that
+// the cursor never regresses when a stale/out-of-order messageID is applied
+// after a newer one already landed.
 func TestUpdateTaskSessionLastReadMessageID(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -159,6 +161,10 @@ func TestUpdateTaskSessionLastReadMessageID(t *testing.T) {
 	}
 
 	seedForMsgTest(t, repo, "task-read", "session-read", "turn-read")
+	now := time.Now().UTC()
+	insertAgentMsg(t, repo, "msg-1", "session-read", "turn-read", "user", "hi", now)
+	insertAgentMsg(t, repo, "msg-2", "session-read", "turn-read", "agent", "hello", now.Add(time.Second))
+
 	session, err := repo.GetTaskSession(ctx, "session-read")
 	if err != nil {
 		t.Fatalf("GetTaskSession before mark-read: %v", err)
@@ -190,7 +196,7 @@ func TestUpdateTaskSessionLastReadMessageID(t *testing.T) {
 		t.Fatalf("ListTaskSessions did not carry LastReadMessageID: %#v", sessions)
 	}
 
-	// Advancing to a newer message overwrites the cursor (last write wins).
+	// Advancing to a newer message overwrites the cursor.
 	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-read", "msg-2"); err != nil {
 		t.Fatalf("UpdateTaskSessionLastReadMessageID advance: %v", err)
 	}
@@ -200,6 +206,19 @@ func TestUpdateTaskSessionLastReadMessageID(t *testing.T) {
 	}
 	if session.LastReadMessageID != "msg-2" {
 		t.Fatalf("session.LastReadMessageID = %q, want %q", session.LastReadMessageID, "msg-2")
+	}
+
+	// A delayed/retried request for the older message (out-of-order arrival)
+	// must not regress the cursor — it's a silent no-op, not an error.
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-read", "msg-1"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID stale update: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, "session-read")
+	if err != nil {
+		t.Fatalf("GetTaskSession after stale update: %v", err)
+	}
+	if session.LastReadMessageID != "msg-2" {
+		t.Fatalf("session.LastReadMessageID = %q, want unchanged %q after stale update", session.LastReadMessageID, "msg-2")
 	}
 }
 

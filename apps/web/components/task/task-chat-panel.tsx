@@ -20,7 +20,7 @@ import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
-import { findUnreadDividerItemId } from "@/lib/session-unread-divider";
+import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-unread-divider";
 import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useAppStore } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
@@ -174,7 +174,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     session,
     taskId,
     isWorking,
-    messages,
     messagesLoading,
     groupedItems,
     allMessages,
@@ -185,10 +184,15 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
-  // The Slack-style read cursor advances to the newest real backend message
-  // (raw `messages`, not `allMessages` — which can carry a synthetic
-  // task-description placeholder that isn't a real persisted message).
-  const latestMessageId = messages.length > 0 ? messages[messages.length - 1].id : null;
+  // The Slack-style read cursor advances to the newest message actually
+  // represented in groupedItems (not the raw backend `messages` list) so it
+  // always names a message findUnreadDividerItemId can find among the same
+  // render items — a raw-list id that never renders (a filtered
+  // clarification/status/setup-output row) would otherwise look "missing"
+  // and make the whole loaded window appear unread. See
+  // lib/session-unread-divider.ts's lastRenderedMessageId for the full
+  // rationale.
+  const latestMessageId = useMemo(() => lastRenderedMessageId(groupedItems), [groupedItems]);
   const dividerAnchor = useSessionReadTracking(resolvedSessionId, isVisible, latestMessageId);
   const dividerBeforeItemKey = useMemo(
     () => findUnreadDividerItemId(groupedItems, dividerAnchor),

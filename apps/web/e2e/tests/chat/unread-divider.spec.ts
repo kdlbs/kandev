@@ -58,8 +58,12 @@ test.describe("Unread divider", () => {
     // isn't practical from a single Playwright page). What this proves is
     // the navigation → hydration → divider-positioning path end to end;
     // cursor persistence and message-ownership validation are covered by
-    // the backend repository/service/handler tests.
-    await apiClient.markSessionRead(sessionId, readCursorMessageId);
+    // the backend repository/service/handler tests. Uses the e2e-only
+    // force-set backdoor rather than the production mark-read endpoint:
+    // the real endpoint is monotonic (it never regresses the persisted
+    // cursor), so replaying an older messageId through it would now be a
+    // rejected no-op instead of rewinding state for this test.
+    await apiClient.forceSetSessionReadCursor(sessionId, readCursorMessageId);
 
     // Navigate away, then back — the actual "navigate into a task that was
     // running outside of active view" trigger this feature targets.

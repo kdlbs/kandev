@@ -43,3 +43,34 @@ describe("PanelPortalManager.reconcile", () => {
     expect(listener).toHaveBeenCalledOnce();
   });
 });
+
+describe("PanelPortalManager.acquire", () => {
+  it("notifies listeners when a remount replaces an existing entry's api", () => {
+    const mgr = new PanelPortalManager();
+    const listener = vi.fn();
+    const firstApi = mockApi();
+    mgr.acquire("panel-a", "chat", {}, firstApi);
+    mgr.subscribe(listener);
+    listener.mockClear();
+
+    const secondApi = mockApi();
+    mgr.acquire("panel-a", "chat", {}, secondApi);
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(mgr.get("panel-a")?.api).toBe(secondApi);
+  });
+
+  it("does not notify when a redundant acquire reuses the same api instance", () => {
+    const mgr = new PanelPortalManager();
+    const listener = vi.fn();
+    const api = mockApi();
+    mgr.acquire("panel-a", "chat", {}, api);
+    mgr.subscribe(listener);
+    listener.mockClear();
+
+    mgr.acquire("panel-a", "chat", { updated: true }, api);
+
+    expect(listener).not.toHaveBeenCalled();
+    expect(mgr.get("panel-a")?.params).toEqual({ updated: true });
+  });
+});

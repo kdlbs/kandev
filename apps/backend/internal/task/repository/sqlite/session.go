@@ -1179,17 +1179,49 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 // read cursor — deliberately a narrow single-column write (like
 // RenameTaskSession/UpdateTaskSessionBaseCommit) so it never collides with a
 // concurrent metadata or full-row write, and vice versa.
+//
+// The write is monotonic: it only advances the cursor when messageID is not
+// older than the currently persisted one, comparing each message's SQLite
+// rowid (== insertion order, since task_session_messages is a normal
+// rowid table keyed on a non-integer TEXT id). This guards against
+// out-of-order delivery — e.g. two overlapping mark-read requests where the
+// response for an older message is processed after a newer one — silently
+// regressing last_read_message_id and resurrecting the "New" divider over
+// transcript the user already read. A cursor referencing a message that no
+// longer exists (deleted) is treated as rank 0 so the guard never wedges.
 func (r *Repository) UpdateTaskSessionLastReadMessageID(ctx context.Context, id, messageID string) error {
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET last_read_message_id = ?, updated_at = ? WHERE id = ?
-	`), messageID, now, id)
+		UPDATE task_sessions
+		   SET last_read_message_id = ?, updated_at = ?
+		 WHERE id = ?
+		   AND (
+		         last_read_message_id IS NULL OR last_read_message_id = ''
+		         OR (SELECT rowid FROM task_session_messages WHERE id = ?)
+		             >= COALESCE(
+		                  (SELECT rowid FROM task_session_messages WHERE id = task_sessions.last_read_message_id),
+		                  0
+		                )
+		       )
+	`), messageID, now, id, messageID)
 	if err != nil {
 		return err
 	}
 	rows, _ := result.RowsAffected()
-	if rows == 0 {
-		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
+	if rows > 0 {
+		return nil
+	}
+	// No row was updated — either the session doesn't exist, or the guard
+	// above correctly rejected a stale/out-of-order cursor (messageID is not
+	// newer than what's already persisted). Distinguish the two so a stale
+	// update is a silent no-op rather than a spurious not-found error.
+	var exists int
+	err = r.db.QueryRowContext(ctx, r.db.Rebind(`SELECT 1 FROM task_sessions WHERE id = ?`), id).Scan(&exists)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, id)
+		}
+		return err
 	}
 	return nil
 }
