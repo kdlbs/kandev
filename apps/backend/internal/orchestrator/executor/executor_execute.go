@@ -1283,11 +1283,18 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
+			if req.UseWorktree {
+				req.RepoName = repoInfo.Repository.Name
+			} else {
+				req.RepoName = worktree.SanitizeRepoDirName(repoInfo.Repository.Name)
+				if req.RepoName == "" {
+					req.RepoName = worktree.SanitizeRepoDirName(repoInfo.RepositoryID)
+				}
+			}
 		}
 		// Task directory mode: place worktree inside per-task directory
 		if req.UseWorktree && repoInfo.Repository != nil && repoInfo.Repository.Name != "" {
 			req.TaskDirName = worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
-			req.RepoName = repoInfo.Repository.Name
 		}
 		if repoInfo.Repository != nil && repoInfo.Repository.SetupScript != "" {
 			if metadata == nil {
