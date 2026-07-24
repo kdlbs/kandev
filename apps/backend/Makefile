@@ -9,18 +9,30 @@ LDFLAGS := -s -w
 
 # Cross-platform commands
 #
-# On Windows, GNU Make invokes commands through cmd.exe, which does not
-# support Unix `NAME=VAL cmd` env-var-prefix syntax. Instead, `set NAME=VAL&`
-# (single ampersand) chains a subsequent command in the same shell, scoping
-# the env var to one recipe line — the closest cmd analog to the Unix form.
-# `EXE` adds the .exe suffix to build outputs; Go does NOT auto-append it
-# when `-o` is explicit.
+# Two independent axes decide these variables; conflating them breaks Git
+# Bash/MSYS, which sets OS=Windows_NT yet runs recipes through sh:
+#
+#  1. Executable suffix (EXE) — keyed on $(OS). Go emits a `.exe` for
+#     GOOS=windows regardless of the calling shell, so native cmd/PowerShell
+#     AND Git Bash both need it. Go does NOT auto-append it when `-o` is set.
+#  2. Shell syntax — keyed on $(OS)$(MSYSTEM). Only native cmd/PowerShell needs
+#     `set NAME=VAL&` (single ampersand chains a command in the same shell,
+#     scoping the env var to one recipe line — the closest cmd analog to the
+#     Unix `NAME=VAL cmd` prefix), backslashed paths, and no `exec`. Under Git
+#     Bash/MSYS $(MSYSTEM) is set (e.g. MINGW64), so the concatenation differs
+#     from "Windows_NT" and recipes take the POSIX branch — matching the shell
+#     they run in. Mirrors the doctor guard in the root Makefile.
 #
 # Install GNU Make on Windows with `winget install ezwinports.make` (or via
-# scoop/chocolatey). run/dev/start-debug branch on OS below (Windows uses
-# `set VAR=VAL&` + backslashed paths). build-cross remains Unix-only — it
-# cross-compiles with CGO for other OSes, which needs Unix toolchains.
+# scoop/chocolatey). build-cross remains Unix-only — it cross-compiles with
+# CGO for other OSes, which needs Unix toolchains.
 ifeq ($(OS),Windows_NT)
+  EXE := .exe
+else
+  EXE :=
+endif
+
+ifeq ($(OS)$(MSYSTEM),Windows_NT)
   RM = cmd /c del /s /q
   RMDIR = cmd /c rmdir /s /q
   # cmd's `mkdir` errors when the dir already exists, unlike Unix `mkdir -p`.
@@ -35,7 +47,6 @@ ifeq ($(OS),Windows_NT)
   GO_LINUX_ARM64 = set CGO_ENABLED=0& set GOOS=linux& set GOARCH=arm64&
   GO_DARWIN_ARM64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=arm64&
   GO_DARWIN_AMD64 = set CGO_ENABLED=0& set GOOS=darwin& set GOARCH=amd64&
-  EXE = .exe
   # Run-target env prefixes and binary invocation. cmd.exe has no `NAME=VAL cmd`
   # syntax (use `set NAME=VAL&`) and no `exec`; the binary path needs backslashes.
   DEV_ENV = set KANDEV_DEBUG_PPROF_ENABLED=true&
@@ -58,7 +69,6 @@ else
   GO_LINUX_ARM64 = CGO_ENABLED=0 GOOS=linux GOARCH=arm64
   GO_DARWIN_ARM64 = CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
   GO_DARWIN_AMD64 = CGO_ENABLED=0 GOOS=darwin GOARCH=amd64
-  EXE =
   DEV_ENV = KANDEV_DEBUG_PPROF_ENABLED=true
   DEBUG_ENV = KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug
   EXEC = exec
@@ -86,7 +96,7 @@ BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet help
+.PHONY: all build build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet check-make-shells help
 
 ## Default target
 all: build
@@ -238,6 +248,12 @@ test-windows:
 	@echo "Running Windows-sensitive packages..."
 	$(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/...
 
+## Verify run/dev/start-debug expand to the right per-shell command line across
+## native Windows (cmd), Git Bash/MSYS, and Unix — the Make-target dispatch the
+## Go CI jobs don't exercise. Dry-run only (make -n), so it runs on any platform.
+check-make-shells:
+	@../../scripts/check-make-shells
+
 ## Run E2E tests (real agents, costs money — manual only)
 ## Set agent commands via env vars: E2E_CLAUDE_CODE_COMMAND, E2E_AMP_COMMAND
 ## Enable debug: KANDEV_DEBUG_AGENT_MESSAGES=true KANDEV_DEBUG_LOG_DIR=/tmp/e2e-debug
@@ -342,6 +358,7 @@ help:
 	@echo "  start-debug   Run in debug mode (pprof + debug logging)"
 	@echo "  test          Run tests (full suite — fails on Windows pending fixture cleanup)"
 	@echo "  test-windows  Run only the Windows-clean subset (matches CI windows-latest job)"
+	@echo "  check-make-shells  Assert run/dev/start-debug expand correctly per shell (make -n)"
 	@echo "  test-e2e      Run E2E adapter tests (real agents, costs money)"
 	@echo "  e2e-plugin-package  Package the plugin-fixture SDK plugin into .build/kandev-plugin-e2e-1.0.0.tar.gz"
 	@echo "  test-lifecycle-goleak  Stress-run lifecycle goleak suite (override LIFECYCLE_GOLEAK_COUNT=N)"

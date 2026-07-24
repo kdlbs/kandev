@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# check-make-shells — assert that apps/backend/Makefile's run/dev/start-debug
+# targets expand to the correct per-shell command line, without running them.
+#
+# The Makefile dispatches on two independent axes:
+#   * EXE suffix   — keyed on $(OS): any Windows build (native cmd/PowerShell
+#                    OR Git Bash) produces kandev.exe.
+#   * shell syntax — keyed on $(OS)$(MSYSTEM): only native cmd/PowerShell uses
+#                    `set VAR=VAL&` + backslash path + no exec; Unix and Git
+#                    Bash/MSYS use POSIX `VAR=val exec`.
+# Git Bash is the trap — it sets OS=Windows_NT yet runs recipes through sh, so
+# it must take the POSIX branch while keeping the .exe suffix. Conflating the
+# two axes (the pre-fix bug) made Git Bash emit `set VAR=VAL&` into bash, where
+# the env var is never exported.
+#
+# Each shell is simulated deterministically with make's OS=/MSYSTEM=
+# command-line overrides, so this needs only GNU make — not the real shell —
+# and runs on any platform. Covers the Make-target dispatch that the backend
+# Go CI jobs don't exercise.
+
+set -euo pipefail
+
+backend_dir="$(cd "$(dirname "$0")/../apps/backend" && pwd)"
+
+status=0
+
+# expect <label> <OS> <MSYSTEM> <target> <expected recipe tail>
+expect() {
+	local label=$1 os=$2 msys=$3 target=$4 want=$5 got
+	got=$(make -C "$backend_dir" OS="$os" MSYSTEM="$msys" -n "$target" 2>/dev/null \
+		| grep -F __backend \
+		| sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]]\{1,\}/ /g' \
+		|| true)
+	if [ "$got" = "$want" ]; then
+		printf 'ok    %-16s %-12s %s\n' "$label" "$target" "$got"
+	else
+		printf 'FAIL  %-16s %-12s\n        want: %s\n        got:  %s\n' \
+			"$label" "$target" "$want" "$got"
+		status=1
+	fi
+}
+
+# Unix — no .exe, POSIX env-prefix + exec.
+expect unix '' '' run         './bin/kandev __backend'
+expect unix '' '' dev         'KANDEV_DEBUG_PPROF_ENABLED=true exec ./bin/kandev __backend'
+expect unix '' '' start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./bin/kandev __backend'
+
+# Native Windows (cmd/PowerShell) — .exe, `set VAR=VAL&`, backslash path, no exec.
+expect windows-native Windows_NT '' run         '"bin\kandev.exe" __backend'
+expect windows-native Windows_NT '' dev         'set KANDEV_DEBUG_PPROF_ENABLED=true& "bin\kandev.exe" __backend'
+expect windows-native Windows_NT '' start-debug 'set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& "bin\kandev.exe" __backend'
+
+# Git Bash/MSYS — .exe suffix but POSIX syntax (recipes run through sh).
+expect git-bash Windows_NT MINGW64 run         './bin/kandev.exe __backend'
+expect git-bash Windows_NT MINGW64 dev         'KANDEV_DEBUG_PPROF_ENABLED=true exec ./bin/kandev.exe __backend'
+expect git-bash Windows_NT MINGW64 start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./bin/kandev.exe __backend'
+
+if [ "$status" -eq 0 ]; then
+	echo "All Makefile shell-dispatch checks passed (3 shells x 3 targets)."
+fi
+exit "$status"
