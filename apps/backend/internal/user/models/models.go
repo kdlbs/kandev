@@ -17,11 +17,29 @@ func NormalizeMCPTaskAgentProfileDefault(value string) string {
 	return MCPTaskAgentProfileDefaultCurrentTask
 }
 
+const (
+	// RoleAdmin unlocks user management and system settings mutation when
+	// authentication is enabled. It does NOT grant visibility into other
+	// users' workspaces (hard privacy isolation).
+	RoleAdmin = "admin"
+	// RoleMember is a regular authenticated user.
+	RoleMember = "member"
+
+	// StatusActive marks a user that may log in.
+	StatusActive = "active"
+	// StatusDisabled marks a user whose access is revoked; all sessions and
+	// API tokens are invalidated when this status is set.
+	StatusDisabled = "disabled"
+)
+
 type User struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID          string    `json:"id"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"display_name"`
+	Role        string    `json:"role"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
 }
 
 type UserSettings struct {

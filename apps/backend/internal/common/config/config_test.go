@@ -399,13 +399,13 @@ func TestServerHostsFromConfigWhenHostUnset(t *testing.T) {
 // without a tag) would surface as a capitalized JSON key and break the
 // frontend's case-sensitive read in apps/web/app/actions/features.ts.
 func TestFeaturesConfig_JSONShape(t *testing.T) {
-	cfg := FeaturesConfig{Office: true, Plugins: true, AppStatusBar: true}
+	cfg := FeaturesConfig{Office: true, Plugins: true, AppStatusBar: true, Auth: true}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
 	got := string(raw)
-	want := `{"office":true,"plugins":true,"appStatusBar":true}`
+	want := `{"office":true,"plugins":true,"appStatusBar":true,"auth":true}`
 	if got != want {
 		t.Errorf("FeaturesConfig JSON = %s; want %s — missing or wrong `json:` struct tag", got, want)
 	}

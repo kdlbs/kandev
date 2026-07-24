@@ -42,6 +42,20 @@ var definitions = []RuntimeFlagDefinition{
 		Mutable:         true,
 	},
 	{
+		Key:         featureAuthKey,
+		EnvVar:      envFeaturesAuth,
+		Kind:        KindFeature,
+		Label:       "Authentication",
+		Description: "Shows the opt-in authentication and multi-user settings surfaces (Users, Authentication, Account).",
+		Stability:   StabilityExperimental,
+		RiskLevel:   RiskMedium,
+		RiskDescription: "This flag only reveals the authentication management UI. Turning it off does NOT " +
+			"disable enforcement for an instance where authentication was already enabled — that is " +
+			"controlled from Settings > System > Authentication (or KANDEV_AUTH_REQUIRED).",
+		RestartRequired: true,
+		Mutable:         true,
+	},
+	{
 		Key:         debugDevModeKey,
 		EnvVar:      envDebugDevMode,
 		Kind:        KindDebug,

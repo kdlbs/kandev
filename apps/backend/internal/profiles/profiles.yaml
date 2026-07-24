@@ -57,6 +57,16 @@ features:
     dev:  "false"
     e2e:  "true"
 
+  # Opt-in authentication + multi-user settings surfaces. The flag only
+  # reveals the Users/Authentication/Account settings UI; enforcement is the
+  # persisted `auth.mode` system setting (or KANDEV_AUTH_REQUIRED=true).
+  # Off in e2e: the default Playwright suite runs unauthenticated; the
+  # dedicated auth project opts in per-spec via backend.restart(env).
+  KANDEV_FEATURES_AUTH:
+    prod: "false"
+    dev:  "true"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent
