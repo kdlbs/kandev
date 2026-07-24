@@ -334,7 +334,13 @@ describe("storage maintenance", () => {
   it("loads overview and list resources without caching", async () => {
     fetchSpy
       .mockResolvedValueOnce(
-        jsonResponse({ settings, summary: {}, capabilities: {}, last_run: null }),
+        jsonResponse({
+          settings,
+          summary: {},
+          capabilities: {},
+          analyzed_at: "2026-07-23T12:00:00Z",
+          last_run: null,
+        }),
       )
       .mockResolvedValueOnce(jsonResponse({ runs: [{ id: "run-1" }] }))
       .mockResolvedValueOnce(jsonResponse({ entries: [{ id: "entry-1" }] }));

@@ -1,6 +1,7 @@
 ---
 status: shipped
 created: 2026-07-14
+updated: 2026-07-23
 owner: cfl
 ---
 
@@ -34,6 +35,14 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
   bytes, the managed Go cache, the service user's default Go cache when it is a distinct path,
   Kandev-managed container count and writable-layer bytes, Docker image-layer bytes, Docker build
   cache, and unused Docker images.
+- A successful storage analysis is reused for 15 minutes. Opening or refreshing the Storage page,
+  saving policy settings, and adopting an external Go cache consume that cached snapshot instead of
+  starting another filesystem or Docker scan. Manual **Analyze** always bypasses the cache and
+  replaces it with a fresh successful snapshot.
+- The Storage analysis card shows when its snapshot was measured using a relative timestamp.
+  Policy editing remains available while read-only analysis or cleanup jobs run. A settings
+  mutation that can conflict with another settings mutation may block saving briefly, but the UI
+  names that operation instead of reporting an unspecified storage action.
 - Scheduled maintenance is install-wide, persists in Kandev's database, and is disabled by
   default. Enabling it does not require editing the VM, a systemd unit, or environment
   variables.
@@ -128,6 +137,9 @@ Decision: [ADR-2026-07-19-workspace-symlink-entries](../../decisions/2026-07-19-
 - Kandev creates an ownership marker beside the managed cache. It never deletes the default user
   cache such as `/root/.cache/go-build` unless that exact path was explicitly adopted through the
   Storage page with a destructive confirmation.
+- After adoption succeeds, the external Go-cache field shows the persisted
+  `go_cache.adopted_path` immediately and after page reload. Unrelated overview refreshes do not
+  erase a path the user is currently editing.
 - Analysis reports the managed cache's current bytes and read-only usage for the service user's
   distinct default Go cache (`$GOCACHE` when absolute, otherwise the platform user-cache path).
   Reporting the default cache does not adopt it or grant cleanup ownership. Cleanup rotates the
@@ -278,7 +290,7 @@ All routes are under the existing authenticated System route group.
 
 ```text
 GET    /api/v1/system/storage
-       -> { settings, capabilities, summary, last_run }
+       -> { settings, capabilities, summary, analyzed_at, last_run }
 
 PATCH  /api/v1/system/storage/settings
        body: {
@@ -316,6 +328,10 @@ DELETE /api/v1/system/storage/quarantine/:id
 `capabilities` reports the managed Go path, whether Go-cache adoption is available, Docker
 availability, configured Docker host, and whether host-global Docker cleanup is allowed. API
 responses never expose secret environment values.
+
+`analyzed_at` is the RFC 3339 timestamp of the successful analysis that produced `summary`.
+`GET /storage` reuses that snapshot for 15 minutes. `POST /storage/analyze` bypasses the freshness
+window and replaces the cached snapshot only when the forced analysis succeeds.
 
 Storage operations use the existing `system.job.update` WebSocket event and polling fallback.
 Job kinds are `storage-analysis`, `storage-cleanup`, and `storage-quarantine-delete`.
@@ -406,6 +422,9 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 ## Persistence guarantees
 
 - Settings, cleanup intents, maintenance runs, and quarantine entries survive backend restarts.
+- The 15-minute analysis snapshot is process-local and does not survive a backend restart. The first
+  Storage overview request after startup measures a new snapshot; later requests reuse it until it
+  expires or manual **Analyze** replaces it.
 - A scheduled loop starts only when `enabled=true`; startup does not immediately run destructive
   cleanup. The first scheduled run is eligible after one full configured interval.
 - Pending/retryable task cleanup resumes after startup independent of scheduled-maintenance
@@ -422,6 +441,13 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
   daemon, **THEN** no destructive storage cleanup runs and the Storage page shows scheduling off.
 - **GIVEN** scheduling is disabled, **WHEN** the user selects **Analyze**, **THEN** the page shows
   reclaimable bytes without changing any filesystem or Docker resource.
+- **GIVEN** a successful storage snapshot is less than 15 minutes old, **WHEN** the user refreshes
+  the page or saves policy settings, **THEN** the same summary and `analyzed_at` are returned without
+  invoking the storage providers again.
+- **GIVEN** a cached storage snapshot of any age, **WHEN** the user selects **Analyze**, **THEN** all
+  analysis providers run and a successful result replaces the snapshot and `analyzed_at`.
+- **GIVEN** a storage analysis or cleanup job is running, **WHEN** the user edits maintenance
+  policy, **THEN** the policy controls and shared Save action remain available.
 - **GIVEN** scheduling is enabled and a task is running a Go test, **WHEN** the maintenance interval
   arrives, **THEN** the run is recorded as `skipped_busy` and no provider changes resources.
 - **GIVEN** maintenance holds the idle gate, **WHEN** a new task launch arrives, **THEN** maintenance
@@ -457,6 +483,8 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
   reports the reclaimed bytes.
 - **GIVEN** `/root/.cache/go-build` was not explicitly adopted, **WHEN** storage cleanup runs,
   **THEN** Kandev does not modify it.
+- **GIVEN** an external Go cache was adopted successfully, **WHEN** the Storage page rerenders or is
+  reopened, **THEN** the external-cache input contains the persisted adopted path.
 - **GIVEN** `/root/.cache/go-build` is the service user's default Go cache and is not adopted,
   **WHEN** storage analysis runs, **THEN** its path and bytes are reported read-only while cleanup
   remains unavailable for that path.
@@ -499,4 +527,5 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 
 ## Implementation plan
 
-See [the implementation plan](../../plans/storage-maintenance/plan.md).
+- [Original Storage maintenance implementation](../../plans/storage-maintenance/plan.md)
+- [Storage overview cache and settings follow-up](../../plans/storage-overview-cache/plan.md)

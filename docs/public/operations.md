@@ -79,6 +79,11 @@ Open **Settings > System > Storage** to inspect Kandev-managed disk usage and co
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
 while task resources are active or another maintenance run owns the cleanup gate.
 
+Storage analysis results are cached in the running backend for 15 minutes, so page reloads and
+policy saves reuse the displayed snapshot instead of scanning disk again. The page shows when that
+snapshot was last analyzed. Select **Analyze** to force a fresh scan; restarting the backend also
+clears the in-memory snapshot.
+
 Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
 period. Orphaned task workspaces move into Kandev's quarantine before permanent deletion; review
 the quarantine list to restore an entry or request deletion as a background job. Host-wide Docker
