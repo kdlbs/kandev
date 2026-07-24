@@ -43,6 +43,7 @@ var (
 	ErrInvalidSlug           = errors.New("display name must produce a valid slug")
 	ErrCommandRequired       = errors.New("command is required")
 	ErrInvalidProfileEnvVars = errors.New("invalid profile env vars")
+	ErrInvalidCommandPrefix  = errors.New("invalid command prefix")
 )
 
 type Controller struct {

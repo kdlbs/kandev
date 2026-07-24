@@ -45,4 +45,61 @@ test.describe("Mobile agent profile config selector", () => {
       await apiClient.deleteAgentProfile(profile.id, true);
     }
   });
+
+  test("sets and saves a command prefix on the agent profile page", async ({
+    testPage,
+    apiClient,
+  }) => {
+    test.setTimeout(90_000);
+
+    const { agents } = await apiClient.listAgents();
+    const agent = agents[0];
+    const profile = await apiClient.createAgentProfile(agent.id, "Mobile Command Prefix Profile", {
+      model: "mock-fast",
+    });
+
+    try {
+      await testPage.goto(`/settings/agents/${agent.name}/profiles/${profile.id}`);
+
+      const prefixInput = testPage.getByTestId("command-prefix-input");
+      await expect(prefixInput).toBeVisible({ timeout: 15_000 });
+      await prefixInput.fill("greywall --");
+
+      const saveButton = testPage.getByRole("button", { name: /^Save( changes)?$/i }).first();
+      await expect(saveButton).toBeEnabled({ timeout: 10_000 });
+      await saveButton.click();
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+
+      // Reload — the saved prefix must still be there.
+      await testPage.reload();
+      await expect(testPage.getByTestId("command-prefix-input")).toHaveValue("greywall --", {
+        timeout: 15_000,
+      });
+
+      // Direct DB-path verification: fetch the profile and assert the
+      // persisted command_prefix.
+      const stored = await apiClient.getAgentProfile(profile.id);
+      expect((stored as unknown as { command_prefix?: string }).command_prefix).toBe("greywall --");
+
+      // Clearing a previously-saved prefix must persist an empty value.
+      await testPage.getByTestId("command-prefix-input").fill("");
+      const saveButtonAfterClear = testPage
+        .getByRole("button", { name: /^Save( changes)?$/i })
+        .first();
+      await expect(saveButtonAfterClear).toBeEnabled({ timeout: 10_000 });
+      await saveButtonAfterClear.click();
+      await expect(testPage.getByText(/unsaved changes/i)).toBeHidden({ timeout: 15_000 });
+
+      await testPage.reload();
+      await expect(testPage.getByTestId("command-prefix-input")).toHaveValue("", {
+        timeout: 15_000,
+      });
+      const storedAfterClear = await apiClient.getAgentProfile(profile.id);
+      expect(
+        (storedAfterClear as unknown as { command_prefix?: string }).command_prefix ?? "",
+      ).toBe("");
+    } finally {
+      await apiClient.deleteAgentProfile(profile.id, true);
+    }
+  });
 });

@@ -423,6 +423,7 @@ export class ApiClient {
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
+      command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
     },
   ): Promise<{
@@ -436,6 +437,7 @@ export class ApiClient {
       config_options: opts.config_options,
       cli_passthrough: opts.cli_passthrough ?? false,
       cli_flags: opts.cli_flags,
+      command_prefix: opts.command_prefix,
       env_vars: opts.env_vars,
     });
   }
@@ -463,6 +465,7 @@ export class ApiClient {
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
+      command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
     },
   ): Promise<void> {

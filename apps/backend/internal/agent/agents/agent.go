@@ -154,6 +154,11 @@ type CommandOptions struct {
 	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
 	// verbatim to the built command by every agent's BuildCommand.
 	CLIFlagTokens []string
+	// CommandPrefixTokens are user-configured launcher tokens derived from
+	// AgentProfile.CommandPrefix (shell-tokenised). Prepended to the built
+	// command so the agent subprocess runs wrapped in a sandbox launcher
+	// (e.g. ["greywall", "--"] → "greywall -- npx -y <pkg> …").
+	CommandPrefixTokens []string
 	// Runtime is the execution backend hosting the agent subprocess.
 	// Agents whose binary lives in a different place inside a container
 	// than on the host (currently only MockAgent) consult

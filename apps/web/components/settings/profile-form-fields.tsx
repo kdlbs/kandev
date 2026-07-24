@@ -25,6 +25,7 @@ import {
   type PermissionKey,
 } from "@/lib/agent-permissions";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
+import { CommandPrefixField } from "@/components/settings/command-prefix-field";
 import {
   CommandsButton,
   findActiveMode,
@@ -48,6 +49,7 @@ export type ProfileFormData = {
   config_options?: Record<string, string>;
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
+  command_prefix?: string;
 } & Record<PermissionKey, boolean>;
 
 export type ProfileFormFieldsProps = {
@@ -613,6 +615,14 @@ export function ProfileFormFields({
           hideCustomFlags={hideCustomCLIFlags}
         />
       </div>
+
+      {!profile.cli_passthrough && (
+        <CommandPrefixField
+          profile={profile}
+          baselineProfile={baselineProfile}
+          onChange={onChange}
+        />
+      )}
     </div>
   );
 }
