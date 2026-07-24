@@ -1,0 +1,61 @@
+# ADR-2026-07-24-opt-in-authentication: Opt-in Authentication and Per-User Workspace Scoping
+
+**Status:** accepted
+**Date:** 2026-07-24
+**Area:** backend, frontend, protocol, security
+
+## Context
+
+Kandev shipped with no user authentication: one hardcoded `default-user` row,
+a WS handshake that read and discarded its token, unfiltered hub broadcasts,
+and a server that binds `0.0.0.0` by default. Shared-server deployments need
+accounts and privacy between users; local single-user installs must not gain
+a login screen or any behavioral change.
+
+## Decision
+
+1. **Opt-in via mode state machine** (`disabled` → `setup` → `enabled`),
+   persisted in the system settings store (`auth.mode`) and force-enabled by
+   `KANDEV_AUTH_REQUIRED=true`. The `KANDEV_FEATURES_AUTH` flag gates only
+   the settings UI surfaces, never enforcement.
+2. **Synthetic identity in disabled mode.** The global HTTP middleware (and
+   WS gateway) inject `Identity{default-user, admin, Synthetic}` when auth is
+   off. Downstream code branches on identity, never on mode — internal
+   callers (event bus, pollers, MCP stream) carry no identity and are
+   unscoped. This keeps disabled-mode behavior byte-identical and makes every
+   consumer identity-aware in one step.
+3. **Opaque DB-backed credentials, not JWTs.** Sessions (`kandev_session`
+   HttpOnly SameSite=Lax cookie) and personal access tokens (`kandev_pat_*`)
+   are 256-bit random values stored as SHA-256 digests. Instant revocation
+   (user disable, logout-all) outweighs stateless verification at kandev
+   scale. The office agent HMAC-JWT remains a separate machine credential.
+4. **Setup wizard promotes `default-user`.** The first account reuses the
+   pre-auth user row (preserving all settings) and claims unowned workspaces
+   and secrets. Rows with empty owners remain visible to everyone until
+   claimed — the compatibility contract for pre-auth data.
+5. **Scoping at the service layer.** The task service filters and denies by
+   the ctx identity with `*NotFound` sentinels (no existence leak); admins do
+   NOT bypass (admin is a management role, not a visibility role).
+   Session-scoped surfaces funnel through one lifecycle chokepoint
+   (`GetOrEnsureExecution`); WS subscriptions, dispatched WS RPC, and
+   workspace-carrying broadcasts (`Hub.BroadcastToWorkspace`) apply the same
+   rules. New global `hub.Broadcast` call sites require a `//ws:global`
+   justification.
+6. **Explicit public allowlist** in `auth/httpmw`: readiness probe, SPA
+   shell/static, bootstrap reads (`features`, `app-state`), credential
+   endpoints, and self-authenticating webhooks. `/mcp` enforces PATs in its
+   own group middleware; office agent JWTs pass through the global layer to
+   `AgentAuthMiddleware`.
+
+## Consequences
+
+- Multi-user servers get real accounts, invites, per-user workspaces and
+  secrets, and scoped live updates; laptop installs are untouched.
+- Every future user-facing service entry point must apply identity scoping
+  (see `apps/backend/AGENTS.md`); the allowlist is pinned by tests.
+- Filesystem isolation is NOT provided — worktrees share one `~/.kandev`
+  tree. Documented limitation; per-user executor sandboxing is future work.
+- OIDC/SSO can be added by inserting rows with a new provider into
+  `auth_identities`; no migration required.
+- Office run subscriptions are not yet ownership-checked (no workspace
+  context at that layer) — accepted gap, noted in the spec.
