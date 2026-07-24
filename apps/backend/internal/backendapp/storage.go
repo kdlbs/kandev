@@ -18,6 +18,7 @@ import (
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	authstore "github.com/kandev/kandev/internal/auth/store"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	"github.com/kandev/kandev/internal/office"
@@ -84,6 +85,11 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 		return nil, nil, nil, fmt.Errorf("runtime flags store: %w", err)
 	}
 
+	authRepo, err := authstore.New(writer, reader)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("auth store: %w", err)
+	}
+
 	masterKeyProvider, err := secrets.NewMasterKeyProvider(cfg.ResolvedDataDir())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("master key: %w", err)
@@ -103,6 +109,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 		Analytics:     analyticsRepo,
 		AgentSettings: agentSettingsRepo,
 		User:          supportRepos.user,
+		UserAccounts:  supportRepos.userAccounts,
 		Notification:  supportRepos.notification,
 		Editor:        supportRepos.editor,
 		Prompts:       supportRepos.prompts,
@@ -112,6 +119,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 		Office:        officeRepo,
 		Terminal:      terminalRepoImpl,
 		RuntimeFlags:  runtimeFlagsStore,
+		Auth:          authRepo,
 	}
 	return pool, repos, cleanups, nil
 }
@@ -120,6 +128,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 // that share a common (writer, reader) wire-up pattern.
 type supportRepositorySet struct {
 	user         userstore.Repository
+	userAccounts userstore.AccountRepository
 	notification notificationstore.Repository
 	editor       editorstore.Repository
 	prompts      promptstore.Repository
@@ -139,6 +148,8 @@ func provideSupportRepos(writer, reader *sqlx.DB) (supportRepositorySet, []func(
 	}
 	cleanups = append(cleanups, cleanup)
 	repos.user = userRepo
+	// Same concrete store, account-management view (used by internal/auth).
+	repos.userAccounts = userRepo
 
 	notificationRepo, cleanup, err := notificationstore.Provide(writer, reader)
 	if err != nil {

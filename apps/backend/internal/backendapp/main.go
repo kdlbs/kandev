@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"go.uber.org/zap"
@@ -339,6 +340,13 @@ func startServices( //nolint:cyclop
 		runtimeflags.RuntimeOptionsFromAppliedConfig(runtimeFlagDefaults, cfg),
 	)
 	log.Info("Task Service initialized")
+
+	services.Auth, err = provideAuthService(ctx, cfg, dbPool, repos, log)
+	if err != nil {
+		log.Error("Failed to initialize auth service", zap.Error(err))
+		return false
+	}
+	warnIfExposedWithoutAuth(cfg, services.Auth, log)
 
 	if err := runInitialAgentSetup(ctx, services.User, agentSettingsController, log); err != nil {
 		// Agent registry seeding is a hard prerequisite for every
@@ -1669,6 +1677,9 @@ func buildHTTPServer(
 	router.Use(httpmw.OtelTracing("kandev"))
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
+	// Opt-in authentication. Runs after CORS; in disabled mode it only
+	// injects the synthetic single-user identity (behavior unchanged).
+	router.Use(authhttpmw.Middleware(services.Auth))
 
 	port := cfg.Server.Port
 	if port == 0 {
@@ -1703,6 +1714,7 @@ func buildHTTPServer(
 		secretsSvc:              secrets.NewService(repos.Secrets, log),
 		secretStore:             repos.Secrets,
 		mcpConfigSvc:            mcpconfig.NewService(repos.AgentSettings),
+		authSvc:                 services.Auth,
 		addCleanup:              addCleanup,
 		repoCloner:              repoCloner,
 		version:                 Version,

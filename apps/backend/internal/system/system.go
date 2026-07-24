@@ -15,6 +15,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -119,6 +120,10 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 // not here, to keep the existing package's surface unchanged.
 func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	g := router.Group("/api/v1/system")
+	// Destructive install-wide mutations require the admin role. With
+	// authentication disabled the synthetic single-user identity is an admin,
+	// so behavior is unchanged; with it enabled, members are read-only here.
+	admin := g.Group("", authn.RequireAdmin())
 
 	g.GET("/info", info.Handler(s.Info))
 	if s.Storage != nil {
@@ -127,12 +132,12 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 
 	g.GET("/disk-usage", disk.HandleGet(s.Disk))
 	g.POST("/disk-usage/refresh", disk.HandleRefresh(s.Disk))
-	g.POST("/disk-usage/open", disk.HandleOpenFolder(s.Disk))
+	admin.POST("/disk-usage/open", disk.HandleOpenFolder(s.Disk))
 
 	g.GET("/database", database.HandleStats(s.Database))
-	g.POST("/database/vacuum", database.HandleVacuum(s.Database))
-	g.POST("/database/optimize", database.HandleOptimize(s.Database))
-	g.POST("/database/reset", database.HandleReset(s.Database))
+	admin.POST("/database/vacuum", database.HandleVacuum(s.Database))
+	admin.POST("/database/optimize", database.HandleOptimize(s.Database))
+	admin.POST("/database/reset", database.HandleReset(s.Database))
 
 	backups.RegisterRoutes(g, s.Backups)
 
@@ -145,10 +150,10 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	}
 
 	g.GET("/updates", updates.HandleGet(s.Updates))
-	g.POST("/updates/check", updates.HandleCheck(s.Updates))
-	g.POST("/updates/apply", updates.HandleApply(s.Updates))
+	admin.POST("/updates/check", updates.HandleCheck(s.Updates))
+	admin.POST("/updates/apply", updates.HandleApply(s.Updates))
 	g.GET("/restart-capability", restart.HandleCapability(s.Restart))
-	g.POST("/restart", restart.HandleRequest(s.Restart))
+	admin.POST("/restart", restart.HandleRequest(s.Restart))
 
 	g.GET("/jobs/:id", jobs.HandleGet(s.Jobs))
 

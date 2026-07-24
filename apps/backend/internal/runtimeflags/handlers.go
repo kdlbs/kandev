@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/kandev/kandev/internal/auth/authn"
 )
 
 type Handler struct {
@@ -16,7 +18,9 @@ func RegisterRoutes(router gin.IRouter, svc *Service) {
 	h := &Handler{svc: svc}
 	api := router.Group("/api/v1/runtime-flags")
 	api.GET("", h.list)
-	api.PATCH("/:key", h.patch)
+	// Flag overrides are install-wide; only admins may change them. With
+	// auth disabled the synthetic identity is an admin (no behavior change).
+	api.PATCH("/:key", authn.RequireAdmin(), h.patch)
 }
 
 func (h *Handler) list(c *gin.Context) {

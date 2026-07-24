@@ -8,6 +8,8 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -34,6 +36,20 @@ func bootInitialState(
 	builder := bootStateBuilder{p: p}
 	state := map[string]any{
 		"features": p.features,
+	}
+	// The auth block is always present so the SPA knows whether to render the
+	// app, the login page, or the setup wizard. For unauthenticated visitors
+	// on an auth-enabled instance, NO data loaders run — the payload carries
+	// only features + auth.
+	if p.authSvc != nil {
+		var identityPtr *authn.Identity
+		if identity, ok := authn.IdentityFromContext(req.Context()); ok {
+			identityPtr = &identity
+		}
+		state["auth"] = p.authSvc.StateFor(ctx, identityPtr)
+		if p.authSvc.Mode() != auth.ModeDisabled && identityPtr == nil {
+			return state
+		}
 	}
 
 	if route.Route == webapp.RouteSettings {

@@ -30,6 +30,9 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
+	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
+	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/clarification"
@@ -480,6 +483,7 @@ type routeParams struct {
 	secretsSvc              *secrets.Service
 	secretStore             secrets.SecretStore
 	mcpConfigSvc            *mcpconfig.Service
+	authSvc                 *auth.Service
 	addCleanup              func(func() error)
 	repoCloner              *repoclone.Cloner
 	version                 string
@@ -582,6 +586,9 @@ func registerRoutes(p routeParams) {
 	p.gateway.SetupRoutes(p.router)
 	registerTaskRoutes(p, planService, handoffSvc)
 	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	if p.authSvc != nil {
+		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.log)
+	}
 
 	// /health is a readiness probe, not a liveness probe. It only
 	// returns 200 after main has flipped the package-level `ready`
@@ -1271,7 +1278,7 @@ func registerExternalMCP(p routeParams) {
 
 	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
 	srv := mcpserver.NewExternal(backendClient, p.log, "")
-	mcpGroup := p.router.Group("", externalMCPOpenMiddleware())
+	mcpGroup := p.router.Group("", externalMCPAuthMiddleware(p.authSvc))
 	srv.RegisterBackendRoutes(mcpGroup)
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
@@ -1287,13 +1294,26 @@ func registerExternalMCP(p routeParams) {
 		zap.String("sse_message", baseURL+"/mcp/message"))
 }
 
-// externalMCPOpenMiddleware documents the external MCP access policy: the
-// endpoint is open on every interface the backend listens on. Kandev does not
-// yet have a user auth boundary, so protecting MCP separately would create a
-// false sense of security while the rest of the app remains reachable.
-func externalMCPOpenMiddleware() gin.HandlerFunc {
+// externalMCPAuthMiddleware guards the external MCP endpoint (/mcp*). While
+// authentication is disabled the endpoint stays open (today's behavior). Once
+// auth is enabled, external coding agents must present a personal access
+// token as an Authorization bearer — they have no browser session cookie.
+func externalMCPAuthMiddleware(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Next()
+		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
+			c.Next()
+			return
+		}
+		// The global auth middleware may already have resolved a PAT (or a
+		// browser session — useful for same-origin tooling).
+		if _, ok := authn.FromGin(c); ok {
+			c.Next()
+			return
+		}
+		c.Header("WWW-Authenticate", "Bearer")
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"error": "external MCP requires a personal access token (Settings > Account > API tokens)",
+		})
 	}
 }
 

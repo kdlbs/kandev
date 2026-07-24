@@ -1778,7 +1778,9 @@ func TestExternalMCPOpenMiddleware_AllowsLoopbackAndRemote(t *testing.T) {
 func setupExternalMCPAccessRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
-	r.Use(externalMCPOpenMiddleware())
+	// nil auth service = auth feature absent = open (disabled-mode behavior).
+	// PAT enforcement when auth is enabled is covered by internal/auth tests.
+	r.Use(externalMCPAuthMiddleware(nil))
 	r.GET("/mcp", func(c *gin.Context) {
 		c.Status(http.StatusOK)
 	})
