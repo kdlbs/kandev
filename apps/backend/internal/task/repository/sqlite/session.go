@@ -1914,13 +1914,32 @@ func (r *Repository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, taskIDs
 	return result, rows.Err()
 }
 
-// SetSessionPrimary marks a session as primary and clears primary flag on other sessions for the same task
+// SetSessionPrimary marks a session as primary and clears the primary flag
+// on every other session for the same task, atomically. Both writes go
+// through a single transaction so a concurrent caller can't observe (or
+// write) a half-applied state — e.g. two sessions racing on is_primary=1,
+// or a reader seeing zero primary sessions mid-swap.
+//
+// On SQLite the writer pool is a single connection (see
+// internal/db.NewSQLiteDB), so only one transaction can hold it at a time —
+// the transaction alone fully serializes concurrent callers. On Postgres,
+// separate connections could otherwise run two of these transactions truly
+// concurrently, each seeing zero primary sessions and both promoting; to
+// close that window we take an exclusive row lock on the owning task
+// (`SELECT ... FOR UPDATE`) before touching its sessions, so a second
+// concurrent promotion for the same task blocks until the first commits.
 func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) error {
 	now := time.Now().UTC()
 
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	// First, get the task_id for this session
 	var taskID string
-	err := r.db.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), sessionID).Scan(&taskID)
+	err = tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_sessions WHERE id = ?`), sessionID).Scan(&taskID)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
@@ -1928,8 +1947,19 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 		return err
 	}
 
+	// Serialize concurrent promotions for the same task across Postgres
+	// connections. SQLite has no FOR UPDATE / row-level locking and doesn't
+	// need it — the single-connection writer pool already serializes here.
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var lockedTaskID string
+		err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT id FROM tasks WHERE id = ? FOR UPDATE`), taskID).Scan(&lockedTaskID)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+	}
+
 	// Clear primary flag on all sessions for this task
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET is_primary = 0, updated_at = ? WHERE task_id = ?
 	`), now, taskID)
 	if err != nil {
@@ -1937,7 +1967,7 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 	}
 
 	// Set primary flag on the specified session
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_sessions SET is_primary = 1, updated_at = ? WHERE id = ?
 	`), now, sessionID)
 	if err != nil {
@@ -1948,5 +1978,5 @@ func (r *Repository) SetSessionPrimary(ctx context.Context, sessionID string) er
 	if rows == 0 {
 		return fmt.Errorf("session not found: %s", sessionID)
 	}
-	return nil
+	return tx.Commit()
 }

@@ -37,9 +37,14 @@ const STATUS_BADGE: Record<
   succeeded: { variant: "default", label: "Succeeded" },
   failed: { variant: "destructive", label: "Failed" },
   skipped: { variant: "outline", label: "Skipped" },
-  // The generating task was archived or no longer exists — its outcome is
-  // unknown, so this is deliberately distinct from succeeded/failed rather
-  // than guessing one. See internal/automation.RunStatusCancelled.
+  // The generating task was archived — via the UI or by the agent itself
+  // (e.g. an "archive this task" instruction). Distinct from a genuine
+  // user cancellation: archiving just closes the task out, it doesn't
+  // mean the run's work was rejected. See internal/automation.RunStatusArchived.
+  archived: { variant: "outline", label: "Archived" },
+  // The generating task no longer exists, or its current primary session
+  // is CANCELLED — a real cancellation, distinct from archived.
+  // See internal/automation.RunStatusCancelled.
   cancelled: { variant: "outline", label: "Cancelled" },
 };
 

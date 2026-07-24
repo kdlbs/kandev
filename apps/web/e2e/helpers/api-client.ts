@@ -2446,6 +2446,26 @@ export class ApiClient {
       task_id: taskId ?? "",
     });
   }
+
+  /**
+   * Seed a task_sessions row directly via the E2E HTTP endpoint —
+   * deterministic state seeding, not a substitute for driving a real
+   * agent stop/resume cycle. Used to assert on session-state-derived
+   * behavior (e.g. the automation Recent Runs "Cancelled" status, which
+   * is keyed off the task's *primary* session state, not the task's own
+   * state). Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async seedAutomationTaskSession(
+    taskId: string,
+    state: string,
+    isPrimary = true,
+  ): Promise<{ id: string; task_id: string; status: string }> {
+    return this.request("POST", "/api/v1/e2e/task-sessions", {
+      task_id: taskId,
+      state,
+      is_primary: isPrimary,
+    });
+  }
 }
 
 // --- Jira / Linear mock payload types ---
