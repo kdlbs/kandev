@@ -452,6 +452,111 @@ describe("idempotent reload: no duplicate registrations without an explicit unlo
   });
 });
 
+describe("overlapping loads for the same plugin: newest-initiated load wins", () => {
+  const PLUGIN_CONC_A_ID = "plugin-conc-a";
+  const PLUGIN_CONC_B_ID = "plugin-conc-b";
+  const SLOT = "chat-input-actions";
+
+  function deferred<T = void>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>((r) => {
+      resolve = r;
+    });
+    return { promise, resolve };
+  }
+
+  afterEach(() => {
+    // evictCache clears both the registry and the module-level registeredPlugins
+    // cache so one test's bundle can't leak into the next (they'd otherwise reuse
+    // a stale cached registration).
+    unloadPlugin(PLUGIN_CONC_A_ID, { evictCache: true });
+    unloadPlugin(PLUGIN_CONC_B_ID, { evictCache: true });
+  });
+
+  it("a superseded (older) load whose import resolves last does not revoke the newer load's registration (Codex P1: boot v1 vs update v2)", async () => {
+    const OldWidget = () => null;
+    const NewWidget = () => null;
+    const oldImportGate = deferred();
+
+    // The older boot import resolves only after the gate — i.e. last.
+    const oldImporter = async (_url: string) => {
+      await oldImportGate.promise;
+      registerFake(PLUGIN_CONC_A_ID, {
+        initialize: (registry: PluginRegistry) => registry.registerComponent(SLOT, OldWidget),
+      });
+      return {};
+    };
+    const newImporter = async (_url: string) => {
+      registerFake(PLUGIN_CONC_A_ID, {
+        initialize: (registry: PluginRegistry) => registry.registerComponent(SLOT, NewWidget),
+      });
+      return {};
+    };
+
+    // Older load starts first (claims the earlier generation) but parks on its
+    // import; the newer load then runs to completion.
+    const oldLoad = loadPlugins(
+      [activePlugin({ id: PLUGIN_CONC_A_ID })],
+      makeHostFactory,
+      oldImporter,
+    );
+    await loadPlugins([activePlugin({ id: PLUGIN_CONC_A_ID })], makeHostFactory, newImporter);
+    expect(pluginRegistry.getSlotComponents(SLOT)).toEqual([NewWidget]);
+
+    // The stale import finally resolves — it must bail before touching the
+    // registry, leaving the newer registration intact (no unregister, no OldWidget).
+    oldImportGate.resolve();
+    await oldLoad;
+
+    expect(pluginRegistry.getSlotComponents(SLOT)).toEqual([NewWidget]);
+  });
+
+  it("a superseded load whose initialize() registers after an await does not append a duplicate slot entry", async () => {
+    const OldWidget = () => null;
+    const NewWidget = () => null;
+    const oldInitGate = deferred();
+
+    let importCount = 0;
+    const importer = async (_url: string) => {
+      importCount += 1;
+      const isOld = importCount === 1;
+      registerFake(PLUGIN_CONC_B_ID, {
+        initialize: async (registry: PluginRegistry) => {
+          if (isOld) {
+            await oldInitGate.promise; // registers post-await, after being superseded
+            registry.registerComponent(SLOT, OldWidget);
+          } else {
+            registry.registerComponent(SLOT, NewWidget);
+          }
+        },
+      });
+      return {};
+    };
+
+    // Older load reaches its awaiting initialize() and parks there. Flush a
+    // full macrotask so it is guaranteed past the import fence and parked at the
+    // gate before we supersede it — exercising the post-await register path.
+    const oldLoad = loadPlugins(
+      [activePlugin({ id: PLUGIN_CONC_B_ID })],
+      makeHostFactory,
+      importer,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    // The update path evicts the cached bundle then reloads — the newer load
+    // registers NewWidget and becomes the current generation.
+    unloadPlugin(PLUGIN_CONC_B_ID, { evictCache: true });
+    await loadPlugins([activePlugin({ id: PLUGIN_CONC_B_ID })], makeHostFactory, importer);
+    expect(pluginRegistry.getSlotComponents(SLOT)).toEqual([NewWidget]);
+
+    // The stale initialize resumes and tries to register — the generation fence
+    // must drop it so exactly one slot registration remains.
+    oldInitGate.resolve();
+    await oldLoad;
+
+    expect(pluginRegistry.getSlotComponents(SLOT)).toEqual([NewWidget]);
+  });
+});
+
 describe("unloadPlugin — evictCache option", () => {
   const PLUGIN_EVICT_A_ID = "plugin-evict-a";
 
