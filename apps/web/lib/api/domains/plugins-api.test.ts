@@ -315,6 +315,63 @@ describe("syncPlugins", () => {
   });
 });
 
+describe("operator boot-token (X-Kandev-Boot-Token) on state-changing calls", () => {
+  const BOOT_TOKEN = "boot-token-xyz";
+
+  beforeEach(() => {
+    (window as unknown as { __KANDEV_BOOT_PAYLOAD__?: unknown }).__KANDEV_BOOT_PAYLOAD__ = {
+      runtime: { bootToken: BOOT_TOKEN },
+    };
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { __KANDEV_BOOT_PAYLOAD__?: unknown }).__KANDEV_BOOT_PAYLOAD__;
+  });
+
+  function tokenHeaderOf(init: FetchInit): string | undefined {
+    return (init?.headers as Record<string, string> | undefined)?.["X-Kandev-Boot-Token"];
+  }
+
+  it("attaches the token to a JSON install", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ plugin: plugin() }, 201));
+    await installPluginFromUrl("https://example.test/x.tar.gz");
+    const [, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(tokenHeaderOf(init)).toBe(BOOT_TOKEN);
+  });
+
+  it("attaches the token to a multipart install (the CSRF-RCE vector)", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ plugin: plugin() }, 201));
+    await installPluginUpload(new File([new Uint8Array([1])], "csrf-plugin.tar.gz"));
+    const [, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(tokenHeaderOf(init)).toBe(BOOT_TOKEN);
+    // Still no Content-Type, so the browser sets the multipart boundary.
+    expect((init?.headers as Record<string, string>)?.["Content-Type"]).toBeUndefined();
+  });
+
+  it("attaches the token to enable/disable/uninstall/sync/patch", async () => {
+    const calls: Array<() => Promise<unknown>> = [
+      () => enablePlugin(PLUGIN_ID),
+      () => disablePlugin(PLUGIN_ID),
+      () => uninstallPlugin(PLUGIN_ID),
+      () => syncPlugins(),
+      () => updatePluginConfig(PLUGIN_ID, { k: "v" }),
+    ];
+    for (const call of calls) {
+      fetchSpy.mockResolvedValueOnce(jsonResponse({ ok: true }));
+      await call();
+      const [, init] = fetchSpy.mock.calls.at(-1) ?? [];
+      expect(tokenHeaderOf(init)).toBe(BOOT_TOKEN);
+    }
+  });
+
+  it("does not attach the token to read-only GETs", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ plugins: [] }));
+    await listPlugins();
+    const [, init] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(tokenHeaderOf(init)).toBeUndefined();
+  });
+});
+
 describe("getPluginConfig", () => {
   it("fetches GET /api/plugins/:id/config and unwraps the config object", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ config: { default_channel: "#dev" } }));

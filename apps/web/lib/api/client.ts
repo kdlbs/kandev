@@ -1,4 +1,41 @@
 import { getBackendConfig } from "@/lib/config";
+import { readBootToken } from "@/src/boot-payload";
+
+// BOOT_TOKEN_HEADER carries the per-boot operator token on state-changing
+// requests. A cross-origin CSRF page cannot read the same-origin boot payload
+// to learn the token, and a CORS "simple" request cannot set a custom header
+// without triggering a preflight the backend's CORS layer then blocks — so
+// gating state-changing routes on this header defeats the CSRF drive-by and
+// the unauthenticated LAN caller. Must match httpmw.BootTokenHeader on the
+// backend.
+export const BOOT_TOKEN_HEADER = "X-Kandev-Boot-Token";
+
+// bootTokenHeaders returns the operator-token header when a token is present in
+// the boot payload, or an empty object otherwise. Merge it into a request's
+// headers for any state-changing operator call (plugin install/enable,
+// marketplace source mutations).
+export function bootTokenHeaders(): Record<string, string> {
+  const token = readBootToken();
+  return token ? { [BOOT_TOKEN_HEADER]: token } : {};
+}
+
+// mutationInit builds a fetchJson `init` for a state-changing operator request:
+// it spreads caller init, sets the method/body, and merges the boot-token
+// header LAST so the correct token always wins over any caller-supplied
+// headers (a caller passing a stale/wrong token must not silently 403). Shared
+// by the plugins and marketplace API domains so both use one merge strategy.
+export function mutationInit(
+  method: string,
+  options: ApiRequestOptions | undefined,
+  body?: BodyInit,
+): RequestInit {
+  return {
+    ...(options?.init ?? {}),
+    method,
+    headers: { ...(options?.init?.headers ?? {}), ...bootTokenHeaders() },
+    ...(body !== undefined ? { body } : {}),
+  };
+}
 
 export type ApiRequestOptions = {
   baseUrl?: string;

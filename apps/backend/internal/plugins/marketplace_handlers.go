@@ -12,14 +12,16 @@ import (
 
 // registerMarketplaceRoutes wires the marketplace catalog + source-management
 // surface onto the /api/plugins group. Kept separate from RegisterRoutes so
-// the marketplace HTTP surface stays self-contained.
-func (c *Controller) registerMarketplaceRoutes(api *gin.RouterGroup) {
+// the marketplace HTTP surface stays self-contained. guard is the per-boot
+// operator-token middleware (see RegisterRoutes); every mutating route is
+// gated by it, while the read-only catalog/source lists stay open.
+func (c *Controller) registerMarketplaceRoutes(api *gin.RouterGroup, guard gin.HandlerFunc) {
 	api.GET("/marketplace", c.marketplaceCatalog)
-	api.POST("/marketplace/refresh", c.marketplaceRefresh)
+	api.POST("/marketplace/refresh", guard, c.marketplaceRefresh)
 	api.GET("/marketplace/sources", c.listSources)
-	api.POST("/marketplace/sources", c.addSource)
-	api.PATCH("/marketplace/sources/:sid", c.updateSource)
-	api.DELETE("/marketplace/sources/:sid", c.deleteSource)
+	api.POST("/marketplace/sources", guard, c.addSource)
+	api.PATCH("/marketplace/sources/:sid", guard, c.updateSource)
+	api.DELETE("/marketplace/sources/:sid", guard, c.deleteSource)
 }
 
 // addSourceRequest is the POST /api/plugins/marketplace/sources body.

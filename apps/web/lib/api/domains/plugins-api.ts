@@ -1,4 +1,10 @@
-import { ApiError, fetchJson, type ApiRequestOptions } from "../client";
+import {
+  ApiError,
+  bootTokenHeaders,
+  fetchJson,
+  mutationInit,
+  type ApiRequestOptions,
+} from "../client";
 import { getBackendConfig } from "@/lib/config";
 import type { PluginRecord, SyncResult } from "@/lib/types/plugins";
 
@@ -39,11 +45,7 @@ export async function installPluginFromUrl(
 ): Promise<InstallResult> {
   return fetchJson<InstallResult>(`${BASE}/install`, {
     ...options,
-    init: {
-      ...(options?.init ?? {}),
-      method: "POST",
-      body: JSON.stringify({ url }),
-    },
+    init: mutationInit("POST", options, JSON.stringify({ url })),
   });
 }
 
@@ -61,11 +63,18 @@ export async function installPluginUpload(
   formData.append("package", file);
 
   // Spread caller init *first* so method/body always win, matching the
-  // convention in lib/api/domains/voice-api.ts.
+  // convention in lib/api/domains/voice-api.ts. The operator-token header is
+  // merged last (after caller headers) so this multipart install — a CORS
+  // "simple" request and the C1 CSRF-RCE vector — carries it. Content-Type is
+  // deliberately never set here, so the browser sets the multipart boundary;
+  // headers stays absent entirely when there is neither a caller header nor a
+  // token to send.
+  const headers = { ...(options?.init?.headers ?? {}), ...bootTokenHeaders() };
   const response = await fetch(`${baseUrl}${BASE}/install`, {
     ...options?.init,
     method: "POST",
     body: formData,
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
   });
 
   if (!response.ok) await throwInstallError(response);
@@ -109,11 +118,7 @@ export async function updatePluginConfig(
 ) {
   return fetchJson<{ updated: boolean }>(`${BASE}/${encodeURIComponent(id)}`, {
     ...options,
-    init: {
-      ...(options?.init ?? {}),
-      method: "PATCH",
-      body: JSON.stringify({ config }),
-    },
+    init: mutationInit("PATCH", options, JSON.stringify({ config })),
   });
 }
 
@@ -121,7 +126,7 @@ export async function updatePluginConfig(
 export async function enablePlugin(id: string, options?: ApiRequestOptions) {
   return fetchJson<{ enabled: boolean }>(`${BASE}/${encodeURIComponent(id)}/enable`, {
     ...options,
-    init: { ...(options?.init ?? {}), method: "POST" },
+    init: mutationInit("POST", options),
   });
 }
 
@@ -129,7 +134,7 @@ export async function enablePlugin(id: string, options?: ApiRequestOptions) {
 export async function disablePlugin(id: string, options?: ApiRequestOptions) {
   return fetchJson<{ disabled: boolean }>(`${BASE}/${encodeURIComponent(id)}/disable`, {
     ...options,
-    init: { ...(options?.init ?? {}), method: "POST" },
+    init: mutationInit("POST", options),
   });
 }
 
@@ -137,7 +142,7 @@ export async function disablePlugin(id: string, options?: ApiRequestOptions) {
 export async function uninstallPlugin(id: string, options?: ApiRequestOptions) {
   return fetchJson<{ deleted: boolean }>(`${BASE}/${encodeURIComponent(id)}`, {
     ...options,
-    init: { ...(options?.init ?? {}), method: "DELETE" },
+    init: mutationInit("DELETE", options),
   });
 }
 
@@ -149,6 +154,6 @@ export async function uninstallPlugin(id: string, options?: ApiRequestOptions) {
 export async function syncPlugins(options?: ApiRequestOptions): Promise<SyncResult> {
   return fetchJson<SyncResult>(`${BASE}/sync`, {
     ...options,
-    init: { ...(options?.init ?? {}), method: "POST" },
+    init: mutationInit("POST", options),
   });
 }

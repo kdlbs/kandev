@@ -60,7 +60,7 @@ func TestMarketplaceCatalogReturnsAnnotatedEntries(t *testing.T) {
 	svc, _, _ := newTestService(t)
 	attachMarketplaceWithSource(t, svc, fixtureIndexServer(t).URL)
 	router := gin.New()
-	RegisterRoutes(router, svc, nil, testLogger(t))
+	RegisterRoutes(router, svc, nil, testLogger(t), testBootToken)
 
 	rec := doRequest(router, http.MethodGet, "/api/plugins/marketplace?category=analytics", "", nil)
 	if rec.Code != http.StatusOK {
@@ -86,7 +86,7 @@ func TestMarketplaceSourceCRUD(t *testing.T) {
 	svc, _, _ := newTestService(t)
 	attachMarketplaceWithSource(t, svc, "https://official.example/index.json")
 	router := gin.New()
-	RegisterRoutes(router, svc, nil, testLogger(t))
+	RegisterRoutes(router, svc, nil, testLogger(t), testBootToken)
 
 	// List returns the built-in source.
 	list := doRequest(router, http.MethodGet, "/api/plugins/marketplace/sources", "", nil)
@@ -125,7 +125,7 @@ func TestMarketplaceDeleteBuiltinReturns409(t *testing.T) {
 	svc, _, _ := newTestService(t)
 	attachMarketplaceWithSource(t, svc, "https://official.example/index.json")
 	router := gin.New()
-	RegisterRoutes(router, svc, nil, testLogger(t))
+	RegisterRoutes(router, svc, nil, testLogger(t), testBootToken)
 
 	sources, err := svc.Marketplace().Sources()
 	if err != nil {

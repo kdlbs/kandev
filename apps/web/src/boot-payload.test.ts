@@ -1,7 +1,39 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadBootPayload, readBootPayload } from "./boot-payload";
+import { loadBootPayload, readBootPayload, readBootToken } from "./boot-payload";
 
 const JIRA_BUNDLE_URL = "/api/plugins/jira/bundle";
+
+describe("readBootToken", () => {
+  it("returns the per-boot operator token from runtime.bootToken", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        version: 1,
+        runtime: { apiPrefix: "/api/v1", webSocketPath: "/ws", bootToken: "boot-token-abc" },
+      },
+    } as unknown as Window;
+
+    expect(readBootToken(win)).toBe("boot-token-abc");
+  });
+
+  it("returns undefined when the payload or token is absent", () => {
+    expect(readBootToken({} as Window)).toBeUndefined();
+    expect(
+      readBootToken({
+        __KANDEV_BOOT_PAYLOAD__: { runtime: { apiPrefix: "/api/v1" } },
+      } as unknown as Window),
+    ).toBeUndefined();
+  });
+
+  it("also surfaces the token through readBootPayload's runtime", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        runtime: { apiPrefix: "/api/v1", webSocketPath: "/ws", bootToken: "tok-1" },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.bootToken).toBe("tok-1");
+  });
+});
 
 describe("readBootPayload", () => {
   it("returns an empty initial state when Go has not injected boot data yet", () => {

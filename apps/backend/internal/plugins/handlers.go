@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -38,23 +39,34 @@ type Controller struct {
 // parity with the backendapp wiring (svc.SetDeliverer(deliverer) happens
 // alongside this call) — no handler in this file calls it directly, since
 // Service already notifies it on every install/status change.
-func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.Logger) {
+//
+// bootToken is the per-boot operator token (see httpmw.RequireBootToken):
+// every state-changing route below is guarded by it, closing the
+// unauthenticated-RCE hole where a LAN peer or a cross-origin browser page
+// could POST /install (a CORS "simple" request that executes before the
+// response is withheld) and spawn a plugin's native binary. Read-only asset
+// serving (:id/bundle, :id/ui/*) is deliberately left ungated — the browser
+// loads those via dynamic import()/stylesheet fetches that cannot carry a
+// custom header — and so is the inbound webhook relay, which is
+// unauthenticated by design for external callers.
+func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.Logger, bootToken string) {
 	ctrl := &Controller{svc: svc, log: log}
+	guard := httpmw.RequireBootToken(bootToken)
 
 	api := router.Group("/api/plugins")
-	api.POST("/install", ctrl.install)
-	api.POST("/sync", ctrl.sync)
+	api.POST("/install", guard, ctrl.install)
+	api.POST("/sync", guard, ctrl.sync)
 	// Register the static /marketplace routes before the /:id wildcard, matching
 	// the /install and /sync ordering — some gin/httprouter tree versions reject
 	// a static sibling added after an existing wildcard for the same method.
-	ctrl.registerMarketplaceRoutes(api)
+	ctrl.registerMarketplaceRoutes(api, guard)
 	api.GET("", ctrl.list)
 	api.GET("/:id", ctrl.get)
 	api.GET("/:id/config", ctrl.getConfig)
-	api.PATCH("/:id", ctrl.updateConfig)
-	api.DELETE("/:id", ctrl.uninstall)
-	api.POST("/:id/enable", ctrl.enable)
-	api.POST("/:id/disable", ctrl.disable)
+	api.PATCH("/:id", guard, ctrl.updateConfig)
+	api.DELETE("/:id", guard, ctrl.uninstall)
+	api.POST("/:id/enable", guard, ctrl.enable)
+	api.POST("/:id/disable", guard, ctrl.disable)
 
 	api.GET("/:id/bundle", ctrl.bundle)
 	api.GET("/:id/ui/*path", ctrl.ui)

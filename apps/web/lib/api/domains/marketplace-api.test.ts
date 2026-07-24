@@ -165,3 +165,48 @@ describe("refreshMarketplace", () => {
     expect(result.refreshed).toBe(true);
   });
 });
+
+describe("operator boot-token on state-changing marketplace calls", () => {
+  const BOOT_TOKEN = "boot-token-mkt";
+
+  beforeEach(() => {
+    (window as unknown as { __KANDEV_BOOT_PAYLOAD__?: unknown }).__KANDEV_BOOT_PAYLOAD__ = {
+      runtime: { bootToken: BOOT_TOKEN },
+    };
+  });
+
+  afterEach(() => {
+    delete (window as unknown as { __KANDEV_BOOT_PAYLOAD__?: unknown }).__KANDEV_BOOT_PAYLOAD__;
+  });
+
+  function tokenHeaderOf(init: FetchInit): string | undefined {
+    return (init?.headers as Record<string, string> | undefined)?.["X-Kandev-Boot-Token"];
+  }
+
+  it("attaches the token to source add/update/delete and refresh", async () => {
+    const calls: Array<() => Promise<unknown>> = [
+      () => addMarketplaceSource("Acme", "https://acme-csrf/index.json"),
+      () => updateMarketplaceSource("s1", { enabled: false }),
+      () => deleteMarketplaceSource("s1"),
+      () => refreshMarketplace(),
+    ];
+    for (const call of calls) {
+      fetchSpy.mockResolvedValueOnce(jsonResponse({ ok: true }));
+      await call();
+      const [, init] = fetchSpy.mock.calls.at(-1) ?? [];
+      expect(tokenHeaderOf(init)).toBe(BOOT_TOKEN);
+    }
+  });
+
+  it("does not attach the token to read-only catalog/source GETs", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ plugins: [], sources: [] }));
+    await getMarketplaceCatalog();
+    const [, catalogInit] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(tokenHeaderOf(catalogInit)).toBeUndefined();
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ sources: [] }));
+    await listMarketplaceSources();
+    const [, listInit] = fetchSpy.mock.calls.at(-1) ?? [];
+    expect(tokenHeaderOf(listInit)).toBeUndefined();
+  });
+});

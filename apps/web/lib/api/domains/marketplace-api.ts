@@ -1,4 +1,4 @@
-import { fetchJson, type ApiRequestOptions } from "../client";
+import { fetchJson, mutationInit, type ApiRequestOptions } from "../client";
 import type { MarketplaceCatalog, MarketplaceSource } from "@/lib/types/plugins";
 
 const BASE = "/api/plugins/marketplace";
@@ -54,7 +54,7 @@ export async function addMarketplaceSource(
 ): Promise<MarketplaceSource> {
   return fetchJson<MarketplaceSource>(`${BASE}/sources`, {
     ...options,
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ name, url }) },
+    init: mutationInit("POST", options, JSON.stringify({ name, url })),
   });
 }
 
@@ -67,7 +67,7 @@ export async function updateMarketplaceSource(
 ): Promise<MarketplaceSource> {
   return fetchJson<MarketplaceSource>(`${BASE}/sources/${encodeURIComponent(id)}`, {
     ...options,
-    init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(patch) },
+    init: mutationInit("PATCH", options, JSON.stringify(patch)),
   });
 }
 
@@ -80,7 +80,7 @@ export async function deleteMarketplaceSource(
 ): Promise<{ deleted: boolean }> {
   return fetchJson<{ deleted: boolean }>(`${BASE}/sources/${encodeURIComponent(id)}`, {
     ...options,
-    init: { ...(options?.init ?? {}), method: "DELETE" },
+    init: mutationInit("DELETE", options),
   });
 }
 
@@ -91,6 +91,6 @@ export async function refreshMarketplace(
 ): Promise<{ refreshed: boolean }> {
   return fetchJson<{ refreshed: boolean }>(`${BASE}/refresh`, {
     ...options,
-    init: { ...(options?.init ?? {}), method: "POST" },
+    init: mutationInit("POST", options),
   });
 }

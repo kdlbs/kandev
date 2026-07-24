@@ -1675,6 +1675,15 @@ func buildHTTPServer(
 		port = ports.Backend
 	}
 
+	// Per-boot operator token: embedded in the SPA boot payload and required
+	// on state-changing operator routes (see httpmw.RequireBootToken). A
+	// generation failure (crypto/rand exhausted — effectively impossible) is
+	// fatal rather than silently leaving those routes open.
+	bootToken, err := httpmw.NewBootToken()
+	if err != nil {
+		log.Fatal("failed to generate operator boot token", zap.Error(err))
+	}
+
 	registerRoutes(routeParams{
 		router:                  router,
 		gateway:                 gateway,
@@ -1709,6 +1718,7 @@ func buildHTTPServer(
 		webInternalURL:          cfg.Server.WebInternalURL,
 		devMode:                 cfg.Debug.DevMode || cfg.Debug.PprofEnabled,
 		httpPort:                port,
+		bootToken:               bootToken,
 		features:                cfg.Features,
 		voice:                   cfg.Voice,
 		log:                     log,
