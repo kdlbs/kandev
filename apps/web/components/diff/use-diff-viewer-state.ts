@@ -154,11 +154,6 @@ type UseDiffViewerStateOpts = {
   baseRef?: string;
   /** Multi-repo subpath for the file (e.g. "kandev"); empty for single-repo. */
   repo?: string;
-  /**
-   * djb2 hash of this file's normalized diff, supplied by the review file list so
-   * finding staleness is computed against the same value the backend stamped.
-   */
-  diffHash?: string;
 };
 
 /**
@@ -222,14 +217,12 @@ function useDiffViewerAnnotations({
   filePath,
   repo,
   diff,
-  diffHash,
   changeLineMapRef,
   revertInfoRef,
 }: BuildAnnotationsOpts & {
   filePath: string;
   repo?: string;
   diff?: string;
-  diffHash?: string;
   changeLineMapRef: RefObject<Map<string, string>>;
   revertInfoRef: RefObject<Map<string, RevertBlockInfo>>;
 }) {
@@ -254,7 +247,7 @@ function useDiffViewerAnnotations({
   );
 
   const walkthrough = useWalkthroughSelection(filePath, repo);
-  const reviewFindings = useReviewFindingAnnotations({ filePath, repo, diff, diffHash });
+  const reviewFindings = useReviewFindingAnnotations({ filePath, repo, diff });
   const withWalkthrough = useMemo(() => {
     const combined = [...annotations, ...reviewFindings.annotations];
     return walkthrough.annotation ? [...combined, walkthrough.annotation] : combined;
@@ -432,7 +425,6 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     enableExpansion = false,
     baseRef,
     repo,
-    diffHash,
   } = opts;
 
   const [selectedLines, setSelectedLines] = useState<SelectedLineRange | null>(null);
@@ -473,7 +465,6 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     filePath: data.filePath,
     repo,
     diff: data.diff,
-    diffHash,
     changeLineMapRef,
     revertInfoRef,
   });

@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { AnnotationSide, DiffLineAnnotation } from "@pierre/diffs";
 import { useOptionalAppStore } from "@/components/state-provider";
 import { resolveFindingAnchor } from "@/lib/review/findings";
+import { hashDiff } from "@/components/review/types";
 import type { TaskReviewFinding } from "@/lib/types/review";
 import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
 
@@ -33,9 +34,13 @@ export function useReviewFindingAnnotations(opts: {
   filePath: string;
   repo?: string;
   diff?: string;
-  diffHash?: string;
 }): ReviewFindingAnnotationsResult {
-  const { filePath, repo, diff, diffHash } = opts;
+  const { filePath, repo, diff } = opts;
+  // The diff reaching the viewer is already normalized (see normalizeDiffContent
+  // in components/review/types.ts), so hashing it here yields the same value the
+  // backend stamped on the finding and the same one computeReviewSets uses for
+  // review-mark staleness.
+  const diffHash = useMemo(() => (diff ? hashDiff(diff) : undefined), [diff]);
   const activeTaskId = useOptionalAppStore((s) => s.tasks.activeTaskId, null);
   const findings = useOptionalAppStore(
     (s) => (activeTaskId ? s.taskReview.findingsByTaskId[activeTaskId] : undefined),
