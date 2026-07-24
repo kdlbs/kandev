@@ -135,7 +135,7 @@ function DrawerSourceMetrics({
   simplified: boolean;
 }) {
   return (
-    <div className="flex min-h-11 items-center gap-2 px-0 text-sm">
+    <div className="flex min-h-11 w-full min-w-0 items-center gap-2 px-0 text-sm">
       {!simplified ? <SourceBadge source={source} updatedAt={updatedAt} showLabel /> : null}
       <div className="flex min-w-0 flex-1 items-center justify-end gap-3 overflow-hidden">
         <MetricValues source={source} updatedAt={updatedAt} limit={4} simplified={simplified} />
