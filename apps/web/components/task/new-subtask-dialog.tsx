@@ -90,7 +90,9 @@ function resolveParentSession(
 }
 
 function resolvePrimaryRepository(task: KanbanState["tasks"][number] | null) {
-  return task?.repositories?.reduce((current, repository) =>
+  const repositories = task?.repositories ?? [];
+  if (repositories.length === 0) return undefined;
+  return repositories.reduce((current, repository) =>
     !current || repository.position < current.position ? repository : current,
   );
 }

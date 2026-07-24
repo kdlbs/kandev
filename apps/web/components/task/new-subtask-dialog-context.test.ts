@@ -59,4 +59,23 @@ describe("resolveSubtaskParentContext", () => {
       baseBranch: "release",
     });
   });
+
+  it("handles a parent task without repositories", () => {
+    expect(
+      resolveSubtaskParentContext({
+        task: { id: "repo-less-parent" } as KanbanState["tasks"][number],
+        sessionsById: {},
+        sessionsByTaskId: {},
+        worktreeIdsBySessionId: {},
+        worktrees: {},
+        messagesBySession: {},
+      }),
+    ).toMatchObject({
+      session: null,
+      worktreeBranch: null,
+      initialPrompt: null,
+      parentRepositoryId: null,
+      baseBranch: null,
+    });
+  });
 });
