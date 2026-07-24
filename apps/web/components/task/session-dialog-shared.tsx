@@ -21,6 +21,7 @@ import {
   MAX_TOTAL_SIZE,
   type FileAttachment,
 } from "./chat/file-attachment";
+import { useAttachmentFileFeedback } from "./chat/use-attachment-file-feedback";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 
 export function EnvironmentBadges({
@@ -53,6 +54,22 @@ export function EnvironmentBadges({
 }
 
 export type SessionOption = { id: string; label: string; index?: number; agentName?: string };
+
+function appendAttachmentsWithinLimits(
+  current: FileAttachment[],
+  processed: FileAttachment[],
+): FileAttachment[] {
+  let count = current.length;
+  let totalSize = current.reduce((sum, attachment) => sum + attachment.size, 0);
+  const accepted: FileAttachment[] = [];
+  for (const attachment of processed) {
+    if (count >= MAX_FILES || totalSize + attachment.size > MAX_TOTAL_SIZE) break;
+    accepted.push(attachment);
+    count += 1;
+    totalSize += attachment.size;
+  }
+  return accepted.length > 0 ? [...current, ...accepted] : current;
+}
 
 /** Unified context selector: Blank, Copy prompt, and per-session summarize options. */
 export function ContextSelect({
@@ -134,28 +151,22 @@ export function ContextSelect({
 export function useDialogAttachments(disabled: boolean) {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const rejectOversizedFile = useAttachmentFileFeedback();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const addFiles = useCallback(async (files: File[]) => {
-    const processed: FileAttachment[] = [];
-    for (const file of files) {
-      const attachment = await processFile(file);
-      if (attachment) processed.push(attachment);
-    }
-    if (processed.length === 0) return;
-    setAttachments((prev) => {
-      let count = prev.length;
-      let totalSize = prev.reduce((s, a) => s + a.size, 0);
-      const accepted: FileAttachment[] = [];
-      for (const att of processed) {
-        if (count >= MAX_FILES || totalSize + att.size > MAX_TOTAL_SIZE) break;
-        accepted.push(att);
-        count += 1;
-        totalSize += att.size;
+  const addFiles = useCallback(
+    async (files: File[]) => {
+      const processed: FileAttachment[] = [];
+      for (const file of files) {
+        if (rejectOversizedFile(file)) continue;
+        const attachment = await processFile(file);
+        if (attachment) processed.push(attachment);
       }
-      return accepted.length > 0 ? [...prev, ...accepted] : prev;
-    });
-  }, []);
+      if (processed.length === 0) return;
+      setAttachments((current) => appendAttachmentsWithinLimits(current, processed));
+    },
+    [rejectOversizedFile],
+  );
 
   const handleRemoveAttachment = useCallback((id: string) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));

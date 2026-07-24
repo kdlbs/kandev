@@ -1,0 +1,21 @@
+import { useCallback } from "react";
+import { useToast } from "@/components/toast-provider";
+import { formatBytes, MAX_FILE_SIZE } from "./file-attachment";
+
+export function useAttachmentFileFeedback() {
+  const { toast } = useToast();
+
+  return useCallback(
+    (file: File): boolean => {
+      if (file.size <= MAX_FILE_SIZE) return false;
+
+      toast({
+        title: "Attachment is too large",
+        description: `${file.name} is ${formatBytes(file.size)}. The maximum file size is ${formatBytes(MAX_FILE_SIZE)}.`,
+        variant: "error",
+      });
+      return true;
+    },
+    [toast],
+  );
+}

@@ -25,6 +25,7 @@ import {
   MAX_TOTAL_SIZE,
   type FileAttachment,
 } from "./file-attachment";
+import { useAttachmentFileFeedback } from "./use-attachment-file-feedback";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
 import type {
@@ -203,6 +204,7 @@ function useAttachments(sessionId: string | null) {
   const [attachments, setAttachments] = useState<FileAttachment[]>(() =>
     sessionId ? getChatDraftAttachments(sessionId).map(restoreAttachmentPreview) : [],
   );
+  const rejectOversizedFile = useAttachmentFileFeedback();
   const attachmentsRef = useRef(attachments);
   const prevSessionIdRef = useRef(sessionId);
   const prevPersistSessionIdRef = useRef(sessionId);
@@ -240,6 +242,7 @@ function useAttachments(sessionId: string | null) {
       const currentTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
       for (const file of files) {
         if (attachments.length >= MAX_FILES) break;
+        if (rejectOversizedFile(file)) continue;
         if (currentTotalSize + file.size > MAX_TOTAL_SIZE) {
           console.warn("Total attachment size limit exceeded");
           break;
@@ -248,7 +251,7 @@ function useAttachments(sessionId: string | null) {
         if (attachment) setAttachments((prev) => [...prev, attachment]);
       }
     },
-    [attachments],
+    [attachments, rejectOversizedFile],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {

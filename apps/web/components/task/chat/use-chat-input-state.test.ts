@@ -1,21 +1,27 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type React from "react";
+import { act, cleanup, renderHook, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import React from "react";
+import { ToastProvider } from "@/components/toast-provider";
 import { useChatInputState } from "./use-chat-input-state";
+import { MAX_FILE_SIZE } from "./file-attachment";
 import type { TipTapInputHandle } from "./tiptap-input";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
 type SubmitHandler = Parameters<typeof useChatInputState>[0]["onSubmit"];
 
 function renderInputState(onSubmit: SubmitHandler) {
-  return renderHook(() =>
-    useChatInputState({
-      sessionId: "session-1",
-      isSending: false,
-      contextItems: [],
-      showRequestChangesTooltip: false,
-      onSubmit,
-    }),
+  return renderHook(
+    () =>
+      useChatInputState({
+        sessionId: "session-1",
+        isSending: false,
+        contextItems: [],
+        showRequestChangesTooltip: false,
+        onSubmit,
+      }),
+    {
+      wrapper: ({ children }) => React.createElement(ToastProvider, null, children),
+    },
   );
 }
 
@@ -52,11 +58,14 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-describe("useChatInputState", () => {
-  beforeEach(() => {
-    localStorage.clear();
-  });
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+});
 
+afterEach(cleanup);
+
+describe("useChatInputState", () => {
   it("keeps the draft when async submit reports failure", async () => {
     const onSubmit = vi
       .fn<(...args: Parameters<SubmitHandler>) => ReturnType<SubmitHandler>>()
@@ -160,5 +169,24 @@ describe("useChatInputState", () => {
     expect(result.current.allItems).toHaveLength(1);
     expect(clear).toHaveBeenCalled();
     expect(resetHeight).toHaveBeenCalled();
+  });
+});
+
+describe("useChatInputState attachment feedback", () => {
+  it("warns when a pasted attachment exceeds the file size limit", async () => {
+    const { result } = renderInputState(vi.fn());
+    const oversizedFile = new File(["video"], "recording.mov", { type: "video/quicktime" });
+    Object.defineProperty(oversizedFile, "size", { value: 11 * 1024 * 1024 });
+
+    await act(async () => {
+      await result.current.addFiles([oversizedFile]);
+    });
+
+    const warning = screen.getByTestId("toast-message");
+    expect(warning.textContent).toContain("Attachment is too large");
+    expect(warning.textContent).toContain(
+      `recording.mov is 11 MB. The maximum file size is ${MAX_FILE_SIZE / 1024 / 1024} MB.`,
+    );
+    expect(result.current.attachments).toEqual([]);
   });
 });
