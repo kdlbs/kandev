@@ -29,10 +29,24 @@ export interface PluginUIPage {
   surface: string;
 }
 
+/**
+ * A single keyboard shortcut a plugin's UI bundle wants kandev to register
+ * and dispatch on its behalf. `id` is plugin-local (unique within the
+ * plugin, not globally); `default` is a combo like "mod+shift+k" ("mod"
+ * resolves to Cmd on macOS, Ctrl elsewhere). Only meaningful alongside
+ * `bundle` — the backend rejects keybindings declared without one.
+ */
+export interface PluginKeybinding {
+  id: string;
+  default: string;
+  description: string;
+}
+
 export interface PluginUISection {
   pages?: PluginUIPage[];
   bundle?: string;
   styles?: string[];
+  keybindings?: PluginKeybinding[];
 }
 
 /**

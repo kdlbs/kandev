@@ -267,6 +267,39 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     await expect.poll(() => fs.existsSync(pluginDir), { timeout: 10_000 }).toBe(false);
   });
 
+  test("keybinding declared in the manifest opens a host.openModal demo modal", async ({
+    testPage,
+  }) => {
+    test.setTimeout(60_000);
+
+    // --- Install via the upload UI, then reload so the boot payload (and
+    // the manifest-driven keybinding registration) is live. ---
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+
+    await testPage.goto("/");
+    await testPage.reload();
+    await expect(testPage.getByTestId(`plugin-nav-item-${NAV_ITEM_ID}`)).toBeVisible({
+      timeout: 15_000,
+    });
+
+    // --- manifest.yaml declares `ui.keybindings: [{ id: open-demo, default:
+    // mod+shift+j }]`; bundle.js binds it to host.openModal(...). "mod"
+    // resolves to Ctrl/Cmd per-platform, matching Playwright's
+    // "ControlOrMeta" pseudo-modifier. ---
+    await testPage.keyboard.press("ControlOrMeta+Shift+J");
+    const modal = testPage.getByTestId("hello-demo-modal");
+    await expect(modal).toBeVisible();
+    await expect(modal).toHaveText("Hello from the plugin modal");
+
+    // --- The host Dialog's built-in close button dismisses the (dismissible
+    // by default) modal. ---
+    await testPage.getByRole("button", { name: "Close" }).click();
+    await expect(modal).not.toBeVisible();
+  });
+
   test("settings page: schema-driven form, secret masking, and Host GetConfig delivery", async ({
     testPage,
     apiClient,

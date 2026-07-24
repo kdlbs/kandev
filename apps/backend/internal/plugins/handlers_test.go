@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -170,6 +171,74 @@ func TestListHandlerReturnsInstalledPlugins(t *testing.T) {
 	}
 	if len(body.Plugins) != 1 {
 		t.Fatalf("len(plugins) = %d, want 1", len(body.Plugins))
+	}
+}
+
+// TestListHandlerExposesUIKeybindings confirms that ui.keybindings declared
+// in the manifest round-trips through GET /api/plugins into the JSON each
+// plugin entry carries for the frontend (record.ui.keybindings, since
+// store.Record embeds manifest.Manifest inline).
+func TestListHandlerExposesUIKeybindings(t *testing.T) {
+	router, svc := newTestRouter(t)
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: kandev-plugin-keybound
+api_version: 1
+version: "1.0.0"
+display_name: Test Plugin
+capabilities:
+  events: ["task.*"]
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+ui:
+  bundle: "/ui/bundle.js"
+  keybindings:
+    - id: open-demo
+      default: mod+shift+k
+      description: Open the demo modal
+`, platformKey)
+	var buf bytes.Buffer
+	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+		"ui/bundle.js":  []byte("export default {};"),
+	}); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	if _, err := svc.Install(context.Background(), &buf); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	rec := doRequest(router, http.MethodGet, "/api/plugins", "", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var body struct {
+		Plugins []struct {
+			UI struct {
+				Keybindings []struct {
+					ID          string `json:"id"`
+					Default     string `json:"default"`
+					Description string `json:"description"`
+				} `json:"keybindings"`
+			} `json:"ui"`
+		} `json:"plugins"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(body.Plugins) != 1 {
+		t.Fatalf("len(plugins) = %d, want 1", len(body.Plugins))
+	}
+	kbs := body.Plugins[0].UI.Keybindings
+	if len(kbs) != 1 {
+		t.Fatalf("len(ui.keybindings) = %d, want 1", len(kbs))
+	}
+	if kbs[0].ID != "open-demo" || kbs[0].Default != "mod+shift+k" || kbs[0].Description != "Open the demo modal" {
+		t.Fatalf("ui.keybindings[0] = %+v, want id=open-demo default=mod+shift+k description=%q", kbs[0], "Open the demo modal")
 	}
 }
 

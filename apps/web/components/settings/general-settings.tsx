@@ -28,6 +28,8 @@ import { ArchiveConfirmationSettings } from "@/components/settings/archive-confi
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
+import { buildPluginShortcutEntries } from "@/lib/keyboard/plugin-shortcuts";
+import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 
 function ThemeSettingsCard({
   theme,
@@ -300,6 +302,8 @@ export function KeyboardShortcutsSettings() {
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
+  const { items: pluginItems } = usePlugins();
+  const pluginShortcutEntries = buildPluginShortcutEntries(pluginItems);
   const [saved, setSaved] = useState(() => ({
     chatSubmitKey: userSettings.chatSubmitKey,
     keyboardShortcuts: userSettings.keyboardShortcuts as StoredShortcutOverrides,
@@ -353,6 +357,7 @@ export function KeyboardShortcutsSettings() {
           onChange={(keyboardShortcuts) =>
             setDraft((current) => ({ ...current, keyboardShortcuts }))
           }
+          pluginEntries={pluginShortcutEntries}
         />
       </SettingsSection>
     </div>
