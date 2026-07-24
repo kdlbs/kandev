@@ -43,3 +43,9 @@ None.
 ## Output contract
 
 Report the changed entry points, exact tests/results, risk tags, and uncertainties; update this task to `done` only after targeted verification passes.
+
+## Completion evidence
+
+- **Entry points:** GitHub anonymous branch, PR, and issue reads; GitLab public `gitlab.com` branch resolution.
+- **Result:** backend focused verification passed: 75 tests.
+- **Risks/uncertainties:** anonymous access remains limited to public read paths; authenticated clients and upstream 403/404 responses remain authoritative.

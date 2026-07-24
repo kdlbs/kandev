@@ -42,3 +42,9 @@ spec: "../../specs/tasks/multi-branch/spec.md"
 ## Output contract
 
 Report the changed state contract, exact tests/results, risk tags, and uncertainties; update this task to `done` only after targeted verification passes.
+
+## Completion evidence
+
+- **Entry points:** per-URL branch and GitHub PR/issue loaders; remote repository chip error and retry UI.
+- **Result:** frontend focused verification passed: 67 tests; post-simplification hook suite passed: 33 tests.
+- **Risks/uncertainties:** stale callbacks are sequence-guarded; provider failures can still persist until the user retries or corrects access.

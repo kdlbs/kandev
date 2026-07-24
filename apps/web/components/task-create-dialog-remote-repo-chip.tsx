@@ -332,7 +332,7 @@ function RemoteRepoPopoverContent({
   }, [value, triggerSearch]);
   const commitURL = (candidate: string) => {
     const trimmed = candidate.trim();
-    if (!parseGitHubAnyUrl(trimmed) && !looksLikeSupportedRemoteURL(trimmed)) {
+    if (!isSupportedRemoteURL(trimmed)) {
       if (looksLikeURL(trimmed)) {
         setUrlError("Enter a GitHub, GitLab, or Azure DevOps repository URL.");
       }
@@ -343,7 +343,7 @@ function RemoteRepoPopoverContent({
     return true;
   };
   const visibleUrlError = accessible.unavailable ? null : urlError;
-  const hasStagedURL = looksLikeURL(value.trim());
+  const hasStagedURL = isSupportedRemoteURL(value.trim());
   const { showProviderTabs, selectedProvider, visibleRepos } = visibleProviderRepositories(
     accessible,
     activeProvider,
@@ -448,6 +448,10 @@ function looksLikeSupportedRemoteURL(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function isSupportedRemoteURL(value: string): boolean {
+  return !!parseGitHubAnyUrl(value) || looksLikeSupportedRemoteURL(value);
 }
 
 function PickerList({

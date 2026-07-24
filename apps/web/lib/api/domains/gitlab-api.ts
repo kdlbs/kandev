@@ -457,13 +457,16 @@ export async function searchProjects(workspaceId: string, query: string) {
   );
 }
 
+type GitLabProjectBranchesOptions = ApiRequestOptions & { expectedHost?: string };
+
 export async function listProjectBranches(
   workspaceId: string,
   project: string,
-  options?: ApiRequestOptions,
+  options?: GitLabProjectBranchesOptions,
 ) {
   const qs = new URLSearchParams({ workspace_id: workspaceId });
   qs.set("project", project);
+  if (options?.expectedHost) qs.set("expected_host", options.expectedHost);
   return fetchJson<{ branches: GitLabRepoBranch[] }>(
     `/api/v1/gitlab/projects/branches?${qs.toString()}`,
     options,

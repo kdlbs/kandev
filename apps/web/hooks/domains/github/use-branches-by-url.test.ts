@@ -117,7 +117,10 @@ describe("useBranchesByURL provider routing", () => {
     expect(listProjectBranchesMock).toHaveBeenCalledWith(
       WORKSPACE_ID,
       "acme/platform/api",
-      expect.anything(),
+      expect.objectContaining({
+        expectedHost: "https://gitlab.com",
+        init: expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      }),
     );
     expect(listAzureDevOpsBranchesMock).toHaveBeenCalledWith(
       WORKSPACE_ID,
@@ -139,7 +142,10 @@ describe("useBranchesByURL provider routing", () => {
       expect(listProjectBranchesMock).toHaveBeenCalledWith(
         WORKSPACE_ID,
         "acme/platform/api",
-        expect.anything(),
+        expect.objectContaining({
+          expectedHost: "https://gitlab.internal:8443",
+          init: expect.objectContaining({ signal: expect.any(AbortSignal) }),
+        }),
       );
       expect(result.current.branches(gitlab)).toEqual([
         expect.objectContaining({ name: "main", type: "remote" }),

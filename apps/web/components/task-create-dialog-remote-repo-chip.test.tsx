@@ -492,18 +492,20 @@ describe("RemoteRepoChip — picker loading state", () => {
 });
 
 describe("RemoteRepoChip — popover content", () => {
+  it.each([
+    "git@github.com:acme/api.git",
+    "git@gitlab.com:acme/api.git",
+    "git@ssh.dev.azure.com:v3/acme/project/api",
+  ])("shows the Enter hint for supported SCP remote %s", (remoteURL) => {
+    renderRemoteRepoChip();
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    fireEvent.change(screen.getByTestId(INPUT_TID), { target: { value: remoteURL } });
+
+    expect(screen.getByText(/press Enter to submit it/i)).toBeTruthy();
+  });
+
   it("renders one top-level input for both repository search and GitHub URLs", () => {
-    renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={vi.fn()}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
+    renderRemoteRepoChip();
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
     const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
     expect(input.placeholder).toBe("Search repositories or paste a remote URL");

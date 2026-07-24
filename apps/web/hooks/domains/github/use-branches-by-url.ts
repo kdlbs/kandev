@@ -269,7 +269,8 @@ function gitLabBranchRequest(parsed: URL, workspaceId: string): BranchRequest | 
   if (!workspaceId) return null;
   const project = parsed.pathname.replace(/^\//, "").replace(/\.git$/, "");
   if (!project.includes("/")) return null;
-  return (signal) => listProjectBranches(workspaceId, project, { init: { signal } });
+  return (signal) =>
+    listProjectBranches(workspaceId, project, { expectedHost: parsed.origin, init: { signal } });
 }
 
 function azureHTTPSBranchRequest(parsed: URL, workspaceId: string): BranchRequest | null {

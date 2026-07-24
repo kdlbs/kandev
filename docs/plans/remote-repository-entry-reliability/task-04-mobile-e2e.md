@@ -37,3 +37,9 @@ spec: "../../specs/tasks/multi-branch/spec.md"
 ## Output contract
 
 Report the exact E2E result, screenshots/failure artifacts if any, risk tags, and uncertainties; update this task to `done` only after targeted verification passes.
+
+## Completion evidence
+
+- **Entry point:** `mobile-create-task-remote-repo.spec.ts` on the `mobile-chrome` project.
+- **Result:** mobile E2E passed: 5 tests, with no failure artifacts; fresh PR screenshots exist under ignored `.pr-assets`.
+- **Risks/uncertainties:** coverage proves the current Pixel 5 flow and viewport containment; provider responses remain externally dependent.
