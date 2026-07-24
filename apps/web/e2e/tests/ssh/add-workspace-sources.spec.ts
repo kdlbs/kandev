@@ -5,6 +5,35 @@ import { waitForLatestSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import fs from "node:fs";
 
+function fixtureBackendEnv(fixture: { gitConfigEnvVars: Array<{ key: string; value: string }> }) {
+  return Object.fromEntries(fixture.gitConfigEnvVars.map(({ key, value }) => [key, value]));
+}
+
+async function cleanupFixture(
+  fixture: { close: () => Promise<void> },
+  releaseBackendEnv?: () => Promise<void>,
+): Promise<void> {
+  let releaseError: unknown;
+  try {
+    await releaseBackendEnv?.();
+  } catch (error) {
+    releaseError = error;
+  } finally {
+    try {
+      await fixture.close();
+    } catch (closeError) {
+      if (releaseError) {
+        throw new AggregateError(
+          [releaseError, closeError],
+          "failed to release the backend environment and close the HTTP Git fixture",
+        );
+      }
+      throw closeError;
+    }
+  }
+  if (releaseError) throw releaseError;
+}
+
 test.describe("SSH executor — attach workspace sources", () => {
   test("materializes a cloneable repository across backend reconnect without leaking credentials", async ({
     apiClient,
@@ -14,7 +43,9 @@ test.describe("SSH executor — attach workspace sources", () => {
   }) => {
     test.setTimeout(240_000);
     const fixture = await startHTTPGitFixture(backend.tmpDir, "ssh-second-source");
+    let releaseBackendEnv: (() => Promise<void>) | undefined;
     try {
+      releaseBackendEnv = await backend.useEnv(fixtureBackendEnv(fixture));
       const fixtureProfile = await apiClient.createExecutorProfile(seedData.sshExecutorId, {
         name: "E2E SSH HTTP Git fixture",
         config: {},
@@ -109,7 +140,7 @@ test.describe("SSH executor — attach workspace sources", () => {
           .filter({ hasText: "fixture-ssh-second-source-main" }),
       ).toBeVisible({ timeout: 30_000 });
     } finally {
-      await fixture.close();
+      await cleanupFixture(fixture, releaseBackendEnv);
     }
   });
 });

@@ -40,9 +40,9 @@ export async function startHTTPGitFixture(root: string, name: string): Promise<H
   const fixtureOrigin = `http://${dockerBridgeGateway()}:${port}/`;
   return {
     // The source endpoint must receive the real GitLab identity so the
-    // production trusted-origin validation remains exercised. Only the
-    // disposable executor profile rewrites Git's clone transport to this
-    // local HTTP server.
+    // production trusted-origin validation remains exercised. Disposable test
+    // executor profiles and their isolated backend fixture rewrite Git's clone
+    // transport to this local HTTP server.
     remoteURL: `https://gitlab.com/fixture/${name}.git`,
     gitConfigEnvVars: [
       { key: "GIT_CONFIG_COUNT", value: "1" },
