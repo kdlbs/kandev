@@ -416,6 +416,42 @@ describe("update sequence: unload before reload", () => {
   });
 });
 
+describe("idempotent reload: no duplicate registrations without an explicit unload", () => {
+  const PLUGIN_REBOOT_A_ID = "plugin-reboot-a";
+  const CHAT_INPUT_SLOT = "chat-input-actions";
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_REBOOT_A_ID);
+  });
+
+  it("registers the slot component exactly once when loadPlugins runs twice for the same plugin (boot race / HMR re-boot / new store), not twice", async () => {
+    const Widget = () => null;
+    // The real browser only runs a module's top-level registerKandevPlugin on
+    // the first import of a specifier; a second import resolves from cache. The
+    // host reuses that cached registration and re-runs initialize(), so without
+    // idempotent (re)load this second pass would append a duplicate slot entry.
+    let importCount = 0;
+    const importer = vi.fn(async (_url: string) => {
+      importCount += 1;
+      if (importCount === 1) {
+        registerFake(PLUGIN_REBOOT_A_ID, {
+          initialize: (registry: PluginRegistry) => {
+            registry.registerComponent(CHAT_INPUT_SLOT, Widget);
+          },
+        });
+      }
+      return {};
+    });
+    const plugin = activePlugin({ id: PLUGIN_REBOOT_A_ID });
+
+    await loadPlugins([plugin], makeHostFactory, importer);
+    // No unloadPlugin() between the two loads — this is the boot re-entry path.
+    await loadPlugins([plugin], makeHostFactory, importer);
+
+    expect(pluginRegistry.getSlotComponents(CHAT_INPUT_SLOT)).toEqual([Widget]);
+  });
+});
+
 describe("unloadPlugin — evictCache option", () => {
   const PLUGIN_EVICT_A_ID = "plugin-evict-a";
 

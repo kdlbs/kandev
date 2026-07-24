@@ -119,6 +119,20 @@ async function loadPlugin(
       return;
     }
     const host = hostFactory(plugin.id);
+    // Idempotent (re)load. The nav/route/slot registry is append-only, so
+    // running a plugin's initialize() a second time while its previous
+    // registrations are still live leaves duplicates — e.g. a plugin's
+    // chat-input-actions icon rendered twice. The disable/update paths already
+    // call unloadPlugin() first, but boot does not, and it can re-enter for a
+    // plugin that is already registered: a boot race (bootPlugins' fire-and-
+    // forget loadPlugins still in flight when an install/update reload runs), a
+    // dev HMR re-boot (fresh bootedStores guard against the persistent registry
+    // singleton), or a fresh store instance. Because resolveRegistration reuses
+    // the cached bundle registration, that re-entry re-runs initialize() and
+    // re-registers on top of the old entries. Revoke this plugin's prior
+    // registrations here so a reload always converges to exactly one set,
+    // whatever the caller did — a no-op on a genuine first load.
+    pluginRegistry.unregisterPlugin(plugin.id);
     const registry = pluginRegistry.forPlugin(plugin.id, plugin.name);
     await raceTimeout(Promise.resolve(registered.initialize(registry, host)), initTimeoutMs, () => {
       console.warn(
