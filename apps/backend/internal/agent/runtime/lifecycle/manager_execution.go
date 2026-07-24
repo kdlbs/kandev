@@ -548,6 +548,10 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
 	}
 
+	if err := resumeRemoteInstancePreflight(ctx, rt, req); err != nil {
+		return nil, err
+	}
+
 	runtimeInstance, err := rt.CreateInstance(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create execution: %w", err)

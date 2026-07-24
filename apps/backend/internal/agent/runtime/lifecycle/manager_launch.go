@@ -625,10 +625,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		OnProgress:                     onProgress,
 	}
 
-	if resumer, ok := rt.(RemoteSessionResumer); ok {
-		if err := resumer.ResumeRemoteInstance(ctx, execReq); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed remote resume preflight: %w", err)
-		}
+	if err := resumeRemoteInstancePreflight(ctx, rt, execReq); err != nil {
+		return nil, nil, nil, err
 	}
 
 	execInstance, err := rt.CreateInstance(ctx, execReq)
@@ -636,6 +634,17 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 	return execReq, execInstance, rt, nil
+}
+
+func resumeRemoteInstancePreflight(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) error {
+	resumer, ok := rt.(RemoteSessionResumer)
+	if !ok {
+		return nil
+	}
+	if err := resumer.ResumeRemoteInstance(ctx, req); err != nil {
+		return fmt.Errorf("failed remote resume preflight: %w", err)
+	}
+	return nil
 }
 
 // runEnvironmentPreparer runs the environment preparer for the executor type, if one is registered.
