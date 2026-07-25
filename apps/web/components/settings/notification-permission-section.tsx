@@ -66,6 +66,7 @@ export function DesktopNotificationsSection({
                 <Button
                   variant="ghost"
                   size="icon"
+                  aria-label="Refresh notification permission"
                   className="cursor-pointer"
                   onClick={() => void onRefreshPermission()}
                 >
