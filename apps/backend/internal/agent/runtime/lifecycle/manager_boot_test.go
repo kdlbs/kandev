@@ -156,7 +156,7 @@ func TestFinalizeBootMessage_NilService(t *testing.T) {
 	mgr.finalizeBootMessage(nil, msg, nil, nil, "exited")
 }
 
-func TestCreateBootMessage_SkipsResumedSession(t *testing.T) {
+func TestCreateBootMessage_MarksResumedSession(t *testing.T) {
 	mgr := newTestManager(t)
 	bootSvc := &MockBootMessageService{}
 	mgr.bootMessageService = bootSvc
@@ -176,11 +176,14 @@ func TestCreateBootMessage_SkipsResumedSession(t *testing.T) {
 		close(stopCh)
 	}
 
-	if message != nil {
-		t.Fatalf("resume boot message = %#v, want none", message)
+	if message == nil {
+		t.Fatal("resume boot message = nil")
 	}
-	if len(bootSvc.CreatedMessages) != 0 {
-		t.Fatalf("created boot messages = %d, want 0", len(bootSvc.CreatedMessages))
+	if len(bootSvc.CreatedMessages) != 1 {
+		t.Fatalf("created boot messages = %d, want 1", len(bootSvc.CreatedMessages))
+	}
+	if got := message.Metadata["is_resuming"]; got != true {
+		t.Fatalf("is_resuming = %#v, want true", got)
 	}
 }
 

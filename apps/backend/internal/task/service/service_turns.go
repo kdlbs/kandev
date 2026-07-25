@@ -62,6 +62,30 @@ func (s *Service) StartTurn(ctx context.Context, sessionID string) (*models.Turn
 	return turn, nil
 }
 
+// createCompletedTurn persists a synthetic turn that is never observable as
+// active. It is used for lifecycle messages that must belong to a turn without
+// making an idle task appear to have an active agent turn.
+func (s *Service) createCompletedTurn(ctx context.Context, session *models.TaskSession) (*models.Turn, error) {
+	if session == nil {
+		return nil, errors.New("cannot create completed turn without a session")
+	}
+	now := time.Now().UTC()
+	turn := &models.Turn{
+		ID:            uuid.New().String(),
+		TaskSessionID: session.ID,
+		TaskID:        session.TaskID,
+		StartedAt:     now,
+		CompletedAt:   &now,
+		Metadata:      runtimeConfigSnapshotMetadata(session),
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := s.turns.CreateTurn(ctx, turn); err != nil {
+		return nil, fmt.Errorf("failed to create completed turn: %w", err)
+	}
+	return turn, nil
+}
+
 func runtimeConfigSnapshotMetadata(session *models.TaskSession) map[string]interface{} {
 	if session == nil {
 		return nil

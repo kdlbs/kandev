@@ -50,13 +50,18 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 	// Ensure we have a turn ID - get active turn or start a new one
 	turnID := req.TurnID
 	if turnID == "" {
-		turn, err := s.getOrStartTurnWithRetry(
-			ctx,
-			req.TaskSessionID,
-			messageID,
-			messageCreateMaxRetries,
-			messageCreateRetryDelay,
-		)
+		var turn *models.Turn
+		if req.CompletedTurn {
+			turn, err = s.createCompletedTurn(ctx, session)
+		} else {
+			turn, err = s.getOrStartTurnWithRetry(
+				ctx,
+				req.TaskSessionID,
+				messageID,
+				messageCreateMaxRetries,
+				messageCreateRetryDelay,
+			)
+		}
 		if err != nil {
 			s.logger.Warn("failed to get or start turn for message",
 				zap.String("session_id", req.TaskSessionID),

@@ -5,7 +5,73 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+func TestBootMessageAdapterResumedMessageDoesNotLeaveActiveTurn(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+
+	if err := harness.taskRepo.CreateWorkspace(ctx, &models.Workspace{
+		ID:   "workspace-1",
+		Name: "Workspace",
+	}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := harness.taskRepo.CreateTask(ctx, &models.Task{
+		ID:          "task-1",
+		WorkspaceID: "workspace-1",
+		Title:       "Task",
+		Priority:    "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := harness.taskRepo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:     "session-1",
+		TaskID: "task-1",
+		State:  models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	message, err := (&bootMsgAdapter{svc: harness.taskSvc}).CreateMessage(
+		ctx,
+		&lifecycle.BootMessageRequest{
+			TaskSessionID: "session-1",
+			TaskID:        "task-1",
+			AuthorType:    "agent",
+			Type:          "script_execution",
+			Metadata: map[string]interface{}{
+				"script_type": "agent_boot",
+				"is_resuming": true,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("CreateMessage: %v", err)
+	}
+	if message == nil {
+		t.Fatal("CreateMessage returned nil")
+	}
+
+	activeTurn, err := harness.taskSvc.GetActiveTurn(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("GetActiveTurn: %v", err)
+	}
+	if activeTurn != nil {
+		t.Fatalf("active turn = %q, want none", activeTurn.ID)
+	}
+
+	turn, err := harness.taskSvc.GetTurn(ctx, message.TurnID)
+	if err != nil {
+		t.Fatalf("GetTurn: %v", err)
+	}
+	if turn.CompletedAt == nil {
+		t.Fatalf("resume message turn %q is not completed", turn.ID)
+	}
+}
 
 // TestDetectBranchRemote_ReturnsConfiguredUpstream covers the happy path: a
 // branch with an explicit `branch.<name>.remote` config returns that remote
