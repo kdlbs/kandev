@@ -224,7 +224,7 @@ test.describe("Clarification flow", () => {
     if (!inputBox || !inputRowBox) {
       throw new Error("expected the custom answer input and row to have bounding boxes");
     }
-    expect(inputBox.x - inputRowBox.x).toBeLessThanOrEqual(16);
+    expect(Math.abs(inputBox.x - inputRowBox.x)).toBeLessThanOrEqual(16);
 
     await inputRow.click({ position: { x: 4, y: 4 } });
     await expect(input).toBeFocused();
