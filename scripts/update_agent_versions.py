@@ -179,6 +179,15 @@ def read_current_version(root: Path, pin: Pin) -> str:
     return current
 
 
+def target_version_pattern(target: Target, version: str) -> re.Pattern[str]:
+    prefix, marker, suffix = target.template.partition("{version}")
+    if not marker or "{version}" in suffix:
+        raise ValueError(f"{target.path}: target template must contain one {{version}} marker")
+    return re.compile(
+        rf"{re.escape(prefix)}(?<![0-9.]){re.escape(version)}(?![0-9.]){re.escape(suffix)}"
+    )
+
+
 def plan_updates(
     root: Path,
     latest_versions: dict[str, str],
@@ -201,14 +210,15 @@ def plan_updates(
                 content = path.read_text()
             current_target = target.template.format(version=current)
             latest_target = target.template.format(version=latest)
-            actual = content.count(current_target)
+            pattern = target_version_pattern(target, current)
+            actual = len(pattern.findall(content))
             if actual != target.occurrences:
                 raise ValueError(
                     f"{target.path}: expected {target.occurrences} occurrences of "
                     f"{current_target!r} for {pin.agent}, found {actual}"
                 )
             if current != latest:
-                proposed[path] = content.replace(current_target, latest_target)
+                proposed[path] = pattern.sub(lambda _: latest_target, content)
 
         if current != latest:
             updates.append(Update(pin.agent, pin.package, current, latest))

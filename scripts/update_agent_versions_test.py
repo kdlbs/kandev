@@ -199,6 +199,27 @@ class UpdateAgentVersionsTest(unittest.TestCase):
             "| Second | `@example/second` | `1.4.0` |\n",
         )
 
+    def test_update_does_not_replace_version_prefixes(self) -> None:
+        self.write_valid_fixture()
+        self.write(
+            "agent_test.go",
+            (
+                'want := "@example/agent@1.2.3"\n'
+                'install := "@example/agent@1.2.3"\n'
+                'newer := "@example/agent@1.2.30"\n'
+            ),
+        )
+
+        self.updater.update_repository(
+            self.root,
+            {"@example/agent": "1.3.0"},
+            pins=(self.fixture_pin(),),
+        )
+
+        content = (self.root / "agent_test.go").read_text()
+        self.assertEqual(content.count("1.3.0"), 2)
+        self.assertIn("@example/agent@1.2.30", content)
+
     def test_registry_lookup_parses_json_without_executing_package(self) -> None:
         completed = subprocess.CompletedProcess(
             args=[],
