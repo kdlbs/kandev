@@ -10,12 +10,8 @@ import (
 
 func (a *Adapter) registerPromptTurn(
 	parent context.Context,
-	promptGenerations ...uint64,
+	promptGeneration uint64,
 ) (context.Context, *promptTurnState) {
-	var promptGeneration uint64
-	if len(promptGenerations) > 0 {
-		promptGeneration = promptGenerations[0]
-	}
 	promptCtx, endTurn := context.WithCancelCause(parent)
 	turn := &promptTurnState{
 		endTurn:          endTurn,

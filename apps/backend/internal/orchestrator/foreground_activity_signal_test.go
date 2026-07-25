@@ -287,7 +287,7 @@ func TestForegroundActivitySignal_DispatchPublishesBackgroundRegisteredDuringCla
 		t.Fatalf("active claim must remain generating, got %q", s)
 	}
 
-	if svc.completeForegroundClaim(claim) {
+	if svc.dispatchAndAcceptForegroundClaim(sessionID, claim) {
 		t.Fatal("dispatch alone must not expose background work before foreground idle")
 	}
 	if !svc.markForegroundIdle(sessionID) {
@@ -697,7 +697,7 @@ func TestForegroundActivitySignal_DelayedOldCompletionCannotYieldSuccessor(t *te
 	if claim == nil {
 		t.Fatal("successor prompt must claim the background-idle foreground")
 	}
-	svc.completeForegroundClaim(claim)
+	svc.dispatchAndAcceptForegroundClaim(sessionID, claim)
 	svc.markForegroundGenerating(sessionID)
 	eb.events = nil
 	taskEvents.activityTaskIDs = nil
@@ -738,7 +738,7 @@ func TestForegroundActivitySignal_OldCompletionBeforeSuccessorLeavesSuccessorCom
 	if claim == nil {
 		t.Fatal("successor prompt must claim after old completion")
 	}
-	svc.completeForegroundClaim(claim)
+	svc.dispatchAndAcceptForegroundClaim(sessionID, claim)
 	svc.markForegroundGenerating(sessionID)
 	eb.events = nil
 	taskEvents.activityTaskIDs = nil
@@ -855,7 +855,7 @@ func TestForegroundActivitySignal_DelayedOldProviderIdleCannotYieldSuccessor(t *
 	if claim == nil {
 		t.Fatal("successor prompt must claim the completion-yielded foreground")
 	}
-	svc.completeForegroundClaim(claim)
+	svc.dispatchAndAcceptForegroundClaim(sessionID, claim)
 	svc.markForegroundGenerating(sessionID)
 	agentMgr.currentPromptGeneration.Store(2)
 	eb.events = nil

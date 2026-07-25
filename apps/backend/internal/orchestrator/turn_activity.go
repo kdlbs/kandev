@@ -40,7 +40,7 @@ type turnActivity struct {
 	// but has not yet been handed to the agent. It is deliberately independent of
 	// `yielded`: during that window the session must stay un-promptable no matter
 	// what happens to the background set. Otherwise a background tool_call landing
-	// mid-admission (registerBackgroundTask re-sets `yielded`) would reopen the gate
+	// mid-admission (registerBackgroundWork re-sets `yielded`) would reopen the gate
 	// under the in-flight prompt and let a second one through — two prompts reaching
 	// one ACP session, which is the exact overlap the claim exists to prevent.
 	promptInFlight  bool
@@ -225,6 +225,14 @@ func (s *Service) yieldForegroundAndPublish(
 	taskID, sessionID string,
 	source foregroundYieldSource,
 ) {
+	// No turnActivity record means transitionForegroundToBackground below is
+	// guaranteed to no-op (it also bails on a nil record), so every turn close
+	// for an untracked session would otherwise pay a wasted GetTaskSession read
+	// (and risk a spurious Warn on failure) for a transition that can never
+	// publish. Bail before that read.
+	if s.turnActivityFor(sessionID, false) == nil {
+		return
+	}
 	if taskID == "" {
 		session, err := s.repo.GetTaskSession(ctx, sessionID)
 		if err != nil || session == nil {
@@ -273,15 +281,18 @@ func (s *Service) transitionForegroundToBackground(sessionID string, source fore
 	return ta.markForegroundIdleLocked()
 }
 
-// registerBackgroundTask records a spawned background task (a subagent Task or a
-// run-in-background shell). Registration alone is not evidence that the
+// registerBackgroundWork records a spawned background task (a subagent Task or
+// a run-in-background shell). Registration alone is not evidence that the
 // foreground yielded: launch frames can arrive while the top-level agent is
 // still generating, and foreground activity must retain precedence. A later
 // foreground-idle boundary exposes the outstanding work.
-func (s *Service) registerBackgroundTask(sessionID, toolCallID string) {
-	s.registerBackgroundWork(sessionID, toolCallID, "", "")
-}
-
+//
+// Callers should pass the launching execution/work IDs whenever they are
+// already known (e.g. from the initial tool_call event) rather than relying on
+// a later update to backfill them: hasBackgroundTask short-circuits
+// registration once the tool_call_id is tracked, so an empty executionID can
+// never be filled in afterward, and clearExecutionBackgroundWorkSnapshot can
+// then never retire the entry on execution teardown.
 func (s *Service) registerBackgroundWork(sessionID, toolCallID, executionID, workID string) {
 	if sessionID == "" || toolCallID == "" {
 		return
@@ -319,15 +330,14 @@ func (s *Service) hasBackgroundTask(sessionID, toolCallID string) bool {
 	return ok
 }
 
-// completeBackgroundTask clears a previously-registered background task. When no
+// completeBackgroundTaskForExecution clears a previously-registered background
+// task, scoped to the execution that owns it (an empty executionID matches any
+// owner — see the test-only completeBackgroundTask wrapper). When no
 // background task remains, the foreground turn is no longer "waiting on
-// background". It returns true when clearing this task flipped the session back
-// out of the background-idle substate (the last outstanding task finished),
-// so the caller publishes the activity signal only on that final completion.
-func (s *Service) completeBackgroundTask(sessionID, toolCallID string) bool {
-	return s.completeBackgroundTaskForExecution(sessionID, toolCallID, "")
-}
-
+// background". It returns true when clearing this task flipped the session
+// back out of the background-idle substate (the last outstanding task
+// finished), so the caller publishes the activity signal only on that final
+// completion.
 func (s *Service) completeBackgroundTaskForExecution(sessionID, toolCallID, executionID string) bool {
 	if sessionID == "" || toolCallID == "" {
 		return false
@@ -514,7 +524,8 @@ func (ta *turnActivity) generatingLocked() bool {
 // rejected with ErrAgentPromptInProgress exactly as it would have been before
 // ADR-0049.
 //
-// The claim is held until agentctl accepts the prompt (completeForegroundClaim)
+// The claim is held until agentctl accepts the prompt (beginForegroundDispatch
+// followed by acceptForegroundDispatch — see promptTask in task_operations.go)
 // or it is handed back (releaseForegroundClaim). The returned token binds both
 // operations to this activity record and admission generation.
 //
@@ -561,15 +572,6 @@ func (s *Service) isForegroundClaimCurrent(sessionID string, claim *foregroundCl
 	return ta.promptInFlight && ta.claimGeneration == claim.claimGeneration
 }
 
-// completeForegroundClaim ends the admission window: the prompt has been handed to
-// the agent, so this is now an ordinary foreground turn and the background set
-// governs promptability again (a subagent spawned by *this* turn may legitimately
-// yield it back to background-idle). It reports whether background work hidden by
-// the active claim became visible, so the caller can publish that transition.
-func (s *Service) completeForegroundClaim(claim *foregroundClaim) bool {
-	return s.acceptForegroundDispatch(s.beginForegroundDispatch("", claim))
-}
-
 // beginForegroundDispatch atomically establishes both immutable prompt-cycle
 // identity and foreground-generating ownership before calling agentctl. Keeping
 // generation, yielded, and revision in one mutation prevents old cleanup from
@@ -592,7 +594,20 @@ func (s *Service) beginForegroundDispatch(sessionID string, claim *foregroundCla
 
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
-	if claim != nil && (!ta.promptInFlight || ta.claimGeneration != claim.claimGeneration) {
+	if claim != nil {
+		if !ta.promptInFlight || ta.claimGeneration != claim.claimGeneration {
+			return nil
+		}
+	} else if ta.promptInFlight {
+		// Fail closed: a live claimed admission is mid-dispatch (its accept has
+		// not run yet). Resume can advance durable state to WAITING_FOR_INPUT
+		// while that claimed prompt is still in flight (see
+		// recheckPromptableWithForegroundClaim's resume comment in
+		// task_operations.go), which lets a second, claimless prompt reach here.
+		// Admitting it would bump promptCycleGeneration out from under the first
+		// dispatch; its later acceptForegroundDispatch would then see a stale
+		// generation and — before this fix — never clear promptInFlight, leaving
+		// the session permanently reporting busy. Reject instead.
 		return nil
 	}
 	yieldedBeforeBegin := ta.yielded
@@ -621,15 +636,26 @@ func (s *Service) acceptForegroundDispatch(dispatch *foregroundDispatch) bool {
 	ta := dispatch.activity
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
+
+	// Release the claimed admission before the cycle-generation check below:
+	// resume can advance durable state to WAITING_FOR_INPUT while this claimed
+	// prompt is still mid-dispatch (see recheckPromptableWithForegroundClaim's
+	// resume comment in task_operations.go), letting a second, claimless prompt
+	// be admitted and bump promptCycleGeneration out from under this dispatch.
+	// Gating the release on `ta.promptCycleGeneration == dispatch.generation`
+	// would then never fire, stranding promptInFlight true forever and making
+	// generatingLocked() report busy for the rest of the session's life.
+	if dispatch.claimedBackgroundTurn && ta.promptInFlight && ta.claimGeneration == dispatch.claimGeneration {
+		ta.promptInFlight = false
+	}
+
 	if dispatch.accepted || ta.promptCycleGeneration != dispatch.generation {
 		return false
 	}
 	dispatch.accepted = true
-	if !dispatch.claimedBackgroundTurn || !ta.promptInFlight ||
-		ta.claimGeneration != dispatch.claimGeneration {
+	if !dispatch.claimedBackgroundTurn {
 		return false
 	}
-	ta.promptInFlight = false
 	if ta.yielded {
 		return true
 	}
@@ -665,7 +691,16 @@ func (s *Service) rollbackForegroundDispatch(dispatch *foregroundDispatch) bool 
 	ta := dispatch.activity
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
-	if !ta.dispatchRollbackIsCurrentLocked(dispatch) || !ta.releaseDispatchClaimLocked(dispatch) {
+	// Release the claimed admission unconditionally, before the
+	// dispatchRollbackIsCurrentLocked staleness check: that check gates on
+	// promptCycleGeneration/foregroundEpoch, which a claimless successor
+	// prompt's beginForegroundDispatch can advance out from under this
+	// dispatch while the admission claim (claimGeneration) is still this
+	// dispatch's own. Short-circuiting the release on that unrelated
+	// staleness check would strand promptInFlight — see
+	// acceptForegroundDispatch's comment for the same failure mode.
+	released := ta.releaseDispatchClaimLocked(dispatch)
+	if !ta.dispatchRollbackIsCurrentLocked(dispatch) || !released {
 		return false
 	}
 	restoreBackground := dispatch.claimedBackgroundTurn || dispatch.yieldedBeforeBegin

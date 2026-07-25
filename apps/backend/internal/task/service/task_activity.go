@@ -47,6 +47,17 @@ func (s *Service) computeTaskForegroundActivity(ctx context.Context, taskID stri
 			zap.String("task_id", taskID), zap.Error(err))
 		return "", false
 	}
+	return s.computeTaskForegroundActivityForSessions(sessions), true
+}
+
+// computeTaskForegroundActivityForSessions is computeTaskForegroundActivity's
+// core aggregation, split out so callers that already hold the task's active
+// session list (e.g. addTaskSessionEventFieldsWithActivity) can reuse it
+// without a second ListActiveTaskSessionsByTaskID query for the same event.
+func (s *Service) computeTaskForegroundActivityForSessions(sessions []*models.TaskSession) v1.ForegroundActivity {
+	if s.foregroundActivity == nil {
+		return ""
+	}
 	activities := make([]v1.ForegroundActivity, 0, len(sessions))
 	for _, session := range sessions {
 		if session == nil {
@@ -57,7 +68,7 @@ func (s *Service) computeTaskForegroundActivity(ctx context.Context, taskID stri
 			activities = append(activities, activity)
 		}
 	}
-	return v1.AggregateForegroundActivity(activities), true
+	return v1.AggregateForegroundActivity(activities)
 }
 
 // PublishTaskActivityIfChanged recomputes the task-level activity aggregate and

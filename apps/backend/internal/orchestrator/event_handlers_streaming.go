@@ -324,7 +324,19 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	}
 	switch ownership {
 	case toolOwnershipBackground:
-		s.registerBackgroundTask(payload.SessionID, payload.Data.ToolCallID)
+		// Register with the launching execution/work IDs up front: relying on the
+		// later tool_update path to backfill them never happens, because
+		// hasBackgroundTask short-circuits registration once the tool_call_id is
+		// already tracked. Without the execution ID here,
+		// clearExecutionBackgroundWorkSnapshot can never match this entry on
+		// execution teardown, orphaning it if the execution dies before a
+		// terminal tool frame arrives.
+		s.registerBackgroundWork(
+			payload.SessionID,
+			payload.Data.ToolCallID,
+			payload.ExecutionID,
+			backgroundWorkID(payload.Data.Normalized),
+		)
 	case toolOwnershipForeground:
 		if s.markForegroundGenerating(payload.SessionID) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
@@ -491,6 +503,15 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	// when no messageCreator is wired (tests, minimal configs).
 	s.trackBackgroundToolUpdate(ctx, payload, ownership)
 
+	s.persistToolUpdateMessage(ctx, payload)
+}
+
+// persistToolUpdateMessage handles the message-persistence half of a
+// tool_update event: updating (or fallback-creating) the tool call message and
+// waking the session for a terminal update that belongs to an active turn.
+// Split out of handleToolUpdateEvent to keep that function within the
+// package's function-length limits; no behavior change.
+func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	if s.messageCreator == nil {
 		return
 	}
@@ -553,7 +574,6 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	if terminal && status != "cancelled" && turnID != "" {
 		s.setSessionRunningForExecution(ctx, payload.TaskID, payload.SessionID, payload.ExecutionID)
 	}
-
 }
 
 // trackBackgroundToolUpdate maintains the fine-grained busy signal's background

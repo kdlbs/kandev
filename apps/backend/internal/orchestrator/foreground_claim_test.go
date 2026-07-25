@@ -263,7 +263,7 @@ func TestClaimForegroundTurn_BackgroundRegistrationCannotReopenTheAdmissionWindo
 	}
 
 	// Dispatch alone is not an idle boundary; the foreground keeps precedence.
-	if svc.completeForegroundClaim(claim) {
+	if svc.dispatchAndAcceptForegroundClaim(sessionID, claim) {
 		t.Fatal("dispatch must not expose background work before foreground idle")
 	}
 	if !svc.isForegroundTurnGenerating(sessionID) {
@@ -397,7 +397,7 @@ func TestForegroundClaim_StaleTokenCannotCompleteOrReleaseNewClaim(t *testing.T)
 	// Work registered during admission becomes visible only after the provider
 	// reports that the dispatched foreground yielded.
 	svc.registerBackgroundTask(sessionID, "background-2")
-	if svc.completeForegroundClaim(first) {
+	if svc.dispatchAndAcceptForegroundClaim(sessionID, first) {
 		t.Fatal("claim completion alone must not expose background work")
 	}
 	if !svc.markForegroundIdle(sessionID) {
@@ -408,7 +408,7 @@ func TestForegroundClaim_StaleTokenCannotCompleteOrReleaseNewClaim(t *testing.T)
 		t.Fatal("second prompt must claim the newly yielded turn")
 	}
 
-	if svc.completeForegroundClaim(first) {
+	if svc.dispatchAndAcceptForegroundClaim(sessionID, first) {
 		t.Fatal("a stale completion must not clear a newer admission")
 	}
 	if svc.releaseForegroundClaim(first) {
@@ -565,4 +565,81 @@ func TestForegroundDispatch_ClaimlessRollbackRestoresOnlyExactUnobservedStart(t 
 			t.Fatalf("stale rollback displaced retry: got %q", got)
 		}
 	})
+}
+
+// TestBeginForegroundDispatch_ClaimlessFailsClosedWhileClaimInFlight covers the
+// resume race that used to strand promptInFlight forever: resume can advance
+// durable state to WAITING_FOR_INPUT while a claimed prompt is still
+// mid-dispatch (see recheckPromptableWithForegroundClaim's resume comment in
+// task_operations.go), letting a second, claimless prompt reach
+// beginForegroundDispatch with a live admission still outstanding. A claimless
+// begin must fail closed in that window instead of bumping
+// promptCycleGeneration out from under the claimed dispatch.
+func TestBeginForegroundDispatch_ClaimlessFailsClosedWhileClaimInFlight(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	const sessionID = "session-claimless-fail-closed"
+
+	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("claim must win the background-idle turn")
+	}
+
+	if dispatch := svc.beginForegroundDispatch(sessionID, nil); dispatch != nil {
+		t.Fatal("claimless begin must fail closed while a claimed admission is in flight")
+	}
+}
+
+// TestAcceptForegroundDispatch_StaleGenerationStillReleasesStrandedClaim is the
+// regression test for the promptInFlight-stranding bug: before the fix,
+// acceptForegroundDispatch returned early on a cycle-generation mismatch
+// without ever releasing the admission claim, so generatingLocked() reported
+// busy for the rest of the session's life and claimForegroundTurn could never
+// win again. The stale-generation interleaving is produced directly here
+// (rather than via a second beginForegroundDispatch call) because
+// beginForegroundDispatch itself now fails closed for that case — see
+// TestBeginForegroundDispatch_ClaimlessFailsClosedWhileClaimInFlight — so this
+// isolates acceptForegroundDispatch's own release ordering.
+func TestAcceptForegroundDispatch_StaleGenerationStillReleasesStrandedClaim(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	const sessionID = "session-accept-stranded"
+
+	svc.registerBackgroundTask(sessionID, "background-1")
+	svc.markForegroundIdle(sessionID)
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("claim must win the background-idle turn")
+	}
+	dispatch := svc.beginForegroundDispatch(sessionID, claim)
+	if dispatch == nil {
+		t.Fatal("begin must establish the dispatch cycle")
+	}
+
+	// Simulate a successor cycle advancing past this dispatch's generation
+	// while dispatch's own claimGeneration is still current -- the exact
+	// desync a claimless resume admission would otherwise produce.
+	claim.activity.mu.Lock()
+	claim.activity.promptCycleGeneration++
+	claim.activity.mu.Unlock()
+
+	if svc.acceptForegroundDispatch(dispatch) {
+		t.Fatal("accept for a superseded generation must not itself expose background work")
+	}
+
+	claim.activity.mu.Lock()
+	stillInFlight := claim.activity.promptInFlight
+	claim.activity.mu.Unlock()
+	if stillInFlight {
+		t.Fatal("accept must release the stranded admission claim even when its cycle generation is stale")
+	}
+
+	if !svc.markForegroundIdle(sessionID) {
+		t.Fatal("expected background work to become visible once yielded")
+	}
+	if svc.claimForegroundTurn(sessionID) == nil {
+		t.Fatal("claimForegroundTurn must succeed again after the stranded claim is released")
+	}
 }

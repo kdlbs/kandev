@@ -778,3 +778,48 @@ func TestBackgroundActivity_UnknownToolUpdatePreservesActivity(t *testing.T) {
 		t.Fatalf("unknown tool update changed activity to %q, want background", got)
 	}
 }
+
+// TestBackgroundWork_RegisteredFromInitialToolCallIsRetiredOnExecutionTeardown
+// covers the initial tool_call registration path (as opposed to the
+// tool_update path exercised by registerAsyncWorkForExecution above). The
+// initial tool_call is the only frame handleToolCallEvent sees before
+// hasBackgroundTask starts short-circuiting later updates, so it must carry
+// the launching execution ID itself. Without that, execution teardown
+// (clearExecutionBackgroundWorkSnapshot, keyed by executionID) can never
+// match this registration, and the session reports background-running
+// forever even after its execution has died.
+func TestBackgroundWork_RegisteredFromInitialToolCallIsRetiredOnExecutionTeardown(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID, sessionID, executionID = "task-initial-call", "session-initial-call", "execution-initial-call"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	payload := streams.NewSubagentTask("background work", "do it", "general-purpose")
+	payload.SubagentTask().IsAsync = true
+	payload.SubagentTask().AgentID = "work-initial-call"
+	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID, ExecutionID: executionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       agentEventToolCall,
+			ToolCallID: "tool-initial-call",
+			ToolStatus: "pending",
+			Normalized: payload,
+		},
+	})
+	svc.markForegroundIdle(sessionID)
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("initial tool_call registration did not surface as background, got %q", got)
+	}
+
+	svc.handleAgentStopped(ctx, watcher.AgentEventData{
+		TaskID: taskID, SessionID: sessionID, AgentExecutionID: executionID,
+	})
+
+	if svc.hasBackgroundTask(sessionID, "tool-initial-call") {
+		t.Fatal("execution teardown left the initial tool_call registration behind")
+	}
+	if got := svc.ForegroundActivity(sessionID); got == v1.ForegroundActivityBackground {
+		t.Fatalf("session still reports background after owning execution died, got %q", got)
+	}
+}

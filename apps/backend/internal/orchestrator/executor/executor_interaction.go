@@ -237,9 +237,15 @@ var ErrPromptDispatchCallbackUnsupported = errors.New("agent manager does not su
 
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
-// Attachments (images) are passed to the agent if provided
+// Attachments (images) are passed to the agent if provided.
+//
+// promptTask (task_operations.go) always calls PromptWithDispatchCallback
+// instead — it needs the dispatch callback to keep foreground-admission
+// tracking in step. Prompt has no production caller of its own; it is kept as
+// a thin nil-callback delegation for tests and any future caller that has no
+// dispatch callback to provide.
 func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
-	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, preloadedSession...)
+	return e.PromptWithDispatchCallback(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, preloadedSession...)
 }
 
 // PromptWithDispatchCallback invokes onDispatched after agentctl accepts the

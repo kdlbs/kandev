@@ -49,3 +49,35 @@ func TestEnqueueACPUpdateSnapshotsPromptGenerationBeforeWorkerConversion(t *test
 		t.Fatalf("foreground-idle generation = %d, want enqueue-time generation 42", idle.PromptGeneration)
 	}
 }
+
+// TestHandleACPUpdate_HumanOriginDeliversLeadingContextWindowThenForegroundIdle
+// pins tryConvertUntypedUpdate's split return: a human-origin usage_update
+// carries both a context-window reading and a derived foreground-idle
+// transition from the same provider frame. Both must reach handleACPUpdate's
+// single log/trace/send path — in provider order, context window first — so
+// the leading event is no longer sent out of band, bypassing
+// shared.LogNormalizedEvent.
+func TestHandleACPUpdate_HumanOriginDeliversLeadingContextWindowThenForegroundIdle(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	var notification sdk.SessionNotification
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":23638,"_meta":{"_claude/origin":{"kind":"human"}}}}`)
+	if err := json.Unmarshal(raw, &notification); err != nil {
+		t.Fatalf("decode notification: %v", err)
+	}
+
+	a.handleACPUpdate(notification, 0)
+
+	events := drainEvents(a)
+	if len(events) != 2 {
+		t.Fatalf("expected 2 delivered events (leading context window + foreground idle), got %d: %+v", len(events), events)
+	}
+	if events[0].Type != streams.EventTypeContextWindow {
+		t.Fatalf("first delivered event type = %q, want %q (context window must precede the derived lifecycle event)",
+			events[0].Type, streams.EventTypeContextWindow)
+	}
+	if events[1].Type != streams.EventTypeForegroundIdle {
+		t.Fatalf("second delivered event type = %q, want %q", events[1].Type, streams.EventTypeForegroundIdle)
+	}
+}

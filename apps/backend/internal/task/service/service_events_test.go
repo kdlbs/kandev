@@ -648,6 +648,69 @@ func createTaskWithoutRepositories(t *testing.T, ctx context.Context, repo taskE
 	}
 }
 
+// panicOnceEventBus panics on its first Publish call (simulating a
+// synchronous subscriber panic reaching the EventBus boundary) and behaves
+// normally afterward.
+type panicOnceEventBus struct {
+	*MockEventBus
+	mu       sync.Mutex
+	panicked bool
+}
+
+func (b *panicOnceEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	b.mu.Lock()
+	shouldPanic := !b.panicked
+	b.panicked = true
+	b.mu.Unlock()
+	if shouldPanic {
+		panic("boom: synchronous subscriber panic")
+	}
+	return b.MockEventBus.Publish(ctx, subject, event)
+}
+
+// TestTaskPublication_QueueRecoversDrainingAfterSubscriberPanic guards
+// against the publication queue getting stuck "draining" forever: a panic
+// from a synchronous EventBus subscriber (recovered by the caller, matching
+// how a panic recovered higher up the stack would behave in production —
+// MemoryEventBus.Publish itself has no recover) must not leave later
+// publications for the same task silently un-delivered.
+func TestTaskPublication_QueueRecoversDrainingAfterSubscriberPanic(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+
+	panicBus := &panicOnceEventBus{MockEventBus: eventBus}
+	svc.eventBus = panicBus
+
+	func() {
+		defer func() {
+			if r := recover(); r == nil {
+				t.Fatal("expected the first publication's subscriber panic to propagate")
+			}
+		}()
+		svc.PublishTaskUpdated(ctx, &models.Task{
+			ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "first",
+		})
+	}()
+
+	// Draining is released synchronously by the recover in
+	// drainTaskPublications before the panic re-propagates above, so this
+	// second publication for the same task must drain immediately rather
+	// than being silently swallowed by a queue stuck "draining".
+	svc.PublishTaskUpdated(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "second",
+	})
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 {
+		t.Fatalf("expected exactly 1 delivered event after panic recovery, got %d", len(published))
+	}
+	data, _ := published[0].Data.(map[string]interface{})
+	if data["title"] != "second" {
+		t.Fatalf("delivered event title = %#v, want %q", data["title"], "second")
+	}
+}
+
 func singlePublishedEventData(t *testing.T, eventBus *MockEventBus) map[string]interface{} {
 	t.Helper()
 	events := eventBus.GetPublishedEvents()

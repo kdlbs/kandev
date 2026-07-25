@@ -202,10 +202,38 @@ func (s *Service) enqueueTaskPublication(ctx context.Context, taskID string, pub
 	queue.draining = true
 	s.taskPublicationMu.Unlock()
 
+	s.drainTaskPublications(taskID, queue)
+}
+
+// drainTaskPublications runs the FIFO drain loop for one task's publication
+// queue. queue.draining is ALWAYS released before this call ends — including
+// when a synchronous EventBus subscriber inside next.publish panics — via the
+// deferred recover below. Without this, a panic recovered higher up the stack
+// (MemoryEventBus.Publish itself has no recover) would leave queue.draining
+// stuck true forever, and enqueueTaskPublication would silently append every
+// later publication for that task without ever draining them again.
+func (s *Service) drainTaskPublications(taskID string, queue *taskPublicationQueue) {
+	defer func() {
+		if r := recover(); r != nil {
+			s.taskPublicationMu.Lock()
+			queue.draining = false
+			hasPending := len(queue.pending) > 0
+			s.taskPublicationMu.Unlock()
+			// Re-arm a drainer for any work still queued: a concurrent
+			// enqueueTaskPublication call would already do this itself
+			// (draining is now false), but nothing guarantees one arrives.
+			if hasPending {
+				go s.resumeDrainTaskPublications(taskID, queue)
+			}
+			panic(r)
+		}
+	}()
+
 	for {
 		s.taskPublicationMu.Lock()
 		if len(queue.pending) == 0 {
 			delete(s.taskPublications, taskID)
+			queue.draining = false
 			s.taskPublicationMu.Unlock()
 			return
 		}
@@ -219,6 +247,21 @@ func (s *Service) enqueueTaskPublication(ctx context.Context, taskID string, pub
 			next.publish(publicationCtx)
 		}()
 	}
+}
+
+// resumeDrainTaskPublications re-arms the drainer for a queue that still had
+// pending work when a panic unwound drainTaskPublications. It runs on its own
+// goroutine so the panicking caller can keep unwinding/recovering without
+// waiting for the remaining publications to drain.
+func (s *Service) resumeDrainTaskPublications(taskID string, queue *taskPublicationQueue) {
+	s.taskPublicationMu.Lock()
+	if queue.draining || len(queue.pending) == 0 {
+		s.taskPublicationMu.Unlock()
+		return
+	}
+	queue.draining = true
+	s.taskPublicationMu.Unlock()
+	s.drainTaskPublications(taskID, queue)
 }
 
 func snapshotTaskForPublication(task *models.Task) *models.Task {
@@ -335,14 +378,23 @@ func (s *Service) addTaskSessionEventFields(ctx context.Context, taskID string, 
 }
 
 func (s *Service) addTaskSessionEventFieldsWithActivity(ctx context.Context, taskID string, data map[string]interface{}, activity *taskActivitySnapshot) *taskActivitySnapshot {
-	activity = s.addTaskForegroundActivityEventField(ctx, taskID, data, activity)
+	// Load the active session list once for this event: both the foreground
+	// activity aggregate and the pending-action rollup need the same set, and
+	// splitting the query per-helper doubled the DB reads on every task event.
+	sessions, sessionsErr := s.sessions.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if sessionsErr != nil {
+		s.logger.Warn("failed to list active sessions for task event fields",
+			zap.String("task_id", taskID), zap.Error(sessionsErr))
+	}
+
+	activity = s.addTaskForegroundActivityEventField(data, activity, sessions, sessionsErr)
 
 	if sessionCountMap, err := s.GetSessionCountsForTasks(ctx, []string{taskID}); err == nil {
 		if count, ok := sessionCountMap[taskID]; ok {
 			data["session_count"] = count
 		}
 	}
-	s.addTaskPendingActionEventField(ctx, taskID, data)
+	s.addTaskPendingActionEventField(ctx, taskID, data, sessions, sessionsErr)
 
 	primarySessionInfoMap, err := s.GetPrimarySessionInfoForTasks(ctx, []string{taskID})
 	if err != nil {
@@ -359,7 +411,7 @@ func (s *Service) addTaskSessionEventFieldsWithActivity(ctx context.Context, tas
 	return activity
 }
 
-func (s *Service) addTaskForegroundActivityEventField(ctx context.Context, taskID string, data map[string]interface{}, activity *taskActivitySnapshot) *taskActivitySnapshot {
+func (s *Service) addTaskForegroundActivityEventField(data map[string]interface{}, activity *taskActivitySnapshot, sessions []*models.TaskSession, sessionsErr error) *taskActivitySnapshot {
 	// Task-level MOST-ACTIVE-WINS activity aggregate.
 	// Present as the value or explicit nil when the aggregate is KNOWN, so a coarse
 	// state change never leaves a stale background-running reading on the client, and
@@ -369,8 +421,14 @@ func (s *Service) addTaskForegroundActivityEventField(ctx context.Context, taskI
 	// preserves the client's last-known reading rather than clearing a still-working
 	// task to a coarse "done".
 	if activity == nil {
-		current, known := s.computeTaskForegroundActivity(ctx, taskID)
-		activity = &taskActivitySnapshot{activity: current, known: known}
+		switch {
+		case s.foregroundActivity == nil:
+			activity = &taskActivitySnapshot{activity: "", known: true}
+		case sessionsErr != nil:
+			activity = &taskActivitySnapshot{known: false}
+		default:
+			activity = &taskActivitySnapshot{activity: s.computeTaskForegroundActivityForSessions(sessions), known: true}
+		}
 	}
 	if activity.known {
 		if activity.activity != "" {
@@ -411,10 +469,9 @@ func (s *Service) addPrimarySessionEventFields(ctx context.Context, taskID strin
 	}
 }
 
-func (s *Service) addTaskPendingActionEventField(ctx context.Context, taskID string, data map[string]interface{}) {
-	sessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, taskID)
-	if err != nil {
-		s.logger.Warn("failed to list sessions for task pending action", zap.String("task_id", taskID), zap.Error(err))
+func (s *Service) addTaskPendingActionEventField(ctx context.Context, taskID string, data map[string]interface{}, sessions []*models.TaskSession, sessionsErr error) {
+	if sessionsErr != nil {
+		// Already logged once by the shared load in addTaskSessionEventFieldsWithActivity.
 		return
 	}
 	sessionIDs := make([]string, 0, len(sessions))

@@ -181,8 +181,8 @@ func TestUsageTracker_CumulativeDelta(t *testing.T) {
 	a := newTestAdapter()
 	const sess = "sess-codex"
 
-	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 100), sess)
-	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 350), sess)
+	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 100), sess, 0)
+	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 350), sess, 0)
 
 	delta, cost := a.consumeUsageDelta(sess)
 	if delta != 350 {
@@ -192,7 +192,7 @@ func TestUsageTracker_CumulativeDelta(t *testing.T) {
 		t.Errorf("first consume cost = %d, want 0 (no cost reported)", cost)
 	}
 
-	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 200), sess)
+	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 200), sess, 0)
 	delta, _ = a.consumeUsageDelta(sess)
 	if delta != 200 {
 		t.Errorf("second consume delta = %d, want 200 (reset baseline)", delta)
@@ -206,7 +206,7 @@ func TestUsageTracker_ForwardsCost(t *testing.T) {
 	a := newTestAdapter()
 	const sess = "sess-claude"
 
-	a.tryConvertUntypedUpdate(usageUpdateCostRaw(200_000, 25_068, 0.06156125), sess)
+	a.tryConvertUntypedUpdate(usageUpdateCostRaw(200_000, 25_068, 0.06156125), sess, 0)
 	_, cost := a.consumeUsageDelta(sess)
 	if cost != 615 {
 		t.Errorf("cost = %d, want 615 (subcents)", cost)

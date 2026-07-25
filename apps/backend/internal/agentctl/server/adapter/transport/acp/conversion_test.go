@@ -874,7 +874,7 @@ func TestTryConvertUntypedUpdate_UsageUpdate(t *testing.T) {
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":200000,"used":56047,"cost":{"amount":9.76,"currency":"USD"}}}`)
 
-	result := a.tryConvertUntypedUpdate(raw, "s1")
+	_, result := a.tryConvertUntypedUpdate(raw, "s1", 0)
 
 	if result == nil {
 		t.Fatal("expected non-nil result for usage_update")
@@ -904,7 +904,7 @@ func TestTryConvertUntypedUpdate_HumanOriginSignalsForegroundIdle(t *testing.T) 
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":23638,"_meta":{"_claude/origin":{"kind":"human"}}}}`)
 
-	event := a.tryConvertUntypedUpdate(raw, "s1")
+	_, event := a.tryConvertUntypedUpdate(raw, "s1", 0)
 	if event == nil {
 		t.Fatal("expected foreground-idle event")
 	}
@@ -917,7 +917,7 @@ func TestTryConvertUntypedUpdate_HumanOriginPreservesPromptGeneration(t *testing
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":23638,"_meta":{"_claude/origin":{"kind":"human"}}}}`)
 
-	event := a.tryConvertUntypedUpdate(raw, "s1", 42)
+	_, event := a.tryConvertUntypedUpdate(raw, "s1", 42)
 	if event == nil {
 		t.Fatal("expected foreground-idle event")
 	}
@@ -930,7 +930,7 @@ func TestTryConvertUntypedUpdate_TaskNotificationSignalsOneBackgroundCompletion(
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":24892,"_meta":{"_claude/origin":{"kind":"task-notification"}}}}`)
 
-	event := a.tryConvertUntypedUpdate(raw, "s1")
+	_, event := a.tryConvertUntypedUpdate(raw, "s1", 0)
 	if event == nil {
 		t.Fatal("expected background-complete event")
 	}
@@ -947,7 +947,7 @@ func TestTryConvertUntypedUpdate_SessionInfoUpdate(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"session_info_update","title":"Linux File Guide","updatedAt":"2026-06-13T19:37:46Z","_meta":{"cursor":{"requestId":"req-1"}}}}`)
 
-	result := a.tryConvertUntypedUpdate(raw, "s1")
+	_, result := a.tryConvertUntypedUpdate(raw, "s1", 0)
 
 	if result == nil {
 		t.Fatal("expected non-nil result for session_info_update")
@@ -973,7 +973,7 @@ func TestTryConvertUntypedUpdate_ZeroUsed(t *testing.T) {
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":200000,"used":0}}`)
 
-	result := a.tryConvertUntypedUpdate(raw, "s1")
+	_, result := a.tryConvertUntypedUpdate(raw, "s1", 0)
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -990,7 +990,7 @@ func TestTryConvertUntypedUpdate_UsedExceedsSize(t *testing.T) {
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":100000,"used":110000}}`)
 
-	result := a.tryConvertUntypedUpdate(raw, "s1")
+	_, result := a.tryConvertUntypedUpdate(raw, "s1", 0)
 
 	if result == nil {
 		t.Fatal("expected non-nil result")
@@ -1004,7 +1004,7 @@ func TestTryConvertUntypedUpdate_UnknownUpdateType(t *testing.T) {
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"something_else","foo":"bar"}}`)
 
-	result := a.tryConvertUntypedUpdate(raw, "s1")
+	_, result := a.tryConvertUntypedUpdate(raw, "s1", 0)
 
 	if result != nil {
 		t.Errorf("expected nil for unknown update type, got %+v", result)
@@ -1014,7 +1014,7 @@ func TestTryConvertUntypedUpdate_UnknownUpdateType(t *testing.T) {
 func TestTryConvertUntypedUpdate_InvalidJSON(t *testing.T) {
 	a := newTestAdapter()
 
-	result := a.tryConvertUntypedUpdate([]byte(`{invalid`), "s1")
+	_, result := a.tryConvertUntypedUpdate([]byte(`{invalid`), "s1", 0)
 
 	if result != nil {
 		t.Errorf("expected nil for invalid JSON, got %+v", result)
@@ -1025,7 +1025,7 @@ func TestTryConvertUntypedUpdate_ZeroSize(t *testing.T) {
 	a := newTestAdapter()
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":0,"used":0}}`)
 
-	result := a.tryConvertUntypedUpdate(raw, "s1")
+	_, result := a.tryConvertUntypedUpdate(raw, "s1", 0)
 
 	if result != nil {
 		t.Errorf("expected nil for zero size (division by zero guard), got %+v", result)
@@ -1043,12 +1043,12 @@ func TestTryConvertUntypedUpdate_StickyMaxSize(t *testing.T) {
 	t.Run("default turn raises max from 200K to 1M", func(t *testing.T) {
 		a := newTestAdapter()
 
-		first := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1")
+		_, first := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1", 0)
 		if first == nil || first.ContextWindowSize != 200_000 {
 			t.Fatalf("first size = %d, want 200000", sizeOrZero(first))
 		}
 
-		second := a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1")
+		_, second := a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1", 0)
 		if second == nil || second.ContextWindowSize != 1_000_000 {
 			t.Fatalf("second size = %d, want 1000000", sizeOrZero(second))
 		}
@@ -1056,9 +1056,10 @@ func TestTryConvertUntypedUpdate_StickyMaxSize(t *testing.T) {
 
 	t.Run("stale 200K start-frame cannot shrink after 1M end-frame", func(t *testing.T) {
 		a := newTestAdapter()
-		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1"), a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1")
+		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1", 0)
+		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1", 0)
 
-		stale := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 233_900), "s1")
+		_, stale := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 233_900), "s1", 0)
 		if stale == nil {
 			t.Fatal("expected non-nil stale frame result")
 		}
@@ -1076,8 +1077,8 @@ func TestTryConvertUntypedUpdate_StickyMaxSize(t *testing.T) {
 
 	t.Run("sonnet stays at 200K", func(t *testing.T) {
 		a := newTestAdapter()
-		first := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1")
-		second := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 7_000), "s1")
+		_, first := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1", 0)
+		_, second := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 7_000), "s1", 0)
 		if first.ContextWindowSize != 200_000 || second.ContextWindowSize != 200_000 {
 			t.Fatalf("sizes = %d, %d; want 200000 both", first.ContextWindowSize, second.ContextWindowSize)
 		}
@@ -1085,7 +1086,7 @@ func TestTryConvertUntypedUpdate_StickyMaxSize(t *testing.T) {
 
 	t.Run("sonnet[1m] is 1M from first frame", func(t *testing.T) {
 		a := newTestAdapter()
-		result := a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1")
+		_, result := a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1", 0)
 		if result == nil || result.ContextWindowSize != 1_000_000 {
 			t.Fatalf("size = %d, want 1000000", sizeOrZero(result))
 		}
@@ -1093,9 +1094,10 @@ func TestTryConvertUntypedUpdate_StickyMaxSize(t *testing.T) {
 
 	t.Run("sessions track max independently", func(t *testing.T) {
 		a := newTestAdapter()
-		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1"), a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s2")
-		s1 := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 10_000), "s1")
-		s2 := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 10_000), "s2")
+		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1", 0)
+		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s2", 0)
+		_, s1 := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 10_000), "s1", 0)
+		_, s2 := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 10_000), "s2", 0)
 		if s1.ContextWindowSize != 1_000_000 {
 			t.Errorf("s1 size = %d, want 1000000", s1.ContextWindowSize)
 		}
@@ -1106,10 +1108,11 @@ func TestTryConvertUntypedUpdate_StickyMaxSize(t *testing.T) {
 
 	t.Run("reset after model switch allows downshift to 200K", func(t *testing.T) {
 		a := newTestAdapter()
-		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1"), a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1")
+		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 5_000), "s1", 0)
+		_, _ = a.tryConvertUntypedUpdate(usageUpdateRaw(1_000_000, 5_000), "s1", 0)
 
 		a.resetContextWindowMaxSize("s1")
-		afterSwitch := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 26_000), "s1")
+		_, afterSwitch := a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 26_000), "s1", 0)
 		if afterSwitch == nil || afterSwitch.ContextWindowSize != 200_000 {
 			t.Fatalf("after switch size = %d, want 200000", sizeOrZero(afterSwitch))
 		}
