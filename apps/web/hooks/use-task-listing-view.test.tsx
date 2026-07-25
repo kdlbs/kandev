@@ -47,7 +47,9 @@ describe("useTaskListingView", () => {
 
     act(() => {
       window.localStorage.setItem(TASK_LISTING_VIEW_STORAGE_KEY, '"list"');
-      window.dispatchEvent(new StorageEvent("storage", { key: TASK_LISTING_VIEW_STORAGE_KEY }));
+      const storageEvent = new StorageEvent("storage");
+      Object.defineProperty(storageEvent, "key", { value: TASK_LISTING_VIEW_STORAGE_KEY });
+      window.dispatchEvent(storageEvent);
     });
     expect(result.current.preferredView).toBe("list");
   });

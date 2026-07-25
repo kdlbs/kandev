@@ -38,4 +38,12 @@ describe("PageClient", () => {
       expect(replaceMock).not.toHaveBeenCalled();
     });
   });
+
+  it("does not restore List while opening a session", async () => {
+    render(<PageClient workspaceId="workspace-1" initialSessionId="session-1" />);
+
+    await waitFor(() => {
+      expect(replaceMock).not.toHaveBeenCalled();
+    });
+  });
 });
