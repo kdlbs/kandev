@@ -27,6 +27,7 @@ import (
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -334,6 +335,18 @@ func (m *captureCreateTaskRepo) GetWorkflow(_ context.Context, id string) (*mode
 	return &models.Workflow{ID: id, WorkspaceID: "ws-1"}, nil
 }
 
+func (m *captureCreateTaskRepo) GetStep(_ context.Context, id string) (*wfmodels.WorkflowStep, error) {
+	return &wfmodels.WorkflowStep{ID: id, WorkflowID: "wf-1"}, nil
+}
+
+func (m *captureCreateTaskRepo) GetNextStepByPosition(
+	context.Context,
+	string,
+	int,
+) (*wfmodels.WorkflowStep, error) {
+	return nil, nil
+}
+
 func (m *captureCreateTaskRepo) GetRepository(_ context.Context, id string) (*models.Repository, error) {
 	if id == "repo-2" {
 		return &models.Repository{ID: id, WorkspaceID: "ws-1", DefaultBranch: "main"}, nil
@@ -414,6 +427,7 @@ func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -458,6 +472,7 @@ func TestHTTPCreateTaskRecordsRepositoryWithoutProfileIDs(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -579,6 +594,7 @@ func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -620,6 +636,7 @@ func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -660,6 +677,7 @@ func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	startCreatedCalled := make(chan struct{}, 1)
 	orch := &captureOrchestrator{startCreatedCalled: startCreatedCalled}
 	h := &TaskHandlers{service: svc, orchestrator: orch, logger: log}
@@ -701,6 +719,7 @@ func TestHTTPCreateTask_StartAgentKeepsCreatedStateWhenSchedulingUpdateFails(t *
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	startCreatedCalled := make(chan struct{}, 1)
 	orch := &captureOrchestrator{startCreatedCalled: startCreatedCalled}
 	h := &TaskHandlers{service: svc, orchestrator: orch, logger: log}
