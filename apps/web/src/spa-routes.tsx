@@ -257,7 +257,14 @@ function PluginRoute({ path }: { path: string }) {
 
 function KanbanRoute({ route }: { route: Extract<SpaRoute, { kind: "kanban" }> }) {
   useKanbanRouteBootstrap(route);
-  return <PageClient initialTaskId={route.taskId} initialSessionId={route.sessionId} />;
+  const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  return (
+    <PageClient
+      workspaceId={route.workspaceId ?? activeWorkspaceId ?? undefined}
+      initialTaskId={route.taskId}
+      initialSessionId={route.sessionId}
+    />
+  );
 }
 
 function useKanbanRouteBootstrap(route: Extract<SpaRoute, { kind: "kanban" }>) {

@@ -69,7 +69,7 @@ test.describe("Quick Chat entry points on mobile", () => {
     await assertNoDocumentHorizontalOverflow(testPage);
   });
 
-  test("returns to the selected workspace home from the Tasks header", async ({
+  test("preserves the selected workspace when Home restores List", async ({
     testPage,
     seedData,
   }) => {
@@ -82,10 +82,11 @@ test.describe("Quick Chat entry points on mobile", () => {
     await homeLink.click();
 
     await expect(testPage).toHaveURL((url) => {
-      return url.pathname === "/" && url.searchParams.get("workspaceId") === seedData.workspaceId;
+      return (
+        url.pathname === "/tasks" && url.searchParams.get("workspace") === seedData.workspaceId
+      );
     });
-    const homeHeader = testPage.getByRole("link", { name: "Kandev home" }).locator("..");
-    await expect(homeHeader.getByText("Home", { exact: true })).toHaveCount(0);
+    await expect(testPage.getByText("No tasks found.", { exact: true })).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
   });
 });

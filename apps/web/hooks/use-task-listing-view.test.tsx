@@ -47,7 +47,7 @@ describe("useTaskListingView", () => {
 
     act(() => {
       window.localStorage.setItem(TASK_LISTING_VIEW_STORAGE_KEY, '"list"');
-      const storageEvent = new StorageEvent("storage");
+      const storageEvent = new Event("storage");
       Object.defineProperty(storageEvent, "key", { value: TASK_LISTING_VIEW_STORAGE_KEY });
       window.dispatchEvent(storageEvent);
     });
