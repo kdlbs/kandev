@@ -13,6 +13,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -779,6 +780,40 @@ func (s *Service) authorizeTask(ctx context.Context, taskID string) error {
 		return nil
 	}
 	return s.taskAccessCheck(ctx, taskID)
+}
+
+// authorizeTaskSessionPair guards an entry point that accepts BOTH a task and a
+// session ID.
+//
+// Checking only the session is not enough: the caller can pass one of their own
+// sessions to satisfy that check while pointing taskID at another user's task,
+// which the method then uses for its task-scoped work (GetTaskPR, repository
+// resolution, PR-watch creation, recoverable-failure handling). Both IDs are
+// authorized, and the pair is required to be consistent so the two arguments
+// cannot describe different tasks.
+//
+// The pair check is skipped when the session cannot be loaded: by then both IDs
+// are already authorized, so a mismatch is a caller bug rather than a
+// cross-user leak, and failing here would change behavior for identity-less
+// internal callers.
+func (s *Service) authorizeTaskSessionPair(ctx context.Context, taskID, sessionID string) error {
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+	if err := s.authorizeTask(ctx, taskID); err != nil {
+		return err
+	}
+	if taskID == "" || sessionID == "" || s.repo == nil {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return nil //nolint:nilerr // both IDs authorized; consistency is best-effort
+	}
+	if session.TaskID != taskID {
+		return fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
+	}
+	return nil
 }
 
 // publishTaskUpdated forwards to the configured TaskEventPublisher.

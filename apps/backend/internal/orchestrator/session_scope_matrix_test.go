@@ -4,7 +4,21 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
+
+// pairStubRepo satisfies sessionExecutorStore with only GetTaskSession usable —
+// the pair consistency check calls nothing else, so the embedded nil interface
+// is never touched.
+type pairStubRepo struct {
+	sessionExecutorStore
+	sessionTaskID string
+}
+
+func (r *pairStubRepo) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
+	return &models.TaskSession{ID: "sess-1", TaskID: r.sessionTaskID}, nil
+}
 
 // Structural pin for the orchestrator's session-keyed entry points.
 //
@@ -153,5 +167,79 @@ func TestSessionKeyedEntryPointsUnscopedWhenUnwired(t *testing.T) {
 				t.Fatal("unwired checker denied the call; pre-auth behavior broken")
 			}
 		})
+	}
+}
+
+// ownSessionForeignTask is the pairing attack: the caller supplies one of their
+// own session IDs to satisfy the session check, while pointing taskID at another
+// user's task. Entry points that accept both IDs then do their task-scoped work
+// against the foreign task — for CheckSessionPR that is PR disclosure plus a
+// PR-watch write, for CancelTransientRetry a recoverable-failure write.
+func ownSessionForeignTask() *Service {
+	return &Service{
+		sessionAccessCheck: func(_ context.Context, sessionID string) error {
+			if sessionID == "sess-mine" {
+				return nil
+			}
+			return errDenied
+		},
+		taskAccessCheck: func(_ context.Context, taskID string) error {
+			if taskID == "task-mine" {
+				return nil
+			}
+			return errDenied
+		},
+	}
+}
+
+func TestCheckSessionPRDeniesOwnSessionPairedWithForeignTask(t *testing.T) {
+	s := ownSessionForeignTask()
+	s.logger = scopeTestLogger(t)
+
+	found, err := s.CheckSessionPR(context.Background(), "task-victim", "sess-mine")
+
+	if err != nil {
+		t.Fatalf("CheckSessionPR: %v", err)
+	}
+	if found {
+		t.Error("found = true; an owned session must not unlock another user's task")
+	}
+}
+
+func TestCancelTransientRetryDeniesOwnSessionPairedWithForeignTask(t *testing.T) {
+	s := ownSessionForeignTask()
+	s.logger = scopeTestLogger(t)
+
+	if s.CancelTransientRetry(context.Background(), "task-victim", "sess-mine") {
+		t.Error("an owned session must not unlock another user's task")
+	}
+}
+
+// TestAuthorizeTaskSessionPairRejectsInconsistentPair covers the consistency
+// half: both IDs authorized, but naming a session that belongs to a different
+// task must still be refused.
+func TestAuthorizeTaskSessionPairRejectsInconsistentPair(t *testing.T) {
+	s := &Service{
+		logger:             scopeTestLogger(t),
+		sessionAccessCheck: func(context.Context, string) error { return nil },
+		taskAccessCheck:    func(context.Context, string) error { return nil },
+		repo:               &pairStubRepo{sessionTaskID: "task-other"},
+	}
+
+	if err := s.authorizeTaskSessionPair(context.Background(), "task-mine", "sess-1"); err == nil {
+		t.Error("expected refusal for a session that belongs to a different task")
+	}
+}
+
+func TestAuthorizeTaskSessionPairAcceptsConsistentPair(t *testing.T) {
+	s := &Service{
+		logger:             scopeTestLogger(t),
+		sessionAccessCheck: func(context.Context, string) error { return nil },
+		taskAccessCheck:    func(context.Context, string) error { return nil },
+		repo:               &pairStubRepo{sessionTaskID: "task-mine"},
+	}
+
+	if err := s.authorizeTaskSessionPair(context.Background(), "task-mine", "sess-1"); err != nil {
+		t.Errorf("consistent pair was refused: %v", err)
 	}
 }

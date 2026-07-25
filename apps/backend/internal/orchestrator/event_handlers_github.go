@@ -1126,7 +1126,12 @@ func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) 
 	// association and installs a PR watch, so it must be owner-only. Report
 	// "no PR" rather than an error so a foreign session leaks nothing about
 	// its existence.
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
+	//
+	// Both IDs, not just the session: everything below (GetTaskPR,
+	// resolveTaskRepo, EnsurePRWatch, resolvePrimaryTaskRepositoryID) is keyed
+	// off taskID, so authorizing only the session would let a caller pair one
+	// of their own sessions with another user's task.
+	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
 		return false, nil
 	}
 
