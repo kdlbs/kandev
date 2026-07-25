@@ -133,7 +133,11 @@ func (s *Service) metadataMatchesService(state InstallStateResponse, metadata *s
 	if !strings.Contains(text, envRunningAsService) || !strings.Contains(text, envServiceMetadata) {
 		return false
 	}
-	return strings.Contains(text, state.MetadataPath) || strings.Contains(text, escapeXML(state.MetadataPath))
+	if strings.Contains(text, state.MetadataPath) || strings.Contains(text, escapeXML(state.MetadataPath)) {
+		return true
+	}
+	return state.Manager == serviceManagerSystemd &&
+		strings.Contains(text, strings.ReplaceAll(state.MetadataPath, "%", "%%"))
 }
 
 func (s InstallStateResponse) applySupport() (bool, string) {

@@ -20,7 +20,9 @@ var (
 )
 
 func reloadLaunchdService(target, domain, plistPath string) error {
-	bootoutLaunchdAndWait(target)
+	if err := bootoutLaunchdAndWait(target); err != nil {
+		return err
+	}
 	var lastErr error
 	for attempt := 1; attempt <= launchdBootstrapAttempts; attempt++ {
 		lastErr = launchctlCommand("bootstrap", domain, plistPath)
@@ -34,12 +36,13 @@ func reloadLaunchdService(target, domain, plistPath string) error {
 	return fmt.Errorf("launchctl bootstrap %s %s: %w", domain, plistPath, lastErr)
 }
 
-func bootoutLaunchdAndWait(target string) {
+func bootoutLaunchdAndWait(target string) error {
 	_ = launchctlCommand("bootout", target)
 	for attempt := 0; attempt < launchdBootoutPollAttempts; attempt++ {
 		if err := launchctlCommand("print", target); err != nil {
-			return
+			return nil
 		}
 		launchctlSleep(launchdBootoutPollInterval)
 	}
+	return fmt.Errorf("timed out waiting for launchctl bootout %s", target)
 }

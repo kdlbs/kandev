@@ -226,9 +226,39 @@ func TestInstallLaunchdWaitsForBootoutAndRetriesBootstrap(t *testing.T) {
 		t.Fatalf("print calls=%d bootstrap calls=%d, want 3 each; order=%v", printCalls, bootstrapCalls, order)
 	}
 	firstBootstrap := slices.Index(order, "bootstrap")
-	lastPrint := slices.Index(order, "bootstrap") - 1
+	lastPrint := firstBootstrap - 1
 	if firstBootstrap < 0 || lastPrint < 0 || order[lastPrint] != "print" {
 		t.Fatalf("bootstrap started before teardown polling completed: %v", order)
+	}
+}
+
+func TestReloadLaunchdServiceStopsWhenBootoutTimesOut(t *testing.T) {
+	originalLaunchctlCommand := launchctlCommand
+	originalLaunchctlSleep := launchctlSleep
+	t.Cleanup(func() {
+		launchctlCommand = originalLaunchctlCommand
+		launchctlSleep = originalLaunchctlSleep
+	})
+
+	bootstrapCalls := 0
+	launchctlSleep = func(time.Duration) {}
+	launchctlCommand = func(args ...string) error {
+		if args[0] == "bootstrap" {
+			bootstrapCalls++
+		}
+		return nil
+	}
+
+	err := reloadLaunchdService(
+		"gui/501/com.kdlbs.kandev",
+		"gui/501",
+		"/Users/alice/Library/LaunchAgents/com.kdlbs.kandev.plist",
+	)
+	if err == nil || !strings.Contains(err.Error(), "timed out waiting for launchctl bootout") {
+		t.Fatalf("reloadLaunchdService() error = %v, want bootout timeout", err)
+	}
+	if bootstrapCalls != 0 {
+		t.Fatalf("bootstrap called %d times after bootout timeout, want 0", bootstrapCalls)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -85,6 +86,39 @@ func TestService_GetManagedNativeServiceSupportsApply(t *testing.T) {
 	}
 	if !resp.Install.ManagedService || !resp.ApplySupported {
 		t.Fatalf("native install state = %+v apply_supported=%v reason=%q", resp.Install, resp.ApplySupported, resp.ApplyUnsupportedReason)
+	}
+}
+
+func TestService_GetManagedSystemdServiceSupportsApplyWithPercentInMetadataPath(t *testing.T) {
+	homeDir := filepath.Join(t.TempDir(), "home%dir")
+	metadataPath, servicePath := writeServiceInstallForTest(t, homeDir, serviceInstallMetadata{
+		Manager:      serviceManagerSystemd,
+		Mode:         installModeUser,
+		Kind:         installKindHomebrew,
+		HomeDir:      homeDir,
+		LogDir:       filepath.Join(homeDir, "logs"),
+		ServicePath:  filepath.Join(homeDir, "kandev.service"),
+		LauncherPath: "/opt/homebrew/bin/kandev",
+	})
+	serviceContent := managedMarkerText + "\n" + envRunningAsService + "\n" +
+		envServiceMetadata + "=" + strings.ReplaceAll(metadataPath, "%", "%%") + "\n"
+	if err := os.WriteFile(servicePath, []byte(serviceContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(envRunningAsService, "true")
+	t.Setenv(envServiceMode, installModeUser)
+	t.Setenv(envServiceManager, serviceManagerSystemd)
+	t.Setenv(envInstallKind, installKindHomebrew)
+	t.Setenv(envServiceMetadata, metadataPath)
+
+	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
+	resp, err := svc.Get()
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !resp.Install.ManagedService || !resp.ApplySupported {
+		t.Fatalf("percent-escaped install state = %+v apply_supported=%v reason=%q",
+			resp.Install, resp.ApplySupported, resp.ApplyUnsupportedReason)
 	}
 }
 
