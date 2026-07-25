@@ -500,8 +500,10 @@ func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 func (h *TaskHandlers) httpApproveSession(c *gin.Context) {
 	result, err := h.service.ApproveSession(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		h.logger.Error("failed to approve session", zap.String("session_id", c.Param("id")), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Route not-found through the shared mapper so a per-user scoping
+		// denial answers 404 like every other session route, rather than
+		// surfacing as a 500 that distinguishes "yours" from "someone else's".
+		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
 

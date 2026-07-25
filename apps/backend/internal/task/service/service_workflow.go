@@ -31,6 +31,10 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
 	}
+	// Approving advances the task's workflow step, so this must be owner-only.
+	if err := s.authorizeTaskID(ctx, session.TaskID); err != nil {
+		return nil, err
+	}
 	result.Session = session
 
 	// Get the task to find its current workflow step
