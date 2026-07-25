@@ -148,10 +148,12 @@ export type KanbanSliceState = {
   kanban: KanbanState;
   kanbanMulti: KanbanMultiState;
   workflows: WorkflowsState;
+  workspaceContextGeneration: number;
   tasks: TaskState;
 };
 
 export type KanbanSliceActions = {
+  resetKanbanWorkspaceContext: () => void;
   setActiveWorkflow: (workflowId: string | null) => void;
   setWorkflows: (workflows: WorkflowsState["items"]) => void;
   reorderWorkflowItems: (workflowIds: string[]) => void;

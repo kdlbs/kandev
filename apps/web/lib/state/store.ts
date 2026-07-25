@@ -33,7 +33,6 @@ import {
   createAutomationsSlice,
   createSystemSlice,
   createPluginsSlice,
-  defaultKanbanState,
   defaultWorkspaceState,
   defaultSettingsState,
   defaultSessionState,
@@ -51,7 +50,6 @@ import {
   defaultSystemState,
   defaultPluginsState,
   type WorkspaceState,
-  type WorkflowsState,
   type ExecutorsState,
   type SettingsAgentsState,
   type AgentDiscoveryState,
@@ -80,6 +78,7 @@ import {
   type GitHubSliceActions,
   type AzureDevOpsSliceActions,
   type PluginsSliceActions,
+  type KanbanSlice,
 } from "./slices";
 import type {
   AvailableCommand,
@@ -125,13 +124,7 @@ import type {
 } from "./slices/office/types";
 
 // Combined AppState type
-export type AppState = {
-  // Kanban slice
-  kanban: (typeof defaultKanbanState)["kanban"];
-  kanbanMulti: (typeof defaultKanbanState)["kanbanMulti"];
-  workflows: (typeof defaultKanbanState)["workflows"];
-  tasks: (typeof defaultKanbanState)["tasks"];
-
+export type AppState = KanbanSlice & {
   // Workspace slice
   workspaces: (typeof defaultWorkspaceState)["workspaces"];
   repositories: (typeof defaultWorkspaceState)["repositories"];
@@ -304,20 +297,6 @@ export type AppState = {
   hydrate: (state: HydrationState, options?: HydrationOptions) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState["items"]) => void;
-  setActiveWorkflow: (workflowId: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState["items"]) => void;
-  reorderWorkflowItems: (workflowIds: string[]) => void;
-  setWorkflowSnapshot: (
-    workflowId: string,
-    data: import("./slices/kanban/types").WorkflowSnapshotData,
-  ) => void;
-  setKanbanMultiLoading: (loading: boolean) => void;
-  clearKanbanMulti: () => void;
-  updateMultiTask: (
-    workflowId: string,
-    task: import("./slices/kanban/types").KanbanState["tasks"][number],
-  ) => void;
-  removeMultiTask: (workflowId: string, taskId: string) => void;
   setExecutors: (executors: ExecutorsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
@@ -444,10 +423,6 @@ export type AppState = {
     meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null },
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
-  setActiveSession: (taskId: string, sessionId: string) => void;
-  setActiveSessionAuto: (taskId: string, sessionId: string) => void;
-  setActiveTask: (taskId: string) => void;
-  clearActiveSession: () => void;
   setTaskSession: (session: TaskSession) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;

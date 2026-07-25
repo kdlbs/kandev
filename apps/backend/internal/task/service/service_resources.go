@@ -600,6 +600,19 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	}
 	archived := 0
 	for _, task := range tasks {
+		if task == nil || task.WorkspaceID != workflow.WorkspaceID {
+			taskID, taskWorkspaceID := "", ""
+			if task != nil {
+				taskID = task.ID
+				taskWorkspaceID = task.WorkspaceID
+			}
+			s.logger.Warn("skipping task outside workflow workspace during workflow delete cascade",
+				zap.String("workflow_id", id),
+				zap.String("workflow_workspace_id", workflow.WorkspaceID),
+				zap.String("task_id", taskID),
+				zap.String("task_workspace_id", taskWorkspaceID))
+			continue
+		}
 		if err := s.ArchiveTask(ctx, task.ID); err != nil {
 			// Concurrent archive between ListTasks and here is a no-op:
 			// the task is already in the desired state, keep cascading.

@@ -215,6 +215,7 @@ export function AppSidebarWorkspacePicker({
   const officeEnabled = useFeature("office");
   const workspaces = useAppStore((s) => s.workspaces);
   const setActiveWorkspace = useAppStore((s) => s.setActiveWorkspace);
+  const resetKanbanWorkspaceContext = useAppStore((s) => s.resetKanbanWorkspaceContext);
   const [open, setOpen] = useState(false);
 
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
@@ -241,15 +242,25 @@ export function AppSidebarWorkspacePicker({
         rememberLastOfficeWorkspace(workspace);
       }
       rememberLastKanbanWorkspace(workspace);
+      resetKanbanWorkspaceContext();
       setActiveWorkspace(id);
-      if (officeEnabled) {
-        const target = type === "office" ? "/office" : "/";
-        router.push(`${target}?workspaceId=${id}`);
+      if (type === "kanban") {
+        router.push(`/?workspaceId=${id}`);
+      } else if (officeEnabled) {
+        router.push(`/office?workspaceId=${id}`);
       }
       setOpen(false);
       onActionComplete?.();
     },
-    [activeId, activeWorkspace, router, setActiveWorkspace, officeEnabled, onActionComplete],
+    [
+      activeId,
+      activeWorkspace,
+      router,
+      setActiveWorkspace,
+      resetKanbanWorkspaceContext,
+      officeEnabled,
+      onActionComplete,
+    ],
   );
   const handleNavigate = useCallback(
     (href: string) => {

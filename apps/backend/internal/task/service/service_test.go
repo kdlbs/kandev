@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -87,6 +88,45 @@ func createTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.Repos
 	})
 }
 
+// testWorkflowStepGetter keeps legacy service tests focused on their own
+// behavior while mirroring production's required workflow-step dependency.
+// Integrity tests install an exact getter (or nil) for boundary assertions.
+type testWorkflowStepGetter struct {
+	repo *sqliterepo.Repository
+}
+
+func (g *testWorkflowStepGetter) GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	rows, err := g.repo.DB().QueryContext(ctx, `SELECT id FROM workflows ORDER BY created_at DESC, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	workflowIDs := make([]string, 0, 1)
+	derivedWorkflowID := strings.Replace(stepID, "step", "wf", 1)
+	for rows.Next() {
+		var workflowID string
+		if err := rows.Scan(&workflowID); err != nil {
+			return nil, err
+		}
+		if workflowID == derivedWorkflowID {
+			return &wfmodels.WorkflowStep{ID: stepID, WorkflowID: workflowID}, nil
+		}
+		workflowIDs = append(workflowIDs, workflowID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(workflowIDs) > 0 {
+		return &wfmodels.WorkflowStep{ID: stepID, WorkflowID: workflowIDs[0]}, nil
+	}
+	return nil, errors.New("workflow step not found")
+}
+
+func (*testWorkflowStepGetter) GetNextStepByPosition(context.Context, string, int) (*wfmodels.WorkflowStep, error) {
+	return nil, nil
+}
+
 // createTestServiceWithSessionsRepo mirrors createTestService but lets a
 // caller substitute the Sessions repository (e.g. to wrap it with a test-only
 // hook) while reusing the same DB setup, migrations, and cleanup-worker
@@ -148,6 +188,7 @@ func createTestServiceWithSessionsRepo(
 		ResourceCleanups:  repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	svc.SetWorkspaceBootstrapper(repo)
+	svc.SetWorkflowStepGetter(&testWorkflowStepGetter{repo: repo})
 	if err := svc.StartTaskResourceCleanupWorker(context.Background()); err != nil {
 		t.Fatalf("failed to start task resource cleanup worker: %v", err)
 	}

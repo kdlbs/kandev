@@ -6,9 +6,11 @@ import type { KanbanState, WorkflowSnapshotData } from "@/lib/state/slices/kanba
 import type { Task } from "@/lib/types/http";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
+import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
 
 type KanbanTask = KanbanState["tasks"][number];
 type Workflow = { id: string; name: string };
+type WorkspaceContextRequest = { workspaceId: string; generation: number };
 
 function isBootHydratedSnapshot(snapshot: WorkflowSnapshotData | undefined): boolean {
   return !!snapshot && snapshot.isPlaceholder !== true;
@@ -19,12 +21,18 @@ async function fetchAndWriteSnapshot(
   store: StoreApi<AppState>,
   fetchGenRef: MutableRefObject<number>,
   myGen: number,
+  request: WorkspaceContextRequest,
 ): Promise<void> {
   try {
     const snapshotAtFetchStart = store.getState().kanbanMulti.snapshots[wf.id];
     const taskIdsAtFetchStart = new Set((snapshotAtFetchStart?.tasks ?? []).map((t) => t.id));
     const snapshot = await fetchWorkflowSnapshot(wf.id, { cache: "no-store" });
-    if (fetchGenRef.current !== myGen) return;
+    if (
+      fetchGenRef.current !== myGen ||
+      !isCurrentWorkspaceContext(store.getState(), request.workspaceId, request.generation)
+    ) {
+      return;
+    }
 
     const steps = snapshot.steps.map((step) => ({
       id: step.id,
@@ -140,12 +148,21 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
     lastFetchedRef.current = key;
 
     const myGen = fetchGenRef.current;
+    const request = {
+      workspaceId,
+      generation: store.getState().workspaceContextGeneration,
+    };
     store.getState().setKanbanMultiLoading(true);
 
     Promise.all(
-      workspaceWorkflows.map((wf) => fetchAndWriteSnapshot(wf, store, fetchGenRef, myGen)),
+      workspaceWorkflows.map((wf) => fetchAndWriteSnapshot(wf, store, fetchGenRef, myGen, request)),
     ).finally(() => {
-      if (fetchGenRef.current !== myGen) return;
+      if (
+        fetchGenRef.current !== myGen ||
+        !isCurrentWorkspaceContext(store.getState(), request.workspaceId, request.generation)
+      ) {
+        return;
+      }
       store.getState().setKanbanMultiLoading(false);
     });
   }, [workspaceId, workflows, connectionStatus, store]);

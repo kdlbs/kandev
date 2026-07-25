@@ -14,12 +14,16 @@ type MockKanban = {
 type MockState = {
   connection: { status: string };
   kanban: MockKanban;
+  workspaces: { activeId: string | null };
+  workspaceContextGeneration: number;
   hydrate: typeof mockHydrate;
 };
 
 let mockState: MockState = {
   connection: { status: "connected" },
   kanban: { workflowId: null, tasks: [], steps: [], isLoading: false },
+  workspaces: { activeId: "ws-A" },
+  workspaceContextGeneration: 0,
   hydrate: mockHydrate,
 };
 
@@ -56,6 +60,8 @@ function resetState(kanban: Partial<MockKanban> = {}) {
       isLoading: false,
       ...kanban,
     },
+    workspaces: { activeId: "ws-A" },
+    workspaceContextGeneration: 0,
     hydrate: mockHydrate,
   };
 }
@@ -142,5 +148,30 @@ describe("useWorkflowSnapshot — kanban.isLoading", () => {
     await Promise.resolve();
     expect(mockHydrate).not.toHaveBeenCalled();
     expect(mockState.kanban.isLoading).toBe(true);
+  });
+
+  it("discards an A snapshot that resolves after reset activates B but before rerender", async () => {
+    let resolveA: (snapshot: { steps: unknown[]; tasks: unknown[] }) => void = () => {};
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveA = resolve;
+        }),
+    );
+
+    renderHook(() => useWorkflowSnapshot("wf-A"));
+    expect(mockState.kanban.isLoading).toBe(true);
+
+    mockState = {
+      ...mockState,
+      kanban: { workflowId: null, steps: [], tasks: [], isLoading: false },
+      workspaces: { activeId: "ws-B" },
+      workspaceContextGeneration: 1,
+    };
+    resolveA({ steps: [], tasks: [] });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+
+    expect(mockHydrate).not.toHaveBeenCalled();
+    expect(mockState.kanban.isLoading).toBe(false);
   });
 });

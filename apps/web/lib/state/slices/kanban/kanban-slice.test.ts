@@ -5,6 +5,7 @@ import { createKanbanSlice } from "./kanban-slice";
 import type { KanbanSlice } from "./types";
 
 const TASK_ID = "task-1";
+const WORKFLOW_ID = "workflow-a";
 const AUTO_SESSION_ID = "session-auto";
 const PINNED_SESSION_ID = "session-pinned";
 
@@ -65,6 +66,63 @@ describe("kanban slice active session selection", () => {
       activeSessionId: AUTO_SESSION_ID,
       pinnedSessionId: null,
       lastSessionByTaskId: { [TASK_ID]: PINNED_SESSION_ID, "task-2": AUTO_SESSION_ID },
+    });
+  });
+});
+
+describe("kanban slice workspace transition", () => {
+  it("clears workflow, board, and active task context before loading another workspace", () => {
+    const store = makeStore();
+    store.setState({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [{ id: "step-a", title: "Todo", color: "blue", position: 0 }],
+        tasks: [
+          {
+            id: TASK_ID,
+            workflowStepId: "step-a",
+            title: "Workspace A task",
+            position: 0,
+          },
+        ],
+      },
+      kanbanMulti: {
+        snapshots: {
+          [WORKFLOW_ID]: {
+            workflowId: WORKFLOW_ID,
+            workflowName: "Workflow A",
+            steps: [],
+            tasks: [],
+          },
+        },
+        isLoading: true,
+      },
+      workflows: {
+        items: [{ id: WORKFLOW_ID, workspaceId: "workspace-a", name: "Workflow A" }],
+        activeId: WORKFLOW_ID,
+      },
+      workspaceContextGeneration: 7,
+      tasks: {
+        activeTaskId: TASK_ID,
+        activeSessionId: PINNED_SESSION_ID,
+        pinnedSessionId: PINNED_SESSION_ID,
+        lastSessionByTaskId: { [TASK_ID]: PINNED_SESSION_ID },
+      },
+    });
+
+    store.getState().resetKanbanWorkspaceContext();
+
+    expect(store.getState()).toMatchObject({
+      kanban: { workflowId: null, steps: [], tasks: [] },
+      kanbanMulti: { snapshots: {}, isLoading: false },
+      workflows: { items: [], activeId: null },
+      workspaceContextGeneration: 8,
+      tasks: {
+        activeTaskId: null,
+        activeSessionId: null,
+        pinnedSessionId: null,
+        lastSessionByTaskId: {},
+      },
     });
   });
 });
