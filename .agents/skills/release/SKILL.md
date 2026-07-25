@@ -31,6 +31,20 @@ Entirely in CI via `.github/workflows/release.yml`, triggered by a maintainer fr
 
 There is no local release script — the entire flow runs in GHA.
 
+## Release-tag signing configuration
+
+The release workflow reads signing configuration from the GitHub `release`
+environment. `RELEASE_GPG_PRIVATE_KEY` and the optional
+`RELEASE_GPG_PASSPHRASE` are environment secrets. The full 40-character
+`RELEASE_GPG_FINGERPRINT` is an environment variable, not a secret: the
+workflow reads `vars.RELEASE_GPG_FINGERPRINT`, so storing it as a secret makes
+normal-release preflight treat it as missing.
+
+`.github/release-signing-key.asc` must contain exactly one public primary key
+whose fingerprint matches that variable; never commit private key material.
+`backfill_tag` repairs publication for an already-signed existing tag only and
+does not bypass the normal-release signing checks.
+
 Desktop signing is automatic. Complete macOS/Windows signing and notarization secrets produce signed artifacts; missing or incomplete signing inputs produce unsigned desktop artifacts and the GitHub release notes get an unsigned-artifact warning. `desktop_validation_only=true` builds artifacts from the current workflow ref for maintainer inspection and skips the release PR, tag, GitHub release, npm publish, Homebrew update, and public container tags.
 
 ## Runtime resolution

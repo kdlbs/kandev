@@ -41,6 +41,13 @@ a new round: reassess prior findings and the verdict against the new head, and
 verify checks or workflow results for that head rather than relying on a PR
 number or author summary.
 
+When the base branch advanced after the reviewed head's CI run, validate the
+actual merge result before declaring the PR ready. Record the latest base and
+immutable head SHAs, create a temporary worktree from that base, merge the head
+with `git merge --no-commit --no-ff <head-sha>`, and run focused verification in
+the merged tree before removing the worktree. GitHub's `mergeable: MERGEABLE`
+status proves conflict compatibility, not that the merged result was tested.
+
 For an existing GitHub PR, inspect both `scripts/pr-state --summary <PR>` and
 `scripts/pr-resolve list <PR>` before treating review feedback as clean. Read
 the body of any exact-current-head review as well as inline threads: bots can
@@ -66,6 +73,8 @@ Before reviewing implementation details:
 - Identify missing coverage for happy path, key error paths, edge cases, auth/workspace boundaries, and concurrency/order-sensitive behavior.
 - For concurrent or event-driven changes, require a deterministic schedule that checks ownership or generation identity, stale-event handling, cancellation, and lock scope. Channel/barrier coordination is preferable to timing sleeps.
 - For stale-event races, cover both event-before-successor and delayed-old-event-after-successor orderings. Prefer integration coverage for cross-package event or callback paths when practical.
+- For terminal event streams, block an earlier publication, enqueue a terminal event (for example delete or cancellation), then enqueue a stale update. Assert no later mutation reaches an upserting consumer; queues must tombstone the entity or discard pending work at the terminal boundary.
+- When completion events lack a stable workload identity, test N outstanding registrations with N completion signals and duplicate delivery. A single-registration test cannot prove that uncorrelated completions retire work correctly. Compare this behavior with the accepted spec or ADR; a passing test that contradicts the contract is still a blocker.
 - Treat missing tests for new or changed non-UI logic as a blocker unless the change is explicitly untestable and says why.
 
 ### 3. Review for issues
@@ -134,9 +143,8 @@ Check every changed file for the following layers. Skip layers that don't apply 
 
 **Testing (blocker if missing):**
 - Backend (Go): new or changed functions/methods must have corresponding `*_test.go` tests
-- Frontend (JS/TS libs only): new utility functions, hooks, API clients, and store slices must have `*.test.ts` tests
-- We do NOT test React components — skip those
-- Exceptions: config files, generated code, React component markup
+- Frontend: new utilities, hooks, API clients, and store slices must have focused tests. Pure React markup may skip a unit test, but behavior-bearing components (conditional status, accessibility, store-derived state, or responsive/mobile variants) need focused `*.test.tsx` coverage and/or E2E. Route responsive user-facing changes through `/mobile-parity`.
+- Exceptions: config files, generated code, and pure React component markup
 - Missing tests for new or changed logic is a **blocker** — suggest what tests to add and recommend `/tdd`
 
 ### 4. Report

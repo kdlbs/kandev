@@ -19,6 +19,13 @@ an access/fetch gate,
 or an otherwise terminal PR state. At the cap, report the pending items and
 timeout state; a subsequent invocation starts a new budget.
 
+Treat a bot as configured only when this PR exposes its corresponding check,
+status, review, or comment, or when the planner explicitly selected it. Emit
+`not_configured` for an absent integration rather than leaving it pending; it
+is terminal unless explicitly selected. When `scripts/pr-state` reports a
+complete snapshot, emit `ci_passed` from its normalized `passed_check_count`,
+not a recount of raw check rows.
+
 The planner may provide `selected_reviewer=<GitHub login>`. Read raw
 `scripts/pr-state --trusted-reviewer "$selected_reviewer" <PR>` when selection is set: review evidence is qualified
 only when `checks_head_sha` plus opening/closing heads match and

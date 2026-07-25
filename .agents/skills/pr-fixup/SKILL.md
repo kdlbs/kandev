@@ -94,8 +94,10 @@ above overrides this rule. The planner does not inspect or resolve conflicts dir
   gate overrides this rule. Omission is known empty only after a complete report.
 - `ci_pending` — anything still running when the 20-min cap hit. Only `none` is
   a known non-pending state.
-- `bots.<name>` — `done` / `rate_limited` / `pending` / `timeout` / `unknown`.
-  Only `done` and `rate_limited` are clean; surface `timeout`, and treat
+- `bots.<name>` — `done` / `rate_limited` / `not_configured` / `pending` / `timeout` / `unknown`.
+  `not_configured` means the PR exposes no corresponding integration signal and
+  is clean unless that reviewer was explicitly selected. Only `done`,
+  `rate_limited`, and `not_configured` are clean; surface `timeout`, and treat
   `pending` or `unknown` as incomplete state.
 - `review_evidence` — contains `reviewer`, `qualification`, `reviewed_head_sha`,
   `review_state`, `eligibility`, `verdict`, `active_changes_requested`, and
@@ -116,7 +118,8 @@ above overrides this rule. The planner does not inspect or resolve conflicts dir
 - `unresolved_review_threads` and `actionable_issue_comments_from_bots` — drive steps 3-4.
   Skip to step 5 only when both are known `0`, `ci_failed` is explicitly known
   empty, `ci_pending` is `none`, the merge-conflict gate is known clean, and
-  every configured reviewer is done or `rate_limited` (or an explicitly selected reviewer is
+  every configured reviewer is done or `rate_limited`, with absent integrations
+  reported as `not_configured` (or an explicitly selected reviewer is
   `qualified` with no blockers; still run verify + push if you have fixes from
   earlier).
 

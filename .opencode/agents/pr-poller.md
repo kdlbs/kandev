@@ -36,6 +36,13 @@ state. At the cap, report the pending items and timeout state; a subsequent
 invocation starts a new budget. Report only observed values in one compact
 report block.
 
+Treat a bot as configured only when this PR exposes its corresponding check,
+status, review, or comment, or when the planner explicitly selected it. Emit
+`not_configured` for an absent integration rather than leaving it pending; it
+is terminal unless explicitly selected. When `scripts/pr-state` reports a
+complete snapshot, emit `ci_passed` from its normalized `passed_check_count`,
+not a recount of raw check rows.
+
 The planner may provide `selected_reviewer=<GitHub login>`. For selection,
 read raw `scripts/pr-state --trusted-reviewer "$selected_reviewer" <PR>`: only known/complete records with matching
 checks/opening/closing heads, `checks_snapshot_complete=true`, and
