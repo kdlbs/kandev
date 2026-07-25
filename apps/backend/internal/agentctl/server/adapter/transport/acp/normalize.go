@@ -23,11 +23,15 @@ const (
 	toolTypeSearch  = "tool_search"
 	toolTypeGeneric = "tool_call"
 
-	toolStatusComplete   = "complete"
-	toolStatusCompleted  = "completed"
-	toolStatusError      = "error"
-	toolStatusInProgress = "in_progress"
-	toolStatusCancelled  = "cancelled"
+	toolStatusComplete    = "complete"
+	toolStatusCompleted   = "completed"
+	toolStatusError       = "error"
+	toolStatusErrored     = "errored"
+	toolStatusInProgress  = "in_progress"
+	toolStatusCancelled   = "cancelled"
+	toolStatusInterrupted = "interrupted"
+	toolStatusNotFound    = "notFound"
+	toolStatusShutdown    = "shutdown"
 
 	// args map keys the adapter stashes so the normalizer can detect subagent
 	// (Task) tool calls without changing NormalizeToolCall's signature.
@@ -39,6 +43,13 @@ const (
 	readTypeDirectory  = "directory"
 	genericLabelFile   = "file"
 	genericLabelFolder = "folder"
+
+	claudeAgentID = "claude-acp"
+
+	// mockAgentID is the controlled dev/E2E simulator. It emits captured
+	// Claude lifecycle shapes so product tests can exercise the same trusted
+	// path without credentials; the mock provider is disabled in production.
+	mockAgentID = "mock-agent"
 )
 
 // DetectToolOperationType determines the specific tool operation type from ACP tool data.
@@ -117,6 +128,9 @@ func (n *Normalizer) NormalizeToolCall(toolName string, args map[string]any) *st
 		payload = n.normalizeGeneric(toolName, args)
 	}
 	applyAgentEnrichment(n.agentID, payload, enrichFrameFromArgs(args))
+	if n.agentID == claudeAgentID && payload.ShellExec() != nil && payload.ShellExec().Background {
+		payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
+	}
 	return payload
 }
 
@@ -228,6 +242,9 @@ func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawI
 
 	if se := payload.ShellExec(); se != nil {
 		updateShellExecInput(se, inputMap)
+		if n.agentID == claudeAgentID && se.Background {
+			payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
+		}
 	}
 	if gen := payload.Generic(); gen != nil {
 		updateGenericInput(gen, inputMap, supplemental)
@@ -572,6 +589,7 @@ func (n *Normalizer) normalizeSubagent(args map[string]any) (*streams.Normalized
 	if frame, ok := n.dialect.parseSubagentFrame(meta, title, rawInput); ok {
 		payload := streams.NewSubagentTask(frame.description, frame.prompt, frame.subagentType)
 		applySubagentResult(payload.SubagentTask(), frame.result)
+		stampSubagentBackgroundWork(payload, n.agentID)
 		return payload, true
 	}
 	desc, prompt, subagentType, ok := recognizeSubagent(meta, title, rawInput)
@@ -579,6 +597,9 @@ func (n *Normalizer) normalizeSubagent(args map[string]any) (*streams.Normalized
 		return nil, false
 	}
 	payload := streams.NewSubagentTask(desc, prompt, subagentType)
+	if (n.agentID == claudeAgentID || n.agentID == mockAgentID) && isClaudeAgentMeta(meta) {
+		stampSubagentBackgroundWork(payload, n.agentID)
+	}
 	// Mark Auggie subagents at recognition time so the result extractor
 	// (which reads a generic `rawOutput.output` string) only runs for
 	// payloads whose tool_call title actually carried the Auggie prefix.
@@ -610,6 +631,44 @@ func (n *Normalizer) EnrichSubagentResult(payload *streams.NormalizedPayload, me
 		return
 	}
 	applySubagentResult(sa, res)
+	if payload.BackgroundWork() != nil {
+		stampSubagentBackgroundWork(payload, n.agentID)
+	}
+}
+
+func stampSubagentBackgroundWork(payload *streams.NormalizedPayload, agentID string) {
+	if payload == nil || payload.SubagentTask() == nil {
+		return
+	}
+	if agentID != claudeAgentID && agentID != codexAgentID && agentID != mockAgentID {
+		return
+	}
+	subagent := payload.SubagentTask()
+	workID := subagent.AgentID
+	if workID == "" {
+		workID = subagent.ChildSessionID
+	}
+	detached := subagent.IsAsync
+	ended := subagentStatusTerminal(subagent.Status)
+	if detached && subagent.Status == subagentAsyncLaunchedStatus {
+		ended = false
+	}
+	payload.SetBackgroundWorkIdentity(
+		streams.BackgroundWorkKindSubagent,
+		workID,
+		detached,
+		ended,
+	)
+}
+
+func subagentStatusTerminal(status string) bool {
+	switch status {
+	case toolStatusComplete, toolStatusCompleted, toolStatusError, toolStatusErrored,
+		"failed", toolStatusCancelled, toolStatusInterrupted, toolStatusShutdown, toolStatusNotFound:
+		return true
+	default:
+		return false
+	}
 }
 
 // --- Helper functions ---

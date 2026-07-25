@@ -1,6 +1,6 @@
 # 0049: Fine-grained foreground-idle busy signal
 
-**Status:** accepted (amended 2026-07-24)
+**Status:** accepted (amended 2026-07-25)
 **Date:** 2026-07-11
 **Area:** backend, frontend, protocol
 **Related:** [Background work liveness spec](../specs/platform/background-work-liveness.md)
@@ -50,9 +50,42 @@ to the foreground only:
   while it generates the completion summary.
 
 - A `RUNNING` session accepts a new prompt when its foreground turn is idle and at least one recognized background task is outstanding; otherwise it keeps rejecting input exactly as before.
-- Recognition keys off the **normalized shape** of the work (subagent task / `run_in_background` shell / active Monitor), not tool-name string matching. The ACP normalizer is corrected to recognize Claude's `run_in_background:true` shell shape (a normalizer bug fix in its own right).
-- Monitor recognition rests on **adapter attestation, not payload shape**. A Monitor normalizes to a Generic payload, and that payload's `Output` is assigned the agent's raw tool result verbatim — so *nothing carried inside `Output` can vouch for its own origin*, however many fields a classifier demands. The ACP adapter therefore stamps a typed `MonitorPayload` as a **sibling** of the Generic payload, on the path already gated by ACP `_meta.claudeCode.toolName` (metadata the claude-agent-acp wrapper sets, which model tool output cannot reach). `IsActiveMonitor` classifies on that attestation alone. `Output` keeps carrying the view the frontend card renders — it is a presentation contract, not a trust one. (The payload's `Name` is likewise unusable as a discriminator: it carries the ACP tool *kind*, which is `"other"` for Monitor.)
-- The default is **busy**: any agent whose in-flight frames are not recognized as background work (Codex, OpenCode, and any future agent) preserves today's exact reject-while-`RUNNING` contract. The narrowing is capability-gated, not assumed — and, per the point above, an unrecognized agent cannot relax its own gate by shaping its tool output.
+- Recognition rests on **adapter attestation, not normalized presentation
+  shape**. A normalized subagent, shell, or Generic card describes what the UI
+  renders; it does not prove that Kandev understands the provider's complete
+  workload lifecycle. The adapter stamps typed background-work provenance only
+  on a path whose launch, foreground-yield, and accountable terminal frames are
+  covered by protocol fixtures. Agent-shaped input or output is never allowed
+  to stamp that provenance.
+- Initial capability support is deliberately narrow: Claude subagents,
+  `run_in_background` shells, and Monitor watches retain their tested support;
+  Codex subagents opt in once child terminal activity is correlated; OpenCode,
+  Cursor, Auggie, Copilot, Amp, generic ACP, and future agents remain
+  foreground-busy until their full lifecycle is covered. This is a typed
+  adapter capability, not a central string whitelist of agent names.
+- The mock provider is a dev/E2E-only exception that replays captured Claude
+  lifecycle metadata through this trusted path; it does not expand production
+  agent support.
+- Codex child activity may use a different ACP tool-call ID from the original
+  launch. Its child thread/session ID is therefore the workload correlation
+  identity. Completion, interruption, cancellation, error, shutdown, and
+  provider-reported disappearance retire the original registration exactly
+  once; generic collaboration control cards do not create new subagent
+  registrations.
+- Monitor remains the motivating trust example. It normalizes to a Generic
+  payload whose `Output` is raw agent data, so the adapter-issued typed
+  provenance remains a sibling of presentation data. The same trust rule now
+  governs every background-work kind rather than Monitor alone.
+- The default is **busy**: any agent whose in-flight frames are not attested as
+  recognized background work preserves the reject-while-`RUNNING` contract. An
+  unrecognized agent cannot relax its own gate by shaping a tool card or result.
+- The live registry stores workload kind and provider-owned child identity per
+  registration. `active_subagent_count` is derived by counting live subagent
+  registrations, never maintained as an independent mutable counter. Session
+  DTOs and activity events expose that count; task DTOs sum it across sessions.
+  Shells and Monitor watches affect liveness but not the subagent count. This
+  preserves identities for a future subagent list without committing the
+  current UI to one.
 - Admission is **check-and-claim, not check-then-act**. The gate is a pure read, so `PromptTask` follows a passing read with an atomic `claimForegroundTurn` before it drives the turn: the check and the flip back to foreground-generating happen under one lock. Without this, two prompts landing in the background-idle window together (a double-send, two tabs) would both pass the read — the window spans a session reload, `ensureSessionRunning`, and a possibly network-bound model switch — and both reach `executor.Prompt`, starting overlapping turns on one ACP session. Exactly one prompt wins; the losers are rejected with `ErrAgentPromptInProgress` just as they were before this ADR.
 - The claim is **held, not merely taken**, and is tracked independently of background-idle activity. It survives until agentctl accepts the prompt, so a background tool call landing while the prompt is in preflight or queued cannot reopen the gate underneath it. The lifecycle adapter reports that exact dispatch boundary before waiting for turn completion. Claim tokens bind the activity record and a monotonically increasing admission generation, so a delayed completion or release cannot mutate a newer claim for the same session. A failed pre-dispatch prompt reopens the gate only if no newer foreground output invalidated its captured foreground epoch. Every transition that changes the substate is broadcast, including a release and background work that becomes visible when a claim completes, so clients cannot remain stranded on the admission-time value.
 - Lifecycle prompt delivery is serialized per agent execution. Agentctl acknowledges transport dispatch before the adapter's prompt RPC completes, so adapter-level queuing alone does not protect lifecycle's shared completion channel and response buffers from concurrent callers. An execution-scoped mutex gives each prompt one waiter and one buffer set; dispatch-only sends leave a pending-completion barrier that the next send must consume before resetting those buffers.
@@ -79,6 +112,10 @@ The distinction is surfaced to the operator as a fine-grained substate (`foregro
 
 - The composer gates on foreground-generating rather than coarse `RUNNING`.
 - A tri-state status indicator distinguishes generating / working-in-background / done; the established "running" affordance is unchanged and a distinct indicator is *added* for the background-idle substate — it never reads as "done" while background work runs.
+- The compact sidebar deliberately reuses the dashed running spinner: yellow
+  means foreground generation and violet means background work. A distinct
+  tooltip and accessible label carry the textual meaning; richer status
+  surfaces continue to show the background-work label.
 - The substate is delivered live over a `session.activity_changed` WS event and
   carried on `session.state_changed`. It is also read from the in-memory tracker
   into the boot payload and the session REST/WS DTOs. Generating is meaningful
@@ -89,19 +126,28 @@ The distinction is surfaced to the operator as a fine-grained substate (`foregro
 
 The operator is no longer falsely locked out while background work runs, and the UI truthfully shows "working in the background" as distinct from both "generating" and "done". Accepting input earlier does not make delivery earlier for a held-open subagent turn — that message still waits behind the open exchange, as the queue does today — but out-of-turn work (a Monitor burst, a backgrounded shell after the main turn yielded) is forwarded promptly with no false "already running" rejection.
 
-The signal is best-effort across a backend or agent-execution restart. Connected
-executions retain background liveness across foreground turns, but detached
-work that survives a restart cannot be reconstructed without an agent-side
-liveness API. Recognition is deliberately Claude-shaped today (subagent task,
-`run_in_background` shell, active Monitor are Claude features); other agents
-keep today's behavior.
+The signal and count are best-effort across a backend or agent-execution
+restart. Connected executions retain background liveness and exact subagent
+registrations across foreground turns, but work that survives a restart cannot
+be reconstructed without an agent-side liveness API. Claude and Codex are the
+initial attested adapters; all others keep the conservative busy behavior.
 
 ## Alternatives Considered
 
 - **Rely on upstream synthetic idle-turn completion alone.** Rejected: it structurally cannot arm while the foreground prompt exchange is open, and its debounce re-extends under event bursts, so the held-open and chained-burst windows remain. A falsifiable acceptance test drives a chatty Monitor and confirms a prompt sent during a burst is accepted only with the fine-grained gate.
 - **Drop the `RUNNING` gate / always accept input.** Rejected: it would let a new message race a genuinely-generating foreground turn, risking dropped or reordered messages and regressing non-steering agents.
 - **Persist the foreground/background distinction to the database (like the coarse states).** Rejected: persistence without an agent-side reconciliation API becomes a second source of truth and can survive restart as a false live value after the workload has died. Connected-execution tracking is kept in memory and read at serialization boundaries; turn close no longer destroys it, while execution teardown does.
-- **Recognize background work by tool-name string matching.** Rejected as brittle across agents and updates; recognition keys on the normalized payload shape so producer and consumer share one contract.
+- **Recognize background work by normalized payload shape.** Rejected: the shape
+  is shared presentation data and proves neither provider capability nor
+  terminal lifecycle support. It caused Codex starts to register globally even
+  though terminal child activities were not correlated.
+- **Maintain a central agent-name whitelist.** Rejected: an agent identity does
+  not prove that the installed adapter/provider version emits the lifecycle
+  frames Kandev expects. Capability is stamped at the adapter recognition point
+  and locked by fixtures instead.
+- **Maintain an increment/decrement subagent counter.** Rejected: duplicate or
+  out-of-order terminal events can drift an independent counter. Count is
+  derived from the idempotent live registration map.
 - **Treat every parentless tool update as foreground activity.** Rejected:
   incremental providers may omit lineage metadata on an update after supplying
   it on the initial call. Reclassifying from each update makes missing metadata

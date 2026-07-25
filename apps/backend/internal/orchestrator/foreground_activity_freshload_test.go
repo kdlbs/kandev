@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -84,6 +85,42 @@ func TestFreshLoad_SettledSessionWithDetachedWorkSerializesBackground(t *testing
 	}
 }
 
+func TestFreshLoad_SessionAndTaskSerializeActiveSubagentCounts(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	register := func(sessionID, toolCallID string) {
+		svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+			TaskID: "task-count", SessionID: sessionID, ExecutionID: "execution-count",
+			Data: &lifecycle.AgentStreamEventData{
+				Type:       agentEventToolCall,
+				ToolCallID: toolCallID,
+				ToolStatus: "in_progress",
+				Normalized: attestedSubagentPayload("audit", "inspect", "reviewer"),
+			},
+		})
+	}
+	register("session-one", "subagent-1")
+	register("session-one", "subagent-2")
+	register("session-two", "subagent-3")
+
+	sessionDTO := &taskdto.TaskSessionDTO{ID: "session-one", State: models.TaskSessionStateRunning}
+	taskdto.EnrichForegroundActivity(sessionDTO, svc)
+	if got := marshalIntField(t, sessionDTO, "active_subagent_count"); got != 2 {
+		t.Fatalf("session active_subagent_count = %d, want 2", got)
+	}
+
+	taskDTO := &taskdto.TaskDTO{ID: "task-count"}
+	sessions := []*models.TaskSession{
+		{ID: "session-one", State: models.TaskSessionStateRunning},
+		{ID: "session-two", State: models.TaskSessionStateWaitingForInput},
+	}
+	taskdto.EnrichTaskForegroundActivity(taskDTO, sessions, svc)
+	if got := marshalIntField(t, taskDTO, "active_subagent_count"); got != 3 {
+		t.Fatalf("task active_subagent_count = %d, want 3", got)
+	}
+}
+
 // marshalField marshals the DTO and returns the string value of foreground_activity.
 func marshalField(t *testing.T, dto any) string {
 	t.Helper()
@@ -109,4 +146,21 @@ func marshalDTO(t *testing.T, dto any) string {
 		t.Fatalf("marshal dto: %v", err)
 	}
 	return string(body)
+}
+
+func marshalIntField(t *testing.T, dto any, field string) int {
+	t.Helper()
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(marshalDTO(t, dto)), &wire); err != nil {
+		t.Fatalf("unmarshal wire: %v", err)
+	}
+	raw, ok := wire[field]
+	if !ok {
+		t.Fatalf("%s absent from wire: %v", field, wire)
+	}
+	var val int
+	if err := json.Unmarshal(raw, &val); err != nil {
+		t.Fatalf("decode %s: %v", field, err)
+	}
+	return val
 }

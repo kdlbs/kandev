@@ -264,7 +264,7 @@ func TestForegroundBusySignal_WiredThroughStreamEvents(t *testing.T) {
 			Type:       agentEventToolCall,
 			ToolCallID: "subagent-1",
 			ToolStatus: "running",
-			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+			Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 		},
 	})
 	emitForegroundIdle(svc, taskID, sessionID)
@@ -317,7 +317,7 @@ func TestForegroundBusySignal_TerminalToolUpdateReclosesGate(t *testing.T) {
 			Type:       agentEventToolCall,
 			ToolCallID: "subagent-1",
 			ToolStatus: "running",
-			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+			Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 		},
 	})
 	emitForegroundIdle(svc, taskID, sessionID)
@@ -333,7 +333,7 @@ func TestForegroundBusySignal_TerminalToolUpdateReclosesGate(t *testing.T) {
 			Type:       "tool_update",
 			ToolCallID: "subagent-1",
 			ToolStatus: agentEventComplete,
-			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+			Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 		},
 	})
 
@@ -368,7 +368,7 @@ func TestForegroundBusySignal_TerminalToolUpdateReclosesGateByIDNotKind(t *testi
 			Type:       agentEventToolCall,
 			ToolCallID: "subagent-1",
 			ToolStatus: "running",
-			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+			Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 		},
 	})
 	emitForegroundIdle(svc, taskID, sessionID)
@@ -416,7 +416,7 @@ func TestForegroundBusySignal_UnregisteredTerminalToolUpdateLeavesGateOpen(t *te
 			Type:       agentEventToolCall,
 			ToolCallID: "subagent-1",
 			ToolStatus: "running",
-			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+			Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 		},
 	})
 	emitForegroundIdle(svc, taskID, sessionID)
@@ -477,8 +477,8 @@ func TestNormalizedIsBackgroundTask(t *testing.T) {
 		want bool
 	}{
 		{"nil", nil, false},
-		{"subagent task", streams.NewSubagentTask("explore", "find files", "general-purpose"), true},
-		{"background shell", streams.NewShellExec("sleep 30", "", "", 0, true), true},
+		{"unattested subagent task", streams.NewSubagentTask("explore", "find files", "general-purpose"), false},
+		{"unattested background shell", streams.NewShellExec("sleep 30", "", "", 0, true), false},
 		{"foreground shell", streams.NewShellExec("ls", "", "", 0, false), false},
 		{"active monitor", monitorGenericPayload(false), true},
 		{"ended monitor", monitorGenericPayload(true), false},
@@ -535,7 +535,7 @@ func TestForegroundBusySignal_BackgroundShellViaUpdate(t *testing.T) {
 			Type:       "tool_update",
 			ToolCallID: "bash-1",
 			ToolStatus: "in_progress",
-			Normalized: streams.NewShellExec("npm run dev", "", "", 0, true),
+			Normalized: attestedBackgroundShellPayload("npm run dev"),
 		},
 	})
 	emitForegroundIdle(svc, taskID, sessionID)
@@ -551,7 +551,7 @@ func TestForegroundBusySignal_BackgroundShellViaUpdate(t *testing.T) {
 			Type:       "tool_update",
 			ToolCallID: "bash-1",
 			ToolStatus: agentEventComplete,
-			Normalized: streams.NewShellExec("npm run dev", "", "", 0, true),
+			Normalized: attestedBackgroundShellPayload("npm run dev"),
 		},
 	})
 	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
@@ -574,8 +574,14 @@ func TestForegroundBusySignal_AsyncSubagentLaunchCompletionPreservesWorkload(t *
 	svc.messageCreator = &mockMessageCreator{}
 
 	const sessionID = "session-async-subagent"
-	payload := streams.NewSubagentTask("background", "sleep", "general-purpose")
+	payload := attestedSubagentPayload("background", "sleep", "general-purpose")
 	payload.SubagentTask().IsAsync = true
+	payload.SetBackgroundWorkIdentity(
+		streams.BackgroundWorkKindSubagent,
+		"test-subagent",
+		true,
+		false,
+	)
 	svc.registerBackgroundTask(sessionID, "subagent-1")
 	svc.markForegroundIdle(sessionID)
 
@@ -687,7 +693,7 @@ func TestForegroundBusySignal_UpdateDoesNotReYieldAfterForeground(t *testing.T) 
 				Type:       "tool_update",
 				ToolCallID: "bash-1",
 				ToolStatus: "in_progress",
-				Normalized: streams.NewShellExec("npm run dev", "", "", 0, true),
+				Normalized: attestedBackgroundShellPayload("npm run dev"),
 			},
 		})
 	}

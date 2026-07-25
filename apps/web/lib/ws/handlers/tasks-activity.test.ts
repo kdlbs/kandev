@@ -73,7 +73,11 @@ function makeMessage(payload: Record<string, unknown>) {
 }
 
 describe("task.updated task-level activity aggregate (live propagation + safe fallback)", () => {
-  type ExistingTask = { id: string; foregroundActivity?: "generating" | "background" };
+  type ExistingTask = {
+    id: string;
+    foregroundActivity?: "generating" | "background";
+    activeSubagentCount?: number;
+  };
 
   function storeWithTask(existing: ExistingTask) {
     const task = { workflowStepId: "step1", title: "T", position: 0, ...existing };
@@ -144,5 +148,42 @@ describe("task.updated task-level activity aggregate (live propagation + safe fa
     const { kanban, multi } = activityFor(store, "t1");
     expect(kanban).toBe("background");
     expect(multi).toBe("background");
+  });
+
+  it("applies and clears the active subagent count, including count-only updates", () => {
+    const store = storeWithTask({
+      id: "t1",
+      foregroundActivity: "generating",
+      activeSubagentCount: 2,
+    });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(makeMessage({ ...makeTask("t1"), active_subagent_count: 0 }));
+
+    expect(store.getState().kanban.tasks.find((task) => task.id === "t1")).toMatchObject({
+      foregroundActivity: "generating",
+      activeSubagentCount: 0,
+    });
+    expect(
+      store.getState().kanbanMulti.snapshots.wf1.tasks.find((task) => task.id === "t1"),
+    ).toMatchObject({
+      foregroundActivity: "generating",
+      activeSubagentCount: 0,
+    });
+  });
+
+  it("preserves the active subagent count when a partial update omits it", () => {
+    const store = storeWithTask({ id: "t1", activeSubagentCount: 3 });
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(makeMessage({ ...makeTask("t1"), title: "Renamed" }));
+
+    expect(
+      store.getState().kanban.tasks.find((task) => task.id === "t1")?.activeSubagentCount,
+    ).toBe(3);
+    expect(
+      store.getState().kanbanMulti.snapshots.wf1.tasks.find((task) => task.id === "t1")
+        ?.activeSubagentCount,
+    ).toBe(3);
   });
 });

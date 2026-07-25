@@ -337,6 +337,91 @@ func TestNormalizeToolCall_CodexMetaIsDialectScoped(t *testing.T) {
 	}
 }
 
+func TestNormalizeSubagentBackgroundAttestationIsAdapterScoped(t *testing.T) {
+	tests := []struct {
+		name    string
+		agentID string
+		args    map[string]any
+		want    bool
+	}{
+		{
+			name:    "Claude Agent metadata",
+			agentID: "claude-acp",
+			args: map[string]any{
+				"kind": "other",
+				"meta": map[string]any{"claudeCode": map[string]any{"toolName": subagentClaudeToolName}},
+			},
+			want: true,
+		},
+		{
+			name:    "Codex collaboration metadata",
+			agentID: codexAgentID,
+			args: map[string]any{
+				"kind": "other",
+				"meta": codexCollaborationMeta(codexCollaborationSpawnAgent, []any{"thread-child"}),
+			},
+			want: true,
+		},
+		{
+			name:    "E2E mock Claude lifecycle metadata",
+			agentID: mockAgentID,
+			args: map[string]any{
+				"kind": "other",
+				"meta": map[string]any{"claudeCode": map[string]any{"toolName": subagentClaudeToolName}},
+			},
+			want: true,
+		},
+		{
+			name:    "OpenCode presentation shape",
+			agentID: "opencode-acp",
+			args:    map[string]any{"kind": "other", "title": subagentTaskName},
+			want:    false,
+		},
+		{
+			name:    "Cursor presentation shape",
+			agentID: "cursor-acp",
+			args: map[string]any{
+				"kind":      "other",
+				"raw_input": map[string]any{subagentKeyToolName: subagentTaskName},
+			},
+			want: false,
+		},
+		{
+			name:    "Auggie presentation shape",
+			agentID: "auggie-acp",
+			args:    map[string]any{"kind": "other", "title": "sub-agent-review: audit"},
+			want:    false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			payload := NewNormalizer(test.agentID).NormalizeToolCall("other", test.args)
+			if got := payload.IsActiveBackgroundWork(); got != test.want {
+				t.Fatalf("IsActiveBackgroundWork() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeBackgroundShellAttestationIsClaudeScoped(t *testing.T) {
+	args := map[string]any{
+		"kind": "execute",
+		"raw_input": map[string]any{
+			"command":           "sleep 30",
+			"run_in_background": true,
+		},
+	}
+	claude := NewNormalizer("claude-acp").NormalizeToolCall("execute", args)
+	if !claude.IsActiveBackgroundWork() || !claude.IsDetachedBackgroundLaunch() {
+		t.Fatal("Claude background shell was not adapter-attested")
+	}
+	openCode := NewNormalizer("opencode-acp").NormalizeToolCall("execute", args)
+	if openCode.IsActiveBackgroundWork() {
+		t.Fatal("OpenCode presentation shape must not self-attest")
+	}
+}
+
 func TestCodexSubagentSequenceUsesImmutableSnapshots(t *testing.T) {
 	a := newTestAdapter()
 	a.agentID = codexAgentID
@@ -385,6 +470,9 @@ func TestCodexSubagentSequenceUsesImmutableSnapshots(t *testing.T) {
 	if got := startSnapshot.SubagentTask(); got.Status != "running" || got.Model != "" {
 		t.Errorf("start event snapshot mutated after completion: status/model = %q/%q", got.Status, got.Model)
 	}
+	if completeEvent.NormalizedPayload.IsActiveBackgroundWork() {
+		t.Error("terminal collaboration result must mark adapter-attested work ended")
+	}
 	if _, active := a.activeToolCalls["call-spawn"]; active {
 		t.Error("terminal completion must remove the active tool call")
 	}
@@ -423,6 +511,7 @@ func TestCloneSubagentPayloadDeepCopiesMutableFields(t *testing.T) {
 	source.OutputFile = "/tmp/result"
 	source.CanReadOutputFile = true
 	source.SetIsAuggie(true)
+	payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindSubagent, "child-1", false, false)
 
 	clone := cloneSubagentPayload(payload).SubagentTask()
 	source.Description = "mutated"
@@ -432,6 +521,9 @@ func TestCloneSubagentPayloadDeepCopiesMutableFields(t *testing.T) {
 	}
 	if !clone.IsAuggie() || !clone.IsAsync || clone.OutputFile != "/tmp/result" || !clone.CanReadOutputFile {
 		t.Fatalf("clone lost adapter fields: %+v", clone)
+	}
+	if background := cloneSubagentPayload(payload).BackgroundWork(); background == nil || background.WorkID != "child-1" {
+		t.Fatalf("clone lost background attestation: %+v", background)
 	}
 }
 
@@ -469,6 +561,68 @@ func TestCodexSubagentActivityDeduplicatesWhileRunning(t *testing.T) {
 	}
 	if got := activityEvent.NormalizedPayload.SubagentTask().SubagentType; got != "review_agent" {
 		t.Errorf("activity subagent_type = %q, want review_agent", got)
+	}
+}
+
+func TestCodexSubagentTerminalActivityCorrelatesAcrossToolCallIDs(t *testing.T) {
+	for _, status := range []string{
+		toolStatusCompleted,
+		"interrupted",
+		toolStatusCancelled,
+		"errored",
+		"shutdown",
+		"notFound",
+	} {
+		t.Run(status, func(t *testing.T) {
+			a := newTestAdapter()
+			a.agentID = codexAgentID
+			a.normalizer = NewNormalizer(codexAgentID)
+
+			start := a.convertToolCallUpdate(
+				"session-1",
+				codexCollaborationToolCall("call-spawn", "thread-child", "running"),
+			)
+			terminal := a.convertToolCallUpdate(
+				"session-1",
+				codexTerminalActivityToolCall("call-terminal", "thread-child", status),
+			)
+
+			if terminal == nil {
+				t.Fatal("terminal child activity was suppressed despite a matching launch")
+			}
+			if terminal.Type != streams.EventTypeToolUpdate {
+				t.Fatalf("terminal event type = %q, want tool_update", terminal.Type)
+			}
+			if terminal.ToolCallID != start.ToolCallID {
+				t.Fatalf("terminal tool call ID = %q, want original %q", terminal.ToolCallID, start.ToolCallID)
+			}
+			if terminal.ToolStatus != toolStatusComplete {
+				t.Fatalf("terminal tool status = %q, want complete", terminal.ToolStatus)
+			}
+			if got := terminal.NormalizedPayload.SubagentTask().Status; got != status {
+				t.Fatalf("terminal payload status = %q, want %q", got, status)
+			}
+			if terminal.NormalizedPayload.IsActiveBackgroundWork() {
+				t.Fatal("terminal child activity must mark adapter-attested work ended")
+			}
+			if _, active := a.activeToolCalls[start.ToolCallID]; active {
+				t.Fatal("terminal child activity must remove the original active tool call")
+			}
+		})
+	}
+}
+
+func TestCodexUnmatchedTerminalActivityDoesNotCreateSubagentCard(t *testing.T) {
+	a := newCodexCorrelationTestAdapter()
+	event := a.convertToolCallUpdate(
+		"session-1",
+		codexTerminalActivityToolCall("call-terminal", "unknown-child", "interrupted"),
+	)
+	if event != nil {
+		t.Fatalf("unmatched terminal activity emitted a new card: %+v", event)
+	}
+	if len(a.codexSubagentCorrelations) != 0 || len(a.activeToolCalls) != 0 {
+		t.Fatal("unmatched terminal activity mutated subagent tracking")
 	}
 }
 
@@ -511,6 +665,10 @@ func TestCodexCompletedTombstonesAreBoundedOldestFirst(t *testing.T) {
 		childID := "child-" + strconv.Itoa(i)
 		a.convertToolCallUpdate("session-1", codexCollaborationToolCall(id, childID, "running"))
 		a.convertToolCallUpdate("session-1", codexStartedActivityToolCallForChild(id, childID))
+		a.convertToolCallUpdate(
+			"session-1",
+			codexTerminalActivityToolCall("terminal-"+strconv.Itoa(i), childID, toolStatusCompleted),
+		)
 	}
 	if got := a.codexCompletedCorrelationCountLocked(); got != maxCodexCompletedSubagentCorrelations {
 		t.Fatalf("completed tombstones = %d, want %d", got, maxCodexCompletedSubagentCorrelations)
@@ -923,6 +1081,25 @@ func codexStartedActivityToolCallForChild(toolCallID, childID string) *acp.Sessi
 			"threadId": childID,
 			"path":     "/root/review_agent",
 			"activity": codexSubagentStarted,
+		}}},
+	}
+}
+
+func codexTerminalActivityToolCall(toolCallID, childID, activity string) *acp.SessionUpdateToolCall {
+	return &acp.SessionUpdateToolCall{
+		ToolCallId: acp.ToolCallId(toolCallID),
+		Kind:       "other",
+		Title:      "Subagent lifecycle",
+		Status:     toolStatusCompleted,
+		RawInput: map[string]any{
+			"agentThreadId": childID,
+			"agentPath":     "/root/review_agent",
+			"activityKind":  activity,
+		},
+		Meta: map[string]any{"codex": map[string]any{"subagent": map[string]any{
+			"threadId": childID,
+			"path":     "/root/review_agent",
+			"activity": activity,
 		}}},
 	}
 }

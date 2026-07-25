@@ -335,12 +335,16 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		// clearExecutionBackgroundWorkSnapshot can never match this entry on
 		// execution teardown, orphaning it if the execution dies before a
 		// terminal tool frame arrives.
-		s.registerBackgroundWork(
+		kind := backgroundWorkKind(payload.Data.Normalized)
+		if s.registerBackgroundWorkKind(
 			payload.SessionID,
 			payload.Data.ToolCallID,
 			payload.ExecutionID,
 			backgroundWorkID(payload.Data.Normalized),
-		)
+			kind,
+		) && kind == streams.BackgroundWorkKindSubagent {
+			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
+		}
 	case toolOwnershipForeground:
 		if s.markForegroundGenerating(payload.SessionID) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
@@ -599,12 +603,16 @@ func (s *Service) trackBackgroundToolUpdate(
 		// signal arrives. Monitor terminal payloads are no longer classified as
 		// active, and synchronous subagents do not carry IsAsync.
 		if normalizedIsDetachedLaunch(payload.Data.Normalized) {
-			s.registerBackgroundWork(
+			kind := backgroundWorkKind(payload.Data.Normalized)
+			if s.registerBackgroundWorkKind(
 				payload.SessionID,
 				payload.Data.ToolCallID,
 				payload.ExecutionID,
 				backgroundWorkID(payload.Data.Normalized),
-			)
+				kind,
+			) && kind == streams.BackgroundWorkKindSubagent {
+				s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
+			}
 			return
 		}
 		// A finished top-level background task no longer holds the turn open.
@@ -638,12 +646,16 @@ func (s *Service) trackBackgroundToolUpdate(
 	// classifier can see them. Register only on that first recognition:
 	// re-registering on later updates would re-set `yielded` and clobber a
 	// foreground stream that meanwhile marked the turn generating again.
-	s.registerBackgroundWork(
+	kind := backgroundWorkKind(payload.Data.Normalized)
+	if s.registerBackgroundWorkKind(
 		payload.SessionID,
 		payload.Data.ToolCallID,
 		payload.ExecutionID,
 		backgroundWorkID(payload.Data.Normalized),
-	)
+		kind,
+	) && kind == streams.BackgroundWorkKindSubagent {
+		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
+	}
 }
 
 // resolveToolUpdateOwnership preserves the ownership established by the
@@ -668,6 +680,9 @@ func backgroundWorkID(payload *streams.NormalizedPayload) string {
 	if payload == nil {
 		return ""
 	}
+	if background := payload.BackgroundWork(); background != nil {
+		return background.WorkID
+	}
 	if subagent := payload.SubagentTask(); subagent != nil {
 		return subagent.AgentID
 	}
@@ -675,6 +690,13 @@ func backgroundWorkID(payload *streams.NormalizedPayload) string {
 		return monitor.TaskID
 	}
 	return ""
+}
+
+func backgroundWorkKind(payload *streams.NormalizedPayload) streams.BackgroundWorkKind {
+	if payload == nil || payload.BackgroundWork() == nil {
+		return ""
+	}
+	return payload.BackgroundWork().Kind
 }
 
 // isTerminalToolStatus reports whether a tool_update status marks the tool call
@@ -1045,7 +1067,8 @@ func (s *Service) publishTaskSessionStateChanged(
 		// Carry activity only while the session can own foreground/background
 		// work. Every other state gets an explicit null so partial client-store
 		// merges clear a previously-live substate during session.stop/teardown.
-		"foreground_activity": foregroundActivity,
+		"foreground_activity":   foregroundActivity,
+		"active_subagent_count": s.ActiveSubagentCount(sessionID),
 	}
 	if stateUpdatedAt != nil && !stateUpdatedAt.IsZero() {
 		eventData[metaKeyUpdatedAt] = stateUpdatedAt.Format(time.RFC3339Nano)

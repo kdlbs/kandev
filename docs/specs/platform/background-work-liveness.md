@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-07-21
-updated: 2026-07-24
+updated: 2026-07-25
 owner: kandev
 ---
 
@@ -21,8 +21,19 @@ and incorrectly prevents prompt delivery.
   may appear as done.
 - A foreground-idle session with recognized background work accepts a new
   prompt. A session with foreground activity continues to reject it.
+- Only adapter-attested workloads relax prompt admission. An adapter opts in a
+  workload only when Kandev has fixture-tested both its launch and accountable
+  terminal lifecycle. Claude subagents, background shells, and Monitor watches,
+  plus Codex subagents, are initially supported; other ACP agents remain
+  conservatively foreground-busy.
+- The runtime retains one registration per live subagent and derives an active
+  subagent count from those registrations. Background shells and Monitor
+  watches contribute to background liveness but not to the subagent count.
 - Task and session status surfaces distinguish generating,
-  background-running, and done without relying on color alone. A pending
+  background-running, and done with text or accessible labels in addition to
+  color. The compact sidebar uses the same dashed spinner for both running
+  states: yellow for foreground generation and violet for background work, with
+  a distinct background-work tooltip and accessible label. A pending
   permission request takes precedence over a pending clarification request,
   which in turn takes precedence over the work-state indicator for a current,
   input-capable session only; stale pending flags on starting or terminal
@@ -41,11 +52,17 @@ and incorrectly prevents prompt delivery.
 - Session records and boot payloads expose `foreground_activity` as
   `generating`, `background`, or absent when no fine-grained activity is known.
   `background` can be present after the coarse session state settles.
-- `session.activity_changed` publishes a changed fine-grained session value;
-  `session.state_changed` carries it with coarse state changes.
+- Session records and boot payloads expose `active_subagent_count`. It is zero
+  or absent when no adapter-attested subagent is live and may be positive while
+  `foreground_activity` is either `generating` or `background`.
+- `session.activity_changed` publishes the changed fine-grained session value
+  and active subagent count; a count-only transition is publishable even when
+  the activity tier does not change. `session.state_changed` carries both with
+  coarse state changes.
 - Task records and `task.updated` carry the most-active-wins
-  `foreground_activity` aggregate. A task update is emitted when that aggregate
-  changes, including a generating-to-background transition with no coarse state
+  `foreground_activity` aggregate and the sum of active subagents across its
+  sessions. A task update is emitted when either aggregate changes, including a
+  generating-to-background or count-only transition with no coarse state
   change.
 
 ## State machine
@@ -65,6 +82,16 @@ execution so each prompt owns its completion wait and response buffers.
 
 - An unknown activity value for an in-flight `RUNNING` session is rendered as
   generating, not done.
+- A normalized tool-card shape cannot attest to background capability. An
+  unsupported adapter that emits a subagent-looking card remains foreground-busy
+  until its launch, yield, and terminal lifecycle are explicitly supported.
+- The development/E2E mock provider may replay captured Claude lifecycle
+  metadata through the same attested path. This is a deterministic test seam,
+  not an additional production-agent capability.
+- A supported adapter must retire the original registration when a terminal
+  child event arrives under a different tool-call ID. Codex child thread/session
+  identity is the correlation key; interrupt, cancellation, failure, shutdown,
+  and normal completion are terminal.
 - Tool-call ownership is established by the initial call and retained across
   incremental updates. An update with unknown ownership preserves the current
   activity; missing parent metadata is not evidence that background-child work
@@ -84,14 +111,29 @@ execution so each prompt owns its completion wait and response buffers.
 
 Fine-grained activity is in memory and is authoritative only while the owning
 agent execution remains connected. A backend or agent-execution restart does
-not reconstruct detached work; it must not preserve a stale live reading.
-Durable coarse state continues to survive as before.
+not reconstruct detached work or active subagent counts; it must not preserve a
+stale live reading. Counts are derived from the live registration map rather
+than persisted or incremented independently. Durable coarse state continues to
+survive as before.
 
 ## Scenarios
 
 - **GIVEN** a foreground-idle session with a recognized background workload,
   **WHEN** the operator sends a prompt, **THEN** the prompt is accepted while
   the status remains background-running until foreground activity begins.
+- **GIVEN** two adapter-attested subagents and one background shell are live,
+  **WHEN** the session is serialized or publishes an activity update, **THEN**
+  `active_subagent_count` is two while all three workloads still contribute to
+  background liveness.
+- **GIVEN** one generating session with one live subagent and another session
+  with two live subagents, **WHEN** the task is serialized, **THEN** its
+  `foreground_activity` is generating and its `active_subagent_count` is three.
+- **GIVEN** a Codex subagent launch and a later terminal child activity under a
+  different tool-call ID, **WHEN** both identify the same child thread, **THEN**
+  the original registration is retired and the count decreases exactly once.
+- **GIVEN** an unsupported ACP adapter emits a normalized subagent-shaped tool
+  card, **WHEN** its prompt remains in flight, **THEN** Kandev reports the
+  foreground as generating and the active subagent count remains zero.
 - **GIVEN** a task with one generating session and one background-running
   session, **WHEN** its aggregate is rendered, **THEN** it shows generating.
 - **GIVEN** a task with no generating session and one background-running
@@ -123,6 +165,7 @@ Durable coarse state continues to survive as before.
 - Mid-turn steering for agents without concurrent-prompt capability.
 - Reconstructing detached-work liveness after backend or agent-execution
   restart.
+- Rendering the active subagent count or individual subagent details in the UI.
 - Changing Office autonomous-agent status vocabulary.
 - Changing archive behavior when the operator has disabled archive
   confirmation.

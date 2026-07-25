@@ -16,6 +16,24 @@ func EnrichTaskForegroundActivity(dto *TaskDTO, sessions []*models.TaskSession, 
 		return
 	}
 	dto.ForegroundActivity = v1.AggregateForegroundActivity(sessionForegroundActivities(sessions, provider))
+	dto.ActiveSubagentCount = taskActiveSubagentCount(sessions, provider)
+}
+
+func taskActiveSubagentCount(
+	sessions []*models.TaskSession,
+	provider ForegroundActivityProvider,
+) int {
+	countProvider, ok := provider.(ActiveSubagentCountProvider)
+	if !ok {
+		return 0
+	}
+	total := 0
+	for _, session := range sessions {
+		if session != nil {
+			total += countProvider.ActiveSubagentCount(session.ID)
+		}
+	}
+	return total
 }
 
 // sessionForegroundActivities resolves generating activity for RUNNING sessions

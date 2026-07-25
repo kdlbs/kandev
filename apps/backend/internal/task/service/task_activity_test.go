@@ -15,11 +15,16 @@ import (
 // fakeActivityProvider resolves a per-session foreground activity so the
 // task-level aggregate can be exercised with distinct values per session.
 type fakeActivityProvider struct {
-	byID map[string]v1.ForegroundActivity
+	byID   map[string]v1.ForegroundActivity
+	counts map[string]int
 }
 
 func (f *fakeActivityProvider) ForegroundActivity(sessionID string) v1.ForegroundActivity {
 	return f.byID[sessionID]
+}
+
+func (f *fakeActivityProvider) ActiveSubagentCount(sessionID string) int {
+	return f.counts[sessionID]
 }
 
 // blockingActivityEventBus pauses a generating publication until the test
@@ -169,6 +174,42 @@ func TestPublishTaskActivityIfChanged_EmitsOnlyOnAggregateChange(t *testing.T) {
 	svc.PublishTaskActivityIfChanged(ctx, "task-1")
 	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
 		t.Fatalf("no change must not re-emit, got %d events", len(events))
+	}
+}
+
+func TestPublishTaskActivityIfChanged_EmitsOnCountOnlyChange(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	createRunningSession(t, ctx, repo, "s1", "task-1", models.TaskSessionStateRunning)
+	createRunningSession(t, ctx, repo, "s2", "task-1", models.TaskSessionStateRunning)
+
+	provider := &fakeActivityProvider{
+		byID: map[string]v1.ForegroundActivity{
+			"s1": v1.ForegroundActivityGenerating,
+			"s2": v1.ForegroundActivityGenerating,
+		},
+		counts: map[string]int{"s1": 1},
+	}
+	svc.SetForegroundActivityProvider(provider)
+
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	if got := singlePublishedEventData(t, eventBus)["active_subagent_count"]; got != 1 {
+		t.Fatalf("initial active_subagent_count = %#v, want 1", got)
+	}
+
+	provider.counts["s1"] = 2
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	if got := singlePublishedEventData(t, eventBus)["active_subagent_count"]; got != 2 {
+		t.Fatalf("count-only active_subagent_count = %#v, want 2", got)
+	}
+
+	eventBus.ClearEvents()
+	svc.PublishTaskActivityIfChanged(ctx, "task-1")
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("unchanged activity and count emitted %d events", len(events))
 	}
 }
 

@@ -94,6 +94,7 @@ export type TaskEventPayload = {
   // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions;
   // absent/null when no session is running.
   foreground_activity?: ForegroundActivity | null;
+  active_subagent_count?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;
@@ -258,6 +259,7 @@ export type TaskSessionStateChangedPayload = {
   // Fine-grained busy substate (see ADR-0049), carried on coarse transitions;
   // live flips arrive on session.activity_changed.
   foreground_activity?: ForegroundActivity | null;
+  active_subagent_count?: number;
 };
 
 /**
@@ -269,6 +271,7 @@ export type TaskSessionActivityChangedPayload = {
   task_id: string;
   session_id: string;
   foreground_activity: ForegroundActivity | null;
+  active_subagent_count: number;
 };
 
 export type TaskSessionNotificationPayload = {

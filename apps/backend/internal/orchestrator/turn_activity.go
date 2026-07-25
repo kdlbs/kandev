@@ -68,6 +68,7 @@ type turnActivity struct {
 type backgroundWork struct {
 	executionID string
 	workID      string
+	kind        streams.BackgroundWorkKind
 	// seq is a monotonically increasing per-session registration order,
 	// assigned only when a registration is first created. It lets an
 	// uncorrelated (ID-less) completion retire the oldest outstanding
@@ -301,8 +302,15 @@ func (s *Service) transitionForegroundToBackground(sessionID string, source fore
 // never be filled in afterward, and clearExecutionBackgroundWorkSnapshot can
 // then never retire the entry on execution teardown.
 func (s *Service) registerBackgroundWork(sessionID, toolCallID, executionID, workID string) {
+	s.registerBackgroundWorkKind(sessionID, toolCallID, executionID, workID, "")
+}
+
+func (s *Service) registerBackgroundWorkKind(
+	sessionID, toolCallID, executionID, workID string,
+	kind streams.BackgroundWorkKind,
+) bool {
 	if sessionID == "" || toolCallID == "" {
-		return
+		return false
 	}
 	ta := s.turnActivityFor(sessionID, true)
 	ta.mu.Lock()
@@ -314,6 +322,9 @@ func (s *Service) registerBackgroundWork(sessionID, toolCallID, executionID, wor
 	if workID != "" {
 		updated.workID = workID
 	}
+	if kind != "" {
+		updated.kind = kind
+	}
 	if !exists {
 		// Assign a sequence only for a brand-new entry: an update that merely
 		// backfills executionID/workID on an existing registration must keep
@@ -322,11 +333,32 @@ func (s *Service) registerBackgroundWork(sessionID, toolCallID, executionID, wor
 		ta.backgroundSeq++
 		updated.seq = ta.backgroundSeq
 	}
-	if !exists || current != updated {
+	changed := !exists || current != updated
+	if changed {
 		ta.revision++
 	}
 	ta.background[toolCallID] = updated
 	ta.mu.Unlock()
+	return changed
+}
+
+// ActiveSubagentCount derives the number of live adapter-attested subagents
+// from the registration map. It is not maintained as an independent counter,
+// so duplicate and out-of-order completion cannot make it drift.
+func (s *Service) ActiveSubagentCount(sessionID string) int {
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil {
+		return 0
+	}
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	count := 0
+	for _, work := range ta.background {
+		if work.kind == streams.BackgroundWorkKindSubagent {
+			count++
+		}
+	}
+	return count
 }
 
 // hasBackgroundTask reports whether toolCallID is already tracked as outstanding
@@ -349,10 +381,8 @@ func (s *Service) hasBackgroundTask(sessionID, toolCallID string) bool {
 // task, scoped to the execution that owns it (an empty executionID matches any
 // owner — see the test-only completeBackgroundTask wrapper). When no
 // background task remains, the foreground turn is no longer "waiting on
-// background". It returns true when clearing this task flipped the session
-// back out of the background-idle substate (the last outstanding task
-// finished), so the caller publishes the activity signal only on that final
-// completion.
+// background". It returns true whenever a registration was removed so the
+// caller also publishes count-only transitions while other work remains.
 func (s *Service) completeBackgroundTaskForExecution(sessionID, toolCallID, executionID string) bool {
 	if sessionID == "" || toolCallID == "" {
 		return false
@@ -369,13 +399,13 @@ func (s *Service) completeBackgroundTaskForExecution(sessionID, toolCallID, exec
 	}
 	delete(ta.background, toolCallID)
 	ta.revision++
-	changed := false
+	visibleChanged := false
 	if len(ta.background) == 0 && ta.yielded {
 		ta.yielded = false
-		changed = true
+		visibleChanged = true
 	}
 	ta.mu.Unlock()
-	return changed
+	return visibleChanged || work.kind == streams.BackgroundWorkKindSubagent
 }
 
 // completeBackgroundWork retires a provider completion. Identified completions
@@ -427,9 +457,11 @@ func (s *Service) completeBackgroundWorkSnapshot(
 	if matchedToolCallID == "" {
 		return activityPublication{}, false
 	}
+	removed := ta.background[matchedToolCallID]
 	delete(ta.background, matchedToolCallID)
 	ta.revision++
-	if !ta.clearYieldWhenEmptyLocked() {
+	visibleChanged := ta.clearYieldWhenEmptyLocked()
+	if !visibleChanged && removed.kind != streams.BackgroundWorkKindSubagent {
 		return activityPublication{}, false
 	}
 	return activityPublication{activity: ta, revision: ta.revision, value: value}, true
@@ -437,8 +469,8 @@ func (s *Service) completeBackgroundWorkSnapshot(
 
 // clearExecutionBackgroundWork removes every registration owned by one
 // terminal execution, preserving any successor execution already using the
-// same task session. It returns true only for a visible background->default
-// transition; callers publish after the tracker lock is released.
+// same task session. It returns true whenever registrations were removed so
+// callers publish count-only transitions too.
 func (s *Service) clearExecutionBackgroundWorkSnapshot(
 	sessionID, executionID string,
 ) (activityPublication, bool) {
@@ -452,21 +484,29 @@ func (s *Service) clearExecutionBackgroundWorkSnapshot(
 	ta.mu.Lock()
 	defer ta.mu.Unlock()
 	removed := false
+	removedSubagent := false
 	for toolCallID, work := range ta.background {
 		if work.executionID == executionID {
 			delete(ta.background, toolCallID)
 			removed = true
+			removedSubagent = removedSubagent || work.kind == streams.BackgroundWorkKindSubagent
 		}
 	}
 	if !removed {
 		return activityPublication{}, false
 	}
 	ta.revision++
-	changed := ta.clearYieldWhenEmptyLocked()
-	if !changed {
+	finalTransition := ta.clearYieldWhenEmptyLocked()
+	if !finalTransition && !removedSubagent {
 		return activityPublication{}, false
 	}
-	return activityPublication{activity: ta, revision: ta.revision, value: nil}, true
+	value := interface{}(string(v1.ForegroundActivityGenerating))
+	if ta.yielded {
+		value = string(v1.ForegroundActivityBackground)
+	} else if finalTransition {
+		value = nil
+	}
+	return activityPublication{activity: ta, revision: ta.revision, value: value}, true
 }
 
 func (ta *turnActivity) clearYieldWhenEmptyLocked() bool {
@@ -856,9 +896,10 @@ func (s *Service) publishForegroundActivityNow(
 		return
 	}
 	eventData := map[string]interface{}{
-		metaKeyTaskID:         taskID,
-		metaKeySessionID:      sessionID,
-		"foreground_activity": value,
+		metaKeyTaskID:           taskID,
+		metaKeySessionID:        sessionID,
+		"foreground_activity":   value,
+		"active_subagent_count": s.ActiveSubagentCount(sessionID),
 	}
 	if err := s.eventBus.Publish(ctx, events.TaskSessionActivityChanged,
 		bus.NewEvent(events.TaskSessionActivityChanged, "task-session", eventData)); err != nil {
@@ -873,42 +914,17 @@ func (s *Service) publishForegroundActivityNow(
 	s.publishTaskActivityIfChanged(ctx, taskID)
 }
 
-// normalizedIsBackgroundTask reports whether a normalized tool payload represents
-// spawned background work the foreground turn waits on: a subagent Task, a
-// run-in-background shell command, or an active Claude Monitor watch.
+// normalizedIsBackgroundTask reports whether the adapter attested a live
+// workload whose complete lifecycle Kandev recognizes.
 //
 // A create_task tool is deliberately NOT background — it spawns an independent
 // task/session with its own lifecycle and does not hold the spawning turn open.
 func normalizedIsBackgroundTask(n *streams.NormalizedPayload) bool {
-	if n == nil {
-		return false
-	}
-	if n.Kind() == streams.ToolKindSubagentTask {
-		return true
-	}
-	if se := n.ShellExec(); se != nil && se.Background {
-		return true
-	}
-	// A Monitor is a long-running watch the foreground turn is not actively
-	// generating against. It normalizes to a Generic payload, so it is
-	// recognized via the shared streams predicate rather than a tool-name match.
-	if n.IsActiveMonitor() {
-		return true
-	}
-	return false
+	return n != nil && n.IsActiveBackgroundWork()
 }
 
 // normalizedIsDetachedLaunch distinguishes a launch tool completing from its
 // asynchronously-running workload completing.
 func normalizedIsDetachedLaunch(n *streams.NormalizedPayload) bool {
-	if n == nil {
-		return false
-	}
-	if subagent := n.SubagentTask(); subagent != nil {
-		return subagent.IsAsync
-	}
-	if shell := n.ShellExec(); shell != nil {
-		return shell.Background
-	}
-	return false
+	return n != nil && n.IsDetachedBackgroundLaunch()
 }

@@ -21,11 +21,7 @@ import { isDebugUI } from "@/lib/config";
 import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
-import {
-  getTaskStateIcon,
-  shouldUseQuestionTaskIcon,
-  shouldUsePermissionTaskIcon,
-} from "@/lib/ui/state-icons";
+import { shouldUseQuestionTaskIcon, shouldUsePermissionTaskIcon } from "@/lib/ui/state-icons";
 import type { SessionPollMode } from "@/lib/state/slices/session-runtime/types";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
@@ -212,9 +208,18 @@ function TaskStateIcon({
   }
   if (foregroundActivity === "background") {
     return (
-      <span data-testid="task-state-background-running" className="mt-[1px] flex shrink-0">
-        {getTaskStateIcon(state, "h-3.5 w-3.5", false, "background")}
-      </span>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span aria-label="Background work is running" className="mt-[1px] flex shrink-0">
+            <IconCircleDashed
+              aria-hidden="true"
+              data-testid="task-state-background-running"
+              className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500"
+            />
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="right">Background work is running</TooltipContent>
+      </Tooltip>
     );
   }
   if (shouldUseQuestionTaskIcon(state)) {

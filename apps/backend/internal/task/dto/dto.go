@@ -163,13 +163,14 @@ type TaskDTO struct {
 	// surfaces fall through to the coarse task state (done / waiting / failed).
 	// Computed on the backend and carried on the task record so every task-level
 	// surface reads one authoritative value; stamped by EnrichTaskForegroundActivity.
-	ForegroundActivity v1.ForegroundActivity  `json:"foreground_activity,omitempty"`
-	IsRemoteExecutor   bool                   `json:"is_remote_executor,omitempty"`
-	ParentID           string                 `json:"parent_id,omitempty"`
-	ArchivedAt         *time.Time             `json:"archived_at,omitempty"`
-	CreatedAt          time.Time              `json:"created_at"`
-	UpdatedAt          time.Time              `json:"updated_at"`
-	Metadata           map[string]interface{} `json:"metadata,omitempty"`
+	ForegroundActivity  v1.ForegroundActivity  `json:"foreground_activity,omitempty"`
+	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
+	IsRemoteExecutor    bool                   `json:"is_remote_executor,omitempty"`
+	ParentID            string                 `json:"parent_id,omitempty"`
+	ArchivedAt          *time.Time             `json:"archived_at,omitempty"`
+	CreatedAt           time.Time              `json:"created_at"`
+	UpdatedAt           time.Time              `json:"updated_at"`
+	Metadata            map[string]interface{} `json:"metadata,omitempty"`
 
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
@@ -258,7 +259,8 @@ type TaskSessionDTO struct {
 	// background may remain present after the foreground turn settles.
 	// Not persisted — populated at the serialization boundary by
 	// EnrichForegroundActivity, never by FromTaskSession.
-	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	ForegroundActivity  v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	ActiveSubagentCount int                   `json:"active_subagent_count,omitempty"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
@@ -297,7 +299,8 @@ type TaskSessionSummaryDTO struct {
 	TaskEnvironmentID string                        `json:"task_environment_id,omitempty"`
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate
 	// (ADR-0049); see TaskSessionDTO.
-	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	ForegroundActivity  v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	ActiveSubagentCount int                   `json:"active_subagent_count,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
@@ -771,6 +774,10 @@ type ForegroundActivityProvider interface {
 	ForegroundActivity(sessionID string) v1.ForegroundActivity
 }
 
+type ActiveSubagentCountProvider interface {
+	ActiveSubagentCount(sessionID string) int
+}
+
 // EnrichForegroundActivity stamps the live fine-grained busy substate onto a full
 // session DTO. Generating is emitted only for RUNNING sessions; detached
 // background activity remains meaningful after the coarse state settles.
@@ -781,6 +788,7 @@ func EnrichForegroundActivity(dto *TaskSessionDTO, provider ForegroundActivityPr
 	if activity, ok := sessionForegroundActivity(dto.ID, dto.State, provider); ok {
 		dto.ForegroundActivity = activity
 	}
+	dto.ActiveSubagentCount = activeSubagentCount(dto.ID, provider)
 }
 
 // EnrichForegroundActivitySummary is EnrichForegroundActivity for the lightweight
@@ -792,6 +800,15 @@ func EnrichForegroundActivitySummary(dto *TaskSessionSummaryDTO, provider Foregr
 	if activity, ok := sessionForegroundActivity(dto.ID, dto.State, provider); ok {
 		dto.ForegroundActivity = activity
 	}
+	dto.ActiveSubagentCount = activeSubagentCount(dto.ID, provider)
+}
+
+func activeSubagentCount(sessionID string, provider ForegroundActivityProvider) int {
+	countProvider, ok := provider.(ActiveSubagentCountProvider)
+	if !ok {
+		return 0
+	}
+	return countProvider.ActiveSubagentCount(sessionID)
 }
 
 // WorkflowStepDTO represents a workflow step for API responses

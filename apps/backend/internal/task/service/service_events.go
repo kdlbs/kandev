@@ -34,8 +34,9 @@ type taskPublication struct {
 }
 
 type taskActivitySnapshot struct {
-	activity v1.ForegroundActivity
-	known    bool
+	activity            v1.ForegroundActivity
+	activeSubagentCount int
+	known               bool
 }
 
 // PublishTaskUpdated publishes a task.updated event for the given task.
@@ -396,7 +397,7 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 			zap.String("task_id", task.ID),
 			zap.Error(err))
 	} else if activity.known {
-		s.recordTaskActivity(task.ID, activity.activity)
+		s.recordTaskActivitySnapshot(task.ID, activity)
 	}
 	if eventType == events.TaskDeleted {
 		s.forgetTaskActivity(task.ID)
@@ -489,7 +490,11 @@ func (s *Service) addTaskForegroundActivityEventField(data map[string]interface{
 		case sessionsErr != nil:
 			activity = &taskActivitySnapshot{known: false}
 		default:
-			activity = &taskActivitySnapshot{activity: s.computeTaskForegroundActivityForSessions(sessions), known: true}
+			activity = &taskActivitySnapshot{
+				activity:            s.computeTaskForegroundActivityForSessions(sessions),
+				activeSubagentCount: s.computeTaskActiveSubagentCountForSessions(sessions),
+				known:               true,
+			}
 		}
 	}
 	if activity.known {
@@ -498,6 +503,7 @@ func (s *Service) addTaskForegroundActivityEventField(data map[string]interface{
 		} else {
 			data["foreground_activity"] = nil
 		}
+		data["active_subagent_count"] = activity.activeSubagentCount
 	}
 	return activity
 }

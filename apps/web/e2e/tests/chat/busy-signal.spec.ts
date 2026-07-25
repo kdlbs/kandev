@@ -80,6 +80,12 @@ test.describe("Fine-grained busy signal — composer + status", () => {
       .sidebarTaskItem("Async subagent lifecycle")
       .getByTestId("task-state-background-running");
     await expect(backgroundIndicator).toBeVisible();
+    await expect(backgroundIndicator).toHaveClass(/text-violet-500/);
+    await expect(backgroundIndicator).toHaveClass(/animate-spin/);
+    await expect(backgroundIndicator.locator("..")).toHaveAttribute(
+      "aria-label",
+      "Background work is running",
+    );
 
     // A prompt submitted while only the async child remains must be admitted
     // immediately. Foreground activity temporarily wins over the child.

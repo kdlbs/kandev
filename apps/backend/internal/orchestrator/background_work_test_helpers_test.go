@@ -1,5 +1,24 @@
 package orchestrator
 
+import "github.com/kandev/kandev/internal/agentctl/types/streams"
+
+func attestedSubagentPayload(description, prompt, subagentType string) *streams.NormalizedPayload {
+	payload := streams.NewSubagentTask(description, prompt, subagentType)
+	payload.SetBackgroundWorkIdentity(
+		streams.BackgroundWorkKindSubagent,
+		"test-subagent",
+		false,
+		false,
+	)
+	return payload
+}
+
+func attestedBackgroundShellPayload(command string) *streams.NormalizedPayload {
+	payload := streams.NewShellExec(command, "", "", 0, true)
+	payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
+	return payload
+}
+
 // registerBackgroundTask is a test-only convenience wrapper around
 // registerBackgroundWork for tests that don't care about the execution/work
 // ID correlation (production call sites always pass those explicitly — see

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -18,9 +19,10 @@ func registerAsyncWorkForExecution(
 	taskID, sessionID, executionID, toolCallID, workID string,
 ) {
 	t.Helper()
-	payload := streams.NewSubagentTask("background work", "do it", "general-purpose")
+	payload := attestedSubagentPayload("background work", "do it", "general-purpose")
 	payload.SubagentTask().IsAsync = true
 	payload.SubagentTask().AgentID = workID
+	payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindSubagent, workID, true, false)
 	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
 		TaskID: taskID, SessionID: sessionID, ExecutionID: executionID,
 		Data: &lifecycle.AgentStreamEventData{
@@ -30,6 +32,33 @@ func registerAsyncWorkForExecution(
 			Normalized: payload,
 		},
 	})
+}
+
+func TestActiveSubagentCount_DerivesOnlyLiveSubagentRegistrations(t *testing.T) {
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	const sessionID = "session-subagent-count"
+
+	svc.registerBackgroundWorkKind(
+		sessionID, "subagent-one", "execution", "child-one", streams.BackgroundWorkKindSubagent,
+	)
+	svc.registerBackgroundWorkKind(
+		sessionID, "subagent-two", "execution", "child-two", streams.BackgroundWorkKindSubagent,
+	)
+	svc.registerBackgroundWorkKind(
+		sessionID, "shell", "execution", "shell-one", streams.BackgroundWorkKindShell,
+	)
+	svc.registerBackgroundWorkKind(
+		sessionID, "monitor", "execution", "monitor-one", streams.BackgroundWorkKindMonitor,
+	)
+	if got := svc.ActiveSubagentCount(sessionID); got != 2 {
+		t.Fatalf("active subagent count = %d, want 2", got)
+	}
+
+	svc.completeBackgroundTaskForExecution(sessionID, "subagent-one", "execution")
+	svc.completeBackgroundTaskForExecution(sessionID, "subagent-one", "execution")
+	if got := svc.ActiveSubagentCount(sessionID); got != 1 {
+		t.Fatalf("count after duplicate terminal completion = %d, want 1", got)
+	}
 }
 
 func TestBackgroundCompletion_IdentifiedRetiresExactWorkAndDuplicateIsHarmless(t *testing.T) {
@@ -187,13 +216,13 @@ func TestBackgroundCompletion_UnidentifiedSuccessorCycleRetiresSoleSessionWork(t
 			activityClears++
 		}
 	}
-	if activityClears != 1 || len(taskEvents.activityTaskIDs) != 1 {
+	if activityClears != 1 || len(taskEvents.activityTaskIDs) != 2 {
 		t.Fatalf("sole completion clear cardinality: session=%d task=%v", activityClears, taskEvents.activityTaskIDs)
 	}
 
 	// The same ID-less notification re-delivered after retirement is a no-op.
 	svc.handleAgentStreamEvent(t.Context(), completion)
-	if len(taskEvents.activityTaskIDs) != 1 {
+	if len(taskEvents.activityTaskIDs) != 2 {
 		t.Fatalf("duplicate completion republished task activity: %v", taskEvents.activityTaskIDs)
 	}
 }
@@ -273,23 +302,25 @@ func TestExecutionStop_RetiresOnlyOwnedBackgroundWorkAndPublishesFinalTransition
 		t.Fatalf("final execution cleanup left stale background activity: %q", got)
 	}
 
-	activityEvents := 0
+	var activityValues []interface{}
+	var subagentCounts []int
 	for _, record := range events.events {
 		if record.subject != eventtypes.TaskSessionActivityChanged {
 			continue
 		}
-		activityEvents++
 		data, ok := record.event.Data.(map[string]interface{})
 		if !ok {
 			t.Fatalf("terminal cleanup activity payload = %#v", record.event.Data)
 		}
-		value, present := data["foreground_activity"]
-		if !present || value != nil {
-			t.Fatalf("terminal cleanup must explicitly clear foreground_activity, got %#v", data)
-		}
+		activityValues = append(activityValues, data["foreground_activity"])
+		subagentCounts = append(subagentCounts, data["active_subagent_count"].(int))
 	}
-	if activityEvents != 1 {
-		t.Fatalf("terminal cleanup activity events = %d, want exactly one", activityEvents)
+	wantValues := []interface{}{"generating", "generating", "background", nil}
+	if !slices.Equal(activityValues, wantValues) {
+		t.Fatalf("execution cleanup activity values = %#v, want %#v", activityValues, wantValues)
+	}
+	if !slices.Equal(subagentCounts, []int{1, 2, 1, 0}) {
+		t.Fatalf("execution cleanup subagent counts = %v, want [1 2 1 0]", subagentCounts)
 	}
 }
 
@@ -667,8 +698,10 @@ func TestExecutionTerminalEvents_ReconcileMissingBackgroundCompletion(t *testing
 			if got := countActivityClears(recorded); got != 1 {
 				t.Fatalf("terminal session activity clears = %d, want exactly one", got)
 			}
-			if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
-				t.Fatalf("terminal task recomputes = %v, want [%s]", taskEvents.activityTaskIDs, taskID)
+			if len(taskEvents.activityTaskIDs) != 2 ||
+				taskEvents.activityTaskIDs[0] != taskID ||
+				taskEvents.activityTaskIDs[1] != taskID {
+				t.Fatalf("terminal task recomputes = %v, want [%s %s]", taskEvents.activityTaskIDs, taskID, taskID)
 			}
 			waitForStopCall(t, agentManager)
 		})
@@ -858,9 +891,15 @@ func TestBackgroundWork_RegisteredFromInitialToolCallIsRetiredOnExecutionTeardow
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
-	payload := streams.NewSubagentTask("background work", "do it", "general-purpose")
+	payload := attestedSubagentPayload("background work", "do it", "general-purpose")
 	payload.SubagentTask().IsAsync = true
 	payload.SubagentTask().AgentID = "work-initial-call"
+	payload.SetBackgroundWorkIdentity(
+		streams.BackgroundWorkKindSubagent,
+		"work-initial-call",
+		true,
+		false,
+	)
 	svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
 		TaskID: taskID, SessionID: sessionID, ExecutionID: executionID,
 		Data: &lifecycle.AgentStreamEventData{

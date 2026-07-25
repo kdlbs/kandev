@@ -1,4 +1,5 @@
 import type { ExecutorType } from "./executor";
+import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
 import type { TaskRepository, WorkspaceFolder } from "./http-workspace-sources";
 import type {
@@ -13,6 +14,7 @@ import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 import type { EntityReference } from "./entity-reference";
 
 export type { ExecutorType } from "./executor";
+export type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 export type {
   SavedLayout,
   SidebarViewApi,
@@ -176,8 +178,6 @@ export type TaskPendingAction = "clarification" | "permission";
  * `session.activity_changed` WS event and carried on `session.state_changed`;
  * absent/`null` is treated as "generating" for a RUNNING session.
  */
-export type ForegroundActivity = "generating" | "background";
-
 export type Workflow = {
   id: WorkflowId;
   workspace_id: WorkspaceId;
@@ -297,7 +297,7 @@ export function primaryTaskRepository(
   return primary;
 }
 
-export type Task = {
+export type Task = ActiveSubagentCountFields & {
   id: TaskId;
   workspace_id: WorkspaceId;
   workflow_id: WorkflowId;
@@ -314,13 +314,9 @@ export type Task = {
   primary_session_pending_action?: TaskPendingAction | null;
   task_pending_action?: TaskPendingAction | null;
   /**
-   * Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions
-   * The aggregate is "generating" when any session is generating,
-   * "background" when none is generating but at least one RUNNING session holds a
-   * turn open for background work, and absent/`null` when no session is running
-   * (task-level surfaces then fall through to the coarse task state). Computed on
-   * the backend and carried on the task record so every task-level surface reads
-   * one authoritative value.
+   * Task-level MOST-ACTIVE-WINS activity across sessions. "generating" wins,
+   * then "background"; null/absent means none is known. The count is the
+   * corresponding sum of live subagents.
    */
   foreground_activity?: ForegroundActivity | null;
   session_count?: number | null;
@@ -400,7 +396,7 @@ export type TaskSessionWorktree = {
   created_at?: string;
 };
 
-export type TaskSession = {
+export type TaskSession = ActiveSubagentCountFields & {
   id: SessionId;
   task_id: TaskId;
   /** Optional user-supplied label shown on the session tab. */
@@ -418,10 +414,7 @@ export type TaskSession = {
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   state: TaskSessionState;
-  /**
-   * Fine-grained busy substate (ADR-0049). Pushed over
-   * `session.activity_changed`; background may outlive the foreground turn.
-   */
+  /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
   error_message?: string;
   metadata?: Record<string, unknown> | null;

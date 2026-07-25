@@ -58,12 +58,16 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
   };
 }
 
-function makeActivityMessage(payload: TaskSessionActivityChangedPayload) {
+function makeActivityMessage(
+  payload: Omit<TaskSessionActivityChangedPayload, "active_subagent_count"> & {
+    active_subagent_count?: number;
+  },
+) {
   return {
     id: "m",
     type: "notification" as const,
     action: "session.activity_changed" as const,
-    payload,
+    payload: { active_subagent_count: 0, ...payload },
   };
 }
 
@@ -951,7 +955,12 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
     const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
 
     handler(
-      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+      makeActivityMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        foreground_activity: "background",
+        active_subagent_count: 2,
+      }),
     );
 
     expect(upsert).toHaveBeenCalledTimes(1);
@@ -959,6 +968,7 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
       id: "s-1",
       state: "RUNNING",
       foreground_activity: "background",
+      active_subagent_count: 2,
     });
   });
 
@@ -1051,12 +1061,14 @@ describe("session.state_changed carries and resets the busy substate", () => {
         new_state: "RUNNING",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         foreground_activity: "generating" as any,
+        active_subagent_count: 2,
       }),
     );
 
     expect(upsert.mock.calls[0][1]).toMatchObject({
       state: "RUNNING",
       foreground_activity: "generating",
+      active_subagent_count: 2,
     });
   });
 

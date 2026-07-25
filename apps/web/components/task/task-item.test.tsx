@@ -15,6 +15,7 @@ const PREPARING_PHASE = "preparing";
 const DATA_LOADING_PHASE = "data-loading-phase";
 const RUNNING_PHASE = "running";
 const YELLOW_SPINNER_CLASS = "text-yellow-500";
+const VIOLET_SPINNER_CLASS = "text-violet-500";
 const PREPARING_SPINNER_CLASS = "text-muted-foreground/40";
 const SPIN_CLASS = "animate-spin";
 const SLOW_SPIN_CLASS = "[animation-duration:2s]";
@@ -187,7 +188,9 @@ describe("TaskItem background-running indicator", () => {
     });
 
     const icon = screen.getByTestId(BACKGROUND_ICON_TEST_ID);
-    expect(icon.querySelector(`.${SPIN_CLASS}`)).not.toBeNull();
+    expect(icon.classList.contains(VIOLET_SPINNER_CLASS)).toBe(true);
+    expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
+    expect(screen.getByLabelText("Background work is running")).not.toBeNull();
     expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
   });

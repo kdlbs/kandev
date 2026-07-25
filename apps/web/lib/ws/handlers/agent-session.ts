@@ -213,6 +213,8 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   // background (ADR-0049).
   if (payload.foreground_activity !== undefined)
     update.foreground_activity = payload.foreground_activity;
+  if (payload.active_subagent_count !== undefined)
+    update.active_subagent_count = payload.active_subagent_count;
   return update;
 }
 
@@ -512,6 +514,7 @@ function applyForegroundActivity(
     started_at: existing.started_at ?? "",
     updated_at: existing.updated_at ?? "",
     foreground_activity: payload.foreground_activity ?? null,
+    active_subagent_count: payload.active_subagent_count ?? 0,
   });
 }
 

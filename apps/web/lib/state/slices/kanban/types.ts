@@ -79,6 +79,8 @@ export type KanbanState = {
      * list background-running affordance.
      */
     foregroundActivity?: ForegroundActivity | null;
+    /** Live subagents across this task's sessions; reserved for future UI. */
+    activeSubagentCount?: number;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     primaryExecutorId?: string | null;
