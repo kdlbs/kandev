@@ -127,6 +127,10 @@ Durable coarse state continues to survive as before.
 - Changing archive behavior when the operator has disabled archive
   confirmation.
 
+## Decision record
+
+[ADR 0049 — Fine-grained foreground-idle busy signal](../../decisions/0049-fine-grained-foreground-idle-busy-signal.md) owns the architectural reasoning: ownership and admission rules, provider attestation, and the per-task publication-order invariant.
+
 ## Implementation plan
 
 [Background work liveness implementation plan](../../plans/background-work-liveness/plan.md)

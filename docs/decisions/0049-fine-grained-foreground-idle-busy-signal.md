@@ -3,6 +3,7 @@
 **Status:** accepted (amended 2026-07-24)
 **Date:** 2026-07-11
 **Area:** backend, frontend, protocol
+**Related:** [Background work liveness spec](../specs/platform/background-work-liveness.md)
 
 ## Context
 
