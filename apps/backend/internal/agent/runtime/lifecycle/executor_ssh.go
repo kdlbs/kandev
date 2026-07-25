@@ -337,7 +337,7 @@ func (r *SSHExecutor) startAndForwardAgentctl(
 }
 
 func sshAgentctlLaunchEnv(base map[string]string, nonce string) map[string]string {
-	env := make(map[string]string, len(base)+2)
+	env := make(map[string]string, len(base))
 	for key, value := range base {
 		env[key] = value
 	}

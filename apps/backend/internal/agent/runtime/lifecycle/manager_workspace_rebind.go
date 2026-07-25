@@ -116,7 +116,7 @@ func waitForReboundAgentReady(ctx context.Context, execution *AgentExecution) er
 	var lastErr error
 	for {
 		status, err := execution.agentctl.GetStatus(readyCtx)
-		if err == nil && status.AgentStatus == "running" {
+		if err == nil && status.AgentStatus == string(v1.AgentStatusRunning) {
 			return nil
 		}
 		if err != nil {
