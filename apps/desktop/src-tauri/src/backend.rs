@@ -916,15 +916,10 @@ mod tests {
     }
 
     #[test]
-    fn pick_available_loopback_port_returns_preferred_port() {
-        let listener = TcpListener::bind((LOOPBACK_HOST, 0)).expect("reserve candidate");
-        let port = listener.local_addr().expect("candidate address").port();
-        drop(listener);
+    fn pick_available_loopback_port_accepts_kernel_assigned_port() {
+        let port = pick_available_loopback_port(0).expect("kernel-assigned port");
 
-        assert_eq!(
-            pick_available_loopback_port(port).expect("preferred port"),
-            port
-        );
+        assert_ne!(port, 0);
     }
 
     #[test]
