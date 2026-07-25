@@ -52,11 +52,11 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 2. Select the workspace and workflow when Kandev cannot infer them. A regular non-ephemeral task must belong to a workflow.
 3. Select a source:
 
-   | Source | Use it for | Important behavior |
-   |---|---|---|
-   | **Repo** | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task. |
-   | **Remote** | A remote repository | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL. A pasted URL stays editable until you press Enter; then select the branch. Anonymous, credential-free reads include public GitHub repository branches, pull requests, and issues, plus public `gitlab.com` branch discovery. Private resources and authenticated browse/write features require valid provider credentials. |
-   | **None** | Planning, research, or work outside Git | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable. |
+   | Source     | Use it for                                        | Important behavior                                                                                                                                                                                                                                                                                                                                                                                                   |
+   | ---------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | **Repo**   | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task.                                                                                                                                                                                                  |
+   | **Remote** | A remote repository                               | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL. A pasted URL stays editable until you press Enter; then select the branch. Anonymous, credential-free reads include public GitHub repository branches, pull requests, and issues, plus public `gitlab.com` branch discovery. Private resources and authenticated browse/write features require valid provider credentials. |
+   | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable.                                                                                                                                                                                                                                            |
 
 4. Select a compatible executor profile and agent profile. A workflow default agent profile locks the task-level agent selector. Executor and agent compatibility is validated before launch.
 5. Enter the initial description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode**; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. A nonempty description exposes the standard split actions.
@@ -95,10 +95,21 @@ For a non-archived, repository-backed task, open the **Files** panel and choose 
 
 The task must be idle: Kandev disables the action while a turn or tool call is active, and rejects a race without changing the task. Desktop opens a dialog; phones open the same flow in a full-height drawer. On success, repositories appear in Files and repository-aware Changes, branch, editor, and pull-request surfaces; folders are Files-only.
 
-If adding a source promotes the workspace from one repository directory to the task root, Kandev
-restarts the idle agent in the new root. Native cross-directory resume is retained where supported;
-otherwise Kandev starts a fresh provider session and supplies recorded conversation context with the
-next prompt. The intentional restart is not shown as a previous agent error.
+Before submission, the dialog or drawer summarizes the effect on the workspace, session context,
+and running processes. **Cancel** or closing the surface sends no request and changes nothing. A
+submitted batch remains all-or-nothing.
+
+If adding a source promotes a Worktree or Local/Local PC workspace from one repository directory to
+the task root, Kandev restarts the idle agent in the new root. Existing files, Git changes, task
+state, messages, plan, attached sources, model, and mode remain. Native cross-directory resume is
+retained where supported; otherwise Kandev starts a fresh provider session and supplies recorded
+conversation context with the next prompt. Provider-private context not recorded by Kandev may not
+carry over. The intentional restart is not shown as a previous agent error.
+
+The host rebind stops open task terminals, dev servers, the task editor server, and other
+agentctl-managed workspace processes, so save unsaved work and restart those processes afterward.
+Local Docker, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
+without restarting the agent or changing its CWD.
 
 Folders are live host paths and are available only to **Local/Local PC** and **Worktree** tasks. Repository sources are supported for **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Local Git rows need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
 

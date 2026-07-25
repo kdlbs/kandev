@@ -49,15 +49,27 @@ function openRepositoryMenu() {
   return trigger;
 }
 
-function Harness({ makeTurnActive = false }: { makeTurnActive?: boolean }) {
+function Harness({
+  makeTurnActive = false,
+  executorType = "worktree",
+}: {
+  makeTurnActive?: boolean;
+  executorType?: string;
+}) {
   return (
     <StateProvider>
-      <HarnessContent makeTurnActive={makeTurnActive} />
+      <HarnessContent makeTurnActive={makeTurnActive} executorType={executorType} />
     </StateProvider>
   );
 }
 
-function HarnessContent({ makeTurnActive }: { makeTurnActive: boolean }) {
+function HarnessContent({
+  makeTurnActive,
+  executorType,
+}: {
+  makeTurnActive: boolean;
+  executorType: string;
+}) {
   const [open, setOpen] = useState(false);
   const [opener, setOpener] = useState<HTMLElement | null>(null);
   const store = useAppStoreApi();
@@ -92,7 +104,7 @@ function HarnessContent({ makeTurnActive }: { makeTurnActive: boolean }) {
         open={open}
         onOpenChange={setOpen}
         taskId="task-1"
-        executorType="worktree"
+        executorType={executorType}
         workspaceId="workspace-1"
         opener={opener}
       />
@@ -106,6 +118,44 @@ afterEach(() => {
   attachTaskWorkspaceSources.mockReset();
   discoverRepositoriesAction.mockClear();
   refreshRepositories.mockClear();
+});
+
+describe("AddWorkspaceSourcesDialog consequences", () => {
+  it.each([
+    ["desktop", false, "add-workspace-sources-dialog"],
+    ["mobile", true, "add-workspace-sources-drawer"],
+  ])("explains the workspace and session consequences on %s", async (_, mobile, surfaceTestId) => {
+    isMobile = mobile;
+    render(<Harness />);
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    const surface = await screen.findByTestId(surfaceTestId);
+    const consequences = screen.getByTestId("workspace-change-consequences");
+
+    expect(surface.contains(consequences)).toBe(true);
+    expect(screen.getByText("This restarts the task workspace")).toBeTruthy();
+    expect(consequences.textContent).toMatch(/task root becomes the agent's working directory/i);
+    expect(consequences.textContent).toMatch(
+      /terminals, dev servers, and other workspace processes stop/i,
+    );
+    expect(consequences.textContent).toMatch(
+      /provider-private context that Kandev did not record may not carry over/i,
+    );
+    expect(screen.getByText(/Cancel leaves the workspace unchanged/i)).toBeTruthy();
+  });
+
+  it("explains that remote executor sources are attached without restarting the agent", async () => {
+    render(<Harness executorType="ssh" />);
+
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    const consequences = await screen.findByTestId("workspace-change-consequences");
+
+    expect(consequences.textContent).toContain("This updates the live task workspace");
+    expect(consequences.textContent).toContain(
+      "The agent and running workspace processes continue",
+    );
+    expect(consequences.textContent).not.toContain("This restarts the task workspace");
+  });
 });
 
 describe("AddWorkspaceSourcesDialog", () => {
@@ -162,6 +212,7 @@ describe("AddWorkspaceSourcesDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
     await finishClose(surface, mobile);
+    expect(attachTaskWorkspaceSources).not.toHaveBeenCalled();
     await waitFor(() => expect(document.activeElement).toBe(opener));
   });
 

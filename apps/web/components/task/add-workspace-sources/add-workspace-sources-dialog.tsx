@@ -52,6 +52,7 @@ import { useDialogOpenerFocus } from "./use-dialog-opener-focus";
 import { useSubmitWorkspaceSources } from "./use-submit-workspace-sources";
 import { useWorkspaceRepositoryOptions } from "./use-workspace-repository-options";
 import { useWorkspaceSourceRows } from "./use-workspace-source-rows";
+import { WorkspaceChangeConsequences } from "./workspace-change-consequences";
 import { cn } from "@/lib/utils";
 
 type Props = {
@@ -89,6 +90,7 @@ export function AddWorkspaceSourcesDialog({
     openerRef,
   });
   const capabilities = getWorkspaceSourceCapabilities(executorType);
+  const restartsWorkspace = !isRemoteWorkspaceExecutor(executorType);
   const close = useCallback(
     (nextOpen: boolean) => {
       if (!nextOpen && !submitting) {
@@ -122,6 +124,7 @@ export function AddWorkspaceSourcesDialog({
       onCloseAutoFocus={restoreOpenerFocus}
       onDrawerCloseAnimationEnd={restoreOpenerFocus}
       error={submitError}
+      consequences={<WorkspaceChangeConsequences restartsWorkspace={restartsWorkspace} />}
       form={
         <SourceForm
           rows={sourceRows.rows}
@@ -169,6 +172,10 @@ function selectableRepositories(
     : repositories;
 }
 
+function isRemoteWorkspaceExecutor(executorType: string | null | undefined): boolean {
+  return ["local_docker", "remote_docker", "ssh", "sprites"].includes(executorType ?? "");
+}
+
 type AddWorkspaceSourcesSurfaceProps = {
   isMobile: boolean;
   open: boolean;
@@ -176,6 +183,7 @@ type AddWorkspaceSourcesSurfaceProps = {
   onCloseAutoFocus: (event?: { preventDefault(): void }) => void;
   onDrawerCloseAnimationEnd: (event: { preventDefault(): void }) => void;
   error: string | null;
+  consequences: ReactNode;
   form: ReactNode;
   submitting: boolean;
   canSubmit: boolean;
@@ -190,6 +198,7 @@ function AddWorkspaceSourcesSurface({
   onCloseAutoFocus,
   onDrawerCloseAnimationEnd,
   error,
+  consequences,
   form,
   submitting,
   canSubmit,
@@ -242,6 +251,7 @@ function AddWorkspaceSourcesSurface({
           </DrawerHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4">
             {errorMessage}
+            <div className="mb-4">{consequences}</div>
             {form}
           </div>
           <div className="shrink-0 border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
@@ -254,18 +264,24 @@ function AddWorkspaceSourcesSurface({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="add-workspace-sources-dialog"
-        className="max-w-xl"
+        className="flex max-h-[calc(100dvh-2rem)] max-w-xl flex-col overflow-hidden"
         onCloseAutoFocus={onCloseAutoFocus}
       >
-        <DialogHeader>
+        <DialogHeader className="shrink-0">
           <DialogTitle>Add to workspace</DialogTitle>
           <DialogDescription>
             Choose repositories or folders to make available in this task.
           </DialogDescription>
         </DialogHeader>
-        {errorMessage}
-        {form}
-        <DialogFooter>{footer}</DialogFooter>
+        <div
+          data-testid="add-workspace-sources-dialog-scroll"
+          className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1"
+        >
+          {errorMessage}
+          {consequences}
+          {form}
+        </div>
+        <DialogFooter className="shrink-0">{footer}</DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -348,7 +364,7 @@ function RepositorySourceMenu({
 }) {
   const itemClass = cn("cursor-pointer items-start gap-3", isMobile ? "min-h-11" : "py-2");
   return (
-    <DropdownMenu>
+    <DropdownMenu modal={!isMobile}>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"

@@ -95,6 +95,30 @@ test.describe("Attach local workspace sources", () => {
     await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
     const dialog = testPage.getByTestId("add-workspace-sources-dialog");
     await expect(dialog).toBeVisible();
+    const [dialogBox, viewport] = await Promise.all([
+      dialog.boundingBox(),
+      testPage.evaluate(() => ({ width: innerWidth, height: innerHeight })),
+    ]);
+    expect(dialogBox).not.toBeNull();
+    expect(dialogBox!.y).toBeGreaterThanOrEqual(0);
+    expect(dialogBox!.y + dialogBox!.height).toBeLessThanOrEqual(viewport.height);
+    await expect(dialog.getByTestId("add-workspace-sources-dialog-scroll")).toHaveCSS(
+      "overflow-y",
+      "auto",
+    );
+    const consequences = dialog.getByTestId("workspace-change-consequences");
+    await expect(consequences).toBeVisible();
+    await expect(consequences).toContainText("This restarts the task workspace");
+    await expect(consequences).toContainText("Cancel leaves the workspace unchanged");
+    await expect(consequences).toContainText(
+      "terminals, dev servers, and other workspace processes stop",
+    );
+    const fullImpactDetails = consequences.getByText("Full impact details");
+    await fullImpactDetails.click();
+    await expect(
+      consequences.getByText(/The task root becomes the agent's working directory/),
+    ).toBeVisible();
+    await fullImpactDetails.click();
     await expect(dialog.getByTestId("source-mode-local")).toHaveCount(0);
     const addRepository = dialog.getByRole("button", { name: "Add repository" });
     const submit = dialog.getByTestId("add-workspace-sources-submit");

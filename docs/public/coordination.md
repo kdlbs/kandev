@@ -176,12 +176,24 @@ Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, *
 
 Use a base branch for every repository attachment. Local/Local PC never changes the user-owned repository checkout.
 
+Read the consequence summary in the dialog or drawer before submitting. It describes whether the
+current executor will restart the agent or update the live remote workspace. **Cancel** or closing
+the surface sends no attachment request and leaves the workspace unchanged.
+
 Kandev rejects the entire request if a source is invalid, duplicated, inaccessible, or cannot be materialized. A failure removes new source records and Kandev-owned materialization; existing task contents remain intact. Attachments persist across reload, relaunch, and reset. A missing persisted folder is surfaced during a new or reset environment rather than silently omitted.
 
 When a second source promotes a single-repository workspace to the task root, Kandev restarts the
-idle agent there. Providers that support loading a conversation from a different working directory
-keep their native session; other providers receive a fresh session with recorded conversation
-context on the next prompt. This intentional restart is not reported as an agent failure.
+idle Worktree or Local/Local PC agent there. Existing files, Git changes, task state, messages,
+plan, attached sources, model, and mode remain. Providers that support loading a conversation from
+a different working directory keep their native session; other providers receive a fresh session
+with recorded conversation context on the next prompt. Provider-private context that Kandev did not
+record may not carry over. This intentional restart is not reported as an agent failure.
+
+That host rebind stops open task terminals, dev servers, the task editor server, and other
+agentctl-managed workspace processes. Save unsaved work first, then reopen or restart those
+processes after attachment. Local Docker, SSH, and Sprites instead clone the new repository under
+the current remote workspace and rescan it without changing the agent CWD or restarting the agent
+and workspace processes.
 
 Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task. `add_branch_to_task_kandev` remains available for its legacy one-repository/branch input. Neither operation can run during an active turn or tool call.
 

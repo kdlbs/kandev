@@ -111,6 +111,21 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
 
   const drawer = testPage.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();
+  const consequences = drawer.getByTestId("workspace-change-consequences");
+  await expect(consequences).toBeVisible();
+  await expect(consequences).toContainText("This restarts the task workspace");
+  await expect(consequences).toContainText("Cancel leaves the workspace unchanged");
+  await expect(consequences).toContainText(
+    "terminals, dev servers, and other workspace processes stop",
+  );
+  const fullImpactDetails = consequences.getByText("Full impact details");
+  const fullImpactDetailsBox = await fullImpactDetails.boundingBox();
+  expect(fullImpactDetailsBox?.height).toBeGreaterThanOrEqual(44);
+  await fullImpactDetails.tap();
+  await expect(
+    consequences.getByText(/The task root becomes the agent's working directory/),
+  ).toBeVisible();
+  await fullImpactDetails.tap();
   const [drawerBox, viewport] = await Promise.all([
     drawer.boundingBox(),
     testPage.evaluate(() => ({ width: innerWidth, height: innerHeight })),
@@ -143,6 +158,14 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   const workspaceRepository = testPage.getByRole("menuitem", { name: "Workspace repository" });
   const localRepository = testPage.getByRole("menuitem", { name: "Local Git repository" });
   const remoteRepository = testPage.getByRole("menuitem", { name: "Remote repository" });
+  const repositoryMenu = workspaceRepository.locator("xpath=ancestor::*[@role='menu'][1]");
+  await repositoryMenu.evaluate((element) =>
+    Promise.all(
+      element
+        .getAnimations({ subtree: true })
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
+  );
   const [workspaceRepositoryBox, localRepositoryBox, remoteRepositoryBox] = await Promise.all([
     workspaceRepository.boundingBox(),
     localRepository.boundingBox(),
