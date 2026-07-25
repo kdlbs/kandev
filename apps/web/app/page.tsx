@@ -195,8 +195,7 @@ export default async function Page({ searchParams }: PageProps) {
       listQuickChatSessions(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ tasks: [] })),
     ]);
 
-    // null preserves the user's "All Workflows" choice when more than one
-    // workflow is visible — only auto-pick when there's exactly one.
+    // null preserves the user's explicit "All Workflows" choice.
     const workflowId = resolveDesiredWorkflowId({
       activeWorkflowId: workflowIdParam ?? null,
       settingsWorkflowId,

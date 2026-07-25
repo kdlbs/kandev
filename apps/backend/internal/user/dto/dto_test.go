@@ -8,6 +8,32 @@ import (
 	"github.com/kandev/kandev/internal/user/models"
 )
 
+func TestTasksListShowDetailsDTO(t *testing.T) {
+	if !FromUserSettings(&models.UserSettings{TasksListShowDetails: true}).TasksListShowDetails {
+		t.Fatal("TasksListShowDetails = false, want true")
+	}
+
+	t.Run("omitted value stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.TasksListShowDetails != nil {
+			t.Fatalf("TasksListShowDetails = %#v, want nil", req.TasksListShowDetails)
+		}
+	})
+
+	t.Run("explicit false is retained", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"tasks_list_show_details":false}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.TasksListShowDetails == nil || *req.TasksListShowDetails {
+			t.Fatalf("TasksListShowDetails = %#v, want false", req.TasksListShowDetails)
+		}
+	})
+}
+
 func TestAppStatusBarOrderDTOAndPatchSemantics(t *testing.T) {
 	want := models.AppStatusBarOrder{
 		LeftItemIDs:  []string{"builtin:connection", "plugin:left"},

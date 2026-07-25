@@ -733,6 +733,7 @@ export class ApiClient {
       terminal_font_family?: string;
       terminal_font_size?: number;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
+      tasks_list_show_details?: boolean;
       [key: string]: unknown;
     };
   }> {
@@ -755,6 +756,7 @@ export class ApiClient {
     sidebar_views?: unknown[];
     saved_layouts?: unknown[];
     kanban_view_mode?: string;
+    tasks_list_show_details?: boolean;
     tasks_list_sort?: string;
     tasks_list_group?: string;
     task_create_last_used?: TaskCreateLastUsedApi;

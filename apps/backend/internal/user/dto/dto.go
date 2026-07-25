@@ -22,6 +22,7 @@ type UserSettingsDTO struct {
 	RepositoryIDs               []string                            `json:"repository_ids"`
 	TasksListSort               string                              `json:"tasks_list_sort"`
 	TasksListGroup              string                              `json:"tasks_list_group"`
+	TasksListShowDetails        bool                                `json:"tasks_list_show_details"`
 	InitialSetupComplete        bool                                `json:"initial_setup_complete"`
 	PreferredShell              string                              `json:"preferred_shell"`
 	DefaultEditorID             string                              `json:"default_editor_id"`
@@ -81,6 +82,7 @@ type UpdateUserSettingsRequest struct {
 	RepositoryIDs               *[]string                          `json:"repository_ids,omitempty"`
 	TasksListSort               *string                            `json:"tasks_list_sort,omitempty"`
 	TasksListGroup              *string                            `json:"tasks_list_group,omitempty"`
+	TasksListShowDetails        *bool                              `json:"tasks_list_show_details,omitempty"`
 	InitialSetupComplete        *bool                              `json:"initial_setup_complete,omitempty"`
 	PreferredShell              *string                            `json:"preferred_shell,omitempty"`
 	DefaultEditorID             *string                            `json:"default_editor_id,omitempty"`
@@ -201,6 +203,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		RepositoryIDs:               settings.RepositoryIDs,
 		TasksListSort:               settings.TasksListSort,
 		TasksListGroup:              settings.TasksListGroup,
+		TasksListShowDetails:        settings.TasksListShowDetails,
 		InitialSetupComplete:        settings.InitialSetupComplete,
 		PreferredShell:              settings.PreferredShell,
 		DefaultEditorID:             settings.DefaultEditorID,

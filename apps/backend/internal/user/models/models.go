@@ -50,6 +50,7 @@ type UserSettings struct {
 	RepositoryIDs               []string                          `json:"repository_ids"`
 	TasksListSort               string                            `json:"tasks_list_sort"`
 	TasksListGroup              string                            `json:"tasks_list_group"`
+	TasksListShowDetails        bool                              `json:"tasks_list_show_details"`
 	InitialSetupComplete        bool                              `json:"initial_setup_complete"`
 	PreferredShell              string                            `json:"preferred_shell"`
 	DefaultEditorID             string                            `json:"default_editor_id"`

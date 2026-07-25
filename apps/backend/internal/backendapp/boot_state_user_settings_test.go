@@ -18,6 +18,16 @@ func TestMapUserSettingsStateIncludesArchiveConfirmation(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesTasksListShowDetails(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{TasksListShowDetails: true},
+	}, "workspace-1")
+
+	if got, ok := state["tasksListShowDetails"].(bool); !ok || !got {
+		t.Fatalf("tasksListShowDetails = %#v, want true", state["tasksListShowDetails"])
+	}
+}
+
 func TestMapUserSettingsStateIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{MCPTaskAgentProfileDefault: "future_value"},

@@ -448,6 +448,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"repositoryIds":               stringSlice(settings.RepositoryIDs),
 		"tasksListSort":               usermodels.NormalizeTasksListSort(settings.TasksListSort),
 		"tasksListGroup":              usermodels.NormalizeTasksListGroup(settings.TasksListGroup),
+		"tasksListShowDetails":        settings.TasksListShowDetails,
 		"preferredShell":              nullString(settings.PreferredShell),
 		"shellOptions":                response.ShellOptions,
 		"defaultEditorId":             nullString(settings.DefaultEditorID),

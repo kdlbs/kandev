@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
+import { useTaskListingView } from "@/hooks/use-task-listing-view";
 import type { WorkflowsState } from "@/lib/state/slices";
 
 type UserSettingsFields = {
@@ -20,13 +21,27 @@ function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
   };
 }
 
+function taskListingViewFor(mode: string): "kanban" | "pipeline" | "list" {
+  if (mode === "graph2" || mode === "pipeline") return "pipeline";
+  if (mode === "list") return "list";
+  return "kanban";
+}
+
+function useViewModeChange() {
+  const { effectiveView, setView } = useTaskListingView();
+  const onViewModeChange = useCallback(
+    (mode: string) => setView(taskListingViewFor(mode)),
+    [setView],
+  );
+  return { effectiveView, onViewModeChange };
+}
+
 /**
  * Custom hook that consolidates all kanban display settings and eliminates prop drilling.
  * This hook provides access to workspaces, workflows, repositories, and preview settings,
  * along with handlers for changing these settings.
  */
 export function useKanbanDisplaySettings() {
-  // Access store directly
   const workspaces = useAppStore((state) => state.workspaces.items);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const workflows = useAppStore((state) => state.workflows.items);
@@ -46,7 +61,6 @@ export function useKanbanDisplaySettings() {
     workflowId: activeWorkflowId,
   });
 
-  // Get preview setting from store
   const enablePreviewOnClick = useAppStore((state) => state.userSettings.enablePreviewOnClick);
 
   // Use pushState instead of router.push to avoid triggering SSR re-fetches.
@@ -108,12 +122,13 @@ export function useKanbanDisplaySettings() {
     [commitSettings, userSettings],
   );
 
-  const handleViewModeChange = useCallback(
-    (mode: string) => {
-      commitSettings({ ...baseSettingsPayload(userSettings), kanbanViewMode: mode || null });
+  const handleToggleTasksListShowDetails = useCallback(
+    (enabled: boolean) => {
+      commitSettings({ ...baseSettingsPayload(userSettings), tasksListShowDetails: enabled });
     },
     [commitSettings, userSettings],
   );
+  const { effectiveView, onViewModeChange } = useViewModeChange();
 
   return {
     // Data
@@ -126,13 +141,15 @@ export function useKanbanDisplaySettings() {
     allRepositoriesSelected,
     selectedRepositoryId: userSettings.repositoryIds[0] ?? null,
     enablePreviewOnClick,
-    kanbanViewMode: userSettings.kanbanViewMode,
+    tasksListShowDetails: userSettings.tasksListShowDetails ?? false,
+    effectiveTaskListingView: effectiveView,
 
     // Handlers
     onWorkspaceChange: handleWorkspaceChange,
     onWorkflowChange: handleWorkflowChange,
     onRepositoryChange: handleRepositoryChange,
     onTogglePreviewOnClick: handleTogglePreviewOnClick,
-    onViewModeChange: handleViewModeChange,
+    onToggleTasksListShowDetails: handleToggleTasksListShowDetails,
+    onViewModeChange,
   };
 }

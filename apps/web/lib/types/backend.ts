@@ -351,6 +351,7 @@ export type UserSettingsUpdatedPayload = {
   user_id: string;
   workspace_id: string;
   kanban_view_mode?: string;
+  tasks_list_show_details?: boolean;
   workflow_filter_id?: string;
   repository_ids: string[];
   initial_setup_complete?: boolean;

@@ -72,9 +72,8 @@ async function fetchWorkspaceData(
   ]);
 
   const workflows = workflowsResponse.workflows;
-  // Preserve "All Workflows" (null/empty saved filter) instead of falling back
-  // to the first workflow — resolveDesiredWorkflowId handles this consistently
-  // with the kanban page and the root tasks page.
+  // Preserve "All Workflows" (null/empty saved filter) consistently with the
+  // Kanban and root task pages.
   const activeWorkflowId = resolveDesiredWorkflowId({
     settingsWorkflowId: savedWorkflowId,
     workspaceWorkflows: workflows,
