@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -80,6 +81,53 @@ func TestHTTPApproveSessionDeniesForeignSessionWith404(t *testing.T) {
 	h.httpApproveSession(ownerCtx)
 	if ownerRec.Code == http.StatusNotFound {
 		t.Fatal("owner got 404 too — the 404 above is not proving authorization")
+	}
+}
+
+// TestProcessRoutesDenyForeignSession covers the session-keyed routes in
+// process_handlers.go. They resolve their execution with a bare in-memory
+// lookup, which skips the lifecycle manager's internal per-user check, so each
+// must deny explicitly. lifecycleMgr is nil on purpose: the check has to
+// short-circuit before anything touches it, and a nil-pointer panic here would
+// mean the guard is in the wrong place.
+func TestProcessRoutesDenyForeignSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &foreignSessionRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &ProcessHandlers{service: svc, logger: log}
+
+	routes := map[string]func(*gin.Context){
+		"set-mode":          h.httpSetSessionMode,
+		"set-model":         h.httpSetSessionModel,
+		"set-config-option": h.httpSetSessionConfigOption,
+		"authenticate":      h.httpAuthenticate,
+		"stop-process":      h.httpStopProcessByID,
+	}
+	for name, handler := range routes {
+		t.Run(name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/x", strings.NewReader(`{}`))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Request = c.Request.WithContext(authn.WithIdentity(
+				c.Request.Context(),
+				authn.Identity{UserID: "user-a", Role: authn.RoleMember},
+			))
+			c.Params = gin.Params{{Key: "id", Value: "sess-b"}, {Key: "processId", Value: "proc-1"}}
+
+			handler(c)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 

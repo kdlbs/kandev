@@ -265,6 +265,10 @@ type Service struct {
 	// Task service owns the rich payload; orchestrator delegates.
 	taskEvents TaskEventPublisher
 
+	// sessionAccessCheck enforces per-user workspace scoping on the
+	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
+	sessionAccessCheck func(ctx context.Context, sessionID string) error
+
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
@@ -734,6 +738,27 @@ func (s *Service) SetTurnService(turnService TurnService) {
 // on those paths). Task service's own publishTaskEvent calls are unaffected.
 func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
 	s.taskEvents = publisher
+}
+
+// SetSessionAccessChecker installs the per-user workspace scoping check used by
+// the session-keyed WS actions (task session status, session PR check). Those
+// resolve sessions through the orchestrator's own repo handle rather than the
+// task service, so they do not inherit its authorize* checks and must ask here.
+//
+// The checker must return nil for contexts without a request identity, so
+// internal callers (event bus, schedulers) stay unscoped. Nil leaves every
+// session-keyed action unscoped, which is the pre-auth behavior.
+func (s *Service) SetSessionAccessChecker(check func(ctx context.Context, sessionID string) error) {
+	s.sessionAccessCheck = check
+}
+
+// authorizeSession applies the configured per-user session check. No-op when
+// unwired.
+func (s *Service) authorizeSession(ctx context.Context, sessionID string) error {
+	if s.sessionAccessCheck == nil {
+		return nil
+	}
+	return s.sessionAccessCheck(ctx, sessionID)
 }
 
 // publishTaskUpdated forwards to the configured TaskEventPublisher.

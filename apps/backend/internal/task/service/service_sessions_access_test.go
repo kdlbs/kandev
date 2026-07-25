@@ -139,6 +139,40 @@ func TestSessionScopingApproveSession(t *testing.T) {
 	}
 }
 
+// TestSessionScopingGetMessage covers the by-ID message read behind the
+// shell-output route. ListMessages was already scoped; GetMessage was not, so a
+// caller holding someone else's (session_id, message_id) pair could read their
+// command output.
+func TestSessionScopingGetMessage(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedSessionScopeFixture(t, repo)
+	ctx := context.Background()
+	foreign, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: "sess-b", TaskID: "task-b",
+		AuthorType: "agent", Content: "secret shell output",
+	})
+	if err != nil {
+		t.Fatalf("seed message: %v", err)
+	}
+	own, err := svc.CreateMessage(ctx, &CreateMessageRequest{
+		TaskSessionID: "sess-a", TaskID: "task-a",
+		AuthorType: "agent", Content: "my shell output",
+	})
+	if err != nil {
+		t.Fatalf("seed own message: %v", err)
+	}
+
+	if _, err := svc.GetMessage(ctxAs("user-a"), foreign.ID); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("get foreign message = %v, want ErrTaskNotFound", err)
+	}
+	if _, err := svc.GetMessage(ctxAs("user-a"), own.ID); err != nil {
+		t.Fatalf("owner must still read own message: %v", err)
+	}
+	if _, err := svc.GetMessage(context.Background(), foreign.ID); err != nil {
+		t.Fatalf("internal caller must stay unscoped: %v", err)
+	}
+}
+
 // TestSessionScopingInternalAndSyntheticCallersUnscoped pins the compatibility
 // contract: identity-less internal callers (pollers, event bus, office
 // schedulers) and the synthetic identity used while auth is disabled keep

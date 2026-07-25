@@ -1122,6 +1122,14 @@ func (s *Service) associatePRFromPushScoped(
 // if found. This provides an on-demand alternative to the background poller,
 // allowing the frontend to trigger immediate PR detection.
 func (s *Service) CheckSessionPR(ctx context.Context, taskID, sessionID string) (bool, error) {
+	// Per-user scoping first, before any early return: this both reveals PR
+	// association and installs a PR watch, so it must be owner-only. Report
+	// "no PR" rather than an error so a foreign session leaks nothing about
+	// its existence.
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return false, nil
+	}
+
 	if s.githubService == nil {
 		return false, nil
 	}

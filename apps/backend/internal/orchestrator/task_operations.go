@@ -1734,6 +1734,11 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) err
 	}
 }
 
+// sessionNotFoundStatus is the status-response error used for both a missing
+// session and one the caller does not own, so the response cannot be used to
+// tell the two apart.
+const sessionNotFoundStatus = "session not found"
+
 // GetTaskSessionStatus returns the status of a task session including whether it's resumable
 func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID string) (dto.TaskSessionStatusResponse, error) {
 	s.logger.Debug("checking task session status",
@@ -1745,10 +1750,17 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		TaskID:    taskID,
 	}
 
+	// Per-user scoping: a foreign session is indistinguishable from a missing
+	// one, so reuse the same response shape rather than a distinct error.
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		resp.Error = sessionNotFoundStatus
+		return resp, nil
+	}
+
 	// 1. Load session from database
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		resp.Error = "session not found"
+		resp.Error = sessionNotFoundStatus
 		return resp, nil
 	}
 

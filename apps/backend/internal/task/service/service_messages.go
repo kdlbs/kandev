@@ -265,7 +265,19 @@ func (s *Service) createMessageWithRetry(ctx context.Context, message *models.Me
 
 // GetMessage retrieves a message by ID
 func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, error) {
-	return s.messages.GetMessage(ctx, id)
+	message, err := s.messages.GetMessage(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	// Scope like ListMessages: the shell-output route reaches a message by ID,
+	// so without this a caller holding someone else's (session_id, message_id)
+	// pair could read their command output.
+	if message.TaskSessionID != "" {
+		if err := s.AuthorizeSessionAccess(ctx, message.TaskSessionID); err != nil {
+			return nil, err
+		}
+	}
+	return message, nil
 }
 
 // ListMessages returns all messages for a session.
