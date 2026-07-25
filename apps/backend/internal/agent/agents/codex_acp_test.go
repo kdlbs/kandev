@@ -36,7 +36,7 @@ func TestCodexACP_BuildCommand_NoCodexCLIFlags(t *testing.T) {
 
 func TestCodexACP_UsesAgentClientProtocolBridge(t *testing.T) {
 	a := NewCodexACP()
-	want := []string{"npx", "-y", "@agentclientprotocol/codex-acp@1.1.5"}
+	want := []string{"npx", "-y", "@agentclientprotocol/codex-acp@1.1.7"}
 
 	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
 		t.Fatalf("BuildCommand = %#v, want %#v", got, want)
@@ -47,7 +47,7 @@ func TestCodexACP_UsesAgentClientProtocolBridge(t *testing.T) {
 	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
 		t.Fatalf("Inference Command = %#v, want %#v", got, want)
 	}
-	wantInstall := "npm install -g @openai/codex @agentclientprotocol/codex-acp@1.1.5"
+	wantInstall := "npm install -g @openai/codex @agentclientprotocol/codex-acp@1.1.7"
 	if got := a.InstallScript(); got != wantInstall {
 		t.Fatalf("InstallScript = %q, want %q", got, wantInstall)
 	}

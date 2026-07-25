@@ -23,13 +23,13 @@ func TestOpenCodeACPUsesInstalledBinaryAndPinnedInstaller(t *testing.T) {
 	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
 		t.Fatalf("Inference Command = %#v, want %#v", got, want)
 	}
-	if got, wantInstall := a.InstallScript(), "npm install -g opencode-ai@1.18.4"; got != wantInstall {
+	if got, wantInstall := a.InstallScript(), "npm install -g opencode-ai@1.18.5"; got != wantInstall {
 		t.Fatalf("InstallScript = %q, want %q", got, wantInstall)
 	}
 }
 
 func TestOpenCodeACPDiscoveryMatchesRuntimeExecutable(t *testing.T) {
-	binaryPath := writeOpenCodeTestBinary(t, "printf '1.18.4\\n'")
+	binaryPath := writeOpenCodeTestBinary(t, "printf '1.18.5\\n'")
 
 	a := NewOpenCodeACP()
 	result, err := a.IsInstalled(context.Background())
@@ -52,9 +52,9 @@ func TestOpenCodeACPDiscoveryAcceptsSupportedVersionOutput(t *testing.T) {
 		name   string
 		output string
 	}{
-		{name: "exact", output: "1.18.4"},
-		{name: "prefixed and whitespace", output: "  OpenCode version v1.18.4  "},
-		{name: "slash prefix", output: "opencode/1.18.4 linux-x64"},
+		{name: "exact", output: "1.18.5"},
+		{name: "prefixed and whitespace", output: "  OpenCode version v1.18.5  "},
+		{name: "slash prefix", output: "opencode/1.18.5 linux-x64"},
 	}
 
 	for _, tt := range tests {
@@ -86,7 +86,7 @@ func TestOpenCodeACPDiscoveryRejectsUnsupportedVersion(t *testing.T) {
 	if result.MatchedPath != binaryPath {
 		t.Fatalf("MatchedPath = %q, want %q", result.MatchedPath, binaryPath)
 	}
-	for _, want := range []string{"1.16.2", "requires 1.18.4", "npm install -g opencode-ai@1.18.4"} {
+	for _, want := range []string{"1.16.2", "requires 1.18.5", "npm install -g opencode-ai@1.18.5"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not contain %q", err, want)
 		}
@@ -103,7 +103,7 @@ func TestOpenCodeACPDiscoveryRejectsMalformedVersion(t *testing.T) {
 	if result.Available {
 		t.Fatal("IsInstalled() Available = true, want false")
 	}
-	if !strings.Contains(err.Error(), "npm install -g opencode-ai@1.18.4") {
+	if !strings.Contains(err.Error(), "npm install -g opencode-ai@1.18.5") {
 		t.Fatalf("error %q does not contain pinned remediation", err)
 	}
 }
@@ -118,7 +118,7 @@ func TestOpenCodeACPDiscoveryHandlesVersionCommandFailure(t *testing.T) {
 	if result.Available {
 		t.Fatal("IsInstalled() Available = true, want false")
 	}
-	if !strings.Contains(err.Error(), "npm install -g opencode-ai@1.18.4") {
+	if !strings.Contains(err.Error(), "npm install -g opencode-ai@1.18.5") {
 		t.Fatalf("error %q does not contain pinned remediation", err)
 	}
 }

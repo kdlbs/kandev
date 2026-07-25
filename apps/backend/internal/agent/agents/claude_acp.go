@@ -18,7 +18,7 @@ var claudeACPLogoDark []byte
 
 const (
 	claudeACPPackage     = "@agentclientprotocol/claude-agent-acp"
-	claudeACPVersion     = "0.61.0"
+	claudeACPVersion     = "0.62.0"
 	claudeACPPackageSpec = claudeACPPackage + "@" + claudeACPVersion
 )
 

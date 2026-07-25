@@ -139,12 +139,12 @@ func TestBuildAgentCommand_PreservesPinnedACPBridgeSpecs(t *testing.T) {
 		{
 			name:  "claude",
 			agent: agents.NewClaudeACP(),
-			want:  "npx -y @agentclientprotocol/claude-agent-acp@0.61.0",
+			want:  "npx -y @agentclientprotocol/claude-agent-acp@0.62.0",
 		},
 		{
 			name:  "codex",
 			agent: agents.NewCodexACP(),
-			want:  "npx -y @agentclientprotocol/codex-acp@1.1.5",
+			want:  "npx -y @agentclientprotocol/codex-acp@1.1.7",
 		},
 		{
 			name:  "opencode",

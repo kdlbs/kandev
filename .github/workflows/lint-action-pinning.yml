@@ -9,6 +9,7 @@ on:
       - ".github/scripts/lint-action-pinning_test.py"
       - ".github/scripts/collect-macos-desktop-diagnostics.sh"
       - ".github/scripts/release-workflow-contract_test.py"
+      - ".github/scripts/update-agent-versions-workflow_test.py"
       - ".github/release-signing-key.asc"
       - "docs/public/release-process.md"
   pull_request:
@@ -19,6 +20,7 @@ on:
       - ".github/scripts/lint-action-pinning_test.py"
       - ".github/scripts/collect-macos-desktop-diagnostics.sh"
       - ".github/scripts/release-workflow-contract_test.py"
+      - ".github/scripts/update-agent-versions-workflow_test.py"
       - ".github/release-signing-key.asc"
       - "docs/public/release-process.md"
 
@@ -46,6 +48,9 @@ jobs:
 
       - name: Test release workflow contract
         run: python3 .github/scripts/release-workflow-contract_test.py
+
+      - name: Test agent version update workflow contract
+        run: python3 .github/scripts/update-agent-versions-workflow_test.py
 
       - name: Verify action refs
         run: python3 .github/scripts/lint-action-pinning.py

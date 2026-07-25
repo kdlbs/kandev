@@ -1,6 +1,9 @@
 package agents
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // TestCopilotACP_PermissionSettings_Curated verifies the four curated flag
 // suggestions surfaced to the profile-creation UI. `allow_all_tools` is
@@ -47,7 +50,7 @@ func TestCopilotACP_BuildCommand_NoCLIFlagSpecialCasing(t *testing.T) {
 	ag := NewCopilotACP()
 	cmd := ag.BuildCommand(CommandOptions{})
 	got := cmd.Args()
-	want := []string{"npx", "-y", "@github/copilot", "--acp"}
+	want := []string{"npx", "-y", "@github/copilot@1.0.75", "--acp"}
 	if len(got) != len(want) {
 		t.Fatalf("argv length mismatch\n  got:  %#v\n  want: %#v", got, want)
 	}
@@ -55,6 +58,25 @@ func TestCopilotACP_BuildCommand_NoCLIFlagSpecialCasing(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("argv[%d] mismatch: got %q, want %q", i, got[i], want[i])
 		}
+	}
+}
+
+func TestCopilotACP_UsesPinnedPackageOnEveryNPMCommandSurface(t *testing.T) {
+	ag := NewCopilotACP()
+	wantACP := []string{"npx", "-y", "@github/copilot@1.0.75", "--acp"}
+	wantPassthrough := []string{"npx", "-y", "@github/copilot@1.0.75"}
+
+	if got := ag.Runtime().Cmd.Args(); !slices.Equal(got, wantACP) {
+		t.Fatalf("Runtime Cmd = %#v, want %#v", got, wantACP)
+	}
+	if got := ag.InferenceConfig().Command.Args(); !slices.Equal(got, wantACP) {
+		t.Fatalf("Inference Command = %#v, want %#v", got, wantACP)
+	}
+	if got := ag.PassthroughConfig().PassthroughCmd.Args(); !slices.Equal(got, wantPassthrough) {
+		t.Fatalf("Passthrough Cmd = %#v, want %#v", got, wantPassthrough)
+	}
+	if got, want := ag.InstallScript(), "npm install -g @github/copilot@1.0.75"; got != want {
+		t.Fatalf("InstallScript = %q, want %q", got, want)
 	}
 }
 

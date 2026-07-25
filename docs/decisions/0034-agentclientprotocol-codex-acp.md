@@ -1,6 +1,6 @@
 # 0034: Agent Client Protocol Codex ACP Bridge
 
-**Status:** accepted
+**Status:** accepted (amended 2026-07-25)
 **Date:** 2026-07-10
 **Area:** backend, protocol
 
@@ -10,7 +10,12 @@ Kandev's `codex-acp` agent previously launched `@zed-industries/codex-acp`. That
 
 ## Decision
 
-Kandev's `codex-acp` agent launches `npx -y @agentclientprotocol/codex-acp@1.1.5` for ACP chat and one-shot inference sessions. The install script still installs `@openai/codex` for `codex login`, then installs the same pinned ACP bridge package for Kandev sessions.
+Kandev's `codex-acp` agent launches an exact
+`@agentclientprotocol/codex-acp` package version for ACP chat and one-shot
+inference sessions. The current tested version is maintained in
+[`ACP_BRIDGE_VERSIONS.md`](../../apps/backend/internal/agent/agents/ACP_BRIDGE_VERSIONS.md).
+The install script still installs `@openai/codex` for `codex login`, then
+installs the same pinned ACP bridge package for Kandev sessions.
 
 No product spec update is required: the user-facing agent remains `codex-acp`; only the package that supplies the ACP bridge changes.
 

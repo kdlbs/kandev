@@ -1,12 +1,15 @@
-# ACP bridge versions
+# Core agent versions
 
-Kandev tests these npm-provided ACP runtimes with the following package pins:
+Kandev tests these core npm-provided ACP runtimes with the following exact
+package pins:
 
 | Agent | Package | Tested version | ACP runtime selection |
 | --- | --- | --- | --- |
-| Claude | `@agentclientprotocol/claude-agent-acp` | `0.61.0` | Exact package spec through `npx` |
-| Codex | `@agentclientprotocol/codex-acp` | `1.1.5` | Exact package spec through `npx` |
-| OpenCode | `opencode-ai` | `1.18.4` | Installed `opencode` binary |
+| Claude | `@agentclientprotocol/claude-agent-acp` | `0.62.0` | Exact package spec through `npx` |
+| Codex | `@agentclientprotocol/codex-acp` | `1.1.7` | Exact package spec through `npx` |
+| OpenCode | `opencode-ai` | `1.18.5` | Installed `opencode` binary |
+| Copilot | `@github/copilot` | `1.0.75` | Exact package spec through `npx`, or the matching installed `copilot` binary |
+| Gemini | `@google/gemini-cli` | `0.52.0` | Exact package spec through `npx` |
 
 Claude and Codex use their exact package specs for normal sessions, container
 commands, one-shot inference, and remote installation. The resolved spec is
@@ -16,15 +19,27 @@ part of `AgentCommand`, which existing lifecycle diagnostics log as
 OpenCode intentionally uses the direct `opencode acp` command for discovery,
 normal sessions, container commands, and one-shot inference. This keeps startup
 offline-compatible and ensures discovery validates the executable actually
-launched. Its installer remains pinned to `opencode-ai@1.18.4`, and discovery
+launched. Its installer remains pinned to `opencode-ai@1.18.5`, and discovery
 runs that executable with `--version` before reporting it as supported. Missing,
 malformed, failing, or mismatched version output reports the agent as unavailable
 with the pinned install command as remediation. The ACP initialize response
 separately records the runtime-reported agent name and version.
 
-To update a bridge, change one version constant at a time, confirm the exact
-version exists in the configured npm registry, capture only sanitized ACP wire
-fixtures, and run the agent command-surface and ACP dialect tests before
-changing the documented tested version. For OpenCode, also install the candidate
-globally and confirm `opencode --version` before capturing fixtures. Do not add
-prompts, file contents, credentials, or other user data to protocol fixtures.
+Copilot prefers a globally installed `copilot` binary after the pinned package
+has been installed, avoiding an npm registry lookup on every launch. Its
+fallback, runtime, inference, passthrough, and install commands all use the same
+exact package spec. Gemini always uses its exact package spec.
+
+Cursor is intentionally not listed as pinned. Its supported installer selects
+the current Cursor Agent build, and the CLI auto-updates by default without a
+supported immutable version selector or CLI auto-update opt-out. Kandev keeps
+using the official installer rather than claiming a version guarantee it
+cannot enforce.
+
+Update each agent independently inside the grouped version-update pull request:
+confirm that the exact version exists in the configured npm registry, capture
+only sanitized ACP wire fixtures when protocol evidence must change, and run
+the agent command-surface and ACP dialect tests before changing the documented
+tested version. For OpenCode, also install the candidate globally and confirm
+`opencode --version` before capturing fixtures. Do not add prompts, file
+contents, credentials, or other user data to protocol fixtures.

@@ -1,0 +1,135 @@
+name: Update Agent Versions
+
+on:
+  schedule:
+    # Wednesdays at 07:17 UTC, away from the repository's Monday 06:00 jobs.
+    - cron: "17 7 * * 3"
+  workflow_dispatch: {}
+
+concurrency:
+  group: update-agent-versions
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    name: Update core agent package pins
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+        with:
+          node-version: "24"
+
+      - name: Install Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: apps/backend/go.mod
+          cache-dependency-path: apps/backend/go.sum
+
+      - name: Test version updater
+        run: python3 scripts/update_agent_versions_test.py
+
+      - name: Update core agent versions
+        id: update
+        env:
+          JSON_REPORT: ${{ runner.temp }}/agent-version-updates.json
+          MARKDOWN_REPORT: ${{ runner.temp }}/agent-version-updates.md
+        run: |
+          set -euo pipefail
+          python3 scripts/update_agent_versions.py \
+            --json-report "$JSON_REPORT" \
+            --markdown-report "$MARKDOWN_REPORT"
+          cat "$MARKDOWN_REPORT" >> "$GITHUB_STEP_SUMMARY"
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Test pinned agent command surfaces
+        if: steps.update.outputs.changed == 'true'
+        working-directory: apps/backend
+        run: go test ./internal/agent/agents ./internal/agent/runtime/lifecycle
+
+      - name: Test workflow contract
+        if: steps.update.outputs.changed == 'true'
+        run: python3 .github/scripts/update-agent-versions-workflow_test.py
+
+      - name: Create agent-update App token
+        if: steps.update.outputs.changed == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.AGENT_UPDATE_APP_ID }}
+          private-key: ${{ secrets.AGENT_UPDATE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Create or refresh update pull request
+        if: steps.update.outputs.changed == 'true'
+        env:
+          BRANCH: automation/agent-version-updates
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          MARKDOWN_REPORT: ${{ runner.temp }}/agent-version-updates.md
+          TITLE: "chore(deps): update pinned agent versions"
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          git config user.email "agent-update-bot@kandev"
+          git config user.name "kandev agent update bot"
+
+          remote_sha="$(git ls-remote --heads origin "refs/heads/$BRANCH" | cut -f1)"
+          git switch -C "$BRANCH"
+          git add \
+            README.md \
+            apps/backend/internal/agent/agents \
+            apps/backend/internal/agent/runtime/lifecycle/manager_launch_test.go
+          git commit -m "$TITLE"
+          git push \
+            "--force-with-lease=refs/heads/$BRANCH:$remote_sha" \
+            origin \
+            "HEAD:refs/heads/$BRANCH"
+
+          pulls_json="$(
+            gh api --method GET "repos/$GITHUB_REPOSITORY/pulls" \
+              -f state=open \
+              -f base=main \
+              -f "head=${GITHUB_REPOSITORY_OWNER}:$BRANCH" \
+              -f per_page=100
+          )"
+          matching_pulls="$(
+            jq -c \
+              --arg repo "$GITHUB_REPOSITORY" \
+              --arg branch "$BRANCH" \
+              '[.[] | select(.head.repo.full_name == $repo and .head.ref == $branch)]' \
+              <<<"$pulls_json"
+          )"
+          pull_count="$(jq 'length' <<<"$matching_pulls")"
+          if [ "$pull_count" -gt 1 ]; then
+            echo "More than one exact automation PR matched; refusing to edit." >&2
+            exit 1
+          fi
+          pr_number="$(
+            jq -r 'if length == 1 then .[0].number else empty end' <<<"$matching_pulls"
+          )"
+          if [ -n "$pr_number" ]; then
+            gh pr edit "$pr_number" \
+              --title "$TITLE" \
+              --body-file "$MARKDOWN_REPORT"
+          else
+            gh pr create \
+              --base main \
+              --head "$BRANCH" \
+              --title "$TITLE" \
+              --body-file "$MARKDOWN_REPORT"
+          fi

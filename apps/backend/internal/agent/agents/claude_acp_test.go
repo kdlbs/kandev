@@ -8,7 +8,7 @@ import (
 
 func TestClaudeACPUsesPinnedBridge(t *testing.T) {
 	a := NewClaudeACP()
-	want := []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp@0.61.0"}
+	want := []string{"npx", "-y", "@agentclientprotocol/claude-agent-acp@0.62.0"}
 
 	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
 		t.Fatalf("BuildCommand = %#v, want %#v", got, want)
@@ -19,7 +19,7 @@ func TestClaudeACPUsesPinnedBridge(t *testing.T) {
 	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
 		t.Fatalf("Inference Command = %#v, want %#v", got, want)
 	}
-	wantInstall := "npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp@0.61.0"
+	wantInstall := "npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp@0.62.0"
 	if got := a.InstallScript(); got != wantInstall {
 		t.Fatalf("InstallScript = %q, want %q", got, wantInstall)
 	}

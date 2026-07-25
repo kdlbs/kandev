@@ -18,7 +18,7 @@ var codexACPLogoDark []byte
 
 const (
 	codexACPPackage     = "@agentclientprotocol/codex-acp"
-	codexACPVersion     = "1.1.5"
+	codexACPVersion     = "1.1.7"
 	codexACPPackageSpec = codexACPPackage + "@" + codexACPVersion
 )
 

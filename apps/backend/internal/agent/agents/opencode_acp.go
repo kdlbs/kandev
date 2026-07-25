@@ -22,7 +22,7 @@ var opencodeACPLogoDark []byte
 
 const (
 	opencodeACPPackage     = "opencode-ai"
-	opencodeACPVersion     = "1.18.4"
+	opencodeACPVersion     = "1.18.5"
 	opencodeACPPackageSpec = opencodeACPPackage + "@" + opencodeACPVersion
 	opencodeVersionTimeout = 5 * time.Second
 )

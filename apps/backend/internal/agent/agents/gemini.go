@@ -15,7 +15,11 @@ var geminiLogoLight []byte
 //go:embed logos/gemini_dark.svg
 var geminiLogoDark []byte
 
-const geminiPkg = "@google/gemini-cli"
+const (
+	geminiPackage     = "@google/gemini-cli"
+	geminiVersion     = "0.52.0"
+	geminiPackageSpec = geminiPackage + "@" + geminiVersion
+)
 
 var (
 	_ Agent            = (*Gemini)(nil)
@@ -35,7 +39,7 @@ func NewGemini() *Gemini {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("npx", "@google/gemini-cli"),
+				PassthroughCmd: NewCommand("npx", geminiPackageSpec),
 				ModelFlag:      NewParam("--model", "{model}"),
 				PromptFlag:     NewParam("--prompt-interactive", "{prompt}"),
 				IdleTimeout:    3 * time.Second,
@@ -77,13 +81,13 @@ func (a *Gemini) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *Gemini) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", geminiPkg, "--acp").Build()
+	return Cmd("npx", "-y", geminiPackageSpec, "--acp").Build()
 }
 
 func (a *Gemini) Runtime() *RuntimeConfig {
 	canRecover := false
 	return &RuntimeConfig{
-		Cmd:             Cmd("npx", "-y", geminiPkg, "--acp").Build(),
+		Cmd:             Cmd("npx", "-y", geminiPackageSpec, "--acp").Build(),
 		WorkingDir:      "{workspace}",
 		Env:             map[string]string{},
 		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -127,7 +131,7 @@ func (a *Gemini) LoginCommand() *LoginCommand {
 }
 
 func (a *Gemini) InstallScript() string {
-	return "npm install -g " + geminiPkg
+	return "npm install -g " + geminiPackageSpec
 }
 
 func (a *Gemini) BillingType() usage.BillingType { return defaultBillingType() }
@@ -142,6 +146,6 @@ func (a *Gemini) PermissionSettings() map[string]PermissionSetting {
 func (a *Gemini) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("npx", "-y", geminiPkg, "--acp"),
+		Command:   NewCommand("npx", "-y", geminiPackageSpec, "--acp"),
 	}
 }
