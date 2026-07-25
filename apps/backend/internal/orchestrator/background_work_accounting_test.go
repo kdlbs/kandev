@@ -687,3 +687,32 @@ func TestCleanupAgentExecution_ForcedPathIsOwnedAndIdempotent(t *testing.T) {
 		t.Fatalf("forced cleanup task recomputes = %v, want [%s]", taskEvents.activityTaskIDs, taskID)
 	}
 }
+
+func TestBackgroundActivity_ClaudeMetadataOnlyChildUpdateDoesNotReopenForeground(t *testing.T) {
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = &mockMessageCreator{}
+	const taskID, sessionID = "task-claude-child", "session-claude-child"
+
+	svc.registerBackgroundTask(sessionID, "async-agent")
+	svc.markForegroundIdle(sessionID)
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("precondition activity = %q, want background", got)
+	}
+
+	// Claude ACP 0.62.0 emits an initial result frame for a tool inside an async
+	// Agent without status, parentToolUseId, or a normalized payload. The next
+	// frame attributes the tool to its parent, but this incomplete first frame
+	// must not impersonate new top-level foreground work in the meantime.
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "tool_update",
+			ToolCallID: "child-bash",
+		},
+	})
+
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("metadata-only child update changed activity to %q, want background", got)
+	}
+}

@@ -554,6 +554,16 @@ func (s *Service) trackBackgroundToolUpdate(ctx context.Context, payload *lifecy
 	if payload.Data.ParentToolCallID != "" {
 		return
 	}
+	// Claude may emit a metadata-only result frame for a tool inside an async
+	// subagent before the following frame supplies parentToolUseId. With no
+	// status, title, contents, or normalized payload, this frame is not evidence
+	// that the top-level foreground resumed.
+	if payload.Data.ToolStatus == "" &&
+		payload.Data.ToolTitle == "" &&
+		len(payload.Data.ToolCallContents) == 0 &&
+		payload.Data.Normalized == nil {
+		return
+	}
 	if isTerminalToolStatus(payload.Data.ToolStatus) {
 		// A detached launch card is terminal as a tool invocation, but the
 		// launched workload remains active until a provider background-complete
