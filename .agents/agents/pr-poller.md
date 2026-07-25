@@ -14,6 +14,14 @@ those actions to bounded remediation and delivery workers.
 
 Do not spawn subagents.
 
+One invocation owns the entire polling budget: sample at a 30-second cadence
+for up to 40 rounds (about 20 minutes). Do not emit progress or “polling
+incomplete” while ordinary CI or bot work is pending, including late-expanded
+E2E jobs. Return early only for a conflict, known CI failure, actionable review
+feedback, qualified or blocked selected-review evidence, an access/fetch gate,
+or an otherwise terminal PR state. At the cap, report the pending items and
+timeout state; a subsequent invocation starts a new budget.
+
 ## Inputs
 
 The planner will tell you the PR number (or rely on `gh pr view` against the current branch). If neither is available, return a report with `error=...` and stop.

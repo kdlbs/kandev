@@ -41,6 +41,14 @@ a new round: reassess prior findings and the verdict against the new head, and
 verify checks or workflow results for that head rather than relying on a PR
 number or author summary.
 
+For an existing GitHub PR, inspect both `scripts/pr-state --summary <PR>` and
+`scripts/pr-resolve list <PR>` before treating review feedback as clean. Read
+the body of any exact-current-head review as well as inline threads: bots can
+place actionable findings outside the diff. A review's `commit_id` is the
+current-head signal; timestamps are only collection order. If `pr-state`
+reports hidden unresolved threads, use `pr-resolve list` to inspect them rather
+than assuming the filtered list is complete.
+
 Compare the PR description, checklist, and claimed manual validation with that
 exact head, especially after a major refactor. Report stale claims separately;
 they are not verification evidence for the current diff.
@@ -108,6 +116,14 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - No speculative code — unused flags/options, "reserved for future" scaffolding, one-off abstractions with a single call site, options parsed but never used
 - Naming clear and consistent with project conventions
 - Deep nesting (>3 levels) — use early returns
+
+**Build and platform boundaries:**
+- For changed Makefiles, shell scripts, or CI path filters, trace each changed
+  target through the shell and platform branches. Distinguish executable naming
+  from recipe-shell syntax; inspect `OS`, `MSYSTEM`, and `SHELL` assumptions.
+- Use `make -n <changed-target>` for every affected platform branch that is
+  available, and confirm CI invokes the changed target. Include docs or
+  configuration paths when a validator or test reads them.
 
 **AI slop detection:**
 - Comments that restate code or narrate obvious steps

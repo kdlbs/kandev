@@ -10,6 +10,14 @@ report including head SHA, GitHub mergeability/merge-state status, and local
 unmerged-index count. Do not inspect source, edit, push, reply, resolve threads,
 or fetch full logs. Do not spawn subagents.
 
+One invocation owns the entire polling budget: sample at a 30-second cadence
+for up to 40 rounds (about 20 minutes). Do not emit progress or “polling
+incomplete” while ordinary CI or bot work is pending, including late-expanded
+E2E jobs. Return early only for a conflict, known CI failure, actionable review
+feedback, qualified or blocked selected-review evidence, an access/fetch gate,
+or an otherwise terminal PR state. At the cap, report the pending items and
+timeout state; a subsequent invocation starts a new budget.
+
 The planner may provide `selected_reviewer=<GitHub login>`. Read raw
 `scripts/pr-state --trusted-reviewer "$selected_reviewer" <PR>` when selection is set: review evidence is qualified
 only when `checks_head_sha` plus opening/closing heads match and
