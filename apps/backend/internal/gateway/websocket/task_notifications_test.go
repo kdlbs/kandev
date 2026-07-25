@@ -53,6 +53,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 		events.MessageAdded,
 		events.MessageUpdated,
 		events.TaskSessionStateChanged,
+		events.TaskSessionActivityChanged,
 		events.GitHubTaskPRUpdated,
 		events.GitLabTaskMRUpdated,
 	} {

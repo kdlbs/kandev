@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -250,7 +251,12 @@ func TestInstallLaunchdIncludesActiveNodeBinInPath(t *testing.T) {
 	executablePath = func() (string, error) {
 		return filepath.Join(tmp, ".npm", "_npx", "abc", "node_modules", "@kdlbs", "runtime-darwin-arm64", "bin", "kandev"), nil
 	}
-	executeServiceCommand = func(string, ...string) error { return nil }
+	executeServiceCommand = func(name string, args ...string) error {
+		if name == "launchctl" && len(args) > 0 && args[0] == "print" {
+			return errors.New("not loaded")
+		}
+		return nil
+	}
 	servicePrintln = func(string) {}
 
 	plistPath := filepath.Join(tmp, "com.kdlbs.kandev.plist")
@@ -314,6 +320,9 @@ func TestInstallLaunchdMessagesDistinguishBootStart(t *testing.T) {
 			var messages []string
 			executeServiceCommand = func(name string, args ...string) error {
 				commands = append(commands, name+" "+strings.Join(args, " "))
+				if name == "launchctl" && len(args) > 0 && args[0] == "print" {
+					return errors.New("not loaded")
+				}
 				return nil
 			}
 			servicePrintln = func(message string) {

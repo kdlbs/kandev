@@ -17,6 +17,7 @@ afterEach(() => {
 });
 
 const INPUT_TESTID = "clarification-input";
+const ROW_TESTID = "clarification-custom-input";
 const TOUCH_SUBMIT_TESTID = "clarification-custom-submit";
 const MULTILINE = "line one\nline two";
 
@@ -53,10 +54,30 @@ function renderInPanel(overrides: Partial<Parameters<typeof ClarificationCustomI
 }
 
 describe("ClarificationCustomInput row focus", () => {
+  it("renders the editor as one flush, transparent input surface", () => {
+    const { getByTestId } = renderInPanel();
+    const row = getByTestId(ROW_TESTID);
+    const input = getByTestId(INPUT_TESTID);
+
+    expect(input.className).toContain("dark:bg-transparent");
+    expect(row.textContent).not.toContain("↳");
+  });
+
+  it("centers every direct row control without manual top offsets", () => {
+    const { getByTestId } = renderInPanel({ active: true });
+    const row = getByTestId(ROW_TESTID);
+
+    expect(row.className).toContain("items-center");
+    expect(row.className).not.toContain("items-start");
+    expect(Array.from(row.children).every((child) => !child.className.includes("mt-0.5"))).toBe(
+      true,
+    );
+  });
+
   it("focuses the textarea when the non-interactive row surface is pressed", () => {
     const { getByTestId } = renderInPanel();
 
-    const notDefaulted = fireEvent.mouseDown(getByTestId("clarification-custom-input"));
+    const notDefaulted = fireEvent.mouseDown(getByTestId(ROW_TESTID));
 
     expect(notDefaulted).toBe(false);
     expect(document.activeElement).toBe(getByTestId(INPUT_TESTID));
@@ -65,7 +86,7 @@ describe("ClarificationCustomInput row focus", () => {
   it("does not focus the disabled textarea from the row surface", () => {
     const { getByTestId } = renderInPanel({ isSubmitting: true });
 
-    fireEvent.mouseDown(getByTestId("clarification-custom-input"));
+    fireEvent.mouseDown(getByTestId(ROW_TESTID));
 
     expect(document.activeElement).not.toBe(getByTestId(INPUT_TESTID));
   });

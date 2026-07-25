@@ -561,6 +561,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"primarySessionId":            task.PrimarySessionID,
 		"primarySessionState":         task.PrimarySessionState,
 		"primarySessionPendingAction": task.PrimarySessionPendingAction,
+		"taskPendingAction":           task.TaskPendingAction,
 		"sessionCount":                task.SessionCount,
 		"reviewStatus":                nullString(string(task.ReviewStatus)),
 		"parentTaskId":                nullString(task.ParentID),

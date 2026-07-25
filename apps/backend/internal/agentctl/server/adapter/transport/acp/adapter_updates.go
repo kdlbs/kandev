@@ -16,8 +16,9 @@ import (
 // it pops the barrier off the queue, releasing the waiter once everything
 // queued ahead of it has been processed.
 type notifWork struct {
-	notif acp.SessionNotification
-	sync  chan struct{}
+	notif            acp.SessionNotification
+	sync             chan struct{}
+	promptGeneration uint64
 }
 
 // enqueueACPUpdate is the SDK-facing notification handler. It pushes the
@@ -36,7 +37,7 @@ func (a *Adapter) enqueueACPUpdate(n acp.SessionNotification) {
 	select {
 	case <-a.lifetimeCtx.Done():
 		return
-	case a.notifQueue <- notifWork{notif: n}:
+	case a.notifQueue <- notifWork{notif: n, promptGeneration: a.currentPromptGeneration()}:
 	}
 }
 
@@ -95,7 +96,7 @@ func (a *Adapter) runUpdateWorker() {
 				close(item.sync)
 				continue
 			}
-			a.handleACPUpdate(item.notif)
+			a.handleACPUpdate(item.notif, item.promptGeneration)
 		}
 	}
 }
@@ -104,7 +105,12 @@ func (a *Adapter) runUpdateWorker() {
 // Runs synchronously on the update worker goroutine; do not call from the SDK's
 // notification path (use enqueueACPUpdate instead). Unit tests invoke this
 // directly to exercise the conversion logic without spinning up the worker.
-func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
+//
+//nolint:cyclop // Existing notification conversion branches; prompt identity adds no new conversion path.
+func (a *Adapter) handleACPUpdate(
+	n acp.SessionNotification,
+	promptGeneration uint64,
+) {
 	// Fast path during session/load: history-replay notifications can arrive as
 	// a burst large enough to overflow the ACP SDK's 1024-deep notification
 	// queue if the per-item handler is slow. Check the loading flag first and
@@ -151,13 +157,25 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 	sessionID := string(n.SessionId)
 
 	suppressed := a.dialect.suppresses(n)
-	var event *AgentEvent
+	var event, leadingEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
 	}
 	if event == nil && !suppressed {
-		// Try untyped updates not yet supported by the ACP SDK.
-		event = a.tryConvertUntypedUpdate(rawData, sessionID)
+		// Try untyped updates not yet supported by the ACP SDK. A derived
+		// lifecycle event (session_info/usage frames that also imply a
+		// foreground-idle or background-complete transition) can carry a
+		// leading context-window event for the same provider frame; both
+		// follow the same log/trace/send path below instead of the context
+		// event being sent out-of-band inside the helper.
+		leadingEvent, event = a.tryConvertUntypedUpdate(rawData, sessionID, promptGeneration)
+	}
+	if leadingEvent != nil {
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)
+		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
+			leadingEvent.Type, rawData, leadingEvent)
+		a.sendUpdate(*leadingEvent)
+		a.maybeScheduleAsyncTurnComplete(*leadingEvent)
 	}
 	if event != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, event)
@@ -299,7 +317,12 @@ type acpUsageUpdate struct {
 	SessionUpdate string `json:"sessionUpdate"`
 	Size          int64  `json:"size"`
 	Used          int64  `json:"used"`
-	Cost          *struct {
+	Meta          struct {
+		ClaudeOrigin struct {
+			Kind string `json:"kind"`
+		} `json:"_claude/origin"`
+	} `json:"_meta,omitempty"`
+	Cost *struct {
 		Amount   float64 `json:"amount"`
 		Currency string  `json:"currency"`
 	} `json:"cost,omitempty"`
@@ -394,18 +417,29 @@ func (a *Adapter) consumeUsageDelta(sessionID string) (int64, int64) {
 
 // tryConvertUntypedUpdate handles ACP session update types not yet supported by the SDK.
 // When the SDK adds native support, move the handling into convertNotification and delete this.
-func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID string) *AgentEvent {
+//
+// The second return value is a leading context-window event derived from the
+// same provider frame as the primary (first) return value — populated only
+// when a usage_update frame also implies a lifecycle transition (see
+// usage.Meta.ClaudeOrigin.Kind below). Callers must log/trace/send both
+// returned events on the normal handleACPUpdate path instead of this helper
+// emitting the leading event itself, out of band.
+func (a *Adapter) tryConvertUntypedUpdate(
+	rawNotification []byte,
+	sessionID string,
+	promptGeneration uint64,
+) (*AgentEvent, *AgentEvent) {
 	var envelope struct {
 		Update json.RawMessage `json:"update"`
 	}
 	if err := json.Unmarshal(rawNotification, &envelope); err != nil {
-		return nil
+		return nil, nil
 	}
 
 	var sessionInfo acpSessionInfoUpdate
 	if err := json.Unmarshal(envelope.Update, &sessionInfo); err == nil &&
 		sessionInfo.SessionUpdate == "session_info_update" {
-		return &AgentEvent{
+		return nil, &AgentEvent{
 			Type:             streams.EventTypeSessionInfo,
 			SessionID:        sessionID,
 			SessionTitle:     sessionInfo.Title,
@@ -416,10 +450,10 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 
 	var usage acpUsageUpdate
 	if err := json.Unmarshal(envelope.Update, &usage); err != nil {
-		return nil
+		return nil, nil
 	}
 	if usage.SessionUpdate != "usage_update" || usage.Size <= 0 {
-		return nil
+		return nil, nil
 	}
 
 	// Forward usage_update.cost to the prompt-complete handler via the
@@ -436,13 +470,33 @@ func (a *Adapter) tryConvertUntypedUpdate(rawNotification []byte, sessionID stri
 	effectiveSize := a.recordUsageAndMaxSize(sessionID, usage.Size, usage.Used, costSubcents)
 
 	remaining := max(effectiveSize-usage.Used, 0)
-	return &AgentEvent{
+	contextEvent := &AgentEvent{
 		Type:                   streams.EventTypeContextWindow,
 		SessionID:              sessionID,
 		ContextWindowSize:      effectiveSize,
 		ContextWindowUsed:      usage.Used,
 		ContextWindowRemaining: remaining,
 		ContextEfficiency:      float64(usage.Used) / float64(effectiveSize) * 100,
+	}
+
+	var lifecycleType string
+	switch usage.Meta.ClaudeOrigin.Kind {
+	case "human":
+		lifecycleType = streams.EventTypeForegroundIdle
+	case "task-notification":
+		lifecycleType = streams.EventTypeBackgroundComplete
+	}
+	if lifecycleType == "" {
+		return nil, contextEvent
+	}
+	// Preserve the context-window update carried by the same provider frame:
+	// return it as the leading event so the caller sends it first, ahead of
+	// the derived lifecycle event, maintaining provider order without
+	// overloading either type.
+	return contextEvent, &AgentEvent{
+		Type:             lifecycleType,
+		SessionID:        sessionID,
+		PromptGeneration: promptGeneration,
 	}
 }
 

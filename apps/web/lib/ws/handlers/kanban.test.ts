@@ -152,6 +152,218 @@ describe("kanban.update handler — primarySessionId preservation", () => {
   });
 });
 
+describe("kanban.update handler — foregroundActivity preservation", () => {
+  it("preserves foregroundActivity from existing tasks", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
+            position: 0,
+            foregroundActivity: "background",
+          },
+        ],
+      },
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          [WORKFLOW_ID]: {
+            workflowId: WORKFLOW_ID,
+            workflowName: "WF1",
+            steps: [],
+            tasks: [
+              {
+                id: TASK_ID,
+                workflowStepId: STEP_ID,
+                title: TASK_TITLE,
+                position: 0,
+                foregroundActivity: "background",
+              },
+            ],
+          },
+        },
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage(WORKFLOW_ID, [
+        { id: TASK_ID, workflowStepId: STEP_ID, title: TASK_TITLE, position: 0 },
+      ]),
+    );
+
+    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
+    expect(task?.foregroundActivity).toBe("background");
+
+    const snapshotTask = store
+      .getState()
+      .kanbanMulti.snapshots[WORKFLOW_ID]?.tasks.find((t) => t.id === TASK_ID);
+    expect(snapshotTask?.foregroundActivity).toBe("background");
+  });
+
+  it("does not restore stale snapshot value when foregroundActivity is explicitly cleared", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
+            position: 0,
+            foregroundActivity: null,
+          },
+        ],
+      },
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          [WORKFLOW_ID]: {
+            workflowId: WORKFLOW_ID,
+            workflowName: "WF1",
+            steps: [],
+            tasks: [
+              {
+                id: TASK_ID,
+                workflowStepId: STEP_ID,
+                title: TASK_TITLE,
+                position: 0,
+                foregroundActivity: "background",
+              },
+            ],
+          },
+        },
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage(WORKFLOW_ID, [
+        { id: TASK_ID, workflowStepId: STEP_ID, title: TASK_TITLE, position: 0 },
+      ]),
+    );
+
+    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
+    expect(task?.foregroundActivity).toBeNull();
+
+    const snapshotTask = store
+      .getState()
+      .kanbanMulti.snapshots[WORKFLOW_ID]?.tasks.find((t) => t.id === TASK_ID);
+    expect(snapshotTask?.foregroundActivity).toBeNull();
+  });
+});
+
+describe("kanban.update handler — taskPendingAction preservation", () => {
+  it("preserves taskPendingAction from existing tasks", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
+            position: 0,
+            taskPendingAction: "clarification",
+          },
+        ],
+      },
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          [WORKFLOW_ID]: {
+            workflowId: WORKFLOW_ID,
+            workflowName: "WF1",
+            steps: [],
+            tasks: [
+              {
+                id: TASK_ID,
+                workflowStepId: STEP_ID,
+                title: TASK_TITLE,
+                position: 0,
+                taskPendingAction: "clarification",
+              },
+            ],
+          },
+        },
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage(WORKFLOW_ID, [
+        { id: TASK_ID, workflowStepId: STEP_ID, title: TASK_TITLE, position: 0 },
+      ]),
+    );
+
+    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
+    expect(task?.taskPendingAction).toBe("clarification");
+
+    const snapshotTask = store
+      .getState()
+      .kanbanMulti.snapshots[WORKFLOW_ID]?.tasks.find((t) => t.id === TASK_ID);
+    expect(snapshotTask?.taskPendingAction).toBe("clarification");
+  });
+
+  it("does not restore stale snapshot value when taskPendingAction is explicitly cleared", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: WORKFLOW_ID,
+        steps: [],
+        tasks: [
+          {
+            id: TASK_ID,
+            workflowStepId: STEP_ID,
+            title: TASK_TITLE,
+            position: 0,
+            taskPendingAction: null,
+          },
+        ],
+      },
+      kanbanMulti: {
+        isLoading: false,
+        snapshots: {
+          [WORKFLOW_ID]: {
+            workflowId: WORKFLOW_ID,
+            workflowName: "WF1",
+            steps: [],
+            tasks: [
+              {
+                id: TASK_ID,
+                workflowStepId: STEP_ID,
+                title: TASK_TITLE,
+                position: 0,
+                taskPendingAction: "clarification",
+              },
+            ],
+          },
+        },
+      },
+    } as Partial<AppState>);
+
+    const handler = registerKanbanHandlers(store)["kanban.update"]!;
+    handler(
+      makeUpdateMessage(WORKFLOW_ID, [
+        { id: TASK_ID, workflowStepId: STEP_ID, title: TASK_TITLE, position: 0 },
+      ]),
+    );
+
+    const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
+    expect(task?.taskPendingAction).toBeNull();
+
+    const snapshotTask = store
+      .getState()
+      .kanbanMulti.snapshots[WORKFLOW_ID]?.tasks.find((t) => t.id === TASK_ID);
+    expect(snapshotTask?.taskPendingAction).toBeNull();
+  });
+});
+
 describe("kanban.update handler — repository preservation", () => {
   it("preserves existing repositories when kanban.update omits repo metadata", () => {
     const store = makeStore({

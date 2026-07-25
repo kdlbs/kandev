@@ -40,6 +40,16 @@ const (
 	// EventTypeContextWindow indicates a context window update.
 	EventTypeContextWindow = "context_window"
 
+	// EventTypeForegroundIdle indicates the provider finished its foreground
+	// model cycle even when the prompt RPC remains open for background work.
+	EventTypeForegroundIdle = "foreground_idle"
+
+	// EventTypeBackgroundComplete indicates one provider-reported background
+	// workload completed. ToolCallID carries a stable provider work identity when
+	// available. Some providers expose no identity on the terminal frame; consumers
+	// must fail closed rather than guessing among multiple registrations.
+	EventTypeBackgroundComplete = "background_complete"
+
 	// EventTypeAvailableCommands indicates available slash commands from the agent.
 	EventTypeAvailableCommands = "available_commands"
 
@@ -90,8 +100,9 @@ type AgentEvent struct {
 	OperationID string `json:"operation_id,omitempty"`
 
 	// PromptGeneration is the lifecycle-owned identity assigned when this
-	// prompt was accepted. Terminal events echo it so delayed completions
-	// cannot be attributed to a newer prompt on the same execution.
+	// prompt was accepted. Terminal events and ownership-sensitive lifecycle
+	// boundaries such as foreground-idle echo it so delayed events cannot be
+	// attributed to a newer prompt on the same execution.
 	PromptGeneration uint64 `json:"prompt_generation,omitempty"`
 
 	// --- Message fields (for "message_chunk" type) ---

@@ -51,10 +51,13 @@ import { useRunComment } from "./use-run-comment";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function makeStoreState(sessionState: string, planMode = false) {
+function makeStoreState(sessionState: string, planMode = false, foregroundActivity?: string) {
   return {
     taskSessions: {
-      items: { "sess-1": { state: sessionState } },
+      items: {
+        "sess-1": { state: sessionState, foreground_activity: foregroundActivity },
+        "other-session": { state: "RUNNING", foreground_activity: "generating" },
+      },
     },
     chatInput: {
       planModeBySessionId: { "sess-1": planMode },
@@ -171,12 +174,35 @@ describe("useRunComment — idle agent sends directly", () => {
     expect(mockMarkCommentsSent).toHaveBeenCalledWith(["c-1"]);
   });
 
+  it("sends directly for a CREATED session so its first prompt can start the agent", async () => {
+    mockStoreState = makeStoreState("CREATED");
+    const { result } = renderCommentHook();
+
+    await expect(result.current.runComment(makeDiffComment())).resolves.toEqual({ queued: false });
+    expect(mockRequest).toHaveBeenCalled();
+    expect(mockAppendToQueue).not.toHaveBeenCalled();
+  });
+
   it("reads fresh store state at call time, not from closure", async () => {
     mockStoreState = makeStoreState("RUNNING");
     const { result } = renderCommentHook();
 
     // Agent finishes — store changes but hook NOT re-rendered
     mockStoreState = makeStoreState("WAITING_FOR_INPUT");
+
+    let res: { queued: boolean } | undefined;
+    await act(async () => {
+      res = await result.current.runComment(makeDiffComment());
+    });
+
+    expect(res).toEqual({ queued: false });
+    expect(mockRequest).toHaveBeenCalled();
+    expect(mockAppendToQueue).not.toHaveBeenCalled();
+  });
+
+  it("sends directly for RUNNING background work despite another generating session", async () => {
+    mockStoreState = makeStoreState("RUNNING", false, "background");
+    const { result } = renderCommentHook();
 
     let res: { queued: boolean } | undefined;
     await act(async () => {
@@ -260,16 +286,11 @@ describe("useRunComment — busy agent queues", () => {
     expect(mockMarkCommentsSent).toHaveBeenCalledWith(["c-1"]);
   });
 
-  it("queues via appendToQueue when agent is STARTING", async () => {
+  it("queues via appendToQueue when the selected session is STARTING", async () => {
     mockStoreState = makeStoreState("STARTING");
     const { result } = renderCommentHook();
 
-    let res: { queued: boolean } | undefined;
-    await act(async () => {
-      res = await result.current.runComment(makeDiffComment());
-    });
-
-    expect(res).toEqual({ queued: true });
+    await expect(result.current.runComment(makeDiffComment())).resolves.toEqual({ queued: true });
     expect(mockAppendToQueue).toHaveBeenCalled();
     expect(mockRequest).not.toHaveBeenCalled();
   });

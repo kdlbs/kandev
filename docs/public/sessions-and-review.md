@@ -144,7 +144,7 @@ Pending inline comments are scoped to the current review session but persist onl
 
 ## Generate a walkthrough
 
-Select **Walkthrough** from Changes or Review. Kandev sends the built-in `changes-walkthrough` prompt to the active session. If the agent is running, the request queues; otherwise it starts a new turn. The agent must have task MCP and must call `show_walkthrough_kandev` with an ordered list of file and line anchors.
+Select **Walkthrough** from Changes or Review. Kandev sends the built-in `changes-walkthrough` prompt to the active session. If the agent is actively generating, the request queues; if it is idle — or only waiting on background work it spawned — it starts a new turn immediately. The agent must have task MCP and must call `show_walkthrough_kandev` with an ordered list of file and line anchors.
 
 <DocsVideo
   webm="./media/feature-guides/code-walkthrough.webm"

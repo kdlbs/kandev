@@ -699,8 +699,8 @@ const (
 	PermissionStatusExpired PermissionStatus = "expired"
 )
 
-// TaskPendingAction is the compact task-list projection for a primary session
-// blocked on user input.
+// TaskPendingAction is the compact task-list projection for a session blocked
+// on user input.
 type TaskPendingAction string
 
 const (

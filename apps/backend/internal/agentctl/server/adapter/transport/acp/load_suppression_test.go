@@ -40,7 +40,7 @@ func TestLoadSuppression_MessageEventsAreSuppressed(t *testing.T) {
 	}
 
 	for _, n := range notifications {
-		a.handleACPUpdate(n)
+		a.handleACPUpdate(n, 0)
 	}
 
 	events := drainEvents(a)
@@ -64,7 +64,7 @@ func TestLoadSuppression_AvailableCommandsPassThroughDuringLoad(t *testing.T) {
 				{Name: "todo", Description: "Manage todos"},
 			},
 		},
-	}))
+	}), 0)
 
 	events := drainEvents(a)
 	if len(events) != 1 {
@@ -97,8 +97,8 @@ func TestLoadSuppression_PlanSuppressedAndCaptured(t *testing.T) {
 		},
 	}
 
-	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{Plan: first}))
-	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{Plan: second}))
+	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{Plan: first}), 0)
+	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{Plan: second}), 0)
 
 	events := drainEvents(a)
 	if len(events) != 0 {
@@ -128,10 +128,10 @@ func TestLoadSuppression_ModeAndConfigSuppressed(t *testing.T) {
 
 	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{
 		CurrentModeUpdate: &acp.SessionCurrentModeUpdate{CurrentModeId: "plan"},
-	}))
+	}), 0)
 	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{
 		ConfigOptionUpdate: &acp.SessionConfigOptionUpdate{},
-	}))
+	}), 0)
 
 	events := drainEvents(a)
 	if len(events) != 0 {
@@ -149,14 +149,14 @@ func TestLoadSuppression_EventsPassThroughWhenNotLoading(t *testing.T) {
 				{Name: "commit", Description: "Commit changes"},
 			},
 		},
-	}))
+	}), 0)
 	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{
 		Plan: &acp.SessionUpdatePlan{
 			Entries: []acp.PlanEntry{
 				{Content: "do something", Status: "in_progress"},
 			},
 		},
-	}))
+	}), 0)
 
 	events := drainEvents(a)
 	if len(events) != 2 {
@@ -185,7 +185,7 @@ func TestLoadSuppression_PlanReemittedAfterLoad(t *testing.T) {
 				{Name: "todo-write", Description: "Write todos"},
 			},
 		},
-	}))
+	}), 0)
 	// Plan is suppressed and captured.
 	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{
 		Plan: &acp.SessionUpdatePlan{
@@ -193,7 +193,7 @@ func TestLoadSuppression_PlanReemittedAfterLoad(t *testing.T) {
 				{Content: "implement feature", Status: "in_progress", Priority: "high"},
 			},
 		},
-	}))
+	}), 0)
 
 	// Drain: only AvailableCommands should have passed through.
 	events := drainEvents(a)
@@ -265,7 +265,7 @@ func TestLoadSuppression_PostReplayEventsPassThrough(t *testing.T) {
 	// Replay a message — should be suppressed.
 	a.handleACPUpdate(makeNotification("s1", acp.SessionUpdate{
 		AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{},
-	}))
+	}), 0)
 
 	events := drainEvents(a)
 	if len(events) != 0 {
@@ -284,7 +284,7 @@ func TestLoadSuppression_PostReplayEventsPassThrough(t *testing.T) {
 				{Name: "commit", Description: "Commit changes"},
 			},
 		},
-	}))
+	}), 0)
 
 	events = drainEvents(a)
 	if len(events) != 1 {

@@ -86,6 +86,12 @@ func fallbackAuthMethods(agentID string) []streams.AuthMethodInfo {
 // When dispatchOnly is true, returns once the prompt is accepted instead of
 // waiting for the agent's turn to complete.
 func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
+	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, nil)
+}
+
+// PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
+// must keep admission serialized until the queued prompt is actually dispatched.
+func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -96,7 +102,7 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 	}
 	key := executionActivityKey(executionID)
 	m.trackActivity(key, lease)
-	result, err := m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments, dispatchOnly)
+	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
 	}

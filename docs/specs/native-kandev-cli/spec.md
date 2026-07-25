@@ -143,6 +143,7 @@ Transitions:
 - **GIVEN** the backend has requested a restart through the restart adapter, **WHEN** the launcher receives the restart request, **THEN** only the `kandev __backend` child process is replaced.
 - **GIVEN** the user presses Ctrl-C while Kandev is running, **WHEN** the launcher handles the signal, **THEN** it terminates the backend child process before exiting.
 - **GIVEN** a new service install on Linux or macOS, **WHEN** the user runs `kandev service install`, **THEN** the generated service unit executes the public `kandev` launcher path.
+- **GIVEN** a native user-service install on Linux or macOS, **WHEN** the service starts, **THEN** its environment and durable install metadata identify it as a kandev-managed service and the guarded System-page updater can launch the native self-update helper.
 - **GIVEN** Node is managed by nvm/fnm/asdf/volta/mise and `node`, `npm`, or `npx` resolve from that manager at install time, **WHEN** the user runs `kandev service install`, **THEN** the generated service environment includes the detected Node tool bin directory in `PATH`.
 - **GIVEN** a user runs `npx kandev@latest --help`, **WHEN** npm has installed the platform runtime package, **THEN** the npm shim execs the runtime package's native `bin/kandev` and the user sees the same public help output.
 

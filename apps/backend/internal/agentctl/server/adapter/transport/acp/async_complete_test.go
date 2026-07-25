@@ -20,7 +20,7 @@ func TestHandleACPUpdate_AsyncMonitorTextWithoutPromptEmitsIdleComplete(t *testi
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
 				Content: acp.TextBlock("monitor finished without a prompt response"),
 			},
-		}))
+		}), 0)
 
 		first := readAdapterEvent(t, a, 100*time.Millisecond)
 		if first.Type != streams.EventTypeMessageChunk {
@@ -48,14 +48,14 @@ func TestHandleACPUpdate_DoesNotEmitIdleCompleteWhilePromptActive(t *testing.T) 
 		setAsyncTurnCompleteIdleForTest(t, 10*time.Millisecond)
 		a := newTestAdapter()
 		defer func() { _ = a.Close() }()
-		_, turn := a.registerPromptTurn(context.Background())
+		_, turn := a.registerPromptTurn(context.Background(), 0)
 		defer a.clearPromptTurn(turn)
 
 		a.handleACPUpdate(makeNotification("s-prompt", acp.SessionUpdate{
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
 				Content: acp.TextBlock("normal prompt chunk"),
 			},
-		}))
+		}), 0)
 
 		first := readAdapterEvent(t, a, 100*time.Millisecond)
 		if first.Type != streams.EventTypeMessageChunk {
@@ -97,7 +97,7 @@ func TestAsyncTurnComplete_CancelledByRealPromptCompletion(t *testing.T) {
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
 				Content: acp.TextBlock("async chunk"),
 			},
-		}))
+		}), 0)
 
 		first := readAdapterEvent(t, a, 100*time.Millisecond)
 		if first.Type != streams.EventTypeMessageChunk {
@@ -122,7 +122,7 @@ func TestAsyncTurnComplete_CancelledByPromptStart(t *testing.T) {
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
 				Content: acp.TextBlock("async chunk before prompt"),
 			},
-		}))
+		}), 0)
 
 		first := readAdapterEvent(t, a, 100*time.Millisecond)
 		if first.Type != streams.EventTypeMessageChunk {
@@ -150,7 +150,7 @@ func TestAsyncTurnComplete_CancelledByNewSession(t *testing.T) {
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
 				Content: acp.TextBlock("old session async chunk"),
 			},
-		}))
+		}), 0)
 		first := readAdapterEvent(t, a, 100*time.Millisecond)
 		if first.Type != streams.EventTypeMessageChunk {
 			t.Fatalf("first event type = %q, want %q", first.Type, streams.EventTypeMessageChunk)
@@ -181,7 +181,7 @@ func TestAsyncTurnComplete_CancelledByLoadSession(t *testing.T) {
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{
 				Content: acp.TextBlock("old session async chunk"),
 			},
-		}))
+		}), 0)
 		first := readAdapterEvent(t, a, 100*time.Millisecond)
 		if first.Type != streams.EventTypeMessageChunk {
 			t.Fatalf("first event type = %q, want %q", first.Type, streams.EventTypeMessageChunk)
