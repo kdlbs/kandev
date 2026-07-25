@@ -1,8 +1,10 @@
 package agents
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/kandev/kandev/internal/agent/usage"
 )
@@ -14,35 +16,44 @@ func defaultBillingType() usage.BillingType {
 }
 
 // claudeBillingType detects whether the Claude agent is using OAuth
-// subscription credentials. Computed on every call (the read is a small
-// local file) so logging in after the backend started is picked up without
-// a restart.
-func claudeBillingType() usage.BillingType {
+// subscription credentials. It reads ~/.claude/.credentials.json once and
+// caches the result for the process lifetime.
+var claudeBillingType = sync.OnceValue(func() usage.BillingType {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return usage.BillingTypeAPIKey
 	}
-	client := usage.NewClaudeUsageClientWithPath(filepath.Join(home, ".claude", ".credentials.json"))
-	if client.HasSubscriptionCredentials() {
+	path := filepath.Join(home, ".claude", ".credentials.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return usage.BillingTypeAPIKey
+	}
+	var creds struct {
+		ClaudeAiOauth *struct{} `json:"claudeAiOauth"`
+	}
+	if err := json.Unmarshal(data, &creds); err != nil {
+		return usage.BillingTypeAPIKey
+	}
+	if creds.ClaudeAiOauth != nil {
 		return usage.BillingTypeSubscription
 	}
 	return usage.BillingTypeAPIKey
-}
+})
 
 // codexBillingType detects whether the Codex agent is using subscription
-// credentials. It reads ~/.codex/auth.json — that path matches the
-// SourceFiles / Runtime mounts in codex_acp.go, where the real Codex CLI
-// persists OAuth tokens. An auth.json holding only OPENAI_API_KEY (no
-// ChatGPT OAuth tokens) is API-key billing. Computed on every call so
-// `codex login` after backend start flips billing without a restart.
-func codexBillingType() usage.BillingType {
+// credentials. It checks for ~/.codex/auth.json once per process — that
+// path matches the SourceFiles / Runtime mounts in codex_acp.go, where
+// the real Codex CLI persists OAuth tokens. The earlier ~/.config/codex
+// path was an XDG-style guess and never matched a real install, so
+// subscription billing was undetectable.
+var codexBillingType = sync.OnceValue(func() usage.BillingType {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return usage.BillingTypeAPIKey
 	}
-	client := usage.NewCodexUsageClientWithPath(filepath.Join(home, ".codex", "auth.json"))
-	if client.HasSubscriptionCredentials() {
+	path := filepath.Join(home, ".codex", "auth.json")
+	if _, err := os.Stat(path); err == nil {
 		return usage.BillingTypeSubscription
 	}
 	return usage.BillingTypeAPIKey
-}
+})

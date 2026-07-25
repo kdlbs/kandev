@@ -36,20 +36,8 @@ export type UtilizationWindow = {
 
 export type ProviderUsage = {
   provider: string;
-  plan?: string;
   windows: UtilizationWindow[];
   fetched_at: string;
-};
-
-export type AgentSubscriptionUsage = {
-  agent_id: string;
-  display_name: string;
-  usage?: ProviderUsage | null;
-  error?: string;
-};
-
-export type AgentSubscriptionUsageResponse = {
-  agents: AgentSubscriptionUsage[];
 };
 
 export type AgentRole =

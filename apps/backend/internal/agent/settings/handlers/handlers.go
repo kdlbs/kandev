@@ -19,8 +19,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const queryValueTrue = "true"
-
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
 type Handlers struct {
@@ -55,7 +53,6 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
-	api.GET("/agents/usage", h.httpAgentSubscriptionUsage)
 	api.GET("/agents", h.httpListAgents)
 	api.POST("/agents", h.interlock, h.httpCreateAgent)
 	api.POST("/agents/tui", h.interlock, h.httpCreateCustomTUIAgent)
@@ -85,11 +82,6 @@ func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, resp)
 	h.broadcastAvailableAgentsAsync()
-}
-
-func (h *Handlers) httpAgentSubscriptionUsage(c *gin.Context) {
-	fresh := c.Query("fresh") == queryValueTrue || c.Query("fresh") == "1"
-	c.JSON(http.StatusOK, h.controller.SubscriptionUsage(c.Request.Context(), fresh))
 }
 
 func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
@@ -485,7 +477,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 }
 
 func (h *Handlers) httpDeleteProfile(c *gin.Context) {
-	force := c.Query("force") == queryValueTrue
+	force := c.Query("force") == "true"
 	profile, err := h.controller.DeleteProfile(c.Request.Context(), c.Param("id"), force)
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
@@ -589,7 +581,7 @@ func (h *Handlers) httpGetAgentModels(c *gin.Context) {
 	}
 
 	// Check for refresh query parameter
-	refresh := c.Query("refresh") == queryValueTrue
+	refresh := c.Query("refresh") == "true"
 
 	resp, err := h.controller.FetchDynamicModels(c.Request.Context(), agentName, refresh)
 	if err != nil {

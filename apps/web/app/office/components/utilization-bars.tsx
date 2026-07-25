@@ -1,22 +1,22 @@
 "use client";
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import type { ProviderUsage } from "@/lib/types/agent-profile";
+import type { ProviderUsage } from "@/lib/state/slices/office/types";
 
 type Props = {
   usage: ProviderUsage;
 };
 
-export function getBarColor(pct: number): string {
+function getBarColor(pct: number): string {
   if (pct >= 90) return "bg-red-500";
   if (pct >= 80) return "bg-amber-500";
-  return "bg-emerald-500";
+  return "bg-blue-500";
 }
 
-export function getTextColor(pct: number): string {
+function getTextColor(pct: number): string {
   if (pct >= 90) return "text-red-600 dark:text-red-400";
   if (pct >= 80) return "text-amber-600 dark:text-amber-400";
-  return "text-emerald-600 dark:text-emerald-400";
+  return "text-muted-foreground";
 }
 
 function formatResetTime(resetAt: string): string {

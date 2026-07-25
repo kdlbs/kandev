@@ -27,8 +27,7 @@ type UtilizationWindow struct {
 
 // ProviderUsage is the full utilization response for one provider credential.
 type ProviderUsage struct {
-	Provider  string              `json:"provider"`       // "anthropic", "openai"
-	Plan      string              `json:"plan,omitempty"` // e.g. "max", "pro", "plus", "free"
+	Provider  string              `json:"provider"` // "anthropic", "openai"
 	Windows   []UtilizationWindow `json:"windows"`
 	FetchedAt time.Time           `json:"fetched_at"`
 }

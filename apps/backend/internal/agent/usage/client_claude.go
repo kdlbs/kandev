@@ -15,16 +15,11 @@ const (
 	claudeUsageURL   = "https://api.anthropic.com/api/oauth/usage"
 	claudeRefreshURL = "https://platform.claude.com/v1/oauth/token"
 	claudeBetaHeader = "oauth-2025-04-20"
-
-	claudeLabel5Hour = "5-hour"
-	claudeLabel7Day  = "7-day"
 )
 
 // ClaudeUsageClient fetches utilization from the Anthropic OAuth usage API.
 type ClaudeUsageClient struct {
 	credentialsPath string
-	usageURL        string
-	refreshURL      string
 	httpClient      *http.Client
 }
 
@@ -32,8 +27,6 @@ type ClaudeUsageClient struct {
 func NewClaudeUsageClientWithPath(credentialsPath string) *ClaudeUsageClient {
 	return &ClaudeUsageClient{
 		credentialsPath: credentialsPath,
-		usageURL:        claudeUsageURL,
-		refreshURL:      claudeRefreshURL,
 		httpClient:      &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -43,83 +36,35 @@ func (c *ClaudeUsageClient) CredentialsPath() string {
 	return c.credentialsPath
 }
 
-// HasSubscriptionCredentials reports whether the credentials file exists and
-// carries an OAuth (subscription) token.
-func (c *ClaudeUsageClient) HasSubscriptionCredentials() bool {
-	creds, err := c.readCredentials()
-	return err == nil && creds.ClaudeAiOauth != nil && creds.ClaudeAiOauth.AccessToken != ""
-}
-
 type claudeCredentials struct {
 	ClaudeAiOauth *claudeOAuthToken `json:"claudeAiOauth"`
 }
 
 type claudeOAuthToken struct {
-	AccessToken      string `json:"accessToken"`
-	RefreshToken     string `json:"refreshToken,omitempty"`
-	ExpiresAt        int64  `json:"expiresAt"` // Unix milliseconds
-	SubscriptionType string `json:"subscriptionType,omitempty"`
-}
-
-type claudeUsageWindow struct {
-	Utilization float64 `json:"utilization"`
-	ResetsAt    string  `json:"resets_at,omitempty"`
-}
-
-type claudeLimitScope struct {
-	Model *struct {
-		DisplayName string `json:"display_name"`
-	} `json:"model"`
-}
-
-type claudeLimit struct {
-	Kind     string            `json:"kind"`
-	Percent  float64           `json:"percent"`
-	ResetsAt string            `json:"resets_at"`
-	Scope    *claudeLimitScope `json:"scope"`
+	AccessToken  string `json:"accessToken"`
+	RefreshToken string `json:"refreshToken,omitempty"`
+	ExpiresAt    int64  `json:"expiresAt"` // Unix milliseconds
 }
 
 type claudeUsageResponse struct {
-	FiveHour *claudeUsageWindow `json:"five_hour"`
-	SevenDay *claudeUsageWindow `json:"seven_day"`
-	Limits   []claudeLimit      `json:"limits"`
+	FiveHour struct {
+		Utilization int    `json:"utilization"`
+		ResetsAt    string `json:"resets_at,omitempty"`
+	} `json:"five_hour"`
+	SevenDay struct {
+		Utilization int    `json:"utilization"`
+		ResetsAt    string `json:"resets_at,omitempty"`
+	} `json:"seven_day"`
 }
 
 // FetchUsage implements ProviderUsageClient.
 func (c *ClaudeUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, error) {
-	creds, err := c.readCredentials()
+	token, err := c.accessToken(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("claude usage: read credentials: %w", err)
-	}
-	if creds.ClaudeAiOauth == nil {
-		return nil, fmt.Errorf("claude usage: no claudeAiOauth entry in %s", c.credentialsPath)
-	}
-	token, err := c.freshAccessToken(ctx, creds.ClaudeAiOauth)
-	if err != nil {
-		return nil, fmt.Errorf("claude usage: %w", err)
+		return nil, fmt.Errorf("claude usage: read token: %w", err)
 	}
 
-	body, err := c.getUsage(ctx, token)
-	if err != nil {
-		return nil, err
-	}
-
-	var raw claudeUsageResponse
-	if err := json.Unmarshal(body, &raw); err != nil {
-		return nil, fmt.Errorf("claude usage: decode: %w", err)
-	}
-
-	now := time.Now()
-	return &ProviderUsage{
-		Provider:  "anthropic",
-		Plan:      creds.ClaudeAiOauth.SubscriptionType,
-		Windows:   claudeWindows(raw, now),
-		FetchedAt: now,
-	}, nil
-}
-
-func (c *ClaudeUsageClient) getUsage(ctx context.Context, token string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.usageURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, claudeUsageURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("claude usage: build request: %w", err)
 	}
@@ -139,78 +84,48 @@ func (c *ClaudeUsageClient) getUsage(ctx context.Context, token string) ([]byte,
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("claude usage: unexpected status %d: %s", resp.StatusCode, body)
 	}
-	return body, nil
-}
 
-// claudeWindows prefers the richer limits[] array (session, weekly, per-model
-// weekly) and falls back to the legacy five_hour/seven_day pair. Always
-// returns a non-nil slice so the API serializes `windows` as an array.
-func claudeWindows(raw claudeUsageResponse, now time.Time) []UtilizationWindow {
-	if windows := claudeLimitWindows(raw.Limits); len(windows) > 0 {
-		return windows
+	var raw claudeUsageResponse
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("claude usage: decode: %w", err)
 	}
-	windows := make([]UtilizationWindow, 0, 2)
-	if raw.FiveHour != nil {
-		windows = append(windows, UtilizationWindow{
-			Label:          claudeLabel5Hour,
-			UtilizationPct: raw.FiveHour.Utilization,
+
+	now := time.Now()
+	windows := []UtilizationWindow{
+		{
+			Label:          "5-hour",
+			UtilizationPct: float64(raw.FiveHour.Utilization),
 			ResetAt:        parseResetAt(raw.FiveHour.ResetsAt, now, 5*time.Hour),
-		})
-	}
-	if raw.SevenDay != nil {
-		windows = append(windows, UtilizationWindow{
-			Label:          claudeLabel7Day,
-			UtilizationPct: raw.SevenDay.Utilization,
+		},
+		{
+			Label:          "7-day",
+			UtilizationPct: float64(raw.SevenDay.Utilization),
 			ResetAt:        parseResetAt(raw.SevenDay.ResetsAt, now, 7*24*time.Hour),
-		})
+		},
 	}
-	return windows
+	return &ProviderUsage{
+		Provider:  "anthropic",
+		Windows:   windows,
+		FetchedAt: now,
+	}, nil
 }
 
-func claudeLimitWindows(limits []claudeLimit) []UtilizationWindow {
-	var windows []UtilizationWindow
-	for _, l := range limits {
-		label := claudeLimitLabel(l)
-		if label == "" {
-			continue
-		}
-		resetAt, err := time.Parse(time.RFC3339, l.ResetsAt)
-		if err != nil {
-			continue
-		}
-		windows = append(windows, UtilizationWindow{
-			Label:          label,
-			UtilizationPct: l.Percent,
-			ResetAt:        resetAt,
-		})
+// accessToken returns a valid access token, refreshing if expired.
+func (c *ClaudeUsageClient) accessToken(ctx context.Context) (string, error) {
+	creds, err := c.readCredentials()
+	if err != nil {
+		return "", err
 	}
-	return windows
-}
-
-func claudeLimitLabel(l claudeLimit) string {
-	switch l.Kind {
-	case "session":
-		return claudeLabel5Hour
-	case "weekly_all":
-		return claudeLabel7Day
-	case "weekly_scoped":
-		if l.Scope != nil && l.Scope.Model != nil && l.Scope.Model.DisplayName != "" {
-			return "7-day (" + l.Scope.Model.DisplayName + ")"
-		}
-		return "7-day (model)"
-	default:
-		// Unknown kinds are skipped rather than shown with a cryptic label.
-		return ""
+	if creds.ClaudeAiOauth == nil {
+		return "", fmt.Errorf("no claudeAiOauth entry in credentials file")
 	}
-}
-
-// freshAccessToken returns a valid access token, refreshing if expired.
-func (c *ClaudeUsageClient) freshAccessToken(ctx context.Context, tok *claudeOAuthToken) (string, error) {
+	tok := creds.ClaudeAiOauth
 	// ExpiresAt is in milliseconds; treat as expired if within 60 s of now.
 	expiresAt := time.UnixMilli(tok.ExpiresAt)
 	if time.Until(expiresAt) > 60*time.Second {
 		return tok.AccessToken, nil
 	}
+	// Token is expired or near expiry — refresh it.
 	if tok.RefreshToken == "" {
 		return "", fmt.Errorf("claude token expired and no refresh token available")
 	}
@@ -220,7 +135,8 @@ func (c *ClaudeUsageClient) freshAccessToken(ctx context.Context, tok *claudeOAu
 	}
 	// Write new token back. Non-fatal — we have the new token in memory even if
 	// persistence fails, but log the error so it doesn't go unnoticed.
-	if writeErr := c.persistRefreshedToken(newTok); writeErr != nil {
+	creds.ClaudeAiOauth = newTok
+	if writeErr := c.writeCredentials(creds); writeErr != nil {
 		fmt.Fprintf(os.Stderr, "claude usage: persist refreshed token: %v\n", writeErr)
 	}
 	return newTok.AccessToken, nil
@@ -238,30 +154,12 @@ func (c *ClaudeUsageClient) readCredentials() (*claudeCredentials, error) {
 	return &creds, nil
 }
 
-// persistRefreshedToken updates only the token fields inside claudeAiOauth,
-// preserving unknown siblings (scopes, subscriptionType, rateLimitTier, ...).
-func (c *ClaudeUsageClient) persistRefreshedToken(tok *claudeOAuthToken) error {
-	data, err := os.ReadFile(c.credentialsPath)
+func (c *ClaudeUsageClient) writeCredentials(creds *claudeCredentials) error {
+	data, err := json.MarshalIndent(creds, "", "  ")
 	if err != nil {
 		return err
 	}
-	var root map[string]any
-	if err := json.Unmarshal(data, &root); err != nil {
-		return err
-	}
-	oauth, _ := root["claudeAiOauth"].(map[string]any)
-	if oauth == nil {
-		oauth = map[string]any{}
-	}
-	oauth["accessToken"] = tok.AccessToken
-	oauth["refreshToken"] = tok.RefreshToken
-	oauth["expiresAt"] = tok.ExpiresAt
-	root["claudeAiOauth"] = oauth
-	out, err := json.MarshalIndent(root, "", "  ")
-	if err != nil {
-		return err
-	}
-	return writeFileAtomic(c.credentialsPath, out, 0o600)
+	return os.WriteFile(c.credentialsPath, data, 0600)
 }
 
 type claudeRefreshRequest struct {
@@ -281,7 +179,7 @@ func (c *ClaudeUsageClient) refreshToken(ctx context.Context, refreshToken strin
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.refreshURL, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, claudeRefreshURL, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
