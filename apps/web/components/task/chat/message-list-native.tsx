@@ -261,6 +261,7 @@ export const NativeMessageList = memo(function NativeMessageList({
         sessionState={sessionState}
         sessionId={sessionId}
         messages={messages}
+        isWorking={isWorking}
         footerActionMessages={footerActionMessages}
       />
 

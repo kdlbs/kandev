@@ -1,10 +1,14 @@
 package store
 
-import "github.com/jmoiron/sqlx"
+import (
+	"context"
+
+	"github.com/jmoiron/sqlx"
+)
 
 // Provide creates the SQLite notification store using separate writer and reader pools.
-func Provide(writer, reader *sqlx.DB) (*sqliteRepository, func() error, error) {
-	repo, err := newSQLiteRepositoryWithDB(writer, reader)
+func Provide(ctx context.Context, writer, reader *sqlx.DB) (*sqliteRepository, func() error, error) {
+	repo, err := newSQLiteRepositoryWithDB(ctx, writer, reader)
 	if err != nil {
 		return nil, nil, err
 	}

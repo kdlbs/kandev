@@ -51,6 +51,16 @@ export default defineConfig({
       use: { ...devices["Desktop Chrome"] },
     },
     {
+      // Opt-in authentication specs restart the worker's backend with
+      // KANDEV_AUTH_REQUIRED=true, which locks the whole API behind a login.
+      // They live in their own project so that env can never leak into the
+      // default suite (which assumes an open backend and a tokenless
+      // ApiClient). Serial within the file; afterAll restarts to baseline.
+      name: "auth",
+      testMatch: /auth\/.*\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
       name: "chromium",
       testIgnore: [
         /mobile-.*\.spec\.ts/,
@@ -60,6 +70,8 @@ export default defineConfig({
         /docker\/.*\.spec\.ts/,
         /ssh\/.*\.spec\.ts/,
         /office-routing-.*\.spec\.ts/,
+        // Auth specs run in the dedicated `auth` project (see above).
+        /auth\/.*\.spec\.ts/,
       ],
       use: { ...devices["Desktop Chrome"] },
     },

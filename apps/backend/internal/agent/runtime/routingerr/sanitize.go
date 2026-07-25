@@ -16,6 +16,10 @@ var redactions = []redaction{
 	{regexp.MustCompile(`sk-[A-Za-z0-9_-]{12,}`), "sk-" + redactionMask},
 	{regexp.MustCompile(`github_pat_[A-Za-z0-9_]{50,}`), "github_pat_" + redactionMask},
 	{regexp.MustCompile(`ghp_[A-Za-z0-9]{30,}`), "ghp_" + redactionMask},
+	// Kandev personal access tokens, including the ?token=<PAT> form used by
+	// headerless WS clients. The generic token/32-char rules below also catch
+	// these; this keeps the credential type visible in redacted logs.
+	{regexp.MustCompile(`kandev_pat_[A-Za-z0-9_]+`), "kandev_pat_" + redactionMask},
 	{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._\-+/=]{20,}`), "Bearer " + redactionMask},
 	{regexp.MustCompile(`(?i)Authorization:\s*[^\r\n]+`), "Authorization: " + redactionMask},
 	{regexp.MustCompile(`--api-key[= ]\S+`), "--api-key " + redactionMask},

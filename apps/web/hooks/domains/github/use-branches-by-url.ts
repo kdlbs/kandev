@@ -32,11 +32,13 @@ import type { Branch } from "@/lib/types/http";
 type URLState = {
   branches: Branch[];
   loading: boolean;
+  error?: Error;
 };
 
 export type UseBranchesByURLResult = {
   branches: (url: string) => Branch[];
   loading: (url: string) => boolean;
+  error: (url: string) => Error | undefined;
   ensure: (url: string, workspaceId?: string) => void;
   /**
    * Forget the cached entry for `url` so the next `ensure(url)` re-fetches.
@@ -99,15 +101,25 @@ function handleSuccess(
   setState((prev) => ({ ...prev, [url]: { branches, loading: false } }));
 }
 
-/** Marks the URL as no longer loading on failure. Does NOT add to loadedRef:
- *  leaving it unmarked lets the next ensure() call retry instead of
- *  short-circuiting on the cached failure. */
-function handleFailure(refs: Refs, setState: SetState, url: string, seq: number): void {
+/** Records the failure as settled so only an explicit clear() + ensure() retry
+ *  can re-run it. */
+function handleFailure(
+  refs: Refs,
+  setState: SetState,
+  url: string,
+  seq: number,
+  error: unknown,
+): void {
   if (!refs.mountedRef.current) return;
   if (refs.seqRef.current.get(url) !== seq) return;
+  refs.loadedRef.current.add(url);
   setState((prev) => ({
     ...prev,
-    [url]: { branches: prev[url]?.branches ?? [], loading: false },
+    [url]: {
+      branches: prev[url]?.branches ?? [],
+      loading: false,
+      error: error instanceof Error ? error : new Error("Could not load branches."),
+    },
   }));
 }
 
@@ -181,7 +193,7 @@ export function useBranchesByURL(): UseBranchesByURLResult {
     const { seq, signal } = initRequest(refs, setState, url);
     request(signal)
       .then((res) => handleSuccess(refs, setState, url, seq, res))
-      .catch(() => handleFailure(refs, setState, url, seq))
+      .catch((error) => handleFailure(refs, setState, url, seq, error))
       .finally(() => finalizeRequest(refs, url, seq));
   }, []);
 
@@ -212,8 +224,12 @@ export function useBranchesByURL(): UseBranchesByURLResult {
     (rawUrl: string): boolean => Boolean(state[rawUrl.trim()]?.loading),
     [state],
   );
+  const error = useCallback(
+    (rawUrl: string): Error | undefined => state[rawUrl.trim()]?.error,
+    [state],
+  );
 
-  return { branches, loading, ensure, clear };
+  return { branches, loading, error, ensure, clear };
 }
 
 type BranchRequest = (signal: AbortSignal) => Promise<{ branches?: Array<{ name: string }> }>;
@@ -253,7 +269,8 @@ function gitLabBranchRequest(parsed: URL, workspaceId: string): BranchRequest | 
   if (!workspaceId) return null;
   const project = parsed.pathname.replace(/^\//, "").replace(/\.git$/, "");
   if (!project.includes("/")) return null;
-  return (signal) => listProjectBranches(workspaceId, project, { init: { signal } });
+  return (signal) =>
+    listProjectBranches(workspaceId, project, { expectedHost: parsed.origin, init: { signal } });
 }
 
 function azureHTTPSBranchRequest(parsed: URL, workspaceId: string): BranchRequest | null {

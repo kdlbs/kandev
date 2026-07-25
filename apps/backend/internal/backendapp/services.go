@@ -142,6 +142,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	}
 	if automationComponents != nil {
 		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
+		// Per-user workspace scoping for the automation HTTP/WS surface.
+		automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	}
 
 	services := &Services{

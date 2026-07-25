@@ -21,6 +21,7 @@ vi.mock("@/components/diff/walkthrough-floating-window", () => ({
 }));
 
 const TASK_ID = "task-1";
+const SECOND_TASK_ID = "task-2";
 
 function walkthrough(): TaskWalkthrough {
   return {
@@ -35,15 +36,22 @@ function walkthrough(): TaskWalkthrough {
 }
 
 let setConnectionStatus: ((status: ConnectionStatus) => void) | null = null;
+let setActiveTask: ((taskId: string) => void) | null = null;
 
 function StoreProbe() {
   setConnectionStatus = useAppStore((s) => s.setConnectionStatus);
+  setActiveTask = useAppStore((s) => s.setActiveTask);
   return null;
 }
 
-function renderOverlay() {
+function ActiveTaskOverlay() {
+  const taskId = useAppStore((s) => s.tasks.activeTaskId);
+  return <WalkthroughOverlay taskId={taskId} />;
+}
+
+function renderOverlay({ followActiveTask = false } = {}) {
   setConnectionStatus = null;
-  render(
+  return render(
     <StateProvider
       initialState={{
         tasks: {
@@ -55,7 +63,7 @@ function renderOverlay() {
       }}
     >
       <StoreProbe />
-      <WalkthroughOverlay taskId={TASK_ID} />
+      {followActiveTask ? <ActiveTaskOverlay /> : <WalkthroughOverlay taskId={TASK_ID} />}
     </StateProvider>,
   );
 }
@@ -99,5 +107,20 @@ describe("WalkthroughOverlay", () => {
     fireEvent.click(launcher);
 
     expect(getOpenWalkthroughTaskId()).toBeNull();
+  });
+
+  it("closes the walkthrough when the active task changes", async () => {
+    vi.mocked(getTaskWalkthrough).mockImplementation(async (taskId) =>
+      taskId === TASK_ID ? walkthrough() : null,
+    );
+    const view = renderOverlay({ followActiveTask: true });
+
+    act(() => setConnectionStatus?.("connected"));
+    fireEvent.click(await within(view.container).findByTestId("walkthrough-launcher"));
+    await waitFor(() => expect(getOpenWalkthroughTaskId()).toBe(TASK_ID));
+
+    act(() => setActiveTask?.(SECOND_TASK_ID));
+
+    await waitFor(() => expect(getOpenWalkthroughTaskId()).toBeNull());
   });
 });

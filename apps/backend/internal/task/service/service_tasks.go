@@ -89,6 +89,9 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 // auto-resolve to the workspace's office workflow.
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
+	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := s.validateCreateTaskRequest(req); err != nil {
 		return nil, err
 	}
@@ -976,6 +979,9 @@ func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspace
 
 // GetTask retrieves a task by ID and populates repositories
 func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return nil, err
+	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -994,6 +1000,9 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return nil, err
+	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1221,6 +1230,9 @@ func (s *Service) RestoreTaskMessageRollback(
 func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	start := time.Now()
 
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return err
+	}
 	// 1. Get task and verify it exists
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
@@ -1429,6 +1441,9 @@ func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) e
 }
 
 func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return err
+	}
 	_, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, reason, models.TaskResourceCleanupTriggerDelete, func(ctx context.Context, id string) (bool, error) {
 		if err := s.tasks.DeleteTask(ctx, id); err != nil {
 			return false, err
@@ -1516,6 +1531,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 		extra = map[string]interface{}{"reason": reason}
 	}
 	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
+	s.forgetTaskActivity(id)
 	s.logger.Info("task deleted",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
@@ -2365,6 +2381,9 @@ func excludeEnvironmentWorktree(worktrees []*worktree.Worktree, env *models.Task
 
 // ListTasks returns all tasks for a workflow
 func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
+	if err := s.authorizeWorkflowID(ctx, workflowID); err != nil {
+		return nil, err
+	}
 	tasks, err := s.tasks.ListTasks(ctx, workflowID)
 	if err != nil {
 		return nil, err
@@ -2381,6 +2400,9 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 // If query is non-empty, filters by task title, description, repository name, or repository path.
 // workflowID and repositoryID, when non-empty, further restrict results to that workflow/repository.
 func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+		return nil, 0, err
+	}
 	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
 	if err != nil {
 		return nil, 0, err

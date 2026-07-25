@@ -31,6 +31,10 @@ type StreamManager struct {
 	logger     *logger.Logger
 	callbacks  StreamCallbacks
 	mcpHandler agentctl.MCPHandler
+	// mcpIdentityScoper scopes in-session MCP dispatches to the owner of the
+	// stream's task. Nil leaves dispatch unscoped (single-user instances and
+	// isolated tests); set via Manager.SetMCPIdentityScoper.
+	mcpIdentityScoper MCPIdentityScoper
 	// stopCh is the Manager-owned shutdown signal. The retry/backoff and
 	// connected `<-ws.Done() / <-stop>` select read from it so they drain on
 	// Manager.Stop. May be nil when isolated tests don't care about external
@@ -282,7 +286,7 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		if sm.callbacks.OnAgentEvent != nil {
 			sm.callbacks.OnAgentEvent(execution, event)
 		}
-	}, sm.mcpHandler, func(disconnectErr error) {
+	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		if disconnectErr != nil {
 			sm.handleUpdatesDisconnect(execution, disconnectErr)
 		}
@@ -329,7 +333,7 @@ func (sm *StreamManager) handleUpdatesDisconnect(execution *AgentExecution, disc
 // closing this stream is expected, not an error.
 func (sm *StreamManager) connectMCPStream(execution *AgentExecution) {
 	ctx := sm.streamContext(execution)
-	err := execution.agentctl.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, sm.mcpHandler, func(disconnectErr error) {
+	err := execution.agentctl.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		if disconnectErr != nil {
 			sm.logger.Debug("passthrough MCP stream disconnected",
 				zap.String("execution_id", execution.ID),

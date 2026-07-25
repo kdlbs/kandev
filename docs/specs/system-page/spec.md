@@ -41,6 +41,9 @@ A new **System** group is added to the existing settings sidebar (`apps/web/comp
 6. **Updates** — `/settings/system/updates`
    - Shows running version, latest available version, and a "new version available" badge if newer.
    - **Check now** button — forces a re-poll (rate-limited 30s per process).
+   - Update alerts are configured with the existing provider/event matrix under
+     **Settings > General > Notifications**. The Updates page does not own a
+     second notification enable switch or delivery-channel preference.
    - Below: the embedded changelog list (the content currently rendered at `/settings/changelog` via `@/generated/changelog.json`).
 7. **Licenses** — `/settings/system/licenses`
    - Renders a JSON manifest of all third-party OSS dependencies (npm + Go), each with its license name, version, repository URL, and license text. The manifest is generated at build time and committed to the repo.
@@ -132,6 +135,10 @@ The page reads the JSON statically; no backend endpoint is needed.
 - **GIVEN** the disk-usage cache is 30 minutes old, **WHEN** the user reopens the Status page, **THEN** the cached value renders instantly with "as of <30 min ago>" and **no** refresh kicks off.
 - **GIVEN** the disk-usage cache is 3 hours old, **WHEN** the user reopens the Status page, **THEN** the stale value renders immediately, the page badge shows "Refreshing…", and the value updates when the background walk completes.
 - **GIVEN** the user is on `1.2.3` and the GitHub latest release is `1.2.4`, **WHEN** they open `/settings/system/updates`, **THEN** an "Update available" badge renders next to the version, the changelog list shows `1.2.4` highlighted as the new entry, and the System sidebar group shows a `1` badge.
+- **GIVEN** the user wants to change update-alert delivery, **WHEN** they open
+  `/settings/system/updates`, **THEN** the page directs them to the existing
+  Notifications provider/event settings instead of rendering a separate
+  update-notification channel control.
 - **GIVEN** the user is running a kandev-managed user service and a newer release exists, **WHEN** they open `/settings/system/updates`, **THEN** the page shows **Apply update** and the confirmation queues a `self-update` job.
 - **GIVEN** the user is not running as a kandev-managed service or is running a `--system` service, **WHEN** they open `/settings/system/updates`, **THEN** the page does not render an update-apply control and instead shows the manual update commands.
 - **GIVEN** the user clicks **VACUUM** on the Database page, **WHEN** the operation completes, **THEN** the DB size delta is shown ("Reclaimed 12.3 MB"), the page Database stats refresh, and a transient info issue appears on the Status page.

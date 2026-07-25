@@ -30,6 +30,9 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	analyticshandlers "github.com/kandev/kandev/internal/analytics/handlers"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
+	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
+	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
 	"github.com/kandev/kandev/internal/clarification"
@@ -50,6 +53,7 @@ import (
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
@@ -480,6 +484,7 @@ type routeParams struct {
 	secretsSvc                    *secrets.Service
 	secretStore                   secrets.SecretStore
 	mcpConfigSvc                  *mcpconfig.Service
+	authSvc                       *auth.Service
 	addCleanup                    func(func() error)
 	repoCloner                    *repoclone.Cloner
 	version                       string
@@ -496,6 +501,8 @@ type routeParams struct {
 func registerRoutes(p routeParams) {
 	workflowCtrl := workflowcontroller.NewController(p.services.Workflow)
 	planService := taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
+	// Per-user task scoping for plan reads/writes (opt-in auth).
+	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	clarificationStore := clarification.NewStore(2 * time.Hour)
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.eventBus, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
@@ -583,6 +590,9 @@ func registerRoutes(p routeParams) {
 	p.gateway.SetupRoutes(p.router)
 	registerTaskRoutes(p, planService, handoffSvc)
 	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	if p.authSvc != nil {
+		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.log)
+	}
 
 	// /health is a readiness probe, not a liveness probe. It only
 	// returns 200 after main has flipped the package-level `ready`
@@ -1086,9 +1096,110 @@ func registerSecondaryRoutes(
 	if p.services.OfficeSvcs != nil {
 		api := p.router.Group("/api/v1/office")
 		api.Use(officeagents.AgentAuthMiddleware(p.services.OfficeSvcs.Agents))
+		api.Use(officeWorkspaceScopeMiddleware(p.authSvc, p.taskSvc))
 		office.RegisterAllRoutes(api, p.services.OfficeSvcs, p.log)
 		p.log.Debug("Registered Office handlers (HTTP)")
 	}
+}
+
+// officeWorkspaceScopeMiddleware enforces per-user workspace ownership on
+// office routes that carry a `:wsId` param (opt-in auth). Office endpoints are
+// dual-consumed: sandbox agents authenticate with a workspace-scoped JWT
+// (validated + workspace-claim-checked by AgentAuthMiddleware, which sets an
+// agent caller in context — those requests skip this check), while browser
+// users authenticate with a session cookie and must own the target workspace.
+// Routes without a `:wsId` param (agent runtime callbacks, approval/routine by
+// ID) are not gated here; they remain governed by AgentAuthMiddleware.
+func officeWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
+			c.Next()
+			return
+		}
+		// Agent JWT callers are already constrained to their workspace claim.
+		if officeagents.CallerFromContext(c) != nil {
+			c.Next()
+			return
+		}
+		wsID := c.Param("wsId")
+		if wsID == "" {
+			c.Next()
+			return
+		}
+		if err := taskSvc.AuthorizeWorkspaceAccess(c.Request.Context(), wsID); err != nil {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+			return
+		}
+		c.Next()
+	}
+}
+
+// integrationWorkspacePrefixes are the workspace-scoped third-party
+// integration route groups. Their config/watch/data routes are keyed by a
+// caller-supplied workspace_id (query, or a /workspaces/:id/ path segment on
+// gitlab) with no per-user gate of their own, so this global middleware
+// authorizes ownership for them when auth is enabled.
+var integrationWorkspacePrefixes = []string{
+	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/", "/api/v1/slack/",
+	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
+}
+
+// integrationWorkspaceScopeMiddleware enforces workspace ownership on the
+// third-party integration route groups (opt-in auth). Their handlers read the
+// workspace from the request; internal pollers call the services directly (no
+// identity) and are unaffected. Mock subroutes (/api/v1/<x>/mock/...) are only
+// mounted in e2e/dev and carry no real credentials, but they still route
+// through here — the ownership check is harmless there because e2e runs with
+// auth disabled.
+func integrationWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
+			c.Next()
+			return
+		}
+		path := c.Request.URL.Path
+		if !hasIntegrationPrefix(path) {
+			c.Next()
+			return
+		}
+		wsID := c.Query("workspace_id")
+		if wsID == "" {
+			wsID = workspaceIDFromPath(path)
+		}
+		if wsID == "" {
+			c.Next()
+			return
+		}
+		if err := taskSvc.AuthorizeWorkspaceAccess(c.Request.Context(), wsID); err != nil {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+			return
+		}
+		c.Next()
+	}
+}
+
+func hasIntegrationPrefix(path string) bool {
+	for _, prefix := range integrationWorkspacePrefixes {
+		if strings.HasPrefix(path, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// workspaceIDFromPath extracts the ID from a `/workspaces/<id>/...` path
+// segment (gitlab's GET /api/v1/gitlab/workspaces/:workspaceID/task-mrs).
+func workspaceIDFromPath(path string) string {
+	const marker = "/workspaces/"
+	idx := strings.Index(path, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := path[idx+len(marker):]
+	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
+		return rest[:slash]
+	}
+	return rest
 }
 
 func dockerTaskTitleProvider(taskRepo *sqliterepo.Repository, log *logger.Logger) docker.TaskTitleProvider {
@@ -1218,6 +1329,7 @@ func registerMCPAndDebugRoutes(
 	handoffSvc *taskservice.HandoffService,
 ) {
 	walkthroughService := taskservice.NewWalkthroughService(p.taskRepo, p.eventBus, p.log)
+	walkthroughService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	mcpHandlers := mcphandlers.NewHandlers(
 		p.taskSvc, wfCtrl,
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
@@ -1248,6 +1360,20 @@ func registerMCPAndDebugRoutes(
 	p.lifecycleMgr.SetMCPHandler(p.gateway.Dispatcher)
 	p.log.Debug("MCP handler configured for agent lifecycle manager")
 
+	// In-session MCP calls reach this same dispatcher over the agent's own WS
+	// stream, which carries no credential — so scope them to the user who owns
+	// the stream's task. Without this the handlers run with no identity, which
+	// the task service treats as an internal caller and serves unscoped.
+	if p.authSvc != nil {
+		p.lifecycleMgr.SetMCPIdentityScoper(mcpscope.NewResolver(
+			p.taskRepo,
+			p.authSvc,
+			func() bool { return p.authSvc.Mode() != auth.ModeDisabled },
+			p.log,
+		).Scope)
+		p.log.Debug("In-session MCP dispatch scoped to task owner")
+	}
+
 	// External MCP endpoint — exposes config tools + create_task to external coding
 	// agents (Claude Code, Cursor, etc.) at /mcp on the backend HTTP server.
 	registerExternalMCP(p)
@@ -1273,7 +1399,7 @@ func registerExternalMCP(p routeParams) {
 
 	backendClient := mcpserver.NewDispatcherBackendClient(p.gateway.Dispatcher, p.log)
 	srv := mcpserver.NewExternal(backendClient, p.log, "")
-	mcpGroup := p.router.Group("", externalMCPOpenMiddleware())
+	mcpGroup := p.router.Group("", externalMCPAuthMiddleware(p.authSvc))
 	srv.RegisterBackendRoutes(mcpGroup)
 	if p.addCleanup != nil {
 		p.addCleanup(func() error {
@@ -1289,13 +1415,26 @@ func registerExternalMCP(p routeParams) {
 		zap.String("sse_message", baseURL+"/mcp/message"))
 }
 
-// externalMCPOpenMiddleware documents the external MCP access policy: the
-// endpoint is open on every interface the backend listens on. Kandev does not
-// yet have a user auth boundary, so protecting MCP separately would create a
-// false sense of security while the rest of the app remains reachable.
-func externalMCPOpenMiddleware() gin.HandlerFunc {
+// externalMCPAuthMiddleware guards the external MCP endpoint (/mcp*). While
+// authentication is disabled the endpoint stays open (today's behavior). Once
+// auth is enabled, external coding agents must present a personal access
+// token as an Authorization bearer — they have no browser session cookie.
+func externalMCPAuthMiddleware(authSvc *auth.Service) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Next()
+		if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
+			c.Next()
+			return
+		}
+		// The global auth middleware may already have resolved a PAT (or a
+		// browser session — useful for same-origin tooling).
+		if _, ok := authn.FromGin(c); ok {
+			c.Next()
+			return
+		}
+		c.Header("WWW-Authenticate", "Bearer")
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+			"error": "external MCP requires a personal access token (Settings > Account > API tokens)",
+		})
 	}
 }
 

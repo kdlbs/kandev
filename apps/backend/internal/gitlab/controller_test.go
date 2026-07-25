@@ -1,6 +1,7 @@
 package gitlab
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +11,12 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
 
 // newControllerFixture wires a real PATClient + Controller against an
 // httptest.NewServer GitLab stub. The returned *requestLog captures every
@@ -98,6 +105,95 @@ func hit(router *gin.Engine, target string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	return w
+}
+
+func TestHttpListProjectBranches_UnconfiguredPublicGitLab(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newTestStore(t)
+	seedWorkspace(t, store, "workspace-test")
+	svc := NewService(DefaultHost, NewNoopClient(DefaultHost), AuthMethodNone, nil, newTestLogger(t))
+	svc.SetStore(store)
+	router := gin.New()
+	NewController(svc, newTestLogger(t)).RegisterHTTPRoutes(router)
+
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if req.URL.Host != "gitlab.com" {
+			t.Fatalf("anonymous request host = %q, want gitlab.com", req.URL.Host)
+		}
+		if got := req.Header.Get("PRIVATE-TOKEN"); got != "" {
+			t.Fatalf("PRIVATE-TOKEN = %q, want absent for anonymous read", got)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`[{"name":"main"}]`)),
+			Request:    req,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	resp := hit(router, "/api/v1/gitlab/projects/branches?project=group%2Fproject&expected_host=https%3A%2F%2Fgitlab.com")
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `"name":"main"`) {
+		t.Fatalf("response = %s, want main branch", resp.Body.String())
+	}
+}
+
+func TestHttpListProjectBranches_ConfiguredUpstreamNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	host, stop := newTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(stop)
+
+	store := newTestStore(t)
+	seedWorkspace(t, store, "workspace-test")
+	if err := store.UpsertConfigForWorkspace(t.Context(), "workspace-test", &GitLabConfig{
+		Host: host, AuthMethod: AuthMethodPAT,
+	}); err != nil {
+		t.Fatalf("seed GitLab config: %v", err)
+	}
+	svc := NewService(host, NewNoopClient(host), AuthMethodNone, nil, newTestLogger(t))
+	svc.SetStore(store)
+	svc.SetWorkspaceSecretStore(&configTestSecrets{values: map[string]string{
+		SecretKeyForWorkspace("workspace-test"): "token",
+	}})
+	router := gin.New()
+	NewController(svc, newTestLogger(t)).RegisterHTTPRoutes(router)
+
+	resp := hit(router, "/api/v1/gitlab/projects/branches?project=group%2Fmissing&expected_host="+url.QueryEscape(host))
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestHttpListProjectBranches_UnconfiguredPublicNotFound(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := newTestStore(t)
+	seedWorkspace(t, store, "workspace-test")
+	svc := NewService(DefaultHost, NewNoopClient(DefaultHost), AuthMethodNone, nil, newTestLogger(t))
+	svc.SetStore(store)
+	router := gin.New()
+	NewController(svc, newTestLogger(t)).RegisterHTTPRoutes(router)
+
+	originalTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusNotFound,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"message":"not found"}`)),
+			Request:    req,
+		}, nil
+	})
+	t.Cleanup(func() { http.DefaultTransport = originalTransport })
+
+	resp := hit(router, "/api/v1/gitlab/projects/branches?project=group%2Fmissing&expected_host=https%3A%2F%2Fgitlab.com")
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404; body=%s", resp.Code, resp.Body.String())
+	}
 }
 
 // Regression for the /gitlab page tabs: each tab value must reach GitLab

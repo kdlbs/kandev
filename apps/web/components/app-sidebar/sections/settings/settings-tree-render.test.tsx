@@ -22,6 +22,12 @@ const state = {
   features: {
     office: false,
     plugins: false,
+    auth: false,
+  },
+  auth: {
+    mode: "disabled" as const,
+    authenticated: true,
+    user: null,
   },
 };
 

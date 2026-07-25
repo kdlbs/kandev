@@ -55,7 +55,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    | Source | Use it for | Important behavior |
    |---|---|---|
    | **Repo** | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task. |
-   | **Remote** | A remote repository | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL; then select the branch. Clone and fetch require valid credentials. |
+   | **Remote** | A remote repository | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL. A pasted URL stays editable until you press Enter; then select the branch. Anonymous, credential-free reads include public GitHub repository branches, pull requests, and issues, plus public `gitlab.com` branch discovery. Private resources and authenticated browse/write features require valid provider credentials. |
    | **None** | Planning, research, or work outside Git | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable. |
 
 4. Select a compatible executor profile and agent profile. A workflow default agent profile locks the task-level agent selector. Executor and agent compatibility is validated before launch.
@@ -84,7 +84,9 @@ Select an option, then choose **Save changes**. The only affected Kandev MCP too
 
 ### Multiple repositories
 
-A task can include several local or remote repository rows. Multi-repository task creation currently requires the **git-worktree** executor; the dialog leaves incompatible executors visible but disables them with `Multi-repo tasks only support the git-worktree executor.` Each remote needs credentials that can clone and fetch its selected base branch.
+A task can include several local or remote repository rows. Multi-repository task creation currently requires the **git-worktree** executor; the dialog leaves incompatible executors visible but disables them with `Multi-repo tasks only support the git-worktree executor.` Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.
+
+If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
 Changes and review are scoped by repository. State the expected deliverable, base branch, and pull-request target for every attachment. See [Coordinate work](coordination.md) for adding branches after creation and splitting multi-repository work.
 
@@ -240,6 +242,8 @@ The archive confirmation is enabled by default at **Settings → General → Tas
 To restore a task, open **List**, enable **Show archived**, and choose unarchive. If the parent was archived with its children, the cascade-owned children are restored with it. For worktree tasks, Kandev probes the newest historical worktree branch for each repository. If that branch still exists locally or on `origin`, Kandev restores it as the checkout branch so the next session can pick it up. Recovery is best-effort and does not rewrite ambiguous multi-row attachments for the same repository. If the branch is missing, the unarchive toast warns that the next session starts fresh from the base branch; work that existed only on the deleted local branch is unrecoverable. Removed worktree directories, containers, and sandboxes are materialized again on a later launch rather than resumed in place.
 
 Delete is permanent. If **Also delete _N_ subtasks** is left unchecked, direct children become root tasks. If selected, descendants are deleted. The operation cannot be undone, and executor cleanup follows the same asynchronous, best-effort rules as archive.
+
+When a task still has an agent generating or background work outstanding, the confirmation dialog adds a still-working warning: proceeding discards work that is in progress. Delete always shows this warning; archive shows it only when the archive confirmation is enabled.
 
 ## Troubleshooting
 

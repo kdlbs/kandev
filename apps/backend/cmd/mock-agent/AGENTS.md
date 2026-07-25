@@ -8,7 +8,9 @@ Scoped guidance for `apps/backend/cmd/mock-agent/`. The mock agent satisfies the
 
 `handler.go` routes any prompt starting with `/e2e:` to `emitPredefinedScenario(e, name)`, which looks `name` up in `scenarioRegistry` (`scenarios.go`). The registry is the single source of truth for scenario names — to add a scenario, add one map entry and one `scenario<Name>(e *emitter)` function.
 
-Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/ask-multiple`, `/crash`, `/todo`, `/mermaid`, `/markdown`, `/sleep [n]`, `/tool:<name>`, `/subagent`, `/subtask`, `/bulk[:N]`.
+Friendly aliases live in `handler.go` next to the dispatcher: `/ask-single`, `/ask-multiple`, `/crash`, `/todo`, `/mermaid`, `/markdown`, `/sleep [n]`, `/tool:<name>`, `/subagent`, `/subtask`, `/bulk[:N]`, `/background [n]`, `/detached-background [n]`, `/async-subagent-lifecycle [n]`, `/async-subagent-teardown`.
+
+The four `background`/`async-subagent` aliases emit the foreground-yield and detached-workload frame shapes behind the fine-grained busy signal (ADR-0049): `/background` spawns a subagent while the foreground goes idle, `/detached-background` launches work that outlives the turn, and the `async-subagent-*` pair replays Claude's async Agent lifecycle with and without its completion frame.
 
 `/bulk` (default 120, e.g. `/bulk:300`) emits N short agent messages, each followed by a tiny tool call. The tool-call boundary flushes the buffered text into its own message row — consecutive agent text chunks otherwise coalesce into a single message (`manager_streaming.flushMessageBuffer` only fires on a tool-call/turn boundary) — so the result is a long, paginated conversation. Use it to manually exercise chat scrollback and the "Load older messages" pagination in dev/preview.
 
@@ -43,6 +45,7 @@ Scenarios in `scenarioRegistry` can only emit `SessionUpdate` notifications — 
 - `e.plan(entries)` — ACP plan updates.
 - `e.startMonitorTool(id, taskID, command)` / `e.emitMonitorEvent(taskID, body)` / `e.endMonitorTool(id)` — reproduces the two-frame Monitor wire pattern the kandev ACP adapter recognises.
 - `e.startSubagentTool(...)` / `e.completeSubagentTool(...)` — claude-style subagent (Task) frames with the `_meta.claudeCode` Agent marker and result metrics.
+- `e.foregroundIdle()` / `e.launchAsyncSubagentTool(...)` / `e.completeDetachedWork()` — the ADR-0049 busy-signal shapes: the human-origin usage boundary that yields the foreground, Claude's detached Agent launch, and the task-notification boundary that closes detached work.
 - `e.requestPermission(...)` — interactive permission flow for scenarios that need an Allow/Reject decision.
 
 ### Emitting `_meta`-tagged tool calls

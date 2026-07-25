@@ -28,6 +28,11 @@ apps/backend/
 │   │   ├── settings/     # Agent settings
 │   │   ├── mcpconfig/    # MCP server configuration
 │   │   └── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
+│   ├── auth/             # Opt-in user authentication + per-user scoping
+│   │   ├── authn/        # Request-identity plumbing (context + gin helpers, RequireAdmin)
+│   │   ├── httpmw/       # Global enforcement middleware (allowlist, synthetic identity)
+│   │   ├── httpapi/      # /api/v1/auth/* + /api/v1/users endpoints
+│   │   └── store/        # auth_identities, auth_sessions, auth_api_tokens, auth_invites
 │   ├── agentctl/
 │   │   └── server/       # agentctl HTTP server
 │   │       ├── acp/      # ACP protocol implementation
@@ -161,6 +166,14 @@ and can leak ACP subprocesses.
 - `remote_docker`, `remote_vps`, `k8s` - Planned
 
 **Remote SSH executor platforms:** Treat supported remote OS/arch values as an end-to-end contract. Platform probe/normalization, lifecycle support checks, agentctl helper resolution, platform default shell, SSH readiness endpoints, frontend response types, and tests must stay aligned. Preserve raw unsupported platform details in user-facing errors, but use normalized values for supported-platform matching. Keep shell defaults platform-aware: Darwin defaults to `zsh`, Linux defaults to `bash`, unless an explicit shell is saved.
+
+**Opt-in authentication & per-user scoping** (`internal/auth/`): auth is OFF by default; the global middleware (`auth/httpmw`, installed after CORS in `backendapp.buildHTTPServer`) then injects a synthetic admin identity for the pre-auth single user, so behavior is unchanged. Enablement is the `features.auth` runtime flag (`KANDEV_FEATURES_AUTH`, Settings > System > Feature Toggles) — the auth service derives its mode from `cfg.Features.Auth` (`disabled` / `setup` = flag-on-no-admin / `enabled` = flag-on-admin-exists); there is no separate `auth.mode` setting. When enabled, requests authenticate via a `kandev_session` cookie (opaque token, SHA-256 at rest, DB-backed) or a `kandev_pat_*` bearer token. Scoping rules:
+- **Identity travels in the request context** (`authn.IdentityFromContext`). No identity = internal caller (pollers, event bus, office schedulers) = unscoped. Synthetic identity = auth disabled = unscoped.
+- **In-session agent MCP is scoped to the task owner.** The MCP tools an agent gets inside its own session are relayed over the agent's WebSocket stream, which carries no credential of its own. `internal/mcp/scope` resolves the stream's task → workspace → owner and attaches that user's real identity before dispatch (`lifecycle.Manager.SetMCPIdentityScoper`), so the same `authorize*` checks apply as for the PAT-authenticated `/mcp` endpoint. The owning task comes from the `AgentExecution`, never from the agent-supplied payload — do not "improve" this by reading `session_id`/`task_id` out of the request. Tool handlers stay identity-agnostic. Under enforced auth every dispatch is scoped to *somebody*: a resolvable active owner gets their identity; an unowned workspace gets a sentinel user ID that reaches unowned rows only; anything unresolvable (missing task/workspace row, or an owner whose account was deleted or disabled) is **denied**. Never return an identity-free context from this path — the task service reads that as an internal caller and grants everything.
+- **Workspaces are per-user** (`workspaces.owner_id`); the task service filters/denies at the service layer with `*NotFound` sentinels (no existence leak). Unowned rows (`owner_id=''`) stay visible until the setup wizard claims them for the admin.
+- **New user-facing service entry points must apply scoping** — call the `authorize*` helpers in `task/service/service_access.go` (or the same pattern) when adding routes that read or mutate workspace-scoped data.
+- **WS**: clients carry their identity; dispatched actions and subscriptions are scoped; workspace-carrying events route via `Hub.BroadcastToWorkspace`. A new `hub.Broadcast` (global) call site needs a `//ws:global` justification comment.
+- **Self-authenticating webhooks** (automation, office channels, plugin webhooks) and `/health`, `/api/v1/features`, `/api/v1/app-state` stay public — the allowlist lives in `auth/httpmw/middleware.go` with a pinning test.
 
 ## Execution Flow
 

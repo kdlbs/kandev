@@ -46,25 +46,23 @@ function makeRepo(id: string, name: string): Repository {
     source_type: "local",
     local_path: `/repos/${name}`,
     default_branch: "main",
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
   } as Repository;
 }
-
 function row(overrides: Partial<TaskRepoRow> = {}): TaskRepoRow {
   return { key: `row-${Math.random()}`, branch: "", ...overrides };
 }
-
 function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
-  const branchesByUrl = {
-    branches: (url: string) =>
-      url === (overrides.remoteRepos?.[0]?.url ?? "")
-        ? ((overrides as Partial<DialogFormState>).branchesByUrl?.branches(url) ?? [])
-        : [],
-    loading: () => false,
-    ensure: () => undefined,
-  };
   return {
+    branchesByUrl: {
+      branches: (url: string) =>
+        url === (overrides.remoteRepos?.[0]?.url ?? "")
+          ? ((overrides as Partial<DialogFormState>).branchesByUrl?.branches(url) ?? [])
+          : [],
+      loading: () => false,
+      error: () => undefined,
+      ensure: () => undefined,
+      clear: () => undefined,
+    },
     repositories: [] as TaskRepoRow[],
     useRemote: false,
     discoveredRepositories: [],
@@ -74,10 +72,10 @@ function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
     removeRemoteRepo: vi.fn(),
     updateRemoteRepo: vi.fn(),
     githubUrlError: null,
-    branchesByUrl,
     prInfoByUrl: {
       info: () => undefined,
       loading: () => false,
+      error: () => undefined,
       ensure: () => undefined,
       clear: () => undefined,
     },
@@ -90,11 +88,8 @@ function makeFs(overrides: Partial<DialogFormState>): DialogFormState {
 }
 
 const NOOP = (_key: string, _value: string) => undefined;
-
-function renderInProvider(ui: Parameters<typeof render>[0]) {
-  return render(<TooltipProvider>{ui}</TooltipProvider>);
-}
-
+const renderInProvider = (ui: Parameters<typeof render>[0]) =>
+  render(<TooltipProvider>{ui}</TooltipProvider>);
 // eslint-disable-next-line max-lines-per-function -- test describe block, splitting hurts readability
 describe("RepoChipsRow", () => {
   it("renders one chip per row plus an Add button", () => {

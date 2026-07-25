@@ -19,6 +19,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { CurrentUserChip } from "./current-user-chip";
 import { linkToTask } from "@/lib/links";
 import { cn } from "@/lib/utils";
 import {
@@ -122,6 +123,9 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
   const officeEnabled = useFeature("office");
   const releaseNotes = useReleaseNotes();
   const [improveOpen, setImproveOpen] = useState(false);
+  const authMode = useAppStore((s) => s.auth.mode);
+  const authUser = useAppStore((s) => s.auth.user);
+  const showCurrentUser = authMode === "enabled" && authUser !== null;
 
   return (
     <div
@@ -180,6 +184,9 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
         />
       )}
       <ThemeToggle />
+      {showCurrentUser && (
+        <CurrentUserChip collapsed={collapsed} className={cn(!collapsed && "ml-auto")} />
+      )}
       <ImproveKandevDialog
         open={improveOpen}
         onOpenChange={setImproveOpen}

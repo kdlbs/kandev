@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"testing"
@@ -25,7 +26,7 @@ func openNotificationTestDB(t *testing.T) *sqlx.DB {
 
 func TestSQLiteRepositoryDeliverySchemaUsesOccurrenceID(t *testing.T) {
 	database := openNotificationTestDB(t)
-	if _, err := newSQLiteRepositoryWithDB(database, database); err != nil {
+	if _, err := newSQLiteRepositoryWithDB(context.Background(), database, database); err != nil {
 		t.Fatalf("create repository: %v", err)
 	}
 
@@ -48,6 +49,17 @@ func TestSQLiteRepositoryDeliverySchemaUsesOccurrenceID(t *testing.T) {
 		}
 	}
 	t.Fatal("notification_deliveries must retain a semantic occurrence_id")
+}
+
+func TestSQLiteRepositoryInitializationHonorsCanceledContext(t *testing.T) {
+	database := openNotificationTestDB(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := newSQLiteRepositoryWithDB(ctx, database, database)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("initialize repository error = %v, want context canceled", err)
+	}
 }
 
 func TestSQLiteRepositoryMigratesLegacyWaitingSubscriptionToClarificationOnly(t *testing.T) {
@@ -78,7 +90,7 @@ func TestSQLiteRepositoryMigratesLegacyWaitingSubscriptionToClarificationOnly(t 
 		t.Fatalf("seed legacy subscription: %v", err)
 	}
 
-	repo, err := newSQLiteRepositoryWithDB(database, database)
+	repo, err := newSQLiteRepositoryWithDB(ctx, database, database)
 	if err != nil {
 		t.Fatalf("migrate legacy schema: %v", err)
 	}
@@ -86,8 +98,55 @@ func TestSQLiteRepositoryMigratesLegacyWaitingSubscriptionToClarificationOnly(t 
 	if err != nil {
 		t.Fatalf("list migrated subscriptions: %v", err)
 	}
-	if len(subscriptions) != 1 || subscriptions[0].EventType != "session.clarification_requested" {
-		t.Fatalf("legacy subscription = %#v, want clarification subscription only", subscriptions)
+	if !hasEnabledSubscription(subscriptions, "session.clarification_requested") || !hasEnabledSubscription(subscriptions, "system.update_available") {
+		t.Fatalf("legacy subscriptions = %#v, want enabled clarification and update subscriptions", subscriptions)
+	}
+}
+
+func TestSQLiteRepositoryMigratesExistingLocalAndSystemUpdateSubscriptionsOnlyOnce(t *testing.T) {
+	database := openNotificationTestDB(t)
+	ctx := context.Background()
+	repo, err := newSQLiteRepositoryWithDB(ctx, database, database)
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	providerIDs := make(map[string]string)
+	for _, provider := range []*models.Provider{
+		{ID: "local", UserID: "user-1", Name: "Local", Type: models.ProviderTypeLocal, Enabled: true},
+		{ID: "system", UserID: "user-1", Name: "System", Type: models.ProviderTypeSystem, Enabled: true},
+		{ID: "apprise", UserID: "user-1", Name: "Apprise", Type: models.ProviderTypeApprise, Enabled: true},
+	} {
+		if err := repo.CreateProvider(ctx, provider); err != nil {
+			t.Fatalf("create %s provider: %v", provider.Type, err)
+		}
+		providerIDs[string(provider.Type)] = provider.ID
+	}
+	if _, err := database.Exec(`DELETE FROM notification_migrations`); err != nil {
+		t.Fatalf("clear fresh migration marker: %v", err)
+	}
+
+	if err := repo.migrateUpdateAvailableSubscriptions(ctx); err != nil {
+		t.Fatalf("migrate update subscriptions: %v", err)
+	}
+	if err := repo.ReplaceSubscriptions(ctx, providerIDs[string(models.ProviderTypeLocal)], "user-1", []string{}); err != nil {
+		t.Fatalf("user opt-out: %v", err)
+	}
+	if err := repo.migrateUpdateAvailableSubscriptions(ctx); err != nil {
+		t.Fatalf("replay update migration: %v", err)
+	}
+	for providerType, want := range map[string]bool{"local": false, "system": true, "apprise": false} {
+		providerID := providerIDs[providerType]
+		subscriptions, err := repo.ListSubscriptionsByProvider(ctx, providerID)
+		if err != nil {
+			t.Fatalf("list %s subscriptions: %v", providerType, err)
+		}
+		got := false
+		for _, subscription := range subscriptions {
+			got = got || (subscription.EventType == "system.update_available" && subscription.Enabled)
+		}
+		if got != want {
+			t.Fatalf("%s update subscription = %v, want %v", providerType, got, want)
+		}
 	}
 }
 
@@ -114,10 +173,10 @@ func TestSQLiteRepositoryMergesLegacySubscriptionIdempotently(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("seed legacy and semantic subscriptions: %v", err)
 	}
-	if _, err := newSQLiteRepositoryWithDB(database, database); err != nil {
+	if _, err := newSQLiteRepositoryWithDB(ctx, database, database); err != nil {
 		t.Fatalf("first migration: %v", err)
 	}
-	repo, err := newSQLiteRepositoryWithDB(database, database)
+	repo, err := newSQLiteRepositoryWithDB(ctx, database, database)
 	if err != nil {
 		t.Fatalf("replay migration: %v", err)
 	}
@@ -125,14 +184,23 @@ func TestSQLiteRepositoryMergesLegacySubscriptionIdempotently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list migrated subscriptions: %v", err)
 	}
-	if len(subscriptions) != 1 || subscriptions[0].EventType != "session.clarification_requested" || !subscriptions[0].Enabled {
-		t.Fatalf("merged subscriptions = %#v, want one enabled clarification subscription", subscriptions)
+	if !hasEnabledSubscription(subscriptions, "session.clarification_requested") || !hasEnabledSubscription(subscriptions, "system.update_available") {
+		t.Fatalf("merged subscriptions = %#v, want enabled clarification and update subscriptions", subscriptions)
 	}
+}
+
+func hasEnabledSubscription(subscriptions []*models.Subscription, eventType string) bool {
+	for _, subscription := range subscriptions {
+		if subscription.EventType == eventType && subscription.Enabled {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSQLiteRepositoryDeliveryIdempotencyIsScopedToOccurrence(t *testing.T) {
 	database := openNotificationTestDB(t)
-	repo, err := newSQLiteRepositoryWithDB(database, database)
+	repo, err := newSQLiteRepositoryWithDB(context.Background(), database, database)
 	if err != nil {
 		t.Fatalf("create repository: %v", err)
 	}
@@ -158,11 +226,11 @@ func TestSQLiteRepositoryMigratesLegacyDeliveriesPreservingHistoryAndReplayabili
 	database := openNotificationTestDB(t)
 	seedLegacyDeliverySchema(t, database)
 
-	repo, err := newSQLiteRepositoryWithDB(database, database)
+	repo, err := newSQLiteRepositoryWithDB(context.Background(), database, database)
 	if err != nil {
 		t.Fatalf("first migration: %v", err)
 	}
-	if _, err := newSQLiteRepositoryWithDB(database, database); err != nil {
+	if _, err := newSQLiteRepositoryWithDB(context.Background(), database, database); err != nil {
 		t.Fatalf("replay migration: %v", err)
 	}
 
@@ -185,7 +253,7 @@ func TestSQLiteRepositoryDeliveryMigrationRollsBackOnMalformedLegacyTable(t *tes
 		t.Fatalf("seed malformed legacy deliveries: %v", err)
 	}
 
-	if _, err := newSQLiteRepositoryWithDB(database, database); err == nil {
+	if _, err := newSQLiteRepositoryWithDB(context.Background(), database, database); err == nil {
 		t.Fatal("migration must fail after beginning when legacy history is malformed")
 	}
 	var count int
@@ -202,11 +270,11 @@ func TestPostgresRepositoryMigratesLegacyDeliveriesReplayably(t *testing.T) {
 	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	seedLegacyDeliverySchema(t, database)
 
-	repo, err := newSQLiteRepositoryWithDB(database, database)
+	repo, err := newSQLiteRepositoryWithDB(context.Background(), database, database)
 	if err != nil {
 		t.Fatalf("first migration: %v", err)
 	}
-	if _, err := newSQLiteRepositoryWithDB(database, database); err != nil {
+	if _, err := newSQLiteRepositoryWithDB(context.Background(), database, database); err != nil {
 		t.Fatalf("replay migration: %v", err)
 	}
 
@@ -217,10 +285,10 @@ func TestPostgresRepositoryMigratesLegacyDeliveriesReplayably(t *testing.T) {
 
 func TestPostgresRepositoryFreshSchemaReinitializes(t *testing.T) {
 	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
-	if _, err := newSQLiteRepositoryWithDB(database, database); err != nil {
+	if _, err := newSQLiteRepositoryWithDB(context.Background(), database, database); err != nil {
 		t.Fatalf("first schema initialization: %v", err)
 	}
-	if _, err := newSQLiteRepositoryWithDB(database, database); err != nil {
+	if _, err := newSQLiteRepositoryWithDB(context.Background(), database, database); err != nil {
 		t.Fatalf("replayed schema initialization: %v", err)
 	}
 }

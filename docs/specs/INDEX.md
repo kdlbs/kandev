@@ -36,6 +36,7 @@ Product-wide capabilities that are not tied to a single feature area.
 
 | Spec | Status |
 |---|---|
+| [background-work-liveness](platform/background-work-liveness.md) | shipped |
 | [plugins](plugins/spec.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
 | [semantic-notifications](platform/notifications.md) | shipped |
@@ -145,6 +146,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 
 | Spec | Status |
 |---|---|
+| [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
 | [improve-kandev](improve-kandev/spec.md) | draft |

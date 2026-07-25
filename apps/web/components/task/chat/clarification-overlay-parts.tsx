@@ -181,7 +181,7 @@ function CustomInputControls({
 }) {
   if (isFinePointer) {
     return (
-      <div className="mt-0.5 flex flex-shrink-0 items-center gap-1">
+      <div className="flex flex-shrink-0 items-center gap-1">
         <kbd
           aria-hidden="true"
           className="select-none flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 rounded border border-border bg-background text-muted-foreground"
@@ -204,7 +204,7 @@ function CustomInputControls({
       data-testid="clarification-custom-submit"
       aria-label="Send answer"
       className={cn(
-        "mt-0.5 flex flex-shrink-0 items-center gap-1 text-xs px-2 py-1 rounded font-medium transition-colors",
+        "flex flex-shrink-0 items-center gap-1 text-xs px-2 py-1 rounded font-medium transition-colors",
         canSend
           ? "bg-blue-500 text-white hover:bg-blue-500/90 cursor-pointer"
           : "bg-muted text-muted-foreground cursor-not-allowed",
@@ -254,19 +254,13 @@ export function ClarificationCustomInput({
         textareaRef.current?.focus({ preventScroll: true });
       }}
       className={cn(
-        "mt-2.5 flex min-h-11 items-start gap-2 px-3 py-2 rounded-lg border transition-colors",
+        "mt-2.5 flex min-h-11 items-center gap-2 px-3 py-2 rounded-lg border transition-colors",
         active
           ? "bg-blue-500/15 border-blue-500/50 text-foreground"
           : "border-dashed border-border/70 bg-muted/30",
         isSubmitting ? "cursor-not-allowed" : "cursor-text",
       )}
     >
-      <span
-        className={cn("mt-0.5 text-xs", active ? "text-blue-500" : "text-muted-foreground")}
-        aria-hidden="true"
-      >
-        ↳
-      </span>
       <Textarea
         ref={textareaRef}
         rows={1}
@@ -278,7 +272,7 @@ export function ClarificationCustomInput({
         disabled={isSubmitting}
         data-testid="clarification-input"
         style={{ maxHeight: MAX_CUSTOM_INPUT_HEIGHT }}
-        className="flex-1 min-h-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/60"
+        className="flex-1 min-h-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent placeholder:text-muted-foreground/60"
         onKeyDown={(e) => {
           // Shift+Enter (and Alt+Enter) fall through so the textarea inserts a
           // newline instead of submitting. isComposing ignores the Enter that
@@ -312,7 +306,7 @@ export function ClarificationCustomInput({
         isSubmitting={isSubmitting}
         onSubmit={onSubmit}
       />
-      {active && <IconCheck className="mt-0.5 h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
+      {active && <IconCheck className="h-3.5 w-3.5 text-blue-500 flex-shrink-0" />}
     </div>
   );
 }

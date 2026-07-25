@@ -296,10 +296,20 @@ type DockerConfig struct {
 	VolumeBasePath string `mapstructure:"volumeBasePath"`
 }
 
-// AuthConfig holds authentication configuration.
+// AuthConfig holds authentication configuration. Whether authentication is
+// enforced is controlled by the `features.auth` runtime flag
+// (KANDEV_FEATURES_AUTH), not here — these are only session-mechanics knobs.
 type AuthConfig struct {
 	JWTSecret     string `mapstructure:"jwtSecret"`
 	TokenDuration int    `mapstructure:"tokenDuration"` // in seconds
+
+	// SessionTTLHours is the sliding lifetime of a browser session. A session
+	// is extended whenever it is used with less than TTL-24h remaining.
+	SessionTTLHours int `mapstructure:"sessionTTLHours"`
+
+	// CookieName is the session cookie name. Only override for unusual
+	// reverse-proxy setups that need distinct cookie names per instance.
+	CookieName string `mapstructure:"cookieName"`
 }
 
 // OfficeConfig holds configuration for the office (autonomous agents) feature.
@@ -348,6 +358,15 @@ type FeaturesConfig struct {
 	// corresponding Status drawer on phones. The snake_case mapstructure key
 	// keeps the config and KANDEV_FEATURES_APP_STATUS_BAR environment name aligned.
 	AppStatusBar bool `mapstructure:"app_status_bar" json:"appStatusBar"`
+
+	// Auth is the on/off switch for opt-in authentication and per-user
+	// workspaces. When on, every visitor must sign in (the first becomes the
+	// admin via a setup wizard) and workspaces are private per user; the
+	// Users/Account settings surfaces also become visible. Set via the
+	// runtime feature toggle KANDEV_FEATURES_AUTH (Settings > System > Feature
+	// Toggles). Off by default so kandev stays single-user until a deployment
+	// opts in.
+	Auth bool `mapstructure:"auth" json:"auth"`
 }
 
 // LoggingConfig holds logging configuration.
@@ -505,7 +524,9 @@ func setDefaults(v *viper.Viper) {
 
 	// Auth defaults
 	v.SetDefault("auth.jwtSecret", "")
-	v.SetDefault("auth.tokenDuration", 3600) // 1 hour
+	v.SetDefault("auth.tokenDuration", 3600)  // 1 hour
+	v.SetDefault("auth.sessionTTLHours", 720) // 30 days, sliding
+	v.SetDefault("auth.cookieName", "kandev_session")
 
 	// Office defaults
 	v.SetDefault("office.jwtSigningKey", "")

@@ -36,6 +36,14 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 	if sessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
 	}
+	// Per-user workspace scoping (opt-in auth): user-facing session surfaces
+	// funnel through here; internal callers pass a ctx without an identity
+	// and are unaffected.
+	if check := m.sessionAccessCheck; check != nil {
+		if err := check(ctx, sessionID); err != nil {
+			return nil, err
+		}
+	}
 
 	// Fast path: execution already in memory
 	if execution, exists := m.executionStore.GetBySessionID(sessionID); exists {
@@ -67,6 +75,13 @@ func (m *Manager) GetOrEnsureExecution(ctx context.Context, sessionID string) (*
 func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEnvironmentID string) (*AgentExecution, error) {
 	if taskEnvironmentID == "" {
 		return nil, fmt.Errorf("task_environment_id is required")
+	}
+	// Per-user scoping (opt-in auth) — before the cache short-circuit so a
+	// cached execution cannot be reached by a non-owner.
+	if check := m.environmentAccessCheck; check != nil {
+		if err := check(ctx, taskEnvironmentID); err != nil {
+			return nil, err
+		}
 	}
 
 	if execution, exists := m.executionStore.GetByTaskEnvironmentID(taskEnvironmentID); exists {
@@ -310,6 +325,13 @@ func (m *Manager) IsAgentCommandConfigured(executionID string) bool {
 //
 // Returns the execution with a running passthrough process, or an error.
 func (m *Manager) EnsurePassthroughExecution(ctx context.Context, sessionID string) (*AgentExecution, error) {
+	// Per-user scoping (opt-in auth) — before the cache short-circuit so a
+	// cached execution cannot be reached by a non-owner.
+	if check := m.sessionAccessCheck; check != nil {
+		if err := check(ctx, sessionID); err != nil {
+			return nil, err
+		}
+	}
 	// Check if execution already exists with a running passthrough process.
 	// PassthroughProcessID is not cleared on exit, so a stale ID can point at
 	// a dead process; verify the runner still has it before short-circuiting,

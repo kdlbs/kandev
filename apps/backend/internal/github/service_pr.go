@@ -2,6 +2,7 @@ package github
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -116,19 +117,25 @@ func pickDefaultMergeMethod(m RepoMergeMethods) string {
 
 // GetPR fetches basic PR details from GitHub.
 func (s *Service) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
-	if s.client == nil {
-		return nil, ErrNoClient
+	if s.client != nil {
+		pr, err := s.client.GetPR(ctx, owner, repo, number)
+		if !errors.Is(err, ErrNoClient) {
+			return pr, err
+		}
 	}
-	return s.client.GetPR(ctx, owner, repo, number)
+	return getPRAnonymous(ctx, owner, repo, number)
 }
 
 // GetIssue fetches basic issue details from GitHub. The create-task dialog is
 // currently the only caller and dedupes requests per URL on the frontend.
 func (s *Service) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {
-	if s.client == nil {
-		return nil, ErrNoClient
+	if s.client != nil {
+		issue, err := s.client.GetIssue(ctx, owner, repo, number)
+		if !errors.Is(err, ErrNoClient) {
+			return issue, err
+		}
 	}
-	return s.client.GetIssue(ctx, owner, repo, number)
+	return getIssueAnonymous(ctx, owner, repo, number)
 }
 
 // GetPRFeedback fetches live PR feedback from GitHub. Cached briefly with

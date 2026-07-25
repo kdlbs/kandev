@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"go.uber.org/zap"
@@ -59,6 +60,7 @@ import (
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
+	userstore "github.com/kandev/kandev/internal/user/store"
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 
 	// Orchestrator
@@ -309,7 +311,7 @@ func startServices( //nolint:cyclop
 	// ============================================
 	log.Info("Initializing Task Service...")
 
-	dbPool, repos, repoCleanups, err := provideRepositories(cfg, log, Version)
+	dbPool, repos, repoCleanups, err := provideRepositories(ctx, cfg, log, Version)
 	if err != nil {
 		log.Error("Failed to initialize repositories", zap.Error(err))
 		return false
@@ -339,6 +341,13 @@ func startServices( //nolint:cyclop
 		runtimeflags.RuntimeOptionsFromAppliedConfig(runtimeFlagDefaults, cfg),
 	)
 	log.Info("Task Service initialized")
+
+	services.Auth, err = provideAuthService(ctx, cfg, dbPool, repos, log)
+	if err != nil {
+		log.Error("Failed to initialize auth service", zap.Error(err))
+		return false
+	}
+	warnIfExposedWithoutAuth(cfg, services.Auth, log)
 
 	if err := runInitialAgentSetup(ctx, services.User, agentSettingsController, log); err != nil {
 		// Agent registry seeding is a hard prerequisite for every
@@ -429,6 +438,13 @@ func startAgentInfrastructure(
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
+	// Session/environment-scoped HTTP surfaces (shell, files, ports, vscode,
+	// LSP, terminals) enforce per-user workspace scoping (opt-in auth). The
+	// GetOrEnsure* execution paths run these checks internally; the vscode and
+	// port reverse proxies (bare lookup + cache) call CheckSessionAccess at
+	// the handler.
+	lifecycleMgr.SetSessionAccessChecker(services.Task.AuthorizeSessionAccess)
+	lifecycleMgr.SetEnvironmentAccessChecker(services.Task.AuthorizeEnvironmentAccess)
 	log.Info("Workspace info provider configured for session recovery")
 
 	// TODO(task-model-unification Phase 2, ADR 0004): wire agentruntime.New(lifecycleMgr)
@@ -650,7 +666,7 @@ func startGatewayAndServe(
 	if services.Mentions != nil {
 		referenceValidator = services.Mentions.Submission
 	}
-	gateway, _, notificationCtrl, terminalSvc, err := provideGateway(
+	gateway, notificationSvc, notificationCtrl, terminalSvc, err := provideGateway(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
 		repos.Notification, repos.Task, repos.Terminal, services.GitHub, services.GitLab,
@@ -668,6 +684,12 @@ func startGatewayAndServe(
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
 	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, log))
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
+
+	// WS gateway per-user scoping (opt-in auth): connection auth on upgrade
+	// and proxy routes, subscription visibility checks, and workspace-owner
+	// broadcast routing. Must be installed before SetupRoutes runs in
+	// buildHTTPServer.
+	gateway.SetAuthPolicy(gatewayAuthPolicy(services.Auth, services.Task, repos.Task))
 
 	waitForAgentctlControlHealthy(ctx, cfg, log)
 
@@ -780,6 +802,17 @@ func startGatewayAndServe(
 		systemSvc.Metrics.SetBroadcaster(gateway.Hub.BroadcastToSystemMetrics)
 		gateway.Hub.SetSystemMetricsInterestTracker(systemSvc.Metrics)
 		systemSvc.Metrics.SetExecutionProvider(lifecycleMetricProvider{manager: lifecycleMgr})
+	}
+	if systemSvc.Updates != nil {
+		systemSvc.Updates.SetNotifier(notificationSvc)
+		gateway.Hub.AddUserSubscriptionListener(func(userID string) {
+			if userID != userstore.DefaultUserID {
+				return
+			}
+			if err := systemSvc.Updates.ReplayCachedUpdate(ctx); err != nil {
+				log.Warn("failed to replay cached update notification", zap.Error(err))
+			}
+		})
 	}
 	systemSvc.StartBackground(ctx)
 	addCleanup(func() error { systemSvc.StopBackground(); return nil })
@@ -1675,14 +1708,34 @@ func buildHTTPServer(
 ) (*http.Server, error) {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
+	// Do not trust X-Forwarded-For by default: gin trusts all proxies out of
+	// the box, which would let a directly-reachable backend accept a spoofed
+	// client IP and defeat the login rate limiter (keyed on ClientIP). With no
+	// trusted proxies, ClientIP() falls back to the real peer RemoteAddr.
+	// Deployments behind a real proxy should front kandev with one that sets a
+	// trusted hop; revisit if a configurable trusted-proxy CIDR is added.
+	if err := router.SetTrustedProxies(nil); err != nil {
+		log.Warn("failed to clear trusted proxies", zap.Error(err))
+	}
 	router.Use(httpmw.RequestLogger(log, "kandev"))
 	router.Use(httpmw.OtelTracing("kandev"))
 	router.Use(gin.Recovery())
 	router.Use(corsMiddleware())
+	// Generate the interim-settings interlock token before touching any
+	// service deps, so a failure here aborts early (the test path passes nil
+	// services to exercise exactly this).
 	interimSettingsInterlockToken, err := newInterimSettingsInterlockToken()
 	if err != nil {
 		return nil, fmt.Errorf("generate interim settings interlock token: %w", err)
 	}
+
+	// Opt-in authentication. Runs after CORS; in disabled mode it only
+	// injects the synthetic single-user identity (behavior unchanged).
+	router.Use(authhttpmw.Middleware(services.Auth))
+	// Per-user workspace ownership on the third-party integration route
+	// groups (jira/gitlab/github/...), which resolve a caller-supplied
+	// workspace_id with no gate of their own. No-op when auth is disabled.
+	router.Use(integrationWorkspaceScopeMiddleware(services.Auth, services.Task))
 
 	registerRoutes(routeParams{
 		router:                        router,
@@ -1712,6 +1765,7 @@ func buildHTTPServer(
 		secretsSvc:                    secrets.NewService(repos.Secrets, log),
 		secretStore:                   repos.Secrets,
 		mcpConfigSvc:                  mcpconfig.NewService(repos.AgentSettings),
+		authSvc:                       services.Auth,
 		addCleanup:                    addCleanup,
 		repoCloner:                    repoCloner,
 		version:                       Version,

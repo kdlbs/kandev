@@ -539,6 +539,47 @@ func listRepoBranchesAnonymous(ctx context.Context, owner, repo string) ([]RepoB
 	return branches, nil
 }
 
+func getPRAnonymous(ctx context.Context, owner, repo string, number int) (*PR, error) {
+	var raw patPR
+	endpoint := fmt.Sprintf("/repos/%s/%s/pulls/%d", url.PathEscape(owner), url.PathEscape(repo), number)
+	if err := getAnonymous(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("get PR #%d: %w", number, err)
+	}
+	return convertPatPR(&raw, owner, repo), nil
+}
+
+func getIssueAnonymous(ctx context.Context, owner, repo string, number int) (*Issue, error) {
+	var raw patIssue
+	endpoint := fmt.Sprintf("/repos/%s/%s/issues/%d", url.PathEscape(owner), url.PathEscape(repo), number)
+	if err := getAnonymous(ctx, endpoint, &raw); err != nil {
+		return nil, fmt.Errorf("get issue #%d: %w", number, err)
+	}
+	return convertPatIssue(&raw, owner, repo), nil
+}
+
+func getAnonymous(ctx context.Context, endpoint string, result any) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, anonymousAPIBase+endpoint, nil)
+	if err != nil {
+		return ErrNoClient
+	}
+	req.Header.Set("Accept", githubAccept)
+	req.Header.Set("X-GitHub-Api-Version", githubAPIVersion)
+
+	resp, err := anonymousHTTPClient.Do(req)
+	if err != nil {
+		return ErrNoClient
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(resp.Body)
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body)}
+	}
+	if err := json.NewDecoder(resp.Body).Decode(result); err != nil {
+		return fmt.Errorf("decode GitHub response: %w", err)
+	}
+	return nil
+}
+
 // parseLinkNext extracts the URL for rel="next" from a GitHub Link header.
 // Returns "" if no next page is present.
 func parseLinkNext(link string) string {

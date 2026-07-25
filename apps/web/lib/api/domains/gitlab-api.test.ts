@@ -308,6 +308,21 @@ describe("gitlab-api — workspace watch actions", () => {
       );
     }
   });
+
+  it("encodes public and self-managed expected hosts when listing project branches", async () => {
+    const expectedHosts = ["https://gitlab.com", SELF_MANAGED_HOST];
+    await Promise.all(
+      expectedHosts.map((expectedHost) =>
+        listProjectBranches(WORKSPACE_WITH_SPACE, PROJECT_PATH, { expectedHost }),
+      ),
+    );
+
+    expect(
+      fetchSpy.mock.calls.map((call) =>
+        new URL(call[0] as string).searchParams.get("expected_host"),
+      ),
+    ).toEqual(expectedHosts);
+  });
 });
 
 describe("gitlab-api — merge request review", () => {

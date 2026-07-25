@@ -77,11 +77,18 @@ export function configOptionToModelOptions(
   option: SelectConfigOption | undefined,
 ): ModelSelectorOption[] {
   if (!option) return [];
-  return option.options.map((item) => ({
-    id: item.value,
-    name: item.name,
-    description: item.description ?? (item.value !== item.name ? item.value : undefined),
-  }));
+  const seen = new Set<string>();
+  return option.options.flatMap((item) => {
+    if (seen.has(item.value)) return [];
+    seen.add(item.value);
+    return [
+      {
+        id: item.value,
+        name: item.name,
+        description: item.description ?? (item.value !== item.name ? item.value : undefined),
+      },
+    ];
+  });
 }
 
 function currentOptionValue(option: DynamicConfigOption) {
@@ -258,8 +265,8 @@ function ConfigOptionSubSelector({
           )}
         </span>
       </button>
-      <ScrollArea
-        className="max-h-[min(18rem,calc(100vh-8rem))] pr-2"
+      <div
+        className="max-h-[min(18rem,calc(100dvh-8rem))] overflow-y-auto overscroll-contain pr-2"
         data-testid={`config-option-section-${option.id}`}
       >
         <div className="space-y-1">
@@ -303,7 +310,7 @@ function ConfigOptionSubSelector({
             );
           })}
         </div>
-      </ScrollArea>
+      </div>
     </div>
   );
 }

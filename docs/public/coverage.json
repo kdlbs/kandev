@@ -242,6 +242,15 @@
       "tests": ["apps/backend/internal/backendapp/middleware_test.go", "apps/backend/internal/gateway/websocket/origin_test.go"]
     },
     {
+      "id": "authentication-and-access",
+      "audiences": ["user", "operator"],
+      "stability": "beta",
+      "docs": ["authentication"],
+      "sources": ["apps/backend/internal/auth/httpmw/middleware.go", "apps/backend/internal/auth/service.go", "apps/backend/internal/auth/httpapi/handlers.go", "apps/web/components/app-sidebar/current-user-chip.tsx"],
+      "tests": ["apps/backend/internal/auth/httpapi/handlers_test.go", "apps/backend/internal/auth/httpmw/middleware_test.go", "apps/web/lib/state/slices/auth/auth-slice.test.ts"],
+      "settingsRoutes": ["/settings/system/users", "/settings/account/security", "/settings/account/tokens"]
+    },
+    {
       "id": "system-health-and-maintenance",
       "audiences": ["operator"],
       "stability": "stable",

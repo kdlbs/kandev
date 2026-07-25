@@ -3,6 +3,7 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -344,4 +345,53 @@ func (d *sqliteTaskDeleter) DeleteTask(ctx context.Context, id string) error {
 	d.deleted = append(d.deleted, id)
 	_, err := d.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, id)
 	return err
+}
+
+// TestWorkspaceAuthorizerGatesAccess verifies the opt-in-auth workspace
+// authorizer is enforced across the automation surface: a caller denied for a
+// workspace cannot read, list, mutate, trigger, or reveal secrets of
+// automations in it. A nil authorizer (auth disabled / internal) is unscoped.
+func TestWorkspaceAuthorizerGatesAccess(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-a", Name: "A", WorkflowID: "wf", WorkflowStepID: "s", Enabled: true, WebhookSecret: "shh"}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	denied := errors.New("denied")
+	svc.SetWorkspaceAuthorizer(func(_ context.Context, ws string) error {
+		if ws == "ws-a" {
+			return denied
+		}
+		return nil
+	})
+
+	if _, err := svc.GetAutomation(ctx, a.ID); !errors.Is(err, denied) {
+		t.Fatalf("GetAutomation: %v", err)
+	}
+	if _, err := svc.ListAutomations(ctx, "ws-a"); !errors.Is(err, denied) {
+		t.Fatalf("ListAutomations: %v", err)
+	}
+	if _, err := svc.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{}); !errors.Is(err, denied) {
+		t.Fatalf("UpdateAutomation: %v", err)
+	}
+	if err := svc.DeleteAutomation(ctx, a.ID); !errors.Is(err, denied) {
+		t.Fatalf("DeleteAutomation: %v", err)
+	}
+	if _, err := svc.GetWebhookSecret(ctx, a.ID); !errors.Is(err, denied) {
+		t.Fatalf("GetWebhookSecret: %v", err)
+	}
+	if _, err := svc.ListRuns(ctx, a.ID, 10); !errors.Is(err, denied) {
+		t.Fatalf("ListRuns: %v", err)
+	}
+	if _, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{Name: "x", WorkspaceID: "ws-a", WorkflowID: "wf", WorkflowStepID: "s"}); !errors.Is(err, denied) {
+		t.Fatalf("CreateAutomation: %v", err)
+	}
+
+	// A workspace the caller is allowed for still works.
+	if _, err := svc.ListAutomations(ctx, "ws-owned"); err != nil {
+		t.Fatalf("allowed workspace list: %v", err)
+	}
 }

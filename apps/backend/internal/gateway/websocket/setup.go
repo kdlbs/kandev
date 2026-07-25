@@ -20,6 +20,7 @@ type Gateway struct {
 	VscodeProxyHandler *VscodeProxyHandler
 	PortProxyHandler   *PortProxyHandler
 	TunnelManager      *TunnelManager
+	authPolicy         AuthPolicy
 	logger             *logger.Logger
 }
 
@@ -66,28 +67,33 @@ func (g *Gateway) SetPortTunnel(lifecycleMgr *lifecycle.Manager) {
 	g.TunnelManager = NewTunnelManager(lifecycleMgr, g.logger)
 }
 
-// SetupRoutes adds the WebSocket routes to the Gin engine
+// SetupRoutes adds the WebSocket routes to the Gin engine. Every route is
+// guarded by requireConnectionAuth — the global HTTP auth middleware defers
+// these paths (upgrades and iframe proxies can't be challenged with a JSON
+// 401 mid-flow by the generic layer), so enforcement happens here, where the
+// ?token=<PAT> fallback for headerless clients is also honored.
 func (g *Gateway) SetupRoutes(router *gin.Engine) {
-	router.GET("/ws", g.Handler.HandleConnection)
+	connectionAuth := g.requireConnectionAuth()
+	router.GET("/ws", connectionAuth, g.Handler.HandleConnection)
 
 	// Add dedicated terminal WebSocket route if terminal handler is configured
 	if g.TerminalHandler != nil {
-		router.GET("/terminal/*target", g.TerminalHandler.HandleTerminalWS)
+		router.GET("/terminal/*target", connectionAuth, g.TerminalHandler.HandleTerminalWS)
 	}
 
 	// Add LSP routes if LSP handler is configured
 	if g.LSPHandler != nil {
-		router.GET("/lsp/:sessionId", g.LSPHandler.HandleLSPConnection)
+		router.GET("/lsp/:sessionId", connectionAuth, g.LSPHandler.HandleLSPConnection)
 	}
 
 	// Add VS Code reverse proxy routes if configured
 	if g.VscodeProxyHandler != nil {
-		router.Any("/vscode/:sessionId/*path", g.VscodeProxyHandler.HandleVscodeProxy)
+		router.Any("/vscode/:sessionId/*path", connectionAuth, g.VscodeProxyHandler.HandleVscodeProxy)
 	}
 
 	// Add generic port proxy routes if configured
 	if g.PortProxyHandler != nil {
-		router.Any("/port-proxy/:sessionId/:port", g.PortProxyHandler.HandlePortProxy)
-		router.Any("/port-proxy/:sessionId/:port/*path", g.PortProxyHandler.HandlePortProxy)
+		router.Any("/port-proxy/:sessionId/:port", connectionAuth, g.PortProxyHandler.HandlePortProxy)
+		router.Any("/port-proxy/:sessionId/:port/*path", connectionAuth, g.PortProxyHandler.HandlePortProxy)
 	}
 }

@@ -266,7 +266,7 @@ func provideGateway(
 	go gateway.Hub.Run(ctx)
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 	gateways.RegisterUserNotifications(ctx, eventBus, gateway.Hub, log)
-	gateways.RegisterOfficeNotifications(ctx, eventBus, gateway.Hub, log)
+	gateways.RegisterOfficeNotifications(ctx, eventBus, gateway.Hub, taskWorkspaceResolver(taskRepo), log)
 	gateways.RegisterRunNotifications(ctx, eventBus, gateway.Hub, log)
 
 	// Route session focus/subscription transitions from the hub into the
@@ -286,6 +286,8 @@ func provideGateway(
 	// on page load, so BroadcastToSession misses the focused-but-not-yet-
 	// subscribed client. Volume is low (debounced down-transitions) and clients
 	// filter by session_id in the payload.
+	//ws:global — payload carries only session_id + poll mode (no content);
+	// scoping it would need a session→workspace resolve per transition.
 	gateway.Hub.AddSessionModeListener(func(sessionID string, mode gateways.SessionMode) {
 		msg, err := ws.NewNotification(ws.ActionSessionPollModeChanged, map[string]interface{}{
 			"session_id": sessionID,
@@ -466,5 +468,22 @@ func subscribeTerminalCleanup(ctx context.Context, eventBus bus.EventBus, svc *t
 	}
 	if _, err := eventBus.Subscribe(events.TaskUpdated, handler); err != nil {
 		log.Error("subscribe terminal cleanup (updated/archived)", zap.Error(err))
+	}
+}
+
+// taskWorkspaceResolver adapts the task repository into the office
+// broadcaster's TaskWorkspaceResolver so run events (task_id, no workspace_id)
+// route to the owning workspace instead of every connected user. Returns a nil
+// resolver when the repo is unavailable so the broadcaster fails closed.
+func taskWorkspaceResolver(taskRepo *sqliterepo.Repository) gateways.TaskWorkspaceResolver {
+	if taskRepo == nil {
+		return nil
+	}
+	return func(ctx context.Context, taskID string) (string, error) {
+		task, err := taskRepo.GetTask(ctx, taskID)
+		if err != nil {
+			return "", err
+		}
+		return task.WorkspaceID, nil
 	}
 }

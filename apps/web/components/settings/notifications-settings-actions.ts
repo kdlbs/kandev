@@ -9,6 +9,7 @@ import {
 } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
 import { DEFAULT_NOTIFICATION_EVENTS } from "@/lib/notifications/events";
+import { nativeNotifications } from "@/lib/desktop/native-notification-client";
 import { useNotificationProviders } from "@/hooks/domains/settings/use-notification-providers";
 import { useAppStore } from "@/components/state-provider";
 import type { NotificationProvider } from "@/lib/types/http";
@@ -244,6 +245,7 @@ export function useNotificationsState() {
 
 export type NotificationsState = ReturnType<typeof useNotificationsState>;
 export type { AppriseFormMode };
+export type PermissionRefresh = (error?: unknown) => void | Promise<void>;
 
 export function useSaveRequest(state: NotificationsState) {
   const {
@@ -452,7 +454,10 @@ function useAppriseProviderActions(state: NotificationsState) {
   };
 }
 
-export function useNotificationsActions(state: NotificationsState, bumpPermission: () => void) {
+export function useNotificationsActions(
+  state: NotificationsState,
+  bumpPermission: PermissionRefresh,
+) {
   const { setProviders } = state;
   const appriseActions = useAppriseProviderActions(state);
 
@@ -468,13 +473,34 @@ export function useNotificationsActions(state: NotificationsState, bumpPermissio
   };
 
   const handleRequestPermission = async () => {
-    if (typeof Notification === "undefined") return;
-    await Notification.requestPermission();
-    bumpPermission();
+    try {
+      if (nativeNotifications.isAvailable()) {
+        const requests: Array<Promise<unknown>> = [nativeNotifications.permission.request()];
+        if (typeof Notification !== "undefined") {
+          requests.push(Notification.requestPermission());
+        }
+        await Promise.all(requests);
+        await bumpPermission();
+        return;
+      }
+      if (typeof Notification === "undefined") return;
+      await Notification.requestPermission();
+      await bumpPermission();
+    } catch (error) {
+      try {
+        await bumpPermission(error);
+      } catch {
+        // A permission failure must never escape a user gesture handler.
+      }
+    }
   };
 
-  const handleRefreshPermission = () => {
-    if (typeof Notification !== "undefined") bumpPermission();
+  const handleRefreshPermission = async () => {
+    try {
+      await bumpPermission();
+    } catch {
+      // A permission query failure is rendered by the permission state hook.
+    }
   };
 
   const handleTestNotification = async () => {

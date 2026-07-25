@@ -15,7 +15,8 @@ import {
   hasPendingClarification,
   hasPendingPermissionRequest,
 } from "@/lib/utils/pending-clarification";
-import { toKanbanTask, workspaceModeFromMetadata } from "@/lib/kanban/map-task";
+import { aggregateTaskPendingInput } from "@/lib/utils/task-pending-input";
+import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import {
   repositoryId as toRepositoryId,
   type TaskState,
@@ -23,7 +24,6 @@ import {
   type TaskSessionState,
   type Repository,
   type Task,
-  type WorkflowSnapshot,
   type Message,
 } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
@@ -35,37 +35,7 @@ import {
   agentErrorAcknowledgementSessionIds,
   usePersistResolvedAgentErrorAcknowledgements,
 } from "../use-agent-error-acknowledgements";
-
-// Map workflow snapshot to kanban state on workspace switch.
-function mapSnapshotToKanban(snapshot: WorkflowSnapshot, newWorkflowId: string) {
-  return {
-    workflowId: newWorkflowId,
-    isLoading: false,
-    steps: snapshot.steps.map((step) => ({
-      id: step.id,
-      title: step.name,
-      color: step.color,
-      position: step.position,
-      events: step.events,
-      // Carry optional step capabilities forward so downstream UI doesn't see
-      // them as missing after a workspace switch (until a full reload).
-      allow_manual_move: step.allow_manual_move,
-      prompt: step.prompt,
-      is_start_step: step.is_start_step,
-      show_in_command_panel: step.show_in_command_panel,
-      agent_profile_id: step.agent_profile_id,
-    })),
-    tasks: snapshot.tasks.map(toKanbanTask),
-  };
-}
-
-function sortByUpdatedAtDesc<T extends { updated_at?: string | null }>(items: T[]): T[] {
-  return [...items].sort((a, b) => {
-    const aDate = a.updated_at ? new Date(a.updated_at).getTime() : 0;
-    const bDate = b.updated_at ? new Date(b.updated_at).getTime() : 0;
-    return bDate - aDate;
-  });
-}
+import { mapSnapshotToKanban, sortByUpdatedAtDesc } from "./session-task-switcher-sheet-helpers";
 
 type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
@@ -80,7 +50,7 @@ type SheetItemCtx = {
   acknowledgedAgentErrors: Record<string, string>;
 };
 
-function toSheetItem(
+export function toSheetItem(
   task: KanbanState["tasks"][number] & { _workflowId: string },
   ctx: SheetItemCtx,
 ) {
@@ -92,7 +62,11 @@ function toSheetItem(
   );
   const resolvedSessionState =
     sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
-  const pending = pendingFlagsForTask(task, resolvedSessionState, ctx.messagesBySession);
+  const pending = pendingFlagsForTask(
+    task,
+    ctx.sessionsByTaskId[task.id] ?? [],
+    ctx.messagesBySession,
+  );
   return {
     id: task.id,
     title: task.title,
@@ -102,6 +76,11 @@ function toSheetItem(
     workspaceMode: task.workspaceMode,
     state: task.state as TaskState | undefined,
     sessionState: resolvedSessionState,
+    // Task-level most-active-wins busy aggregate from the task record — the same
+    // authoritative value the desktop sidebar (toSidebarItem) and board read, so the
+    // mobile task-switcher row shows background-running and agrees with the board for
+    // multi-session tasks instead of missing it.
+    foregroundActivity: task.foregroundActivity,
     description: task.description,
     workflowId: task._workflowId,
     workflowName: ctx.workflowNameById.get(task._workflowId),
@@ -123,25 +102,23 @@ function toSheetItem(
 }
 
 function pendingFlagsForTask(
-  task: Pick<KanbanState["tasks"][number], "primarySessionId" | "primarySessionPendingAction">,
-  primarySessionState: TaskSessionState | undefined,
+  task: Pick<KanbanState["tasks"][number], "taskPendingAction">,
+  sessions: TaskSession[],
   messagesBySession: Record<string, Message[] | undefined>,
 ): { clarification: boolean; permission: boolean } {
-  if (!task.primarySessionId) return { clarification: false, permission: false };
-  const messages = messagesBySession[task.primarySessionId];
-  if (messages !== undefined) {
-    return {
-      clarification: hasPendingClarification(messages),
-      permission: hasPendingPermissionRequest(messages),
-    };
-  }
-  if (primarySessionState !== "WAITING_FOR_INPUT") {
-    return { clarification: false, permission: false };
-  }
-  return {
-    clarification: task.primarySessionPendingAction === "clarification",
-    permission: task.primarySessionPendingAction === "permission",
-  };
+  const { clarification, permission } = aggregateTaskPendingInput(
+    sessions,
+    (session) => {
+      const messages = messagesBySession[session.id];
+      if (messages === undefined) return undefined;
+      return {
+        clarification: hasPendingClarification(messages),
+        permission: hasPendingPermissionRequest(messages),
+      };
+    },
+    task.taskPendingAction,
+  );
+  return { clarification, permission };
 }
 
 export function useSheetData(workspaceId: string | null) {
@@ -321,9 +298,15 @@ function mergeSessionFields(
     primarySessionId: resolvePrimarySessionId(task, existing, taskSessionId),
     primarySessionState: resolvePrimarySessionState(task, existing),
     primarySessionPendingAction: resolvePrimarySessionPendingAction(task, existing),
+    taskPendingAction: resolveTaskPendingAction(task, existing),
     sessionCount: resolveSessionCount(task, existing, taskSessionId),
     reviewStatus: resolveReviewStatus(task, existing),
   };
+}
+
+function resolveTaskPendingAction(task: Task, existing: KanbanState["tasks"][number] | undefined) {
+  if ("task_pending_action" in task) return task.task_pending_action ?? undefined;
+  return existing?.taskPendingAction ?? undefined;
 }
 
 function resolvePrimarySessionId(

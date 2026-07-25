@@ -15,9 +15,10 @@ import (
 // carry afterBarrier state finalization. The worker closes sync after the
 // callback, releasing the waiter once everything queued ahead has completed.
 type notifWork struct {
-	notif        acp.SessionNotification
-	sync         chan struct{}
-	afterBarrier func()
+	notif            acp.SessionNotification
+	sync             chan struct{}
+	afterBarrier     func()
+	promptGeneration uint64
 }
 
 // enqueueACPUpdate is the SDK-facing notification handler. It pushes the
@@ -36,7 +37,7 @@ func (a *Adapter) enqueueACPUpdate(n acp.SessionNotification) {
 	select {
 	case <-a.lifetimeCtx.Done():
 		return
-	case a.notifQueue <- notifWork{notif: n}:
+	case a.notifQueue <- notifWork{notif: n, promptGeneration: a.currentPromptGeneration()}:
 	}
 }
 
@@ -107,7 +108,7 @@ func (a *Adapter) runUpdateWorker() {
 				close(item.sync)
 				continue
 			}
-			a.handleACPUpdate(item.notif)
+			a.handleACPUpdate(item.notif, item.promptGeneration)
 		}
 	}
 }
@@ -116,7 +117,12 @@ func (a *Adapter) runUpdateWorker() {
 // Runs synchronously on the update worker goroutine; do not call from the SDK's
 // notification path (use enqueueACPUpdate instead). Unit tests invoke this
 // directly to exercise the conversion logic without spinning up the worker.
-func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
+//
+//nolint:cyclop // Existing notification conversion branches; prompt identity adds no new conversion path.
+func (a *Adapter) handleACPUpdate(
+	n acp.SessionNotification,
+	promptGeneration uint64,
+) {
 	// Fast path during session/load: history-replay notifications can arrive as
 	// a burst large enough to overflow the ACP SDK's 1024-deep notification
 	// queue if the per-item handler is slow. Check the loading flag first and
@@ -163,9 +169,21 @@ func (a *Adapter) handleACPUpdate(n acp.SessionNotification) {
 	sessionID := string(n.SessionId)
 
 	suppressed := a.dialect.suppresses(n)
-	var event *AgentEvent
+	var event, leadingEvent *AgentEvent
 	if !suppressed {
 		event = a.convertNotification(n)
+		if n.Update.UsageUpdate != nil {
+			if lifecycleEvent := usageLifecycleEvent(sessionID, n.Update.UsageUpdate.Meta, promptGeneration); lifecycleEvent != nil {
+				leadingEvent, event = event, lifecycleEvent
+			}
+		}
+	}
+	if leadingEvent != nil {
+		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, leadingEvent)
+		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
+			leadingEvent.Type, rawData, leadingEvent)
+		a.sendUpdate(*leadingEvent)
+		a.maybeScheduleAsyncTurnComplete(*leadingEvent)
 	}
 	if event != nil {
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, event)
@@ -452,6 +470,21 @@ func (a *Adapter) convertUsageUpdate(sessionID string, usage *acp.SessionUsageUp
 		ContextWindowRemaining: remaining,
 		ContextEfficiency:      float64(used) / float64(effectiveSize) * 100,
 	}
+}
+
+func usageLifecycleEvent(sessionID string, meta map[string]any, promptGeneration uint64) *AgentEvent {
+	origin, _ := meta["_claude/origin"].(map[string]any)
+	kind, _ := origin["kind"].(string)
+	var eventType string
+	switch kind {
+	case "human":
+		eventType = streams.EventTypeForegroundIdle
+	case "task-notification":
+		eventType = streams.EventTypeBackgroundComplete
+	default:
+		return nil
+	}
+	return &AgentEvent{Type: eventType, SessionID: sessionID, PromptGeneration: promptGeneration}
 }
 
 // convertMessageChunk converts an ACP ContentBlock to an AgentEvent, handling multimodal content.

@@ -32,6 +32,16 @@ function resolveUrl(pathOrUrl: string, baseUrl: string) {
   return `${baseUrl}${pathOrUrl}`;
 }
 
+// Notified whenever a request comes back 401. The auth gate (src/main.tsx)
+// registers a callback that clears the store's auth slice and redirects to
+// the login page, so a session that expires mid-use doesn't leave the SPA
+// stuck making requests against a stale authenticated identity.
+let onUnauthorized: (() => void) | null = null;
+
+export function setOnUnauthorized(cb: (() => void) | null): void {
+  onUnauthorized = cb;
+}
+
 async function throwFromResponse(response: Response): Promise<never> {
   let body: unknown = null;
   let message = `Request failed: ${response.status} ${response.statusText}`;
@@ -50,22 +60,33 @@ async function throwFromResponse(response: Response): Promise<never> {
 export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Promise<T> {
   const baseUrl = options?.baseUrl ?? getBackendConfig().apiBaseUrl;
   const url = resolveUrl(pathOrUrl, baseUrl);
+  const response = await fetch(url, {
+    ...options?.init,
+    cache: options?.cache,
+    // Send the session cookie for opt-in authentication.
+    credentials: "include",
+    headers: buildRequestHeaders(options),
+  });
+  if (!response.ok) {
+    if (response.status === 401) onUnauthorized?.();
+    await throwFromResponse(response);
+  }
+  if (response.status === 204) return undefined as T;
+  const text = await response.text();
+  if (!text) return undefined as T;
+  return JSON.parse(text) as T;
+}
+
+// buildRequestHeaders assembles the JSON content-type header plus the
+// interim-settings interlock token on mutating requests.
+function buildRequestHeaders(options?: ApiRequestOptions): Headers {
   const headers = requestHeaders(options?.init?.headers);
   headers.set("Content-Type", "application/json");
   if (isMutation(options?.init?.method)) {
     const token = readInterimSettingsInterlockToken();
     if (token) headers.set(interimSettingsInterlockHeader, token);
   }
-  const response = await fetch(url, {
-    ...options?.init,
-    cache: options?.cache,
-    headers,
-  });
-  if (!response.ok) await throwFromResponse(response);
-  if (response.status === 204) return undefined as T;
-  const text = await response.text();
-  if (!text) return undefined as T;
-  return JSON.parse(text) as T;
+  return headers;
 }
 
 function isMutation(method: string | undefined): boolean {

@@ -293,6 +293,61 @@ jobs:
             exit 1
           fi
 
+      - name: Validate committed release signing public key
+        id: committed_release_gpg
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        run: |
+          set -euo pipefail
+          KEY_LISTING="$(gpg --batch --with-colons --show-keys .github/release-signing-key.asc)"
+          SECRET_KEY_RECORDS="$(printf '%s\n' "$KEY_LISTING" | awk -F: '$1 == "sec" || $1 == "ssb" { count++ } END { print count + 0 }')"
+          PUBLIC_KEY_RECORDS="$(printf '%s\n' "$KEY_LISTING" | awk -F: '$1 == "pub" { count++ } END { print count + 0 }')"
+          PRIMARY_FINGERPRINTS="$(printf '%s\n' "$KEY_LISTING" | awk -F: '
+            $1 == "pub" {
+              if (getline && $1 == "fpr") print $10
+            }
+          ')"
+          PRIMARY_FINGERPRINT_COUNT="$(printf '%s\n' "$PRIMARY_FINGERPRINTS" | awk 'NF { count++ } END { print count + 0 }')"
+
+          if [ "$SECRET_KEY_RECORDS" -ne 0 ]; then
+            echo ".github/release-signing-key.asc must not contain secret-key material." >&2
+            exit 1
+          fi
+          if [ "$PUBLIC_KEY_RECORDS" -eq 0 ]; then
+            echo ".github/release-signing-key.asc must contain one primary public key; none found." >&2
+            exit 1
+          fi
+          if [ "$PUBLIC_KEY_RECORDS" -ne 1 ] || [ "$PRIMARY_FINGERPRINT_COUNT" -ne 1 ]; then
+            echo ".github/release-signing-key.asc must contain exactly one primary public key and fingerprint." >&2
+            exit 1
+          fi
+
+          PUBLIC_FINGERPRINT="$PRIMARY_FINGERPRINTS"
+          if ! [[ "$PUBLIC_FINGERPRINT" =~ ^[A-F0-9]{40}$ ]]; then
+            echo ".github/release-signing-key.asc contains an invalid primary public-key fingerprint." >&2
+            exit 1
+          fi
+          echo "fingerprint=$PUBLIC_FINGERPRINT" >> "$GITHUB_OUTPUT"
+
+      - name: Preflight release tag signing fingerprint
+        if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
+        env:
+          EXPECTED_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
+          COMMITTED_PUBLIC_FINGERPRINT: ${{ steps.committed_release_gpg.outputs.fingerprint }}
+        run: |
+          set -euo pipefail
+          if [ -z "$EXPECTED_FINGERPRINT" ]; then
+            echo "RELEASE_GPG_FINGERPRINT is required as a variable in the release environment." >&2
+            exit 1
+          fi
+          if [ -z "$COMMITTED_PUBLIC_FINGERPRINT" ]; then
+            echo "The committed release public key did not report a fingerprint." >&2
+            exit 1
+          fi
+          if [ "$COMMITTED_PUBLIC_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "The committed release public key does not match RELEASE_GPG_FINGERPRINT." >&2
+            exit 1
+          fi
+
       - name: Bump version + generate CHANGELOG (in working tree)
         if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
@@ -372,8 +427,8 @@ jobs:
           git checkout main
           git reset --hard origin/main
 
-      - name: Validate committed release signing public key
-        id: committed_release_gpg
+      - name: Validate merged release signing public key
+        id: merged_release_gpg
         if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         run: |
           set -euo pipefail
@@ -421,7 +476,7 @@ jobs:
         if: ${{ !inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '' }}
         env:
           EXPECTED_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}
-          COMMITTED_PUBLIC_FINGERPRINT: ${{ steps.committed_release_gpg.outputs.fingerprint }}
+          MERGED_PUBLIC_FINGERPRINT: ${{ steps.merged_release_gpg.outputs.fingerprint }}
           IMPORTED_FINGERPRINT: ${{ steps.import_release_gpg.outputs.fingerprint }}
           TAGGER_NAME: ${{ steps.import_release_gpg.outputs.name }}
           TAGGER_EMAIL: ${{ steps.import_release_gpg.outputs.email }}
@@ -431,20 +486,20 @@ jobs:
             echo "RELEASE_GPG_FINGERPRINT is required in the release environment." >&2
             exit 1
           fi
-          if [ -z "$COMMITTED_PUBLIC_FINGERPRINT" ]; then
-            echo "The committed release public key did not report a fingerprint." >&2
+          if [ -z "$MERGED_PUBLIC_FINGERPRINT" ]; then
+            echo "The merged release public key did not report a fingerprint." >&2
             exit 1
           fi
-          if [ "$COMMITTED_PUBLIC_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
-            echo "The committed release public key does not match RELEASE_GPG_FINGERPRINT." >&2
+          if [ "$MERGED_PUBLIC_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then
+            echo "The merged release public key does not match RELEASE_GPG_FINGERPRINT." >&2
             exit 1
           fi
           if [ -z "$IMPORTED_FINGERPRINT" ]; then
             echo "The imported release signing key did not report a fingerprint." >&2
             exit 1
           fi
-          if [ "$IMPORTED_FINGERPRINT" != "$COMMITTED_PUBLIC_FINGERPRINT" ]; then
-            echo "The imported release signing key does not match the committed release public key." >&2
+          if [ "$IMPORTED_FINGERPRINT" != "$MERGED_PUBLIC_FINGERPRINT" ]; then
+            echo "The imported release signing key does not match the merged release public key." >&2
             exit 1
           fi
           if [ "$IMPORTED_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]; then

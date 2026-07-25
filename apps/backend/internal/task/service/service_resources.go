@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 	"github.com/kandev/kandev/internal/worktree/copyfiles"
 )
@@ -67,11 +68,17 @@ type repositorySessionPruner interface {
 
 // CreateWorkspace creates a new workspace
 func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceRequest) (*models.Workspace, error) {
+	// Authenticated callers own what they create; the request-body owner is
+	// only honored for internal/synthetic callers (pre-auth compatibility).
+	ownerID := req.OwnerID
+	if userID, scoped := callerScope(ctx); scoped {
+		ownerID = userID
+	}
 	workspace := &models.Workspace{
 		ID:                          uuid.New().String(),
 		Name:                        req.Name,
 		Description:                 req.Description,
-		OwnerID:                     req.OwnerID,
+		OwnerID:                     ownerID,
 		DefaultExecutorID:           normalizeOptionalID(req.DefaultExecutorID),
 		DefaultEnvironmentID:        normalizeOptionalID(req.DefaultEnvironmentID),
 		DefaultAgentProfileID:       normalizeOptionalID(req.DefaultAgentProfileID),
@@ -107,7 +114,14 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 
 // GetWorkspace retrieves a workspace by ID
 func (s *Service) GetWorkspace(ctx context.Context, id string) (*models.Workspace, error) {
-	return s.workspaces.GetWorkspace(ctx, id)
+	workspace, err := s.workspaces.GetWorkspace(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
+		return nil, repoerrors.ErrWorkspaceNotFound
+	}
+	return workspace, nil
 }
 
 // UpdateWorkspace updates an existing workspace
@@ -115,6 +129,9 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
+		return nil, repoerrors.ErrWorkspaceNotFound
 	}
 
 	if req.Name != nil {
@@ -153,6 +170,9 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
+		return repoerrors.ErrWorkspaceNotFound
+	}
 	return s.deleteWorkspace(ctx, workspace, nil)
 }
 
@@ -162,6 +182,9 @@ func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confir
 	workspace, err := s.workspaces.GetWorkspace(ctx, id)
 	if err != nil {
 		return err
+	}
+	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
+		return repoerrors.ErrWorkspaceNotFound
 	}
 	if confirmName != workspace.Name {
 		return ErrWorkspaceConfirmNameMismatch
@@ -426,15 +449,24 @@ func normalizeOptionalID(value *string) *string {
 	return &trimmed
 }
 
-// ListWorkspaces returns all workspaces
+// ListWorkspaces returns the workspaces visible to the ctx identity: all of
+// them for internal/synthetic callers, only owned (plus pre-auth unowned)
+// rows for authenticated users.
 func (s *Service) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
-	return s.workspaces.ListWorkspaces(ctx)
+	workspaces, err := s.workspaces.ListWorkspaces(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return filterWorkspacesForCaller(ctx, workspaces), nil
 }
 
 // Workflow operations
 
 // CreateWorkflow creates a new workflow
 func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest) (*models.Workflow, error) {
+	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+		return nil, err
+	}
 	workflow := &models.Workflow{
 		ID:                 uuid.New().String(),
 		WorkspaceID:        req.WorkspaceID,
@@ -467,11 +499,17 @@ func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest
 
 // GetWorkflow retrieves a workflow by ID
 func (s *Service) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
+	if err := s.authorizeWorkflowID(ctx, id); err != nil {
+		return nil, err
+	}
 	return s.workflows.GetWorkflow(ctx, id)
 }
 
 // UpdateWorkflow updates an existing workflow
 func (s *Service) UpdateWorkflow(ctx context.Context, id string, req *UpdateWorkflowRequest) (*models.Workflow, error) {
+	if err := s.authorizeWorkflowID(ctx, id); err != nil {
+		return nil, err
+	}
 	workflow, err := s.workflows.GetWorkflow(ctx, id)
 	if err != nil {
 		return nil, err
@@ -546,6 +584,9 @@ func (s *Service) SetWorkflowSource(ctx context.Context, id, source, sourcePath 
 // exists (the tasks.workflow_id FK was dropped to support empty workflow_id
 // on ephemeral tasks, so SQLite cannot cascade for us).
 func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
+	if err := s.authorizeWorkflowID(ctx, id); err != nil {
+		return err
+	}
 	workflow, err := s.workflows.GetWorkflow(ctx, id)
 	if err != nil {
 		return err
@@ -589,6 +630,9 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 // ListWorkflows returns workflows for a workspace, excluding hidden ones by default.
 // Pass includeHidden=true to include system-only flows like Improve Kandev.
 func (s *Service) ListWorkflows(ctx context.Context, workspaceID string, includeHidden bool) ([]*models.Workflow, error) {
+	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	return s.workflows.ListWorkflows(ctx, workspaceID, includeHidden)
 }
 
@@ -610,6 +654,9 @@ func (s *Service) GetOfficeWorkflowIDs(ctx context.Context) map[string]struct{} 
 
 // ReorderWorkflows updates sort_order for workflows within a workspace.
 func (s *Service) ReorderWorkflows(ctx context.Context, workspaceID string, workflowIDs []string) error {
+	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+		return err
+	}
 	if err := s.workflows.ReorderWorkflows(ctx, workspaceID, workflowIDs); err != nil {
 		s.logger.Error("failed to reorder workflows", zap.String("workspace_id", workspaceID), zap.Error(err))
 		return err
@@ -641,6 +688,9 @@ func (s *Service) createRepository(
 	localPath string,
 	resolveProvider bool,
 ) (*models.Repository, error) {
+	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+		return nil, err
+	}
 	sourceType := req.SourceType
 	if sourceType == "" {
 		sourceType = sourceTypeLocal
@@ -716,7 +766,16 @@ func resolveRepositoryProviderIdentity(repository *models.Repository) {
 }
 
 func (s *Service) GetRepository(ctx context.Context, id string) (*models.Repository, error) {
-	return s.repoEntities.GetRepository(ctx, id)
+	repo, err := s.repoEntities.GetRepository(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if repo != nil {
+		if err := s.authorizeWorkspaceID(ctx, repo.WorkspaceID); err != nil {
+			return nil, repoerrors.ErrRepositoryNotFound
+		}
+	}
+	return repo, nil
 }
 
 // GetRepositoryByProviderInfo looks up a repository by workspace and provider identity.
@@ -852,6 +911,11 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 	if err != nil {
 		return nil, err
 	}
+	if repository != nil {
+		if err := s.authorizeWorkspaceID(ctx, repository.WorkspaceID); err != nil {
+			return nil, repoerrors.ErrRepositoryNotFound
+		}
+	}
 	updates := *req
 	if req.LocalPath != nil {
 		localPath, pathErr := canonicalRepositoryLocalPath(*req.LocalPath)
@@ -956,6 +1020,11 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if repository != nil {
+		if err := s.authorizeWorkspaceID(ctx, repository.WorkspaceID); err != nil {
+			return repoerrors.ErrRepositoryNotFound
+		}
+	}
 	active, err := s.sessions.HasActiveTaskSessionsByRepository(ctx, id)
 	if err != nil {
 		s.logger.Error("failed to check active agent sessions for repository", zap.String("repository_id", id), zap.Error(err))
@@ -974,6 +1043,9 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListRepositories(ctx context.Context, workspaceID string) ([]*models.Repository, error) {
+	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	repositories, err := s.repoEntities.ListRepositories(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -1090,6 +1162,9 @@ func dedupeRepositoriesByIdentity(repos []*models.Repository) []*models.Reposito
 // attempt to delete a repository that would otherwise be blocked by
 // DeleteRepository's ErrActiveTaskSessions sentinel.
 func (s *Service) CountActiveSessionsByRepository(ctx context.Context, id string) (int, error) {
+	if err := s.authorizeRepositoryID(ctx, id); err != nil {
+		return 0, err
+	}
 	if _, err := s.repoEntities.GetRepository(ctx, id); err != nil {
 		return 0, err
 	}
@@ -1099,6 +1174,9 @@ func (s *Service) CountActiveSessionsByRepository(ctx context.Context, id string
 // Repository script operations
 
 func (s *Service) CreateRepositoryScript(ctx context.Context, req *CreateRepositoryScriptRequest) (*models.RepositoryScript, error) {
+	if err := s.authorizeRepositoryID(ctx, req.RepositoryID); err != nil {
+		return nil, err
+	}
 	script := &models.RepositoryScript{
 		ID:           uuid.New().String(),
 		RepositoryID: req.RepositoryID,
@@ -1116,12 +1194,22 @@ func (s *Service) CreateRepositoryScript(ctx context.Context, req *CreateReposit
 }
 
 func (s *Service) GetRepositoryScript(ctx context.Context, id string) (*models.RepositoryScript, error) {
-	return s.repoEntities.GetRepositoryScript(ctx, id)
+	script, err := s.repoEntities.GetRepositoryScript(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeRepositoryID(ctx, script.RepositoryID); err != nil {
+		return nil, err
+	}
+	return script, nil
 }
 
 func (s *Service) UpdateRepositoryScript(ctx context.Context, id string, req *UpdateRepositoryScriptRequest) (*models.RepositoryScript, error) {
 	script, err := s.repoEntities.GetRepositoryScript(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeRepositoryID(ctx, script.RepositoryID); err != nil {
 		return nil, err
 	}
 	if req.Name != nil {
@@ -1149,6 +1237,9 @@ func (s *Service) DeleteRepositoryScript(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if err := s.authorizeRepositoryID(ctx, script.RepositoryID); err != nil {
+		return err
+	}
 	if err := s.repoEntities.DeleteRepositoryScript(ctx, id); err != nil {
 		s.logger.Error("failed to delete repository script", zap.String("script_id", id), zap.Error(err))
 		return err
@@ -1159,6 +1250,9 @@ func (s *Service) DeleteRepositoryScript(ctx context.Context, id string) error {
 }
 
 func (s *Service) ListRepositoryScripts(ctx context.Context, repositoryID string) ([]*models.RepositoryScript, error) {
+	if err := s.authorizeRepositoryID(ctx, repositoryID); err != nil {
+		return nil, err
+	}
 	return s.repoEntities.ListRepositoryScripts(ctx, repositoryID)
 }
 
