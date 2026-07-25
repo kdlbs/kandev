@@ -169,7 +169,7 @@ func TestShouldDeleteReviewTask_GitHubErrorThenSuccess_ResetsCounter(t *testing.
 	}
 }
 
-func TestCleanupAllOrphanedReviewTasks_DeletedWatchOrphans(t *testing.T) {
+func TestCleanupAllOrphanedReviewTasks_DeletedWatchWithoutWorkspaceFailsClosed(t *testing.T) {
 	_, svc, mockClient, store := setupPollerTest(t)
 	ctx := context.Background()
 
@@ -204,11 +204,11 @@ func TestCleanupAllOrphanedReviewTasks_DeletedWatchOrphans(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CleanupAllOrphanedReviewTasks: %v", err)
 	}
-	if deleted != 1 {
-		t.Fatalf("deleted=%d, want 1 (orphan with missing watch should fall back to auto policy and reap)", deleted)
+	if deleted != 0 {
+		t.Fatalf("deleted=%d, want 0 when workspace ownership cannot be resolved", deleted)
 	}
-	if len(rec.calls) != 1 || rec.calls[0] != "task-77" {
-		t.Fatalf("DeleteTask calls=%v, want [task-77]", rec.calls)
+	if len(rec.calls) != 0 {
+		t.Fatalf("DeleteTask calls=%v, want none without workspace authentication", rec.calls)
 	}
 }
 
@@ -420,7 +420,9 @@ func TestCheckReviewWatches_RunsOrphanSweepWhenNoEnabledWatches(t *testing.T) {
 func TestCheckIssueWatches_RunsOrphanSweepWhenNoEnabledWatches(t *testing.T) {
 	poller, svc, _, store := setupPollerTest(t)
 	ctx := context.Background()
-	svc.client = newIssueStateMockClient(map[int]string{9002: "closed"})
+	client := newIssueStateMockClient(map[int]string{9002: "closed"})
+	svc.client = client
+	configureTestWorkspaceAuth(t, svc, client, "ws-1")
 
 	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: false}
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
@@ -467,10 +469,12 @@ func (c *issueStateMockClient) GetIssueState(_ context.Context, _, _ string, num
 	return "open", nil
 }
 
-func TestCleanupAllOrphanedIssueTasks_DeletedWatchOrphans(t *testing.T) {
+func TestCleanupAllOrphanedIssueTasks_DeletedWatchWithoutWorkspaceFailsClosed(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	ctx := context.Background()
-	svc.client = newIssueStateMockClient(map[int]string{77: "closed"})
+	client := newIssueStateMockClient(map[int]string{77: "closed"})
+	svc.client = client
+	configureTestWorkspaceAuth(t, svc, client, "ws-1")
 
 	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: true}
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
@@ -495,18 +499,20 @@ func TestCleanupAllOrphanedIssueTasks_DeletedWatchOrphans(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CleanupAllOrphanedIssueTasks: %v", err)
 	}
-	if deleted != 1 {
-		t.Fatalf("deleted=%d, want 1 (orphan with missing watch should fall back to auto policy and reap)", deleted)
+	if deleted != 0 {
+		t.Fatalf("deleted=%d, want 0 when workspace ownership cannot be resolved", deleted)
 	}
-	if len(rec.calls) != 1 || rec.calls[0] != "task-77" {
-		t.Fatalf("DeleteTask calls=%v, want [task-77]", rec.calls)
+	if len(rec.calls) != 0 {
+		t.Fatalf("DeleteTask calls=%v, want none without workspace authentication", rec.calls)
 	}
 }
 
 func TestCleanupAllOrphanedIssueTasks_DisabledWatch_StillCleansUp(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	ctx := context.Background()
-	svc.client = newIssueStateMockClient(map[int]string{88: "closed"})
+	client := newIssueStateMockClient(map[int]string{88: "closed"})
+	svc.client = client
+	configureTestWorkspaceAuth(t, svc, client, "ws-1")
 
 	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: false}
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
@@ -532,7 +538,9 @@ func TestCleanupAllOrphanedIssueTasks_DisabledWatch_StillCleansUp(t *testing.T) 
 func TestCleanupAllOrphanedIssueTasks_UnknownWatchSkipped(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	ctx := context.Background()
-	svc.client = newIssueStateMockClient(map[int]string{222: "closed"})
+	client := newIssueStateMockClient(map[int]string{222: "closed"})
+	svc.client = client
+	configureTestWorkspaceAuth(t, svc, client, "ws-1")
 
 	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: true, CleanupPolicy: CleanupPolicyNever}
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
@@ -568,7 +576,9 @@ func TestCleanupAllOrphanedIssueTasks_UnknownWatchSkipped(t *testing.T) {
 func TestCleanupAllOrphanedIssueTasks_SkipsEnabledWatchRows(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	ctx := context.Background()
-	svc.client = newIssueStateMockClient(map[int]string{111: "closed"})
+	client := newIssueStateMockClient(map[int]string{111: "closed"})
+	svc.client = client
+	configureTestWorkspaceAuth(t, svc, client, "ws-1")
 
 	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: true}
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {
@@ -606,7 +616,9 @@ func TestCleanupAllOrphanedIssueTasks_SkipsEnabledWatchRows(t *testing.T) {
 func TestCleanupAllOrphanedIssueTasks_RespectsNeverPolicy(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	ctx := context.Background()
-	svc.client = newIssueStateMockClient(map[int]string{55: "closed"})
+	client := newIssueStateMockClient(map[int]string{55: "closed"})
+	svc.client = client
+	configureTestWorkspaceAuth(t, svc, client, "ws-1")
 
 	watch := &IssueWatch{WorkspaceID: "ws-1", Enabled: true, CleanupPolicy: CleanupPolicyNever}
 	if err := store.CreateIssueWatch(ctx, watch); err != nil {

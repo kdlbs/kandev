@@ -1,6 +1,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createElement, useEffect } from "react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { StateProvider } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import {
   PRDetailContent,
@@ -32,10 +34,6 @@ vi.mock("@/hooks/domains/github/use-pr-feedback", () => ({
 vi.mock("@/lib/api/domains/github-review-api", () => ({
   requestPRReviewers: reviewMocks.requestReviewers,
   submitPRReview: reviewMocks.submitReview,
-}));
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { setTaskPR: () => void }) => unknown) =>
-    selector({ setTaskPR: vi.fn() }),
 }));
 vi.mock("@/lib/state/slices/comments", () => ({
   isPRFeedbackComment: () => false,
@@ -141,18 +139,20 @@ function ReviewRequestHarness({
   onReady,
   requestedReviewers = [],
   reviews = [],
+  workspaceId = "workspace-1",
 }: {
   onReady: (reviewRequest: ReturnType<typeof usePRScopedReviewRequest>) => void;
   requestedReviewers?: { login: string; type: "user" }[];
   reviews?: PRReview[];
+  workspaceId?: string | null;
 }) {
-  const reviewRequest = usePRScopedReviewRequest(
-    makeTaskPR(),
+  const reviewRequest = usePRScopedReviewRequest(makeTaskPR(), {
+    workspaceId,
     requestedReviewers,
     reviews,
-    vi.fn(),
-    vi.fn(),
-  );
+    refresh: vi.fn(),
+    toast: vi.fn(),
+  });
   useEffect(() => onReady(reviewRequest), [onReady, reviewRequest]);
   return null;
 }
@@ -168,14 +168,23 @@ function dismissedReview(id = 1): PRReview {
   };
 }
 
-function renderPRDetail() {
-  return render(
-    createElement(
+const TEST_INITIAL_STATE = {
+  workspaces: { activeId: "workspace-1" },
+} as unknown as Partial<AppState>;
+
+function prDetailTree(taskPR = makeTaskPR()) {
+  return createElement(StateProvider, {
+    initialState: TEST_INITIAL_STATE,
+    children: createElement(
       TooltipProvider,
       undefined,
-      createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
+      createElement(PRDetailContent, { taskPR, sessionId: "session-1" }),
     ),
-  );
+  });
+}
+
+function renderPRDetail(taskPR = makeTaskPR()) {
+  return render(prDetailTree(taskPR));
 }
 
 describe("shouldHideApproveButton", () => {
@@ -193,6 +202,12 @@ describe("shouldHideApproveButton", () => {
     expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, null)).toBe(true);
     expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, "")).toBe(true);
     expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, "   ")).toBe(true);
+  });
+
+  it("allows App-attributed approval when a mutation actor is available", () => {
+    expect(shouldHideApproveButton(makeTaskPR({ author_login: "alice" }), null, null, true)).toBe(
+      false,
+    );
   });
 
   it("hides when current user authored the PR (case-insensitive)", () => {
@@ -251,13 +266,7 @@ describe("PRDetailContent deferred re-request", () => {
     feedbackMocks.value = makeFeedback({ reviews: [dismissedReview()] });
     reviewMocks.requestReviewers.mockResolvedValue({ requested: true });
 
-    render(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    renderPRDetail();
 
     await act(async () => {
       fireEvent.click(screen.getByTestId(RE_REQUEST_BUTTON));
@@ -266,6 +275,13 @@ describe("PRDetailContent deferred re-request", () => {
     await waitFor(() => {
       expect(screen.getByTestId(PENDING_REVIEWER)).not.toBeNull();
     });
+    expect(reviewMocks.requestReviewers).toHaveBeenCalledWith(
+      "o",
+      "r",
+      1,
+      ["octocat"],
+      "workspace-1",
+    );
     expect(screen.queryByTestId(RE_REQUEST_BUTTON)).toBeNull();
   });
 });
@@ -275,23 +291,11 @@ describe("PRDetailContent remount lifecycle", () => {
     feedbackMocks.value = makeFeedback({ reviews: [dismissedReview()] });
     reviewMocks.requestReviewers.mockReturnValue(new Promise(() => undefined));
 
-    const firstPanel = render(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    const firstPanel = renderPRDetail();
     fireEvent.click(screen.getByTestId(RE_REQUEST_BUTTON));
     firstPanel.unmount();
 
-    render(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    renderPRDetail();
     fireEvent.click(screen.getByTestId(RE_REQUEST_BUTTON));
 
     expect(reviewMocks.requestReviewers).toHaveBeenCalledOnce();
@@ -319,13 +323,7 @@ describe("PRDetailContent optimistic review reconciliation", () => {
         },
       ],
     });
-    view.rerender(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    view.rerender(prDetailTree());
 
     await waitFor(() => {
       expect(screen.queryByTestId(PENDING_REVIEWER)).toBeNull();
@@ -354,13 +352,7 @@ describe("PRDetailContent same-timestamp review reconciliation", () => {
         },
       ],
     });
-    view.rerender(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    view.rerender(prDetailTree());
 
     await waitFor(() => expect(screen.queryByTestId(PENDING_REVIEWER)).toBeNull());
     expect(screen.getByTestId("pr-submitted-review-octocat")).not.toBeNull();
@@ -373,13 +365,7 @@ describe("PRDetailContent confirmed review request", () => {
       reviews: [dismissedReview()],
     });
     reviewMocks.requestReviewers.mockResolvedValue({ requested: true });
-    const view = render(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    const view = renderPRDetail();
     await act(async () => {
       fireEvent.click(screen.getByTestId(RE_REQUEST_BUTTON));
     });
@@ -397,25 +383,13 @@ describe("PRDetailContent confirmed review request", () => {
         },
       ],
     });
-    view.rerender(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    view.rerender(prDetailTree());
     await waitFor(() => {
       expect(screen.getByTestId(PENDING_REVIEWER)).not.toBeNull();
     });
 
     feedbackMocks.value = makeFeedback({ reviews: [dismissedReview()] });
-    view.rerender(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    view.rerender(prDetailTree());
 
     await waitFor(() => {
       expect(screen.getByTestId(RE_REQUEST_BUTTON)).not.toBeNull();
@@ -444,6 +418,70 @@ describe("PRDetailContent same-tick re-request", () => {
   });
 });
 
+describe("PRDetailContent workspace-scoped requests", () => {
+  it("does not issue a cross-workspace request when no active workspace is available", async () => {
+    let reRequest: (reviewer: string) => Promise<void> = async () => undefined;
+    render(
+      createElement(ReviewRequestHarness, {
+        workspaceId: null,
+        onReady: (request) => {
+          reRequest = request.reRequest;
+        },
+      }),
+    );
+
+    await act(async () => reRequest("octocat"));
+
+    expect(reviewMocks.requestReviewers).not.toHaveBeenCalled();
+  });
+
+  it("keeps same-PR requests and optimistic reconciliation isolated by workspace", async () => {
+    reviewMocks.requestReviewers.mockResolvedValue({ requested: true });
+    let reviewRequest: ReturnType<typeof usePRScopedReviewRequest> | undefined;
+    const onReady = (value: ReturnType<typeof usePRScopedReviewRequest>) => {
+      reviewRequest = value;
+    };
+    const view = render(
+      createElement(ReviewRequestHarness, { onReady, workspaceId: "workspace-a" }),
+    );
+
+    await act(async () => reviewRequest?.reRequest("octocat"));
+    expect(reviewRequest?.requestedReviewers).toEqual([{ login: "octocat", type: "user" }]);
+
+    view.rerender(createElement(ReviewRequestHarness, { onReady, workspaceId: "workspace-b" }));
+    expect(reviewRequest?.requestedReviewers).toEqual([]);
+
+    await act(async () => reviewRequest?.reRequest("octocat"));
+    expect(reviewMocks.requestReviewers).toHaveBeenNthCalledWith(
+      1,
+      "o",
+      "r",
+      1,
+      ["octocat"],
+      "workspace-a",
+    );
+    expect(reviewMocks.requestReviewers).toHaveBeenNthCalledWith(
+      2,
+      "o",
+      "r",
+      1,
+      ["octocat"],
+      "workspace-b",
+    );
+
+    view.rerender(
+      createElement(ReviewRequestHarness, {
+        onReady,
+        workspaceId: "workspace-b",
+        requestedReviewers: [{ login: "octocat", type: "user" }],
+      }),
+    );
+    view.rerender(createElement(ReviewRequestHarness, { onReady, workspaceId: "workspace-a" }));
+
+    expect(reviewRequest?.requestedReviewers).toEqual([{ login: "octocat", type: "user" }]);
+  });
+});
+
 describe("PRDetailContent persistent request expiry", () => {
   it("keeps an unresolved request locked beyond the optimistic expiry window", () => {
     vi.useFakeTimers();
@@ -454,13 +492,7 @@ describe("PRDetailContent persistent request expiry", () => {
     const view = renderPRDetail();
     fireEvent.click(screen.getByTestId(RE_REQUEST_BUTTON));
     act(() => vi.advanceTimersByTime(5 * 60 * 1000));
-    view.rerender(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    view.rerender(prDetailTree());
 
     expect(screen.getByTestId(RE_REQUEST_BUTTON).hasAttribute("disabled")).toBe(true);
     vi.useRealTimers();
@@ -491,13 +523,7 @@ describe("PRDetailContent persistent request expiry", () => {
     feedbackMocks.value = makeFeedback({
       pr: { requested_reviewers: [{ login: "octocat", type: "user" }] },
     });
-    view.rerender(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    view.rerender(prDetailTree());
     await act(async () => undefined);
 
     expect(vi.getTimerCount()).toBe(0);
@@ -600,13 +626,7 @@ describe("PRDetailContent PR identity changes", () => {
     feedbackMocks.value = makeFeedback({ reviews: [dismissedReview()] });
     reviewMocks.requestReviewers.mockResolvedValue({ requested: true });
 
-    const view = render(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, { taskPR: makeTaskPR(), sessionId: "session-1" }),
-      ),
-    );
+    const view = renderPRDetail();
     await act(async () => {
       fireEvent.click(screen.getByTestId(RE_REQUEST_BUTTON));
     });
@@ -614,16 +634,7 @@ describe("PRDetailContent PR identity changes", () => {
       expect(screen.getByTestId(PENDING_REVIEWER)).not.toBeNull();
     });
 
-    view.rerender(
-      createElement(
-        TooltipProvider,
-        undefined,
-        createElement(PRDetailContent, {
-          taskPR: makeTaskPR({ pr_number: 2 }),
-          sessionId: "session-1",
-        }),
-      ),
-    );
+    view.rerender(prDetailTree(makeTaskPR({ pr_number: 2 })));
 
     expect(screen.getByTestId(RE_REQUEST_BUTTON)).not.toBeNull();
   });

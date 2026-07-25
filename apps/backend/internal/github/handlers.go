@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -122,6 +123,9 @@ func wsWithField(field string, serviceFn func(ctx context.Context, val string) (
 		}
 		result, err := serviceFn(ctx, val)
 		if err != nil {
+			if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "workspace not found", nil)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, result)
@@ -141,6 +145,9 @@ func wsDeleteByID(deleteFn func(ctx context.Context, id string) error) func(ctx 
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgIDRequired, nil)
 		}
 		if err := deleteFn(ctx, id); err != nil {
+			if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "watch not found", nil)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{respKeyDeleted: true})
@@ -165,6 +172,9 @@ func wsUpdateByPayload[T any](updateFn func(ctx context.Context, id string, req 
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgInvalidPayload, nil)
 		}
 		if err := updateFn(ctx, idHolder.ID, &req); err != nil {
+			if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "watch not found", nil)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"updated": true})
@@ -197,7 +207,12 @@ func wsTriggerAllByWorkspace(
 
 func wsStatus(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-		status, err := svc.GetStatus(ctx)
+		payload, parseErr := parseMap(msg)
+		if parseErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgInvalidPayload, nil)
+		}
+		workspaceID, _ := payload["workspace_id"].(string)
+		status, err := svc.GetWorkspaceAuthStatus(ctx, workspaceID, githubUserID(ctx))
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
@@ -286,12 +301,15 @@ func wsGetPRFeedback(svc *Service, _ *logger.Logger) func(ctx context.Context, m
 		}
 		owner, _ := payload["owner"].(string)
 		repo, _ := payload["repo"].(string)
+		workspaceID, _ := payload["workspace_id"].(string)
 		numberF, _ := payload["number"].(float64)
 		number := int(numberF)
 		if owner == "" || repo == "" || number == 0 {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "owner, repo, number required", nil)
 		}
-		feedback, err := svc.GetPRFeedback(ctx, owner, repo, number)
+		feedback, err := svc.GetPRFeedbackForWorkspace(
+			ctx, workspaceID, githubUserID(ctx), owner, repo, number,
+		)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
@@ -312,7 +330,7 @@ func wsCreateReviewWatch(svc *Service, _ *logger.Logger) func(ctx context.Contex
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgInvalidPayload, nil)
 		}
-		rw, err := svc.CreateReviewWatch(ctx, &req)
+		rw, err := svc.CreateReviewWatchForUser(ctx, githubUserID(ctx), &req)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
@@ -368,13 +386,9 @@ func wsTriggerAllReviewChecks(svc *Service, _ *logger.Logger) func(ctx context.C
 }
 
 func wsListPRWatches(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-		watches, err := svc.ListActivePRWatches(ctx)
-		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
-		}
-		return ws.NewResponse(msg.ID, msg.Action, watches)
-	}
+	return wsWithField("workspace_id", func(ctx context.Context, workspaceID string) (interface{}, error) {
+		return svc.ListActivePRWatchesForWorkspace(ctx, workspaceID)
+	})
 }
 
 func wsDeletePRWatch(svc *Service, _ *logger.Logger) func(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -420,7 +434,11 @@ func wsGetPRFiles(svc *Service, _ *logger.Logger) func(ctx context.Context, msg 
 		if errResp != nil {
 			return errResp, nil
 		}
-		files, err := svc.GetPRFiles(ctx, owner, repo, number)
+		payload, _ := parseMap(msg)
+		workspaceID, _ := payload["workspace_id"].(string)
+		files, err := svc.GetPRFilesForWorkspace(
+			ctx, workspaceID, githubUserID(ctx), owner, repo, number,
+		)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
@@ -434,7 +452,11 @@ func wsGetPRCommits(svc *Service, _ *logger.Logger) func(ctx context.Context, ms
 		if errResp != nil {
 			return errResp, nil
 		}
-		commits, err := svc.GetPRCommits(ctx, owner, repo, number)
+		payload, _ := parseMap(msg)
+		workspaceID, _ := payload["workspace_id"].(string)
+		commits, err := svc.GetPRCommitsForWorkspace(
+			ctx, workspaceID, githubUserID(ctx), owner, repo, number,
+		)
 		if err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
@@ -456,8 +478,11 @@ func wsCreateIssueWatch(svc *Service, _ *logger.Logger) func(ctx context.Context
 		if err := msg.ParsePayload(&req); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, errMsgInvalidPayload, nil)
 		}
-		iw, err := svc.CreateIssueWatch(ctx, &req)
+		iw, err := svc.CreateIssueWatchForWorkspace(ctx, &req)
 		if err != nil {
+			if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "issue watch not found", nil)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		return ws.NewResponse(msg.ID, msg.Action, iw)
@@ -490,6 +515,9 @@ func wsTriggerIssueWatch(svc *Service, log *logger.Logger) func(ctx context.Cont
 		}
 		watch, err := svc.GetIssueWatch(ctx, id)
 		if err != nil {
+			if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "issue watch not found", nil)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
 		if watch == nil || watch.WorkspaceID != workspaceID {

@@ -9,13 +9,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -25,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/githubauth"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -39,12 +43,23 @@ var (
 )
 
 func main() {
+	if code, handled := runGitHubUtilityCommand(); handled {
+		os.Exit(code)
+	}
+
 	// Dispatch kandev CLI subcommands before flag parsing or server startup.
 	// When invoked as "agentctl kandev <cmd>", this runs the CLI and exits
 	// without starting the HTTP server.
 	if len(os.Args) > 1 && os.Args[1] == "kandev" {
 		os.Exit(runKandevCLI(os.Args[2:]))
 	}
+
+	cleanupGitHubCLIShim, err := prepareGitHubCLIShim()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer cleanupGitHubCLIShim()
 
 	flag.Parse()
 
@@ -84,6 +99,60 @@ func main() {
 		zap.String("log_level", cfg.LogLevel))
 
 	run(cfg, log)
+}
+
+func runGitHubUtilityCommand() (int, bool) {
+	if isGitHubCLIShimInvocation(os.Args[0]) {
+		err := runGitHubCLIShim(
+			context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr,
+			os.Getenv, os.Environ, nil, os.Getenv(envGitHubCLIShimDir), lookPathIn, executeGitHubCLI,
+		)
+		return githubUtilityExitCode(err), true
+	}
+	if len(os.Args) > 1 && os.Args[1] == "git-credential" {
+		err := runGitHubCredentialHelper(
+			context.Background(), os.Args[2:], os.Stdin, os.Stdout, os.Getenv, nil,
+		)
+		return githubUtilityExitCode(err), true
+	}
+	return 0, false
+}
+
+func prepareGitHubCLIShim() (func(), error) {
+	if os.Getenv(githubauth.CredentialBrokerURLEnv) == "" {
+		return func() {}, nil
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve agentctl executable for gh shim: %w", err)
+	}
+	shimDir, cleanup, err := installGitHubCLIShim(executable, "")
+	if err != nil {
+		return nil, err
+	}
+	if err := os.Setenv(envGitHubCLIShimDir, shimDir); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("configure gh shim directory: %w", err)
+	}
+	path := pathWithoutDirectory(os.Getenv("PATH"), shimDir)
+	path = strings.Join([]string{shimDir, path}, string(os.PathListSeparator))
+	if err := os.Setenv("PATH", path); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("configure gh shim PATH: %w", err)
+	}
+	return cleanup, nil
+}
+
+func githubUtilityExitCode(err error) int {
+	if err == nil {
+		return 0
+	}
+	fmt.Fprintln(os.Stderr, err)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		return exitErr.ExitCode()
+	}
+	return 1
 }
 
 // run starts the agentctl server.

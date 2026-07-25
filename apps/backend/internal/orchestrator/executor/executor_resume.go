@@ -171,7 +171,8 @@ func (e *Executor) ensureRepoLocalPath(ctx context.Context, repo *models.Reposit
 	if repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
 		return nil
 	}
-	if repo.LocalPath != "" && isLocalGitRepo(repo.LocalPath) {
+	if repo.LocalPath != "" && isLocalGitRepo(repo.LocalPath) &&
+		(e.repoCloner == nil || !e.repoCloner.ShouldRecloneForWorkspace(repo.WorkspaceID, repo.LocalPath)) {
 		return nil
 	}
 	localPath, cloneErr := e.ensureRepoCloned(ctx, repo)

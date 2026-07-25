@@ -8,6 +8,29 @@ import (
 	"testing"
 )
 
+func TestGitHubCredentialBrokerConfigValidation(t *testing.T) {
+	cfg := minimalValidConfig()
+	cfg.GitHubCredentialBroker.PublicBaseURL = "https://kandev.example.com"
+	if err := validate(cfg); err != nil {
+		t.Fatalf("validate broker-only config: %v", err)
+	}
+	cfg.GitHubCredentialBroker.PublicBaseURL = "http://kandev.example.com"
+	if err := validate(cfg); err == nil || !strings.Contains(err.Error(), "githubCredentialBroker.publicBaseUrl") {
+		t.Fatalf("validate insecure broker URL error = %v", err)
+	}
+}
+
+func TestGitHubCredentialBrokerConfigEnvironmentBinding(t *testing.T) {
+	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL", "https://kandev.example.com")
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if got := cfg.GitHubCredentialBroker.PublicBaseURL; got != "https://kandev.example.com" {
+		t.Fatalf("broker public base URL = %q", got)
+	}
+}
+
 // minimalValidConfig returns a Config that passes validate() out of the box.
 // Tests modify a copy to exercise individual validation branches.
 func minimalValidConfig() *Config {

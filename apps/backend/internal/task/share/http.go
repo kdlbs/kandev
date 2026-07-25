@@ -1,7 +1,6 @@
 package share
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -10,22 +9,19 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/github"
 )
 
 // HTTPHandlers wires the share endpoints. RegisterRoutes is the public entry
 // point used by cmd/kandev.
 type HTTPHandlers struct {
-	svc      *Service
-	ghClient github.Client
-	log      *logger.Logger
+	svc *Service
+	log *logger.Logger
 }
 
 // NewHTTPHandlers returns handlers that delegate to the share Service. The
-// github.Client is used only for the upfront IsAuthenticated probe so we
-// can return a precondition-failed error instead of letting Upload fail.
-func NewHTTPHandlers(svc *Service, ghClient github.Client, log *logger.Logger) *HTTPHandlers {
-	return &HTTPHandlers{svc: svc, ghClient: ghClient, log: log}
+// service resolves workspace-owned backend access for the upfront probe.
+func NewHTTPHandlers(svc *Service, log *logger.Logger) *HTTPHandlers {
+	return &HTTPHandlers{svc: svc, log: log}
 }
 
 // RegisterRoutes wires the share endpoints onto the given gin engine under
@@ -132,7 +128,7 @@ func (h *HTTPHandlers) httpCreate(c *gin.Context) {
 		return
 	}
 
-	if err := h.requireGitHubAuth(ctx); err != nil {
+	if err := h.svc.CheckBackendAccess(ctx, sessionID); err != nil {
 		c.JSON(http.StatusPreconditionFailed, errorBody{
 			Error: err.Error(),
 			Code:  "github_credential_missing",
@@ -189,24 +185,6 @@ func (h *HTTPHandlers) httpRevoke(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
-}
-
-// requireGitHubAuth returns nil when the client reports an authenticated
-// session, or an explanatory error otherwise. A transport-layer failure is
-// logged and treated as "not authenticated" so the user still sees a clean
-// 412 with a CTA, not a 5xx.
-func (h *HTTPHandlers) requireGitHubAuth(ctx context.Context) error {
-	if h.ghClient == nil {
-		return errors.New("github client is not configured")
-	}
-	ok, err := h.ghClient.IsAuthenticated(ctx)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return errors.New("connect a GitHub account to share tasks publicly")
-	}
-	return nil
 }
 
 // mapShareError translates a service error into the response body + status

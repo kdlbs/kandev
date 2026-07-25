@@ -43,13 +43,15 @@ describe("PR review writes", () => {
   it("posts reviewer logins to the pull request review-request endpoint", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ requested: true }));
 
-    await expect(requestPRReviewers("acme", "site", 42, ["octocat"])).resolves.toEqual({
+    await expect(
+      requestPRReviewers("acme", "site", 42, ["octocat"], "workspace-1"),
+    ).resolves.toEqual({
       requested: true,
     });
 
     const call = fetchSpy.mock.calls.at(-1);
     expect(String(call?.[0])).toBe(
-      "http://api.test/api/v1/github/prs/acme/site/42/requested-reviewers",
+      "http://api.test/api/v1/github/prs/acme/site/42/requested-reviewers?workspace_id=workspace-1",
     );
     expect(call?.[1]?.method).toBe("POST");
     expect(JSON.parse(String(call?.[1]?.body))).toEqual({ reviewers: ["octocat"] });

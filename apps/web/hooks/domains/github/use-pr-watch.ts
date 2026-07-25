@@ -5,6 +5,7 @@ import { listPRWatches, deletePRWatch } from "@/lib/api/domains/github-api";
 import { useAppStore } from "@/components/state-provider";
 
 export function usePRWatches() {
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const items = useAppStore((state) => state.prWatches.items);
   const loaded = useAppStore((state) => state.prWatches.loaded);
   const loading = useAppStore((state) => state.prWatches.loading);
@@ -13,9 +14,9 @@ export function usePRWatches() {
   const removePRWatch = useAppStore((state) => state.removePRWatch);
 
   useEffect(() => {
-    if (loaded || loading) return;
+    if (!workspaceId || loaded || loading) return;
     setPRWatchesLoading(true);
-    listPRWatches({ cache: "no-store" })
+    listPRWatches(workspaceId, { cache: "no-store" })
       .then((response) => {
         setPRWatches(response?.watches ?? []);
       })
@@ -25,14 +26,15 @@ export function usePRWatches() {
       .finally(() => {
         setPRWatchesLoading(false);
       });
-  }, [loaded, loading, setPRWatches, setPRWatchesLoading]);
+  }, [workspaceId, loaded, loading, setPRWatches, setPRWatchesLoading]);
 
   const remove = useCallback(
     async (id: string) => {
-      await deletePRWatch(id);
+      if (!workspaceId) return;
+      await deletePRWatch(id, workspaceId);
       removePRWatch(id);
     },
-    [removePRWatch],
+    [workspaceId, removePRWatch],
   );
 
   return { items, loaded, loading, remove };

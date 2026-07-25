@@ -126,3 +126,15 @@ export async function assertLocatorWithinViewportX(
     `${label}: right edge ${(box.x + box.width).toFixed(1)} exceeds viewport ${viewport.width}`,
   ).toBeLessThanOrEqual(viewport.width + 1);
 }
+
+export async function expectElementsNotToIntersect(first: Locator, second: Locator): Promise<void> {
+  const [firstBox, secondBox] = await Promise.all([first.boundingBox(), second.boundingBox()]);
+  expect(firstBox).not.toBeNull();
+  expect(secondBox).not.toBeNull();
+  const intersects =
+    firstBox!.x < secondBox!.x + secondBox!.width &&
+    firstBox!.x + firstBox!.width > secondBox!.x &&
+    firstBox!.y < secondBox!.y + secondBox!.height &&
+    firstBox!.y + firstBox!.height > secondBox!.y;
+  expect(intersects).toBe(false);
+}

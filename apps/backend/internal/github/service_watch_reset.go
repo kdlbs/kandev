@@ -33,6 +33,10 @@ func (s *Service) PreviewResetIssueWatch(ctx context.Context, watchID string) (i
 	if s.store == nil {
 		return 0, errStoreUnavailable
 	}
+	watch, err := s.GetIssueWatch(ctx, watchID)
+	if err != nil || watch == nil {
+		return 0, err
+	}
 	return watchreset.Preview(ctx, &githubIssueWatchResetter{store: s.store, watchID: watchID})
 }
 
@@ -43,6 +47,10 @@ func (s *Service) PreviewResetIssueWatch(ctx context.Context, watchID string) (i
 func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, error) {
 	if s.store == nil {
 		return 0, errStoreUnavailable
+	}
+	watch, err := s.GetIssueWatch(ctx, watchID)
+	if err != nil || watch == nil {
+		return 0, err
 	}
 	s.mu.Lock()
 	td := s.cascadeTaskDeleter

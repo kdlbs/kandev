@@ -5,8 +5,13 @@ import type { GitHubPR, GitHubPRStatus } from "@/lib/types/github";
 const getPRStatusesBatch = vi.fn();
 
 vi.mock("@/lib/api/domains/github-api", () => ({
-  getPRStatusesBatch: (refs: { owner: string; repo: string; number: number }[]) =>
-    getPRStatusesBatch(refs) as Promise<{ statuses: Record<string, GitHubPRStatus> }>,
+  getPRStatusesBatch: (
+    workspaceId: string,
+    refs: { owner: string; repo: string; number: number }[],
+  ) =>
+    getPRStatusesBatch(workspaceId, refs) as Promise<{
+      statuses: Record<string, GitHubPRStatus>;
+    }>,
 }));
 
 import { prStatusKey, usePRStatuses } from "./use-pr-statuses";
@@ -60,7 +65,7 @@ describe("usePRStatuses", () => {
   });
 
   it("skips fetch when prs list is empty", () => {
-    renderHook(() => usePRStatuses([]));
+    renderHook(() => usePRStatuses("ws-1", []));
     expect(getPRStatusesBatch).not.toHaveBeenCalled();
   });
 
@@ -69,7 +74,7 @@ describe("usePRStatuses", () => {
     getPRStatusesBatch.mockResolvedValueOnce({
       statuses: { "acme/widget#7": makeStatus(pr) },
     });
-    const { result } = renderHook(() => usePRStatuses([pr]));
+    const { result } = renderHook(() => usePRStatuses("ws-1", [pr]));
     await waitFor(() => {
       expect(result.current.size).toBe(1);
     });
@@ -81,7 +86,7 @@ describe("usePRStatuses", () => {
     getPRStatusesBatch.mockResolvedValue({
       statuses: { "acme/widget#7": makeStatus(pr) },
     });
-    const { rerender, result } = renderHook(({ prs }) => usePRStatuses(prs), {
+    const { rerender, result } = renderHook(({ prs }) => usePRStatuses("ws-1", prs), {
       initialProps: { prs: [pr] },
     });
     await waitFor(() => expect(result.current.size).toBe(1));
@@ -102,7 +107,7 @@ describe("usePRStatuses", () => {
     getPRStatusesBatch.mockResolvedValue({
       statuses: { "acme/widget#7": makeStatus(pr1), "acme/widget#8": makeStatus(pr2) },
     });
-    const { rerender } = renderHook(({ prs }) => usePRStatuses(prs), {
+    const { rerender } = renderHook(({ prs }) => usePRStatuses("ws-1", prs), {
       initialProps: { prs: [pr1] },
     });
     await waitFor(() => expect(getPRStatusesBatch).toHaveBeenCalledTimes(1));
@@ -115,7 +120,7 @@ describe("usePRStatuses", () => {
     getPRStatusesBatch.mockResolvedValueOnce({
       statuses: { "acme/widget#7": makeStatus(pr) },
     });
-    const { result, rerender } = renderHook(({ prs }) => usePRStatuses(prs), {
+    const { result, rerender } = renderHook(({ prs }) => usePRStatuses("ws-1", prs), {
       initialProps: { prs: [pr] },
     });
     await waitFor(() => expect(result.current.size).toBe(1));

@@ -13,6 +13,13 @@ test("uses a trusted GitLab URL with isolated executor and backend Git rewrites"
     const fixture = await startHTTPGitFixture(root, "rewrite-source");
     try {
       expect(fixture.remoteURL).toBe("https://gitlab.com/fixture/rewrite-source.git");
+      expect(fixture.checkoutPath).toBe(path.join(root, "rewrite-source-checkout"));
+      expect(
+        execFileSync("git", ["remote", "get-url", "origin"], {
+          cwd: fixture.checkoutPath,
+          encoding: "utf8",
+        }).trim(),
+      ).toBe(fixture.remoteURL);
       expect(fixture.gitConfigEnvVars).toEqual([
         { key: "GIT_CONFIG_COUNT", value: "1" },
         {

@@ -313,6 +313,9 @@ export function hydrateState(
 /** Hydrate GitHub slices, preserving loading states. */
 function hydrateGitHub(draft: Draft<AppState>, state: HydrationState): void {
   if (state.githubStatus) mergeWithLoading(draft.githubStatus, state.githubStatus);
+  if (state.githubAppRegistrations) {
+    mergeWithLoading(draft.githubAppRegistrations, state.githubAppRegistrations);
+  }
   if (state.taskPRs) deepMerge(draft.taskPRs, state.taskPRs);
   if (state.azureDevOpsTaskPullRequests) {
     deepMerge(draft.azureDevOpsTaskPullRequests, state.azureDevOpsTaskPullRequests);

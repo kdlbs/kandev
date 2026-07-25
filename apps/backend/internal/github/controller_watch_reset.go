@@ -1,10 +1,13 @@
 package github
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // httpPreviewResetReviewWatch returns the count of tasks a reset on the
@@ -76,6 +79,10 @@ func (c *Controller) httpResetIssueWatch(ctx *gin.Context) {
 func (c *Controller) requireReviewWatchInWorkspace(ctx *gin.Context, id string) bool {
 	watch, err := c.service.GetReviewWatch(ctx.Request.Context(), id)
 	if err != nil {
+		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "review watch not found"})
+			return false
+		}
 		c.writeResetError(ctx, "load review watch", err)
 		return false
 	}
@@ -91,6 +98,10 @@ func (c *Controller) requireReviewWatchInWorkspace(ctx *gin.Context, id string) 
 func (c *Controller) requireIssueWatchInWorkspace(ctx *gin.Context, id string) bool {
 	watch, err := c.service.GetIssueWatch(ctx.Request.Context(), id)
 	if err != nil {
+		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "issue watch not found"})
+			return false
+		}
 		c.writeResetError(ctx, "load issue watch", err)
 		return false
 	}

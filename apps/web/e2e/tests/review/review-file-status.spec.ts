@@ -111,8 +111,13 @@ test.describe("Review file status", () => {
     const sidebar = dialog.getByTestId("review-dialog-sidebar");
     await expect(sidebar).toBeVisible();
 
-    for (const name of ["Added", "Modified", "Deleted"]) {
-      await expect(sidebar.getByRole("img", { name })).toBeVisible();
+    for (const [path, name] of [
+      [ADDED_PATH, "Added"],
+      [MODIFIED_PATH, "Modified"],
+      [DELETED_PATH, "Deleted"],
+    ] as const) {
+      const row = sidebar.locator(`[data-testid="review-file-row"][data-file-path="${path}"]`);
+      await expect(row.getByRole("img", { name })).toBeVisible();
     }
     await expect(sidebar.getByRole("img", { name: `Moved from ${MOVED_FROM_PATH}` })).toBeVisible({
       timeout: 20_000,

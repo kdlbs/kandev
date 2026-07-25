@@ -376,7 +376,7 @@ function NewSubtaskForm({
     defaultSubtaskWorkspaceMode(worktreeBranch),
   );
   // Shim DialogFormState shared with the create-task dialog.
-  const fs = useSubtaskFormState();
+  const fs = useSubtaskFormState(workspaceId);
   useSeedParentRepository(fs, parentRepositoryId, baseBranch);
   useSeedAgentProfileId(fs, defaultProfileId);
   const handlers = useDialogHandlers(fs, availableRepositories);

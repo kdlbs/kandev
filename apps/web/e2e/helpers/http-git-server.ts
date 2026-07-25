@@ -5,9 +5,10 @@ import path from "node:path";
 
 type HTTPGitFixture = {
   remoteURL: string;
+  checkoutPath: string;
   /**
-   * Backend-only config that survives restarts without colliding with
-   * repoclone's command-scoped credential configuration.
+   * Backend-only config for fixture consumers whose Git path honors global
+   * configuration. Managed workspace clones deliberately sanitize it.
    */
   backendEnv: Record<string, string>;
   /**
@@ -56,6 +57,7 @@ export async function startHTTPGitFixture(
     options.onListening?.(port);
     const fixtureOrigin = `http://${dockerBridgeGateway()}:${port}/`;
     const remoteURL = `https://gitlab.com/fixture/${name}.git`;
+    execFileSync("git", ["remote", "set-url", "origin", remoteURL], { cwd: checkout });
     const backendGitConfigPath = path.join(root, "fixture", `${name}.gitconfig`);
     const config = `[url "${fixtureOrigin}fixture/${name}.git"]\n\tinsteadOf = ${remoteURL}\n`;
     (options.writeBackendGitConfig ?? fs.writeFileSync)(backendGitConfigPath, config);
@@ -65,6 +67,7 @@ export async function startHTTPGitFixture(
       // executor profiles and their isolated backend fixture rewrite Git's clone
       // transport to this local HTTP server.
       remoteURL,
+      checkoutPath: checkout,
       backendEnv: { GIT_CONFIG_GLOBAL: backendGitConfigPath },
       gitConfigEnvVars: [
         { key: "GIT_CONFIG_COUNT", value: "1" },

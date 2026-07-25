@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useCallback, useState, useRef } from "react";
+import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { PRDiffFile } from "@/lib/types/github";
@@ -14,6 +15,14 @@ type PRDiffView = {
 };
 
 export type KeyedPRDiffState = PRDiffView & {
+  sourceKey: string;
+};
+
+type PRDiffRequest = {
+  workspaceId: string;
+  owner: string;
+  repo: string;
+  prNumber: number;
   sourceKey: string;
 };
 
@@ -32,10 +41,7 @@ export function resolvePRDiffView(state: KeyedPRDiffState, requestedKey: string)
 }
 
 async function fetchPRFiles(
-  owner: string,
-  repo: string,
-  prNumber: number,
-  sourceKey: string,
+  { workspaceId, owner, repo, prNumber, sourceKey }: PRDiffRequest,
   setState: (s: KeyedPRDiffState) => void,
 ) {
   const client = getWebSocketClient();
@@ -47,6 +53,7 @@ async function fetchPRFiles(
   debug("fetch.start", { owner, repo, prNumber });
   try {
     const response = await client.request<{ files?: PRDiffFile[] }>("github.pr_files.get", {
+      workspace_id: workspaceId,
       owner,
       repo,
       number: prNumber,
@@ -71,34 +78,37 @@ export function usePRDiff(
   prNumber: number | null,
   refreshKey?: string | null,
 ) {
+  const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const [state, setState] = useState<KeyedPRDiffState>(INITIAL_STATE);
-  const hasParams = !!owner && !!repo && !!prNumber;
-  const sourceKey = hasParams ? `${owner}/${repo}/${prNumber}/${refreshKey ?? ""}` : "";
+  const hasParams = !!workspaceId && !!owner && !!repo && !!prNumber;
+  const sourceKey = hasParams
+    ? `${workspaceId}/${owner}/${repo}/${prNumber}/${refreshKey ?? ""}`
+    : "";
   const paramsKeyRef = useRef<string>("");
   const requestIdRef = useRef(0);
 
   const refresh = useCallback(() => {
-    if (!owner || !repo || !prNumber) return;
+    if (!workspaceId || !owner || !repo || !prNumber) return;
     const requestId = ++requestIdRef.current;
-    void fetchPRFiles(owner, repo, prNumber, sourceKey, (next) => {
+    void fetchPRFiles({ workspaceId, owner, repo, prNumber, sourceKey }, (next) => {
       if (requestId !== requestIdRef.current) return;
       setState(next);
     });
-  }, [owner, repo, prNumber, sourceKey]);
+  }, [workspaceId, owner, repo, prNumber, sourceKey]);
 
   useEffect(() => {
     if (sourceKey === paramsKeyRef.current) return;
     paramsKeyRef.current = sourceKey;
-    if (!owner || !repo || !prNumber) {
+    if (!workspaceId || !owner || !repo || !prNumber) {
       requestIdRef.current++; // invalidate in-flight responses
       return;
     }
     const requestId = ++requestIdRef.current;
-    void fetchPRFiles(owner, repo, prNumber, sourceKey, (next) => {
+    void fetchPRFiles({ workspaceId, owner, repo, prNumber, sourceKey }, (next) => {
       if (requestId !== requestIdRef.current) return;
       setState(next);
     });
-  }, [owner, repo, prNumber, sourceKey]);
+  }, [workspaceId, owner, repo, prNumber, sourceKey]);
 
   return { ...resolvePRDiffView(state, sourceKey), refresh };
 }

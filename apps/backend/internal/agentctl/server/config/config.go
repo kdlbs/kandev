@@ -16,6 +16,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -511,6 +512,9 @@ func CollectAgentEnv(additional map[string]string) []string {
 	for k, v := range additional {
 		envMap[k] = v
 	}
+	if envMap["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"] != "" {
+		prependPathEntry(envMap, envMap["KANDEV_GITHUB_CLI_SHIM_DIR"])
+	}
 
 	// Convert back to slice
 	result := make([]string, 0, len(envMap))
@@ -518,6 +522,22 @@ func CollectAgentEnv(additional map[string]string) []string {
 		result = append(result, k+"="+v)
 	}
 	return result
+}
+
+func prependPathEntry(env map[string]string, entry string) {
+	if entry == "" {
+		return
+	}
+	cleanEntry := filepath.Clean(entry)
+	parts := filepath.SplitList(env["PATH"])
+	filtered := make([]string, 0, len(parts)+1)
+	filtered = append(filtered, entry)
+	for _, part := range parts {
+		if filepath.Clean(part) != cleanEntry {
+			filtered = append(filtered, part)
+		}
+	}
+	env["PATH"] = strings.Join(filtered, string(os.PathListSeparator))
 }
 
 func envBool(env []string, key string) bool {

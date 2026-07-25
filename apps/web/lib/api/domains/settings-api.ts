@@ -596,7 +596,7 @@ export async function removeDockerContainer(
 
 export type RemoteAuthMethod = {
   method_id: string;
-  type: "env" | "files" | "gh_cli_token";
+  type: "env" | "files";
   env_var?: string;
   setup_hint?: string;
   source_files?: string[];

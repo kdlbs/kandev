@@ -179,6 +179,7 @@ export type {
 } from "./ui/types";
 export type {
   GitHubStatusState,
+  GitHubAppRegistrationsState,
   TaskPRsState,
   PRWatchesState,
   ReviewWatchesState,

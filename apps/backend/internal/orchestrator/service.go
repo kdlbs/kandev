@@ -696,6 +696,12 @@ func (s *Service) EnsureRepositoryCloned(ctx context.Context, repository *models
 	return s.executor.EnsureRepositoryCloned(ctx, repository)
 }
 
+// SetGitHubCredentialBroker configures renewable workspace GitHub credentials
+// for executor git and gh operations.
+func (s *Service) SetGitHubCredentialBroker(issuer executor.GitHubCredentialLeaseIssuer, endpoint string) {
+	s.executor.SetGitHubCredentialBroker(issuer, endpoint)
+}
+
 // SetTurnService sets the turn service for tracking conversation turns.
 //
 // A "turn" represents a single conversation round-trip: user prompt → agent response.

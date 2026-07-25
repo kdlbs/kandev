@@ -31,7 +31,7 @@ func TestTriggerPRSync_SyncsExistingWatch(t *testing.T) {
 		PRNumber:  10,
 		Branch:    "feat/x",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatal(err)
 	}
 	tp := &TaskPR{
@@ -82,7 +82,7 @@ func TestTriggerPRSync_DetectsPR(t *testing.T) {
 		PRNumber:  0,
 		Branch:    "feat/y",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -133,7 +133,7 @@ func TestTriggerPRSyncAll_ThrottlesDetectionProbe(t *testing.T) {
 		PRNumber:  0,
 		Branch:    "feat/never-merged",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -179,7 +179,7 @@ func TestTriggerPRDetection_CoalescesConcurrentProbes(t *testing.T) {
 			PRNumber:  0,
 			Branch:    "feat/never-merged",
 		}
-		if err := store.CreatePRWatch(ctx, watch); err != nil {
+		if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 			t.Fatal(err)
 		}
 

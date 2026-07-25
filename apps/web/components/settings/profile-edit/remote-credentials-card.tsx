@@ -21,7 +21,7 @@ import {
 } from "@/lib/api/domains/settings-api";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 
-type AuthChoice = "files" | "env" | "gh_cli_token" | "none";
+type AuthChoice = "files" | "env" | "none";
 export type { GitIdentityMode, GitIdentityState } from "./git-identity-fields";
 
 const RADIO_LABEL_BASE =
@@ -176,14 +176,11 @@ function getSpecMethods(spec: RemoteAuthSpec): RemoteAuthMethod[] {
 type InitialChoiceOpts = {
   fileMethod: RemoteAuthMethod | undefined;
   envMethod: RemoteAuthMethod | undefined;
-  ghTokenMethod: RemoteAuthMethod | undefined;
   selectedIds: Set<string>;
   envSecretId: string | null;
 };
 
 function initialChoice(opts: InitialChoiceOpts): AuthChoice {
-  if (opts.ghTokenMethod && opts.selectedIds.has(opts.ghTokenMethod.method_id))
-    return "gh_cli_token";
   if (opts.fileMethod && opts.selectedIds.has(opts.fileMethod.method_id)) return "files";
   // Treat env as selected either when the user just clicked the radio (its
   // method id is in selectedIds, no secret picked yet) or when a secret is
@@ -221,8 +218,7 @@ function AuthSection({
   const methods = getSpecMethods(spec);
   const envMethod = methods.find((m) => m.type === "env");
   const fileMethod = methods.find((m) => m.type === "files");
-  const ghTokenMethod = methods.find((m) => m.type === "gh_cli_token");
-  const hasOnlyEnv = envMethod && !fileMethod && !ghTokenMethod;
+  const hasOnlyEnv = envMethod && !fileMethod;
 
   // `choice` is derived from props so the configured-status badge updates live
   // when the user picks a secret in the dropdown (which only flows back through
@@ -231,14 +227,12 @@ function AuthSection({
   const choice: AuthChoice = initialChoice({
     fileMethod,
     envMethod,
-    ghTokenMethod,
     selectedIds,
     envSecretId,
   });
   const baselineChoice = initialChoice({
     fileMethod,
     envMethod,
-    ghTokenMethod,
     selectedIds: baselineSelectedIds,
     envSecretId: baselineEnvSecretId,
   });
@@ -249,13 +243,9 @@ function AuthSection({
     if (fileMethod) {
       setMethodSelected(nextSelectedIds, fileMethod.method_id, value === "files");
     }
-    if (ghTokenMethod) {
-      setMethodSelected(nextSelectedIds, ghTokenMethod.method_id, value === "gh_cli_token");
-    }
     if (envMethod) {
-      // Track env in selectedIds the same way `files`/`gh_cli_token` are
-      // tracked, so `initialChoice` stays "env" while the user is still
-      // picking a secret. Switching away clears the secret too.
+      // Track env in selectedIds so `initialChoice` stays "env" while the
+      // user is still picking a secret. Switching away clears the secret too.
       setMethodSelected(nextSelectedIds, envMethod.method_id, value === "env");
       if (value !== "env") {
         onMethodSecretChange(envMethod.method_id, null);
@@ -292,7 +282,6 @@ function AuthSection({
               onChoiceChange={handleChoice}
               fileMethod={fileMethod}
               envMethod={envMethod}
-              ghTokenMethod={ghTokenMethod}
               secretId={envSecretId}
               baselineSecretId={baselineEnvSecretId}
               onSecretIdChange={(sid) => {
@@ -336,36 +325,6 @@ function EnvOnlySection({
         isDirty={secretId !== baselineSecretId}
       />
     </>
-  );
-}
-
-function GhTokenOption({
-  method,
-  isSelected,
-  isDirty,
-  onSelect,
-}: {
-  method: RemoteAuthMethod;
-  isSelected: boolean;
-  isDirty: boolean;
-  onSelect: () => void;
-}) {
-  return (
-    <AuthOptionButton
-      selected={isSelected}
-      isDirty={isDirty}
-      onSelect={onSelect}
-      label={method.label ?? "Copy token from local CLI"}
-    >
-      <div className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium">{method.label ?? "Copy token from local CLI"}</span>
-        {method.setup_hint && (
-          <div className="markdown-body text-xs text-muted-foreground [&_p]:m-0">
-            <ReactMarkdown>{method.setup_hint}</ReactMarkdown>
-          </div>
-        )}
-      </div>
-    </AuthOptionButton>
   );
 }
 
@@ -462,7 +421,6 @@ function AuthChoiceRadio({
   onChoiceChange,
   fileMethod,
   envMethod,
-  ghTokenMethod,
   secretId,
   baselineSecretId,
   onSecretIdChange,
@@ -473,7 +431,6 @@ function AuthChoiceRadio({
   onChoiceChange: (v: AuthChoice) => void;
   fileMethod?: RemoteAuthMethod;
   envMethod?: RemoteAuthMethod;
-  ghTokenMethod?: RemoteAuthMethod;
   secretId: string | null;
   baselineSecretId: string | null;
   onSecretIdChange: (id: string | null) => void;
@@ -481,14 +438,6 @@ function AuthChoiceRadio({
 }) {
   return (
     <div role="radiogroup" aria-label="Remote auth method" className="grid gap-0">
-      {ghTokenMethod && (
-        <GhTokenOption
-          method={ghTokenMethod}
-          isSelected={choice === "gh_cli_token"}
-          isDirty={(choice === "gh_cli_token") !== (baselineChoice === "gh_cli_token")}
-          onSelect={() => onChoiceChange("gh_cli_token")}
-        />
-      )}
       {fileMethod && (
         <FileOption
           method={fileMethod}
@@ -568,13 +517,6 @@ function AuthStatusBadge({ choice, hasSecret }: { choice: AuthChoice; hasSecret:
     return (
       <Badge variant="default" className="bg-green-600 text-[10px] px-1.5 py-0">
         Files Selected
-      </Badge>
-    );
-  }
-  if (choice === "gh_cli_token") {
-    return (
-      <Badge variant="default" className="bg-green-600 text-[10px] px-1.5 py-0">
-        Auto-detect
       </Badge>
     );
   }

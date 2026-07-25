@@ -57,6 +57,10 @@ func (c *NoopClient) ListAccessibleRepos(context.Context, string, int) ([]GitHub
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) HasRepositoryAccess(context.Context, string, string) (bool, error) {
+	return false, ErrNoClient
+}
+
 func (c *NoopClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
 	return nil, ErrNoClient
 }
