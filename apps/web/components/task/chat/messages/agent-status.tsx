@@ -40,8 +40,13 @@ const BACKGROUND_WORK_CONFIG: StatusConfig = {
 export function resolveAgentStatusConfig(
   sessionState: TaskSessionState | undefined,
   isWorking: boolean,
+  hasBackgroundWork = false,
 ): StatusConfig | null {
+  // Background work shows through two coarse states (ADR-0049): a RUNNING
+  // session whose foreground turn has yielded, and a WAITING_FOR_INPUT session
+  // holding detached work. Both must read "background", not the coarse label.
   if (isWorking && sessionState === "WAITING_FOR_INPUT") return BACKGROUND_WORK_CONFIG;
+  if (isWorking && sessionState === "RUNNING" && hasBackgroundWork) return BACKGROUND_WORK_CONFIG;
   return sessionState ? STATE_CONFIG[sessionState] : null;
 }
 
@@ -285,7 +290,10 @@ export function AgentStatus({
   messages = [],
   isWorking = false,
 }: AgentStatusProps) {
-  const config = resolveAgentStatusConfig(sessionState, isWorking);
+  const hasBackgroundWork = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId]?.foreground_activity === "background" : false,
+  );
+  const config = resolveAgentStatusConfig(sessionState, isWorking, hasBackgroundWork);
   const isRunning = config?.icon === "spinner";
   const agentLabel = useAgentLabel(sessionId, config?.dynamicLabel);
 

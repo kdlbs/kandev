@@ -43,12 +43,14 @@ const (
 	TaskSessionStateCancelled       TaskSessionState = "CANCELLED"
 )
 
-// ForegroundActivity is the fine-grained busy substate of a RUNNING session
+// ForegroundActivity is the fine-grained busy substate of a session
 // (ADR-0049). It distinguishes a foreground turn that is
 // actively generating from one that is idle, held open only by spawned
 // background work (a subagent task, a run-in-background shell, an active
-// Monitor). It is only meaningful while the session state is RUNNING; for every
-// other state the coarse state already tells the whole story.
+// Monitor). "generating" is only meaningful while the session state is
+// RUNNING, but "background" can outlive the foreground turn: detached work
+// keeps it set after the coarse state settles (e.g. WAITING_FOR_INPUT), and
+// consumers must not assume RUNNING when they see it.
 type ForegroundActivity string
 
 const (

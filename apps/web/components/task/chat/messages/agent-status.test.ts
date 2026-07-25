@@ -20,4 +20,17 @@ describe("resolveAgentStatusConfig", () => {
       icon: "spinner",
     });
   });
+
+  it("reads background when a RUNNING foreground turn has yielded to background work", () => {
+    expect(resolveAgentStatusConfig("RUNNING", true, true)).toMatchObject({
+      label: "Background work is running",
+      icon: "spinner",
+    });
+  });
+
+  it("keeps the generating label for a RUNNING turn without background work", () => {
+    expect(resolveAgentStatusConfig("RUNNING", true, false)).toMatchObject({
+      label: "Agent is running",
+    });
+  });
 });
