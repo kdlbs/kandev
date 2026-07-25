@@ -1335,9 +1335,11 @@ func (m *Manager) resolveApprovalPolicyAndDisplayName(ctx context.Context, execu
 }
 
 // createBootMessage creates a boot message and starts the stderr polling goroutine.
-// Returns the message and stop channel (both nil if bootMessageService is not configured).
+// Returns nil values when boot messages are unavailable or the execution is resuming.
 func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName string) (*models.Message, chan struct{}) {
-	if m.bootMessageService == nil {
+	// Resume has no user turn to own a boot message. Creating one would lazily
+	// open a synthetic turn and make an otherwise idle session appear active.
+	if m.bootMessageService == nil || execution == nil || execution.ACPSessionID != "" {
 		return nil, nil
 	}
 	bootMsg, bootErr := m.bootMessageService.CreateMessage(ctx, &BootMessageRequest{
@@ -1351,7 +1353,7 @@ func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecuti
 			"agent_name":  agentDisplayName,
 			"command":     bootCommand,
 			"status":      "running",
-			"is_resuming": execution.ACPSessionID != "",
+			"is_resuming": false,
 			"started_at":  time.Now().UTC().Format(time.RFC3339Nano),
 		},
 	})

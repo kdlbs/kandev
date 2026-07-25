@@ -156,9 +156,9 @@ must be retried.
   **Add sources**, chooses **Workspace repository**, and adds a saved or discovered repository and
   branch with the shared task-create selector, **THEN** the new worktree appears as a top-level
   Files entry and in repository-aware Changes surfaces without recreating the task.
-- **GIVEN** an idle task whose runtime emits a late session-resumed status while adopting an updated
-  workspace root, **WHEN** the user attaches another source, **THEN** the status event does not
-  create a phantom turn and the subsequent attachment succeeds.
+- **GIVEN** an idle task whose runtime resumes its agent or emits a late session-resumed status while
+  adopting an updated workspace root, **WHEN** the user attaches another source, **THEN** lifecycle
+  boot/status messages do not create a phantom turn and the subsequent attachment succeeds.
 - **GIVEN** an Add sources batch with a local row already configured, **WHEN** the user chooses
   **Remote repository** from **Add repository**, **THEN** both rows remain visible in the batch and
   submit atomically.
