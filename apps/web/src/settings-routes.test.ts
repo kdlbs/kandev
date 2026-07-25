@@ -1,11 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactElement } from "react";
+import { render, screen } from "@testing-library/react";
 
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
 import { TaskActionsSettings } from "@/components/settings/general-settings";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
 import { buildSettingsInitialStateForRoute, renderSettingsRoute } from "./settings-routes";
+
+vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () => null }));
 
 const ACTIVE_WORKSPACE_COOKIE = "kandev-active-workspace";
 const OWNER_ID = "owner-1";
@@ -109,18 +112,23 @@ describe("buildSettingsInitialStateForRoute", () => {
     expect(failed.userSettings).toBeUndefined();
   });
 
-  it("maps the update notification settings from the boot payload", () => {
-    const state = buildState({
-      updateNotificationSettings: { enabled: false, channel: "desktop" },
-    });
+  it("does not recreate the retired update-notification state during hydration", () => {
+    const state = buildState();
 
-    expect(state.system).toEqual({
-      updateNotificationSettings: { enabled: false, channel: "desktop" },
-    });
+    expect(state.system).toBeUndefined();
   });
 });
 
 describe("renderSettingsRoute", () => {
+  it("directs update notification settings to Notifications", () => {
+    render(renderSettingsRoute("/settings/system/updates"));
+
+    expect(screen.getByText(/notification preferences are managed/i)).toBeTruthy();
+    expect(screen.getByRole("link", { name: /notifications/i }).getAttribute("href")).toBe(
+      "/settings/general/notifications",
+    );
+  });
+
   it("renders layout profile settings from General settings", () => {
     const route = renderSettingsRoute("/settings/general/layouts");
     expect(isValidElement(route)).toBe(true);
@@ -150,7 +158,6 @@ function buildState(
     availableAgents: [],
     availableTools: [],
     userSettingsResponse: null,
-    updateNotificationSettings: null,
     ...overrides,
   });
 }

@@ -5,6 +5,8 @@ fn main() {
             "check_for_updates",
             "install_update",
             "show_native_notification",
+            "get_native_notification_permission",
+            "request_native_notification_permission",
             "open_external_url",
         ]);
         tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest))

@@ -2,7 +2,10 @@ package providers
 
 import (
 	"context"
+	"errors"
 )
+
+var ErrNoEligibleSubscriber = errors.New("no eligible notification subscriber")
 
 type Message struct {
 	EventType     string
@@ -13,6 +16,7 @@ type Message struct {
 	OccurrenceID  string
 	UserID        string
 	Config        map[string]interface{}
+	Payload       map[string]string
 }
 
 type Provider interface {

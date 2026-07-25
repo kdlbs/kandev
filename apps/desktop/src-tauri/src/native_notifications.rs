@@ -1,11 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::VecDeque,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Mutex,
-    },
-};
+use std::{collections::VecDeque, sync::Mutex};
 
 const MAX_SEEN_EVENT_IDS: usize = 1_024;
 
@@ -15,7 +9,7 @@ pub struct NativeNotificationRequest {
     pub event_id: String,
     pub title: String,
     pub body: String,
-    /// Present for session-scoped events (waiting-for-input, failed).
+    /// Present for session-scoped events (turn-finished, clarification-requested, failed).
     /// Absent for account/app-scoped events such as an available update,
     /// which has no associated task. `#[serde(default)]` accepts payloads
     /// that omit the key entirely (e.g. `JSON.stringify` drops `undefined`).
@@ -23,19 +17,18 @@ pub struct NativeNotificationRequest {
     pub task_id: Option<String>,
     pub session_id: Option<String>,
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum NativeNotificationResult {
     Shown,
     Duplicate,
     PermissionDenied,
+    DisplayFailed,
 }
 
 #[derive(Debug, Default)]
 pub struct NativeNotificationState {
     seen_event_ids: Mutex<VecDeque<String>>,
-    permission_prompt_attempted: AtomicBool,
 }
 
 impl NativeNotificationState {
@@ -75,24 +68,12 @@ impl NativeNotificationState {
             NativeNotificationResult::Duplicate
         }
     }
-
-    fn begin_permission_prompt(&self) -> bool {
-        !self
-            .permission_prompt_attempted
-            .swap(true, Ordering::SeqCst)
-    }
-
-    fn allow_permission_prompt_retry(&self) {
-        self.permission_prompt_attempted
-            .store(false, Ordering::SeqCst);
-    }
 }
 
 /// Event identities this bridge will display. Session-scoped events require
 /// a non-empty task_id (they're gated on task context); the update-available
 /// event has no task and must omit it.
-const SESSION_EVENT_PREFIXES: [&str; 4] = [
-    "session.waiting_for_input:",
+const SESSION_EVENT_PREFIXES: [&str; 3] = [
     "session.failed:",
     "session.turn_finished:",
     "session.clarification_requested:",
@@ -139,19 +120,10 @@ pub fn show_native_notification(
 
     backend.require_owned_origin(&webview)?;
     validate_request(&request)?;
-    let mut permission = app
+    let permission = app
         .notification()
         .permission_state()
         .map_err(|err| err.to_string())?;
-    if permission != PermissionState::Granted
-        && permission != PermissionState::Denied
-        && state.begin_permission_prompt()
-    {
-        permission = app.notification().request_permission().map_err(|err| {
-            state.allow_permission_prompt_retry();
-            err.to_string()
-        })?;
-    }
     let claim_result =
         state.claim_after_permission(&request, permission == PermissionState::Granted);
     if claim_result != NativeNotificationResult::Shown {
@@ -165,9 +137,40 @@ pub fn show_native_notification(
         .show();
     if let Err(err) = show_result {
         state.release(&request.event_id);
-        return Err(err.to_string());
+        eprintln!("Could not show native notification: {err}");
+        return Ok(NativeNotificationResult::DisplayFailed);
     }
     Ok(NativeNotificationResult::Shown)
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+pub fn get_native_notification_permission(
+    app: tauri::AppHandle,
+    backend: tauri::State<'_, crate::backend::BackendState>,
+    webview: tauri::WebviewWindow,
+) -> Result<tauri::plugin::PermissionState, String> {
+    use tauri_plugin_notification::NotificationExt;
+
+    backend.require_owned_origin(&webview)?;
+    app.notification()
+        .permission_state()
+        .map_err(|err| err.to_string())
+}
+
+#[cfg(feature = "desktop-runtime")]
+#[tauri::command]
+pub fn request_native_notification_permission(
+    app: tauri::AppHandle,
+    backend: tauri::State<'_, crate::backend::BackendState>,
+    webview: tauri::WebviewWindow,
+) -> Result<tauri::plugin::PermissionState, String> {
+    use tauri_plugin_notification::NotificationExt;
+
+    backend.require_owned_origin(&webview)?;
+    app.notification()
+        .request_permission()
+        .map_err(|err| err.to_string())
 }
 
 #[cfg(test)]
@@ -229,9 +232,20 @@ mod tests {
         for event_id in [
             "session.turn_finished:turn-1",
             "session.clarification_requested:request-1",
+            "session.failed:session-1",
         ] {
             assert_eq!(validate_request(&request(event_id, "task-1")), Ok(()));
         }
+    }
+
+    #[test]
+    fn bridge_rejects_retired_waiting_for_input_events() {
+        let request = request("session.waiting_for_input:session-1", "task-1");
+
+        assert_eq!(
+            validate_request(&request),
+            Err("unsupported native notification event".to_string())
+        );
     }
 
     #[test]
@@ -243,7 +257,7 @@ mod tests {
 
     #[test]
     fn bridge_rejects_session_events_missing_task_id() {
-        let mut request = request("session.waiting_for_input:session-1", "task-1");
+        let mut request = request("session.clarification_requested:session-1", "task-1");
         request.task_id = None;
 
         assert_eq!(
@@ -277,19 +291,15 @@ mod tests {
     }
 
     #[test]
-    fn permission_prompt_is_attempted_only_once_per_process() {
+    fn display_failure_releases_the_event_identity_for_retry() {
         let state = NativeNotificationState::default();
+        let request = request("session.failed:session-1", "task-1");
 
-        assert!(state.begin_permission_prompt());
-        assert!(!state.begin_permission_prompt());
-    }
-
-    #[test]
-    fn permission_prompt_can_retry_after_a_transient_error() {
-        let state = NativeNotificationState::default();
-
-        assert!(state.begin_permission_prompt());
-        state.allow_permission_prompt_retry();
-        assert!(state.begin_permission_prompt());
+        assert!(state.claim(&request.event_id));
+        state.release(&request.event_id);
+        assert_eq!(
+            state.claim_after_permission(&request, true),
+            NativeNotificationResult::Shown
+        );
     }
 }

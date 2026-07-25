@@ -80,38 +80,3 @@ func HandleApply(svc *Service) gin.HandlerFunc {
 		c.JSON(http.StatusAccepted, ApplyResponse{JobID: jobID})
 	}
 }
-
-// HandleGetNotifySettings returns the persisted update-notification
-// preferences (enable/disable + desktop/in_view/both channel).
-func HandleGetNotifySettings(svc *Service) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		settings, err := svc.GetNotifySettings(c.Request.Context())
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, settings)
-	}
-}
-
-// HandleSaveNotifySettings validates and persists the update-notification
-// preferences. An unknown channel or malformed body is a 400.
-func HandleSaveNotifySettings(svc *Service) gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var body NotifySettings
-		if err := c.ShouldBindJSON(&body); err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
-			return
-		}
-		saved, err := svc.SaveNotifySettings(c.Request.Context(), body)
-		if errors.Is(err, ErrNotifyStoreUnavailable) {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, saved)
-	}
-}

@@ -144,48 +144,6 @@ func TestWriteAndReadLatestVersion_RoundtripAndUpsert(t *testing.T) {
 	}
 }
 
-// TestWriteAndReadNotifiedUpdateVersion_RoundtripAndUpsert verifies the
-// separate "last version we notified the user about" key persists
-// independently of the polled latest_version, and upserts cleanly across
-// restarts (backed by the same DB row) so re-notification is deduped per
-// version rather than per process lifetime.
-func TestWriteAndReadNotifiedUpdateVersion_RoundtripAndUpsert(t *testing.T) {
-	db := memSQLiteDB(t)
-	if err := ensureMetaTable(db); err != nil {
-		t.Fatalf("ensureMetaTable: %v", err)
-	}
-
-	v, err := ReadNotifiedUpdateVersion(db)
-	if err != nil {
-		t.Fatalf("ReadNotifiedUpdateVersion fresh: %v", err)
-	}
-	if v != "" {
-		t.Errorf("expected empty value on fresh DB, got %q", v)
-	}
-
-	if err := WriteNotifiedUpdateVersion(db, "v1.2.3"); err != nil {
-		t.Fatalf("WriteNotifiedUpdateVersion: %v", err)
-	}
-	v, err = ReadNotifiedUpdateVersion(db)
-	if err != nil {
-		t.Fatalf("ReadNotifiedUpdateVersion after write: %v", err)
-	}
-	if v != "v1.2.3" {
-		t.Errorf("version = %q, want %q", v, "v1.2.3")
-	}
-
-	if err := WriteNotifiedUpdateVersion(db, "v1.2.4"); err != nil {
-		t.Fatalf("WriteNotifiedUpdateVersion overwrite: %v", err)
-	}
-	v, err = ReadNotifiedUpdateVersion(db)
-	if err != nil {
-		t.Fatalf("ReadNotifiedUpdateVersion after overwrite: %v", err)
-	}
-	if v != "v1.2.4" {
-		t.Errorf("version after overwrite = %q, want %q", v, "v1.2.4")
-	}
-}
-
 // TestReadLatestVersion_PartialPersistedState verifies the read tolerates
 // only a subset of the three keys being present (which can happen if a
 // previous write was interrupted).

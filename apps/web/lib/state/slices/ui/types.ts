@@ -107,6 +107,9 @@ export type TaskDeletedNotification = {
 export type UpdateAvailableNotification = {
   version: string;
   url?: string;
+  title: string;
+  body: string;
+  occurrence_id: string;
 };
 
 export type BottomTerminalState = {

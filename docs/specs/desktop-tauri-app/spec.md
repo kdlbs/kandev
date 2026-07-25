@@ -138,6 +138,8 @@ For desktop-owned launches, Kandev uses native OS notifications for:
 - a completed agent turn when that provider event is selected;
 - a structured clarification request that needs a user answer when that
   provider event is selected;
+- a newer Kandev release when `system.update_available` is selected for the
+  Local provider;
 - a session that failed.
 
 Notification delivery respects the existing notification settings and suppresses duplicate
@@ -152,6 +154,11 @@ identity is deduplicated.
 Turn-finished and clarification-requested delivery follows the selected event
 checkboxes. Session-failure delivery is an independent safety alert whenever
 the Local provider is enabled; it does not reuse either semantic subscription.
+Update-available delivery uses the release version as its occurrence identity
+and the same Local-provider preference as browser delivery. The existing
+Notifications settings control requests native permission from a user gesture;
+background events never prompt. An open app keeps the in-app update indication
+when native permission is denied or native delivery fails.
 
 ## Desktop bridge and permissions
 
@@ -255,6 +262,10 @@ display before being shown.
   while Kandev is not focused, **WHEN** its native notification is delivered,
   **THEN** Kandev sends no duplicate browser or shell notification and generic
   app focus or activation does not navigate to an inferred task.
+- **GIVEN** `system.update_available` is selected for Local and native
+  permission is denied, **WHEN** a newer release is detected, **THEN** the open
+  app retains its in-app update indication, does not prompt in the background,
+  and does not mark a task route from generic activation.
 - **GIVEN** a saved window position belongs to a disconnected display, **WHEN** Kandev reopens,
   **THEN** the main window appears within a currently visible display.
 - **GIVEN** the same settings page is opened in a browser or narrow/mobile viewport, **WHEN** it
@@ -268,7 +279,7 @@ display before being shown.
 - Global shortcuts that operate while another application is focused.
 - Silent, forced, or downgrade updates; App Store/Microsoft Store/Snap distribution.
 - Auto-updating Linux `.deb` or `.rpm` packages outside their package managers.
-- Notifications beyond waiting-for-input and session failure in this increment.
+- Notification events beyond the canonical provider catalog in this increment.
 - A separate native settings window, multiple native windows, or a rewritten native UI.
 - Mobile Tauri targets. Native shortcuts have no mobile analogue; the shared settings page must
   remain responsive and preserve browser/mobile behavior.

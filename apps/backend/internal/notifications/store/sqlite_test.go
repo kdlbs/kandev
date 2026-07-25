@@ -86,8 +86,55 @@ func TestSQLiteRepositoryMigratesLegacyWaitingSubscriptionToClarificationOnly(t 
 	if err != nil {
 		t.Fatalf("list migrated subscriptions: %v", err)
 	}
-	if len(subscriptions) != 1 || subscriptions[0].EventType != "session.clarification_requested" {
-		t.Fatalf("legacy subscription = %#v, want clarification subscription only", subscriptions)
+	if !hasEnabledSubscription(subscriptions, "session.clarification_requested") || !hasEnabledSubscription(subscriptions, "system.update_available") {
+		t.Fatalf("legacy subscriptions = %#v, want enabled clarification and update subscriptions", subscriptions)
+	}
+}
+
+func TestSQLiteRepositoryMigratesExistingLocalAndSystemUpdateSubscriptionsOnlyOnce(t *testing.T) {
+	database := openNotificationTestDB(t)
+	ctx := context.Background()
+	repo, err := newSQLiteRepositoryWithDB(database, database)
+	if err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	providerIDs := make(map[string]string)
+	for _, provider := range []*models.Provider{
+		{ID: "local", UserID: "user-1", Name: "Local", Type: models.ProviderTypeLocal, Enabled: true},
+		{ID: "system", UserID: "user-1", Name: "System", Type: models.ProviderTypeSystem, Enabled: true},
+		{ID: "apprise", UserID: "user-1", Name: "Apprise", Type: models.ProviderTypeApprise, Enabled: true},
+	} {
+		if err := repo.CreateProvider(ctx, provider); err != nil {
+			t.Fatalf("create %s provider: %v", provider.Type, err)
+		}
+		providerIDs[string(provider.Type)] = provider.ID
+	}
+	if _, err := database.Exec(`DELETE FROM notification_migrations`); err != nil {
+		t.Fatalf("clear fresh migration marker: %v", err)
+	}
+
+	if err := repo.migrateUpdateAvailableSubscriptions(ctx); err != nil {
+		t.Fatalf("migrate update subscriptions: %v", err)
+	}
+	if err := repo.ReplaceSubscriptions(ctx, providerIDs[string(models.ProviderTypeLocal)], "user-1", []string{}); err != nil {
+		t.Fatalf("user opt-out: %v", err)
+	}
+	if err := repo.migrateUpdateAvailableSubscriptions(ctx); err != nil {
+		t.Fatalf("replay update migration: %v", err)
+	}
+	for providerType, want := range map[string]bool{"local": false, "system": true, "apprise": false} {
+		providerID := providerIDs[providerType]
+		subscriptions, err := repo.ListSubscriptionsByProvider(ctx, providerID)
+		if err != nil {
+			t.Fatalf("list %s subscriptions: %v", providerType, err)
+		}
+		got := false
+		for _, subscription := range subscriptions {
+			got = got || (subscription.EventType == "system.update_available" && subscription.Enabled)
+		}
+		if got != want {
+			t.Fatalf("%s update subscription = %v, want %v", providerType, got, want)
+		}
 	}
 }
 
@@ -125,9 +172,18 @@ func TestSQLiteRepositoryMergesLegacySubscriptionIdempotently(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list migrated subscriptions: %v", err)
 	}
-	if len(subscriptions) != 1 || subscriptions[0].EventType != "session.clarification_requested" || !subscriptions[0].Enabled {
-		t.Fatalf("merged subscriptions = %#v, want one enabled clarification subscription", subscriptions)
+	if !hasEnabledSubscription(subscriptions, "session.clarification_requested") || !hasEnabledSubscription(subscriptions, "system.update_available") {
+		t.Fatalf("merged subscriptions = %#v, want enabled clarification and update subscriptions", subscriptions)
 	}
+}
+
+func hasEnabledSubscription(subscriptions []*models.Subscription, eventType string) bool {
+	for _, subscription := range subscriptions {
+		if subscription.EventType == eventType && subscription.Enabled {
+			return true
+		}
+	}
+	return false
 }
 
 func TestSQLiteRepositoryDeliveryIdempotencyIsScopedToOccurrence(t *testing.T) {

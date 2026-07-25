@@ -28,6 +28,9 @@ inferred from generic session lifecycle state.
   agent-authored clarification-request message and uses the shared
   pending/request ID as its occurrence identity. Task and session identity are
   required.
+- `system.update_available` is derived from the release poller's durable cached
+  version and uses the release version/tag as its occurrence identity. It is
+  install-wide and has no task or session identity.
 - Notification idempotency is keyed by provider, semantic event type, and
   occurrence identity. The task-session ID remains recorded for routing and
   audit but is not the deduplication boundary.
@@ -36,6 +39,9 @@ inferred from generic session lifecycle state.
 - Local WebSocket and desktop notifications preserve the semantic event type
   and occurrence identity rather than collapsing both cases back into a
   waiting-state action.
+- New-release delivery uses the same provider subscriptions, delivery history,
+  and retry semantics as other notifications. It does not maintain a parallel
+  update-only preference or de-duplication store.
 
 The user-visible contract is defined by
 [Semantic Notifications](../specs/platform/notifications.md).

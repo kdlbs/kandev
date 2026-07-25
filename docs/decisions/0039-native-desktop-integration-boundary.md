@@ -47,8 +47,8 @@ confirmation in the existing System > Updates page. The backend is cleanly stopp
 relaunch.
 
 Desktop-owned launches reuse existing notification preferences and events but
-route selected turn-finished, clarification-requested, and session-failure
-delivery through the native notifier. The semantic session event boundary is
+route selected turn-finished, clarification-requested, update-available, and
+session-failure delivery through the native notifier. The semantic event boundary is
 defined by
 [the semantic notification-event decision](2026-07-24-semantic-notification-events.md).
 Desktop launches suppress the legacy backend shell-command and Web Notification
@@ -57,6 +57,11 @@ notification. Browser, CLI, and service launches retain their existing channels.
 reopen and second-instance activation focus the window but never infer a notification route. The
 upstream desktop notification API cannot correlate desktop body clicks with a custom payload, so
 the app does not navigate from generic focus or activation events.
+
+Native notification permission is requested only by the user-initiated control
+on the existing Notifications settings page. Background events never prompt.
+For update availability, the open SPA retains its in-app indication when native
+permission is denied, unsupported, or delivery fails.
 
 External `http`, `https`, and `mailto` links use a scoped native opener. Loopback app navigation,
 downloads, and blob URLs remain in the WebView.

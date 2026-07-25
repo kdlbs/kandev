@@ -152,6 +152,9 @@ export type SystemErrorPayload = {
 export type UpdateAvailablePayload = {
   version: string;
   url?: string;
+  title: string;
+  body: string;
+  occurrence_id: string;
 };
 
 export type WorkspacePayload = {

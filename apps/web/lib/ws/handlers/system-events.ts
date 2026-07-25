@@ -16,10 +16,5 @@ export function registerSystemEventsHandlers(store: StoreApi<AppState>): WsHandl
     "system.metrics.updated": (message) => {
       store.getState().setSystemMetricsSnapshot(message.payload);
     },
-    "system.update_available": (message) => {
-      // Persisted transiently (see slices/ui) so useUpdateAvailableToast can
-      // consume it and decide desktop/in-view delivery per saved settings.
-      store.getState().setUpdateAvailableNotification(message.payload);
-    },
   };
 }

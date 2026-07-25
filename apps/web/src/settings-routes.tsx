@@ -31,6 +31,7 @@ import { WorkspaceRepositoriesClient } from "@/app/settings/workspace/workspace-
 import { WorkspaceWorkflowsClient } from "@/app/settings/workspace/workspace-workflows-client";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import { GitHubIntegrationPage } from "@/components/github/github-settings";
+import Link from "@/components/routing/app-link";
 import { useAppStoreApi } from "@/components/state-provider";
 import { EditorsSettings } from "@/components/settings/editors-settings";
 import {
@@ -59,7 +60,6 @@ import { LogViewer } from "@/components/settings/system/log-viewer";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
-import { UpdateNotificationsCard } from "@/components/settings/system/update-notifications-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
 import { TerminalSettings } from "@/components/settings/terminal-settings";
 import { VoiceModeSettings } from "@/components/settings/voice-mode-settings";
@@ -71,7 +71,6 @@ import {
 } from "@/components/plugins/plugin-error-boundary";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { listWorkflows } from "@/lib/api/domains/kanban-api";
-import { fetchUpdateNotificationSettings } from "@/lib/api/domains/system-api";
 import {
   fetchUserSettings,
   listAgentDiscovery,
@@ -100,7 +99,7 @@ import type {
   WorkflowTemplate,
   Workspace,
 } from "@/lib/types/http";
-import type { LicenseEntry, UpdateNotificationSettings } from "@/lib/types/system";
+import type { LicenseEntry } from "@/lib/types/system";
 
 type RouteRenderer = () => ReactNode;
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
@@ -121,7 +120,6 @@ type SettingsInitialStateData = {
   availableAgents: Awaited<ReturnType<typeof listAvailableAgents>>["agents"];
   availableTools: NonNullable<Awaited<ReturnType<typeof listAvailableAgents>>["tools"]>;
   userSettingsResponse: UserSettingsResponse | null;
-  updateNotificationSettings: UpdateNotificationSettings | null;
 };
 
 const licenseEntries = licenses as LicenseEntry[];
@@ -429,8 +427,14 @@ function renderUpdatesRoute() {
       title="Updates"
       description="Current vs latest release plus the full kandev changelog."
     >
+      <p className="text-sm text-muted-foreground">
+        Notification preferences are managed in{" "}
+        <Link className="cursor-pointer underline" href="/settings/general/notifications">
+          Notifications
+        </Link>
+        .
+      </p>
       <UpdatesCard />
-      <UpdateNotificationsCard />
     </SystemPageShell>
   );
 }
@@ -472,23 +476,15 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
 }
 
 async function loadSettingsInitialState(): Promise<HydrationState> {
-  const [
-    workspaces,
-    executors,
-    agents,
-    discovery,
-    available,
-    userSettingsResponse,
-    updateNotificationSettings,
-  ] = await Promise.all([
-    listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-    listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
-    listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
-    listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
-    listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
-    fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    fetchUpdateNotificationSettings({ cache: "no-store" }).catch(() => null),
-  ]);
+  const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
+    await Promise.all([
+      listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+      listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
+      listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
+      listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
+      listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
+      fetchUserSettings({ cache: "no-store" }).catch(() => null),
+    ]);
 
   return buildSettingsInitialStateForRoute({
     workspaces: workspaces.workspaces,
@@ -498,7 +494,6 @@ async function loadSettingsInitialState(): Promise<HydrationState> {
     availableAgents: available.agents,
     availableTools: available.tools ?? [],
     userSettingsResponse,
-    updateNotificationSettings,
   });
 }
 
@@ -510,7 +505,6 @@ export function buildSettingsInitialStateForRoute({
   availableAgents,
   availableTools,
   userSettingsResponse,
-  updateNotificationSettings,
 }: SettingsInitialStateData): HydrationState {
   const workspaceItems = workspaces.map(mapWorkspaceItem);
   const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
@@ -538,7 +532,6 @@ export function buildSettingsInitialStateForRoute({
       loaded: true,
     },
     settingsData: { executorsLoaded: true, agentsLoaded: true },
-    system: { updateNotificationSettings },
     ...(mappedUserSettings.loaded
       ? {
           userSettings: {

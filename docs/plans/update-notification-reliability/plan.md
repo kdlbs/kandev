@@ -1,0 +1,372 @@
+---
+spec: docs/specs/platform/notifications.md
+created: 2026-07-24
+status: draft
+---
+
+# Implementation Plan: Update Notification Reliability
+
+## Overview
+
+Move update-available delivery from the parallel `internal/system/updates`
+settings/broadcast path into the canonical notification-provider service.
+`system.update_available` uses the release version as its durable occurrence
+identity, can be selected for Local, System, Apprise, and future providers, and
+replays cached release state when a Local user subscriber arrives after the
+startup poll.
+
+Remove the update-only enable/channel card and API. The Notifications page
+remains the single policy surface, while an open Local client always retains an
+in-app update indication if browser/native delivery is denied or fails. Native
+permission moves to the existing user-initiated Notifications control.
+
+The provider/occurrence boundary is recorded in
+[the semantic notification ADR](../../decisions/2026-07-24-semantic-notification-events.md),
+and the desktop transport boundary is reconciled in
+[ADR-0039](../../decisions/0039-native-desktop-integration-boundary.md).
+
+## Backend
+
+### Canonical provider event and delivery history
+
+Files:
+
+- `apps/backend/internal/notifications/service/service.go`
+- `apps/backend/internal/notifications/service/service_test.go`
+- `apps/backend/internal/notifications/providers/provider.go`
+- `apps/backend/internal/notifications/providers/local.go`
+- `apps/backend/internal/notifications/providers/local_test.go`
+- `apps/backend/internal/notifications/store/sqlite.go`
+- `apps/backend/internal/notifications/store/sqlite_test.go`
+
+Changes:
+
+- Add `EventSystemUpdateAvailable = "system.update_available"` to the
+  available-event catalog and event validation.
+- Add `HandleUpdateAvailable(ctx, version, releaseURL)`, with version as the
+  occurrence ID and the copy/payload defined by the spec.
+- Reuse `notification_deliveries` uniqueness for provider-scoped
+  de-duplication. System update deliveries store an empty task-session ID
+  rather than introducing a second “last notified version” key.
+- Have the Local adapter report that no user subscriber was eligible. The
+  notification service then releases only that provider's delivery claim so a
+  cached replay can retry it.
+- Add update availability to fresh Local/System default subscriptions.
+- Add a replayable one-time notification migration marker that opts existing
+  Local/System providers into the new event without auto-subscribing Apprise
+  and without re-enabling a later user opt-out.
+
+### Release detection, cached replay, and startup wiring
+
+Files:
+
+- `apps/backend/internal/system/updates/service.go`
+- `apps/backend/internal/system/updates/service_test.go`
+- `apps/backend/internal/system/updates/notify_dispatch_test.go`
+- `apps/backend/internal/system/updates/notify_settings.go` (delete)
+- `apps/backend/internal/system/updates/notify_settings_test.go` (delete)
+- `apps/backend/internal/system/updates/notify_store.go` (delete)
+- `apps/backend/internal/system/updates/notify_store_test.go` (delete)
+- `apps/backend/internal/system/updates/handler.go`
+- `apps/backend/internal/system/updates/handler_notify_test.go` (delete)
+- `apps/backend/internal/system/system.go`
+- `apps/backend/internal/persistence/meta.go`
+- `apps/backend/internal/persistence/meta_test.go`
+- `apps/backend/internal/persistence/postgres_meta_test.go`
+- `apps/backend/internal/gateway/websocket/hub.go`
+- `apps/backend/internal/gateway/websocket/hub_user_subscription_test.go`
+- `apps/backend/internal/backendapp/main.go`
+- `apps/backend/internal/backendapp/gateway.go`
+- Related backend application tests
+
+Changes:
+
+- Replace the update service's broadcaster, update-only settings store, mutex,
+  and `notified_update_version` persistence with a narrow notifier interface
+  implemented by the canonical notification service.
+- After a successful release fetch/persist, invoke the notifier with the
+  cached tag and URL.
+- Add `ReplayCachedUpdate(ctx)` that reads `kandev_meta` and invokes the
+  notifier only when the cached version is newer; it never refetches GitHub.
+- Add a user-subscription listener to the WebSocket hub. Invoke listeners after
+  the user subscriber is registered and after releasing the hub lock.
+- Retain the notification service returned by `provideGateway`, wire it into
+  the update service, and replay cached update state when the default user
+  subscribes.
+- Remove `GET/PUT /api/v1/system/updates/notification-settings` and all boot
+  wiring for the parallel settings store.
+- Delete the independent notified-version metadata helpers and tests.
+
+## Desktop
+
+### Native permission and allowlist
+
+Files:
+
+- `apps/desktop/src-tauri/src/native_notifications.rs`
+- `apps/desktop/src-tauri/src/main.rs`
+- `apps/desktop/src-tauri/build.rs`
+- `apps/desktop/src-tauri/capabilities/default.json`
+- `apps/desktop/src-tauri/permissions/autogenerated/*.toml`
+- `apps/desktop/src-tauri/gen/schemas/*.json`
+- `apps/web/lib/desktop/native-notification-client.ts`
+- Related frontend bridge tests
+
+Changes:
+
+- Keep `system.update_available:<version>` in the privileged native allowlist,
+  but remove the retired `session.waiting_for_input` prefix and use a semantic
+  event in missing-task validation tests.
+- Split native permission state/query and permission request into narrow
+  origin-checked commands. Only the user-initiated request command may prompt.
+- Make background `show_native_notification` return a denied/not-granted result
+  without prompting, while preserving event-identity release on actual display
+  failure.
+- Expose permission state/request through the typed frontend desktop client and
+  regenerate Tauri permissions/schemas from the declared command list.
+
+## Frontend
+
+### Single provider settings surface
+
+Files:
+
+- `apps/web/components/settings/system/update-notifications-card.tsx` (delete)
+- `apps/web/components/settings/system/update-notifications-card.test.tsx` (delete)
+- `apps/web/src/settings-routes.tsx`
+- `apps/web/src/settings-routes.test.ts`
+- `apps/web/lib/api/domains/system-api.ts`
+- `apps/web/lib/api/domains/system-api.test.ts`
+- `apps/web/lib/types/system.ts`
+- `apps/web/lib/types/backend.ts`
+- `apps/web/lib/notifications/events.ts`
+- `apps/web/components/settings/notifications-settings.tsx`
+- `apps/web/components/settings/notifications-settings-actions.ts`
+- `apps/web/components/settings/notifications-settings-actions.test.tsx`
+- `apps/web/lib/state/default-state.ts`
+- `apps/web/lib/state/hydration/hydrator.ts`
+- `apps/web/lib/state/hydration/hydrator.test.ts`
+- `apps/web/lib/state/slices/system/system-slice.ts`
+- `apps/web/lib/state/slices/system/types.ts`
+- `apps/web/lib/state/slices/ui/ui-slice.ts`
+- `apps/web/lib/state/slices/ui/types.ts`
+- `apps/web/lib/state/store.ts`
+
+Changes:
+
+- Remove the update-only settings type, API client, boot hydration, System
+  settings card, and save contributor.
+- Add the update event label/description to the existing provider/event matrix.
+- Make the existing Notifications permission control query and request the
+  native permission when the Tauri bridge is available, otherwise use the Web
+  Notification API. Display denied/unsupported state through the existing
+  settings feedback.
+- Keep only the transient update occurrence state required to bridge a Local
+  WebSocket event into React's toast context.
+
+### Local delivery and guaranteed in-app fallback
+
+Files:
+
+- `apps/web/lib/ws/handlers/notifications.ts`
+- `apps/web/lib/ws/handlers/notifications.test.ts`
+- `apps/web/lib/ws/handlers/system-events.ts`
+- `apps/web/lib/ws/handlers/system-events.test.ts`
+- `apps/web/hooks/use-update-available-toast.ts`
+- `apps/web/hooks/use-update-available-toast.test.ts`
+- `apps/web/components/update-available-toast-bridge.tsx`
+
+Changes:
+
+- Register `system.update_available` with the canonical notification handlers
+  instead of the generic system-event path.
+- Always show the in-app update toast for a delivered Local occurrence.
+- Attempt native delivery without prompting when the bridge is available;
+  otherwise show a Web Notification only when permission is already granted.
+  Denied, unsupported, and command-failure paths retain the in-app toast.
+- De-duplicate by the backend occurrence ID/version and remove the update-only
+  settings fetch/channel branches.
+
+## Mobile Design Contract
+
+- **Desktop outcome and mobile entry:** both use
+  **Settings > General > Notifications > Notification Events** to select
+  `Kandev update available` per provider.
+- **Nearest exemplar:** the existing
+  `notification-events-table.tsx` stacked mobile event cards and
+  `mobile-notification-events.spec.ts` are the shipped settings pattern.
+- **Hierarchy and primary action:** each event is a section; provider rows are
+  the primary level and their 44px checkbox targets change the subscription.
+  The shared floating Save action remains the persistence action.
+- **Presentation and rationale:** inline stacked cards are retained because the
+  event matrix is a short, frequently reviewed settings list; no temporary
+  drawer or full-height surface is needed.
+- **Scroll/geometry:** the settings page remains the single vertical scroll
+  owner, each touch target is at least 44px, and document horizontal overflow
+  remains zero.
+- **Shared logic:** desktop table and mobile cards share provider drafts,
+  toggles, validation, and save coordination; only presentation differs.
+- **Mobile proof:** the mobile Playwright test toggles the update event, saves,
+  reloads, verifies persistence, touch size, containment, and no horizontal
+  overflow.
+
+## Tests
+
+- **Provider routing and idempotency:** update occurrence reaches every selected
+  provider once, disabled/unselected providers are skipped, a failed provider
+  claim is released, and concurrent/replayed occurrences deduplicate.
+  - File: `apps/backend/internal/notifications/service/service_test.go`
+  - Method: fake repository plus capturing Local/Apprise/System adapters.
+- **Subscription migration:** fresh defaults include the update event; existing
+  Local/System providers migrate once; Apprise is unchanged; a later opt-out
+  survives a second startup.
+  - File: `apps/backend/internal/notifications/store/sqlite_test.go`
+  - Method: fresh and replayed real SQLite schema tests.
+- **Poll-before-client lifecycle:** immediate poll with no Local subscriber
+  leaves Local pending; first default-user subscription replays cached state
+  without a GitHub request; later subscriptions do not duplicate successful
+  deliveries.
+  - Files: `apps/backend/internal/system/updates/notify_dispatch_test.go`,
+    `apps/backend/internal/gateway/websocket/hub_user_subscription_test.go`,
+    and focused backend application wiring tests.
+  - Method: deterministic fetcher, fake notifier, real hub subscription order.
+- **Removed settings surface:** the deleted route/API/state/card no longer
+  appears in backend routes, boot payload, or Updates page tests.
+- **Native permission:** semantic allowlist validation, permission-state
+  mapping, no background prompt, user-initiated request, denied result, and
+  released identity after display error.
+  - File: `apps/desktop/src-tauri/src/native_notifications.rs`
+  - Method: Rust unit tests around pure validation/permission decisions.
+- **Frontend delivery:** update event is registered with notification handlers,
+  always produces the in-app toast, attempts native/browser delivery only when
+  allowed, and retains the toast for denied/unsupported/rejected delivery.
+  - Files: `apps/web/lib/ws/handlers/notifications.test.ts`,
+    `apps/web/hooks/use-update-available-toast.test.ts`
+  - Method: Zustand handler tests and rendered hook tests with mocked bridges.
+- **Permission UI:** existing Notifications control uses the native permission
+  bridge in Tauri and browser permission elsewhere.
+  - File: `apps/web/components/settings/notifications-settings-actions.test.tsx`
+  - Method: component/action tests with typed transport mocks.
+
+## E2E Tests
+
+- **Scenario:** at a 390px viewport, the update event is readable and
+  touch-operable, can be toggled and saved, survives reload, and causes no
+  horizontal overflow.
+  - File: `apps/web/e2e/tests/settings/mobile-notification-events.spec.ts`
+  - Verification: the repository's `mobile-chrome` Pixel 5 project.
+- Delete
+  `apps/web/e2e/tests/system/update-notifications-settings.spec.ts`; the
+  update-only settings surface no longer exists.
+
+## Public and Internal Documentation
+
+- Update `docs/public/operations.md` to point update alert configuration to the
+  Notifications provider/event matrix.
+- Add `system.update_available` and its occurrence payload to
+  `docs/public/websocket-api.md`.
+- Keep `docs/specs/platform/notifications.md`,
+  `docs/specs/system-page/spec.md`,
+  `docs/specs/desktop-tauri-app/spec.md`,
+  `docs/decisions/2026-07-24-semantic-notification-events.md`, and
+  `docs/decisions/0039-native-desktop-integration-boundary.md` aligned.
+
+## Implementation Waves
+
+Wave 1:
+
+- [x] [task-01-provider-event-and-delivery](task-01-provider-event-and-delivery.md)
+  — `implementer` (balanced)
+- [x] [task-03-native-permission-bridge](task-03-native-permission-bridge.md)
+  — `implementer` (balanced)
+
+Wave 2:
+
+- [x] [task-02-update-replay-and-wiring](task-02-update-replay-and-wiring.md)
+  — `implementer` (balanced), depends on Task 01
+
+Wave 3:
+
+- [x] [task-04-frontend-provider-delivery](task-04-frontend-provider-delivery.md)
+  — `implementer` (balanced), depends on Tasks 01-03
+
+Wave 4:
+
+- [x] [task-05-mobile-e2e-and-docs](task-05-mobile-e2e-and-docs.md)
+  — `test-engineer` (balanced), depends on Task 04
+
+Workers execute sequentially in the shared worktree despite the logical Wave 1
+independence, because both tasks contribute to the same final notification
+contract and Tauri schema generation is shared state.
+
+## Verification
+
+Targeted backend:
+
+```bash
+cd apps/backend
+go test ./internal/notifications/...
+go test ./internal/system/updates ./internal/gateway/websocket ./internal/backendapp
+golangci-lint run ./... --new-from-rev=767cc89e6 --timeout=5m
+```
+
+Targeted frontend:
+
+```bash
+cd apps
+pnpm --filter @kandev/web exec vitest run \
+  lib/ws/handlers/notifications.test.ts \
+  hooks/use-update-available-toast.test.ts \
+  components/settings/notifications-settings-actions.test.tsx \
+  lib/state/hydration/hydrator.test.ts \
+  src/settings-routes.test.ts
+cd web && pnpm run typecheck
+```
+
+Targeted desktop:
+
+```bash
+cd apps/desktop/src-tauri
+cargo test --features desktop-runtime native_notifications
+cargo fmt --check
+```
+
+Focused production-build E2E:
+
+```bash
+cd apps/web
+pnpm e2e:run tests/settings/mobile-notification-events.spec.ts
+```
+
+Documentation:
+
+```bash
+node --test scripts/validate-public-docs.test.mjs
+node scripts/validate-public-docs.mjs
+```
+
+Final change-aware verification after commit:
+
+```bash
+make fmt
+make typecheck
+make test
+make lint
+```
+
+## Risks
+
+- The Local provider must distinguish “no eligible subscriber” from a
+  successful queued send without broadening that transport detail into every
+  provider.
+- The hub subscription callback must run after registration and outside the
+  hub mutex; otherwise replay can miss the new subscriber or deadlock while
+  broadcasting back through the hub.
+- Provider delivery uniqueness must remain the sole concurrency claim when a
+  poll tick, manual check, and subscription replay overlap.
+- Native permission commands expand the privileged desktop bridge and therefore
+  require exact-origin validation, generated permission updates, and Rust plus
+  frontend contract tests.
+- Deleting the parallel settings surface touches boot hydration and Zustand
+  composition; orphan searches and typecheck must prove no stale field/API
+  remains.

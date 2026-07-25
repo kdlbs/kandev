@@ -45,7 +45,8 @@ type Hub struct {
 	dispatcher *ws.Dispatcher
 
 	// Optional provider for session data on subscription (e.g., git status)
-	sessionDataProvider SessionDataProvider
+	sessionDataProvider       SessionDataProvider
+	userSubscriptionListeners []func(userID string)
 
 	// sessionMode tracks per-session focus state and fires listeners when
 	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
@@ -357,9 +358,11 @@ func (h *Hub) getSubscribersLocked(m map[string]map[*Client]bool, id string) []*
 }
 
 // sendToClients delivers a pre-marshalled message to a list of clients.
-func (h *Hub) sendToClients(data []byte, clients []*Client, action string) {
+func (h *Hub) sendToClients(data []byte, clients []*Client, action string) int {
+	queued := 0
 	for _, client := range clients {
 		if client.sendBytes(data) {
+			queued++
 			h.logger.Debug("Sent message to client",
 				zap.String("client_id", client.ID),
 				zap.String("action", action))
@@ -369,6 +372,7 @@ func (h *Hub) sendToClients(data []byte, clients []*Client, action string) {
 				zap.String("action", action))
 		}
 	}
+	return queued
 }
 
 // BroadcastToTask sends a notification to clients subscribed to a specific task
@@ -435,18 +439,18 @@ func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
 }
 
 // BroadcastToUser sends a notification to clients subscribed to a specific user
-func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) {
+func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) bool {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
-		return
+		return false
 	}
 	clients := h.getSubscribersLocked(h.userSubscribers, userID)
 	h.logger.Debug("BroadcastToUser",
 		zap.String("user_id", userID),
 		zap.String("action", msg.Action),
 		zap.Int("subscriber_count", len(clients)))
-	h.sendToClients(data, clients, msg.Action)
+	return h.sendToClients(data, clients, msg.Action) > 0
 }
 
 // SubscribeToTask subscribes a client to task notifications
@@ -500,17 +504,32 @@ func (h *Hub) UnsubscribeFromSession(client *Client, sessionID string) {
 // SubscribeToUser subscribes a client to user notifications
 func (h *Hub) SubscribeToUser(client *Client, userID string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	if _, ok := h.userSubscribers[userID]; !ok {
 		h.userSubscribers[userID] = make(map[*Client]bool)
 	}
 	h.userSubscribers[userID][client] = true
 	client.userSubscriptions[userID] = true
+	listeners := append([]func(string){}, h.userSubscriptionListeners...)
+	h.mu.Unlock()
 
 	h.logger.Debug("Client subscribed to user",
 		zap.String("client_id", client.ID),
 		zap.String("user_id", userID))
+	for _, listener := range listeners {
+		listener(userID)
+	}
+}
+
+// AddUserSubscriptionListener registers a callback invoked after a user has
+// been registered as a subscriber. Callbacks run without the hub lock held so
+// they can safely send messages through the hub.
+func (h *Hub) AddUserSubscriptionListener(listener func(userID string)) {
+	if listener == nil {
+		return
+	}
+	h.mu.Lock()
+	h.userSubscriptionListeners = append(h.userSubscriptionListeners, listener)
+	h.mu.Unlock()
 }
 
 // UnsubscribeFromUser unsubscribes a client from user notifications

@@ -30,7 +30,6 @@ import (
 	// Event bus
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	ws "github.com/kandev/kandev/pkg/websocket"
 
 	// GitHub integration
 	azuredevopspkg "github.com/kandev/kandev/internal/azuredevops"
@@ -61,6 +60,7 @@ import (
 	notificationcontroller "github.com/kandev/kandev/internal/notifications/controller"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	usercontroller "github.com/kandev/kandev/internal/user/controller"
+	userstore "github.com/kandev/kandev/internal/user/store"
 	utilitycontroller "github.com/kandev/kandev/internal/utility/controller"
 
 	// Orchestrator
@@ -666,7 +666,7 @@ func startGatewayAndServe(
 	if services.Mentions != nil {
 		referenceValidator = services.Mentions.Submission
 	}
-	gateway, _, notificationCtrl, terminalSvc, err := provideGateway(
+	gateway, notificationSvc, notificationCtrl, terminalSvc, err := provideGateway(
 		ctx, log, eventBus, services.Task, services.User,
 		orchestratorSvc, lifecycleMgr, agentRegistry,
 		repos.Notification, repos.Task, repos.Terminal, services.GitHub, services.GitLab,
@@ -804,16 +804,14 @@ func startGatewayAndServe(
 		systemSvc.Metrics.SetExecutionProvider(lifecycleMetricProvider{manager: lifecycleMgr})
 	}
 	if systemSvc.Updates != nil {
-		systemSvc.Updates.SetBroadcaster(func(msg *ws.Message) bool {
-			// GetClientCount is checked first so a truly empty hub never
-			// enqueues onto the broadcast channel; between this check and
-			// the send a client could still disconnect, so this reports
-			// eligibility, not a delivery guarantee.
-			if gateway.Hub.GetClientCount() == 0 {
-				return false
+		systemSvc.Updates.SetNotifier(notificationSvc)
+		gateway.Hub.AddUserSubscriptionListener(func(userID string) {
+			if userID != userstore.DefaultUserID {
+				return
 			}
-			gateway.Hub.Broadcast(msg)
-			return true
+			if err := systemSvc.Updates.ReplayCachedUpdate(ctx); err != nil {
+				log.Warn("failed to replay cached update notification", zap.Error(err))
+			}
 		})
 	}
 	systemSvc.StartBackground(ctx)

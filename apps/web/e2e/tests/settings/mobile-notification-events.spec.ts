@@ -4,6 +4,7 @@ import type { ApiClient } from "../../helpers/api-client";
 
 const TURN_FINISHED = "session.turn_finished";
 const CLARIFICATION_REQUESTED = "session.clarification_requested";
+const UPDATE_AVAILABLE = "system.update_available";
 const PROVIDER_NAMES = [
   "E2E mobile semantic notifications alpha",
   "E2E mobile semantic notifications beta",
@@ -36,7 +37,7 @@ async function expectViewportContained(locator: Locator) {
 }
 
 test.describe("Mobile notification event settings", () => {
-  test("shows both semantic event rows as touch-operable without horizontal overflow", async ({
+  test("shows semantic event rows, including updates, as touch-operable without horizontal overflow", async ({
     testPage,
     apiClient,
   }) => {
@@ -54,11 +55,17 @@ test.describe("Mobile notification event settings", () => {
       const needsAnswer = testPage.getByRole("checkbox", {
         name: `Agent needs an answer for ${PROVIDER_NAMES[0]}`,
       });
+      const updateAvailable = testPage.getByRole("checkbox", {
+        name: `Kandev update available for ${PROVIDER_NAMES[0]}`,
+      });
       const turnFinishedTarget = testPage.getByTestId(
         `notification-event-toggle-${TURN_FINISHED}-${providers[0].id}`,
       );
       const needsAnswerTarget = testPage.getByTestId(
         `notification-event-toggle-${CLARIFICATION_REQUESTED}-${providers[0].id}`,
+      );
+      const updateAvailableTarget = testPage.getByTestId(
+        `notification-event-toggle-${UPDATE_AVAILABLE}-${providers[0].id}`,
       );
       await expect(eventContainer).toBeVisible();
       await expect(
@@ -76,6 +83,13 @@ test.describe("Mobile notification event settings", () => {
       ).toBeVisible();
       await expect(turnFinished).toBeVisible();
       await expect(needsAnswer).toBeVisible();
+      await expect(updateAvailable).not.toBeChecked();
+      await expect(
+        eventContainer.getByText("Kandev update available", { exact: true }),
+      ).toBeVisible();
+      await expect(
+        eventContainer.getByText("Notify when a newer Kandev release is available."),
+      ).toBeVisible();
 
       await expectViewportContained(
         eventContainer.getByText("Agent turn finished", { exact: true }),
@@ -89,9 +103,16 @@ test.describe("Mobile notification event settings", () => {
       await expectViewportContained(
         eventContainer.getByText("Notify when the agent explicitly asks you a question."),
       );
+      await expectViewportContained(
+        eventContainer.getByText("Kandev update available", { exact: true }),
+      );
+      await expectViewportContained(
+        eventContainer.getByText("Notify when a newer Kandev release is available."),
+      );
       await expectViewportContained(turnFinished);
       await expectViewportContained(needsAnswer);
-      for (const target of [turnFinishedTarget, needsAnswerTarget]) {
+      await expectViewportContained(updateAvailable);
+      for (const target of [turnFinishedTarget, needsAnswerTarget, updateAvailableTarget]) {
         const box = await target.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -101,12 +122,13 @@ test.describe("Mobile notification event settings", () => {
         await eventContainer.evaluate((element) => element.scrollWidth <= element.clientWidth),
       ).toBe(true);
 
-      for (const target of [turnFinishedTarget, needsAnswerTarget]) {
-        await target.scrollIntoViewIfNeeded();
-        await target.tap();
-      }
-      await expect(turnFinished).not.toBeChecked();
-      await expect(needsAnswer).not.toBeChecked();
+      await updateAvailableTarget.scrollIntoViewIfNeeded();
+      await updateAvailableTarget.tap();
+      await expect(updateAvailable).toBeChecked();
+      await testPage.getByRole("button", { name: "Save changes" }).click();
+      await expect(testPage.getByRole("button", { name: "Save changes" })).not.toBeVisible();
+      await testPage.reload();
+      await expect(updateAvailable).toBeChecked();
       expect(
         await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
       ).toBe(false);
