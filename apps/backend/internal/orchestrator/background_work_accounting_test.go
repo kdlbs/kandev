@@ -77,7 +77,7 @@ func TestBackgroundCompletion_IdentifiedRemainsExecutionScoped(t *testing.T) {
 	}
 }
 
-func TestBackgroundCompletion_UnidentifiedFailsClosedWithMultipleWorkloads(t *testing.T) {
+func TestBackgroundCompletion_UnidentifiedRetiresOldestOfMultipleWorkloadsFIFO(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	const taskID, sessionID, executionID = "task-fallback", "session-fallback", "execution-fallback"
 
@@ -89,11 +89,68 @@ func TestBackgroundCompletion_UnidentifiedFailsClosedWithMultipleWorkloads(t *te
 		Data: &lifecycle.AgentStreamEventData{Type: streams.EventTypeBackgroundComplete},
 	})
 
-	if !svc.hasBackgroundTask(sessionID, "tool-one") || !svc.hasBackgroundTask(sessionID, "tool-two") {
-		t.Fatal("unidentified completion must not guess among multiple outstanding workloads")
+	// An ID-less completion retires exactly one registration — the oldest
+	// (FIFO) — and leaves the remainder live, per the spec's "ambiguous
+	// remainder live" contract. It must not retire zero registrations just
+	// because more than one candidate exists.
+	if svc.hasBackgroundTask(sessionID, "tool-one") {
+		t.Fatal("unidentified completion must retire the oldest registered workload")
+	}
+	if !svc.hasBackgroundTask(sessionID, "tool-two") {
+		t.Fatal("unidentified completion must leave the remaining workload live")
 	}
 	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
-		t.Fatalf("ambiguous completion changed visible activity to %q", got)
+		t.Fatalf("completion with a live remainder changed visible activity to %q", got)
+	}
+}
+
+// TestBackgroundCompletion_TwoUnidentifiedCompletionsRetireBothWorkloadsFIFO is
+// the multi-workload regression: two background workloads are registered
+// (distinct tool-call IDs, same execution), then two ID-less
+// streams.EventTypeBackgroundComplete payloads are delivered through the real
+// event-handler path (handleAgentStreamEvent), exactly as Claude's
+// task-notification completion arrives in production. Before the fix, the
+// second-candidate-is-ambiguous branch bailed out entirely on any completion
+// once two or more registrations existed, so neither payload ever retired
+// anything and the session over-reported background-running forever.
+func TestBackgroundCompletion_TwoUnidentifiedCompletionsRetireBothWorkloadsFIFO(t *testing.T) {
+	repo := setupTestRepo(t)
+	const taskID, sessionID, executionID = "task-two-idless", "session-two-idless", "execution-two-idless"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	// Registration order establishes FIFO precedence: tool-first registers
+	// before tool-second.
+	registerAsyncWorkForExecution(t, svc, taskID, sessionID, executionID, "tool-first", "work-first")
+	registerAsyncWorkForExecution(t, svc, taskID, sessionID, executionID, "tool-second", "work-second")
+	svc.markForegroundIdle(sessionID)
+
+	idlessCompletion := &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID, ExecutionID: executionID,
+		Data: &lifecycle.AgentStreamEventData{Type: streams.EventTypeBackgroundComplete},
+	}
+
+	// First ID-less completion retires exactly the first-registered workload
+	// (FIFO), leaving the second one live and the session still yielded.
+	svc.handleAgentStreamEvent(t.Context(), idlessCompletion)
+	if svc.hasBackgroundTask(sessionID, "tool-first") {
+		t.Fatal("first ID-less completion did not retire the first-registered workload")
+	}
+	if !svc.hasBackgroundTask(sessionID, "tool-second") {
+		t.Fatal("first ID-less completion retired the second-registered workload out of FIFO order")
+	}
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("session left background-idle with a live remainder, got %q", got)
+	}
+
+	// Second ID-less completion retires the sole remaining registration and
+	// the session leaves background (activity publication fires).
+	svc.handleAgentStreamEvent(t.Context(), idlessCompletion)
+	if svc.hasBackgroundTask(sessionID, "tool-second") {
+		t.Fatal("second ID-less completion did not retire the last remaining workload")
+	}
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+		t.Fatalf("session did not leave background after final completion, got %q", got)
 	}
 }
 
@@ -141,7 +198,7 @@ func TestBackgroundCompletion_UnidentifiedSuccessorCycleRetiresSoleSessionWork(t
 	}
 }
 
-func TestBackgroundCompletion_UnidentifiedFailsClosedAcrossExecutions(t *testing.T) {
+func TestBackgroundCompletion_UnidentifiedAcrossExecutionsRetiresOldestFIFO(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	const taskID, sessionID = "task-cross-exec", "session-cross-exec"
 	registerAsyncWorkForExecution(t, svc, taskID, sessionID, "execution-old", "tool-old", "work-old")
@@ -152,8 +209,14 @@ func TestBackgroundCompletion_UnidentifiedFailsClosedAcrossExecutions(t *testing
 		TaskID: taskID, SessionID: sessionID, ExecutionID: "execution-current",
 		Data: &lifecycle.AgentStreamEventData{Type: streams.EventTypeBackgroundComplete},
 	})
-	if !svc.hasBackgroundTask(sessionID, "tool-old") || !svc.hasBackgroundTask(sessionID, "tool-new") {
-		t.Fatal("ambiguous cross-execution completion guessed an owning workload")
+	// An uncorrelated completion is not execution-scoped (there is no ID to
+	// scope by); it retires the oldest registration across the whole session,
+	// regardless of which execution launched it.
+	if svc.hasBackgroundTask(sessionID, "tool-old") {
+		t.Fatal("cross-execution unidentified completion must retire the oldest registered workload")
+	}
+	if !svc.hasBackgroundTask(sessionID, "tool-new") {
+		t.Fatal("cross-execution unidentified completion must leave the newer workload live")
 	}
 }
 

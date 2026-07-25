@@ -18,6 +18,14 @@ import (
 type taskPublicationQueue struct {
 	pending  []taskPublication
 	draining bool
+	// deleted tombstones a task once its task.deleted publication is enqueued.
+	// Without it, drainTaskPublications' delete(s.taskPublications, taskID)
+	// on an empty queue gives a later stale publication (e.g. a delayed
+	// task.updated racing task.deleted) a clean map slot to recreate the
+	// queue in, and the frontend upserts whatever arrives last — resurrecting
+	// a task the operator already deleted. Once set, only a task.created for
+	// the same ID (theoretical ID reuse) clears it.
+	deleted bool
 }
 
 type taskPublication struct {
@@ -173,7 +181,7 @@ func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType strin
 		value := *oldState
 		oldStateSnapshot = &value
 	}
-	s.enqueueTaskPublication(ctx, taskSnapshot.ID, func(publicationCtx context.Context) {
+	s.enqueueTaskPublication(ctx, taskSnapshot.ID, eventType, func(publicationCtx context.Context) {
 		s.publishTaskEventNow(publicationCtx, eventType, taskSnapshot, oldStateSnapshot, extraSnapshot, oldWorkflowSnapshot, nil)
 	})
 }
@@ -184,7 +192,15 @@ func (s *Service) publishTaskEventWithExtra(ctx context.Context, eventType strin
 // closure retains its caller's context values but drops cancellation and
 // deadlines when it begins draining, then receives a bounded service-owned
 // publication context.
-func (s *Service) enqueueTaskPublication(ctx context.Context, taskID string, publish func(context.Context)) {
+//
+// eventType lets this enqueue apply the deletion tombstone: a task.deleted
+// enqueue tombstones the queue and drops any not-yet-published pending
+// entries (they are moot once the task is gone — see taskPublicationQueue.
+// deleted), keeping ONLY the deletion publication itself. Once tombstoned,
+// every later enqueue whose eventType is not task.created is silently
+// dropped; a task.created enqueue clears the tombstone (theoretical ID
+// reuse).
+func (s *Service) enqueueTaskPublication(ctx context.Context, taskID, eventType string, publish func(context.Context)) {
 	s.taskPublicationMu.Lock()
 	if s.taskPublications == nil {
 		s.taskPublications = make(map[string]*taskPublicationQueue)
@@ -193,6 +209,19 @@ func (s *Service) enqueueTaskPublication(ctx context.Context, taskID string, pub
 	if queue == nil {
 		queue = &taskPublicationQueue{}
 		s.taskPublications[taskID] = queue
+	}
+	if queue.deleted {
+		if eventType != events.TaskCreated {
+			s.taskPublicationMu.Unlock()
+			s.logger.Debug("dropped task publication for a tombstoned (deleted) task",
+				zap.String("task_id", taskID), zap.String("event_type", eventType))
+			return
+		}
+		queue.deleted = false
+	}
+	if eventType == events.TaskDeleted {
+		queue.deleted = true
+		queue.pending = nil
 	}
 	queue.pending = append(queue.pending, taskPublication{ctx: ctx, publish: publish})
 	if queue.draining {
@@ -232,7 +261,14 @@ func (s *Service) drainTaskPublications(taskID string, queue *taskPublicationQue
 	for {
 		s.taskPublicationMu.Lock()
 		if len(queue.pending) == 0 {
-			delete(s.taskPublications, taskID)
+			// A tombstoned queue stays in the map so a later stale enqueue for
+			// this (deleted) task ID sees queue.deleted and is dropped, instead
+			// of finding no entry and silently recreating a fresh, un-tombstoned
+			// queue. This is bounded: one small struct per task ID deleted over
+			// the process lifetime, not per publication.
+			if !queue.deleted {
+				delete(s.taskPublications, taskID)
+			}
 			queue.draining = false
 			s.taskPublicationMu.Unlock()
 			return

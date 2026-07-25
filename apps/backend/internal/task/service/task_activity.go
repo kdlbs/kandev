@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -84,7 +85,7 @@ func (s *Service) PublishTaskActivityIfChanged(ctx context.Context, taskID strin
 	if taskID == "" || s.foregroundActivity == nil {
 		return
 	}
-	s.enqueueTaskPublication(ctx, taskID, func(publicationCtx context.Context) {
+	s.enqueueTaskPublication(ctx, taskID, events.TaskUpdated, func(publicationCtx context.Context) {
 		current, known := s.computeTaskForegroundActivity(publicationCtx, taskID)
 		if !known {
 			// The session set could not be loaded: leave the last-known aggregate in

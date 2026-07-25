@@ -58,10 +58,11 @@ const (
 // Event types for task sessions
 const (
 	TaskSessionStateChanged = "task_session.state_changed"
-	// TaskSessionActivityChanged fires when a RUNNING session's foreground
-	// turn flips between actively generating and idle-on-background-work,
-	// without any change to the coarse session state. It carries the
-	// fine-grained busy signal (ADR-0049) so the
+	// TaskSessionActivityChanged fires when a session's fine-grained activity
+	// flips — a RUNNING foreground turn moving between actively generating and
+	// idle-on-background-work, or detached background work starting/finishing
+	// under a settled coarse state — without any change to the coarse session
+	// state. It carries the fine-grained busy signal (ADR-0049) so the
 	// operator-facing composer and status indicator can distinguish
 	// "generating" from "waiting on spawned background work".
 	TaskSessionActivityChanged = "task_session.activity_changed"

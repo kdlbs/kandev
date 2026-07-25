@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
@@ -286,13 +287,121 @@ func TestTaskPublication_IdleAndDeletedTaskStateAreCleanedUp(t *testing.T) {
 	if _, seen := svc.lastTaskActivity["task-1"]; seen {
 		t.Fatal("task deletion did not clear activity baseline")
 	}
+	// The queue's tombstone deliberately survives an idle drain: it stays in
+	// the map, marked deleted, so a later stale publication for this task ID
+	// is dropped instead of silently recreating an un-tombstoned queue.
 	svc.taskPublicationMu.Lock()
-	defer svc.taskPublicationMu.Unlock()
-	if len(svc.taskPublications) != 0 {
-		t.Fatalf("idle publication dispatchers = %#v, want none", svc.taskPublications)
+	queue, ok := svc.taskPublications["task-1"]
+	svc.taskPublicationMu.Unlock()
+	if !ok {
+		t.Fatal("deleted task's publication queue should remain as a tombstone")
+	}
+	if !queue.deleted || queue.draining || len(queue.pending) != 0 {
+		t.Fatalf("tombstoned queue = %#v, want deleted=true, idle, empty", queue)
 	}
 	if got := len(eventBus.GetPublishedEvents()); got != 1 {
 		t.Fatalf("deleted publication count = %d, want 1", got)
+	}
+}
+
+// TestTaskPublication_StaleUpdateAfterDeletionIsDropped is the maintainer's
+// exact repro: task.updated -> task.deleted -> a stale task.updated. Before
+// the tombstone, drainTaskPublications deleted the queue's map entry once
+// idle, so the stale update recreated a fresh, un-tombstoned queue and
+// published normally — resurrecting a task the operator had just deleted on
+// the frontend, which upserts whatever it receives last.
+func TestTaskPublication_StaleUpdateAfterDeletionIsDropped(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+
+	svc.PublishTaskUpdated(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "update"})
+	svc.PublishTaskDeleted(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1"})
+	svc.PublishTaskUpdated(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "stale-after-delete"})
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 2 {
+		t.Fatalf("published %d events, want 2 (update, deleted); stale post-deletion update must be dropped: %#v", len(published), published)
+	}
+	for index, want := range []string{events.TaskUpdated, events.TaskDeleted} {
+		if published[index].Type != want {
+			t.Fatalf("event %d subject = %q, want %q", index, published[index].Type, want)
+		}
+	}
+}
+
+// TestTaskPublication_PendingEntriesQueuedBeforeDeletionAreDropped covers the
+// second repro leg: publications already queued (but not yet drained) behind
+// a blocked in-flight publication are moot once a task.deleted for the same
+// task lands — only the deletion publication itself should survive.
+func TestTaskPublication_PendingEntriesQueuedBeforeDeletionAreDropped(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+
+	barrier := &taskPublicationBarrierBus{
+		MockEventBus: eventBus,
+		entered:      make(chan struct{}, 1),
+		release:      make(chan struct{}),
+	}
+	svc.eventBus = barrier
+
+	blockedDone := make(chan struct{})
+	go func() {
+		svc.PublishTaskUpdated(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "ordinary"})
+		close(blockedDone)
+	}()
+	<-barrier.entered
+
+	// These two updates queue behind the blocked "ordinary" publication.
+	svc.PublishTaskUpdated(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "queued-1"})
+	svc.PublishTaskUpdated(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "queued-2"})
+	svc.PublishTaskDeleted(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1"})
+
+	close(barrier.release)
+	<-blockedDone
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 2 {
+		t.Fatalf("published %d events, want 2 (ordinary, deleted); pending updates queued before deletion must be dropped: %#v", len(published), published)
+	}
+	firstData, _ := published[0].Data.(map[string]interface{})
+	if firstData["title"] != "ordinary" {
+		t.Fatalf("event 0 title = %#v, want %q", firstData["title"], "ordinary")
+	}
+	if published[1].Type != events.TaskDeleted {
+		t.Fatalf("event 1 subject = %q, want %q", published[1].Type, events.TaskDeleted)
+	}
+}
+
+// TestTaskPublication_TaskCreatedAfterTombstoneClearsAndPublishes covers
+// theoretical ID reuse: a task.created enqueue for a tombstoned task ID must
+// clear the tombstone and publish normally again.
+func TestTaskPublication_TaskCreatedAfterTombstoneClearsAndPublishes(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+
+	svc.PublishTaskDeleted(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1"})
+	eventBus.ClearEvents()
+
+	svc.enqueueTaskPublication(ctx, "task-1", events.TaskCreated, func(publicationCtx context.Context) {
+		svc.publishTaskEventNow(publicationCtx, events.TaskCreated, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1"}, nil, nil, nil, nil)
+	})
+
+	published := eventBus.GetPublishedEvents()
+	if len(published) != 1 || published[0].Type != events.TaskCreated {
+		t.Fatalf("task.created after tombstone did not publish: %#v", published)
+	}
+
+	// A subsequent update now publishes normally: the tombstone is cleared.
+	// (The queue itself drains back out of the map like any non-tombstoned
+	// queue once idle — the tombstone's effect is that task.created was
+	// accepted at all, and that this and later publications are not dropped.)
+	svc.PublishTaskUpdated(ctx, &models.Task{ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "after-recreate"})
+	published = eventBus.GetPublishedEvents()
+	if len(published) != 2 || published[1].Type != events.TaskUpdated {
+		t.Fatalf("update after task.created recreate did not publish: %#v", published)
 	}
 }
 

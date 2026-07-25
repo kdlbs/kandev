@@ -101,8 +101,10 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	}
 	// The orchestrator also surfaces the in-memory fine-grained busy substate
 	// (ADR-0049). Derive the narrow provider from it so the
-	// session-fetch handlers can stamp foreground_activity onto RUNNING sessions
-	// without waiting for a WS flip. Nil (e.g. in tests) simply omits the field.
+	// session-fetch handlers can stamp foreground_activity onto sessions without
+	// waiting for a WS flip — generating for RUNNING sessions, background for any
+	// coarse state still holding detached work. Nil (e.g. in tests) simply omits
+	// the field.
 	if fa, ok := orchestrator.(dto.ForegroundActivityProvider); ok {
 		h.foregroundActivity = fa
 	}

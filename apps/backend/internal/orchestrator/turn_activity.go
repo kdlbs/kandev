@@ -29,12 +29,13 @@ import (
 // task has been explicitly registered for the session, so nothing changes for a
 // session that has no background work outstanding.
 type turnActivity struct {
-	mu         sync.Mutex
-	publishMu  sync.Mutex                // serializes event/task publication for this session
-	revision   uint64                    // invalidates delayed publications after newer mutations
-	background map[string]backgroundWork // outstanding work keyed by launch tool-call ID
-	tools      map[string]toolOwnership  // activity ownership established by the initial tool call
-	yielded    bool                      // foreground handed off to background work
+	mu            sync.Mutex
+	publishMu     sync.Mutex                // serializes event/task publication for this session
+	revision      uint64                    // invalidates delayed publications after newer mutations
+	background    map[string]backgroundWork // outstanding work keyed by launch tool-call ID
+	tools         map[string]toolOwnership  // activity ownership established by the initial tool call
+	yielded       bool                      // foreground handed off to background work
+	backgroundSeq uint64                    // next sequence number for a new background registration
 
 	// promptInFlight marks an admitted prompt that has claimed the foreground turn
 	// but has not yet been handed to the agent. It is deliberately independent of
@@ -67,6 +68,12 @@ type turnActivity struct {
 type backgroundWork struct {
 	executionID string
 	workID      string
+	// seq is a monotonically increasing per-session registration order,
+	// assigned only when a registration is first created. It lets an
+	// uncorrelated (ID-less) completion retire the oldest outstanding
+	// registration deterministically instead of guessing via Go's
+	// intentionally-random map iteration order.
+	seq uint64
 }
 
 type toolOwnership uint8
@@ -307,6 +314,14 @@ func (s *Service) registerBackgroundWork(sessionID, toolCallID, executionID, wor
 	if workID != "" {
 		updated.workID = workID
 	}
+	if !exists {
+		// Assign a sequence only for a brand-new entry: an update that merely
+		// backfills executionID/workID on an existing registration must keep
+		// its original seq, so FIFO retirement order reflects true
+		// registration order rather than the most recent backfill.
+		ta.backgroundSeq++
+		updated.seq = ta.backgroundSeq
+	}
 	if !exists || current != updated {
 		ta.revision++
 	}
@@ -365,11 +380,16 @@ func (s *Service) completeBackgroundTaskForExecution(sessionID, toolCallID, exec
 
 // completeBackgroundWork retires a provider completion. Identified completions
 // remove only their exact execution-scoped registration, making duplicate
-// delivery harmless. An ID-less completion is accepted only when exactly one
-// workload exists for the session. With multiple candidates there is no
-// accountable choice: fail closed and let a later identified event or execution
-// teardown reconcile them. In particular, never range a Go map and pretend its
-// intentionally-random iteration order is completion ordering.
+// delivery harmless. An ID-less completion retires exactly one outstanding
+// registration — the oldest by registration order (FIFO) — and leaves any
+// remainder live: Claude attributes an ID-less task-notification to the ACP
+// cycle that receives it, not necessarily the execution/cycle that launched
+// the async child, so there is no way to attribute it to a specific workload.
+// Retiring the oldest deterministically drains one registration per
+// completion instead of leaving every registration stuck forever whenever
+// more than one workload is outstanding. In particular, never range a Go map
+// and pretend its intentionally-random iteration order is completion
+// ordering — use the tracked seq instead.
 func (s *Service) completeBackgroundWorkSnapshot(
 	sessionID, executionID, workID string,
 	value interface{},
@@ -382,6 +402,7 @@ func (s *Service) completeBackgroundWorkSnapshot(
 	defer ta.mu.Unlock()
 
 	matchedToolCallID := ""
+	oldestSeq := uint64(0)
 	for toolCallID, work := range ta.background {
 		if workID != "" {
 			// Identified completion remains execution-scoped: a delayed exact event
@@ -396,14 +417,12 @@ func (s *Service) completeBackgroundWorkSnapshot(
 			}
 			continue
 		}
-		// Claude attributes an ID-less task-notification to the ACP cycle that
-		// receives it, not necessarily the execution/cycle that launched the async
-		// child. Search session-wide, but retire only a sole unambiguous candidate.
-		if matchedToolCallID != "" {
-			// More than one uncorrelated candidate is ambiguous.
-			return activityPublication{}, false
+		// Uncorrelated completion: track the oldest (lowest seq) candidate seen
+		// so far so the final choice is FIFO regardless of map iteration order.
+		if matchedToolCallID == "" || work.seq < oldestSeq {
+			matchedToolCallID = toolCallID
+			oldestSeq = work.seq
 		}
-		matchedToolCallID = toolCallID
 	}
 	if matchedToolCallID == "" {
 		return activityPublication{}, false
