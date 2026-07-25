@@ -14,6 +14,15 @@ those actions to bounded remediation and delivery workers.
 
 Do not spawn subagents.
 
+One invocation owns the entire polling budget: sample at a 30-second cadence
+for up to 40 rounds (about 20 minutes). Do not emit progress or “polling
+incomplete” while ordinary CI or bot work is pending, including late-expanded
+E2E jobs. Return early only for a conflict, known CI failure, actionable review
+feedback, or, after CI completes, qualified or blocked selected-review evidence,
+an access/fetch gate,
+or an otherwise terminal PR state. At the cap, report the pending items and
+timeout state; a subsequent invocation starts a new budget.
+
 ## Inputs
 
 The planner will tell you the PR number (or rely on `gh pr view` against the current branch). If neither is available, return a report with `error=...` and stop.
@@ -38,11 +47,11 @@ ci_passed: <count or "unknown">
 ci_pending: <comma-separated names, "none", or "unknown">
 checks_evidence: checks_head_sha=<SHA|unknown> snapshot_complete=<true|false|unknown>
 bots:
-  coderabbit: <done|rate_limited|pending|timeout|unknown>  comments=<N or "unknown">
-  greptile:   <done|pending|timeout|unknown>              reviews=<N or "unknown">
-  claude:     <done|pending|timeout|unknown>              reviews=<N or "unknown">  path=<app|fork|none>
-  opencode:   <done|pending|timeout|unknown>              comments=<N or "unknown">
-  cubic:      <done|pending|timeout|unknown>              reviews=<N or "unknown">
+  coderabbit: <done|rate_limited|not_configured|pending|timeout|unknown>  comments=<N or "unknown">
+  greptile:   <done|not_configured|pending|timeout|unknown>              reviews=<N or "unknown">
+  claude:     <done|not_configured|pending|timeout|unknown>              reviews=<N or "unknown">  path=<app|fork|none>
+  opencode:   <done|not_configured|pending|timeout|unknown>              comments=<N or "unknown">
+  cubic:      <done|not_configured|pending|timeout|unknown>              reviews=<N or "unknown">
 unresolved_review_threads: <N or "unknown">
 actionable_issue_comments_from_bots: <N or "unknown">
 claude_summary: blockers=<N or "unknown"> suggestions=<N or "unknown"> verdict=<ready|ready_with_suggestions|blocked|unknown|none>
@@ -115,7 +124,7 @@ such as a DNS timeout or GitHub API failure, use the fetch-failure recovery path
       ```bash
       scripts/pr-state --trusted-reviewer "$selected_reviewer" <num>
       ```
-      Parse `.checks`, `.checks_head_sha`, `.checks_snapshot_complete`, `.review_threads`, `.unresolved_review_thread_count`, `.reviews`, `.issue_comments`, `.review_evidence`, and `.errors`. Derive `ci_failed`, `ci_pending`, bot terminal states, and whether the latest bot summaries are actionable in the poller from those raw arrays. The PR-view check snapshot is current-head complete only when `checks_snapshot_complete=true`; its `checks_head_sha` must equal both review evidence opening/closing heads before selected-review evidence can qualify. `.review_evidence` is exact-head evidence only when all three heads are known and identical; `current_head_sha` is the final observed head, while `evidence_head_sha` is present only for a stable combined collection. If check snapshot H1 and reviews are stable H2, emit `qualification=unknown` and retry/fall back; never pair their CI and review state. Only records whose `commit_id` equals `evidence_head_sha` qualify; timestamps never prove head coverage. `blocked_exact_current_head_reviews` aggregates every exact-head record with `eligibility=blocked`, regardless of author; old-head blockers are excluded. Use the record's machine-readable `eligibility` and `verdict`: approved is eligible only absent a blocker signal, commented is eligible only with `<!-- kandev-review: clean -->`, nonzero structured blockers, independently labeled Markdown `Blocker:`/`Blockers:` lines with descriptive values, or explicit blocked/changes-requested/action-required/must-fix evidence are blocked. `No blocker(s): ...`, `Blocker(s): 0`, and `| Blocker | 0 |` are nonblocking; later independent positive label lines still win. Dismissed/pending/unknown or ambiguous comments are never eligible. If `.errors` is non-empty, emit `unknown` for affected fields and explain the fetch failure in `recommendation:`. Do not backfill missing values from memory or from a generic CI template.
+      Parse `.checks`, `.checks_head_sha`, `.checks_snapshot_complete`, `.passed_check_count`, `.review_threads`, `.unresolved_review_thread_count`, `.reviews`, `.issue_comments`, `.review_evidence`, and `.errors`. Emit `ci_passed` from the normalized `passed_check_count` only when the snapshot is complete; do not recount raw check rows. A bot is configured only when the PR has its corresponding check, status, review, or comment, or when it is explicitly selected; otherwise emit `not_configured` rather than `pending`. Derive failures and actionable summaries from the remaining raw arrays. The PR-view check snapshot is current-head complete only when `checks_snapshot_complete=true`; its `checks_head_sha` must equal both review evidence opening/closing heads before selected-review evidence can qualify. `.review_evidence` is exact-head evidence only when all three heads are known and identical; `current_head_sha` is the final observed head, while `evidence_head_sha` is present only for a stable combined collection. If check snapshot H1 and reviews are stable H2, emit `qualification=unknown` and retry/fall back; never pair their CI and review state. Only records whose `commit_id` equals `evidence_head_sha` qualify; timestamps never prove head coverage. `blocked_exact_current_head_reviews` aggregates every exact-head record with `eligibility=blocked`, regardless of author; old-head blockers are excluded. Use the record's machine-readable `eligibility` and `verdict`: approved is eligible only absent a blocker signal, commented is eligible only with `<!-- kandev-review: clean -->`, nonzero structured blockers, independently labeled Markdown `Blocker:`/`Blockers:` lines with descriptive values, or explicit blocked/changes-requested/action-required/must-fix evidence are blocked. `No blocker(s): ...`, `Blocker(s): 0`, and `| Blocker | 0 |` are nonblocking; later independent positive label lines still win. Dismissed/pending/unknown or ambiguous comments are never eligible. If `.errors` is non-empty, emit `unknown` for affected fields and explain the fetch failure in `recommendation:`. Do not backfill missing values from memory or from a generic CI template.
 
    b. **Fallback raw CI status:**
       ```bash
@@ -170,7 +179,7 @@ such as a DNS timeout or GitHub API failure, use the fetch-failure recovery path
 
    d. **Exit conditions:**
       - With `selected_reviewer`, use `scripts/pr-state --trusted-reviewer "$selected_reviewer" <PR>`. After all CI checks complete, exit when `checks_snapshot_complete=true`, all three evidence heads match, its exact-current-head record has `eligibility=eligible`, and active changes requests, actionable unresolved threads, actionable issue comments, and `blocked_exact_current_head_review_count` are all known zero (`qualification=qualified`). Only the dedicated OpenCode App `${OPENCODE_REVIEW_APP_SLUG}[bot]` additionally requires emitted `trusted_producer=true`; it means both the raw dedicated-App marker predicate and exact authenticated workflow/job success passed. For other explicitly selected reviewers, `trusted_producer` is not a qualification gate. Any missing/failed API state or a latest non-success workflow/job requires local frontier fallback only for the dedicated App path; ambiguous/ineligible selected evidence always requires fallback.
-      - Without `selected_reviewer`, all CI checks completed AND every configured reviewer is in a terminal state (`done` / `rate_limited` / `timeout`) → exit loop.
+      - Without `selected_reviewer`, all CI checks completed AND every configured reviewer is in a terminal state (`done` / `rate_limited` / `timeout`); absent integrations are terminal as `not_configured` → exit loop.
       - Round 40 reached (≈20 min) → mark any still-pending CI checks under `ci_pending:` and any still-pending bots as `timeout`, then exit loop.
 
 4. **Fallback only: count unresolved review threads** via GraphQL (single call, not per-round). Skip this when `scripts/pr-state` already returned `.unresolved_review_thread_count` without a `review_threads` error:
@@ -216,7 +225,7 @@ such as a DNS timeout or GitHub API failure, use the fetch-failure recovery path
 7. **Emit the report.** Fill in the shape above exactly. Emit `checks_evidence` from `checks_head_sha`/`checks_snapshot_complete`; when it is not complete, do not describe CI as current-head green. For `review_evidence`, use `reviewer=none qualification=unqualified reviewed_head_sha=<current head> review_state=none eligibility=ineligible verdict=none trusted_producer=unknown active_changes_requested=<N> blocked_exact_current_head_reviews=<N>` when no reviewer was selected. With a selected reviewer, report its latest exact-current-head record's `review_state`, `eligibility`, and `verdict`, and set `trusted_producer` from the canonical raw field. Emit `qualified` only when the PR-view check head plus review opening/closing heads are known, identical, and complete, that record is `eligible`, and active changes-request, actionable-thread, and blocked-exact-review counts are known zero; only the dedicated OpenCode App additionally requires `trusted_producer=true`. For non-OpenCode selected reviewers, neither `trusted_producer=false` nor `unknown` changes generic qualification. Emit `blocked` when any such count is nonzero or the selected record is `blocked`, `unqualified` for an ineligible/ambiguous/no selected record (or a dedicated App without `trusted_producer=true`), and `unknown` when evidence/head data is incomplete. A changed head invalidates every prior record. Use green wording only
    when the report is complete and every required value is known: `ci_failed`
    is known empty, `ci_pending` is `none`, every configured reviewer is done or
-   `rate_limited`, mergeability and local conflict state are known clean, and
+   `rate_limited` (and every absent integration is `not_configured`), mergeability and local conflict state are known clean, and
    all required counts are known. The `recommendation:` line is one short
    sentence chosen from this menu, picking the first that applies:
    - `"GitHub access requires approval; planner must surface the approval gate to the user and must not relaunch polling."` if the network escalation or approval request was denied, cancelled, or interrupted

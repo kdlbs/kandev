@@ -130,6 +130,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
+| [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

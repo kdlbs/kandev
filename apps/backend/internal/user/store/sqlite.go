@@ -443,6 +443,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"repository_ids":                  settings.RepositoryIDs,
 		"tasks_list_sort":                 models.NormalizeTasksListSort(settings.TasksListSort),
 		"tasks_list_group":                models.NormalizeTasksListGroup(settings.TasksListGroup),
+		"tasks_list_show_details":         settings.TasksListShowDetails,
 		"initial_setup_complete":          settings.InitialSetupComplete,
 		"preferred_shell":                 settings.PreferredShell,
 		"default_editor_id":               settings.DefaultEditorID,
@@ -587,6 +588,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		RepositoryIDs               []string                            `json:"repository_ids"`
 		TasksListSort               string                              `json:"tasks_list_sort"`
 		TasksListGroup              string                              `json:"tasks_list_group"`
+		TasksListShowDetails        bool                                `json:"tasks_list_show_details"`
 		InitialSetupComplete        bool                                `json:"initial_setup_complete"`
 		PreferredShell              string                              `json:"preferred_shell"`
 		DefaultEditorID             string                              `json:"default_editor_id"`
@@ -631,6 +633,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.RepositoryIDs = payload.RepositoryIDs
 	settings.TasksListSort = models.NormalizeTasksListSort(payload.TasksListSort)
 	settings.TasksListGroup = models.NormalizeTasksListGroup(payload.TasksListGroup)
+	settings.TasksListShowDetails = payload.TasksListShowDetails
 	settings.InitialSetupComplete = payload.InitialSetupComplete
 	settings.PreferredShell = payload.PreferredShell
 	settings.DefaultEditorID = payload.DefaultEditorID

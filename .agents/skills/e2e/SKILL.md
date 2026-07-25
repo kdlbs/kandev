@@ -137,6 +137,14 @@ Without this, tests run against stale code and failures are misleading. `make bu
 4. Use page objects for common interactions; create new ones for new pages
 5. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
 
+### Input-modality behavior
+
+For a touch-specific interaction, use Playwright `.tap()` rather than `.click()`
+so the app receives a touch `pointerType`. Run focused mobile specs with
+`-- --project=mobile-chrome`; otherwise Playwright can report no matching tests.
+After the interaction settles, assert the resulting state and exercise a later
+mouse or pen entry when the UI maintains hybrid-device pointer state.
+
 ### Visual alignment regressions
 
 For a UI change whose contract is a rendered size or alignment relationship,

@@ -91,7 +91,19 @@ explicitly requests task tracking.
    - Screenshots must use synthetic or redacted data. Reject any asset that
      exposes secrets, authentication tokens, or personally identifiable
      information, and stop with a recapture request.
-   - Compress PNGs before embedding: `pngquant --quality 65-90 --ext .png --force apps/web/.pr-assets/*.png`.
+   - Compress PNGs before embedding. Prefer a system `pngquant`; when it is
+     unavailable, use the supported ephemeral fallback rather than skipping
+     compression:
+     ```bash
+     if command -v pngquant >/dev/null 2>&1; then
+       pngquant --quality 65-90 --ext .png --force apps/web/.pr-assets/*.png
+     else
+       (
+         cd apps
+         pnpm dlx pngquant-bin@9.0.0 --quality 65-90 --ext .png --force web/.pr-assets/*.png
+       )
+     fi
+     ```
 
    **Embed (GitHub only — image binaries must never merge into `main`):** GitHub has no public API to upload images into a PR body (drag-and-drop is web-UI only), so publish the images on an orphan commit that can never be merged and reference them with SHA-pinned raw URLs:
    ```bash
@@ -112,9 +124,21 @@ explicitly requests task tracking.
    ```
    `gh pr edit` fails on this repo (GraphQL touches the deprecated Projects-classic API). Fall back to REST — build the payload with `jq --rawfile`, never by hand-escaping shell strings:
    ```bash
-   jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
+   if command -v rtk >/dev/null 2>&1; then
+     rtk proxy jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
+     rtk proxy jq empty /tmp/pr-body-payload.json
+   else
+     jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
+     jq empty /tmp/pr-body-payload.json
+   fi
    gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input /tmp/pr-body-payload.json
    ```
+   **RTK and JSON payloads:** RTK is optional. If it is installed, it
+   summarizes normal stdout, so it must not sit between a JSON producer and a
+   redirected file or another parser. The conditional recipe above keeps the
+   REST fallback byte-preserving whether or not RTK is installed.
+   The same rule applies to command substitutions, `xargs`, and any other
+   consumer that expects unmodified Git or JSON output.
 
    **Preserve the existing PR description:** The PR body is a shared, mutable
    document. Preview automation and other bots may add sections after the PR

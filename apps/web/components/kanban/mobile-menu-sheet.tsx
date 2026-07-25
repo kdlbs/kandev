@@ -53,16 +53,6 @@ function getRepositoryPlaceholder(loading: boolean, empty: boolean): string {
   return "Select repository";
 }
 
-function getMobileViewValue(
-  currentPage: string,
-  kanbanViewMode: string | null,
-  isMobile: boolean,
-): string {
-  if (currentPage === "tasks") return "list";
-  if (!isMobile && kanbanViewMode === "graph2") return "pipeline";
-  return "kanban";
-}
-
 type MobileDisplayOptionsProps = {
   activeWorkflowId: string | null;
   workflows: WorkflowsState["items"];
@@ -73,6 +63,9 @@ type MobileDisplayOptionsProps = {
   onRepositoryChange: (value: string | "all") => void;
   enablePreviewOnClick: boolean | undefined;
   onTogglePreviewOnClick: ((checked: boolean) => void) | undefined;
+  tasksListShowDetails: boolean;
+  onToggleTasksListShowDetails: (checked: boolean) => void;
+  showTaskDetails: boolean;
   showWorkflow: boolean;
 };
 
@@ -85,7 +78,14 @@ function MobileDisplaySelects({
   repositoriesLoading,
   onRepositoryChange,
   showWorkflow,
-}: Omit<MobileDisplayOptionsProps, "enablePreviewOnClick" | "onTogglePreviewOnClick">) {
+}: Omit<
+  MobileDisplayOptionsProps,
+  | "enablePreviewOnClick"
+  | "onTogglePreviewOnClick"
+  | "tasksListShowDetails"
+  | "onToggleTasksListShowDetails"
+  | "showTaskDetails"
+>) {
   return (
     <>
       {showWorkflow && (
@@ -137,7 +137,14 @@ function MobileDisplaySelects({
 }
 
 function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
-  const { enablePreviewOnClick, onTogglePreviewOnClick, ...selectProps } = props;
+  const {
+    enablePreviewOnClick,
+    onTogglePreviewOnClick,
+    tasksListShowDetails,
+    onToggleTasksListShowDetails,
+    showTaskDetails,
+    ...selectProps
+  } = props;
   return (
     <div className="space-y-4">
       <label className={mobileSectionTitleClass}>Display Options</label>
@@ -154,6 +161,21 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
           <span className="text-sm">Open preview on click</span>
         </label>
       </div>
+      {showTaskDetails && (
+        <div className={mobileFieldClass}>
+          <label className={mobileFieldLabelClass}>List rows</label>
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
+            <Checkbox
+              checked={tasksListShowDetails}
+              onCheckedChange={(checked) => onToggleTasksListShowDetails(checked === true)}
+            />
+            <span>Show task details</span>
+          </label>
+          <p className="pl-6 text-xs text-muted-foreground">
+            Add repository, pull request, session, parent, and review context to List rows.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -387,28 +409,31 @@ export function MobileMenuSheet({
     allRepositoriesSelected,
     selectedRepositoryId,
     enablePreviewOnClick,
+    tasksListShowDetails,
     onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
-    kanbanViewMode,
+    onToggleTasksListShowDetails,
+    effectiveTaskListingView,
     onViewModeChange,
   } = useKanbanDisplaySettings();
 
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
-  const viewValue = getMobileViewValue(currentPage, kanbanViewMode, isMobile);
+  const viewValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;
 
   const handleViewChange = (value: string) => {
     if (!value) return;
     if (value === "list") {
+      onViewModeChange("list");
       if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
       onOpenChange(false);
     } else if (value === "kanban") {
+      onViewModeChange("kanban");
       if (currentPage !== "kanban") router.push("/");
-      if (!isMobile) onViewModeChange("");
       onOpenChange(false);
     } else if (value === "pipeline" && !isMobile) {
+      onViewModeChange("pipeline");
       if (currentPage !== "kanban") router.push("/");
-      onViewModeChange("graph2");
       onOpenChange(false);
     }
   };
@@ -437,6 +462,9 @@ export function MobileMenuSheet({
         onRepositoryChange={onRepositoryChange}
         enablePreviewOnClick={enablePreviewOnClick}
         onTogglePreviewOnClick={onTogglePreviewOnClick}
+        tasksListShowDetails={tasksListShowDetails}
+        onToggleTasksListShowDetails={onToggleTasksListShowDetails}
+        showTaskDetails={currentPage === "tasks"}
         showWorkflow={!isMobile || currentPage !== "kanban"}
       />
 

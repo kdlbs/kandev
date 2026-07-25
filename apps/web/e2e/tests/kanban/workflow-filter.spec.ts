@@ -69,6 +69,32 @@ test.describe("Kanban workflow filter", () => {
     });
   });
 
+  test("keeps All Workflows selected for a one-workflow workspace after reopening and reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    if (workflowBId) {
+      await apiClient.deleteWorkflow(workflowBId);
+      workflowBId = null;
+    }
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: seedData.workflowId,
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await selectWorkflowFilter(testPage, "All Workflows");
+    await testPage.getByTestId("display-button").click();
+    await expect(testPage.getByTestId("display-workflow-filter")).toContainText("All Workflows");
+    await closeDisplayDropdown(testPage);
+
+    await testPage.reload();
+    await testPage.getByTestId("display-button").click();
+    await expect(testPage.getByTestId("display-workflow-filter")).toContainText("All Workflows");
+  });
+
   // Regression: c64e835 made resolveDesiredWorkflowId fall back to the first
   // visible workflow whenever both the active id and persisted setting were
   // null. The kanban page's useWorkflowSelection effect then silently

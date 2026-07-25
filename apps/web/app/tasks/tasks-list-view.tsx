@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import type { PaginationState } from "@tanstack/react-table";
-import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
@@ -13,10 +12,10 @@ import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
-import { getTaskStateIcon, isTaskInFlight } from "@/lib/ui/state-icons";
-import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
+import { isTaskInFlight } from "@/lib/ui/state-icons";
 import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
+import { TaskListRowPrimaryContent } from "./rich-task-list-row";
 import {
   TASKS_LIST_GROUP_OPTIONS,
   TASKS_LIST_SORT_OPTIONS,
@@ -36,6 +35,7 @@ export type TasksListViewProps = {
   tasks: Task[];
   workflows: Workflow[];
   repositories: Repository[];
+  showTaskDetails: boolean;
   pageCount: number;
   pagination: PaginationState;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
@@ -58,6 +58,7 @@ export function TasksListView({
   tasks,
   workflows,
   repositories,
+  showTaskDetails,
   pageCount,
   pagination,
   setPagination,
@@ -83,6 +84,7 @@ export function TasksListView({
           tasks={tasks}
           workflows={workflows}
           repositories={repositories}
+          showTaskDetails={showTaskDetails}
           tasksListGroup={tasksListGroup}
           isLoading={isLoading}
           deletingTaskId={deletingTaskId}
@@ -193,6 +195,7 @@ function TaskRows({
   tasks,
   workflows,
   repositories,
+  showTaskDetails,
   tasksListGroup,
   isLoading,
   deletingTaskId,
@@ -204,6 +207,7 @@ function TaskRows({
   tasks: Task[];
   workflows: Workflow[];
   repositories: Repository[];
+  showTaskDetails: boolean;
   tasksListGroup: TasksListGroup;
   isLoading: boolean;
   deletingTaskId: string | null;
@@ -245,6 +249,9 @@ function TaskRows({
           onUnarchive={onUnarchive}
           onDelete={onDelete}
           onRowClick={onRowClick}
+          repositories={repositories}
+          parentTasks={tasks}
+          showTaskDetails={showTaskDetails}
         />
       ))}
     </div>
@@ -361,6 +368,9 @@ function flattenTaskTree(nodes: TaskTreeNode[]): TaskTreeNode[] {
 function TaskListRow({
   task,
   level,
+  repositories,
+  parentTasks,
+  showTaskDetails,
   deletingTaskId,
   onArchive,
   onUnarchive,
@@ -369,6 +379,9 @@ function TaskListRow({
 }: {
   task: Task;
   level: number;
+  repositories: Repository[];
+  parentTasks: Task[];
+  showTaskDetails: boolean;
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
@@ -379,16 +392,6 @@ function TaskListRow({
   const [showArchiveConfirm, setShowArchiveConfirm] = useState(false);
   const isDeleting = deletingTaskId === task.id;
   const isArchived = !!task.archived_at;
-  // Carry the sidebar's rich "needs me" reading to the list row: derive the
-  // message-derived pending-clarification / pending-permission flags (with the
-  // boot-payload snapshot fallback) instead of collapsing to the coarse state
-  // Waiting-for-input takes precedence over the work-state indicator.
-  const pendingInput = useTaskPendingInput(task.primary_session_id, {
-    taskId: task.id,
-    taskPendingAction: task.task_pending_action,
-    primarySessionState: task.primary_session_state,
-    primarySessionPendingAction: task.primary_session_pending_action,
-  });
 
   return (
     <div
@@ -406,30 +409,13 @@ function TaskListRow({
         }
       }}
     >
-      <div
-        className="flex min-w-0 items-center gap-2"
-        data-testid="tasks-list-row-content"
-        style={{ paddingLeft: `${level * 28}px` }}
-      >
-        {getTaskStateIcon(
-          task.state,
-          "h-4 w-4 shrink-0",
-          pendingInput.clarification,
-          task.foreground_activity,
-          pendingInput.permission,
-        )}
-        <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
-          {task.title}
-        </span>
-        {isArchived && (
-          <Badge
-            variant="outline"
-            className="shrink-0 border-amber-500/30 px-1.5 py-0 text-[10px] text-amber-500"
-          >
-            Archived
-          </Badge>
-        )}
-      </div>
+      <TaskListRowPrimaryContent
+        task={task}
+        level={level}
+        repositories={repositories}
+        parentTasks={parentTasks}
+        showTaskDetails={showTaskDetails}
+      />
       <div className="flex items-center justify-between gap-3 md:justify-end">
         <span className="hidden text-xs text-muted-foreground sm:inline">
           {formatRelativeTime(task.updated_at)}
@@ -453,6 +439,9 @@ function TaskListRow({
 
 function TaskListSectionView({
   section,
+  repositories,
+  parentTasks,
+  showTaskDetails,
   deletingTaskId,
   onArchive,
   onUnarchive,
@@ -460,6 +449,9 @@ function TaskListSectionView({
   onRowClick,
 }: {
   section: TaskListSection;
+  repositories: Repository[];
+  parentTasks: Task[];
+  showTaskDetails: boolean;
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
@@ -481,6 +473,9 @@ function TaskListSectionView({
             key={task.id}
             task={task}
             level={level}
+            repositories={repositories}
+            parentTasks={parentTasks}
+            showTaskDetails={showTaskDetails}
             deletingTaskId={deletingTaskId}
             onArchive={onArchive}
             onUnarchive={onUnarchive}

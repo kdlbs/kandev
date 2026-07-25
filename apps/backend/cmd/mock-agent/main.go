@@ -40,6 +40,8 @@ type mockAgent struct {
 	mu              sync.Mutex
 }
 
+var _ acp.Agent = (*mockAgent)(nil)
+
 func main() {
 	model := parseModelFlag()
 
@@ -323,6 +325,14 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	a.mu.Unlock()
 	_ = os.Remove(overloadedCounterPath(req.SessionId))
 	return acp.CloseSessionResponse{}, nil
+}
+
+// DeleteSession is not supported by the mock agent.
+func (a *mockAgent) DeleteSession(
+	_ context.Context,
+	_ acp.DeleteSessionRequest,
+) (acp.DeleteSessionResponse, error) {
+	return acp.DeleteSessionResponse{}, acp.NewMethodNotFound(acp.AgentMethodSessionDelete)
 }
 
 // ListSessions is not supported by the mock and returns an empty list.

@@ -5,6 +5,7 @@ import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { Message } from "@/lib/types/http";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { MessageListFooter } from "./message-list-footer";
 import {
   type MessageListProps,
@@ -12,7 +13,7 @@ import {
   MessageItem,
   getItemKey,
   getConversationLoadingState,
-  getSessionRunningState,
+  getEffectiveActiveTurnId,
   getLastTurnGroupId,
   getStreamingAgentMessageId,
 } from "./message-list-shared";
@@ -194,7 +195,8 @@ export const NativeMessageList = memo(function NativeMessageList({
     sessionState,
   });
   const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(sessionId);
-  const isRunning = getSessionRunningState(sessionState);
+  const { activeTurnId } = useSessionTurn(sessionId);
+  const effectiveActiveTurnId = getEffectiveActiveTurnId(activeTurnId, isWorking);
   const streamingMessageId = getStreamingAgentMessageId(messages);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
   const handleScrollToMessage = useScrollToMessage();
@@ -247,7 +249,7 @@ export const NativeMessageList = memo(function NativeMessageList({
               worktreePath={worktreePath}
               onOpenFile={onOpenFile}
               isLastGroup={item.type === "turn_group" && item.id === lastTurnGroupId}
-              isTurnActive={isRunning}
+              activeTurnId={effectiveActiveTurnId}
               streamingMessageId={streamingMessageId}
               onScrollToMessage={handleScrollToMessage}
             />

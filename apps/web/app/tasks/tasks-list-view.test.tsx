@@ -49,6 +49,7 @@ function props(tasks: Task[]): TasksListViewProps {
     tasks,
     workflows: [],
     repositories: [],
+    showTaskDetails: false,
     pageCount: 1,
     pagination: { pageIndex: 0, pageSize: 25 },
     setPagination: () => undefined,
@@ -61,11 +62,15 @@ function props(tasks: Task[]): TasksListViewProps {
   };
 }
 
-function renderList(task: Task, messagesBySession: Record<string, Message[]> = {}) {
+function renderList(
+  task: Task,
+  messagesBySession: Record<string, Message[]> = {},
+  showTaskDetails = false,
+) {
   return render(
     <StateProvider initialState={{ messages: { bySession: messagesBySession, metaBySession: {} } }}>
       <TooltipProvider>
-        <TasksListView {...props([task])} />
+        <TasksListView {...props([task])} showTaskDetails={showTaskDetails} />
       </TooltipProvider>
     </StateProvider>,
   );
@@ -88,6 +93,15 @@ describe("TasksListView row — waiting-for-input parity", () => {
     expect(container.querySelector(".tabler-icon-shield-question")).not.toBeNull();
     expect(container.querySelector(".tabler-icon-check")).toBeNull();
     expect(container.querySelector(".tabler-icon-loader-2")).toBeNull();
+  });
+
+  it("keeps the pending permission indicator when rich rows are enabled", () => {
+    const { container } = renderList(
+      makeTask({}),
+      { "session-1": [message({ type: "permission_request", metadata: { status: "pending" } })] },
+      true,
+    );
+    expect(container.querySelector(".tabler-icon-shield-question")).not.toBeNull();
   });
 
   it("falls back to the boot snapshot pending action when messages are not loaded", () => {

@@ -40,6 +40,10 @@ func (*sessionRequestCaptureAgent) CloseSession(context.Context, acpsdk.CloseSes
 	return acpsdk.CloseSessionResponse{}, nil
 }
 
+func (*sessionRequestCaptureAgent) DeleteSession(context.Context, acpsdk.DeleteSessionRequest) (acpsdk.DeleteSessionResponse, error) {
+	return acpsdk.DeleteSessionResponse{}, nil
+}
+
 func (*sessionRequestCaptureAgent) ListSessions(context.Context, acpsdk.ListSessionsRequest) (acpsdk.ListSessionsResponse, error) {
 	return acpsdk.ListSessionsResponse{}, nil
 }

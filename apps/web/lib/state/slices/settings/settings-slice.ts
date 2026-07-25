@@ -28,6 +28,7 @@ export const defaultSettingsState: SettingsSliceState = {
     repositoryIds: [],
     tasksListSort: DEFAULT_TASKS_LIST_SORT,
     tasksListGroup: DEFAULT_TASKS_LIST_GROUP,
+    tasksListShowDetails: false,
     preferredShell: null,
     shellOptions: [],
     defaultEditorId: null,

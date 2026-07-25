@@ -31,6 +31,8 @@
 #   - since: { head_oid, committed_at } or null
 #   - failed_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
 #   - pending_checks: [{ name, workflow, status, run_id, job_id, details_url, target_url }]
+#   - successful_checks: [{ name, workflow, status, conclusion, run_id, job_id, details_url, target_url }]
+#   - passed_check_count: <N>
 #   - checks_head_sha: <SHA or null>
 #   - checks_snapshot_complete: <boolean>
 #   - unresolved_review_thread_count: <N>
@@ -483,6 +485,10 @@ summarize_state_json() {
       and .status != "failure"
       and .status != "error";
 
+    def successful_check:
+      (.status == "completed" and .conclusion == "success")
+      or (.status == "success" and (.conclusion == null or .conclusion == "success"));
+
     {
       pr,
       since,
@@ -498,6 +504,12 @@ summarize_state_json() {
         | select(pending_status and .conclusion == null)
         | {name, workflow, status, run_id, job_id, details_url, target_url}
       ],
+      successful_checks: [
+        effective_checks[]
+        | select(successful_check)
+        | {name, workflow, status, conclusion, run_id, job_id, details_url, target_url}
+      ],
+      passed_check_count: ([effective_checks[] | select(successful_check)] | length),
       unresolved_review_thread_count,
       filtered_review_thread_count,
       review_evidence,

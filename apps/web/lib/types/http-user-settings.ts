@@ -53,6 +53,7 @@ export type UserSettings = {
   repository_ids: string[];
   tasks_list_sort?: string;
   tasks_list_group?: string;
+  tasks_list_show_details?: boolean;
   initial_setup_complete?: boolean;
   preferred_shell?: string;
   default_editor_id?: string;
@@ -102,6 +103,7 @@ export type UserSettingsUpdatePayload = {
   repository_ids?: string[];
   tasks_list_sort?: string;
   tasks_list_group?: string;
+  tasks_list_show_details?: boolean;
   preferred_shell?: string;
   default_editor_id?: string;
   enable_preview_on_click?: boolean;

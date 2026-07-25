@@ -560,13 +560,26 @@ func (sm *SessionManager) buildEffectivePrompt(execution *AgentExecution, prompt
 }
 
 // waitForPromptDone waits for the prompt to complete, checking for stalls periodically.
-func (sm *SessionManager) waitForPromptDone(ctx context.Context, execution *AgentExecution) (*PromptResult, error) {
+func (sm *SessionManager) waitForPromptDone(
+	ctx context.Context,
+	execution *AgentExecution,
+	promptGeneration uint64,
+) (*PromptResult, error) {
 	stallTicker := time.NewTicker(30 * time.Second)
 	defer stallTicker.Stop()
 
 	for {
 		select {
 		case signal := <-execution.promptDoneCh:
+			if signal.PromptGeneration != 0 &&
+				promptGeneration != 0 &&
+				signal.PromptGeneration != promptGeneration {
+				sm.logger.Debug("ignoring completion signal for superseded prompt generation",
+					zap.String("execution_id", execution.ID),
+					zap.Uint64("signal_prompt_generation", signal.PromptGeneration),
+					zap.Uint64("active_prompt_generation", promptGeneration))
+				continue
+			}
 			if signal.IsError {
 				sm.logger.Error("prompt completed with error",
 					zap.String("execution_id", execution.ID),
@@ -703,7 +716,7 @@ func (sm *SessionManager) sendPrompt(
 	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, attachments, promptGeneration); err != nil {
 		return nil, err
 	}
-	return sm.finishAcceptedPrompt(preparedCtx, execution, dispatchOnly, onDispatched)
+	return sm.finishAcceptedPrompt(preparedCtx, execution, dispatchOnly, onDispatched, promptGeneration)
 }
 
 func (sm *SessionManager) preparePrompt(
@@ -745,12 +758,11 @@ func (sm *SessionManager) preparePrompt(
 		promptGeneration = beginExecutionPrompt(execution)
 	}
 
-	execution.messageMu.Lock()
-	execution.messageBuffer.Reset()
-	execution.thinkingBuffer.Reset()
-	execution.currentMessageID = ""
-	execution.currentThinkingID = ""
-	execution.messageMu.Unlock()
+	// A disconnect can release the prior SendPrompt before its disconnect
+	// callback has persisted a partial assistant response. Drain that history
+	// segment before resetting the streaming state; the callback uses the same
+	// locked drain, so the segment is persisted at most once.
+	resetStreamingStateWithHistory(execution, sm.historyManager, sm.logger)
 
 	effectivePrompt := sm.buildEffectivePrompt(execution, prompt)
 	sm.logger.Info("sending prompt to agent",
@@ -807,6 +819,7 @@ func (sm *SessionManager) finishAcceptedPrompt(
 	execution *AgentExecution,
 	dispatchOnly bool,
 	onDispatched func(),
+	promptGeneration uint64,
 ) (*PromptResult, error) {
 	if dispatchOnly {
 		execution.dispatchedPromptPending = true
@@ -818,7 +831,7 @@ func (sm *SessionManager) finishAcceptedPrompt(
 		return &PromptResult{StopReason: PromptStopReasonDispatched}, nil
 	}
 	// Wait for completion signal from handleAgentEvent(complete) or stream disconnect.
-	return sm.waitForPromptDone(ctx, execution)
+	return sm.waitForPromptDone(ctx, execution, promptGeneration)
 }
 
 func (sm *SessionManager) dispatchPrompt(

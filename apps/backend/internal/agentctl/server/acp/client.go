@@ -390,16 +390,17 @@ func (c *Client) CreateTerminal(ctx context.Context, p acp.CreateTerminalRequest
 		span.RecordError(err)
 		return acp.CreateTerminalResponse{}, err
 	}
-	return acp.CreateTerminalResponse{TerminalId: id}, nil
+	return acp.CreateTerminalResponse{TerminalId: acp.TerminalId(id)}, nil
 }
 
 // KillTerminal sends SIGTERM to a terminal's process.
 func (c *Client) KillTerminal(ctx context.Context, p acp.KillTerminalRequest) (acp.KillTerminalResponse, error) {
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.kill_terminal")
 	defer span.End()
-	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
+	terminalID := string(p.TerminalId)
+	span.SetAttributes(attribute.String("terminal_id", terminalID))
 
-	if err := c.terminals.Kill(p.TerminalId); err != nil {
+	if err := c.terminals.Kill(terminalID); err != nil {
 		span.RecordError(err)
 		return acp.KillTerminalResponse{}, err
 	}
@@ -410,9 +411,10 @@ func (c *Client) KillTerminal(ctx context.Context, p acp.KillTerminalRequest) (a
 func (c *Client) TerminalOutput(ctx context.Context, p acp.TerminalOutputRequest) (acp.TerminalOutputResponse, error) {
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.terminal_output")
 	defer span.End()
-	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
+	terminalID := string(p.TerminalId)
+	span.SetAttributes(attribute.String("terminal_id", terminalID))
 
-	output, truncated, exitCode, signal, err := c.terminals.Output(p.TerminalId)
+	output, truncated, exitCode, signal, err := c.terminals.Output(terminalID)
 	if err != nil {
 		span.RecordError(err)
 		return acp.TerminalOutputResponse{}, err
@@ -435,9 +437,10 @@ func (c *Client) TerminalOutput(ctx context.Context, p acp.TerminalOutputRequest
 func (c *Client) ReleaseTerminal(ctx context.Context, p acp.ReleaseTerminalRequest) (acp.ReleaseTerminalResponse, error) {
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.release_terminal")
 	defer span.End()
-	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
+	terminalID := string(p.TerminalId)
+	span.SetAttributes(attribute.String("terminal_id", terminalID))
 
-	_ = c.terminals.Release(p.TerminalId)
+	_ = c.terminals.Release(terminalID)
 	return acp.ReleaseTerminalResponse{}, nil
 }
 
@@ -445,9 +448,10 @@ func (c *Client) ReleaseTerminal(ctx context.Context, p acp.ReleaseTerminalReque
 func (c *Client) WaitForTerminalExit(ctx context.Context, p acp.WaitForTerminalExitRequest) (acp.WaitForTerminalExitResponse, error) {
 	_, span := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, "", "request.wait_for_terminal_exit")
 	defer span.End()
-	span.SetAttributes(attribute.String("terminal_id", p.TerminalId))
+	terminalID := string(p.TerminalId)
+	span.SetAttributes(attribute.String("terminal_id", terminalID))
 
-	exitCode, signal, err := c.terminals.WaitForExit(p.TerminalId)
+	exitCode, signal, err := c.terminals.WaitForExit(terminalID)
 	if err != nil {
 		span.RecordError(err)
 		return acp.WaitForTerminalExitResponse{}, err
