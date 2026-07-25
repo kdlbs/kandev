@@ -73,7 +73,7 @@ func TestService_PollBeforeLocalSubscription_ReplaysCachedUpdateExactlyOnce(t *t
 	ctx := context.Background()
 	t.Setenv("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS", "true")
 	pool := newTestPool(t)
-	repo, closeRepo, err := notificationstore.Provide(pool.Writer(), pool.Reader())
+	repo, closeRepo, err := notificationstore.Provide(ctx, pool.Writer(), pool.Reader())
 	if err != nil {
 		t.Fatalf("provide notification repository: %v", err)
 	}

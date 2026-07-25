@@ -51,7 +51,7 @@ func TestPostgresBootInitializesRepositories(t *testing.T) {
 	}
 	log := newTestLogger()
 
-	pool, repos, cleanups, err := provideRepositories(cfg, log, "test-postgres-boot")
+	pool, repos, cleanups, err := provideRepositories(context.Background(), cfg, log, "test-postgres-boot")
 	if err != nil {
 		t.Fatalf("provide repositories with postgres: %v", err)
 	}

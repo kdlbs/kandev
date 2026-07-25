@@ -311,7 +311,7 @@ func startServices( //nolint:cyclop
 	// ============================================
 	log.Info("Initializing Task Service...")
 
-	dbPool, repos, repoCleanups, err := provideRepositories(cfg, log, Version)
+	dbPool, repos, repoCleanups, err := provideRepositories(ctx, cfg, log, Version)
 	if err != nil {
 		log.Error("Failed to initialize repositories", zap.Error(err))
 		return false

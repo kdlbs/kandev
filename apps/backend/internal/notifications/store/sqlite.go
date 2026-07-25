@@ -24,13 +24,13 @@ type sqliteRepository struct {
 
 var _ Repository = (*sqliteRepository)(nil)
 
-func newSQLiteRepositoryWithDB(writer, reader *sqlx.DB) (*sqliteRepository, error) {
-	return newSQLiteRepository(writer, reader, false)
+func newSQLiteRepositoryWithDB(ctx context.Context, writer, reader *sqlx.DB) (*sqliteRepository, error) {
+	return newSQLiteRepository(ctx, writer, reader, false)
 }
 
-func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
+func newSQLiteRepository(ctx context.Context, writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
 	repo := &sqliteRepository{db: writer, ro: reader, ownsDB: ownsDB}
-	if err := repo.initSchema(); err != nil {
+	if err := repo.initSchema(ctx); err != nil {
 		if ownsDB {
 			if closeErr := writer.Close(); closeErr != nil {
 				return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
@@ -48,7 +48,7 @@ func (r *sqliteRepository) Close() error {
 	return r.db.Close()
 }
 
-func (r *sqliteRepository) initSchema() error {
+func (r *sqliteRepository) initSchema(ctx context.Context) error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS notification_providers (
 		id TEXT PRIMARY KEY,
@@ -104,7 +104,7 @@ func (r *sqliteRepository) initSchema() error {
 	if err := r.migrateLegacySubscriptions(); err != nil {
 		return err
 	}
-	return r.migrateUpdateAvailableSubscriptions(context.Background())
+	return r.migrateUpdateAvailableSubscriptions(ctx)
 }
 
 const updateAvailableSubscriptionMigration = "add_system_update_available_to_local_and_system_v1"

@@ -49,6 +49,11 @@ func TestLocalProviderForwardsUpdatePayloadToSubscribedClient(t *testing.T) {
 		hub.Run(hubCtx)
 		close(hubDone)
 	}()
+	cleanupHub := func() {
+		cancelHub()
+		<-hubDone
+	}
+	t.Cleanup(cleanupHub)
 	clientReady := make(chan *gatewayws.Client, 1)
 	serverDone := make(chan struct{})
 	upgrader := websocket.Upgrader{}
@@ -65,22 +70,23 @@ func TestLocalProviderForwardsUpdatePayloadToSubscribedClient(t *testing.T) {
 		clientReady <- client
 		client.WritePump()
 	}))
-	defer server.Close()
-
-	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
-	if err != nil {
-		t.Fatalf("dial websocket: %v", err)
-	}
-	defer func() {
-		cancelHub()
+	t.Cleanup(func() {
+		cleanupHub()
 		select {
 		case <-serverDone:
 		case <-time.After(time.Second):
 			t.Error("websocket writer did not stop")
 		}
-		<-hubDone
+		server.Close()
+	})
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial websocket: %v", err)
+	}
+	t.Cleanup(func() {
 		_ = conn.Close()
-	}()
+	})
 	<-clientReady
 
 	provider := NewLocalProvider(hub)
