@@ -230,6 +230,17 @@ test.describe("Clarification flow", () => {
     await expect(input).toBeFocused();
     await input.pressSequentially("Use the embedded database for this task");
     await expect(input).toHaveValue("Use the embedded database for this task");
+    const [filledInputBox, filledInputRowBox] = await Promise.all([
+      input.boundingBox(),
+      inputRow.boundingBox(),
+    ]);
+    if (!filledInputBox || !filledInputRowBox) {
+      throw new Error("expected the filled custom answer input and row to have bounding boxes");
+    }
+    const inputCenter = filledInputBox.y + filledInputBox.height / 2;
+    const rowCenter = filledInputRowBox.y + filledInputRowBox.height / 2;
+    expect(Math.abs(inputCenter - rowCenter)).toBeLessThanOrEqual(1);
+
     await input.press("Enter");
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("Use the embedded database for this task");
