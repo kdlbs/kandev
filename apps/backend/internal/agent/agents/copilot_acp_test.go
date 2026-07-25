@@ -80,12 +80,10 @@ func TestCopilotACP_UsesPinnedPackageOnEveryNPMCommandSurface(t *testing.T) {
 	}
 }
 
-// TestCopilotACP_BuildCommand_PreferNativeBinary verifies that when the
-// lifecycle has found the standalone `copilot` CLI in the execution
-// environment, BuildCommand emits it directly instead of `npx -y <pkg>` —
-// skipping the npm registry round-trip that makes launches slow behind a
-// private registry.
-func TestCopilotACP_BuildCommand_PreferNativeBinary(t *testing.T) {
+// TestCopilotACP_BuildCommand_KeepsPinnedPackageWhenNativeBinaryIsPresent
+// prevents a globally installed or auto-updated Copilot binary from bypassing
+// the reviewed package pin.
+func TestCopilotACP_BuildCommand_KeepsPinnedPackageWhenNativeBinaryIsPresent(t *testing.T) {
 	ag := NewCopilotACP()
 
 	if name := ag.NativeBinaryName(); name != "copilot" {
@@ -93,7 +91,7 @@ func TestCopilotACP_BuildCommand_PreferNativeBinary(t *testing.T) {
 	}
 
 	native := ag.BuildCommand(CommandOptions{PreferNativeBinary: true}).Args()
-	wantNative := []string{"copilot", "--acp"}
+	wantNative := []string{"npx", "-y", "@github/copilot@1.0.75", "--acp"}
 	if len(native) != len(wantNative) {
 		t.Fatalf("native argv mismatch\n  got:  %#v\n  want: %#v", native, wantNative)
 	}

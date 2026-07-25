@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
 import json
 import subprocess
 import tempfile
@@ -151,6 +153,52 @@ class UpdateAgentVersionsTest(unittest.TestCase):
                 pins=(self.fixture_pin(),),
             )
 
+    def test_shared_versions_update_by_package_specific_template(self) -> None:
+        first_pin = self.updater.Pin(
+            agent="First",
+            package="@example/first",
+            source_path="first.go",
+            version_constant="firstVersion",
+            targets=(
+                self.updater.Target("first.go", 1, 'const firstVersion = "{version}"'),
+                self.updater.Target(
+                    "VERSIONS.md", 1, "| First | `@example/first` | `{version}` |"
+                ),
+            ),
+        )
+        second_pin = self.updater.Pin(
+            agent="Second",
+            package="@example/second",
+            source_path="second.go",
+            version_constant="secondVersion",
+            targets=(
+                self.updater.Target("second.go", 1, 'const secondVersion = "{version}"'),
+                self.updater.Target(
+                    "VERSIONS.md", 1, "| Second | `@example/second` | `{version}` |"
+                ),
+            ),
+        )
+        self.write("first.go", 'const firstVersion = "1.2.3"\n')
+        self.write("second.go", 'const secondVersion = "1.2.3"\n')
+        self.write(
+            "VERSIONS.md",
+            "| First | `@example/first` | `1.2.3` |\n"
+            "| Second | `@example/second` | `1.2.3` |\n",
+        )
+
+        updates = self.updater.update_repository(
+            self.root,
+            {"@example/first": "1.3.0", "@example/second": "1.4.0"},
+            pins=(first_pin, second_pin),
+        )
+
+        self.assertEqual(len(updates), 2)
+        self.assertEqual(
+            (self.root / "VERSIONS.md").read_text(),
+            "| First | `@example/first` | `1.3.0` |\n"
+            "| Second | `@example/second` | `1.4.0` |\n",
+        )
+
     def test_registry_lookup_parses_json_without_executing_package(self) -> None:
         completed = subprocess.CompletedProcess(
             args=[],
@@ -167,7 +215,23 @@ class UpdateAgentVersionsTest(unittest.TestCase):
             check=True,
             capture_output=True,
             text=True,
+            timeout=30,
         )
+
+    def test_main_returns_error_when_metadata_lookup_times_out(self) -> None:
+        stderr = io.StringIO()
+        with (
+            mock.patch.object(
+                self.updater.subprocess,
+                "run",
+                side_effect=subprocess.TimeoutExpired(["npm", "view"], 30),
+            ),
+            contextlib.redirect_stderr(stderr),
+        ):
+            status = self.updater.main()
+
+        self.assertEqual(status, 2)
+        self.assertIn("timed out", stderr.getvalue())
 
 
 if __name__ == "__main__":

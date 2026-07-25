@@ -8,7 +8,7 @@ package pins:
 | Claude | `@agentclientprotocol/claude-agent-acp` | `0.62.0` | Exact package spec through `npx` |
 | Codex | `@agentclientprotocol/codex-acp` | `1.1.7` | Exact package spec through `npx` |
 | OpenCode | `opencode-ai` | `1.18.5` | Installed `opencode` binary |
-| Copilot | `@github/copilot` | `1.0.75` | Exact package spec through `npx`, or the matching installed `copilot` binary |
+| Copilot | `@github/copilot` | `1.0.75` | Exact package spec through `npx` |
 | Gemini | `@google/gemini-cli` | `0.52.0` | Exact package spec through `npx` |
 
 Claude and Codex use their exact package specs for normal sessions, container

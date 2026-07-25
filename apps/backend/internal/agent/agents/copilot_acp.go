@@ -22,8 +22,8 @@ const (
 )
 
 // copilotNativeBinary is the standalone CLI installed by the @github/copilot
-// npm package. When present on PATH we run it directly instead of paying the
-// per-launch `npx` registry round-trip.
+// npm package. It remains available for discovery and preflight checks, but
+// ACP launches always use the exact package pin.
 const copilotNativeBinary = "copilot"
 
 var (
@@ -93,10 +93,9 @@ func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) 
 // execution environment. See NativeBinaryAgent.
 func (a *CopilotACP) NativeBinaryName() string { return copilotNativeBinary }
 
-func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
-	if opts.PreferNativeBinary {
-		return Cmd(copilotNativeBinary, "--acp").Build()
-	}
+func (a *CopilotACP) BuildCommand(CommandOptions) Command {
+	// A global Copilot CLI can auto-update independently of this reviewed pin.
+	// Keep ACP launch reproducible even when lifecycle discovery finds one.
 	return Cmd("npx", "-y", copilotACPPackageSpec, "--acp").Build()
 }
 

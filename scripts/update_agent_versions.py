@@ -18,6 +18,7 @@ STABLE_VERSION_RE = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9
 class Target(NamedTuple):
     path: str
     occurrences: int
+    template: str = "{version}"
 
 
 class Pin(NamedTuple):
@@ -46,6 +47,7 @@ class Update(NamedTuple):
 AGENT_DIR = "apps/backend/internal/agent/agents"
 LIFECYCLE_TEST = "apps/backend/internal/agent/runtime/lifecycle/manager_launch_test.go"
 VERSION_DOC = f"{AGENT_DIR}/ACP_BRIDGE_VERSIONS.md"
+NPM_METADATA_TIMEOUT_SECONDS = 30
 
 PINS = (
     Pin(
@@ -56,9 +58,17 @@ PINS = (
         (
             Target(f"{AGENT_DIR}/claude_acp.go", 1),
             Target(f"{AGENT_DIR}/claude_acp_test.go", 2),
-            Target(LIFECYCLE_TEST, 1),
-            Target("README.md", 1),
-            Target(VERSION_DOC, 1),
+            Target(
+                LIFECYCLE_TEST, 1, "@agentclientprotocol/claude-agent-acp@{version}"
+            ),
+            Target(
+                "README.md", 1, "@agentclientprotocol/claude-agent-acp@{version}"
+            ),
+            Target(
+                VERSION_DOC,
+                1,
+                "| Claude | `@agentclientprotocol/claude-agent-acp` | `{version}` |",
+            ),
         ),
     ),
     Pin(
@@ -69,9 +79,13 @@ PINS = (
         (
             Target(f"{AGENT_DIR}/codex_acp.go", 1),
             Target(f"{AGENT_DIR}/codex_acp_test.go", 2),
-            Target(LIFECYCLE_TEST, 1),
-            Target("README.md", 1),
-            Target(VERSION_DOC, 1),
+            Target(LIFECYCLE_TEST, 1, "@agentclientprotocol/codex-acp@{version}"),
+            Target("README.md", 1, "@agentclientprotocol/codex-acp@{version}"),
+            Target(
+                VERSION_DOC,
+                1,
+                "| Codex | `@agentclientprotocol/codex-acp` | `{version}` |",
+            ),
         ),
     ),
     Pin(
@@ -82,7 +96,10 @@ PINS = (
         (
             Target(f"{AGENT_DIR}/opencode_acp.go", 1),
             Target(f"{AGENT_DIR}/opencode_acp_test.go", 9),
-            Target(VERSION_DOC, 2),
+            Target(
+                VERSION_DOC, 1, "| OpenCode | `opencode-ai` | `{version}` |"
+            ),
+            Target(VERSION_DOC, 1, "opencode-ai@{version}"),
         ),
     ),
     Pin(
@@ -92,9 +109,13 @@ PINS = (
         "copilotACPVersion",
         (
             Target(f"{AGENT_DIR}/copilot_acp.go", 1),
-            Target(f"{AGENT_DIR}/copilot_acp_test.go", 4),
-            Target("README.md", 1),
-            Target(VERSION_DOC, 1),
+            Target(f"{AGENT_DIR}/copilot_acp_test.go", 5),
+            Target("README.md", 1, "@github/copilot@{version}"),
+            Target(
+                VERSION_DOC,
+                1,
+                "| Copilot | `@github/copilot` | `{version}` |",
+            ),
         ),
     ),
     Pin(
@@ -105,8 +126,12 @@ PINS = (
         (
             Target(f"{AGENT_DIR}/gemini.go", 1),
             Target(f"{AGENT_DIR}/gemini_test.go", 3),
-            Target("README.md", 1),
-            Target(VERSION_DOC, 1),
+            Target("README.md", 1, "@google/gemini-cli@{version}"),
+            Target(
+                VERSION_DOC,
+                1,
+                "| Gemini | `@google/gemini-cli` | `{version}` |",
+            ),
         ),
     ),
 )
@@ -125,6 +150,7 @@ def fetch_latest_version(package: str) -> str:
         check=True,
         capture_output=True,
         text=True,
+        timeout=NPM_METADATA_TIMEOUT_SECONDS,
     )
     version = json.loads(completed.stdout)
     if not isinstance(version, str):
@@ -173,14 +199,16 @@ def plan_updates(
             content = proposed.get(path)
             if content is None:
                 content = path.read_text()
-            actual = content.count(current)
+            current_target = target.template.format(version=current)
+            latest_target = target.template.format(version=latest)
+            actual = content.count(current_target)
             if actual != target.occurrences:
                 raise ValueError(
                     f"{target.path}: expected {target.occurrences} occurrences of "
-                    f"{current} for {pin.agent}, found {actual}"
+                    f"{current_target!r} for {pin.agent}, found {actual}"
                 )
             if current != latest:
-                proposed[path] = content.replace(current, latest)
+                proposed[path] = content.replace(current_target, latest_target)
 
         if current != latest:
             updates.append(Update(pin.agent, pin.package, current, latest))
@@ -223,8 +251,7 @@ def markdown_report(updates: Sequence[Update]) -> str:
     lines.extend(
         [
             "",
-            "Each agent update requires independent compatibility review. "
-            "This pull request is not auto-merged.",
+            "Each agent update requires independent compatibility review. This pull request is not auto-merged.",
             "",
         ]
     )
@@ -275,7 +302,13 @@ def run(argv: Sequence[str]) -> int:
 def main() -> int:
     try:
         return run(sys.argv[1:])
-    except (json.JSONDecodeError, OSError, subprocess.CalledProcessError, ValueError) as error:
+    except (
+        json.JSONDecodeError,
+        OSError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+        ValueError,
+    ) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
 
