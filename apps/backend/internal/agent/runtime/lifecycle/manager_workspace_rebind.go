@@ -8,6 +8,8 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+const agentctlProcessStatusRunning = "running"
+
 var (
 	workspaceRebindReadyTimeout  = 10 * time.Second
 	workspaceRebindReadyPoll     = 500 * time.Millisecond
@@ -116,7 +118,7 @@ func waitForReboundAgentReady(ctx context.Context, execution *AgentExecution) er
 	var lastErr error
 	for {
 		status, err := execution.agentctl.GetStatus(readyCtx)
-		if err == nil && status.AgentStatus == string(v1.AgentStatusRunning) {
+		if err == nil && status.AgentStatus == agentctlProcessStatusRunning {
 			return nil
 		}
 		if err != nil {
