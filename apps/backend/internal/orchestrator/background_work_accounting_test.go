@@ -716,3 +716,65 @@ func TestBackgroundActivity_ClaudeMetadataOnlyChildUpdateDoesNotReopenForeground
 		t.Fatalf("metadata-only child update changed activity to %q, want background", got)
 	}
 }
+
+func TestBackgroundActivity_ClaudeCachedChildUpdateDoesNotReopenForeground(t *testing.T) {
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = &mockMessageCreator{}
+	const taskID, sessionID = "task-claude-cached-child", "session-claude-cached-child"
+
+	svc.registerBackgroundTask(sessionID, "async-agent")
+	svc.markForegroundIdle(sessionID)
+
+	childPayload := streams.NewGeneric("other", map[string]any{"query": "select:Monitor"})
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             agentEventToolCall,
+			ToolCallID:       "child-tool-search",
+			ParentToolCallID: "async-agent",
+			ToolStatus:       "running",
+			Normalized:       childPayload,
+		},
+	})
+
+	// Claude's next update temporarily omits parentToolUseId. The ACP adapter
+	// still attaches the normalized payload cached from the initial child call,
+	// so ownership must come from the original call rather than this partial
+	// update's shape.
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "tool_update",
+			ToolCallID: "child-tool-search",
+			Normalized: childPayload,
+		},
+	})
+
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("cached child update changed activity to %q, want background", got)
+	}
+}
+
+func TestBackgroundActivity_UnknownToolUpdatePreservesActivity(t *testing.T) {
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	const taskID, sessionID = "task-unknown-tool", "session-unknown-tool"
+
+	svc.registerBackgroundTask(sessionID, "async-agent")
+	svc.markForegroundIdle(sessionID)
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID:    taskID,
+		SessionID: sessionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "tool_update",
+			ToolCallID: "update-without-initial-call",
+			ToolStatus: "in_progress",
+			Normalized: streams.NewGeneric("other", map[string]any{"result": "partial"}),
+		},
+	})
+
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("unknown tool update changed activity to %q, want background", got)
+	}
+}

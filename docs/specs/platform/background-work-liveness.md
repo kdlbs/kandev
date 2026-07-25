@@ -52,7 +52,7 @@ and incorrectly prevents prompt delivery.
 
 | State | Entry | Exit |
 | --- | --- | --- |
-| generating | A prompt is claimed, dispatched, or emits top-level foreground output. | The current prompt yields or completes, unless more foreground activity arrives. |
+| generating | A prompt is claimed or dispatched, or known top-level foreground work emits output. | The current prompt yields or completes, unless more foreground activity arrives. |
 | background-running | The foreground is idle and one or more recognized workloads remain registered. | A foreground prompt/output takes precedence, or the final workload completes or is torn down. |
 | idle/done | Neither foreground ownership nor recognized background work remains. | A foreground prompt/output or recognized workload begins. |
 
@@ -65,6 +65,10 @@ execution so each prompt owns its completion wait and response buffers.
 
 - An unknown activity value for an in-flight `RUNNING` session is rendered as
   generating, not done.
+- Tool-call ownership is established by the initial call and retained across
+  incremental updates. An update with unknown ownership preserves the current
+  activity; missing parent metadata is not evidence that background-child work
+  became foreground work.
 - A task aggregate that cannot be recomputed preserves its last-known value
   rather than publishing a spurious done reading.
 - When provider completion identifies a workload, only that registration is
@@ -95,6 +99,9 @@ Durable coarse state continues to survive as before.
   or sidebar, **THEN** it does not show done.
 - **GIVEN** a detached workload launch completes, **WHEN** no workload terminal
   signal has arrived, **THEN** the session stays background-running.
+- **GIVEN** a child tool call was attributed to recognized background work,
+  **WHEN** an incremental update temporarily omits its parent metadata,
+  **THEN** the session remains background-running.
 - **GIVEN** a freshly loaded page or a second browser tab, **WHEN** a connected
   session has current background activity, **THEN** its task and session
   surfaces show background-running without waiting for a transition.

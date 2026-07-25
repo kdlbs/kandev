@@ -513,6 +513,18 @@ func TestForegroundActivitySignal_SamePromptOutputAfterIdleDoesNotInvalidateComp
 					Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
 				},
 			})
+			if tt.outputType == "tool_update" {
+				svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+					TaskID:    taskID,
+					SessionID: sessionID,
+					Data: &lifecycle.AgentStreamEventData{
+						Type:       agentEventToolCall,
+						ToolCallID: "foreground-tool-1",
+						ToolStatus: "running",
+						Normalized: streams.NewShellExec("go test ./...", "", "", 0, false),
+					},
+				})
+			}
 			emitForegroundIdle(svc, taskID, sessionID)
 			svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
 				TaskID:    taskID,

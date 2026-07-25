@@ -33,6 +33,7 @@ type turnActivity struct {
 	publishMu  sync.Mutex                // serializes event/task publication for this session
 	revision   uint64                    // invalidates delayed publications after newer mutations
 	background map[string]backgroundWork // outstanding work keyed by launch tool-call ID
+	tools      map[string]toolOwnership  // activity ownership established by the initial tool call
 	yielded    bool                      // foreground handed off to background work
 
 	// promptInFlight marks an admitted prompt that has claimed the foreground turn
@@ -67,6 +68,15 @@ type backgroundWork struct {
 	executionID string
 	workID      string
 }
+
+type toolOwnership uint8
+
+const (
+	toolOwnershipUnknown toolOwnership = iota
+	toolOwnershipForeground
+	toolOwnershipBackground
+	toolOwnershipChild
+)
 
 type activityPublication struct {
 	activity *turnActivity
@@ -113,9 +123,45 @@ func (s *Service) turnActivityFor(sessionID string, create bool) *turnActivity {
 	if !create {
 		return nil
 	}
-	ta := &turnActivity{background: make(map[string]backgroundWork)}
+	ta := &turnActivity{
+		background: make(map[string]backgroundWork),
+		tools:      make(map[string]toolOwnership),
+	}
 	actual, _ := s.foregroundActivity.LoadOrStore(sessionID, ta)
 	return actual.(*turnActivity)
+}
+
+func (s *Service) recordToolOwnership(sessionID, toolCallID string, ownership toolOwnership) {
+	if sessionID == "" || toolCallID == "" || ownership == toolOwnershipUnknown {
+		return
+	}
+	ta := s.turnActivityFor(sessionID, true)
+	ta.mu.Lock()
+	if ta.tools == nil {
+		ta.tools = make(map[string]toolOwnership)
+	}
+	ta.tools[toolCallID] = ownership
+	ta.mu.Unlock()
+}
+
+func (s *Service) toolOwnership(sessionID, toolCallID string) toolOwnership {
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil || toolCallID == "" {
+		return toolOwnershipUnknown
+	}
+	ta.mu.Lock()
+	defer ta.mu.Unlock()
+	return ta.tools[toolCallID]
+}
+
+func (s *Service) clearToolOwnership(sessionID, toolCallID string) {
+	ta := s.turnActivityFor(sessionID, false)
+	if ta == nil || toolCallID == "" {
+		return
+	}
+	ta.mu.Lock()
+	delete(ta.tools, toolCallID)
+	ta.mu.Unlock()
 }
 
 // markForegroundGenerating records that the foreground agent produced output

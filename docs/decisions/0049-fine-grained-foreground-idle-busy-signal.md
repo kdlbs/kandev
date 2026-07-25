@@ -55,7 +55,16 @@ to the foreground only:
 - Admission is **check-and-claim, not check-then-act**. The gate is a pure read, so `PromptTask` follows a passing read with an atomic `claimForegroundTurn` before it drives the turn: the check and the flip back to foreground-generating happen under one lock. Without this, two prompts landing in the background-idle window together (a double-send, two tabs) would both pass the read — the window spans a session reload, `ensureSessionRunning`, and a possibly network-bound model switch — and both reach `executor.Prompt`, starting overlapping turns on one ACP session. Exactly one prompt wins; the losers are rejected with `ErrAgentPromptInProgress` just as they were before this ADR.
 - The claim is **held, not merely taken**, and is tracked independently of background-idle activity. It survives until agentctl accepts the prompt, so a background tool call landing while the prompt is in preflight or queued cannot reopen the gate underneath it. The lifecycle adapter reports that exact dispatch boundary before waiting for turn completion. Claim tokens bind the activity record and a monotonically increasing admission generation, so a delayed completion or release cannot mutate a newer claim for the same session. A failed pre-dispatch prompt reopens the gate only if no newer foreground output invalidated its captured foreground epoch. Every transition that changes the substate is broadcast, including a release and background work that becomes visible when a claim completes, so clients cannot remain stranded on the admission-time value.
 - Lifecycle prompt delivery is serialized per agent execution. Agentctl acknowledges transport dispatch before the adapter's prompt RPC completes, so adapter-level queuing alone does not protect lifecycle's shared completion channel and response buffers from concurrent callers. An execution-scoped mutex gives each prompt one waiter and one buffer set; dispatch-only sends leave a pending-completion barrier that the next send must consume before resetting those buffers.
-- Any top-level non-background tool activity marks the foreground as generating again, just like message and thinking frames. This closes the gate as soon as foreground execution resumes even when the next frame is a tool call rather than text.
+- Tool activity marks the foreground as generating only from positive ownership
+  evidence. The initial tool call records whether it is top-level foreground,
+  recognized background work, or a child of background work; subsequent
+  updates inherit that ownership. Missing parent metadata and update-only tool
+  frames preserve the current activity rather than promoting unknown work to
+  foreground. This is required for incremental ACP streams such as Claude's,
+  which can temporarily omit `parentToolUseId` while the adapter still carries
+  the child tool's cached normalized payload. A known top-level non-background
+  tool still marks the foreground as generating, just like message and thinking
+  frames.
 - All activity-bearing lifecycle and activity-refresh events use one FIFO per
   task; different tasks may publish concurrently. Same-task reentrant
   publication enqueues and returns. Repository reads and synchronous callbacks
@@ -92,3 +101,8 @@ keep today's behavior.
 - **Drop the `RUNNING` gate / always accept input.** Rejected: it would let a new message race a genuinely-generating foreground turn, risking dropped or reordered messages and regressing non-steering agents.
 - **Persist the foreground/background distinction to the database (like the coarse states).** Rejected: persistence without an agent-side reconciliation API becomes a second source of truth and can survive restart as a false live value after the workload has died. Connected-execution tracking is kept in memory and read at serialization boundaries; turn close no longer destroys it, while execution teardown does.
 - **Recognize background work by tool-name string matching.** Rejected as brittle across agents and updates; recognition keys on the normalized payload shape so producer and consumer share one contract.
+- **Treat every parentless tool update as foreground activity.** Rejected:
+  incremental providers may omit lineage metadata on an update after supplying
+  it on the initial call. Reclassifying from each update makes missing metadata
+  override known ownership and falsely closes the prompt gate. Unknown updates
+  therefore preserve activity until positive foreground evidence arrives.
