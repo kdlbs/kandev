@@ -38,12 +38,14 @@ type serviceInstallMetadata struct {
 	HomeDir         string `json:"home_dir"`
 	LogDir          string `json:"log_dir"`
 	ServicePath     string `json:"service_path"`
+	LauncherPath    string `json:"launcher_path,omitempty"`
 	NodePath        string `json:"node_path"`
 	CLIEntry        string `json:"cli_entry"`
 	BundleDir       string `json:"bundle_dir,omitempty"`
 	LauncherVersion string `json:"launcher_version,omitempty"`
 	Port            int    `json:"port,omitempty"`
 	SystemUser      string `json:"system_user,omitempty"`
+	NoBootStart     bool   `json:"no_boot_start,omitempty"`
 	InstalledAt     string `json:"installed_at"`
 }
 
@@ -93,7 +95,8 @@ func readServiceMetadata(metadataPath string) (*serviceInstallMetadata, error) {
 	if metadata.Version != serviceMetadataVersion {
 		return nil, fmt.Errorf("unsupported service metadata version %d", metadata.Version)
 	}
-	if metadata.ServicePath == "" || metadata.NodePath == "" || metadata.CLIEntry == "" {
+	legacyLauncher := metadata.NodePath != "" && metadata.CLIEntry != ""
+	if metadata.ServicePath == "" || (metadata.LauncherPath == "" && !legacyLauncher) {
 		return nil, errors.New("service metadata missing required paths")
 	}
 	return &metadata, nil

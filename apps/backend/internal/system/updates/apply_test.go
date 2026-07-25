@@ -77,6 +77,50 @@ func TestService_ApplyQueuesSelfUpdateJobAndWritesIntent(t *testing.T) {
 	}
 }
 
+func TestWriteApplyIntentPreservesNativeNoBootStart(t *testing.T) {
+	homeDir := t.TempDir()
+	metadataPath := filepath.Join(homeDir, "service", "install.json")
+	if err := os.MkdirAll(filepath.Dir(metadataPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte(`{
+		"version": 1,
+		"manager": "systemd",
+		"mode": "user",
+		"kind": "npm",
+		"home_dir": "/home/alice/.kandev",
+		"log_dir": "/home/alice/.kandev/logs",
+		"service_path": "/home/alice/.config/systemd/user/kandev.service",
+		"launcher_path": "/usr/local/lib/node_modules/@kdlbs/runtime-linux-x64/bin/kandev",
+		"no_boot_start": true,
+		"installed_at": "2026-07-25T00:00:00Z"
+	}`)
+	if err := os.WriteFile(metadataPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := readServiceMetadata(metadataPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default(), WithHomeDir(homeDir))
+	intentPath, _, err := svc.writeApplyIntent(UpdatesResponse{Latest: "v1.2.3"}, metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intentData, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var intent map[string]interface{}
+	if err := json.Unmarshal(intentData, &intent); err != nil {
+		t.Fatal(err)
+	}
+	install, _ := intent["install"].(map[string]interface{})
+	if install["no_boot_start"] != true {
+		t.Fatalf("intent install.no_boot_start = %#v, want true; intent=%v", install["no_boot_start"], intent)
+	}
+}
+
 func TestService_ApplyRejectsUnsupportedInstall(t *testing.T) {
 	pool := newTestPool(t)
 	if err := persistence.WriteLatestVersion(pool.Writer(), "v1.0.1", "https://example/v1.0.1", time.Now().UTC()); err != nil {
@@ -222,6 +266,34 @@ func TestSystemdSelfUpdateArgsPropagateUpdateEnvironment(t *testing.T) {
 	}
 }
 
+func TestSystemdSelfUpdateArgsUseNativeLauncherPath(t *testing.T) {
+	var req applyRequest
+	data := []byte(`{
+		"intent_path": "/tmp/unused",
+		"intent": {
+			"install": {
+				"launcher_path": "/opt/homebrew/Cellar/kandev/1.2.3/libexec/bin/kandev"
+			}
+		}
+	}`)
+	if err := json.Unmarshal(data, &req); err != nil {
+		t.Fatal(err)
+	}
+	req.IntentPath = "/tmp/intent.json"
+
+	got := systemdSelfUpdateArgs(req, "kandev-self-update-test")
+	wantTail := []string{
+		"/opt/homebrew/Cellar/kandev/1.2.3/libexec/bin/kandev",
+		"service",
+		"self-update",
+		"--intent",
+		"/tmp/intent.json",
+	}
+	if len(got) < len(wantTail) || !stringSlicesEqual(got[len(got)-len(wantTail):], wantTail) {
+		t.Fatalf("args tail=%#v, want %#v; all args=%#v", got, wantTail, got)
+	}
+}
+
 func TestRenderLaunchdHelperPlistRunsOnceWithUpdateEnvironment(t *testing.T) {
 	t.Setenv("PATH", "/opt/homebrew/bin:/usr/bin")
 	t.Setenv("npm_config_prefix", "/tmp/npm-global")
@@ -262,6 +334,27 @@ func TestRenderLaunchdHelperPlistRunsOnceWithUpdateEnvironment(t *testing.T) {
 	// Must not regress to the looping `launchctl submit` mechanism.
 	if strings.Contains(plist, "submit") {
 		t.Fatalf("plist should not reference submit:\n%s", plist)
+	}
+}
+
+func TestRenderLaunchdHelperPlistUsesNativeLauncherPath(t *testing.T) {
+	var req applyRequest
+	data := []byte(`{
+		"install": {
+			"launcher_path": "/opt/homebrew/Cellar/kandev/1.2.3/libexec/bin/kandev",
+			"log_dir": "/tmp/kandev/logs"
+		}
+	}`)
+	if err := json.Unmarshal(data, &req.Intent); err != nil {
+		t.Fatal(err)
+	}
+	req.IntentPath = "/tmp/intent.json"
+
+	plist := renderLaunchdHelperPlist("com.kdlbs.kandev.self-update.test", req)
+	if !strings.Contains(plist,
+		"<string>/opt/homebrew/Cellar/kandev/1.2.3/libexec/bin/kandev</string>\n"+
+			"    <string>service</string>") {
+		t.Fatalf("plist does not invoke native launcher directly:\n%s", plist)
 	}
 }
 

@@ -159,9 +159,9 @@ sudo journalctl -u kandev.service -n 200 --no-pager
 
 ## Upgrade safely
 
-The current native service implementation does not write the legacy install metadata used by the Settings update workflow. Consequently, **Settings → System → Updates cannot apply an update to this service**, including a user service.
+For a user service installed by `kandev service install`, use **Settings → System → Updates → Apply update** when a newer release is available. Kandev verifies the managed unit or plist and its owner-only `<home>/service/install.json` metadata before enabling this action. System services still require a terminal update because they need elevated privileges.
 
-Upgrade the package, reinstall with the same mode and home flags so absolute paths and bundle metadata are refreshed, then restart explicitly:
+If the Apply action is unavailable or fails, upgrade the package manually, reinstall with the same mode and home flags so absolute paths and bundle metadata are refreshed, then restart explicitly:
 
 ```bash
 # npm example; use `brew upgrade kandev` for Homebrew
