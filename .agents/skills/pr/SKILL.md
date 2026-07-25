@@ -98,7 +98,10 @@ explicitly requests task tracking.
      if command -v pngquant >/dev/null 2>&1; then
        pngquant --quality 65-90 --ext .png --force apps/web/.pr-assets/*.png
      else
-       pnpm dlx pngquant-bin --quality 65-90 --ext .png --force apps/web/.pr-assets/*.png
+       (
+         cd apps
+         pnpm dlx pngquant-bin@9.0.0 --quality 65-90 --ext .png --force web/.pr-assets/*.png
+       )
      fi
      ```
 
@@ -121,16 +124,6 @@ explicitly requests task tracking.
    ```
    `gh pr edit` fails on this repo (GraphQL touches the deprecated Projects-classic API). Fall back to REST — build the payload with `jq --rawfile`, never by hand-escaping shell strings:
    ```bash
-   jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
-   gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input /tmp/pr-body-payload.json
-   ```
-
-   **RTK and JSON payloads:** RTK is optional. If it is installed, it
-   summarizes normal stdout, so it must not sit between a JSON producer and a
-   redirected file or another parser. Use its raw proxy for machine-readable
-   pipelines; otherwise run `jq` directly. In either case, validate the result
-   before sending it to GitHub:
-   ```bash
    if command -v rtk >/dev/null 2>&1; then
      rtk proxy jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
      rtk proxy jq empty /tmp/pr-body-payload.json
@@ -140,6 +133,10 @@ explicitly requests task tracking.
    fi
    gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input /tmp/pr-body-payload.json
    ```
+   **RTK and JSON payloads:** RTK is optional. If it is installed, it
+   summarizes normal stdout, so it must not sit between a JSON producer and a
+   redirected file or another parser. The conditional recipe above keeps the
+   REST fallback byte-preserving whether or not RTK is installed.
    The same rule applies to command substitutions, `xargs`, and any other
    consumer that expects unmodified Git or JSON output.
 
