@@ -68,6 +68,9 @@ func TestHandleListTasks_IncludesAssociatedPRs(t *testing.T) {
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
 		ID: "ws-pr", Name: "PR WS", CreatedAt: now, UpdatedAt: now,
 	}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-pr", WorkspaceID: "ws-pr", Name: "PR Workflow", CreatedAt: now, UpdatedAt: now,
+	}))
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{
 		ID: "task-pr", WorkspaceID: "ws-pr", WorkflowID: "wf-pr",
 		Title: "Has a PR", State: v1.TaskStateReview, CreatedAt: now, UpdatedAt: now,

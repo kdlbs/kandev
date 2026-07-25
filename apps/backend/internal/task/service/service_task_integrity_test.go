@@ -6,10 +6,19 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type nilWorkflowRepository struct {
+	taskrepository.WorkflowRepository
+}
+
+func (nilWorkflowRepository) GetWorkflow(context.Context, string) (*models.Workflow, error) {
+	return nil, nil
+}
 
 func TestCreateTaskRejectsWorkflowOutsideRequestedWorkspace(t *testing.T) {
 	svc, _, repo := createTestService(t)
@@ -70,6 +79,25 @@ func TestCreateTaskRejectsNonexistentWorkflow(t *testing.T) {
 	}
 	if len(tasks) != 0 {
 		t.Fatalf("persisted %d tasks with a nonexistent workflow, want none", len(tasks))
+	}
+}
+
+func TestCreateTaskRejectsNilWorkflowResult(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	svc.workflows = nilWorkflowRepository{WorkflowRepository: repo}
+
+	_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1",
+		WorkflowID:  "missing-workflow",
+		Title:       "orphaned task",
+	})
+	if !errors.Is(err, ErrInvalidTaskWorkflow) {
+		t.Fatalf("CreateTask error = %v, want invalid task workflow", err)
 	}
 }
 

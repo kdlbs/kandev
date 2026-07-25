@@ -41,6 +41,29 @@ func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository)
 	return svc, repo
 }
 
+type staticWorkflowStepGetter struct {
+	steps map[string]*workflowmodels.WorkflowStep
+}
+
+func (g *staticWorkflowStepGetter) GetStep(
+	_ context.Context,
+	stepID string,
+) (*workflowmodels.WorkflowStep, error) {
+	step := g.steps[stepID]
+	if step == nil {
+		return nil, fmt.Errorf("workflow step not found: %s", stepID)
+	}
+	return step, nil
+}
+
+func (*staticWorkflowStepGetter) GetNextStepByPosition(
+	context.Context,
+	string,
+	int,
+) (*workflowmodels.WorkflowStep, error) {
+	return nil, nil
+}
+
 func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo.Repository, *bus.MemoryEventBus) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
@@ -1888,6 +1911,11 @@ func TestHandleCreateTask_SubtaskCanRequestNewWorkspaceMode(t *testing.T) {
 
 func TestHandleCreateTask_SubtaskHonorsExplicitWorkspaceAndWorkflow(t *testing.T) {
 	svc, repo := newTestTaskService(t)
+	svc.SetWorkflowStepGetter(&staticWorkflowStepGetter{
+		steps: map[string]*workflowmodels.WorkflowStep{
+			"step-other": {ID: "step-other", WorkflowID: "wf-2"},
+		},
+	})
 	ctx := context.Background()
 	parentID := seedParentWithRepo(t, svc, repo)
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))

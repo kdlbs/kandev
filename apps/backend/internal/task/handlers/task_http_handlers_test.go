@@ -330,6 +330,10 @@ func (m *captureCreateTaskRepo) GetWorkspaceTaskPrefix(_ context.Context, _ stri
 	return "KAN", "wf-office", nil
 }
 
+func (m *captureCreateTaskRepo) GetWorkflow(_ context.Context, id string) (*models.Workflow, error) {
+	return &models.Workflow{ID: id, WorkspaceID: "ws-1"}, nil
+}
+
 func (m *captureCreateTaskRepo) GetRepository(_ context.Context, id string) (*models.Repository, error) {
 	if id == "repo-2" {
 		return &models.Repository{ID: id, WorkspaceID: "ws-1", DefaultBranch: "main"}, nil

@@ -227,6 +227,9 @@ func (s *Service) validateTaskWorkflow(ctx context.Context, req *CreateTaskReque
 	if err != nil {
 		return err
 	}
+	if workflow == nil {
+		return fmt.Errorf("%w: workflow not found", ErrInvalidTaskWorkflow)
+	}
 	if workflow.WorkspaceID != req.WorkspaceID {
 		return repoerrors.ErrWorkspaceNotFound
 	}
