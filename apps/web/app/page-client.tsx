@@ -8,14 +8,16 @@ import { getLocalStorage, setLocalStorage } from "@/lib/local-storage";
 import { STORAGE_KEYS } from "@/lib/settings/constants";
 import { useRouter } from "@/lib/routing/client-router";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
+import { linkToTasks } from "@/lib/links";
 import { shouldRestoreHomeTaskListingView } from "@/lib/task-listing/view-preference";
 
 type PageClientProps = {
+  workspaceId?: string;
   initialTaskId?: string;
   initialSessionId?: string;
 };
 
-export function PageClient({ initialTaskId, initialSessionId }: PageClientProps) {
+export function PageClient({ workspaceId, initialTaskId, initialSessionId }: PageClientProps) {
   const router = useRouter();
   const { preferredView } = useTaskListingView();
   const [showOnboarding, setShowOnboarding] = useState(() => {
@@ -33,9 +35,9 @@ export function PageClient({ initialTaskId, initialSessionId }: PageClientProps)
 
   useEffect(() => {
     if (shouldRestoreHomeTaskListingView(preferredView, initialTaskId, initialSessionId)) {
-      router.replace("/tasks");
+      router.replace(linkToTasks(workspaceId));
     }
-  }, [initialSessionId, initialTaskId, preferredView, router]);
+  }, [initialSessionId, initialTaskId, preferredView, router, workspaceId]);
 
   return (
     <>

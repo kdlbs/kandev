@@ -1,4 +1,3 @@
-import { repositorySlug } from "@/lib/repository-slug";
 import type { Repository, Task } from "@/lib/types/http";
 
 export type RichTaskRowDetails = {
@@ -35,7 +34,8 @@ export function resolveRichTaskRowDetails({
     seenRepositoryIds.add(taskRepository.repository_id);
     const repository = repositoriesById.get(taskRepository.repository_id);
     if (!repository) continue;
-    const label = repositorySlug(repository);
+    const label = repositoryLabel(repository);
+    if (!label) continue;
     if (seenRepositoryLabels.has(label)) continue;
     seenRepositoryLabels.add(label);
     repositoryLabels.push(label);
@@ -52,4 +52,11 @@ export function resolveRichTaskRowDetails({
     parentTitle,
     reviewAttention,
   };
+}
+
+function repositoryLabel(repository: Repository): string | null {
+  if (repository.provider_owner && repository.provider_name) {
+    return `${repository.provider_owner}/${repository.provider_name}`;
+  }
+  return repository.name || null;
 }

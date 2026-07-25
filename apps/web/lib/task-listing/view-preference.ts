@@ -21,6 +21,7 @@ export function resolveTaskListingView(
   legacyKanbanViewMode: string | null | undefined,
 ): TaskListingView {
   if (storedView) return storedView;
+  if (hasStoredTaskListingView()) return DEFAULT_TASK_LISTING_VIEW;
   return legacyKanbanViewMode === "graph2" ? "pipeline" : DEFAULT_TASK_LISTING_VIEW;
 }
 
@@ -46,6 +47,15 @@ export function getStoredTaskListingView(): TaskListingView | null {
     return parseTaskListingView(window.localStorage.getItem(TASK_LISTING_VIEW_STORAGE_KEY));
   } catch {
     return null;
+  }
+}
+
+function hasStoredTaskListingView(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(TASK_LISTING_VIEW_STORAGE_KEY) !== null;
+  } catch {
+    return false;
   }
 }
 

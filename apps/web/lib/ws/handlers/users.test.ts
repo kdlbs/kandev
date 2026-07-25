@@ -25,6 +25,18 @@ function userSettingsMessage(
 }
 
 describe("user settings websocket handler", () => {
+  it("updates the List detail preference and preserves it when omitted", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ tasks_list_show_details: true }),
+    );
+    expect(store.getState().userSettings.tasksListShowDetails).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.tasksListShowDetails).toBe(true);
+  });
+
   it("normalizes the simplified metrics preference from live updates", () => {
     const store = makeStore();
 

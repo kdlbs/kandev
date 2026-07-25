@@ -75,4 +75,25 @@ describe("resolveRichTaskRowDetails", () => {
 
     expect(details.repositoryLabels).toEqual(["kdlbs/kandev"]);
   });
+
+  it("omits a repository badge when only a local path is available", () => {
+    const details = resolveRichTaskRowDetails({
+      task: task({
+        repositories: [
+          { repository_id: "repo-1" as Task["id"], position: 0 },
+        ] as unknown as Task["repositories"],
+      }),
+      repositories: [
+        repository({
+          name: "",
+          provider_owner: undefined,
+          provider_name: undefined,
+          local_path: "/private/engineering/kandev",
+        }),
+      ],
+      parentTasks: [],
+    });
+
+    expect(details.repositoryLabels).toEqual([]);
+  });
 });

@@ -37,6 +37,12 @@ describe("task listing view preference", () => {
     expect(resolveTaskListingView(null, "graph2")).toBe("pipeline");
   });
 
+  it("defaults malformed device preferences to Kanban instead of using the legacy mode", () => {
+    window.localStorage.setItem(TASK_LISTING_VIEW_STORAGE_KEY, '"unsupported"');
+
+    expect(resolveTaskListingView(getStoredTaskListingView(), "graph2")).toBe("kanban");
+  });
+
   it("defaults to Kanban when neither a device nor legacy preference exists", () => {
     expect(resolveTaskListingView(null, null)).toBe("kanban");
   });
