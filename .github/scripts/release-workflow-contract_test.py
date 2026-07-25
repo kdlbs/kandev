@@ -60,15 +60,33 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("CURRENT_REF: ${{ github.ref }}", guard)
         self.assertIn('if [ "$CURRENT_REF" != "refs/heads/main" ]', guard)
 
-    def test_normal_release_validates_signing_identity_after_merge(self) -> None:
+    def test_normal_release_preflights_fingerprint_before_merge_and_imports_key_after_merge(
+        self,
+    ) -> None:
         prepare = job_block("prepare")
+        bump = step_block("Bump version + generate CHANGELOG (in working tree)")
         merge = step_block("Create release PR + squash-merge")
         public_key = step_block("Validate committed release signing public key")
+        preflight = step_block("Preflight release tag signing fingerprint")
         signing = step_block("Import release tag signing key")
         self.assertIn(NORMAL_RELEASE_IF, public_key)
         self.assertIn("gpg --batch --with-colons --show-keys .github/release-signing-key.asc", public_key)
         self.assertIn("PUBLIC_FINGERPRINT", public_key)
         self.assertIn('echo "fingerprint=$PUBLIC_FINGERPRINT" >> "$GITHUB_OUTPUT"', public_key)
+
+        self.assertIn(NORMAL_RELEASE_IF, preflight)
+        self.assertIn("EXPECTED_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}", preflight)
+        self.assertIn(
+            "COMMITTED_PUBLIC_FINGERPRINT: ${{ steps.committed_release_gpg.outputs.fingerprint }}",
+            preflight,
+        )
+        self.assertIn('if [ -z "$EXPECTED_FINGERPRINT" ]', preflight)
+        self.assertIn('if [ -z "$COMMITTED_PUBLIC_FINGERPRINT" ]', preflight)
+        self.assertIn(
+            'if [ "$COMMITTED_PUBLIC_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]',
+            preflight,
+        )
+
         self.assertIn(NORMAL_RELEASE_IF, signing)
         self.assertIn("id: import_release_gpg", signing)
         self.assertIn(
@@ -109,8 +127,10 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertLess(tag.index('git tag -v "$TAG"'), tag.index('git push origin "$TAG"'))
         self.assertNotIn('git tag -a "$TAG"', tag)
 
-        self.assertLess(prepare.index(merge), prepare.index(public_key))
-        self.assertLess(prepare.index(public_key), prepare.index(signing))
+        self.assertLess(prepare.index(public_key), prepare.index(preflight))
+        self.assertLess(prepare.index(preflight), prepare.index(bump))
+        self.assertLess(prepare.index(bump), prepare.index(merge))
+        self.assertLess(prepare.index(merge), prepare.index(signing))
         self.assertLess(prepare.index(signing), prepare.index(validate))
         self.assertLess(prepare.index(validate), prepare.index(tag))
 
