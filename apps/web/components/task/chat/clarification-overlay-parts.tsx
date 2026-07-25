@@ -261,12 +261,6 @@ export function ClarificationCustomInput({
         isSubmitting ? "cursor-not-allowed" : "cursor-text",
       )}
     >
-      <span
-        className={cn("mt-0.5 text-xs", active ? "text-blue-500" : "text-muted-foreground")}
-        aria-hidden="true"
-      >
-        ↳
-      </span>
       <Textarea
         ref={textareaRef}
         rows={1}
@@ -278,7 +272,7 @@ export function ClarificationCustomInput({
         disabled={isSubmitting}
         data-testid="clarification-input"
         style={{ maxHeight: MAX_CUSTOM_INPUT_HEIGHT }}
-        className="flex-1 min-h-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 placeholder:text-muted-foreground/60"
+        className="flex-1 min-h-0 resize-none overflow-y-auto border-0 bg-transparent p-0 text-sm shadow-none focus-visible:ring-0 dark:bg-transparent placeholder:text-muted-foreground/60"
         onKeyDown={(e) => {
           // Shift+Enter (and Alt+Enter) fall through so the textarea inserts a
           // newline instead of submitting. isComposing ignores the Enter that

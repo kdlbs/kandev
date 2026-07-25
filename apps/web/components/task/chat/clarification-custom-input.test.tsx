@@ -53,6 +53,15 @@ function renderInPanel(overrides: Partial<Parameters<typeof ClarificationCustomI
 }
 
 describe("ClarificationCustomInput row focus", () => {
+  it("renders the editor as one flush, transparent input surface", () => {
+    const { getByTestId } = renderInPanel();
+    const row = getByTestId("clarification-custom-input");
+    const input = getByTestId(INPUT_TESTID);
+
+    expect(input.className).toContain("dark:bg-transparent");
+    expect(row.textContent).not.toContain("↳");
+  });
+
   it("focuses the textarea when the non-interactive row surface is pressed", () => {
     const { getByTestId } = renderInPanel();
 
