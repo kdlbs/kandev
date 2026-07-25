@@ -54,10 +54,10 @@ func dialWS(t *testing.T, wsURL, origin string) (*gorillaws.Conn, *http.Response
 	return conn, resp, err
 }
 
-// waitForClientCount blocks until the hub observes the expected client count.
+// waitForGatewayClientCount blocks until the hub observes the expected client count.
 // Successful WebSocket dials can return before the handler goroutine has
 // registered the client, so tests must synchronize on the hub before cleanup.
-func waitForClientCount(t *testing.T, g *Gateway, want int) {
+func waitForGatewayClientCount(t *testing.T, g *Gateway, want int) {
 	t.Helper()
 
 	deadline := time.Now().Add(2 * time.Second)
@@ -111,9 +111,9 @@ func TestHandleConnection_AllowsTrustedOrigins(t *testing.T) {
 				}
 				t.Fatalf("upgrade with origin %q failed (status %d): %v", origin, status, err)
 			}
-			waitForClientCount(t, g, 1)
+			waitForGatewayClientCount(t, g, 1)
 			_ = conn.Close()
-			waitForClientCount(t, g, 0)
+			waitForGatewayClientCount(t, g, 0)
 		})
 	}
 }
