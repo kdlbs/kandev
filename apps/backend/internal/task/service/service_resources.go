@@ -591,6 +591,9 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if workflow == nil {
+		return fmt.Errorf("workflow not found: %s", id)
+	}
 
 	tasks, err := s.tasks.ListTasks(ctx, id)
 	if err != nil {

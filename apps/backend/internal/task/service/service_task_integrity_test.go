@@ -307,3 +307,36 @@ func TestListTasksExcludesLegacyRowsFromAnotherWorkspace(t *testing.T) {
 		t.Fatalf("ListTasks returned %+v, want only valid-b", tasks)
 	}
 }
+
+func TestListTasksRejectsNilWorkflowResult(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.workflows = nilWorkflowRepository{WorkflowRepository: repo}
+
+	if _, err := svc.ListTasks(context.Background(), "missing-workflow"); err == nil {
+		t.Fatal("ListTasks succeeded with a nil workflow result")
+	}
+}
+
+func TestDeleteWorkflowRejectsNilWorkflowResult(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:          "legacy-task",
+		WorkspaceID: "ws-1",
+		WorkflowID:  "missing-workflow",
+		Title:       "Legacy task",
+		State:       v1.TaskStateCreated,
+		Priority:    defaultPriority,
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	svc.workflows = nilWorkflowRepository{WorkflowRepository: repo}
+
+	if err := svc.DeleteWorkflow(ctx, "missing-workflow"); err == nil {
+		t.Fatal("DeleteWorkflow succeeded with a nil workflow result")
+	}
+}

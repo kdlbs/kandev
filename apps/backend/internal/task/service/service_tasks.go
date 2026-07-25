@@ -2437,6 +2437,9 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 	if err != nil {
 		return nil, err
 	}
+	if workflow == nil {
+		return nil, fmt.Errorf("workflow not found: %s", workflowID)
+	}
 	tasks, err := s.tasks.ListTasks(ctx, workflowID)
 	if err != nil {
 		return nil, err

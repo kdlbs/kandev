@@ -18,6 +18,7 @@ type SetWorkflows = (workflows: StoreWorkflow[]) => void;
 function useWorkflowsFetchEffect(
   workspaceId: string | null,
   enabled: boolean,
+  requireActiveWorkspace: boolean,
   setWorkflows: SetWorkflows,
   store: StoreApi<AppState>,
 ) {
@@ -27,7 +28,11 @@ function useWorkflowsFetchEffect(
     const generation = store.getState().workspaceContextGeneration;
     listWorkflows(workspaceId, { cache: "no-store", includeHidden: true })
       .then((response) => {
-        if (cancelled || !isCurrentWorkspaceContext(store.getState(), workspaceId, generation)) {
+        const state = store.getState();
+        const staleWorkspaceContext = requireActiveWorkspace
+          ? !isCurrentWorkspaceContext(state, workspaceId, generation)
+          : state.workspaceContextGeneration !== generation;
+        if (cancelled || staleWorkspaceContext) {
           return;
         }
         const mapped = response.workflows.map((workflow) => ({
@@ -50,7 +55,7 @@ function useWorkflowsFetchEffect(
     return () => {
       cancelled = true;
     };
-  }, [enabled, setWorkflows, store, workspaceId]);
+  }, [enabled, requireActiveWorkspace, setWorkflows, store, workspaceId]);
 }
 
 /**
@@ -63,13 +68,13 @@ export function useEnsureWorkspaceWorkflows() {
   const store = useAppStoreApi();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const setWorkflows = useAppStore((state) => state.setWorkflows);
-  useWorkflowsFetchEffect(workspaceId, true, setWorkflows, store);
+  useWorkflowsFetchEffect(workspaceId, true, true, setWorkflows, store);
 }
 
 export function useWorkflows(workspaceId: string | null, enabled = true) {
   const store = useAppStoreApi();
   const workflows = useAppStore((state) => state.workflows.items);
   const setWorkflows = useAppStore((state) => state.setWorkflows);
-  useWorkflowsFetchEffect(workspaceId, enabled, setWorkflows, store);
+  useWorkflowsFetchEffect(workspaceId, enabled, false, setWorkflows, store);
   return { workflows };
 }

@@ -316,6 +316,14 @@ type captureCreateTaskRepo struct {
 	updateStateErr error
 }
 
+type missingWorkflowCreateTaskRepo struct {
+	captureCreateTaskRepo
+}
+
+func (*missingWorkflowCreateTaskRepo) GetWorkflow(_ context.Context, id string) (*models.Workflow, error) {
+	return nil, fmt.Errorf("workflow not found: %s", id)
+}
+
 type captureTaskCreateLastUsedRecorder struct {
 	calls int
 	got   usermodels.TaskCreateLastUsed
@@ -663,6 +671,67 @@ func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
 		RepositoryID: "repo-2",
 		Branch:       "main",
 	}, recorder.got)
+}
+
+func TestWSCreateTaskReturnsValidationErrorForMissingWorkflow(t *testing.T) {
+	log := newTestLogger(t)
+	repo := &missingWorkflowCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id": "ws-1",
+		"workflow_id":  "missing-workflow",
+		"title":        "Broken workflow",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	assert.Contains(t, payload.Message, "workflow not found")
+}
+
+func TestWSCreateTaskReturnsValidationErrorForStepOutsideWorkflow(t *testing.T) {
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id":     "ws-1",
+		"workflow_id":      "wf-2",
+		"workflow_step_id": "step-1",
+		"title":            "Broken step",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	assert.Contains(t, payload.Message, "workflow step not found")
 }
 
 func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {

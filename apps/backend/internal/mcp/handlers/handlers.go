@@ -646,7 +646,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		h.logger.Error("failed to create task", zap.Error(err))
 		// Defense-in-depth: resolveTaskRepositories already catches this for the
 		// MCP path, but non-MCP callers (UI, internal engine) reach here directly.
-		if errors.Is(err, service.ErrSubtaskDepthExceeded) {
+		if errors.Is(err, service.ErrSubtaskDepthExceeded) ||
+			errors.Is(err, service.ErrInvalidTaskWorkflow) ||
+			isMCPWorkflowNotFoundError(err) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)

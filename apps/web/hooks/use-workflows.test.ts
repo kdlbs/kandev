@@ -168,6 +168,30 @@ describe("useWorkflows — stale response guard", () => {
   });
 });
 
+describe("useWorkflows — explicit workspace selection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockState = {
+      workflows: { items: [] },
+      workspaces: { activeId: "ws-A" },
+      workspaceContextGeneration: 0,
+      setWorkflows: mockSetWorkflows,
+    };
+  });
+
+  it("loads workflows when the selected workspace is not globally active", async () => {
+    mockListWorkflows.mockResolvedValueOnce({ workflows: [makeWorkflow("wf-B", "ws-B")] });
+
+    renderHook(() => useWorkflows("ws-B", true));
+
+    await waitFor(() =>
+      expect(mockSetWorkflows).toHaveBeenCalledWith([
+        expect.objectContaining({ id: "wf-B", workspaceId: "ws-B" }),
+      ]),
+    );
+  });
+});
+
 describe("useEnsureWorkspaceWorkflows", () => {
   beforeEach(() => {
     vi.clearAllMocks();
