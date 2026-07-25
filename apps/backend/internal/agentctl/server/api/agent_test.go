@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -245,6 +246,24 @@ func TestHandleWSNewSession_NoAdapter(t *testing.T) {
 	}
 }
 
+func TestHandleWSNewSession_UsesExtendedDeadline(t *testing.T) {
+	s := newTestServer(t)
+	capture := &newSessionDeadlineCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-1", "agent.session.new", NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp := s.handleWSNewSession(context.Background(), msg)
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeResponse)
+	}
+	if capture.remaining < constants.SessionNewTimeout-time.Second {
+		t.Fatalf("session/new deadline = %v from now, want about %v", capture.remaining, constants.SessionNewTimeout)
+	}
+}
+
 func TestHandleWSLoadSession_NoAdapter(t *testing.T) {
 	s := newTestServer(t)
 	ctx := context.Background()
@@ -380,6 +399,20 @@ type mcpCaptureAdapter struct {
 	promptErrorAdapter
 	newSessionServers  []types.McpServer
 	loadSessionServers []types.McpServer
+}
+
+type newSessionDeadlineCaptureAdapter struct {
+	promptErrorAdapter
+	remaining time.Duration
+}
+
+func (a *newSessionDeadlineCaptureAdapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return "", errors.New("session/new context has no deadline")
+	}
+	a.remaining = time.Until(deadline)
+	return "session-1", nil
 }
 
 func (a *mcpCaptureAdapter) NewSession(_ context.Context, servers []types.McpServer) (string, error) {
