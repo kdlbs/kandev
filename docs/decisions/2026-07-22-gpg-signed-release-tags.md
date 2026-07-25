@@ -20,12 +20,14 @@ passphrase are supplied through a GitHub Environment restricted to `main`.
 The environment has no required reviewer, so any maintainer authorized to
 dispatch the workflow and access the environment may start a normal release.
 Before changing version files or creating the release PR, the workflow validates
-that the committed public key is well formed and that its fingerprint matches
+that the committed public key is well-formed and that its fingerprint matches
 the environment's expected fingerprint. It imports the private key only after
-merging the release PR, requires its full fingerprint to match both preflight
-values, and adopts the validated key identity for the tagger. Missing, invalid,
-or mismatched public configuration therefore fails before `main` is mutated;
-invalid private signing material still fails before tag publication.
+merging the release PR, after revalidating the public key from the merged
+revision. The imported key must match the merged public key and the expected
+fingerprint before its identity is adopted for the tagger. Missing, invalid, or
+mismatched public configuration therefore fails before `main` is mutated;
+invalid private signing material or a key rotation during the release PR still
+fails before tag publication.
 Historical and backfill tags remain unchanged.
 
 The repository tag ruleset targets `v*`, enables **Restrict updates** and
@@ -51,8 +53,9 @@ Future release tags can be tied to a maintained signing identity and checked
 against the public key stored in the repository. Normal releases depend on the
 `release` environment, the configured expected fingerprint, and valid GPG
 signing secrets. Public-key and fingerprint configuration errors are caught
-before the workflow creates a release commit, while private-key import remains
-deliberately deferred until after that commit merges. Dry runs, desktop
+before the workflow creates a release commit, while a fresh check after merge
+binds the signer to the public key in the tag's revision. Private-key import
+remains deliberately deferred until after that commit merges. Dry runs, desktop
 validation, and backfills use the empty `release-validation` environment and do
 not import the private key. Key generation, rotation, revocation, GitHub
 identity association, and environment configuration remain maintainer
