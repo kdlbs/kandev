@@ -475,7 +475,11 @@ export function useNotificationsActions(
   const handleRequestPermission = async () => {
     try {
       if (nativeNotifications.isAvailable()) {
-        await nativeNotifications.permission.request();
+        const requests: Array<Promise<unknown>> = [nativeNotifications.permission.request()];
+        if (typeof Notification !== "undefined") {
+          requests.push(Notification.requestPermission());
+        }
+        await Promise.all(requests);
         await bumpPermission();
         return;
       }

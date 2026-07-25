@@ -1,5 +1,5 @@
-import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, render, renderHook, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { NotificationProvider } from "@/lib/types/http";
 import {
   useIsDirty,
@@ -47,6 +47,7 @@ const savedProvider: NotificationProvider = {
 let notificationProviders = [savedProvider];
 let notificationEvents = ["task.completed"];
 let notificationProvidersLoaded = true;
+const originalNotification = globalThis.Notification;
 
 vi.mock("@/hooks/domains/settings/use-notification-providers", () => ({
   useNotificationProviders: () => ({
@@ -93,6 +94,13 @@ beforeEach(() => {
   notificationProvidersLoaded = true;
   mocks.nativeAvailable.mockReturnValue(true);
   mocks.createNotificationProvider.mockResolvedValue(createdProvider);
+});
+
+afterEach(() => {
+  Object.defineProperty(globalThis, "Notification", {
+    configurable: true,
+    value: originalNotification,
+  });
 });
 
 describe("notification provider draft hydration", () => {
@@ -314,5 +322,55 @@ describe("notification permission actions", () => {
       configurable: true,
       value: originalNotification,
     });
+  });
+});
+
+describe("notification permission transport behavior", () => {
+  it("requests browser permission alongside native permission for Office notification fallback", async () => {
+    mocks.nativePermissionRequest.mockResolvedValue("granted");
+    const requestPermission = vi.fn().mockResolvedValue("granted");
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      value: { permission: "default", requestPermission },
+    });
+    const refreshPermission = vi.fn();
+    const { result } = renderHook(() => {
+      const state = useNotificationsState();
+      return useNotificationsActions(state, refreshPermission);
+    });
+
+    await act(() => result.current.handleRequestPermission());
+
+    expect(mocks.nativePermissionRequest).toHaveBeenCalledOnce();
+    expect(requestPermission).toHaveBeenCalledOnce();
+    expect(refreshPermission).toHaveBeenCalledOnce();
+  });
+
+  it("directs denied native notifications to OS app settings", () => {
+    mocks.nativeAvailable.mockReturnValue(true);
+    const { container } = render(
+      <DesktopNotificationsSection
+        notificationPermission="denied"
+        onRequestPermission={vi.fn()}
+        onRefreshPermission={vi.fn()}
+        onTestNotification={vi.fn()}
+      />,
+    );
+
+    expect(within(container).getByText(/OS app notification settings/i)).toBeTruthy();
+  });
+
+  it("directs denied browser notifications to site settings", () => {
+    mocks.nativeAvailable.mockReturnValue(false);
+    const { container } = render(
+      <DesktopNotificationsSection
+        notificationPermission="denied"
+        onRequestPermission={vi.fn()}
+        onRefreshPermission={vi.fn()}
+        onTestNotification={vi.fn()}
+      />,
+    );
+
+    expect(within(container).getByText(/site settings/i)).toBeTruthy();
   });
 });

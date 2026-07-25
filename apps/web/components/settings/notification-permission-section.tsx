@@ -98,8 +98,9 @@ export function DesktopNotificationsSection({
 
       {notificationPermission === "denied" && (
         <p className="text-sm text-amber-600">
-          Notifications are blocked in your browser. Enable them in site settings, then click
-          Refresh.
+          {nativeNotifications.isAvailable()
+            ? "Notifications are blocked in your OS app notification settings. Enable them there, then click Refresh."
+            : "Notifications are blocked in your browser. Enable them in site settings, then click Refresh."}
         </p>
       )}
       {notificationPermission === "unsupported" && (
