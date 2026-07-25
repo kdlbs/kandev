@@ -15,6 +15,7 @@ import {
   hasPendingClarification,
   hasPendingPermissionRequest,
 } from "@/lib/utils/pending-clarification";
+import { aggregateTaskPendingInput } from "@/lib/utils/task-pending-input";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import {
   repositoryId as toRepositoryId,
@@ -105,24 +106,19 @@ function pendingFlagsForTask(
   sessions: TaskSession[],
   messagesBySession: Record<string, Message[] | undefined>,
 ): { clarification: boolean; permission: boolean } {
-  let clarification = false;
-  let permission = false;
-  let hasUnloadedMessages = false;
-  for (const session of sessions) {
-    if (session.state !== "RUNNING" && session.state !== "WAITING_FOR_INPUT") continue;
-    const messages = messagesBySession[session.id];
-    if (messages === undefined) {
-      hasUnloadedMessages = true;
-      continue;
-    }
-    clarification ||= hasPendingClarification(messages);
-    permission ||= hasPendingPermissionRequest(messages);
-  }
-  if (sessions.length > 0 && !hasUnloadedMessages) return { clarification, permission };
-  return {
-    clarification: clarification || task.taskPendingAction === "clarification",
-    permission: permission || task.taskPendingAction === "permission",
-  };
+  const { clarification, permission } = aggregateTaskPendingInput(
+    sessions,
+    (session) => {
+      const messages = messagesBySession[session.id];
+      if (messages === undefined) return undefined;
+      return {
+        clarification: hasPendingClarification(messages),
+        permission: hasPendingPermissionRequest(messages),
+      };
+    },
+    task.taskPendingAction,
+  );
+  return { clarification, permission };
 }
 
 export function useSheetData(workspaceId: string | null) {

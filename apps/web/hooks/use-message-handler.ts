@@ -206,14 +206,20 @@ export async function sendMessageRequest(
   );
 }
 
+const TERMINAL_SESSION_STATES = new Set(["FAILED", "CANCELLED", "COMPLETED"]);
+
 function requireSessionInputMode(state: AppState, selectedSessionId: string): SessionInputMode {
   const selectedSession = state.taskSessions.items[selectedSessionId] ?? null;
   const inputMode = deriveSessionInputMode(selectedSession);
   if (inputMode === "unavailable") {
-    throw new MessageSendError(
-      "session-unavailable",
-      "The selected session is not available for input.",
-    );
+    // A terminal session row (agent process has exited) gets the backend's
+    // actionable copy; a missing row keeps the generic message since there is
+    // nothing session-specific to say.
+    const message =
+      selectedSession && TERMINAL_SESSION_STATES.has(selectedSession.state)
+        ? "Session has ended. Please create a new session to continue."
+        : "The selected session is not available for input.";
+    throw new MessageSendError("session-unavailable", message);
   }
   return inputMode;
 }

@@ -22,7 +22,7 @@ import { useTaskColor } from "@/hooks/use-task-color";
 import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
 import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
 import {
-  getSessionStateIcon,
+  getTaskStateIcon,
   shouldUseQuestionTaskIcon,
   shouldUsePermissionTaskIcon,
 } from "@/lib/ui/state-icons";
@@ -213,7 +213,7 @@ function TaskStateIcon({
   if (foregroundActivity === "background") {
     return (
       <span data-testid="task-state-background-running" className="mt-[1px] flex shrink-0">
-        {getSessionStateIcon("RUNNING", "h-3.5 w-3.5", "background")}
+        {getTaskStateIcon(state, "h-3.5 w-3.5", false, "background")}
       </span>
     );
   }

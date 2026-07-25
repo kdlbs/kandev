@@ -12,6 +12,8 @@ import type { Message } from "@/lib/types/http";
 import type { AppState } from "@/lib/state/store";
 import { deriveSessionInputMode } from "./session-input-mode";
 
+const TERMINAL_SESSION_STATES = new Set(["FAILED", "CANCELLED", "COMPLETED"]);
+
 type UseRequestChangesWalkthroughParams = {
   taskId: string | null | undefined;
   sessionId: string | null | undefined;
@@ -88,7 +90,14 @@ export function useRequestChangesWalkthrough({
       return;
     }
     if (inputMode === "unavailable") {
-      toast({ title: "Session is not available for input", variant: "error" });
+      // A terminal session row (agent process has exited) gets the backend's
+      // actionable copy; a missing row keeps the generic message since there
+      // is nothing session-specific to say.
+      const title =
+        activeSession && TERMINAL_SESSION_STATES.has(activeSession.state)
+          ? "Session has ended. Please create a new session to continue."
+          : "Session is not available for input";
+      toast({ title, variant: "error" });
       return;
     }
     try {

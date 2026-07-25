@@ -4,6 +4,7 @@ import {
   hasPendingClarification,
   hasPendingPermissionRequest,
 } from "@/lib/utils/pending-clarification";
+import { aggregateTaskPendingInput } from "@/lib/utils/task-pending-input";
 
 /** Flat per-session pending flags keyed for shallow comparison so the sidebar
  *  only re-renders when a clarification/permission flag actually flips, not on
@@ -25,11 +26,6 @@ export function buildPendingFlags(
   return flags;
 }
 
-export type PendingActionFallback = {
-  primarySessionState?: string | null;
-  primarySessionPendingAction?: TaskPendingAction | null;
-};
-
 export function workflowStepTitle(
   task: KanbanState["tasks"][number],
   stepTitleById: Map<string, string>,
@@ -38,60 +34,24 @@ export function workflowStepTitle(
   return stepTitleById.get(task.workflowStepId as string);
 }
 
-function fallbackPendingFlags(fallback?: PendingActionFallback): {
-  clarification: boolean;
-  permission: boolean;
-} {
-  if (fallback?.primarySessionState !== "WAITING_FOR_INPUT") {
-    return { clarification: false, permission: false };
-  }
-  return {
-    clarification: fallback.primarySessionPendingAction === "clarification",
-    permission: fallback.primarySessionPendingAction === "permission",
-  };
-}
-
-export function readPendingFlags(
-  pendingFlags: Record<string, boolean>,
-  sessionId?: string | null,
-  fallback?: PendingActionFallback,
-): { clarification: boolean; permission: boolean } {
-  if (!sessionId) return { clarification: false, permission: false };
-  const clarKey = pendingClarKey(sessionId);
-  const permKey = pendingPermKey(sessionId);
-  const hasMessageFlags =
-    Object.prototype.hasOwnProperty.call(pendingFlags, clarKey) ||
-    Object.prototype.hasOwnProperty.call(pendingFlags, permKey);
-  if (!hasMessageFlags) return fallbackPendingFlags(fallback);
-  return {
-    clarification: pendingFlags[clarKey] ?? false,
-    permission: pendingFlags[permKey] ?? false,
-  };
-}
-
 export function readTaskPendingFlags(
   pendingFlags: Record<string, boolean>,
   sessions: Array<{ id: string; state: string }>,
   taskPendingAction?: TaskPendingAction | null,
 ): { clarification: boolean; permission: boolean } {
-  let clarification = false;
-  let permission = false;
-  let hasUnloadedMessages = false;
-  for (const session of sessions) {
-    if (session.state !== "RUNNING" && session.state !== "WAITING_FOR_INPUT") continue;
-    const clarKey = pendingClarKey(session.id);
-    const permKey = pendingPermKey(session.id);
-    if (!(clarKey in pendingFlags) && !(permKey in pendingFlags)) {
-      hasUnloadedMessages = true;
-      continue;
-    }
-    clarification ||= pendingFlags[clarKey] ?? false;
-    permission ||= pendingFlags[permKey] ?? false;
-  }
-  if (sessions.length === 0 || hasUnloadedMessages) {
-    permission ||= taskPendingAction === "permission";
-    clarification ||= taskPendingAction === "clarification";
-  }
+  const { clarification, permission } = aggregateTaskPendingInput(
+    sessions,
+    (session) => {
+      const clarKey = pendingClarKey(session.id);
+      const permKey = pendingPermKey(session.id);
+      if (!(clarKey in pendingFlags) && !(permKey in pendingFlags)) return undefined;
+      return {
+        clarification: pendingFlags[clarKey] ?? false,
+        permission: pendingFlags[permKey] ?? false,
+      };
+    },
+    taskPendingAction,
+  );
   return { clarification, permission };
 }
 

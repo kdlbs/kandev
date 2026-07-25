@@ -1,14 +1,9 @@
-import type { ForegroundActivity, TaskSession, TaskSessionState } from "@/lib/types/http";
+import type { TaskSession, TaskSessionState } from "@/lib/types/http";
 
 export type SessionInfo = {
   diffStats: { additions: number; deletions: number } | undefined;
   updatedAt: string | undefined;
   sessionState: TaskSessionState | undefined;
-  // Fine-grained busy substate (ADR-0049) of the most-active session, so the
-  // sidebar indicator can distinguish background-running from generating. Paired
-  // with `sessionState` (both read from the same picked session) and left
-  // undefined when no session is present.
-  foregroundActivity?: ForegroundActivity | null;
 };
 
 type GitStatusMap = Record<
@@ -61,9 +56,8 @@ function priority(state: TaskSessionState | undefined): number {
   return idx === -1 ? SESSION_STATE_PRIORITY.length : idx;
 }
 
-// Returns the single most-active session, so its state AND its fine-grained
-// foreground_activity substate are read from the same session (they must agree —
-// the substate only means anything relative to the state it belongs to).
+// Returns the single most-active session, so the sidebar's state badge
+// reflects whatever session is most active right now.
 function pickMostActiveSession(sessions: TaskSession[]): TaskSession | undefined {
   let best: TaskSession | undefined;
   for (const s of sessions) {
@@ -93,11 +87,10 @@ export function getSessionInfoForTask(
   const updatedAt = latestSession.updated_at || undefined;
   const mostActive = pickMostActiveSession(sessions);
   const sessionState = mostActive?.state as TaskSessionState | undefined;
-  const foregroundActivity = mostActive?.foreground_activity ?? null;
   const envKey = environmentIdBySessionId?.[latestSession.id] ?? latestSession.id;
   const gitStatus = gitStatusByEnvId[envKey];
-  if (!gitStatus) return { diffStats: undefined, updatedAt, sessionState, foregroundActivity };
+  if (!gitStatus) return { diffStats: undefined, updatedAt, sessionState };
 
   const diffStats = computeDiffStats(gitStatus);
-  return { diffStats, updatedAt, sessionState, foregroundActivity };
+  return { diffStats, updatedAt, sessionState };
 }

@@ -268,13 +268,6 @@ export type TaskSessionActivityChangedPayload = {
   foreground_activity: ForegroundActivity | null;
 };
 
-export type TaskSessionWaitingForInputPayload = {
-  task_id: string;
-  session_id: string;
-  title: string;
-  body: string;
-};
-
 export type TaskSessionNotificationPayload = {
   task_id: string;
   session_id: string;
@@ -539,10 +532,6 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "session.activity_changed": BackendMessage<
       "session.activity_changed",
       TaskSessionActivityChangedPayload
-    >;
-    "session.waiting_for_input": BackendMessage<
-      "session.waiting_for_input",
-      TaskSessionWaitingForInputPayload
     >;
     "session.clarification_requested": BackendMessage<
       "session.clarification_requested",

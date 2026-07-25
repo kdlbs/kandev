@@ -68,7 +68,7 @@ export function sessionStatusTooltip(
   const canRequestInput = state === "RUNNING" || state === "WAITING_FOR_INPUT";
   if (canRequestInput && pending.permission) return "Permission requested";
   if (canRequestInput && pending.clarification) return "Waiting for input";
-  if (foregroundActivity === "background") return "Background running";
+  if (canRequestInput && foregroundActivity === "background") return "Background running";
   return STATUS_LABELS[mapSessionStatus(state)];
 }
 

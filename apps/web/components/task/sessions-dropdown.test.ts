@@ -32,4 +32,10 @@ describe("sessionStatusTooltip", () => {
   ] as const)("ignores stale pending input for %s sessions", (state, expected) => {
     expect(sessionStatusTooltip(state, { permission: true, clarification: true })).toBe(expected);
   });
+
+  it("does not show background-running for a terminal session with a stale background substate", () => {
+    expect(
+      sessionStatusTooltip("COMPLETED", { permission: false, clarification: false }, "background"),
+    ).toBe("Complete");
+  });
 });

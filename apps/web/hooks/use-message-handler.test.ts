@@ -394,12 +394,38 @@ describe("useMessageHandler input routing", () => {
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
   });
 
-  it("rejects an unavailable selected session without sending or queueing", async () => {
+  it("rejects a terminal selected session with the actionable ended-session copy", async () => {
     selectedSession("COMPLETED");
     const { result } = renderMessageHandler();
 
     await expect(result.current.handleSendMessage(submit("too late"))).rejects.toMatchObject({
       code: "session-unavailable",
+      message: "Session has ended. Please create a new session to continue.",
+    });
+    expect(queueMock).not.toHaveBeenCalled();
+    expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
+  });
+
+  it.each(["FAILED", "CANCELLED"])(
+    "rejects a %s selected session with the actionable ended-session copy",
+    async (state) => {
+      selectedSession(state);
+      const { result } = renderMessageHandler();
+
+      await expect(result.current.handleSendMessage(submit("too late"))).rejects.toMatchObject({
+        code: "session-unavailable",
+        message: "Session has ended. Please create a new session to continue.",
+      });
+    },
+  );
+
+  it("rejects a missing selected session row with the generic unavailable copy", async () => {
+    storeState.current.taskSessions.items = {};
+    const { result } = renderMessageHandler();
+
+    await expect(result.current.handleSendMessage(submit("too late"))).rejects.toMatchObject({
+      code: "session-unavailable",
+      message: "The selected session is not available for input.",
     });
     expect(queueMock).not.toHaveBeenCalled();
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();

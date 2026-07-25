@@ -71,6 +71,14 @@ function useArchiveConfirmationMode(
   return archiveOpenMode === "confirm" || (archiveOpenMode === "pending" && confirmTaskArchive);
 }
 
+function shouldCheckTaskInFlight(open: boolean, requiresConfirmation: boolean): boolean {
+  return open && requiresConfirmation;
+}
+
+function computeTaskIsInFlight(isInFlight: boolean | undefined, storeInFlight: boolean): boolean {
+  return Boolean(isInFlight) || storeInFlight;
+}
+
 export function TaskArchiveConfirmDialog({
   open,
   onOpenChange,
@@ -105,9 +113,9 @@ export function TaskArchiveConfirmDialog({
     onOpenChange,
   );
   const subtaskCount = useSubtaskCount(open && requiresConfirmation, taskId, taskIds);
-  const shouldCheckInFlight = [open, requiresConfirmation].every(Boolean);
+  const shouldCheckInFlight = shouldCheckTaskInFlight(open, requiresConfirmation);
   const storeInFlight = useTaskInFlight(taskId, taskIds, shouldCheckInFlight);
-  const taskIsInFlight = [isInFlight, storeInFlight].includes(true);
+  const taskIsInFlight = computeTaskIsInFlight(isInFlight, storeInFlight);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setCascade(false);

@@ -195,8 +195,28 @@ describe("useRequestChangesWalkthrough input-mode edge cases", () => {
     );
   });
 
-  it("does not send or queue when the selected session is unavailable", async () => {
+  it("shows the actionable ended-session copy when the selected session is terminal", async () => {
     mockStoreState = storeState("COMPLETED");
+    const { result } = renderRequestHook();
+
+    await act(async () => {
+      await result.current();
+    });
+
+    expect(mockListPrompts).not.toHaveBeenCalled();
+    expect(mockRequest).not.toHaveBeenCalled();
+    expect(mockQueueMessage).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Session has ended. Please create a new session to continue.",
+        variant: "error",
+      }),
+    );
+  });
+
+  it("shows the generic unavailable copy when the selected session row is missing", async () => {
+    mockStoreState = storeState("WAITING_FOR_INPUT");
+    mockStoreState.taskSessions.items = {} as MockStoreState["taskSessions"]["items"];
     const { result } = renderRequestHook();
 
     await act(async () => {
