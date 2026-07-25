@@ -70,6 +70,37 @@ func TestClaimForegroundTurn_OnlyOneConcurrentPromptWins(t *testing.T) {
 	}
 }
 
+// A prompt admitted while the foreground is idle can resume an agent process
+// before dispatch. AgentBootReady then advances the durable session from
+// RUNNING through STARTING to WAITING_FOR_INPUT. The admission claim still owns
+// the foreground turn, so that expected state transition must not reject the
+// already accepted prompt.
+func TestRecheckPromptableWithForegroundClaim_AcceptsWaitingAfterResume(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	const (
+		taskID    = "task-resumed"
+		sessionID = "session-resumed"
+	)
+	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
+	svc.markForegroundIdle(sessionID)
+
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("the prompt must claim the background-idle foreground")
+	}
+
+	if err := svc.recheckPromptableWithForegroundClaim(
+		taskID,
+		sessionID,
+		models.TaskSessionStateWaitingForInput,
+		claim,
+	); err != nil {
+		t.Fatalf("a current claim must survive the expected resume transition to WAITING_FOR_INPUT: %v", err)
+	}
+}
+
 // TestPromptTask_ConcurrentPromptsIntoBackgroundIdleStartOneTurn is the same
 // regression driven through the REAL operator entrypoint. It is the assertion
 // that actually matters: no matter how many prompts land in the background-idle

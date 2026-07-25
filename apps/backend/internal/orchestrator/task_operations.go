@@ -2918,7 +2918,14 @@ func (s *Service) recheckPromptableWithForegroundClaim(
 		return s.checkSessionPromptable(taskID, sessionID, state)
 	}
 	if state != models.TaskSessionStateRunning {
-		return fmt.Errorf("%w: session is in %s state", ErrSessionNotPromptable, state)
+		// ensureSessionRunning may resume the agent after this prompt claimed a
+		// background-idle RUNNING session. AgentBootReady advances the durable
+		// state to WAITING_FOR_INPUT before dispatch; keep the valid claim across
+		// that expected transition while still rejecting terminal or otherwise
+		// non-promptable states.
+		if err := s.checkSessionPromptable(taskID, sessionID, state); err != nil {
+			return err
+		}
 	}
 	if !s.isForegroundClaimCurrent(sessionID, claim) {
 		return fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
