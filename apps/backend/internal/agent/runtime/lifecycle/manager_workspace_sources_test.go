@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agent/registry"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -126,6 +127,44 @@ func TestRebindWorkspaceForSessionWaitsForRestartedAdapterBeforeLoadingSession(t
 	}
 }
 
+func TestRebindWorkspaceForSessionCreatesNewSessionWhenProviderCannotChangeResumeCWD(t *testing.T) {
+	server := newWorkspaceRebindAgentctlServer(t, false)
+
+	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
+	t.Cleanup(server.Close)
+	t.Cleanup(server.closeConnections)
+	mgr.registry = registry.NewRegistry(newTestLogger())
+	mgr.registry.LoadDefaults()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.historyManager = history
+	execution.AgentID = "opencode-acp"
+	execution.Status = v1.AgentStatusReady
+	execution.ACPSessionID = "acp-existing"
+	execution.historyEnabled = true
+	if err := history.AppendUserMessage(execution.SessionID, "earlier request"); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.RebindWorkspaceForSession(context.Background(), execution.SessionID, "/new-workspace", []string{"/attached"}); err != nil {
+		t.Fatalf("RebindWorkspaceForSession: %v", err)
+	}
+	if loads := server.loads(); len(loads) != 0 {
+		t.Fatalf("loaded ACP sessions = %v, want none", loads)
+	}
+	if execution.ACPSessionID != "acp-new" {
+		t.Fatalf("ACP session ID = %q, want acp-new", execution.ACPSessionID)
+	}
+	if !execution.needsResumeContext {
+		t.Fatal("fresh workspace session should inject recorded context on the next prompt")
+	}
+	if actions := server.actions(); !sameStrings(actions, []string{"agent.initialize", "agent.session.new"}) {
+		t.Fatalf("ACP actions = %v, want initialize then new session", actions)
+	}
+}
+
 func TestRebindWorkspaceForSessionReadinessTimeoutRollsBack(t *testing.T) {
 	server := newWorkspaceRebindAgentctlServer(t, true)
 	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
@@ -230,6 +269,17 @@ func newWorkspaceRebindAgentctlServer(t *testing.T, neverReady bool) *workspaceR
 			server.mu.Unlock()
 			if request.Action == "agent.initialize" {
 				response, _ := ws.NewResponse(request.ID, request.Action, map[string]any{"success": true})
+				data, _ := json.Marshal(response)
+				if conn.WriteMessage(websocket.TextMessage, data) != nil {
+					return
+				}
+				continue
+			}
+			if request.Action == "agent.session.new" {
+				response, _ := ws.NewResponse(request.ID, request.Action, map[string]any{
+					"success":    true,
+					"session_id": "acp-new",
+				})
 				data, _ := json.Marshal(response)
 				if conn.WriteMessage(websocket.TextMessage, data) != nil {
 					return

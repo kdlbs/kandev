@@ -113,8 +113,9 @@ type AgentExecution struct {
 	currentMessageID  string
 	currentThinkingID string
 
-	// History-based context injection for agents without native session resume (e.g. Auggie).
-	// historyEnabled gates recording and injection; set from SessionConfig.HistoryContextInjection.
+	// History-based context injection for agents without usable native session resume.
+	// historyEnabled gates recording and injection; it is enabled by either
+	// HistoryContextInjection or NewSessionOnWorkspaceRebind.
 	// needsResumeContext is set to true when the session has history that should be injected.
 	// resumeContextInjected is set to true after context has been injected into a prompt.
 	historyEnabled        bool

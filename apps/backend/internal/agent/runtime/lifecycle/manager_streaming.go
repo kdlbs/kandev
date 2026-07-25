@@ -89,6 +89,11 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution) string {
 	// If we have remaining message content, publish it
 	trimmedMessage := strings.TrimSpace(agentMessage)
 	if trimmedMessage != "" {
+		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
+			if err := m.historyManager.AppendAgentMessage(execution.SessionID, trimmedMessage); err != nil {
+				m.logger.Warn("failed to store agent message to history", zap.Error(err))
+			}
+		}
 		if currentMsgID != "" {
 			// Publish final append to the streaming message
 			m.publishStreamingMessageFinal(execution, currentMsgID, trimmedMessage)

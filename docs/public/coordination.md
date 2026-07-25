@@ -178,6 +178,11 @@ Use a base branch for every repository attachment. Local/Local PC never changes 
 
 Kandev rejects the entire request if a source is invalid, duplicated, inaccessible, or cannot be materialized. A failure removes new source records and Kandev-owned materialization; existing task contents remain intact. Attachments persist across reload, relaunch, and reset. A missing persisted folder is surfaced during a new or reset environment rather than silently omitted.
 
+When a second source promotes a single-repository workspace to the task root, Kandev restarts the
+idle agent there. Providers that support loading a conversation from a different working directory
+keep their native session; other providers receive a fresh session with recorded conversation
+context on the next prompt. This intentional restart is not reported as an agent failure.
+
 Task agents can call `add_workspace_sources_kandev` with the same mixed batch; `task_id` defaults to the current task. `add_branch_to_task_kandev` remains available for its legacy one-repository/branch input. Neither operation can run during an active turn or tool call.
 
 Use `update_repository_base_branch_kandev` with a task-repository ID to change the comparison base. The database update is authoritative. Resetting cached session bases, refreshing Changes, base commit, ahead/behind counts, and cumulative diff in a live tracker are best-effort side effects; a failure is logged without rolling back the new base, and the persisted value is rebuilt on the next session launch. The tool does not rewrite commits, switch the checkout, or change an existing pull request's target branch.

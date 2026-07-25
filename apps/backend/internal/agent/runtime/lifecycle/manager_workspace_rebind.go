@@ -3,9 +3,11 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"go.uber.org/zap"
 )
 
 const agentctlProcessStatusRunning = "running"
@@ -17,9 +19,11 @@ var (
 )
 
 // RebindWorkspaceForSession moves an idle native host execution to a prepared
-// task root without changing its Kandev session or ACP conversation. The
-// caller must only invoke this after the complete attachment batch is ready;
-// this operation publishes no materialization event itself.
+// task root without changing its Kandev session. Providers that support loading
+// a conversation under a new CWD keep their ACP session; incompatible providers
+// get a fresh ACP session whose next prompt receives recorded Kandev history.
+// The caller must only invoke this after the complete attachment batch is
+// ready; this operation publishes no materialization event itself.
 func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, workspacePath string, sourceRoots ...[]string) error {
 	execution, ok := m.executionStore.GetBySessionID(sessionID)
 	if !ok {
@@ -39,6 +43,7 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 	oldPath, acpID := execution.WorkspacePath, execution.ACPSessionID
 	oldRoots := append([]string(nil), execution.WorkspaceSourceRoots...)
 	newRoots := optionalWorkspaceSourceRoots(oldRoots, sourceRoots)
+	startNewSession := m.startsNewSessionOnWorkspaceRebind(execution)
 	execution.Status = v1.AgentStatusStarting
 
 	// Stop before changing agentctl's workdir: a successful rebind must never
@@ -56,8 +61,8 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 	if _, err := execution.agentctl.Start(ctx); err != nil {
 		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, fmt.Errorf("restart agent after workspace rebind: %w", err))
 	}
-	if err := m.restoreReboundACPSession(ctx, execution, acpID); err != nil {
-		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, fmt.Errorf("load existing ACP session after workspace rebind: %w", err))
+	if err := m.restoreReboundACPSession(ctx, execution, acpID, startNewSession); err != nil {
+		return m.rollbackWorkspaceRebind(ctx, execution, oldPath, oldRoots, acpID, fmt.Errorf("restore ACP session after workspace rebind: %w", err))
 	}
 	execution.Status = v1.AgentStatusReady
 	return nil
@@ -81,7 +86,7 @@ func (m *Manager) rollbackWorkspaceRebind(ctx context.Context, execution *AgentE
 		m.executionStore.UpdateError(execution.ID, fmt.Sprintf("%v; rollback restart failed: %v", cause, err))
 		return fmt.Errorf("%w; rollback restart failed: %v", cause, err)
 	}
-	if err := m.restoreReboundACPSession(rollbackCtx, execution, acpID); err != nil {
+	if err := m.restoreReboundACPSession(rollbackCtx, execution, acpID, false); err != nil {
 		m.executionStore.UpdateError(execution.ID, fmt.Sprintf("%v; rollback session/load failed: %v", cause, err))
 		return fmt.Errorf("%w; rollback session/load failed: %v", cause, err)
 	}
@@ -89,10 +94,10 @@ func (m *Manager) rollbackWorkspaceRebind(ctx context.Context, execution *AgentE
 	return cause
 }
 
-// restoreReboundACPSession only resumes the existing ACP conversation once the
-// restarted child has published a running status and its replacement updates
-// stream is connected. Start can acknowledge before the ACP adapter is usable.
-func (m *Manager) restoreReboundACPSession(ctx context.Context, execution *AgentExecution, acpID string) error {
+// restoreReboundACPSession restores agent continuity once the restarted child
+// has published a running status and its replacement updates stream is
+// connected. Start can acknowledge before the ACP adapter is usable.
+func (m *Manager) restoreReboundACPSession(ctx context.Context, execution *AgentExecution, acpID string, startNewSession bool) error {
 	if err := waitForReboundAgentReady(ctx, execution); err != nil {
 		return err
 	}
@@ -104,10 +109,84 @@ func (m *Manager) restoreReboundACPSession(ctx context.Context, execution *Agent
 	if _, err := execution.agentctl.Initialize(ctx, "kandev", "1.0.0"); err != nil {
 		return fmt.Errorf("initialize restarted ACP adapter: %w", err)
 	}
+	if startNewSession {
+		return m.createReboundACPSession(ctx, execution)
+	}
 	if err := execution.agentctl.LoadSession(ctx, acpID, nil); err != nil {
 		return err
 	}
 	return nil
+}
+
+func (m *Manager) startsNewSessionOnWorkspaceRebind(execution *AgentExecution) bool {
+	if m.registry == nil || execution.AgentID == "" {
+		return false
+	}
+	agentConfig, ok := m.registry.Get(execution.AgentID)
+	if !ok || agentConfig.Runtime() == nil {
+		return false
+	}
+	return agentConfig.Runtime().SessionConfig.NewSessionOnWorkspaceRebind
+}
+
+func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentExecution) error {
+	agentConfig, ok := m.registry.Get(execution.AgentID)
+	if !ok {
+		return fmt.Errorf("agent type not found: %s", execution.AgentID)
+	}
+	mcpServers, err := m.resolveMcpServers(ctx, execution, agentConfig)
+	if err != nil {
+		return fmt.Errorf("resolve MCP servers for rebound session: %w", err)
+	}
+	previousMode := execution.GetModeState()
+	previousModel := execution.GetModelState()
+	newSessionID, err := execution.agentctl.NewSession(ctx, execution.WorkspacePath, mcpServers)
+	if err != nil {
+		return fmt.Errorf("create ACP session in rebound workspace: %w", err)
+	}
+	execution.ACPSessionID = newSessionID
+	execution.sessionInitialized = true
+	execution.resumeContextInjected = false
+	execution.needsResumeContext = m.historyManager != nil &&
+		m.historyManager.HasHistory(execution.SessionID)
+	m.reapplyReboundSessionConfig(ctx, execution, newSessionID, previousModel, previousMode)
+	if m.eventPublisher != nil {
+		m.eventPublisher.PublishACPSessionCreated(execution, newSessionID)
+	}
+	return nil
+}
+
+func (m *Manager) reapplyReboundSessionConfig(
+	ctx context.Context,
+	execution *AgentExecution,
+	sessionID string,
+	model *CachedModelState,
+	mode *CachedModeState,
+) {
+	if model != nil && model.CurrentModelID != "" {
+		if err := execution.agentctl.SetModel(ctx, model.CurrentModelID); err != nil {
+			m.logger.Warn("failed to re-apply model after workspace rebind",
+				zap.String("execution_id", execution.ID),
+				zap.String("model", model.CurrentModelID),
+				zap.Error(err))
+		}
+	}
+	if model != nil {
+		for _, option := range model.ConfigOptions {
+			if option.ID == "" || option.CurrentValue == "" ||
+				strings.EqualFold(option.Category, "model") ||
+				strings.EqualFold(option.Category, "mode") {
+				continue
+			}
+			if err := execution.agentctl.SetConfigOption(ctx, option.ID, option.CurrentValue); err != nil {
+				m.logger.Warn("failed to re-apply config option after workspace rebind",
+					zap.String("execution_id", execution.ID),
+					zap.String("config_id", option.ID),
+					zap.Error(err))
+			}
+		}
+	}
+	m.reapplySessionModeAfterReset(ctx, execution, sessionID, mode)
 }
 
 func waitForReboundAgentReady(ctx context.Context, execution *AgentExecution) error {

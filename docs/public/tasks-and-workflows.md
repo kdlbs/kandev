@@ -95,6 +95,11 @@ For a non-archived, repository-backed task, open the **Files** panel and choose 
 
 The task must be idle: Kandev disables the action while a turn or tool call is active, and rejects a race without changing the task. Desktop opens a dialog; phones open the same flow in a full-height drawer. On success, repositories appear in Files and repository-aware Changes, branch, editor, and pull-request surfaces; folders are Files-only.
 
+If adding a source promotes the workspace from one repository directory to the task root, Kandev
+restarts the idle agent in the new root. Native cross-directory resume is retained where supported;
+otherwise Kandev starts a fresh provider session and supplies recorded conversation context with the
+next prompt. The intentional restart is not shown as a previous agent error.
+
 Folders are live host paths and are available only to **Local/Local PC** and **Worktree** tasks. Repository sources are supported for **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Local Git rows need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
 
 ### Attachments and local-change consent

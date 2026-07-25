@@ -103,9 +103,10 @@ func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 		// See GH issue #1247.
 		RequiresProcessKill: true,
 		SessionConfig: SessionConfig{
-			NativeSessionResume: true,
-			CanRecover:          &canRecover,
-			SessionDirTemplate:  "{home}/.opencode",
+			NativeSessionResume:         true,
+			NewSessionOnWorkspaceRebind: true,
+			CanRecover:                  &canRecover,
+			SessionDirTemplate:          "{home}/.opencode",
 		},
 	}
 }

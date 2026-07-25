@@ -46,6 +46,9 @@ manually moving files into the task workspace.
 - Kandev may re-root or restart an idle task environment when its executor cannot safely change the
   agent working directory in place. The action is unavailable while a turn or tool call is active,
   and the backend independently rejects that race with a conflict response.
+- Providers that honor a changed `session/load` working directory keep their native ACP session
+  after the re-root. Providers that do not are started in a fresh ACP session at the promoted task
+  root, and Kandev rehydrates the recorded conversation context with the next prompt.
 - When **Add Repositories to workspace** is unavailable, the combined Files action remains
   reachable so **Open workspace folder** still works. The repository action is disabled and shows
   the reason in touch-visible text rather than relying on a tooltip.
@@ -135,6 +138,7 @@ persisted in source URLs or copied into agent-visible metadata.
 | A container/remote repository clone fails                      | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source.           |
 | A container/remote task submits a folder source                | The request returns `422` without persistence or filesystem changes.                                                                                |
 | Agentctl cannot rescan the new root                            | The attachment fails rather than reporting success with a stale Files tree.                                                                         |
+| An idle agent must restart to adopt the promoted root          | The intentional stop is not shown as a prior agent failure; the replacement agent uses the promoted task root.                                       |
 | A requested file move or rename crosses canonical source roots | The request is rejected before either source is mutated.                                                                                            |
 | A persisted local folder later disappears                      | The current live environment keeps its existing materialization; a new/reset environment surfaces the missing source and does not silently omit it. |
 | The client disconnects during materialization                  | Rollback runs on a detached bounded context and the eventual task event reflects durable state.                                                     |
@@ -159,6 +163,10 @@ must be retried.
 - **GIVEN** an idle task whose runtime resumes its agent or emits a late session-resumed status while
   adopting an updated workspace root, **WHEN** the user attaches another source, **THEN** lifecycle
   boot/status messages do not create a phantom turn and the subsequent attachment succeeds.
+- **GIVEN** an idle single-repository task whose agent started in the repository directory, **WHEN**
+  another source promotes the workspace to the task root, **THEN** the next agent prompt runs from
+  the task root without a previous-agent-error banner; compatible providers retain their native
+  session and incompatible providers receive a fresh session with recorded conversation context.
 - **GIVEN** an Add sources batch with a local row already configured, **WHEN** the user chooses
   **Remote repository** from **Add repository**, **THEN** both rows remain visible in the batch and
   submit atomically.

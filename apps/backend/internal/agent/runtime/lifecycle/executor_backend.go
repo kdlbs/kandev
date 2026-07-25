@@ -383,7 +383,8 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	if req.AgentConfig != nil {
 		agentID = req.AgentConfig.ID()
 		if rt := req.AgentConfig.Runtime(); rt != nil {
-			historyEnabled = rt.SessionConfig.HistoryContextInjection
+			historyEnabled = rt.SessionConfig.HistoryContextInjection ||
+				rt.SessionConfig.NewSessionOnWorkspaceRebind
 		}
 	}
 

@@ -46,6 +46,11 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	execution.messageMu.Unlock()
 
 	if strings.TrimSpace(toFlush) != "" {
+		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
+			if err := m.historyManager.AppendAgentMessage(execution.SessionID, toFlush); err != nil {
+				m.logger.Warn("failed to store streamed agent message to history", zap.Error(err))
+			}
+		}
 		m.publishStreamingMessage(execution, toFlush)
 	}
 }
@@ -295,15 +300,7 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 		zap.Bool("is_error", isError))
 
 	// Flush the message buffer to publish any remaining content as a streaming message.
-	flushedText := m.flushMessageBuffer(execution)
-	if flushedText != "" {
-		event.Text = flushedText
-		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
-			if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
-				m.logger.Warn("failed to store final agent message to history", zap.Error(err))
-			}
-		}
-	}
+	m.flushMessageBuffer(execution)
 
 	m.logger.Info("complete event processed",
 		zap.String("execution_id", execution.ID),

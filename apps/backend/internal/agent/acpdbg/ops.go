@@ -70,6 +70,19 @@ type PromptResult struct {
 	Text string
 }
 
+// SessionLoadOptions configures a session/load operation and an optional
+// prompt used to verify the loaded session's effective workspace.
+type SessionLoadOptions struct {
+	SessionID string
+	Prompt    string
+}
+
+// SessionLoadResult holds the loaded session metadata and optional response.
+type SessionLoadResult struct {
+	ProbeResult
+	Text string
+}
+
 // Prompt runs the full prompt round-trip: initialize → session/new →
 // [set_model] → [set_mode] → session/prompt → drain updates until the
 // prompt response arrives.
@@ -100,19 +113,16 @@ func Prompt(ctx context.Context, r *Runner, opts PromptOptions) (*PromptResult, 
 	return &PromptResult{ProbeResult: *probe, Text: text}, nil
 }
 
-// SessionLoad runs initialize → session/load.
-func SessionLoad(ctx context.Context, r *Runner, sessionID string) (*ProbeResult, error) {
-	if sessionID == "" {
+// SessionLoad runs initialize → session/load → [session/prompt].
+func SessionLoad(ctx context.Context, r *Runner, opts SessionLoadOptions) (*SessionLoadResult, error) {
+	if opts.SessionID == "" {
 		return nil, errors.New("session-id is required")
 	}
 	initResp, err := sendInitialize(ctx, r)
 	if err != nil {
 		return nil, fmt.Errorf("initialize: %w", err)
 	}
-	req, _ := r.Framer().NewRequest("session/load", map[string]any{
-		"sessionId":  sessionID,
-		"mcpServers": []any{},
-	})
+	req, _ := r.Framer().NewRequest("session/load", sessionLoadParams(opts.SessionID, r.cfg.Workdir))
 	resp, err := r.Request(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("session/load: %w", err)
@@ -120,7 +130,23 @@ func SessionLoad(ctx context.Context, r *Runner, sessionID string) (*ProbeResult
 	if errMap, ok := resp["error"].(map[string]any); ok {
 		return nil, fmt.Errorf("session/load error: %v", errMap["message"])
 	}
-	return buildProbeResult(initResp, resp), nil
+	result := &SessionLoadResult{ProbeResult: *buildProbeResult(initResp, resp)}
+	if opts.Prompt == "" {
+		return result, nil
+	}
+	result.Text, err = sendPromptAndCollect(ctx, r, opts.SessionID, opts.Prompt)
+	if err != nil {
+		return nil, fmt.Errorf("session/prompt: %w", err)
+	}
+	return result, nil
+}
+
+func sessionLoadParams(sessionID, workdir string) map[string]any {
+	return map[string]any{
+		"sessionId":  sessionID,
+		"cwd":        workdir,
+		"mcpServers": []any{},
+	}
 }
 
 // --- JSON-RPC helpers ---

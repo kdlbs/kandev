@@ -247,12 +247,16 @@ type ResourceLimits struct {
 type SessionConfig struct {
 	NativeSessionResume     bool
 	HistoryContextInjection bool // Opt-in: inject conversation history on session resume for agents without native resume
-	ResumeFlag              Param
-	CanRecover              *bool
-	SessionDirTemplate      string
-	SessionDirTarget        string
-	ForkSessionCmd          Command
-	ContinueSessionCmd      Command
+	// NewSessionOnWorkspaceRebind forces session/new when an idle execution's
+	// working directory changes. Some providers accept session/load with a new
+	// cwd but keep tool execution pinned to the session's original directory.
+	NewSessionOnWorkspaceRebind bool
+	ResumeFlag                  Param
+	CanRecover                  *bool
+	SessionDirTemplate          string
+	SessionDirTarget            string
+	ForkSessionCmd              Command
+	ContinueSessionCmd          Command
 }
 
 // SupportsRecovery returns whether the agent supports session recovery.

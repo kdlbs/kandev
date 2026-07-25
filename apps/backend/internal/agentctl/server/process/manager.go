@@ -1911,8 +1911,13 @@ func (m *Manager) waitForExit() {
 
 	pid := m.agentPID()
 	err := m.cmd.Wait()
+	intentionalStop := m.Status() == StatusStopping
 
-	if err != nil {
+	switch {
+	case intentionalStop:
+		m.exitCode.Store(0)
+		m.logger.Info("agent process exited during intentional stop")
+	case err != nil:
 		m.exitErr.Store(errorWrapper{err: err})
 		exitCode := -1
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -1943,12 +1948,12 @@ func (m *Manager) waitForExit() {
 		default:
 			m.logger.Warn("updates channel full, could not send exit error event")
 		}
-	} else {
+	default:
 		m.exitCode.Store(0)
 		m.logger.Info("agent process exited successfully")
 	}
 
-	if m.Status() != StatusStopping {
+	if !intentionalStop {
 		if err := m.reapRemainingProcessGroup(context.Background(), pid); err != nil {
 			m.mainReapPending.Store(true)
 			m.logger.Warn("agent process group reap remains pending", zap.Error(err))

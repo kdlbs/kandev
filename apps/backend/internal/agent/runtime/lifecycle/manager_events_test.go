@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -113,6 +114,40 @@ func TestHandleAgentEvent_UserMessageChunkNotBufferedAsAssistant(t *testing.T) {
 	}
 	if streamedText != "Hello." {
 		t.Fatalf("streamed assistant text = %q, want %q", streamedText, "Hello.")
+	}
+}
+
+func TestHandleAgentEvent_RecordsStreamedAssistantTextForResumeContext(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
+	if err != nil {
+		t.Fatal(err)
+	}
+	mgr.historyManager = history
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.historyEnabled = true
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type: "message_chunk",
+		Text: "First line.\nSecond line.",
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recorded strings.Builder
+	for _, entry := range entries {
+		if entry.Type == "agent_message" {
+			recorded.WriteString(entry.Content)
+		}
+	}
+	if recorded.String() != "First line.\nSecond line." {
+		t.Fatalf("recorded assistant history = %q, want full streamed message; entries=%+v", recorded.String(), entries)
 	}
 }
 
