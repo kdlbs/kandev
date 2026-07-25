@@ -1975,6 +1975,10 @@ func (s *Service) clearSessionPlanMode(ctx context.Context, session *models.Task
 // Public entry point for client-driven plan-mode toggles (e.g. the "Implement plan"
 // affordance) so the change is server-authoritative and survives page refresh.
 func (s *Service) SetSessionPlanModeByID(ctx context.Context, sessionID string, enabled bool) error {
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return err

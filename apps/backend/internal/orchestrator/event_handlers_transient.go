@@ -331,6 +331,12 @@ func (s *Service) cancelAllTransientRetries() {
 // and surfaces the manual recovery banner so they can Resume or Start fresh.
 // Returns true if a retry loop was active.
 func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID string) bool {
+	// Reports "nothing to cancel" on denial: the bool return carries no error
+	// channel, and a foreign session must not be distinguishable from an idle
+	// one. Guard first — resetTransientRetry below mutates retry state.
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return false
+	}
 	_, active := s.transientRetries.Load(sessionID)
 	s.resetTransientRetry(sessionID)
 	if !active {

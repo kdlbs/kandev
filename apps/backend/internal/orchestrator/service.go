@@ -269,6 +269,11 @@ type Service struct {
 	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
 	sessionAccessCheck func(ctx context.Context, sessionID string) error
 
+	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
+	// entry points that name a task rather than a session (session.launch,
+	// session.ensure). Nil = unscoped.
+	taskAccessCheck func(ctx context.Context, taskID string) error
+
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
@@ -752,13 +757,28 @@ func (s *Service) SetSessionAccessChecker(check func(ctx context.Context, sessio
 	s.sessionAccessCheck = check
 }
 
+// SetTaskAccessChecker installs the task-keyed sibling of
+// SetSessionAccessChecker, used by the entry points that name a task rather
+// than a session. Same contract: nil for identity-less internal callers.
+func (s *Service) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
+	s.taskAccessCheck = check
+}
+
 // authorizeSession applies the configured per-user session check. No-op when
 // unwired.
 func (s *Service) authorizeSession(ctx context.Context, sessionID string) error {
-	if s.sessionAccessCheck == nil {
+	if s.sessionAccessCheck == nil || sessionID == "" {
 		return nil
 	}
 	return s.sessionAccessCheck(ctx, sessionID)
+}
+
+// authorizeTask applies the configured per-user task check. No-op when unwired.
+func (s *Service) authorizeTask(ctx context.Context, taskID string) error {
+	if s.taskAccessCheck == nil || taskID == "" {
+		return nil
+	}
+	return s.taskAccessCheck(ctx, taskID)
 }
 
 // publishTaskUpdated forwards to the configured TaskEventPublisher.

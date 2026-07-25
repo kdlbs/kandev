@@ -123,6 +123,7 @@ func provideOrchestrator(
 	// resolves sessions through its own repo handle, so it does not inherit the
 	// task service's authorize* checks.
 	orchestratorSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
+	orchestratorSvc.SetTaskAccessChecker(taskSvc.AuthorizeTaskAccess)
 
 	// Publish task.updated when the first session is marked primary so the
 	// frontend receives primary_session_id for newly created tasks.
