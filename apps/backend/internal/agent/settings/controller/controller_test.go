@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -632,16 +633,15 @@ func TestDetectAgents_E2EMockPropagatesSupportsMCP(t *testing.T) {
 	}
 }
 
-// TestController_PreviewAgentCommand_CopilotPrefersNativeBinary verifies the
-// command preview reflects the local copilot CLI when it is on PATH — the
-// preview assumes the default standalone host — and falls back to npx when it
-// is absent. Regresses the report that the preview always showed npx.
-func TestController_PreviewAgentCommand_CopilotPrefersNativeBinary(t *testing.T) {
+// TestController_PreviewAgentCommand_CopilotKeepsPinnedPackage verifies that
+// a globally installed Copilot CLI does not make the command preview bypass
+// the reviewed package pin.
+func TestController_PreviewAgentCommand_CopilotKeepsPinnedPackage(t *testing.T) {
 	controller := newTestController(map[string]agents.Agent{
 		"copilot-acp": agents.NewCopilotACP(),
 	})
 
-	// copilot on PATH → preview shows the native binary.
+	// A copilot binary on PATH must not change the previewed launch command.
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "copilot"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write fake copilot: %v", err)
@@ -651,17 +651,8 @@ func TestController_PreviewAgentCommand_CopilotPrefersNativeBinary(t *testing.T)
 	if err != nil {
 		t.Fatalf("PreviewAgentCommand() error = %v", err)
 	}
-	if got := res.Command; len(got) == 0 || got[0] != "copilot" {
-		t.Errorf("preview with copilot on PATH should start with copilot, got %v", got)
-	}
-
-	// copilot absent → preview falls back to npx.
-	t.Setenv("PATH", t.TempDir())
-	res, err = controller.PreviewAgentCommand(context.Background(), "copilot-acp", CommandPreviewRequest{})
-	if err != nil {
-		t.Fatalf("PreviewAgentCommand() error = %v", err)
-	}
-	if got := res.Command; len(got) == 0 || got[0] != "npx" {
-		t.Errorf("preview without copilot on PATH should start with npx, got %v", got)
+	want := []string{"npx", "-y", "@github/copilot@1.0.75", "--acp"}
+	if got := res.Command; !slices.Equal(got, want) {
+		t.Errorf("preview with copilot on PATH = %v, want %v", got, want)
 	}
 }
