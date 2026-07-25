@@ -17,7 +17,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types"
-	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/logger"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -259,8 +258,9 @@ func TestHandleWSNewSession_UsesExtendedDeadline(t *testing.T) {
 	if resp.Type != ws.MessageTypeResponse {
 		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeResponse)
 	}
-	if capture.remaining < constants.SessionNewTimeout-time.Second {
-		t.Fatalf("session/new deadline = %v from now, want about %v", capture.remaining, constants.SessionNewTimeout)
+	const want = 2 * time.Minute
+	if capture.remaining < want-time.Second || capture.remaining > want {
+		t.Fatalf("session/new deadline = %v from now, want about %v", capture.remaining, want)
 	}
 }
 
