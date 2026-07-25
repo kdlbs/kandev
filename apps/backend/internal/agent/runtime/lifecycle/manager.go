@@ -390,6 +390,18 @@ func (m *Manager) CheckSessionAccess(ctx context.Context, sessionID string) erro
 	return m.sessionAccessCheck(ctx, sessionID)
 }
 
+// CheckEnvironmentAccess authorizes an environment-scoped operation for the ctx
+// identity. The environment-keyed sibling of CheckSessionAccess, for handlers
+// that act on a task environment without going through
+// GetOrEnsureExecutionForEnvironment (the user-shell tear-down path).
+// No-op when no checker is set.
+func (m *Manager) CheckEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error {
+	if m.environmentAccessCheck == nil {
+		return nil
+	}
+	return m.environmentAccessCheck(ctx, taskEnvironmentID)
+}
+
 // SetWorkspaceInfoProvider sets the provider for workspace information.
 //
 // The WorkspaceInfoProvider interface allows the lifecycle manager to dynamically create

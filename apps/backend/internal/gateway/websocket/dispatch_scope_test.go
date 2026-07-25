@@ -48,6 +48,12 @@ func newDispatchScopeFixture(t *testing.T, identity authn.Identity) *dispatchSco
 				return repoerrors.ErrTaskNotFound
 			},
 		},
+		ActionEnvironment: func(_ context.Context, envID string) error {
+			if envID == "env-a" {
+				return nil
+			}
+			return repoerrors.ErrTaskNotFound
+		},
 	})
 
 	handled := false
@@ -191,23 +197,26 @@ func TestParseScopedActionRefs(t *testing.T) {
 		wantOK   bool
 		wantTask string
 		wantSess string
+		wantEnv  string
 	}{
-		{`{"task_id":"t","session_id":"s"}`, true, "t", "s"},
-		{`{"task_id":"t"}`, true, "t", ""},
-		{`{"session_id":"s"}`, true, "", "s"},
-		{`{}`, false, "", ""},
-		{`{"task_id":""}`, false, "", ""},
-		{`[1,2]`, false, "", ""},
-		{``, false, "", ""},
+		{`{"task_id":"t","session_id":"s"}`, true, "t", "s", ""},
+		{`{"task_id":"t"}`, true, "t", "", ""},
+		{`{"session_id":"s"}`, true, "", "s", ""},
+		{`{"task_environment_id":"e"}`, true, "", "", "e"},
+		{`{"task_id":"","task_environment_id":"e"}`, true, "", "", "e"},
+		{`{}`, false, "", "", ""},
+		{`{"task_id":""}`, false, "", "", ""},
+		{`[1,2]`, false, "", "", ""},
+		{``, false, "", "", ""},
 	}
 	for _, tc := range cases {
 		refs, ok := parseScopedActionRefs(json.RawMessage(tc.payload))
 		if ok != tc.wantOK {
 			t.Errorf("payload %q ok = %v, want %v", tc.payload, ok, tc.wantOK)
 		}
-		if refs.TaskID != tc.wantTask || refs.SessionID != tc.wantSess {
-			t.Errorf("payload %q refs = %+v, want task=%q session=%q",
-				tc.payload, refs, tc.wantTask, tc.wantSess)
+		if refs.TaskID != tc.wantTask || refs.SessionID != tc.wantSess || refs.TaskEnvironmentID != tc.wantEnv {
+			t.Errorf("payload %q refs = %+v, want task=%q session=%q env=%q",
+				tc.payload, refs, tc.wantTask, tc.wantSess, tc.wantEnv)
 		}
 	}
 }
@@ -221,5 +230,40 @@ func TestIdentityIsScoped(t *testing.T) {
 	}
 	if !identityIsScoped(authn.Identity{UserID: "u"}) {
 		t.Error("real identity must be scoped")
+	}
+}
+
+// TestDispatchScopeDeniesForeignEnvironment covers the user-shell actions, which
+// name a task environment and treat task_id as optional. Checking only task_id
+// let `user_shell.stop` tear down another user's terminal with task_id empty.
+func TestDispatchScopeDeniesForeignEnvironment(t *testing.T) {
+	f := newDispatchScopeFixture(t, realIdentity())
+
+	f.dispatch(t, `{"task_environment_id":"env-b","terminal_id":"shell-1"}`)
+
+	if *f.handled {
+		t.Error("handler ran for a foreign task environment")
+	}
+}
+
+// TestDispatchScopeDeniesForeignEnvironmentWithEmptyTaskID is the exact bypass:
+// omitting task_id must not skip the check.
+func TestDispatchScopeDeniesForeignEnvironmentWithEmptyTaskID(t *testing.T) {
+	f := newDispatchScopeFixture(t, realIdentity())
+
+	f.dispatch(t, `{"task_id":"","task_environment_id":"env-b","terminal_id":"shell-1"}`)
+
+	if *f.handled {
+		t.Error("empty task_id must not bypass the environment check")
+	}
+}
+
+func TestDispatchScopeAllowsOwnEnvironment(t *testing.T) {
+	f := newDispatchScopeFixture(t, realIdentity())
+
+	f.dispatch(t, `{"task_environment_id":"env-a","terminal_id":"shell-1"}`)
+
+	if !*f.handled {
+		t.Error("handler did not run for the caller's own task environment")
 	}
 }

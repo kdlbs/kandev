@@ -77,3 +77,38 @@ func TestPassthroughGuardIsNoOpWhenUnwired(t *testing.T) {
 		t.Errorf("unwired checker denied the call (%v); pre-auth behavior broken", err)
 	}
 }
+
+// TestUserShellStopDeniesForeignEnvironment covers the legacy fallback in
+// wsUserShellStop: task_id is optional there and the fallback tears down the
+// PTY through the interactive runner directly, never reaching
+// GetOrEnsureExecutionForEnvironment where the environment check normally runs.
+// With task_id empty and a foreign task_environment_id, it stopped another
+// user's terminal.
+func TestUserShellStopDeniesForeignEnvironment(t *testing.T) {
+	mgr := &lifecycle.Manager{}
+	mgr.SetEnvironmentAccessChecker(func(_ context.Context, envID string) error {
+		if envID == "env-a" {
+			return nil
+		}
+		return errors.New("task not found")
+	})
+	h := &ShellHandlers{lifecycleMgr: mgr, logger: passthroughTestLogger(t)}
+	msg := &ws.Message{ID: "1", Type: ws.MessageTypeRequest, Action: ws.ActionUserShellStop,
+		Payload: json.RawMessage(`{"task_id":"","task_environment_id":"env-b","terminal_id":"shell-1"}`)}
+
+	_, err := h.wsUserShellStop(context.Background(), msg)
+
+	if err == nil {
+		t.Fatal("foreign task environment was accepted")
+	}
+	if err.Error() != "task environment not found" {
+		t.Errorf("error = %q, want \"task environment not found\"", err.Error())
+	}
+}
+
+// TestUserShellStopGuardIsNoOpWhenUnwired keeps single-user instances working.
+func TestUserShellStopGuardIsNoOpWhenUnwired(t *testing.T) {
+	if err := (&lifecycle.Manager{}).CheckEnvironmentAccess(context.Background(), "env-b"); err != nil {
+		t.Errorf("unwired checker denied the call (%v); pre-auth behavior broken", err)
+	}
+}
