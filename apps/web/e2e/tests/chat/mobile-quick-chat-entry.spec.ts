@@ -14,6 +14,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
+const TASK_LISTING_VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
+
 test.describe("Quick Chat entry points on mobile", () => {
   test("opens from the home header and closes with the touch control", async ({ testPage }) => {
     await testPage.goto("/");
@@ -73,6 +75,10 @@ test.describe("Quick Chat entry points on mobile", () => {
     testPage,
     seedData,
   }) => {
+    await testPage.addInitScript(
+      (key) => window.localStorage.setItem(key, JSON.stringify("list")),
+      TASK_LISTING_VIEW_STORAGE_KEY,
+    );
     await testPage.goto(`/tasks?workspace=${seedData.workspaceId}`);
     await testPage.waitForLoadState("networkidle");
 
