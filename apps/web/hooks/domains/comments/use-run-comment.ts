@@ -20,6 +20,7 @@ import type {
   AgentMessageComment,
 } from "@/lib/state/slices/comments";
 import type { Message } from "@/lib/types/http";
+import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
 
 /**
  * Format a single comment into markdown suitable for sending to the agent.
@@ -124,12 +125,15 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
       // comments when the agent is idle, or sending with wrong plan mode).
       const state = storeApi.getState();
       const activeSession = state.taskSessions.items[sessionId] ?? null;
-      const isAgentBusy = activeSession?.state === "STARTING" || activeSession?.state === "RUNNING";
+      const inputMode = deriveSessionInputMode(activeSession);
       const planModeEnabled = state.chatInput.planModeBySessionId[sessionId] ?? false;
       const content = formatSingleComment(comment);
 
       try {
-        if (isAgentBusy) {
+        if (inputMode === "unavailable") {
+          throw new Error("Session is not available for input");
+        }
+        if (inputMode === "queue") {
           await appendToQueue(buildQueuePayload(sessionId, taskId, content, planModeEnabled));
         } else {
           const client = getWebSocketClient();
@@ -148,7 +152,7 @@ export function useRunComment({ sessionId, taskId }: UseRunCommentParams) {
         }
 
         markCommentsSent([comment.id]);
-        return { queued: isAgentBusy };
+        return { queued: inputMode === "queue" };
       } catch (error) {
         console.error("Failed to send comment to agent:", error);
         throw error;

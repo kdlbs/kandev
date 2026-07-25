@@ -636,6 +636,12 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		zap.String("agent_execution_id", data.AgentExecutionID))
 
 	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
+	// agent.completed is terminal for this lifecycle execution. Any detached
+	// registrations it still owns can no longer produce a trustworthy completion
+	// frame, so reconcile them before evaluating successor workflow state.
+	s.clearExecutionBackgroundWorkAndPublish(
+		context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
+	)
 
 	// Check for workflow transition based on session's current step.
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
@@ -756,6 +762,12 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		zap.String("error_message", data.ErrorMessage))
 
 	if drop, _ := s.shouldDropSessionFailure(ctx, data, "agent.failed", true); drop {
+		// A dropped failure is still terminal for the execution named by the
+		// lifecycle event (commonly a rotated predecessor). Clear only that
+		// execution's detached registrations; successor work remains untouched.
+		s.clearExecutionBackgroundWorkAndPublish(
+			context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
+		)
 		return
 	}
 	s.markExecutionFailed(data.SessionID, data.AgentExecutionID)
@@ -770,6 +782,13 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	if data.SessionID != "" && s.handleTransientFailure(ctx, data) {
 		return
 	}
+
+	// All paths below are terminal for this execution (resume recovery included).
+	// A transient retry returned above and retains its registrations until its
+	// execution is actually stopped.
+	s.clearExecutionBackgroundWorkAndPublish(
+		context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
+	)
 
 	// Terminal from here. Finalize run-mode automation runs — every branch
 	// below returns early (resume failure, session-backed recoverable failure,
@@ -1323,6 +1342,13 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
 
+	// Reconcile before the rotated-execution guard: a late stop from an old
+	// execution must clear only that execution's registrations while preserving
+	// background work already registered by its successor.
+	s.clearExecutionBackgroundWorkAndPublish(
+		context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
+	)
+
 	// NOTE: we deliberately do NOT resetTransientRetry here — the transient
 	// retry tears down the failed execution via StopExecution as part of its
 	// own re-drive, which surfaces as an agent.stopped event; clearing the loop
@@ -1394,6 +1420,9 @@ func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
 		return
 	}
 	ctx := context.Background()
+	// Defensive terminal-boundary reconciliation. Normal lifecycle events clear
+	// first; this covers direct forced cleanup paths and is idempotent.
+	s.clearExecutionBackgroundWorkAndPublish(ctx, taskID, sessionID, executionID)
 	if err := s.executor.StopExecution(ctx, executionID, "agent completed", true); err != nil {
 		s.logger.Debug("agent execution cleanup after terminal state",
 			zap.String("execution_id", executionID),

@@ -17,22 +17,25 @@ type serviceArgs struct {
 	HomeDir     string
 	NoBootStart bool
 	Follow      bool
+	Intent      string
+	DryRun      bool
 	ShowHelp    bool
 }
 
 const (
-	actionInstall   = "install"
-	actionUninstall = "uninstall"
-	actionRestart   = "restart"
-	actionConfig    = "config"
-	actionLogs      = "logs"
-	actionStatus    = "status"
-	actionStop      = "stop"
-	flagHelp        = "--help"
-	goosLinux       = "linux"
-	goosDarwin      = "darwin"
-	managedMarker   = "managed by kandev"
-	serviceUnitName = "kandev.service"
+	actionInstall    = "install"
+	actionUninstall  = "uninstall"
+	actionRestart    = "restart"
+	actionConfig     = "config"
+	actionLogs       = "logs"
+	actionStatus     = "status"
+	actionStop       = "stop"
+	actionSelfUpdate = "self-update"
+	flagHelp         = "--help"
+	goosLinux        = "linux"
+	goosDarwin       = "darwin"
+	managedMarker    = "managed by kandev"
+	serviceUnitName  = "kandev.service"
 )
 
 const serviceHelp = `kandev service — install kandev as an OS-managed service
@@ -64,6 +67,13 @@ func runService(argv []string, build BuildInfo) int {
 		printServiceConfig(args)
 		return 0
 	}
+	if args.Action == actionSelfUpdate {
+		if err := runNativeSelfUpdate(args); err != nil {
+			fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+			return 1
+		}
+		return 0
+	}
 	switch runtime.GOOS {
 	case goosLinux:
 		return runLinuxService(args, build)
@@ -91,12 +101,16 @@ func parseServiceArgs(argv []string) (serviceArgs, error) {
 		}
 		i = next
 	}
+	if action == actionSelfUpdate && !out.ShowHelp && out.Intent == "" {
+		return out, ParseError{Message: "kandev service self-update requires --intent <path>"}
+	}
 	return out, nil
 }
 
 func validServiceAction(action string) bool {
 	switch action {
-	case actionInstall, actionUninstall, string(CommandStart), actionStop, actionRestart, actionStatus, actionLogs, actionConfig:
+	case actionInstall, actionUninstall, string(CommandStart), actionStop, actionRestart, actionStatus, actionLogs, actionConfig,
+		actionSelfUpdate:
 		return true
 	default:
 		return false
@@ -114,6 +128,20 @@ func parseServiceFlag(argv []string, i int, action string, out *serviceArgs) (in
 		out.NoBootStart = true
 	case arg == "-f" || arg == "--follow":
 		out.Follow = true
+	case arg == "--dry-run" && action == actionSelfUpdate:
+		out.DryRun = true
+	case arg == "--intent" && action == actionSelfUpdate:
+		value, err := takeValue(argv, i, "--intent")
+		if err != nil {
+			return i, err
+		}
+		out.Intent = value
+		return i + 1, nil
+	case strings.HasPrefix(arg, "--intent=") && action == actionSelfUpdate:
+		out.Intent = strings.TrimPrefix(arg, "--intent=")
+		if out.Intent == "" {
+			return i, ParseError{Message: "--intent requires a value"}
+		}
 	case arg == "--port":
 		return parseServicePort(argv, i, out)
 	case strings.HasPrefix(arg, "--port="):
@@ -203,26 +231,45 @@ func installSystemd(args serviceArgs, build BuildInfo, unitPath string) int {
 	}
 	homeDir := serviceHomeDir(args)
 	logDir := filepath.Join(homeDir, "logs")
-	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
-		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
-		return 1
-	}
-	unit := renderSystemdUnit(nativeServiceUnitInput{
+	bundleDir := serviceBundleDir(self)
+	systemUser := serviceUser(args.System)
+	input := nativeServiceUnitInput{
 		Executable:   self,
 		HomeDir:      homeDir,
 		LogDir:       logDir,
 		Port:         args.Port,
 		System:       args.System,
-		SystemUser:   serviceUser(args.System),
-		BundleDir:    serviceBundleDir(self),
+		SystemUser:   systemUser,
+		NoBootStart:  args.NoBootStart,
+		BundleDir:    bundleDir,
 		Version:      serviceVersion(build.Version),
 		PathPrefixes: serviceNodeToolBinDirs(),
-	})
+	}
+	metadata := buildNativeServiceMetadata(nativeServiceManagerSystemd, args, input, unitPath)
+	prepared, err := prepareNativeServiceMetadata(metadata)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	defer func() { _ = prepared.Close() }()
+	if err := os.MkdirAll(filepath.Dir(unitPath), 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	unit := renderSystemdUnit(input)
 	if err := backupUnmanagedServiceFile(unitPath); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
 	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	if err := prepared.Commit(); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	if err := prepared.Close(); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
@@ -293,26 +340,41 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 	}
 	homeDir := serviceHomeDir(args)
 	logDir := filepath.Join(homeDir, "logs")
-	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
-		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
-		return 1
-	}
-	if err := os.MkdirAll(logDir, 0o755); err != nil {
-		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
-		return 1
-	}
-	plist := renderLaunchdPlist(nativeServiceUnitInput{
+	bundleDir := serviceBundleDir(self)
+	systemUser := serviceUser(args.System)
+	input := nativeServiceUnitInput{
 		Executable:   self,
 		HomeDir:      homeDir,
 		LogDir:       logDir,
 		Port:         args.Port,
 		System:       args.System,
-		SystemUser:   serviceUser(args.System),
+		SystemUser:   systemUser,
 		NoBootStart:  args.NoBootStart,
-		BundleDir:    serviceBundleDir(self),
+		BundleDir:    bundleDir,
 		Version:      serviceVersion(build.Version),
 		PathPrefixes: serviceNodeToolBinDirs(),
-	})
+	}
+	metadata := buildNativeServiceMetadata(nativeServiceManagerLaunchd, args, input, plistPath)
+	prepared, err := prepareNativeServiceMetadata(metadata)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	defer func() { _ = prepared.Close() }()
+	if args.System {
+		if err := prepared.EnsureHomeDirectory("logs", 0o755); err != nil {
+			fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+			return 1
+		}
+	} else if err := os.MkdirAll(logDir, 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	if err := os.MkdirAll(filepath.Dir(plistPath), 0o755); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	plist := renderLaunchdPlist(input)
 	if err := backupUnmanagedServiceFile(plistPath); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
@@ -321,8 +383,15 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	_ = runCommand("launchctl", "bootout", target)
-	if err := runCommand("launchctl", "bootstrap", domain, plistPath); err != nil {
+	if err := prepared.Commit(); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	if err := prepared.Close(); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	if err := reloadLaunchdService(target, domain, plistPath); err != nil {
 		return 1
 	}
 	_ = runCommand("launchctl", "enable", target)
@@ -448,6 +517,11 @@ func renderSystemdUnit(input nativeServiceUnitInput) string {
 		serviceEnvLine("KANDEV_HOME_DIR", input.HomeDir),
 		serviceEnvLine("KANDEV_LOG_LEVEL", "info"),
 		serviceEnvLineAllowSpecifiers("PATH", pathValue),
+		serviceEnvLine("KANDEV_RUNNING_AS_SERVICE", "true"),
+		serviceEnvLine("KANDEV_SERVICE_MODE", nativeServiceMode(input.System)),
+		serviceEnvLine("KANDEV_SERVICE_MANAGER", nativeServiceManagerSystemd),
+		serviceEnvLine("KANDEV_INSTALL_KIND", nativeInstallKind(input.Executable, input.BundleDir)),
+		serviceEnvLine("KANDEV_SERVICE_METADATA", nativeServiceMetadataPath(input.HomeDir)),
 	}
 	if input.Port != 0 {
 		env = append(env, serviceEnvLine("KANDEV_SERVER_PORT", fmt.Sprint(input.Port)))
@@ -475,7 +549,16 @@ func renderSystemdUnit(input nativeServiceUnitInput) string {
 
 func renderLaunchdPlist(input nativeServiceUnitInput) string {
 	pathValue := servicePathWithPrefixes(launchdServicePath, input.PathPrefixes)
-	envEntries := [][2]string{{"KANDEV_HOME_DIR", input.HomeDir}, {"KANDEV_LOG_LEVEL", "info"}, {"PATH", pathValue}}
+	envEntries := [][2]string{
+		{"KANDEV_HOME_DIR", input.HomeDir},
+		{"KANDEV_LOG_LEVEL", "info"},
+		{"PATH", pathValue},
+		{"KANDEV_RUNNING_AS_SERVICE", "true"},
+		{"KANDEV_SERVICE_MODE", nativeServiceMode(input.System)},
+		{"KANDEV_SERVICE_MANAGER", nativeServiceManagerLaunchd},
+		{"KANDEV_INSTALL_KIND", nativeInstallKind(input.Executable, input.BundleDir)},
+		{"KANDEV_SERVICE_METADATA", nativeServiceMetadataPath(input.HomeDir)},
+	}
 	if input.Port != 0 {
 		envEntries = append(envEntries, [2]string{"KANDEV_SERVER_PORT", fmt.Sprint(input.Port)})
 	}

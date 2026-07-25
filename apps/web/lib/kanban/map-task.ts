@@ -4,7 +4,12 @@ import {
   issueFieldsFromMetadata,
 } from "@/lib/metadata-utils";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
-import type { TaskPendingAction, TaskState, TaskSessionState } from "@/lib/types/http";
+import type {
+  ForegroundActivity,
+  TaskPendingAction,
+  TaskState,
+  TaskSessionState,
+} from "@/lib/types/http";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -36,6 +41,8 @@ export type TaskLike = {
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  task_pending_action?: TaskPendingAction | null;
+  foreground_activity?: ForegroundActivity | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -70,11 +77,18 @@ function pickId(source: TaskLike): string {
   return (source.id ?? source.task_id ?? "") as string;
 }
 
-export function pickPendingAction(action: unknown): TaskPendingAction | undefined {
+export function pickPendingAction(action: unknown): TaskPendingAction | null | undefined {
+  if (action === null) return null;
   if (action === "clarification" || action === "permission") {
     return action;
   }
   return undefined;
+}
+
+function pickForegroundActivity(
+  activity: TaskLike["foreground_activity"],
+): ForegroundActivity | null | undefined {
+  return activity === null ? null : (activity ?? undefined);
 }
 
 type KanbanTaskRepository = NonNullable<KanbanTask["repositories"]>[number];
@@ -109,6 +123,8 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
+    taskPendingAction: pickPendingAction(source.task_pending_action),
+    foregroundActivity: pickForegroundActivity(source.foreground_activity),
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
     primaryExecutorId: source.primary_executor_id ?? undefined,

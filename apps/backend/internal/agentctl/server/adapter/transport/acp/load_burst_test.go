@@ -469,7 +469,7 @@ func BenchmarkHandleACPUpdate_LoadSuppressed(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		a.handleACPUpdate(notes[i%len(notes)])
+		a.handleACPUpdate(notes[i%len(notes)], 0)
 	}
 }
 
@@ -500,7 +500,7 @@ func BenchmarkHandleACPUpdate_NormalPath(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		a.handleACPUpdate(notes[i%len(notes)])
+		a.handleACPUpdate(notes[i%len(notes)], 0)
 	}
 }
 

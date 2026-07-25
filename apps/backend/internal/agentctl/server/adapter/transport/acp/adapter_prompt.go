@@ -99,7 +99,7 @@ func (a *Adapter) sendPrompt(
 		attribute.Int("prompt_length", len(finalMessage)),
 		attribute.Int("image_count", len(attachments)),
 	)
-	promptCtx, turn := a.registerPromptTurn(traceCtx)
+	promptCtx, turn := a.registerPromptTurn(traceCtx, promptGeneration)
 	defer a.clearPromptTurn(turn)
 	a.setPromptTraceCtx(promptCtx)
 

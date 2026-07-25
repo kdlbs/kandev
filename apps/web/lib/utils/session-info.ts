@@ -56,11 +56,13 @@ function priority(state: TaskSessionState | undefined): number {
   return idx === -1 ? SESSION_STATE_PRIORITY.length : idx;
 }
 
-function pickMostActiveState(sessions: TaskSession[]): TaskSessionState | undefined {
-  let best: TaskSessionState | undefined;
+// Returns the single most-active session, so the sidebar's state badge
+// reflects whatever session is most active right now.
+function pickMostActiveSession(sessions: TaskSession[]): TaskSession | undefined {
+  let best: TaskSession | undefined;
   for (const s of sessions) {
     const candidate = s.state as TaskSessionState | undefined;
-    if (priority(candidate) < priority(best)) best = candidate;
+    if (priority(candidate) < priority(best?.state as TaskSessionState | undefined)) best = s;
   }
   return best;
 }
@@ -83,7 +85,8 @@ export function getSessionInfoForTask(
   // Empty string means the session was created from a WS event without timestamps;
   // return undefined so callers fall through to task.updatedAt/createdAt instead.
   const updatedAt = latestSession.updated_at || undefined;
-  const sessionState = pickMostActiveState(sessions);
+  const mostActive = pickMostActiveSession(sessions);
+  const sessionState = mostActive?.state as TaskSessionState | undefined;
   const envKey = environmentIdBySessionId?.[latestSession.id] ?? latestSession.id;
   const gitStatus = gitStatusByEnvId[envKey];
   if (!gitStatus) return { diffStats: undefined, updatedAt, sessionState };

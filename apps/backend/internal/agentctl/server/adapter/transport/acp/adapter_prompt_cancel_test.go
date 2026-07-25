@@ -100,7 +100,7 @@ func TestWaitForPromptRPCAfterUserCancel_CompletesAfterAbort(t *testing.T) {
 
 func TestRegisterPromptTurn_CancelCause(t *testing.T) {
 	a := newTestAdapter()
-	ctx, turn := a.registerPromptTurn(context.Background())
+	ctx, turn := a.registerPromptTurn(context.Background(), 0)
 	defer a.clearPromptTurn(turn)
 
 	turn.endTurn(ErrTurnCancelNotAcknowledged)
@@ -116,7 +116,7 @@ func TestRegisterPromptTurn_CancelCause(t *testing.T) {
 // timeout branches of the waiters.
 func TestSignalPromptTurnAbort_DoesNotCancelPromptCtx(t *testing.T) {
 	a := newTestAdapter()
-	ctx, turn := a.registerPromptTurn(context.Background())
+	ctx, turn := a.registerPromptTurn(context.Background(), 0)
 	defer a.clearPromptTurn(turn)
 
 	turn.rpcDone = make(chan struct{})
@@ -142,7 +142,7 @@ func TestWaitForPromptRPCAfterUserCancel_CancelsPromptCtxOnTimeout(t *testing.T)
 	t.Cleanup(func() { promptCancelJoinTimeout = prev })
 
 	a := newTestAdapter()
-	ctx, turn := a.registerPromptTurn(context.Background())
+	ctx, turn := a.registerPromptTurn(context.Background(), 0)
 	defer a.clearPromptTurn(turn)
 	turn.rpcDone = make(chan struct{})
 	turn.abortCh = make(chan struct{})
@@ -166,7 +166,7 @@ func TestWaitForPromptRPCAfterCancel_CancelsPromptCtxOnTimeout(t *testing.T) {
 	t.Cleanup(func() { promptCancelJoinTimeout = prev })
 
 	a := newTestAdapter()
-	ctx, turn := a.registerPromptTurn(context.Background())
+	ctx, turn := a.registerPromptTurn(context.Background(), 0)
 	defer a.clearPromptTurn(turn)
 	turn.rpcDone = make(chan struct{})
 

@@ -721,6 +721,28 @@ func TestHandleAgentEvent_DelayedCompleteCannotFinishReplacementPrompt(t *testin
 	}
 }
 
+func TestHandleAgentEvent_ForegroundIdlePreservesPromptGeneration(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-foreground-idle", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             "foreground_idle",
+		SessionID:        execution.SessionID,
+		PromptGeneration: 42,
+	})
+
+	events := eventBus.getStreamEvents()
+	if len(events) != 1 || events[0].Data == nil {
+		t.Fatalf("expected one foreground-idle stream event, got %#v", events)
+	}
+	if events[0].Data.PromptGeneration != 42 {
+		t.Fatalf("prompt generation = %d, want 42", events[0].Data.PromptGeneration)
+	}
+}
+
 func TestHandleAgentEvent_ErrorClaimCannotRaceReplacementPrompt(t *testing.T) {
 	mgr, _ := createTestManagerWithTracking()
 	execution := createTestExecution("exec-1", "task-1", "session-1")

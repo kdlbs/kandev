@@ -14,7 +14,9 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { useSubtaskCount } from "@/hooks/use-subtask-count";
+import { useTaskInFlight } from "@/hooks/use-task-in-flight";
 import { getCleanupSummary, getBulkCleanupSummary } from "./task-cleanup-summary";
+import { StillWorkingWarning } from "./task-still-working-warning";
 
 type TaskDeleteConfirmDialogProps = {
   open: boolean;
@@ -25,6 +27,7 @@ type TaskDeleteConfirmDialogProps = {
   isDeleting?: boolean;
   taskId?: string;
   taskIds?: string[];
+  isInFlight?: boolean;
   /** Executor type of the task being deleted (single). */
   executorType?: string | null;
   /** Executor types of the tasks being deleted (bulk). */
@@ -42,6 +45,7 @@ export function TaskDeleteConfirmDialog({
   isDeleting,
   taskId,
   taskIds,
+  isInFlight,
   executorType,
   executorTypes,
   onConfirm,
@@ -59,6 +63,7 @@ export function TaskDeleteConfirmDialog({
 
   const [cascade, setCascade] = useState(false);
   const subtaskCount = useSubtaskCount(open, taskId, taskIds);
+  const storeInFlight = useTaskInFlight(taskId, taskIds, open);
 
   const handleOpenChange = (next: boolean) => {
     if (!next) setCascade(false);
@@ -81,6 +86,9 @@ export function TaskDeleteConfirmDialog({
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
+        {(isInFlight || storeInFlight) && (
+          <StillWorkingWarning count={isBulkOperation ? safeCount : undefined} />
+        )}
         {subtaskCount > 0 && (
           <label className="flex items-start gap-2 text-sm cursor-pointer">
             <Checkbox

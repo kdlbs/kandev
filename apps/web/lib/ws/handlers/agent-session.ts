@@ -208,6 +208,11 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
   if (payload.name !== undefined) update.name = payload.name;
   if (payload.task_environment_id) update.task_environment_id = payload.task_environment_id;
   if (payload.updated_at) update.updated_at = payload.updated_at;
+  // Carry the authoritative activity value across coarse transitions. A new
+  // foreground turn resets it to generating; settled detached work may remain
+  // background (ADR-0049).
+  if (payload.foreground_activity !== undefined)
+    update.foreground_activity = payload.foreground_activity;
   return update;
 }
 
@@ -482,6 +487,34 @@ function maybeNotifySessionFailure(store: StoreApi<AppState>, ctx: SessionFailur
   });
 }
 
+/** Apply a fine-grained busy-substate flip (ADR-0049). Annotates the
+ *  existing session row so the composer gate and status indicator update; does
+ *  nothing until the row exists (state_changed seeds it first). */
+function applyForegroundActivity(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+): void {
+  if (!payload?.task_id || !payload?.session_id) return;
+  const taskId = toTaskId(payload.task_id);
+  const sessionId = toSessionId(payload.session_id);
+  const existing = store.getState().taskSessions.items[sessionId];
+  if (!existing) return;
+  // Detached work can outlive the foreground turn, whose coarse state is then
+  // WAITING_FOR_INPUT. Terminal/parked sessions reject delayed activity frames;
+  // their execution teardown owns the final clear.
+  if (existing.state !== "RUNNING" && existing.state !== "WAITING_FOR_INPUT") return;
+  if (existing.task_id && existing.task_id !== taskId) return;
+  store.getState().upsertTaskSessionFromEvent(taskId, {
+    id: sessionId,
+    task_id: taskId,
+    state: existing.state,
+    started_at: existing.started_at ?? "",
+    updated_at: existing.updated_at ?? "",
+    foreground_activity: payload.foreground_activity ?? null,
+  });
+}
+
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
     "message.queue.status_changed": (message) => {
@@ -554,6 +587,9 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
       });
 
       maybeFanOutOfficeRefetch(store, newState, existingSession?.state);
+    },
+    "session.activity_changed": (message) => {
+      applyForegroundActivity(store, message.payload);
     },
     "session.agentctl_starting": (message) => {
       const payload = message.payload;

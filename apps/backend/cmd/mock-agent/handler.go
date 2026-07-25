@@ -270,9 +270,75 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitMarkdownShowcase(e, model)
 	case strings.EqualFold(cmd, "/sleep") || strings.HasPrefix(strings.ToLower(cmd), "/sleep "):
 		emitSleep(e, cmd)
+	case strings.EqualFold(cmd, "/background") || strings.HasPrefix(strings.ToLower(cmd), "/background "):
+		emitBackgroundWork(e, cmd)
+	case strings.EqualFold(cmd, "/detached-background") || strings.HasPrefix(strings.ToLower(cmd), "/detached-background "):
+		emitDetachedBackgroundWork(e, cmd)
+	case strings.EqualFold(cmd, "/async-subagent-lifecycle") || strings.HasPrefix(strings.ToLower(cmd), "/async-subagent-lifecycle "):
+		emitAsyncSubagentLifecycle(e, cmd, true)
+	case strings.EqualFold(cmd, "/async-subagent-teardown"):
+		emitAsyncSubagentLifecycle(e, cmd, false)
 	default:
 		emitRandomResponse(e, cmd, model)
 	}
+}
+
+const asyncSubagentAgentID = "agent_e2e_async_lifecycle"
+
+// emitAsyncSubagentLifecycle replays the ordering emitted by a detached Claude
+// Agent rather than the shell-oriented /detached-background sequence:
+//
+//  1. Agent tool launch acknowledgement with a stable agentId
+//  2. human-origin usage boundary (foreground idle)
+//  3. final thought and assistant output from the same prompt
+//  4. Prompt returns to its caller, completing the foreground turn
+//  5. optional ID-less task-notification boundary after the child finishes
+//
+// The teardown variant intentionally omits step 5 so execution termination is
+// the only evidence available to reconcile the registration.
+func emitAsyncSubagentLifecycle(e *emitter, cmd string, emitCompletion bool) {
+	d := parseBackgroundDuration(cmd, 20*time.Second)
+	toolCallID := nextToolID()
+	e.launchAsyncSubagentTool(
+		toolCallID,
+		"Async subagent exploration",
+		"Continue independently after the foreground turn ends",
+		"general-purpose",
+	)
+	e.foregroundIdle()
+	e.thought("The child is launched; I can return control to the operator.")
+	e.text("Foreground response after async launch.")
+
+	if !emitCompletion {
+		return
+	}
+	backgroundEmitter := &emitter{ctx: context.Background(), conn: e.conn, sid: e.sid}
+	go func() {
+		time.Sleep(d)
+		// Claude's async Agent invocation is terminal at launch. The later
+		// completion is a task-notification usage frame, not a second tool update.
+		backgroundEmitter.completeDetachedWork()
+	}()
+}
+
+// emitDetachedBackgroundWork launches work that outlives this prompt response.
+// It is intentionally different from /background, whose foreground prompt stays
+// open for the entire delay, so E2E can cover settled+background explicitly.
+func emitDetachedBackgroundWork(e *emitter, cmd string) {
+	d := parseBackgroundDuration(cmd, 8*time.Second)
+	e.text("Launching detached background work; this foreground turn is complete.")
+
+	taskToolID := nextToolID()
+	e.launchAsyncSubagentTool(taskToolID,
+		"Detached background exploration",
+		"Continue working after the foreground response ends",
+		"general-purpose")
+
+	backgroundEmitter := &emitter{ctx: context.Background(), conn: e.conn, sid: e.sid}
+	go func() {
+		time.Sleep(d)
+		backgroundEmitter.completeDetachedWork()
+	}()
 }
 
 // emitSleep sleeps for the requested duration (default 10s) then responds.
@@ -289,6 +355,59 @@ func emitSleep(e *emitter, cmd string) {
 	}
 	time.Sleep(d)
 	e.text(fmt.Sprintf("Slept for %s.", d))
+}
+
+// emitBackgroundWork reproduces the fine-grained busy signal window
+// (ADR-0049): the foreground emits a line, spawns a
+// top-level subagent Task that holds the turn open, then goes IDLE for the
+// requested duration (default 8s) with no foreground output — the exact state
+// where the orchestrator narrows the busy gate so the composer accepts input
+// while the session still reads RUNNING. When the hold elapses the subagent
+// completes, the foreground resumes, and the turn ends (→ done).
+func emitBackgroundWork(e *emitter, cmd string) {
+	d := parseBackgroundDuration(cmd, 8*time.Second)
+
+	e.text("Kicking off background work; I'll keep going in the background.")
+
+	taskToolID := nextToolID()
+	e.startSubagentTool(taskToolID,
+		"Background exploration",
+		"Explore the codebase while the foreground stays idle",
+		"general-purpose")
+
+	// Hold the turn open with NO foreground output so the session stays in the
+	// background-idle substate for the whole window.
+	time.Sleep(d)
+
+	e.completeSubagentTool(taskToolID, "Background work finished", subagentResult{
+		agentID:      "agent_e2e_background",
+		subagentType: "general-purpose",
+		durationMs:   d.Milliseconds(),
+		totalTokens:  4242,
+		toolUseCount: 1,
+	})
+
+	e.text("Background work complete.")
+}
+
+// parseBackgroundDuration reads the optional duration argument of a /background
+// command, returning def when it is absent or unparseable. A value carrying an
+// explicit unit is honored as-is (`1m`, `500ms`, `2h`); a bare number is treated
+// as seconds (`8` → 8s). The explicit-unit parse is tried FIRST: appending "s"
+// to a unit-bearing value like `1m` would otherwise parse as the valid-but-wrong
+// "1ms" (1 millisecond) and never reach the correct interpretation.
+func parseBackgroundDuration(cmd string, def time.Duration) time.Duration {
+	parts := strings.Fields(cmd)
+	if len(parts) < 2 {
+		return def
+	}
+	if parsed, err := time.ParseDuration(parts[1]); err == nil && parsed > 0 {
+		return parsed
+	}
+	if secs, err := time.ParseDuration(parts[1] + "s"); err == nil && secs > 0 {
+		return secs
+	}
+	return def
 }
 
 // emitError emits an error message.

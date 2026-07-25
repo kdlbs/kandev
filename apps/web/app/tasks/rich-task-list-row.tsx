@@ -3,6 +3,7 @@
 import { IconAlertCircle, IconSubtask } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { useTaskPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import type { Repository, Task } from "@/lib/types/http";
 import { resolveRichTaskRowDetails } from "./rich-task-row-details";
@@ -21,10 +22,24 @@ function ArchivedBadge({ task }: { task: Task }) {
   );
 }
 
-function PrimaryTaskLine({ task, showPullRequest }: { task: Task; showPullRequest: boolean }) {
+function PrimaryTaskLine({
+  task,
+  pendingInput,
+  showPullRequest,
+}: {
+  task: Task;
+  pendingInput: PendingInput;
+  showPullRequest: boolean;
+}) {
   return (
     <>
-      {getTaskStateIcon(task.state, "h-4 w-4 shrink-0")}
+      {getTaskStateIcon(
+        task.state,
+        "h-4 w-4 shrink-0",
+        pendingInput.clarification,
+        task.foreground_activity,
+        pendingInput.permission,
+      )}
       <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
         {task.title}
       </span>
@@ -95,10 +110,12 @@ function RichTaskContent({
   task,
   details,
   level,
+  pendingInput,
 }: {
   task: Task;
   details: RichTaskRowDetails;
   level: number;
+  pendingInput: PendingInput;
 }) {
   return (
     <div
@@ -107,7 +124,7 @@ function RichTaskContent({
       style={{ paddingLeft: `${level * 28}px` }}
     >
       <div className="flex min-w-0 items-center gap-2">
-        <PrimaryTaskLine task={task} showPullRequest />
+        <PrimaryTaskLine task={task} pendingInput={pendingInput} showPullRequest />
       </div>
       <RichMetadataBadges details={details} />
       {details.description && (
@@ -133,9 +150,18 @@ export function TaskListRowPrimaryContent({
   parentTasks: Task[];
   showTaskDetails: boolean;
 }) {
+  const pendingInput = useTaskPendingInput(task.primary_session_id, {
+    taskId: task.id,
+    taskPendingAction: task.task_pending_action,
+    primarySessionState: task.primary_session_state,
+    primarySessionPendingAction: task.primary_session_pending_action,
+  });
+
   if (showTaskDetails) {
     const details = resolveRichTaskRowDetails({ task, repositories, parentTasks });
-    return <RichTaskContent task={task} details={details} level={level} />;
+    return (
+      <RichTaskContent task={task} details={details} level={level} pendingInput={pendingInput} />
+    );
   }
   return (
     <div
@@ -143,7 +169,7 @@ export function TaskListRowPrimaryContent({
       data-testid="tasks-list-row-content"
       style={{ paddingLeft: `${level * 28}px` }}
     >
-      <PrimaryTaskLine task={task} showPullRequest={false} />
+      <PrimaryTaskLine task={task} pendingInput={pendingInput} showPullRequest={false} />
     </div>
   );
 }
