@@ -19,7 +19,8 @@ import { HealthIndicatorButton, HealthIssuesDialog } from "../system-health/heal
 import { TaskSearchInput } from "./task-search-input";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
-import { MobileMenuSheet, type TasksListDisplayOptions } from "./mobile-menu-sheet";
+import { MobileMenuSheet } from "./mobile-menu-sheet";
+import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
 import { linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";

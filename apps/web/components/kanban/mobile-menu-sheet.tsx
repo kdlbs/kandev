@@ -20,14 +20,12 @@ import {
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 import { TaskSearchInput } from "./task-search-input";
+import {
+  MobileTasksListOptions,
+  type TasksListDisplayOptions,
+} from "./mobile-menu-task-list-options";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
-import {
-  TASKS_LIST_GROUP_OPTIONS,
-  TASKS_LIST_SORT_OPTIONS,
-  type TasksListGroup,
-  type TasksListSort,
-} from "@/lib/tasks/tasks-list-options";
 import { cn } from "@/lib/utils";
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
@@ -45,15 +43,6 @@ type MobileMenuSheetProps = {
   tasksListOptions?: TasksListDisplayOptions;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
-};
-
-export type TasksListDisplayOptions = {
-  showArchived: boolean;
-  onShowArchivedChange: (show: boolean) => void;
-  sort: TasksListSort;
-  onSortChange: (sort: TasksListSort) => void;
-  group: TasksListGroup;
-  onGroupChange: (group: TasksListGroup) => void;
 };
 
 const mobileSectionClass = "space-y-2";
@@ -102,6 +91,7 @@ function MobileDisplaySelects({
   | "tasksListShowDetails"
   | "onToggleTasksListShowDetails"
   | "showTaskDetails"
+  | "tasksListOptions"
 >) {
   return (
     <>
@@ -195,66 +185,6 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
         </div>
       )}
       {tasksListOptions && <MobileTasksListOptions options={tasksListOptions} />}
-    </div>
-  );
-}
-
-function MobileTasksListOptions({ options }: { options: TasksListDisplayOptions }) {
-  return (
-    <div className={mobileFieldClass}>
-      <label className={mobileFieldLabelClass}>Task list</label>
-      <div className="space-y-3">
-        <div className={mobileFieldClass}>
-          <label className={mobileFieldLabelClass}>Sort</label>
-          <Select
-            value={options.sort}
-            onValueChange={(value) => options.onSortChange(value as TasksListSort)}
-          >
-            <SelectTrigger
-              data-testid="mobile-tasks-list-sort"
-              className="h-11 w-full cursor-pointer px-3 text-sm"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TASKS_LIST_SORT_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value} className="cursor-pointer">
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className={mobileFieldClass}>
-          <label className={mobileFieldLabelClass}>Group</label>
-          <Select
-            value={options.group}
-            onValueChange={(value) => options.onGroupChange(value as TasksListGroup)}
-          >
-            <SelectTrigger
-              data-testid="mobile-tasks-list-group"
-              className="h-11 w-full cursor-pointer px-3 text-sm"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TASKS_LIST_GROUP_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value} className="cursor-pointer">
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md text-sm font-medium">
-          <Checkbox
-            checked={options.showArchived}
-            onCheckedChange={(checked) => options.onShowArchivedChange(checked === true)}
-            data-testid="mobile-tasks-list-show-archived"
-          />
-          <span>Show archived</span>
-        </label>
-      </div>
     </div>
   );
 }
