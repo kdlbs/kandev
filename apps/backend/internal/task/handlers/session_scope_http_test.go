@@ -155,6 +155,28 @@ func TestHTTPGetTaskSessionDeniesForeignSessionWith404(t *testing.T) {
 // existence signal.
 func TestHTTPGetShellOutputDeniesForeignMessageWith404(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+
+	foreign := shellOutputRequestAs(t, "user-a")
+	if foreign.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body: %s)", foreign.Code, foreign.Body.String())
+	}
+
+	// In-test witness that the 404 above comes from authorization and not from
+	// the route's post-service `!ok` gate. This test was previously vacuous for
+	// exactly that reason: with an empty metadata fixture it passed even with
+	// the guard removed. The owner must get past the check, so if this ever
+	// starts returning 404 too, the assertion above has stopped proving
+	// anything — which is cheaper to notice here than in a mutation run.
+	owner := shellOutputRequestAs(t, "user-b")
+	if owner.Code == http.StatusNotFound {
+		t.Fatal("owner got 404 too — the 404 above is not proving authorization")
+	}
+}
+
+// shellOutputRequestAs issues the shell-output request for the foreign fixture's
+// message as userID, and returns the recorded response.
+func shellOutputRequestAs(t *testing.T, userID string) *httptest.ResponseRecorder {
+	t.Helper()
 	log := newTestLogger(t)
 	repo := &foreignMessageRepo{}
 	svc := service.NewService(service.Repos{
@@ -171,14 +193,11 @@ func TestHTTPGetShellOutputDeniesForeignMessageWith404(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodGet,
 		"/api/v1/task-sessions/sess-b/messages/msg-b/shell-output", nil)
 	c.Request = c.Request.WithContext(authn.WithIdentity(
-		c.Request.Context(), authn.Identity{UserID: "user-a", Role: authn.RoleMember}))
+		c.Request.Context(), authn.Identity{UserID: userID, Role: authn.RoleMember}))
 	c.Params = gin.Params{{Key: "id", Value: "sess-b"}, {Key: "message_id", Value: "msg-b"}}
 
 	h.httpGetShellOutput(c)
-
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
-	}
+	return rec
 }
 
 // foreignMessageRepo owns the message's session as "user-b".
