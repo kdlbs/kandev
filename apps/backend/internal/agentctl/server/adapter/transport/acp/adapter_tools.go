@@ -161,6 +161,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	if codexParentToolCallID != "" {
 		parentToolCallID = codexParentToolCallID
 	}
+	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
 	return &AgentEvent{
 		Type:              eventType,
@@ -790,6 +791,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 
 	if isTerminal {
 		delete(a.activeToolCalls, emittedToolCallID)
+		a.forgetPromptHandoffToolLocked(emittedToolCallID)
 		// Also drop tracked Monitor: this terminal update is the
 		// agent-emitted close, so the prompt-end sweep must not re-emit a
 		// "Monitor exited" event for this same toolCallID.

@@ -110,14 +110,23 @@
       "audiences": ["user"],
       "stability": "stable",
       "docs": ["sessions-and-review", "developer-tools", "automation-and-mcp"],
-      "sources": ["apps/web/components/review/review-dialog.tsx", "apps/web/components/review/walkthrough-overlay.tsx"],
-      "tests": ["apps/web/components/review/review-dialog.build-files.test.ts", "apps/web/components/review/walkthrough-overlay.test.tsx"],
+      "sources": [
+        "apps/backend/internal/mcp/handlers/review.go",
+        "apps/web/components/review/review-dialog.tsx",
+        "apps/web/components/review/walkthrough-overlay.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/mcp/handlers/review_test.go",
+        "apps/web/components/review/review-dialog.build-files.test.ts",
+        "apps/web/components/review/walkthrough-overlay.test.tsx"
+      ],
       "mcpTools": [
         "create_task_plan_kandev",
         "delete_task_plan_kandev",
         "delete_walkthrough_kandev",
         "get_task_plan_kandev",
         "get_walkthrough_kandev",
+        "publish_review_findings_kandev",
         "show_walkthrough_kandev",
         "update_task_plan_kandev"
       ]

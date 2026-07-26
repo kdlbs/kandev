@@ -1562,6 +1562,132 @@ func TestSendPrompt_SerializesCompletionWaitersPerExecution(t *testing.T) {
 	}
 }
 
+func TestSendPrompt_AuthoritativeHandoffReleasesNextGeneration(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+
+	firstPromptSeen := make(chan struct{})
+	secondPromptSeen := make(chan struct{})
+	var promptCount int
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			promptCount++
+			switch promptCount {
+			case 1:
+				close(firstPromptSeen)
+			case 2:
+				close(secondPromptSeen)
+			}
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	mgr, eventBus := createTestManagerWithTracking()
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := createTestExecution("exec-handoff", "task-handoff", "session-handoff")
+	execution.agentctl = client
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	firstResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.sessionManager.SendPrompt(ctx, execution, "first", false, nil, false)
+		firstResult <- err
+	}()
+	select {
+	case <-firstPromptSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first prompt did not reach agentctl")
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeMessageChunk,
+		Text:             "parent answer",
+		PromptGeneration: 1,
+	})
+
+	secondResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.sessionManager.SendPrompt(ctx, execution, "second", false, nil, false)
+		secondResult <- err
+	}()
+	select {
+	case <-secondPromptSeen:
+		t.Fatal("second prompt reached agentctl before foreground handoff")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeForegroundIdle,
+		PromptGeneration: 1,
+		Data:             map[string]any{streams.AgentEventDataPromptHandoff: true},
+	})
+
+	select {
+	case err := <-firstResult:
+		if err != nil {
+			t.Fatalf("first prompt handoff returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("foreground handoff did not release the first lifecycle waiter")
+	}
+	select {
+	case <-secondPromptSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second prompt did not reach agentctl after foreground handoff")
+	}
+
+	// The original bridge RPC can return only after the follow-up echo. Its late
+	// result must not complete or reset generation 2.
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		PromptGeneration: 1,
+		Data:             map[string]any{"stop_reason": "end_turn"},
+	})
+	select {
+	case err := <-secondResult:
+		t.Fatalf("late generation-1 completion released generation 2: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if !mgr.executionStore.OwnsPromptGeneration(execution.SessionID, execution.ID, 2) {
+		t.Fatal("late original completion replaced generation-2 ownership")
+	}
+
+	var streamed string
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && event.Data.Type == "message_streaming" {
+			streamed += event.Data.Text
+		}
+	}
+	if streamed != "parent answer" {
+		t.Fatalf("streamed handoff boundary = %q, want parent answer", streamed)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		PromptGeneration: 2,
+		Data:             map[string]any{"stop_reason": "end_turn"},
+	})
+	select {
+	case err := <-secondResult:
+		if err != nil {
+			t.Fatalf("second prompt returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("generation-2 completion did not release its waiter")
+	}
+}
+
 func TestWaitForPromptDone_TreatsPromptAbandonedAfterCancelAsCancelEscalated(t *testing.T) {
 	log := newSessionTestLogger()
 	sm := NewSessionManager(log, make(chan struct{}))
