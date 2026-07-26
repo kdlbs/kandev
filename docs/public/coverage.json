@@ -118,6 +118,7 @@
         "delete_walkthrough_kandev",
         "get_task_plan_kandev",
         "get_walkthrough_kandev",
+        "publish_review_findings_kandev",
         "show_walkthrough_kandev",
         "update_task_plan_kandev"
       ]
