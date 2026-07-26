@@ -347,11 +347,6 @@
       { "route": "/settings/plugins", "reason": "Experimental feature intentionally omitted until its public contract stabilizes." },
       { "route": "/settings/system", "reason": "Redirect to System status." }
     ],
-    "mcpTools": [
-      {
-        "tool": "publish_review_findings_kandev",
-        "reason": "Internal reporting tool the native code-review agent uses to emit inline findings; not a user-facing feature to document."
-      }
-    ]
+    "mcpTools": []
   }
 }
