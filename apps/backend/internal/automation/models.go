@@ -22,18 +22,12 @@ const (
 )
 
 const (
-	defaultBranchMain           = "main"
-	exampleRepositoryOwner      = "org/repo"
-	placeholderRepositoryOwner  = "Repository (owner/name)"
-	triggerCategoryGitHub       = "github"
-	triggerDataSourceKey        = "source"
-	triggerDataSourceManual     = "manual"
-	triggerCronHourlyShorthand  = "@hourly"
-	triggerCronHourlyExpression = "0 * * * *"
-	triggerCronDailyShorthand   = "@daily"
-	triggerCronDailyExpression  = "0 0 * * *"
-	triggerCronWeeklyShorthand  = "@weekly"
-	triggerCronWeeklyExpression = "0 0 * * 0"
+	defaultBranchMain          = "main"
+	exampleRepositoryOwner     = "org/repo"
+	placeholderRepositoryOwner = "Repository (owner/name)"
+	triggerCategoryGitHub      = "github"
+	triggerDataSourceKey       = "source"
+	triggerDataSourceManual    = "manual"
 )
 
 // RunStatus tracks the outcome of a trigger firing.

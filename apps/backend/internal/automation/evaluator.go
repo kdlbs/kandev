@@ -83,8 +83,6 @@ func (e *GitHubEvaluator) loop(ctx context.Context) {
 
 func (e *GitHubEvaluator) evaluate(ctx context.Context) {
 	e.evaluatePRTriggers(ctx)
-	e.evaluatePushTriggers(ctx)
-	e.evaluateCITriggers(ctx)
 }
 
 func (e *GitHubEvaluator) evaluatePRTriggers(ctx context.Context) {
@@ -170,52 +168,6 @@ func (e *GitHubEvaluator) firePRTrigger(ctx context.Context, t *AutomationTrigge
 	}
 }
 
-func (e *GitHubEvaluator) evaluatePushTriggers(ctx context.Context) {
-	triggers, err := e.svc.Store().ListEnabledTriggersByType(ctx, TriggerTypeGitHubPush)
-	if err != nil {
-		e.logger.Error("failed to list github_push triggers", zap.Error(err))
-		return
-	}
-	for i := range triggers {
-		t := &triggers[i]
-		e.checkPushTrigger(ctx, t)
-	}
-}
-
-func (e *GitHubEvaluator) checkPushTrigger(ctx context.Context, t *AutomationTrigger) {
-	var cfg GitHubPushTriggerConfig
-	if err := json.Unmarshal(t.Config, &cfg); err != nil {
-		return
-	}
-	// Push trigger evaluation requires comparing commit SHAs.
-	// For now, mark as evaluated; full implementation needs commit tracking.
-	now := time.Now().UTC()
-	_ = e.svc.Store().UpdateTriggerEvaluatedAt(ctx, t.ID, now)
-}
-
-func (e *GitHubEvaluator) evaluateCITriggers(ctx context.Context) {
-	triggers, err := e.svc.Store().ListEnabledTriggersByType(ctx, TriggerTypeGitHubCI)
-	if err != nil {
-		e.logger.Error("failed to list github_ci triggers", zap.Error(err))
-		return
-	}
-	for i := range triggers {
-		t := &triggers[i]
-		e.checkCITrigger(ctx, t)
-	}
-}
-
-func (e *GitHubEvaluator) checkCITrigger(ctx context.Context, t *AutomationTrigger) {
-	var cfg GitHubCITriggerConfig
-	if err := json.Unmarshal(t.Config, &cfg); err != nil {
-		return
-	}
-	// CI trigger evaluation requires tracking check run completion.
-	// For now, mark as evaluated; full implementation needs check run tracking.
-	now := time.Now().UTC()
-	_ = e.svc.Store().UpdateTriggerEvaluatedAt(ctx, t.ID, now)
-}
-
 // matchesBranches checks if a branch matches any of the filter patterns.
 // Empty filter means match all.
 func matchesBranches(branch string, filters []string) bool {
@@ -224,6 +176,18 @@ func matchesBranches(branch string, filters []string) bool {
 	}
 	for _, f := range filters {
 		if matchGlob(f, branch) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesRepo checks if owner/name matches any entry in the repo filter list.
+// An empty list never matches — webhook-driven push/CI triggers cannot act
+// without knowing which repo(s) to scope to.
+func matchesRepo(owner, name string, repos []github.RepoFilter) bool {
+	for _, r := range repos {
+		if r.Owner == owner && r.Name == name {
 			return true
 		}
 	}

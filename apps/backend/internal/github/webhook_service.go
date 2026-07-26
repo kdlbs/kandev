@@ -12,6 +12,9 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 const (
@@ -142,6 +145,7 @@ type GitHubWebhookService struct {
 	personal           personalConnectionRevoker
 	installations      appInstallationVerifier
 	personalReconciler personalAuthorizationReconciler
+	publisher          bus.EventBus
 	now                func() time.Time
 }
 
@@ -150,10 +154,12 @@ func NewGitHubWebhookService(
 	store githubWebhookStore,
 	repositories installationRepositoryUpdater,
 	personal personalConnectionRevoker,
+	publisher bus.EventBus,
 	reconciliation ...GitHubWebhookReconciliation,
 ) *GitHubWebhookService {
 	service := &GitHubWebhookService{
-		secret: []byte(secret), store: store, repos: repositories, personal: personal, now: time.Now,
+		secret: []byte(secret), store: store, repos: repositories, personal: personal,
+		publisher: publisher, now: time.Now,
 	}
 	if len(reconciliation) > 0 {
 		service.installations = reconciliation[0].Installations
@@ -167,9 +173,10 @@ func NewAppRegistrationWebhookService(
 	store githubWebhookStore,
 	repositories installationRepositoryUpdater,
 	personal personalConnectionRevoker,
+	publisher bus.EventBus,
 	reconciliation ...GitHubWebhookReconciliation,
 ) *GitHubWebhookService {
-	service := NewGitHubWebhookService(secret, store, repositories, personal, reconciliation...)
+	service := NewGitHubWebhookService(secret, store, repositories, personal, publisher, reconciliation...)
 	service.registrationID = strings.TrimSpace(registrationID)
 	return service
 }
@@ -244,6 +251,10 @@ func (s *GitHubWebhookService) process(ctx context.Context, event string, payloa
 		return s.processInstallationRepositories(ctx, payload)
 	case "github_app_authorization":
 		return s.processAuthorization(ctx, payload)
+	case "push":
+		return s.processPush(ctx, payload)
+	case "check_run":
+		return s.processCheckRun(ctx, payload)
 	default:
 		return 0, "event ignored", nil
 	}
@@ -448,6 +459,152 @@ func (s *GitHubWebhookService) processAuthorization(
 		affected++
 	}
 	return affected, fmt.Sprintf("authorization revoked: %d binding(s)", affected), nil
+}
+
+type pushWebhookEvent struct {
+	Ref        string `json:"ref"`
+	After      string `json:"after"`
+	Deleted    bool   `json:"deleted"`
+	Repository struct {
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repository"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
+	Pusher struct {
+		Name string `json:"name"`
+	} `json:"pusher"`
+}
+
+const gitBranchRefPrefix = "refs/heads/"
+
+func isZeroSHA(sha string) bool {
+	if sha == "" {
+		return true
+	}
+	for _, c := range sha {
+		if c != '0' {
+			return false
+		}
+	}
+	return true
+}
+
+// processPush handles the "push" webhook, publishing events.GitHubPushReceived
+// with the resolved workspace IDs when the push targets a branch ref and
+// isn't a branch delete.
+func (s *GitHubWebhookService) processPush(ctx context.Context, payload []byte) (int, string, error) {
+	var event pushWebhookEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return 0, "", fmt.Errorf("decode push webhook: %w", err)
+	}
+	if event.Deleted || isZeroSHA(event.After) || !strings.HasPrefix(event.Ref, gitBranchRefPrefix) {
+		return 0, "push ignored", nil
+	}
+	workspaceIDs, err := s.resolveWorkspaceIDs(ctx, event.Installation.ID)
+	if err != nil {
+		return 0, "", err
+	}
+	if len(workspaceIDs) == 0 {
+		return 0, "push ignored", nil
+	}
+	s.publishEvent(ctx, events.GitHubPushReceived, &GitHubPushEventPayload{
+		WorkspaceIDs: workspaceIDs,
+		Owner:        event.Repository.Owner.Login,
+		Name:         event.Repository.Name,
+		Branch:       strings.TrimPrefix(event.Ref, gitBranchRefPrefix),
+		SHA:          event.After,
+		PusherLogin:  event.Pusher.Name,
+	})
+	return len(workspaceIDs), fmt.Sprintf("push published: %d workspace(s)", len(workspaceIDs)), nil
+}
+
+type checkRunWebhookEvent struct {
+	Action   string `json:"action"`
+	CheckRun struct {
+		ID         int64  `json:"id"`
+		Name       string `json:"name"`
+		HeadSHA    string `json:"head_sha"`
+		Conclusion string `json:"conclusion"`
+		CheckSuite struct {
+			HeadBranch string `json:"head_branch"`
+		} `json:"check_suite"`
+	} `json:"check_run"`
+	Repository struct {
+		Name  string `json:"name"`
+		Owner struct {
+			Login string `json:"login"`
+		} `json:"owner"`
+	} `json:"repository"`
+	Installation struct {
+		ID int64 `json:"id"`
+	} `json:"installation"`
+}
+
+// processCheckRun handles the "check_run" webhook, publishing
+// events.GitHubCheckRunCompleted with the resolved workspace IDs for
+// completed check runs only.
+func (s *GitHubWebhookService) processCheckRun(ctx context.Context, payload []byte) (int, string, error) {
+	var event checkRunWebhookEvent
+	if err := json.Unmarshal(payload, &event); err != nil {
+		return 0, "", fmt.Errorf("decode check_run webhook: %w", err)
+	}
+	if event.Action != "completed" {
+		return 0, "check_run ignored", nil
+	}
+	workspaceIDs, err := s.resolveWorkspaceIDs(ctx, event.Installation.ID)
+	if err != nil {
+		return 0, "", err
+	}
+	if len(workspaceIDs) == 0 {
+		return 0, "check_run ignored", nil
+	}
+	s.publishEvent(ctx, events.GitHubCheckRunCompleted, &GitHubCheckRunEventPayload{
+		WorkspaceIDs: workspaceIDs,
+		Owner:        event.Repository.Owner.Login,
+		Name:         event.Repository.Name,
+		Branch:       event.CheckRun.CheckSuite.HeadBranch,
+		SHA:          event.CheckRun.HeadSHA,
+		CheckName:    event.CheckRun.Name,
+		Conclusion:   event.CheckRun.Conclusion,
+		CheckRunID:   event.CheckRun.ID,
+	})
+	return len(workspaceIDs), fmt.Sprintf("check_run published: %d workspace(s)", len(workspaceIDs)), nil
+}
+
+// resolveWorkspaceIDs resolves an installation ID to the distinct set of
+// workspace IDs connected to it under this registration.
+func (s *GitHubWebhookService) resolveWorkspaceIDs(ctx context.Context, installationID int64) ([]string, error) {
+	if installationID <= 0 {
+		return nil, nil
+	}
+	connections, err := s.listWorkspaceConnections(ctx, installationID)
+	if err != nil {
+		return nil, fmt.Errorf("load installation bindings: %w", err)
+	}
+	seen := make(map[string]bool, len(connections))
+	workspaceIDs := make([]string, 0, len(connections))
+	for _, connection := range connections {
+		if connection == nil || connection.WorkspaceID == "" || seen[connection.WorkspaceID] {
+			continue
+		}
+		seen[connection.WorkspaceID] = true
+		workspaceIDs = append(workspaceIDs, connection.WorkspaceID)
+	}
+	return workspaceIDs, nil
+}
+
+// publishEvent is nil-safe and never fails webhook delivery: publish errors
+// are swallowed so a bus outage doesn't turn a real webhook into a failed
+// delivery.
+func (s *GitHubWebhookService) publishEvent(ctx context.Context, eventType string, data interface{}) {
+	if s.publisher == nil {
+		return
+	}
+	_ = s.publisher.Publish(ctx, eventType, bus.NewEvent(eventType, "github_webhook_service", data))
 }
 
 func (s *GitHubWebhookService) reconcileInstallation(
