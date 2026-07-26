@@ -182,10 +182,29 @@ func TestHTTPGetShellOutputDeniesForeignMessageWith404(t *testing.T) {
 }
 
 // foreignMessageRepo owns the message's session as "user-b".
+//
+// The metadata must be a VALID shell-output payload. httpGetShellOutput has a
+// second 404 gate after the service call —
+// `if !ok || message.TaskSessionID != c.Param("id")` — and
+// ExtractShellExecOutput returns ok=false for nil metadata. With an empty
+// fixture the route answers 404 through that gate whether or not scoping
+// denied it, so the test would pass even with the authorization removed.
+// Populating it means a scope regression reaches the 200 path and fails.
 type foreignMessageRepo struct {
 	foreignSessionRepo
 }
 
 func (r *foreignMessageRepo) GetMessage(context.Context, string) (*models.Message, error) {
-	return &models.Message{ID: "msg-b", TaskSessionID: "sess-b"}, nil
+	return &models.Message{
+		ID:            "msg-b",
+		TaskSessionID: "sess-b",
+		Metadata: map[string]any{
+			"status": "completed",
+			"normalized": map[string]any{
+				"shell_exec": map[string]any{
+					"output": map[string]any{"stdout": "victim shell output"},
+				},
+			},
+		},
+	}, nil
 }
