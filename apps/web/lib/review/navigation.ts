@@ -32,10 +32,46 @@ const FLASH_DURATION_MS = 1400;
 // rather than leak a running loop.
 const MAX_SCROLL_ATTEMPTS = 60;
 
+/** Emits the navigate event so a mounted stale-findings banner can expand. */
+export function emitNavigateFinding(findingId: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent<NavigateFindingEventDetail>(NAVIGATE_FINDING_EVENT, {
+      detail: { findingId },
+    }),
+  );
+}
+
+/**
+ * The subtree to search for a finding card. The Changes panel behind the review
+ * dialog can render the same finding inline, leaving two elements with the same
+ * id in the document; scoping to the open dialog keeps navigation from scrolling
+ * to (and flashing) the hidden background card. Falls back to the whole document
+ * when no dialog is open.
+ */
+function findingScope(): ParentNode {
+  if (typeof document === "undefined") return document;
+  const dialogs = document.querySelectorAll<HTMLElement>('[role="dialog"][data-state="open"]');
+  return dialogs.length > 0 ? dialogs[dialogs.length - 1] : document;
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
 /**
  * Scrolls a finding card into view and flashes it, retrying across frames while
  * its file section renders. Resolves true once the card was found, false if it
  * never appeared. Safe to call outside the browser (resolves false).
+ *
+ * The navigate event is re-emitted on every frame, not just once up front: the
+ * target file's section — and a stale finding's collapsed banner — mount lazily
+ * after the file is selected, so a single event fired before that render would
+ * be missed and the banner would never expand.
  */
 export function scrollToFinding(
   findingId: string,
@@ -45,9 +81,13 @@ export function scrollToFinding(
   return new Promise((resolve) => {
     let attempts = 0;
     const tick = () => {
-      const el = document.querySelector<HTMLElement>(findingSelector(findingId));
+      emitNavigateFinding(findingId);
+      const el = findingScope().querySelector<HTMLElement>(findingSelector(findingId));
       if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        el.scrollIntoView({
+          behavior: prefersReducedMotion() ? "auto" : "smooth",
+          block: "center",
+        });
         flashFinding(el);
         resolve(true);
         return;
@@ -80,20 +120,15 @@ function flashFinding(el: HTMLElement) {
 
 /**
  * Jumps to a finding in the review diff: selects its file (so the section
- * expands and scrolls into view), notifies the stale banner in case it must
- * expand, then scrolls the finding's card into view and flashes it.
+ * expands and scrolls into view), then scrolls the finding's card into view and
+ * flashes it. `scrollToFinding` re-emits the navigate event each frame so a
+ * lazily-mounted stale-findings banner still expands. Resolves false if the
+ * card never rendered within the retry budget.
  */
 export function navigateToFinding(
   finding: TaskReviewFinding,
   selectFile: (fileKey: string) => void,
 ): Promise<boolean> {
   selectFile(findingFileKey(finding));
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(
-      new CustomEvent<NavigateFindingEventDetail>(NAVIGATE_FINDING_EVENT, {
-        detail: { findingId: finding.id },
-      }),
-    );
-  }
   return scrollToFinding(finding.id);
 }

@@ -85,46 +85,52 @@ export function ReviewFindingsOverview({
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-1.5"
         data-testid="review-findings-overview-scroll"
       >
-        {groups.map((group) => (
-          <div key={group.key} className="mb-2 last:mb-0">
-            <div className="flex items-baseline gap-1.5 px-1 pb-1">
-              <span className="truncate text-xs font-medium text-foreground" title={group.filePath}>
-                {fileName(group.filePath)}
-              </span>
-              {fileDir(group.filePath) && (
-                <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70">
-                  {fileDir(group.filePath)}
-                </span>
-              )}
-              <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                {group.findings.length}
-              </span>
-            </div>
-
-            <div className="space-y-1">
-              {group.findings.map((finding) => (
-                <button
-                  key={finding.id}
-                  type="button"
-                  onClick={() => onNavigate(finding)}
-                  className="w-full cursor-pointer rounded-md border border-border/50 bg-muted/30 px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted/60"
-                  data-testid="review-finding-nav-item"
-                  data-finding-id={finding.id}
+        {groups.map((group) => {
+          const dir = fileDir(group.filePath);
+          return (
+            <div key={group.key} className="mb-2 last:mb-0">
+              <div className="flex items-baseline gap-1.5 px-1 pb-1">
+                <span
+                  className="truncate text-xs font-medium text-foreground"
+                  title={group.filePath}
                 >
-                  <div className="mb-0.5 flex items-center gap-1.5">
-                    <ReviewFindingSeverityBadge severity={finding.severity} />
-                    <span className="text-[10px] font-medium text-muted-foreground">
-                      {formatLineRange(finding.start_line, finding.end_line)}
-                    </span>
-                  </div>
-                  <p className="line-clamp-2 text-xs font-medium leading-snug text-foreground/90">
-                    {finding.title}
-                  </p>
-                </button>
-              ))}
+                  {fileName(group.filePath)}
+                </span>
+                {dir && (
+                  <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/70">
+                    {dir}
+                  </span>
+                )}
+                <span className="ml-auto shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                  {group.findings.length}
+                </span>
+              </div>
+
+              <div className="space-y-1">
+                {group.findings.map((finding) => (
+                  <button
+                    key={finding.id}
+                    type="button"
+                    onClick={() => onNavigate(finding)}
+                    className="w-full cursor-pointer rounded-md border border-border/50 bg-muted/30 px-2 py-1.5 text-left transition-colors hover:border-border hover:bg-muted/60"
+                    data-testid="review-finding-nav-item"
+                    data-finding-id={finding.id}
+                  >
+                    <div className="mb-0.5 flex items-center gap-1.5">
+                      <ReviewFindingSeverityBadge severity={finding.severity} />
+                      <span className="text-[10px] font-medium text-muted-foreground">
+                        {formatLineRange(finding.start_line, finding.end_line)}
+                      </span>
+                    </div>
+                    <p className="line-clamp-2 text-xs font-medium leading-snug text-foreground/90">
+                      {finding.title}
+                    </p>
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

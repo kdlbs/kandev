@@ -28,7 +28,13 @@ export function ReviewFindingsButton({ findings, onSelectFile }: ReviewFindingsB
   const handleNavigate = useCallback(
     (finding: TaskReviewFinding) => {
       setOpen(false);
-      navigateToFinding(finding, onSelectFile);
+      // Fire-and-forget: the popover is already closing. If the card never
+      // renders within the retry budget, warn rather than fail silently.
+      navigateToFinding(finding, onSelectFile).then((reached) => {
+        if (!reached) {
+          console.warn("[review] could not scroll to finding:", finding.id);
+        }
+      });
     },
     [onSelectFile],
   );

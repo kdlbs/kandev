@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { useReviewSidebarResize } from "@/hooks/use-review-sidebar-resize";
 import type { TaskPR } from "@/lib/types/github";
@@ -80,6 +80,18 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
   const splitRowRef = useRef<HTMLDivElement>(null);
   const sidebar = useReviewSidebarResize(splitRowRef, open, state.reviewSourceKey);
 
+  // Clear the sidebar filter before selecting a finding's file: a finding may
+  // belong to a file the current filter hides, and ReviewDiffList only renders
+  // filtered files, so the target section would never mount to scroll to.
+  const { setFilter, handleSelectFile } = state;
+  const navigateToFindingFile = useCallback(
+    (fileKey: string) => {
+      setFilter("");
+      handleSelectFile(fileKey);
+    },
+    [setFilter, handleSelectFile],
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -100,7 +112,7 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
           onToggleWordWrap={state.setWordWrap}
           onSendComments={state.handleSendComments}
           onClose={() => onOpenChange(false)}
-          onSelectFile={state.handleSelectFile}
+          onSelectFile={navigateToFindingFile}
           onRequestWalkthrough={props.onRequestWalkthrough}
           requestWalkthroughDisabled={state.allFiles.length === 0}
           getPendingComments={state.getPendingComments}
