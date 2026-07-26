@@ -122,6 +122,10 @@ func (c *Controller) httpTestConfig(ctx *gin.Context) {
 	}
 	result, err := c.service.TestConnectionForWorkspace(ctx.Request.Context(), c.workspaceID(ctx), &req)
 	if err != nil {
+		if workspaceDenied(err) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+			return
+		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -359,6 +363,13 @@ const (
 
 // writeClientError maps service-level errors to HTTP responses.
 func (c *Controller) writeClientError(ctx *gin.Context, err error) {
+	if workspaceDenied(err) {
+		// A workspace the caller may not access is indistinguishable from a
+		// missing one — 404, not 403/500. Covers data-plane reads (via clientFor)
+		// and watch create/update (via writeIssueWatchError's fall-through).
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
 	if errors.Is(err, ErrNotConfigured) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "Linear is not configured",

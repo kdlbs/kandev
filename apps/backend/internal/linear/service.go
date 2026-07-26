@@ -261,6 +261,13 @@ func (s *Service) TestConnectionForWorkspace(ctx context.Context, workspaceID st
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
 	}
+	// Authorize before revealing/using the workspace's stored key: an omitted
+	// workspace_id resolves the global default. Return a hard error (not a
+	// swallowed {OK:false} result) so the denial is a 404 rather than a
+	// probeable "test failed".
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	cfg, secret, err := s.resolveCredentials(ctx, workspaceID, req)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
@@ -472,7 +479,11 @@ func (s *Service) SearchIssuesForWorkspace(ctx context.Context, workspaceID stri
 
 // clientFor returns the cached client, creating it if needed.
 func (s *Service) clientFor(ctx context.Context, workspaceID string) (Client, error) {
-	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	// clientFor is the single chokepoint for every data-plane read (teams,
+	// states, labels, issues), so authorizing the resolved workspace here scopes
+	// all of them — an omitted workspace_id must not resolve another user's
+	// default workspace.
+	workspaceID, err := s.resolveWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}

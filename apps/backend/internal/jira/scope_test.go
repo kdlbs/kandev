@@ -9,10 +9,10 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
-// denyExcept returns a workspace authorizer that allows every workspace except
+// denyOnly returns a workspace authorizer that allows every workspace except
 // the named ones, which it denies with the same ErrWorkspaceNotFound the real
 // task-service authorizer returns.
-func denyExcept(denied ...string) func(context.Context, string) error {
+func denyOnly(denied ...string) func(context.Context, string) error {
 	blocked := make(map[string]bool, len(denied))
 	for _, ws := range denied {
 		blocked[ws] = true
@@ -62,7 +62,7 @@ func TestCopyConfigToWorkspace_DeniesForeignTarget(t *testing.T) {
 		t.Fatalf("seed victim health: %v", err)
 	}
 
-	f.svc.SetWorkspaceAuthorizer(denyExcept(victim))
+	f.svc.SetWorkspaceAuthorizer(denyOnly(victim))
 
 	_, err := f.svc.CopyConfigToWorkspace(ctx, src, victim)
 	if !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
@@ -91,7 +91,7 @@ func TestConfigForWorkspace_DeniesForeignWorkspace(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
 	const foreign = "ws-foreign"
-	f.svc.SetWorkspaceAuthorizer(denyExcept(foreign))
+	f.svc.SetWorkspaceAuthorizer(denyOnly(foreign))
 
 	if _, err := f.svc.GetConfigForWorkspace(ctx, foreign); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 		t.Errorf("Get: expected ErrWorkspaceNotFound, got %v", err)
@@ -133,7 +133,7 @@ func TestListAllIssueWatches_FiltersToCallerWorkspaces(t *testing.T) {
 	}
 
 	// Scoped: only the caller's own workspace watches survive the filter.
-	f.svc.SetWorkspaceAuthorizer(denyExcept("ws-other"))
+	f.svc.SetWorkspaceAuthorizer(denyOnly("ws-other"))
 	mine, err := f.svc.ListAllIssueWatches(ctx)
 	if err != nil {
 		t.Fatalf("scoped list: %v", err)

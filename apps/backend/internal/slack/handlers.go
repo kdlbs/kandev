@@ -157,6 +157,13 @@ func (c *Controller) workspaceID(ctx *gin.Context) string {
 const errCodeSlackNotConfigured = "SLACK_NOT_CONFIGURED"
 
 func (c *Controller) writeClientError(ctx *gin.Context, err error) {
+	if workspaceDenied(err) {
+		// A workspace the caller may not access is indistinguishable from a
+		// missing one — 404, not 403/500. Covers TestConnection and data-plane
+		// reads (via clientFor).
+		ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+		return
+	}
 	if errors.Is(err, ErrNotConfigured) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{
 			"error": "Slack is not configured",

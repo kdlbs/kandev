@@ -9,10 +9,10 @@ import (
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
-// denyExcept returns a workspace authorizer that allows every workspace except
+// denyOnly returns a workspace authorizer that allows every workspace except
 // the named ones, which it denies with the same ErrWorkspaceNotFound the real
 // task-service authorizer returns.
-func denyExcept(denied ...string) func(context.Context, string) error {
+func denyOnly(denied ...string) func(context.Context, string) error {
 	blocked := make(map[string]bool, len(denied))
 	for _, ws := range denied {
 		blocked[ws] = true
@@ -64,7 +64,7 @@ func TestCopyConfigToWorkspace_DeniesForeignTarget(t *testing.T) {
 		t.Fatalf("seed victim health: %v", err)
 	}
 
-	svc.SetWorkspaceAuthorizer(denyExcept(victim))
+	svc.SetWorkspaceAuthorizer(denyOnly(victim))
 
 	if _, err := svc.CopyConfigToWorkspace(ctx, src, victim); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 		t.Fatalf("expected ErrWorkspaceNotFound, got %v", err)
@@ -94,7 +94,7 @@ func TestConfigForWorkspace_DeniesForeignWorkspace(t *testing.T) {
 	ctx := context.Background()
 	svc := newCopyTestService(t, newFakeSecrets())
 	const foreign = "ws-foreign"
-	svc.SetWorkspaceAuthorizer(denyExcept(foreign))
+	svc.SetWorkspaceAuthorizer(denyOnly(foreign))
 
 	if _, err := svc.GetConfigForWorkspace(ctx, foreign); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
 		t.Errorf("Get: expected ErrWorkspaceNotFound, got %v", err)
