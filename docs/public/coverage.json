@@ -74,6 +74,7 @@
       ],
       "mcpTools": [
         "add_branch_to_task_kandev",
+        "add_workspace_sources_kandev",
         "archive_task_kandev",
         "create_task_kandev",
         "delete_task_kandev",
@@ -189,8 +190,8 @@
       "audiences": ["user", "operator"],
       "stability": "stable",
       "docs": ["integrations", "configuration"],
-      "sources": ["apps/web/components/app-sidebar/sections/integrations-section.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope.go", "apps/backend/internal/azuredevops/service.go", "apps/web/app/azure-devops/azure-devops-page-client.tsx"],
-      "tests": ["apps/web/components/app-sidebar/sections/integrations-section.test.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope_test.go", "apps/backend/internal/azuredevops/service_test.go", "apps/web/e2e/tests/integrations/azure-devops.spec.ts"],
+      "sources": ["apps/web/components/app-sidebar/sections/integrations-section.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope.go", "apps/backend/internal/azuredevops/service.go", "apps/web/app/azure-devops/azure-devops-page-client.tsx", "apps/backend/internal/github/app_registration_lifecycle_service.go", "apps/backend/internal/github/app_registration_import.go", "apps/web/lib/api/domains/github-auth-api.ts"],
+      "tests": ["apps/web/components/app-sidebar/sections/integrations-section.test.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope_test.go", "apps/backend/internal/azuredevops/service_test.go", "apps/web/e2e/tests/integrations/azure-devops.spec.ts", "apps/backend/internal/github/controller_app_registration_test.go", "apps/backend/internal/github/app_registration_import_test.go", "apps/web/e2e/tests/settings/github-app-registration.spec.ts"],
       "settingsRoutes": [
         "/settings/integrations",
         "/settings/integrations/azure-devops",
@@ -240,6 +241,15 @@
       "docs": ["security", "configuration", "executors", "automation-and-mcp", "operations"],
       "sources": ["apps/backend/internal/backendapp/middleware.go", "apps/backend/internal/gateway/websocket/origin.go", "apps/backend/internal/secrets/crypto.go"],
       "tests": ["apps/backend/internal/backendapp/middleware_test.go", "apps/backend/internal/gateway/websocket/origin_test.go"]
+    },
+    {
+      "id": "authentication-and-access",
+      "audiences": ["user", "operator"],
+      "stability": "beta",
+      "docs": ["authentication"],
+      "sources": ["apps/backend/internal/auth/httpmw/middleware.go", "apps/backend/internal/auth/service.go", "apps/backend/internal/auth/httpapi/handlers.go", "apps/web/components/app-sidebar/current-user-chip.tsx"],
+      "tests": ["apps/backend/internal/auth/httpapi/handlers_test.go", "apps/backend/internal/auth/httpmw/middleware_test.go", "apps/web/lib/state/slices/auth/auth-slice.test.ts"],
+      "settingsRoutes": ["/settings/system/users", "/settings/account/security", "/settings/account/tokens"]
     },
     {
       "id": "system-health-and-maintenance",

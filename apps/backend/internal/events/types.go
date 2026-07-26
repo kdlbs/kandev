@@ -3,11 +3,12 @@ package events
 
 // Event types for tasks
 const (
-	TaskCreated      = "task.created"
-	TaskUpdated      = "task.updated"
-	TaskStateChanged = "task.state_changed"
-	TaskDeleted      = "task.deleted"
-	TaskMoved        = "task.moved" // Manual step change via MoveTask
+	TaskCreated                    = "task.created"
+	TaskUpdated                    = "task.updated"
+	TaskStateChanged               = "task.state_changed"
+	TaskDeleted                    = "task.deleted"
+	TaskMoved                      = "task.moved" // Manual step change via MoveTask
+	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
 )
 
 // Event types for office task tree controls.
@@ -58,6 +59,14 @@ const (
 // Event types for task sessions
 const (
 	TaskSessionStateChanged = "task_session.state_changed"
+	// TaskSessionActivityChanged fires when a session's fine-grained activity
+	// flips — a RUNNING foreground turn moving between actively generating and
+	// idle-on-background-work, or detached background work starting/finishing
+	// under a settled coarse state — without any change to the coarse session
+	// state. It carries the fine-grained busy signal (ADR-0049) so the
+	// operator-facing composer and status indicator can distinguish
+	// "generating" from "waiting on spawned background work".
+	TaskSessionActivityChanged = "task_session.activity_changed"
 )
 
 // Event types for task plans

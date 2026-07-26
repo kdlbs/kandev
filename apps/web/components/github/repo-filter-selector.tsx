@@ -36,24 +36,36 @@ type RepoFilterSelectorProps = {
   workspaceId?: string;
 };
 
-function useGitHubOrgs() {
+function useGitHubOrgs(workspaceId: string | undefined) {
   const [orgs, setOrgs] = useState<GitHubOrg[]>([]);
   const [loading, setLoading] = useState(true);
-  const fetchedRef = useRef(false);
-
   useEffect(() => {
-    if (fetchedRef.current) return;
-    fetchedRef.current = true;
-    listUserOrgs()
-      .then((r) => setOrgs(r.orgs ?? []))
-      .catch(() => setOrgs([]))
-      .finally(() => setLoading(false));
-  }, []);
+    if (!workspaceId) {
+      setOrgs([]);
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    listUserOrgs(workspaceId)
+      .then((r) => {
+        if (!cancelled) setOrgs(r.orgs ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setOrgs([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspaceId]);
 
   return { orgs, loading };
 }
 
-function useRepoSearch(org: string, query: string) {
+function useRepoSearch(workspaceId: string | undefined, org: string, query: string) {
   const [searchState, setSearchState] = useState<{
     results: GitHubRepoInfo[];
     loading: boolean;
@@ -63,15 +75,23 @@ function useRepoSearch(org: string, query: string) {
 
   useEffect(() => {
     clearTimeout(timerRef.current);
-    if (!org) return;
+    if (!workspaceId || !org) return;
+    let cancelled = false;
     timerRef.current = setTimeout(() => {
       setSearchState((prev) => ({ ...prev, loading: true, org }));
-      searchOrgRepos(org, query || undefined)
-        .then((r) => setSearchState({ results: r.repos ?? [], loading: false, org }))
-        .catch(() => setSearchState({ results: [], loading: false, org }));
+      searchOrgRepos(workspaceId, org, query || undefined)
+        .then((r) => {
+          if (!cancelled) setSearchState({ results: r.repos ?? [], loading: false, org });
+        })
+        .catch(() => {
+          if (!cancelled) setSearchState({ results: [], loading: false, org });
+        });
     }, 300);
-    return () => clearTimeout(timerRef.current);
-  }, [org, query]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timerRef.current);
+    };
+  }, [workspaceId, org, query]);
 
   // Clear results when org becomes empty (derived, not in effect)
   const results = org ? searchState.results : [];
@@ -214,10 +234,12 @@ function OrgBadges({
 }
 
 function RepoSearchCombobox({
+  workspaceId,
   disabled,
   scope,
   onAdd,
 }: {
+  workspaceId: string | undefined;
   disabled: boolean;
   scope: GitHubWorkspaceSettings | null;
   onAdd: (owner: string, name: string) => void;
@@ -228,7 +250,7 @@ function RepoSearchCombobox({
   const slashIdx = value.indexOf("/");
   const org = slashIdx > 0 ? value.slice(0, slashIdx) : "";
   const query = slashIdx > 0 ? value.slice(slashIdx + 1) : "";
-  const { results, loading: searchLoading } = useRepoSearch(org, query);
+  const { results, loading: searchLoading } = useRepoSearch(workspaceId, org, query);
   const filteredResults = useMemo(
     () => results.filter((repo) => repoAllowedByScope(scope, repo.owner, repo.name)).slice(0, 10),
     [results, scope],
@@ -308,7 +330,7 @@ export function RepoFilterSelector({
   onSelectedReposChange,
   workspaceId,
 }: RepoFilterSelectorProps) {
-  const { orgs, loading: orgsLoading } = useGitHubOrgs();
+  const { orgs, loading: orgsLoading } = useGitHubOrgs(workspaceId);
   const scope = useWorkspaceRepoScope(workspaceId);
   const scopedOrgs = useMemo(
     () => orgs.filter((org) => orgAllowedByScope(scope, org.login)),
@@ -383,7 +405,12 @@ export function RepoFilterSelector({
             </div>
           )}
 
-          <RepoSearchCombobox disabled={allRepos} scope={scope} onAdd={addRepo} />
+          <RepoSearchCombobox
+            workspaceId={workspaceId}
+            disabled={allRepos}
+            scope={scope}
+            onAdd={addRepo}
+          />
 
           <SelectedFilters repos={selectedRepos} onRemove={removeFilter} disabled={allRepos} />
         </>

@@ -3,6 +3,7 @@ import {
   NOTIFICATION_EVENT_OFFICE_INBOX_ITEM,
   NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED,
   NOTIFICATION_EVENT_SESSION_TURN_FINISHED,
+  NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE,
 } from "@/lib/notifications/events";
 import { playWaitingForInputSound } from "@/lib/notifications/sound";
 import { nativeNotifications } from "@/lib/desktop/native-notification-client";
@@ -10,6 +11,7 @@ import type { AppState } from "@/lib/state/store";
 import type {
   OfficeInboxItemNotificationPayload,
   TaskSessionNotificationPayload,
+  UpdateAvailablePayload,
 } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 
@@ -104,5 +106,7 @@ export function registerNotificationsHandlers(store: StoreApi<AppState>): WsHand
         body: "A new item needs your attention.",
       },
     ),
+    [NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE]: (message: { payload: UpdateAvailablePayload }) =>
+      store.getState().setUpdateAvailableNotification(message.payload),
   };
 }

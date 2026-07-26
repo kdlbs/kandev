@@ -10,6 +10,24 @@ import (
 	"github.com/kandev/kandev/internal/github"
 )
 
+type recordingGitHubResolver struct {
+	clients    map[string]github.Client
+	workspaces []string
+	allowNil   bool
+}
+
+func (r *recordingGitHubResolver) ResolveGitHubAutomationClient(
+	_ context.Context,
+	workspaceID string,
+) (github.Client, error) {
+	r.workspaces = append(r.workspaces, workspaceID)
+	client := r.clients[workspaceID]
+	if client == nil && !r.allowNil {
+		return nil, errors.New("workspace not connected")
+	}
+	return client, nil
+}
+
 func sampleSnapshot() *Snapshot {
 	completed := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
 	return &Snapshot{
@@ -35,7 +53,7 @@ func TestGistBackend_Upload_CreatesSecretGistWithExpectedFiles(t *testing.T) {
 	mock := github.NewMockClient()
 	b := NewGistBackend(mock)
 
-	id, url, err := b.Upload(context.Background(), sampleSnapshot())
+	id, url, err := b.Upload(context.Background(), "workspace-1", sampleSnapshot())
 	if err != nil {
 		t.Fatalf("upload: %v", err)
 	}
@@ -88,7 +106,7 @@ func TestGistBackend_Upload_RejectsOversizedSnapshot(t *testing.T) {
 	big := strings.Repeat("x", GistMaxBytes+1)
 	snap.Messages = []Message{{Role: "user", Blocks: []Block{{Kind: "text", Text: big}}}}
 
-	_, _, err := b.Upload(context.Background(), snap)
+	_, _, err := b.Upload(context.Background(), "workspace-1", snap)
 	if err == nil {
 		t.Fatal("expected ErrSnapshotTooLarge, got nil")
 	}
@@ -104,11 +122,11 @@ func TestGistBackend_Delete_Success(t *testing.T) {
 	t.Parallel()
 	mock := github.NewMockClient()
 	b := NewGistBackend(mock)
-	id, _, err := b.Upload(context.Background(), sampleSnapshot())
+	id, _, err := b.Upload(context.Background(), "workspace-1", sampleSnapshot())
 	if err != nil {
 		t.Fatalf("upload: %v", err)
 	}
-	if err := b.Delete(context.Background(), id); err != nil {
+	if err := b.Delete(context.Background(), "workspace-1", id); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	if got := mock.DeletedGists(); len(got) != 1 || got[0] != id {
@@ -121,11 +139,48 @@ func TestGistBackend_Delete_PassesThroughNotFoundForCallerInspection(t *testing.
 	mock := github.NewMockClient()
 	b := NewGistBackend(mock)
 
-	err := b.Delete(context.Background(), "missing-id")
+	err := b.Delete(context.Background(), "workspace-1", "missing-id")
 	if err == nil {
 		t.Fatal("expected error for missing gist")
 	}
 	if !IsAlreadyGone(err) {
 		t.Fatalf("expected IsAlreadyGone to be true, got err=%v", err)
+	}
+}
+
+func TestGistBackend_ResolvesOwningWorkspaceForEveryOperation(t *testing.T) {
+	t.Parallel()
+	first := github.NewMockClient()
+	second := github.NewMockClient()
+	resolver := &recordingGitHubResolver{clients: map[string]github.Client{
+		"workspace-1": first,
+		"workspace-2": second,
+	}}
+	backend := NewWorkspaceGistBackend(resolver)
+	firstID, _, err := backend.Upload(context.Background(), "workspace-1", sampleSnapshot())
+	if err != nil {
+		t.Fatalf("workspace-1 upload: %v", err)
+	}
+	if _, _, err := backend.Upload(context.Background(), "workspace-2", sampleSnapshot()); err != nil {
+		t.Fatalf("workspace-2 upload: %v", err)
+	}
+	if err := backend.Delete(context.Background(), "workspace-1", firstID); err != nil {
+		t.Fatalf("workspace-1 delete: %v", err)
+	}
+	if len(first.Gists()) != 0 || len(second.Gists()) != 1 ||
+		len(resolver.workspaces) != 3 || resolver.workspaces[2] != "workspace-1" {
+		t.Fatalf("resolver workspaces = %v, first gists = %d, second gists = %d",
+			resolver.workspaces, len(first.Gists()), len(second.Gists()))
+	}
+}
+
+func TestGistBackend_FailsClosedWhenResolverReturnsNoClient(t *testing.T) {
+	t.Parallel()
+	backend := NewWorkspaceGistBackend(&recordingGitHubResolver{
+		clients:  map[string]github.Client{},
+		allowNil: true,
+	})
+	if _, _, err := backend.Upload(context.Background(), "workspace-1", sampleSnapshot()); err == nil {
+		t.Fatal("expected upload to fail when the workspace resolver returns no client")
 	}
 }

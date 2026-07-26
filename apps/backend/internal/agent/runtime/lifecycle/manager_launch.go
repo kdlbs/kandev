@@ -24,6 +24,8 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+const legacyExecutorTypeLocalPC = "local_pc"
+
 // resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
 func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (string, *AgentProfileInfo, error) {
 	profileID := executionProfileID(req)
@@ -350,6 +352,11 @@ func (m *Manager) resolveWorkspaceFromProvider(ctx context.Context, req *LaunchR
 }
 
 func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
+	// Clone-based runtimes own their workspace filesystem. In particular, never
+	// pass a host checkout into Docker, SSH, or Sprites on reset/reconnect.
+	if backend, err := m.getExecutorBackend(req.ExecutorType); err == nil && backend.RequiresCloneURL() {
+		return "", "", "", ""
+	}
 	// Worktree mode requires a repository. Repo-less tasks fall through to the
 	// scratch workspace path below — even if the executor type was worktree.
 	useWorktree := req.UseWorktree && req.RepositoryPath != ""
@@ -631,6 +638,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
+		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
 		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,
@@ -645,10 +653,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		OnProgress:                     onProgress,
 	}
 
-	if resumer, ok := rt.(RemoteSessionResumer); ok {
-		if err := resumer.ResumeRemoteInstance(ctx, execReq); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed remote resume preflight: %w", err)
-		}
+	if err := resumeRemoteInstancePreflight(ctx, rt, execReq); err != nil {
+		return nil, nil, nil, err
 	}
 
 	execInstance, err := rt.CreateInstance(ctx, execReq)
@@ -656,6 +662,17 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 	return execReq, execInstance, rt, nil
+}
+
+func resumeRemoteInstancePreflight(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) error {
+	resumer, ok := rt.(RemoteSessionResumer)
+	if !ok {
+		return nil
+	}
+	if err := resumer.ResumeRemoteInstance(ctx, req); err != nil {
+		return fmt.Errorf("failed remote resume preflight: %w", err)
+	}
+	return nil
 }
 
 // runEnvironmentPreparer runs the environment preparer for the executor type, if one is registered.
@@ -1024,6 +1041,14 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
+	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders); err != nil {
+		return nil, err
+	}
+	if req.ExecutorType == string(models.ExecutorTypeLocal) || req.ExecutorType == legacyExecutorTypeLocalPC {
+		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req)); err != nil {
+			return nil, err
+		}
+	}
 	progressRecorder := newPrepareProgressRecorder(m.newProgressCallback(req.TaskID, req.SessionID))
 
 	// 4b. Run environment preparation (if preparer registered for this executor type).
@@ -1060,6 +1085,21 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	if err != nil {
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
+	}
+	// A reset/relaunch receives the complete durable repository projection from
+	// the orchestrator. Reconcile it through the fresh live agentctl rather than
+	// relying on the legacy primary-repository prepare script alone.
+	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 1 && execInstance != nil && execInstance.Client != nil {
+		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree)
+		if projectionErr == nil {
+			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)
+		}
+		if projectionErr != nil {
+			_ = rt.StopInstance(context.WithoutCancel(ctx), execInstance, false)
+			err = fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr)
+			m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+			return nil, err
+		}
 	}
 
 	// Remote executors (Docker, Sprites) clone the workspace inside the
@@ -1295,9 +1335,9 @@ func (m *Manager) resolveApprovalPolicyAndDisplayName(ctx context.Context, execu
 }
 
 // createBootMessage creates a boot message and starts the stderr polling goroutine.
-// Returns the message and stop channel (both nil if bootMessageService is not configured).
+// Returns nil values when boot messages are unavailable.
 func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName string) (*models.Message, chan struct{}) {
-	if m.bootMessageService == nil {
+	if m.bootMessageService == nil || execution == nil {
 		return nil, nil
 	}
 	bootMsg, bootErr := m.bootMessageService.CreateMessage(ctx, &BootMessageRequest{

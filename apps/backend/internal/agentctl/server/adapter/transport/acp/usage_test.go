@@ -1,7 +1,7 @@
 package acp
 
 import (
-	"fmt"
+	"context"
 	"testing"
 
 	"github.com/coder/acp-go-sdk"
@@ -174,15 +174,14 @@ func TestExtractUsage_DoesNotInterpretGrokPrivateReasoningTokens(t *testing.T) {
 }
 
 // TestUsageTracker_CumulativeDelta asserts the codex-acp fallback path:
-// usage_update updates the cumulative used counter via tryConvertUntypedUpdate;
-// consumeUsageDelta returns the running total and resets to zero so the next
-// turn starts fresh.
+// usage_update reports current context occupancy; consumeUsageDelta returns
+// nonnegative growth since the previously consumed baseline.
 func TestUsageTracker_CumulativeDelta(t *testing.T) {
 	a := newTestAdapter()
 	const sess = "sess-codex"
 
-	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 100), sess)
-	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 350), sess)
+	a.convertUsageUpdate(sess, usageUpdate(200_000, 100))
+	a.convertUsageUpdate(sess, usageUpdate(200_000, 350))
 
 	delta, cost := a.consumeUsageDelta(sess)
 	if delta != 350 {
@@ -192,24 +191,36 @@ func TestUsageTracker_CumulativeDelta(t *testing.T) {
 		t.Errorf("first consume cost = %d, want 0 (no cost reported)", cost)
 	}
 
-	a.tryConvertUntypedUpdate(usageUpdateRaw(200_000, 200), sess)
+	// Compaction decreases occupancy. It resets both baselines instead of
+	// emitting a negative delta or recounting the restored context.
+	a.convertUsageUpdate(sess, usageUpdate(200_000, 200))
 	delta, _ = a.consumeUsageDelta(sess)
-	if delta != 200 {
-		t.Errorf("second consume delta = %d, want 200 (reset baseline)", delta)
+	if delta != 0 {
+		t.Errorf("post-compaction delta = %d, want 0", delta)
+	}
+	a.convertUsageUpdate(sess, usageUpdate(200_000, 260))
+	delta, _ = a.consumeUsageDelta(sess)
+	if delta != 60 {
+		t.Errorf("growth after compaction = %d, want 60", delta)
 	}
 }
 
-// TestUsageTracker_ForwardsCost mirrors claude-acp where usage_update.cost.amount
-// is the authoritative per-turn USD figure. The tracker stores the most
-// recent value; consume returns it and resets.
-func TestUsageTracker_ForwardsCost(t *testing.T) {
+// TestUsageTracker_CumulativeUSDCost mirrors claude-acp where
+// usage_update.cost.amount is authoritative cumulative USD session cost.
+func TestUsageTracker_CumulativeUSDCost(t *testing.T) {
 	a := newTestAdapter()
 	const sess = "sess-claude"
 
-	a.tryConvertUntypedUpdate(usageUpdateCostRaw(200_000, 25_068, 0.06156125), sess)
+	a.convertUsageUpdate(sess, usageUpdateWithCost(200_000, 25_068, 0.06156125, "USD"))
 	_, cost := a.consumeUsageDelta(sess)
 	if cost != 615 {
 		t.Errorf("cost = %d, want 615 (subcents)", cost)
+	}
+
+	a.convertUsageUpdate(sess, usageUpdateWithCost(200_000, 25_500, 0.07156125, "USD"))
+	_, cost = a.consumeUsageDelta(sess)
+	if cost != 100 {
+		t.Errorf("cumulative cost delta = %d, want 100", cost)
 	}
 
 	_, cost = a.consumeUsageDelta(sess)
@@ -218,11 +229,32 @@ func TestUsageTracker_ForwardsCost(t *testing.T) {
 	}
 }
 
-func usageUpdateCostRaw(size, used int64, costUSD float64) []byte {
-	return []byte(fmt.Sprintf(
-		`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":%d,"used":%d,"cost":{"amount":%g,"currency":"USD"}}}`,
-		size, used, costUSD,
-	))
+func TestUsageTracker_IgnoresNonUSDCostAndResetsDecreases(t *testing.T) {
+	a := newTestAdapter()
+	const sess = "sess-cost-currency"
+
+	a.convertUsageUpdate(sess, usageUpdateWithCost(200_000, 100, 2.5, "EUR"))
+	_, cost := a.consumeUsageDelta(sess)
+	if cost != 0 {
+		t.Fatalf("EUR cost = %d, want 0", cost)
+	}
+
+	a.convertUsageUpdate(sess, usageUpdateWithCost(200_000, 110, 0.05, "USD"))
+	_, cost = a.consumeUsageDelta(sess)
+	if cost != 500 {
+		t.Fatalf("initial USD cost = %d, want 500", cost)
+	}
+	a.convertUsageUpdate(sess, usageUpdateWithCost(200_000, 120, 0.01, "USD"))
+	_, cost = a.consumeUsageDelta(sess)
+	if cost != 0 {
+		t.Fatalf("decreased USD cumulative cost = %d, want 0", cost)
+	}
+}
+
+func usageUpdateWithCost(size, used int64, amount float64, currency string) *acp.SessionUsageUpdate {
+	update := usageUpdate(size, used)
+	update.Cost = &acp.Cost{Amount: amount, Currency: currency}
+	return update
 }
 
 // TestConsumeUsageDelta_UnknownSession returns zero for sessions that
@@ -233,5 +265,20 @@ func TestConsumeUsageDelta_UnknownSession(t *testing.T) {
 	d, c := a.consumeUsageDelta("never-seen")
 	if d != 0 || c != 0 {
 		t.Errorf("unknown session = (%d, %d), want (0, 0)", d, c)
+	}
+}
+
+func TestNewSession_ClearsUsageTrackers(t *testing.T) {
+	a, _ := setupConcurrencyFakeAgent(t)
+	if err := a.Initialize(context.Background()); err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	a.convertUsageUpdate("old-session", usageUpdate(200_000, 500))
+
+	if _, err := a.NewSession(context.Background(), nil); err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if got := len(a.usageBySession); got != 0 {
+		t.Fatalf("usage tracker count = %d, want 0", got)
 	}
 }

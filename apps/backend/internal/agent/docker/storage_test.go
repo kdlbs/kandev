@@ -7,12 +7,11 @@ import (
 	"testing"
 	"time"
 
-	dockertypes "github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/build"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/moby/moby/api/types/build"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/image"
+	"github.com/moby/moby/client"
 	"go.uber.org/zap"
 )
 
@@ -63,21 +62,27 @@ func TestStorageResultJSONUsesSnakeCase(t *testing.T) {
 func TestDiskUsageMapsTypedSDKResponse(t *testing.T) {
 	created := time.Unix(100, 0)
 	lastUsed := time.Unix(200, 0)
-	sdk := &fakeStorageAPI{usage: dockertypes.DiskUsage{
-		LayersSize: 500,
-		Images:     []*image.Summary{{ID: "image-1", Size: 300, Containers: 0, Created: created.Unix()}},
-		Containers: []*container.Summary{
-			{ID: "managed", SizeRw: 75, Labels: map[string]string{"kandev.managed": "true"}},
-			{ID: "unrelated", SizeRw: 125, Labels: map[string]string{"owner": "user"}},
+	sdk := &fakeStorageAPI{usage: client.DiskUsageResult{
+		Images: client.ImagesDiskUsage{
+			TotalSize: 500,
+			Items:     []image.Summary{{ID: "image-1", Size: 300, Containers: 0, Created: created.Unix()}},
 		},
-		BuildCache: []*build.CacheRecord{
-			{ID: "cache-1", Size: 100},
-			{ID: "cache-2", Size: 200, LastUsedAt: &lastUsed},
+		Containers: client.ContainersDiskUsage{
+			Items: []container.Summary{
+				{ID: "managed", SizeRw: 75, Labels: map[string]string{"kandev.managed": "true"}},
+				{ID: "unrelated", SizeRw: 125, Labels: map[string]string{"owner": "user"}},
+			},
+		},
+		BuildCache: client.BuildCacheDiskUsage{
+			Items: []build.CacheRecord{
+				{ID: "cache-1", Size: 100},
+				{ID: "cache-2", Size: 200, LastUsedAt: &lastUsed},
+			},
 		},
 	}}
-	client := &Client{storage: sdk}
+	dockerClient := &Client{storage: sdk}
 
-	got, err := client.DiskUsage(context.Background())
+	got, err := dockerClient.DiskUsage(context.Background())
 	if err != nil {
 		t.Fatalf("DiskUsage: %v", err)
 	}
@@ -87,20 +92,23 @@ func TestDiskUsageMapsTypedSDKResponse(t *testing.T) {
 		got.Containers[0].Labels["kandev.managed"] != "true" {
 		t.Fatalf("disk usage = %#v", got)
 	}
-	wantTypes := []dockertypes.DiskUsageObject{
-		dockertypes.ContainerObject, dockertypes.ImageObject, dockertypes.BuildCacheObject,
+	// Verbose is what makes the daemon return the per-object Items above.
+	wantOptions := client.DiskUsageOptions{
+		Containers: true, Images: true, BuildCache: true, Verbose: true,
 	}
-	if !reflect.DeepEqual(sdk.usageOptions.Types, wantTypes) {
-		t.Fatalf("disk usage types = %#v, want %#v", sdk.usageOptions.Types, wantTypes)
+	if !reflect.DeepEqual(sdk.usageOptions, wantOptions) {
+		t.Fatalf("disk usage options = %#v, want %#v", sdk.usageOptions, wantOptions)
 	}
 }
 
 func TestPruneBuildCacheUsesAgeAndReservedSpaceFilters(t *testing.T) {
-	sdk := &fakeStorageAPI{buildReport: &build.CachePruneReport{CachesDeleted: []string{"one"}, SpaceReclaimed: 42}}
-	client := &Client{storage: sdk}
+	sdk := &fakeStorageAPI{buildResult: client.BuildCachePruneResult{
+		Report: build.CachePruneReport{CachesDeleted: []string{"one"}, SpaceReclaimed: 42},
+	}}
+	dockerClient := &Client{storage: sdk}
 	cutoff := time.Unix(1234, 0).UTC()
 
-	got, err := client.PruneBuildCache(context.Background(), BuildCachePruneOptions{
+	got, err := dockerClient.PruneBuildCache(context.Background(), BuildCachePruneOptions{
 		KeepBytes: 1024, UnusedBefore: cutoff,
 	})
 	if err != nil {
@@ -110,27 +118,29 @@ func TestPruneBuildCacheUsesAgeAndReservedSpaceFilters(t *testing.T) {
 		t.Fatalf("prune result = %#v", got)
 	}
 	if !sdk.buildOptions.All || sdk.buildOptions.ReservedSpace != 1024 ||
-		sdk.buildOptions.KeepStorage != 1024 ||
-		!sdk.buildOptions.Filters.ExactMatch("until", "1234") {
+		!sdk.buildOptions.Filters["until"]["1234"] {
 		t.Fatalf("build prune options = %#v", sdk.buildOptions)
 	}
 }
 
 func TestPruneUnusedImagesUsesAllUnusedAndAgeFilters(t *testing.T) {
-	sdk := &fakeStorageAPI{imageReport: image.PruneReport{
-		ImagesDeleted: []image.DeleteResponse{{Deleted: "image-1"}}, SpaceReclaimed: 84,
+	sdk := &fakeStorageAPI{imageResult: client.ImagePruneResult{
+		Report: image.PruneReport{
+			ImagesDeleted: []image.DeleteResponse{{Deleted: "image-1"}}, SpaceReclaimed: 84,
+		},
 	}}
-	client := &Client{storage: sdk}
+	dockerClient := &Client{storage: sdk}
 
-	got, err := client.PruneUnusedImages(context.Background(), time.Unix(5678, 0).UTC())
+	got, err := dockerClient.PruneUnusedImages(context.Background(), time.Unix(5678, 0).UTC())
 	if err != nil {
 		t.Fatalf("PruneUnusedImages: %v", err)
 	}
 	if got.Deleted != 1 || got.BytesReclaimed != 84 {
 		t.Fatalf("prune result = %#v", got)
 	}
-	if !sdk.imageFilters.ExactMatch("dangling", "false") || !sdk.imageFilters.ExactMatch("until", "5678") {
-		t.Fatalf("image prune filters = %#v", sdk.imageFilters)
+	if !sdk.imageOptions.Filters["dangling"]["false"] ||
+		!sdk.imageOptions.Filters["until"]["5678"] {
+		t.Fatalf("image prune filters = %#v", sdk.imageOptions.Filters)
 	}
 }
 
@@ -140,9 +150,9 @@ func TestRemoveContainerRemovesAttachedVolumesWithoutGlobalPrune(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new logger: %v", err)
 	}
-	client := &Client{remover: remover, logger: log}
+	dockerClient := &Client{remover: remover, logger: log}
 
-	if err := client.RemoveContainer(context.Background(), "container-1", false); err != nil {
+	if err := dockerClient.RemoveContainer(context.Background(), "container-1", false); err != nil {
 		t.Fatalf("RemoveContainer: %v", err)
 	}
 	if remover.id != "container-1" || remover.options.Force || !remover.options.RemoveVolumes {
@@ -151,39 +161,41 @@ func TestRemoveContainerRemovesAttachedVolumesWithoutGlobalPrune(t *testing.T) {
 }
 
 type fakeStorageAPI struct {
-	usage        dockertypes.DiskUsage
+	usage        client.DiskUsageResult
 	usageErr     error
-	usageOptions dockertypes.DiskUsageOptions
-	buildOptions build.CachePruneOptions
-	buildReport  *build.CachePruneReport
+	usageOptions client.DiskUsageOptions
+	buildOptions client.BuildCachePruneOptions
+	buildResult  client.BuildCachePruneResult
 	buildErr     error
-	imageFilters filters.Args
-	imageReport  image.PruneReport
+	imageOptions client.ImagePruneOptions
+	imageResult  client.ImagePruneResult
 	imageErr     error
 }
 
-func (f *fakeStorageAPI) DiskUsage(_ context.Context, options dockertypes.DiskUsageOptions) (dockertypes.DiskUsage, error) {
+func (f *fakeStorageAPI) DiskUsage(_ context.Context, options client.DiskUsageOptions) (client.DiskUsageResult, error) {
 	f.usageOptions = options
 	return f.usage, f.usageErr
 }
 
-func (f *fakeStorageAPI) BuildCachePrune(_ context.Context, options build.CachePruneOptions) (*build.CachePruneReport, error) {
+func (f *fakeStorageAPI) BuildCachePrune(_ context.Context, options client.BuildCachePruneOptions) (client.BuildCachePruneResult, error) {
 	f.buildOptions = options
-	return f.buildReport, f.buildErr
+	return f.buildResult, f.buildErr
 }
 
-func (f *fakeStorageAPI) ImagesPrune(_ context.Context, pruneFilters filters.Args) (image.PruneReport, error) {
-	f.imageFilters = pruneFilters
-	return f.imageReport, f.imageErr
+func (f *fakeStorageAPI) ImagePrune(_ context.Context, options client.ImagePruneOptions) (client.ImagePruneResult, error) {
+	f.imageOptions = options
+	return f.imageResult, f.imageErr
 }
 
 type fakeContainerRemover struct {
 	id      string
-	options container.RemoveOptions
+	options client.ContainerRemoveOptions
 }
 
-func (f *fakeContainerRemover) ContainerRemove(_ context.Context, id string, options container.RemoveOptions) error {
+func (f *fakeContainerRemover) ContainerRemove(
+	_ context.Context, id string, options client.ContainerRemoveOptions,
+) (client.ContainerRemoveResult, error) {
 	f.id = id
 	f.options = options
-	return nil
+	return client.ContainerRemoveResult{}, nil
 }

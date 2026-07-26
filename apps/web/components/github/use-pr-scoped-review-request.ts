@@ -8,6 +8,14 @@ type Toast = (message: {
   variant: "error" | "success";
 }) => void;
 
+type ReviewRequestOptions = {
+  workspaceId: string | null;
+  requestedReviewers: RequestedReviewer[];
+  reviews: PRReview[];
+  refresh: () => void;
+  toast: Toast;
+};
+
 type ReviewBaseline = Pick<PRReview, "id" | "author" | "created_at" | "state">;
 
 type RequestEntry = {
@@ -30,8 +38,15 @@ function normalizeLogin(login: string) {
   return login.trim().toLowerCase();
 }
 
-function prIdentity(taskPR: TaskPR) {
-  return `${taskPR.owner.toLowerCase()}:${taskPR.repo.toLowerCase()}:${taskPR.pr_number}`;
+function normalizeWorkspaceId(workspaceId: string) {
+  return workspaceId.trim().toLowerCase();
+}
+
+function prIdentity(workspaceId: string | null, taskPR: TaskPR) {
+  if (!workspaceId) return null;
+  const normalizedWorkspaceId = normalizeWorkspaceId(workspaceId);
+  if (!normalizedWorkspaceId) return null;
+  return `${normalizedWorkspaceId}:${taskPR.owner.toLowerCase()}:${taskPR.repo.toLowerCase()}:${taskPR.pr_number}`;
 }
 
 function entryKey(identity: string, reviewer: string) {
@@ -175,12 +190,9 @@ export function clearPRReviewRequestRegistryForTests() {
 
 export function usePRScopedReviewRequest(
   taskPR: TaskPR,
-  requestedReviewers: RequestedReviewer[],
-  reviews: PRReview[],
-  refresh: () => void,
-  toast: Toast,
+  { workspaceId, requestedReviewers, reviews, refresh, toast }: ReviewRequestOptions,
 ) {
-  const identity = prIdentity(taskPR);
+  const identity = prIdentity(workspaceId, taskPR);
   useSyncExternalStore(
     subscribe,
     () => revision,
@@ -188,16 +200,31 @@ export function usePRScopedReviewRequest(
   );
 
   useEffect(() => {
+    if (!identity) return;
     reconcile(identity, requestedReviewers, reviews);
   }, [identity, requestedReviewers, reviews]);
 
   const reRequest = useCallback(
     async (reviewer: string) => {
+      if (!workspaceId || !identity) {
+        toast({
+          title: "Failed to re-request review",
+          description: "Select a workspace before requesting review.",
+          variant: "error",
+        });
+        return;
+      }
       const baseline = latestReview(reviews, reviewer);
       const operationId = beginRequest(identity, reviewer, baseline);
       if (operationId === null) return;
       try {
-        await requestPRReviewers(taskPR.owner, taskPR.repo, taskPR.pr_number, [reviewer]);
+        await requestPRReviewers(
+          taskPR.owner,
+          taskPR.repo,
+          taskPR.pr_number,
+          [reviewer],
+          workspaceId,
+        );
       } catch (error) {
         finishRequest(identity, reviewer, operationId, false);
         toast({
@@ -215,10 +242,10 @@ export function usePRScopedReviewRequest(
         // The request remains optimistic until the bounded registry expires or server data resolves it.
       }
     },
-    [identity, refresh, reviews, taskPR.owner, taskPR.pr_number, taskPR.repo, toast],
+    [identity, refresh, reviews, taskPR.owner, taskPR.pr_number, taskPR.repo, toast, workspaceId],
   );
 
-  const activeEntries = getEntries(identity);
+  const activeEntries = identity ? getEntries(identity) : [];
   const requestingReviewers = activeEntries
     .filter((entry) => entry.status === "requesting")
     .map((entry) => entry.reviewer);

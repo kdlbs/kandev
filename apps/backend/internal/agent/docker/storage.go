@@ -7,16 +7,13 @@ import (
 	"strconv"
 	"time"
 
-	dockertypes "github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/build"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
+	"github.com/moby/moby/client"
 )
 
 type storageAPI interface {
-	DiskUsage(context.Context, dockertypes.DiskUsageOptions) (dockertypes.DiskUsage, error)
-	BuildCachePrune(context.Context, build.CachePruneOptions) (*build.CachePruneReport, error)
-	ImagesPrune(context.Context, filters.Args) (image.PruneReport, error)
+	DiskUsage(context.Context, client.DiskUsageOptions) (client.DiskUsageResult, error)
+	BuildCachePrune(context.Context, client.BuildCachePruneOptions) (client.BuildCachePruneResult, error)
+	ImagePrune(context.Context, client.ImagePruneOptions) (client.ImagePruneResult, error)
 }
 
 type ImageUsage struct {
@@ -50,39 +47,34 @@ type PruneResult struct {
 }
 
 func (c *Client) DiskUsage(ctx context.Context) (DiskUsage, error) {
-	usage, err := c.storageClient().DiskUsage(ctx, dockertypes.DiskUsageOptions{
-		Types: []dockertypes.DiskUsageObject{
-			dockertypes.ContainerObject,
-			dockertypes.ImageObject,
-			dockertypes.BuildCacheObject,
-		},
+	// Verbose is required for the daemon to return per-image and per-container
+	// records alongside the aggregate totals.
+	usage, err := c.storageClient().DiskUsage(ctx, client.DiskUsageOptions{
+		Containers: true,
+		Images:     true,
+		BuildCache: true,
+		Verbose:    true,
 	})
 	if err != nil {
 		return DiskUsage{}, fmt.Errorf("read Docker disk usage: %w", err)
 	}
 	result := DiskUsage{
-		ImageLayerBytes: usage.LayersSize,
-		Images:          make([]ImageUsage, 0, len(usage.Images)),
-		Containers:      make([]ContainerUsage, 0, len(usage.Containers)),
+		ImageLayerBytes: usage.Images.TotalSize,
+		Images:          make([]ImageUsage, 0, len(usage.Images.Items)),
+		Containers:      make([]ContainerUsage, 0, len(usage.Containers.Items)),
 	}
-	for _, cache := range usage.BuildCache {
-		if cache != nil && cache.Size > 0 {
+	for _, cache := range usage.BuildCache.Items {
+		if cache.Size > 0 {
 			result.BuildCacheBytes += cache.Size
 		}
 	}
-	for _, item := range usage.Images {
-		if item == nil {
-			continue
-		}
+	for _, item := range usage.Images.Items {
 		result.Images = append(result.Images, ImageUsage{
 			ID: item.ID, SizeBytes: item.Size, Containers: item.Containers,
 			CreatedAt: time.Unix(item.Created, 0).UTC(),
 		})
 	}
-	for _, item := range usage.Containers {
-		if item == nil {
-			continue
-		}
+	for _, item := range usage.Containers.Items {
 		result.Containers = append(result.Containers, ContainerUsage{
 			ID: item.ID, WritableBytes: item.SizeRw, Labels: item.Labels,
 		})
@@ -91,32 +83,34 @@ func (c *Client) DiskUsage(ctx context.Context) (DiskUsage, error) {
 }
 
 func (c *Client) PruneBuildCache(ctx context.Context, options BuildCachePruneOptions) (PruneResult, error) {
-	pruneFilters := filters.NewArgs(filters.Arg("until", unixFilter(options.UnusedBefore)))
-	report, err := c.storageClient().BuildCachePrune(ctx, build.CachePruneOptions{
-		All: true, ReservedSpace: options.KeepBytes, KeepStorage: options.KeepBytes, Filters: pruneFilters,
+	// The client translates ReservedSpace into the legacy "keep-storage"
+	// parameter when talking to daemons on API <= 1.47.
+	result, err := c.storageClient().BuildCachePrune(ctx, client.BuildCachePruneOptions{
+		All:           true,
+		ReservedSpace: options.KeepBytes,
+		Filters:       make(client.Filters).Add("until", unixFilter(options.UnusedBefore)),
 	})
 	if err != nil {
 		return PruneResult{}, fmt.Errorf("prune Docker build cache: %w", err)
 	}
-	if report == nil {
-		return PruneResult{}, nil
-	}
 	return PruneResult{
-		Deleted: len(report.CachesDeleted), BytesReclaimed: reclaimedBytes(report.SpaceReclaimed),
+		Deleted:        len(result.Report.CachesDeleted),
+		BytesReclaimed: reclaimedBytes(result.Report.SpaceReclaimed),
 	}, nil
 }
 
 func (c *Client) PruneUnusedImages(ctx context.Context, unusedBefore time.Time) (PruneResult, error) {
-	pruneFilters := filters.NewArgs(
-		filters.Arg("dangling", "false"),
-		filters.Arg("until", unixFilter(unusedBefore)),
-	)
-	report, err := c.storageClient().ImagesPrune(ctx, pruneFilters)
+	result, err := c.storageClient().ImagePrune(ctx, client.ImagePruneOptions{
+		Filters: make(client.Filters).
+			Add("dangling", "false").
+			Add("until", unixFilter(unusedBefore)),
+	})
 	if err != nil {
 		return PruneResult{}, fmt.Errorf("prune unused Docker images: %w", err)
 	}
 	return PruneResult{
-		Deleted: len(report.ImagesDeleted), BytesReclaimed: reclaimedBytes(report.SpaceReclaimed),
+		Deleted:        len(result.Report.ImagesDeleted),
+		BytesReclaimed: reclaimedBytes(result.Report.SpaceReclaimed),
 	}, nil
 }
 

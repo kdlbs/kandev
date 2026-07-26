@@ -86,7 +86,7 @@ func (m *Manager) NotifyWorktreeMaterialized(ctx context.Context, wt Materialize
 // Best-effort: returns an error but the caller treats it as a warning.
 // The worktree still exists on disk; the next session relaunch will pick
 // it up via prepareMultiRepo regardless of whether this rescan succeeded.
-func (m *Manager) RescanWorkspaceForSession(ctx context.Context, sessionID, workDir string) error {
+func (m *Manager) RescanWorkspaceForSession(ctx context.Context, sessionID, workDir string, sourceRoots ...[]string) error {
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
 	}
@@ -106,7 +106,11 @@ func (m *Manager) RescanWorkspaceForSession(ctx context.Context, sessionID, work
 			zap.String("execution_id", execution.ID))
 		return nil
 	}
-	if err := client.RescanWorkspace(ctx, workDir); err != nil {
+	oldRoots := append([]string(nil), execution.WorkspaceSourceRoots...)
+	newRoots := optionalWorkspaceSourceRoots(oldRoots, sourceRoots)
+	execution.WorkspaceSourceRoots = newRoots
+	if err := client.RescanWorkspace(ctx, workDir, newRoots); err != nil {
+		execution.WorkspaceSourceRoots = oldRoots
 		return fmt.Errorf("rescan workspace via agentctl: %w", err)
 	}
 	m.logger.Info("agentctl workspace rescan ok",
@@ -114,4 +118,11 @@ func (m *Manager) RescanWorkspaceForSession(ctx context.Context, sessionID, work
 		zap.String("execution_id", execution.ID),
 		zap.String("work_dir", workDir))
 	return nil
+}
+
+func optionalWorkspaceSourceRoots(current []string, roots [][]string) []string {
+	if len(roots) == 0 {
+		return append([]string(nil), current...)
+	}
+	return append([]string(nil), roots[0]...)
 }

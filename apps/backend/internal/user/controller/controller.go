@@ -50,6 +50,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		RepositoryIDs:               req.RepositoryIDs,
 		TasksListSort:               req.TasksListSort,
 		TasksListGroup:              req.TasksListGroup,
+		TasksListShowDetails:        req.TasksListShowDetails,
 		InitialSetupComplete:        req.InitialSetupComplete,
 		PreferredShell:              req.PreferredShell,
 		DefaultEditorID:             req.DefaultEditorID,

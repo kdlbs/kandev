@@ -26,8 +26,22 @@ failure eligible for retry.
 
 Prefer `scripts/pr-state --summary <PR>` and `scripts/pr-resolve list <PR>`.
 Include head SHA, GitHub mergeability/merge-state status, and the local unmerged
-index count from `git ls-files -u`. Use one-shot checks or bounded commands.
-Report only observed values and return one compact report block.
+index count from `git ls-files -u`. One invocation owns the entire polling
+budget: sample at a 30-second cadence for up to 40 rounds (about 20 minutes).
+Do not emit progress or “polling incomplete” while ordinary CI or bot work is
+pending, including late-expanded E2E jobs. Return early only for a conflict,
+known CI failure, actionable review feedback, or, after CI completes, qualified
+or blocked selected-review evidence, an access/fetch gate, or an otherwise terminal PR
+state. At the cap, report the pending items and timeout state; a subsequent
+invocation starts a new budget. Report only observed values in one compact
+report block.
+
+Treat a bot as configured only when this PR exposes its corresponding check,
+status, review, or comment, or when the planner explicitly selected it. Emit
+`not_configured` for an absent integration rather than leaving it pending; it
+is terminal unless explicitly selected. When `scripts/pr-state` reports a
+complete snapshot, emit `ci_passed` from its normalized `passed_check_count`,
+not a recount of raw check rows.
 
 The planner may provide `selected_reviewer=<GitHub login>`. For selection,
 read raw `scripts/pr-state --trusted-reviewer "$selected_reviewer" <PR>`: only known/complete records with matching

@@ -31,6 +31,7 @@ import { WorkspaceRepositoriesClient } from "@/app/settings/workspace/workspace-
 import { WorkspaceWorkflowsClient } from "@/app/settings/workspace/workspace-workflows-client";
 import WorkspacesPage from "@/app/settings/workspace/page";
 import { GitHubIntegrationPage } from "@/components/github/github-settings";
+import Link from "@/components/routing/app-link";
 import { useAppStoreApi } from "@/components/state-provider";
 import { EditorsSettings } from "@/components/settings/editors-settings";
 import {
@@ -46,6 +47,9 @@ import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
 import { SpritesSettings } from "@/components/settings/sprites-settings";
 import { AboutCard } from "@/components/settings/system/about-card";
+import { ApiTokens } from "@/components/settings/account/api-tokens";
+import { SecuritySettings } from "@/components/settings/account/security-settings";
+import { UsersTable } from "@/components/settings/system/users-table";
 import { BackupsTable } from "@/components/settings/system/backups-table";
 import { DatabaseStatsCard } from "@/components/settings/system/database-stats-card";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
@@ -56,7 +60,6 @@ import { LogViewer } from "@/components/settings/system/log-viewer";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
-import { UpdateNotificationsCard } from "@/components/settings/system/update-notifications-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
 import { TerminalSettings } from "@/components/settings/terminal-settings";
 import { VoiceModeSettings } from "@/components/settings/voice-mode-settings";
@@ -68,7 +71,6 @@ import {
 } from "@/components/plugins/plugin-error-boundary";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import { listWorkflows } from "@/lib/api/domains/kanban-api";
-import { fetchUpdateNotificationSettings } from "@/lib/api/domains/system-api";
 import {
   fetchUserSettings,
   listAgentDiscovery,
@@ -97,7 +99,7 @@ import type {
   WorkflowTemplate,
   Workspace,
 } from "@/lib/types/http";
-import type { LicenseEntry, UpdateNotificationSettings } from "@/lib/types/system";
+import type { LicenseEntry } from "@/lib/types/system";
 
 type RouteRenderer = () => ReactNode;
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
@@ -118,7 +120,6 @@ type SettingsInitialStateData = {
   availableAgents: Awaited<ReturnType<typeof listAvailableAgents>>["agents"];
   availableTools: NonNullable<Awaited<ReturnType<typeof listAvailableAgents>>["tools"]>;
   userSettingsResponse: UserSettingsResponse | null;
-  updateNotificationSettings: UpdateNotificationSettings | null;
 };
 
 const licenseEntries = licenses as LicenseEntry[];
@@ -162,6 +163,30 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/integrations/sentry": () => renderIntegrationSettingsRoute("sentry"),
   "/settings/integrations/slack": () => renderIntegrationSettingsRoute("slack"),
   "/settings/system": () => <SettingsRedirect to="/settings/system/status" />,
+  "/settings/system/users": () => (
+    <SystemPageShell
+      title="Users"
+      description="Manage accounts, roles, and invite links for this instance."
+    >
+      <UsersTable />
+    </SystemPageShell>
+  ),
+  "/settings/account/security": () => (
+    <SystemPageShell
+      title="Profile & password"
+      description="Change your password and review devices signed in to your account."
+    >
+      <SecuritySettings />
+    </SystemPageShell>
+  ),
+  "/settings/account/tokens": () => (
+    <SystemPageShell
+      title="API tokens"
+      description="Personal access tokens for scripts and CLIs acting as you."
+    >
+      <ApiTokens />
+    </SystemPageShell>
+  ),
   "/settings/system/about": () => (
     <SystemPageShell title="About" description="Version, build metadata, and links.">
       <AboutCard />
@@ -402,8 +427,14 @@ function renderUpdatesRoute() {
       title="Updates"
       description="Current vs latest release plus the full kandev changelog."
     >
+      <p className="text-sm text-muted-foreground">
+        Notification preferences are managed in{" "}
+        <Link className="cursor-pointer underline" href="/settings/general/notifications">
+          Notifications
+        </Link>
+        .
+      </p>
       <UpdatesCard />
-      <UpdateNotificationsCard />
     </SystemPageShell>
   );
 }
@@ -445,23 +476,15 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
 }
 
 async function loadSettingsInitialState(): Promise<HydrationState> {
-  const [
-    workspaces,
-    executors,
-    agents,
-    discovery,
-    available,
-    userSettingsResponse,
-    updateNotificationSettings,
-  ] = await Promise.all([
-    listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
-    listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
-    listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
-    listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
-    listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
-    fetchUserSettings({ cache: "no-store" }).catch(() => null),
-    fetchUpdateNotificationSettings({ cache: "no-store" }).catch(() => null),
-  ]);
+  const [workspaces, executors, agents, discovery, available, userSettingsResponse] =
+    await Promise.all([
+      listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [] })),
+      listExecutors({ cache: "no-store" }).catch(() => ({ executors: [] })),
+      listAgents({ cache: "no-store" }).catch(() => ({ agents: [] })),
+      listAgentDiscovery({ cache: "no-store" }).catch(() => ({ agents: [] })),
+      listAvailableAgents({ cache: "no-store" }).catch(() => ({ agents: [], tools: [] })),
+      fetchUserSettings({ cache: "no-store" }).catch(() => null),
+    ]);
 
   return buildSettingsInitialStateForRoute({
     workspaces: workspaces.workspaces,
@@ -471,7 +494,6 @@ async function loadSettingsInitialState(): Promise<HydrationState> {
     availableAgents: available.agents,
     availableTools: available.tools ?? [],
     userSettingsResponse,
-    updateNotificationSettings,
   });
 }
 
@@ -483,7 +505,6 @@ export function buildSettingsInitialStateForRoute({
   availableAgents,
   availableTools,
   userSettingsResponse,
-  updateNotificationSettings,
 }: SettingsInitialStateData): HydrationState {
   const workspaceItems = workspaces.map(mapWorkspaceItem);
   const activeWorkspaceId = resolveSettingsActiveWorkspaceId(
@@ -511,7 +532,6 @@ export function buildSettingsInitialStateForRoute({
       loaded: true,
     },
     settingsData: { executorsLoaded: true, agentsLoaded: true },
-    system: { updateNotificationSettings },
     ...(mappedUserSettings.loaded
       ? {
           userSettings: {

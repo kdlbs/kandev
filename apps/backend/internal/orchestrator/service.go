@@ -111,6 +111,11 @@ type TurnService interface {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState)
+	// PublishTaskActivityIfChanged recomputes the task-level MOST-ACTIVE-WINS
+	// activity aggregate and emits task.updated only when its three-state value
+	// changed — including a generating↔background flip that leaves the coarse
+	// state unchanged.
+	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.
@@ -148,6 +153,7 @@ type repoStore interface {
 	UpdateTaskStateIfNotArchived(ctx context.Context, id string, state v1.TaskState) (v1.TaskState, bool, error)
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
+	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
@@ -434,6 +440,13 @@ type Service struct {
 	// in-flight dispatch at all is reason enough to defer.
 	dispatchingQueued sync.Map
 
+	// foregroundActivity tracks, per session, whether the open turn is actively
+	// generating in the foreground or only waiting on a spawned background task
+	// (subagent / run-in-background shell). Keyed sessionID -> *turnActivity;
+	// see turn_activity.go. Consulted by checkSessionPromptable so a session
+	// that kicked off background work still accepts operator input.
+	foregroundActivity sync.Map
+
 	// taskRuntimeStateMu serializes task-state flips derived from session
 	// runtime state. Without it, a completion/cancel path can check for active
 	// sibling sessions just before another handler marks one RUNNING, then
@@ -675,6 +688,25 @@ func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.Rep
 	s.executor.SetRepoCloner(cloner, updater)
 }
 
+// RepositoryHostCloner is the narrow host-materialization contract. It returns
+// only the persisted local path; clone credentials remain private to the
+// orchestrator executor pipeline.
+type RepositoryHostCloner interface {
+	EnsureRepositoryCloned(context.Context, *models.Repository) (string, error)
+}
+
+// EnsureRepositoryCloned delegates host cloning through the executor's
+// authenticated clone pipeline.
+func (s *Service) EnsureRepositoryCloned(ctx context.Context, repository *models.Repository) (string, error) {
+	return s.executor.EnsureRepositoryCloned(ctx, repository)
+}
+
+// SetGitHubCredentialBroker configures renewable workspace GitHub credentials
+// for executor git and gh operations.
+func (s *Service) SetGitHubCredentialBroker(issuer executor.GitHubCredentialLeaseIssuer, endpoint string) {
+	s.executor.SetGitHubCredentialBroker(issuer, endpoint)
+}
+
 // SetTurnService sets the turn service for tracking conversation turns.
 //
 // A "turn" represents a single conversation round-trip: user prompt → agent response.
@@ -726,6 +758,16 @@ func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task
 		return
 	}
 	s.taskEvents.PublishTaskStateChanged(ctx, task, oldState)
+}
+
+// publishTaskActivityIfChanged forwards a per-session activity flip to the task
+// service, which recomputes the task-level aggregate and emits task.updated only
+// when the aggregated value actually changes. No-op when the publisher isn't wired.
+func (s *Service) publishTaskActivityIfChanged(ctx context.Context, taskID string) {
+	if s.taskEvents == nil || taskID == "" {
+		return
+	}
+	s.taskEvents.PublishTaskActivityIfChanged(ctx, taskID)
 }
 
 func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID string) {
@@ -966,6 +1008,15 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 // query the DB for any open turn and close it. Loops to mop up multiple
 // zombies (e.g. left over from before this fix) with a small sanity bound.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
+	s.completeTurnForTaskSession(ctx, "", sessionID)
+}
+
+func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
+	// Foreground ownership ends with the turn, but detached background work can
+	// outlive it. Preserve those registrations and expose them as background-idle;
+	// full cleanup belongs to execution/session teardown paths.
+	s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldTurnCompletion)
+
 	if s.turnService == nil {
 		return
 	}

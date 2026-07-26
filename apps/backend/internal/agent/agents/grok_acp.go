@@ -82,10 +82,11 @@ func (a *GrokACP) Runtime() *RuntimeConfig {
 		ProjectSkillDir: ".grok/skills",
 		UserSkillDir:    ".grok/skills",
 		SessionConfig: SessionConfig{
-			NativeSessionResume: true,
-			CanRecover:          &canRecover,
-			SessionDirTemplate:  "{home}/.grok",
-			SessionDirTarget:    "/root/.grok",
+			NativeSessionResume:         true,
+			NewSessionOnWorkspaceRebind: true,
+			CanRecover:                  &canRecover,
+			SessionDirTemplate:          "{home}/.grok",
+			SessionDirTarget:            "/root/.grok",
 		},
 	}
 }

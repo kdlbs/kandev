@@ -46,6 +46,49 @@ function cancelledToolExecute(id: string): Message {
   };
 }
 
+function staleCodexSubagent(): Message {
+  return {
+    id: "codex-subagent",
+    session_id: toSessionId("s1"),
+    task_id: toTaskId("t1"),
+    author_type: "agent",
+    content: "ten_second_probe",
+    type: "tool_call",
+    turn_id: "turn-codex",
+    created_at: "2026-07-23T12:00:00Z",
+    metadata: {
+      status: "in_progress",
+      tool_call_id: "codex-subagent-tool",
+      normalized: {
+        kind: "subagent_task",
+        subagent_task: {
+          description: "ten_second_probe",
+          subagent_type: "subagent",
+          status: "started",
+          child_session_id: "child-session",
+        },
+      },
+    },
+  };
+}
+
+function renderCodexSubagentGroup(isTurnActive: boolean): string {
+  return renderToStaticMarkup(
+    <TurnGroupMessage
+      group={{
+        type: "turn_group",
+        id: "turn-group-codex",
+        turnId: "turn-codex",
+        messages: [staleCodexSubagent()],
+      }}
+      sessionId="s1"
+      permissionsByToolCallId={new Map()}
+      isLastGroup
+      isTurnActive={isTurnActive}
+    />,
+  );
+}
+
 describe("TurnGroupMessage repeated tool compaction", () => {
   it("summarizes the middle of a long run of identical terminal commands", () => {
     const messages = Array.from({ length: 6 }, (_, i) => toolExecute(`tool-${i + 1}`));
@@ -107,5 +150,17 @@ describe("TurnGroupMessage repeated tool compaction", () => {
     );
 
     expect(html).not.toContain('aria-label="Loading"');
+  });
+});
+
+describe("TurnGroupMessage Codex subagent activity", () => {
+  it("runs the group only while the stale lifecycle belongs to an active turn", () => {
+    const activeHtml = renderCodexSubagentGroup(true);
+    const settledHtml = renderCodexSubagentGroup(false);
+
+    expect(activeHtml).toContain('aria-label="Loading"');
+    expect(activeHtml).toContain("Subagent working...");
+    expect(settledHtml).not.toContain('aria-label="Loading"');
+    expect(settledHtml).not.toContain("Subagent working...");
   });
 });

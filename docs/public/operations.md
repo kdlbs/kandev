@@ -15,7 +15,7 @@ Kandev does not currently provide a user-login boundary for the web application,
 | --- | --- | --- | --- |
 | Desktop | Launch or quit Kandev | `~/.kandev` by default | **Settings > System > Updates** uses the signed desktop updater when supported |
 | Interactive CLI | `kandev`, then `Ctrl-C` | `~/.kandev` by default | Upgrade the Homebrew or npm package, then restart |
-| Managed service | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | Upgrade the package, reinstall the unit with the same flags, and restart; the current native installer does not enable in-app apply |
+| Managed service | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | Use guarded in-app apply for a managed user service; otherwise upgrade the package, reinstall with the same flags, and restart |
 | Docker or Kubernetes | Container or workload manager | Mounted Kandev home plus any external database/provider state | Replace the image and recreate the container or pod |
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.
@@ -66,7 +66,7 @@ Add `--system` to both commands for a system service.
 | `repos/` | Kandev-managed source clones |
 | `sessions/`, `quick-chat/`, `agent-sessions/` | Session history, ephemeral workspaces, and isolated agent homes when used |
 | `logs/` | Service and optional ACP debug logs |
-| `service/` | Update/helper files when present; the current native service installer does not create `install.json` |
+| `service/` | Owner-only managed-service install metadata plus update intents and helper files |
 | `lsp-servers/`, `runtime/`, `workspaces/` | Installed tools and feature-specific materialized state |
 
 Database snapshots do not contain Git worktrees, clones, the master key, service metadata, or provider-side objects. Native agent and `gh` login files also normally live in the service user's home outside `~/.kandev` (for example `~/.codex` and `~/.config/gh`). The official container instead sets `HOME=/data/home`, so those CLI credentials live on its mounted volume.
@@ -239,12 +239,12 @@ Never delete a managed task directory merely because its database row looks term
 
 The backend contacts the public GitHub Releases API once at startup and every six hours, with a 30-second HTTP timeout, and persists the last successful result. **Check now** performs a synchronous request and permits one manual check per process every 30 seconds. Offline or rate-limited installations continue to show cached state.
 
-**Settings > System > Updates > Update notifications** controls whether a newly detected release triggers a notification, and on which channel: **Desktop notification** (native OS notification, or a browser notification when not running the desktop app), **In-app banner**, or **Both**. Defaults to enabled on both channels; disabling stops delivery without losing the underlying update check. Each release only notifies once per install.
+Configure update alerts in **Settings > General > Notifications > Notification Events**. Select **Kandev update available** for each notification provider that should receive it: Local delivers the in-app update indication and can use an already-granted browser or native desktop notification; System and Apprise use their configured provider transports. There is no separate update-only channel selector. New Local and System providers include this event by default; existing Local and System providers receive it once on upgrade, while existing Apprise providers remain unchanged. Disabling the event for a provider stops that provider's delivery without disabling release checks. Each provider receives a release version at most once; a later version is a new occurrence.
 
 Before any update, finish or stop active sessions, create and export a database backup plus its master key, preserve unpushed Git work, and read release notes.
 
 - Desktop: use **Settings > System > Updates** when signed updater assets are available; otherwise install the new desktop package.
-- Managed service: the current native CLI installer neither writes `service/install.json` nor supplies the service/install metadata required by the guarded one-click updater, so its **Apply update** action is unavailable. Run `brew upgrade kandev` or `npm install -g kandev@latest`, rerun `kandev service install` with the same install flags, then `kandev service restart`. Backend support for metadata-bearing legacy services is implementation detail, not the current native installation path.
+- Managed user service: use **Settings > System > Updates > Apply update**. Kandev enables it only after verifying the managed unit or plist and `<home>/service/install.json`. If the guarded update is unavailable or fails, run `brew upgrade kandev` or `npm install -g kandev@latest`, rerun `kandev service install` with the same install flags, then `kandev service restart`. System services always use that terminal flow with the required privileges.
 - Unmanaged CLI: run `brew upgrade kandev` or `npm install -g kandev@latest`, then restart the process.
 - Transient npx: start the desired release with `npx -y kandev@latest`; this does not update a persistent package.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.
@@ -285,7 +285,7 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 | Restored data looks stale | Whether the backend was restarted immediately | Quit/restart; do not keep using the old open database connections |
 | Logs page has no downloadable files | `logging.outputPath` and service/container logs | `stdout` is the default; use in-memory tail or configure a file sink |
 | Update check returns HTTP 429 | Time since last **Check now** | Wait at least 30 seconds; background checks retry every six hours |
-| **Apply update** is absent | Install method shown on the Updates page | Expected for current native services; upgrade the package, reinstall the service with the same flags, and restart |
+| **Apply update** is absent | Install mode/method and `<home>/service/install.json` | Expected for system, unmanaged, local-checkout, or invalid-metadata installs. A managed npm, npx, or Homebrew user service should offer Apply; reinstall it with the same flags to refresh its identity and metadata, or use the manual package-manager flow. |
 | Metrics show unavailable | OS support, disk path, executor connectivity | Select supported metrics and verify permissions/network; the collector reports errors per sample |
 | Disk total exceeds filesystem expectation | Separate `data` and `backups` rows | Backups are counted twice in the UI total; use volume metrics for capacity decisions |
 | Legacy `/tmp/kandev-agent/*` uses disk | Process inventory and open-file references for the exact directory | This is data from older Kandev versions, not a current Storage resource. Stop Kandev, confirm no live process references the target, then remove only the confirmed-inactive legacy directory through host administration. |

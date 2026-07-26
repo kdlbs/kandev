@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { Branch } from "@/lib/types/http";
 import { Badge } from "@kandev/ui/badge";
+import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -39,6 +40,10 @@ import {
 import { remoteRepositoryMatchesSelection } from "./task-create-dialog-remote-repo-identity";
 
 export { selectedRemoteRepositoryIdentity } from "./task-create-dialog-remote-repo-identity";
+import {
+  looksLikeSupportedRemoteURL,
+  looksLikeURL,
+} from "@/components/workspace-source-picker/remote-url";
 
 const TRUNCATE_THRESHOLD = 30;
 
@@ -47,6 +52,7 @@ export type RemoteRepoChipProps = {
   branches: Branch[];
   branchesLoading: boolean;
   prInfo?: PRInfo;
+  resolutionError?: Error;
   accessibleRepos: UseRemoteRepositoriesResult;
   /** Identities selected by other rows. Matching entries remain selectable. */
   selectedRepositoryIdentities?: string[];
@@ -63,6 +69,7 @@ export type RemoteRepoChipProps = {
     },
   ) => void;
   onBranchChange: (branch: string) => void;
+  onRetry?: () => void;
   onRemove: () => void;
 };
 
@@ -81,33 +88,63 @@ export function RemoteRepoChip({
   branches,
   branchesLoading,
   prInfo,
+  resolutionError,
   accessibleRepos,
   selectedRepositoryIdentities = [],
   onURLChange,
   onBranchChange,
+  onRetry,
   onRemove,
 }: RemoteRepoChipProps) {
   useRowBranchAutoSelect({ row, branches, prInfo, onBranchChange });
   return (
-    <span
-      className="inline-flex items-center rounded-md border border-input bg-input/20 dark:bg-input/30 pr-0.5"
-      data-testid="remote-repo-chip"
-      data-remote-url={row.url}
+    <div
+      className="flex max-w-full flex-col items-start gap-1"
+      data-testid="remote-repo-chip-wrapper"
     >
-      <RemoteRepoPill
-        row={row}
-        accessibleRepos={accessibleRepos}
-        selectedRepositoryIdentities={selectedRepositoryIdentities}
-        onURLChange={onURLChange}
-      />
-      <RemoteBranchPill
-        url={row.url}
-        branch={row.branch}
-        branches={branches}
-        branchesLoading={branchesLoading}
-        onBranchChange={onBranchChange}
-      />
-      <RemoveButton onRemove={onRemove} />
+      <span
+        className="inline-flex max-w-full items-center rounded-md border border-input bg-input/20 dark:bg-input/30 pr-0.5"
+        data-testid="remote-repo-chip"
+        data-remote-url={row.url}
+      >
+        <RemoteRepoPill
+          row={row}
+          accessibleRepos={accessibleRepos}
+          selectedRepositoryIdentities={selectedRepositoryIdentities}
+          onURLChange={onURLChange}
+        />
+        <RemoteBranchPill
+          url={row.url}
+          branch={row.branch}
+          branches={branches}
+          branchesLoading={branchesLoading}
+          onBranchChange={onBranchChange}
+        />
+        <RemoveButton onRemove={onRemove} />
+      </span>
+      {resolutionError && onRetry ? (
+        <RemoteResolutionError error={resolutionError} onRetry={onRetry} />
+      ) : null}
+    </div>
+  );
+}
+
+function RemoteResolutionError({ error, onRetry }: { error: Error; onRetry: () => void }) {
+  return (
+    <span className="flex max-w-full items-center gap-2 text-xs text-destructive" role="alert">
+      <span className="min-w-0 break-words">
+        Could not resolve remote repository: {error.message}
+      </span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        className="h-11 sm:h-9 cursor-pointer"
+        aria-label="Retry remote repository resolution"
+        onClick={onRetry}
+      >
+        Retry
+      </Button>
     </span>
   );
 }
@@ -299,7 +336,7 @@ function RemoteRepoPopoverContent({
   }, [value, triggerSearch]);
   const commitURL = (candidate: string) => {
     const trimmed = candidate.trim();
-    if (!parseGitHubAnyUrl(trimmed) && !looksLikeSupportedRemoteURL(trimmed)) {
+    if (!isSupportedRemoteURL(trimmed)) {
       if (looksLikeURL(trimmed)) {
         setUrlError("Enter a GitHub, GitLab, or Azure DevOps repository URL.");
       }
@@ -310,6 +347,7 @@ function RemoteRepoPopoverContent({
     return true;
   };
   const visibleUrlError = accessible.unavailable ? null : urlError;
+  const hasStagedURL = isSupportedRemoteURL(value.trim());
   const { showProviderTabs, selectedProvider, visibleRepos } = visibleProviderRepositories(
     accessible,
     activeProvider,
@@ -323,30 +361,24 @@ function RemoteRepoPopoverContent({
           setValue(event.target.value);
           setUrlError(null);
         }}
-        onBlur={(event) => {
-          const popoverContent = event.currentTarget.closest('[data-slot="popover-content"]');
-          if (
-            popoverContent &&
-            event.relatedTarget instanceof Node &&
-            popoverContent.contains(event.relatedTarget)
-          ) {
-            return;
-          }
-          commitURL(value);
-        }}
         onPaste={(event) => {
           const pasted = event.clipboardData.getData("text");
-          const isURL = looksLikeURL(pasted.trim());
-          if (!commitURL(pasted) && !isURL) return;
           event.preventDefault();
-          setValue(pasted.trim());
+          setValue(pasted);
         }}
         onKeyDown={(event) => {
-          if (event.key === "Tab") {
-            commitURL(value);
+          if (
+            event.key !== "Enter" ||
+            event.defaultPrevented ||
+            event.repeat ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey ||
+            event.nativeEvent.isComposing ||
+            event.keyCode === 229
+          )
             return;
-          }
-          if (event.key !== "Enter") return;
           const isURL = looksLikeURL(value.trim());
           if (commitURL(value) || isURL) event.preventDefault();
         }}
@@ -361,6 +393,12 @@ function RemoteRepoPopoverContent({
           visibleUrlError && "border-destructive focus:border-destructive",
         )}
       />
+      {hasStagedURL ? (
+        <div className="px-2 pt-1 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">Remote URL</span> — press Enter to submit
+          it.
+        </div>
+      ) : null}
       <PickerList
         accessible={{ ...accessible, repos: visibleRepos }}
         selectedRepositoryIdentities={selectedRepositoryIdentities}
@@ -392,30 +430,9 @@ function visibleProviderRepositories(
     : accessible.repos;
   return { showProviderTabs, selectedProvider, visibleRepos };
 }
-
-function looksLikeURL(value: string): boolean {
-  if (!value) return false;
-  const withScheme = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
-  try {
-    const parsed = new URL(withScheme);
-    return parsed.hostname.includes(".") && value.includes("/");
-  } catch {
-    return false;
-  }
+function isSupportedRemoteURL(value: string): boolean {
+  return !!parseGitHubAnyUrl(value) || looksLikeSupportedRemoteURL(value);
 }
-
-function looksLikeSupportedRemoteURL(value: string): boolean {
-  if (/^git@(github\.com|gitlab\.com|ssh\.dev\.azure\.com):\S+$/i.test(value)) return true;
-  if (!looksLikeURL(value)) return false;
-  const candidate = /^[a-z][a-z\d+.-]*:\/\//i.test(value) ? value : `https://${value}`;
-  try {
-    const host = new URL(candidate).hostname.toLowerCase();
-    return host === "github.com" || host === "gitlab.com" || host === "dev.azure.com";
-  } catch {
-    return false;
-  }
-}
-
 function PickerList({
   accessible,
   selectedRepositoryIdentities,

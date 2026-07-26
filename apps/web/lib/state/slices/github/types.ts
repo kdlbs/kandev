@@ -1,5 +1,6 @@
 import type {
   GitHubStatus,
+  GitHubAppRegistrationCatalog,
   GitHubRateLimitUpdate,
   TaskPR,
   TaskIssueLink,
@@ -11,10 +12,25 @@ import type {
   TaskCIAutomationOptions,
 } from "@/lib/types/github";
 
-export type GitHubStatusState = {
+export type GitHubStatusEntry = {
   status: GitHubStatus | null;
   loaded: boolean;
   loading: boolean;
+};
+
+export type GitHubStatusState = {
+  byWorkspaceId: Record<string, GitHubStatusEntry>;
+};
+
+export type GitHubAppRegistrationsEntry = {
+  catalog: GitHubAppRegistrationCatalog | null;
+  loaded: boolean;
+  loading: boolean;
+  error: string | null;
+};
+
+export type GitHubAppRegistrationsState = {
+  byWorkspaceId: Record<string, GitHubAppRegistrationsEntry>;
 };
 
 export type TaskPRsState = {
@@ -77,6 +93,7 @@ export type TaskCIAutomationOptionsState = {
 
 export type GitHubSliceState = {
   githubStatus: GitHubStatusState;
+  githubAppRegistrations: GitHubAppRegistrationsState;
   taskPRs: TaskPRsState;
   taskIssues: TaskIssuesState;
   pendingPrUrlByTaskId: PendingPrUrlsState;
@@ -89,8 +106,16 @@ export type GitHubSliceState = {
 };
 
 export type GitHubSliceActions = {
-  setGitHubStatus: (status: GitHubStatus | null) => void;
-  setGitHubStatusLoading: (loading: boolean) => void;
+  setGitHubStatus: (workspaceId: string, status: GitHubStatus | null) => void;
+  setGitHubStatusLoading: (workspaceId: string, loading: boolean) => void;
+  resetGitHubStatus: (workspaceId: string) => void;
+  setGitHubAppRegistrations: (
+    workspaceId: string,
+    catalog: GitHubAppRegistrationCatalog | null,
+    error?: string | null,
+  ) => void;
+  setGitHubAppRegistrationsLoading: (workspaceId: string, loading: boolean) => void;
+  resetGitHubAppRegistrations: (workspaceId: string) => void;
   setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
   setTaskIssues: (workspaceId: string, issues: Record<string, TaskIssueLink>) => void;
   upsertTaskIssue: (workspaceId: string, issue: TaskIssueLink) => void;

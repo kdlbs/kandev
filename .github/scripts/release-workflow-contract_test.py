@@ -60,15 +60,55 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("CURRENT_REF: ${{ github.ref }}", guard)
         self.assertIn('if [ "$CURRENT_REF" != "refs/heads/main" ]', guard)
 
-    def test_normal_release_validates_signing_identity_after_merge(self) -> None:
+    def test_normal_release_preflights_and_revalidates_signing_key_around_merge(
+        self,
+    ) -> None:
         prepare = job_block("prepare")
+        bump = step_block("Bump version + generate CHANGELOG (in working tree)")
         merge = step_block("Create release PR + squash-merge")
-        public_key = step_block("Validate committed release signing public key")
+        preflight_public_key = step_block("Validate committed release signing public key")
+        preflight = step_block("Preflight release tag signing fingerprint")
+        merged_public_key = step_block("Validate merged release signing public key")
         signing = step_block("Import release tag signing key")
-        self.assertIn(NORMAL_RELEASE_IF, public_key)
-        self.assertIn("gpg --batch --with-colons --show-keys .github/release-signing-key.asc", public_key)
-        self.assertIn("PUBLIC_FINGERPRINT", public_key)
-        self.assertIn('echo "fingerprint=$PUBLIC_FINGERPRINT" >> "$GITHUB_OUTPUT"', public_key)
+        self.assertIn(NORMAL_RELEASE_IF, preflight_public_key)
+        self.assertIn(
+            "gpg --batch --with-colons --show-keys .github/release-signing-key.asc",
+            preflight_public_key,
+        )
+        self.assertIn("SECRET_KEY_RECORDS", preflight_public_key)
+        self.assertIn("PUBLIC_KEY_RECORDS", preflight_public_key)
+        self.assertIn("PRIMARY_FINGERPRINT_COUNT", preflight_public_key)
+        self.assertIn('if [ "$SECRET_KEY_RECORDS" -ne 0 ]', preflight_public_key)
+        self.assertIn('if [ "$PUBLIC_KEY_RECORDS" -eq 0 ]', preflight_public_key)
+        self.assertIn('if [ "$PUBLIC_KEY_RECORDS" -ne 1 ]', preflight_public_key)
+        self.assertIn('[[ "$PUBLIC_FINGERPRINT" =~ ^[A-F0-9]{40}$ ]]', preflight_public_key)
+        self.assertIn("PUBLIC_FINGERPRINT", preflight_public_key)
+        self.assertIn(
+            'echo "fingerprint=$PUBLIC_FINGERPRINT" >> "$GITHUB_OUTPUT"',
+            preflight_public_key,
+        )
+
+        self.assertIn(NORMAL_RELEASE_IF, preflight)
+        self.assertIn("EXPECTED_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}", preflight)
+        self.assertIn(
+            "COMMITTED_PUBLIC_FINGERPRINT: ${{ steps.committed_release_gpg.outputs.fingerprint }}",
+            preflight,
+        )
+        self.assertIn('if [ -z "$EXPECTED_FINGERPRINT" ]', preflight)
+        self.assertIn('if [ -z "$COMMITTED_PUBLIC_FINGERPRINT" ]', preflight)
+        self.assertIn(
+            'if [ "$COMMITTED_PUBLIC_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]',
+            preflight,
+        )
+
+        self.assertIn(NORMAL_RELEASE_IF, merged_public_key)
+        self.assertIn("id: merged_release_gpg", merged_public_key)
+        self.assertIn(
+            "gpg --batch --with-colons --show-keys .github/release-signing-key.asc",
+            merged_public_key,
+        )
+        self.assertIn('echo "fingerprint=$PUBLIC_FINGERPRINT" >> "$GITHUB_OUTPUT"', merged_public_key)
+
         self.assertIn(NORMAL_RELEASE_IF, signing)
         self.assertIn("id: import_release_gpg", signing)
         self.assertIn(
@@ -84,7 +124,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn(NORMAL_RELEASE_IF, validate)
         self.assertIn("EXPECTED_FINGERPRINT: ${{ vars.RELEASE_GPG_FINGERPRINT }}", validate)
         self.assertIn(
-            "COMMITTED_PUBLIC_FINGERPRINT: ${{ steps.committed_release_gpg.outputs.fingerprint }}",
+            "MERGED_PUBLIC_FINGERPRINT: ${{ steps.merged_release_gpg.outputs.fingerprint }}",
             validate,
         )
         self.assertIn(
@@ -92,8 +132,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             validate,
         )
         self.assertIn('if [ -z "$EXPECTED_FINGERPRINT" ]', validate)
-        self.assertIn('if [ "$COMMITTED_PUBLIC_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]', validate)
-        self.assertIn('if [ "$IMPORTED_FINGERPRINT" != "$COMMITTED_PUBLIC_FINGERPRINT" ]', validate)
+        self.assertIn('if [ "$MERGED_PUBLIC_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]', validate)
+        self.assertIn('if [ "$IMPORTED_FINGERPRINT" != "$MERGED_PUBLIC_FINGERPRINT" ]', validate)
         self.assertIn('if [ "$IMPORTED_FINGERPRINT" != "$EXPECTED_FINGERPRINT" ]', validate)
         self.assertIn("TAGGER_NAME: ${{ steps.import_release_gpg.outputs.name }}", validate)
         self.assertIn("TAGGER_EMAIL: ${{ steps.import_release_gpg.outputs.email }}", validate)
@@ -109,8 +149,12 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertLess(tag.index('git tag -v "$TAG"'), tag.index('git push origin "$TAG"'))
         self.assertNotIn('git tag -a "$TAG"', tag)
 
-        self.assertLess(prepare.index(merge), prepare.index(public_key))
-        self.assertLess(prepare.index(public_key), prepare.index(signing))
+        self.assertLess(prepare.index(preflight_public_key), prepare.index(preflight))
+        self.assertLess(prepare.index(preflight), prepare.index(bump))
+        self.assertLess(prepare.index(bump), prepare.index(merge))
+        self.assertLess(prepare.index(merge), prepare.index(merged_public_key))
+        self.assertLess(prepare.index(merged_public_key), prepare.index(signing))
+        self.assertLess(prepare.index(merge), prepare.index(signing))
         self.assertLess(prepare.index(signing), prepare.index(validate))
         self.assertLess(prepare.index(validate), prepare.index(tag))
 

@@ -138,6 +138,129 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
 
     expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
   });
+
+  it("clears an orphaned active turn when an authoritative refresh reports WAITING_FOR_INPUT", () => {
+    const store = makeStore();
+    store.setState((draft) => {
+      draft.turns.activeBySession[SESSION_ID] = "turn-from-missed-history";
+    });
+
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [
+        makeSession({ state: "WAITING_FOR_INPUT", updated_at: "2026-04-20T00:01:00Z" }),
+      ]);
+
+    expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
+  });
+
+  it("keeps a newer active turn when an older WAITING_FOR_INPUT state arrives", () => {
+    const store = makeStore();
+    const turnStartedAt = "2026-04-20T00:02:00Z";
+    store.getState().addTurn({
+      id: "turn-new",
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      started_at: turnStartedAt,
+      created_at: turnStartedAt,
+      updated_at: turnStartedAt,
+    });
+    store.getState().setActiveTurn(SESSION_ID, "turn-new");
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ state: "WAITING_FOR_INPUT", updated_at: "2026-04-20T00:01:00Z" }),
+      );
+
+    expect(store.getState().turns.activeBySession[SESSION_ID]).toBe("turn-new");
+  });
+
+  it("keeps an active turn while the refreshed session remains RUNNING", () => {
+    const store = makeStore();
+    const turnStartedAt = "2026-04-20T00:02:00Z";
+    store.getState().addTurn({
+      id: "turn-running",
+      session_id: SESSION_ID,
+      task_id: TASK_ID,
+      started_at: turnStartedAt,
+      created_at: turnStartedAt,
+      updated_at: turnStartedAt,
+    });
+    store.getState().setActiveTurn(SESSION_ID, "turn-running");
+
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [
+        makeSession({ state: "RUNNING", updated_at: "2026-04-20T00:03:00Z" }),
+      ]);
+
+    expect(store.getState().turns.activeBySession[SESSION_ID]).toBe("turn-running");
+  });
+
+  it("clears only the active-turn markers authoritatively retired by source adoption", () => {
+    const store = makeStore();
+    const adoptedSession = SESSION_ID;
+    const stillActiveSession = toSessionId("session-still-active");
+    const startedAt = "2026-04-20T00:02:00Z";
+    store.getState().addTurn({
+      id: "turn-adopted",
+      session_id: adoptedSession,
+      task_id: TASK_ID,
+      started_at: startedAt,
+      created_at: startedAt,
+      updated_at: startedAt,
+    });
+    store.getState().addTurn({
+      id: "turn-still-active",
+      session_id: stillActiveSession,
+      task_id: TASK_ID,
+      started_at: startedAt,
+      created_at: startedAt,
+      updated_at: startedAt,
+    });
+    store.getState().setActiveTurn(adoptedSession, "turn-adopted");
+    store.getState().setActiveTurn(stillActiveSession, "turn-still-active");
+
+    store.getState().reconcileWorkspaceSourcesAdopted([adoptedSession]);
+
+    expect(store.getState().turns.activeBySession[adoptedSession]).toBeNull();
+    expect(store.getState().turns.activeBySession[stillActiveSession]).toBe("turn-still-active");
+  });
+});
+
+// ADR-0049 — a fresh page-load / second tab receives the
+// fine-grained busy substate on the boot payload (and now on the REST/WS session
+// endpoints). Hydration and any subsequent list refresh must not drop it, or the
+// coarse busy affordance would persist until the next WS flip — the exact gap
+// this batch closes.
+describe("setTaskSession preserves foreground_activity across merges", () => {
+  it("keeps a boot-seeded background substate when a later list update omits the field", () => {
+    const store = makeStore();
+
+    // Boot payload seeds the RUNNING session as background-idle.
+    store.getState().setTaskSession(makeSession({ foreground_activity: "background" }));
+    expect(store.getState().taskSessions.items[SESSION_ID].foreground_activity).toBe("background");
+
+    // A later list/get refresh that omits the field (older code path, or a race)
+    // must not clobber the boot value — mergeTaskSession spreads absent keys through.
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })]);
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.foreground_activity).toBe("background");
+    expect(session.repository_id).toBe("repo-1");
+  });
+
+  it("applies an explicit substate flip from an enriched update", () => {
+    const store = makeStore();
+
+    store.getState().setTaskSession(makeSession({ foreground_activity: "background" }));
+    // The enriched endpoint now reports the turn is generating again.
+    store.getState().setTaskSession(makeSession({ foreground_activity: "generating" }));
+
+    expect(store.getState().taskSessions.items[SESSION_ID].foreground_activity).toBe("generating");
+  });
 });
 
 function makeEntry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {

@@ -94,6 +94,37 @@ func TestBuildContainerConfig_WorkingDirIsAlwaysContainerPath(t *testing.T) {
 	}
 }
 
+func TestBuildContainerConfigPreflightsBrokerBeforePrepareClone(t *testing.T) {
+	cm := newCMTest(t)
+	cfg := ContainerConfig{
+		AgentConfig: newConfigStubAgent(),
+		InstanceID:  "0123456789abcdef",
+		TaskID:      "task-1",
+		Credentials: map[string]string{
+			envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+			envKeyGitHubCredentialLease:     "lease",
+		},
+		PrepareScript: "git clone https://github.com/acme/widgets.git /workspace",
+	}
+
+	got, err := cm.buildContainerConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildContainerConfig: %v", err)
+	}
+	if len(got.Entrypoint) != 3 {
+		t.Fatalf("entrypoint = %#v", got.Entrypoint)
+	}
+	script := got.Entrypoint[2]
+	probeAt := strings.Index(script, "curl -sS --connect-timeout")
+	cloneAt := strings.Index(script, `eval "$KANDEV_PREPARE_SCRIPT"`)
+	if probeAt < 0 || cloneAt < 0 || probeAt >= cloneAt {
+		t.Fatalf("broker probe must precede prepare/clone: %s", script)
+	}
+	if !strings.Contains(script, `exit "$probe_rc"`) {
+		t.Fatalf("unreachable broker must stop bootstrap before clone: %s", script)
+	}
+}
+
 func TestBuildContainerConfig_ImageDefaultsToRuntime(t *testing.T) {
 	cm := newCMTest(t)
 	cfg := ContainerConfig{

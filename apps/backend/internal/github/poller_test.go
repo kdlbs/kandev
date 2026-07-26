@@ -52,6 +52,7 @@ func setupPollerTest(t *testing.T) (*Poller, *Service, *MockClient, *Store) {
 	eventBus := bus.NewMemoryEventBus(log)
 
 	svc := NewService(mockClient, "pat", nil, store, eventBus, log)
+	configureTestWorkspaceAuth(t, svc, mockClient, testWorkspaceID, "ws-1", "ws1")
 	poller := NewPoller(svc, eventBus, log)
 
 	return poller, svc, mockClient, store
@@ -97,7 +98,7 @@ func TestCheckSinglePRWatch_MergedPR_SyncsThenResets(t *testing.T) {
 		PRNumber:  42,
 		Branch:    "feature-branch",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
@@ -179,7 +180,7 @@ func TestCheckSinglePRWatch_OpenPR_SyncsOnChange(t *testing.T) {
 		Branch:          "open-branch",
 		LastCheckStatus: "pending", // different from "success" -> hasNew=true
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
@@ -254,8 +255,8 @@ func TestReconcileWatches_CreatesWatchesForTasks(t *testing.T) {
 
 	prov := &mockTaskBranchProvider{
 		tasks: []TaskBranchInfo{
-			{TaskID: "t1", SessionID: "s1", Owner: "myorg", Repo: "myrepo", Branch: "feature-a"},
-			{TaskID: "t2", SessionID: "s2", Owner: "myorg", Repo: "myrepo", Branch: "feature-b"},
+			{WorkspaceID: testWorkspaceID, TaskID: "t1", SessionID: "s1", Owner: "myorg", Repo: "myrepo", Branch: "feature-a"},
+			{WorkspaceID: testWorkspaceID, TaskID: "t2", SessionID: "s2", Owner: "myorg", Repo: "myrepo", Branch: "feature-b"},
 		},
 	}
 	poller.SetTaskBranchProvider(prov)
@@ -310,14 +311,14 @@ func TestReconcileWatches_SkipsExistingWatches(t *testing.T) {
 		PRNumber:  0,
 		Branch:    "feature-a",
 	}
-	if err := store.CreatePRWatch(ctx, existing); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(existing)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
 	prov := &mockTaskBranchProvider{
 		tasks: []TaskBranchInfo{
-			{TaskID: "t1", SessionID: "s1", Owner: "myorg", Repo: "myrepo", Branch: "feature-a"},
-			{TaskID: "t2", SessionID: "s2", Owner: "myorg", Repo: "myrepo", Branch: "feature-b"},
+			{WorkspaceID: testWorkspaceID, TaskID: "t1", SessionID: "s1", Owner: "myorg", Repo: "myrepo", Branch: "feature-a"},
+			{WorkspaceID: testWorkspaceID, TaskID: "t2", SessionID: "s2", Owner: "myorg", Repo: "myrepo", Branch: "feature-b"},
 		},
 	}
 	poller.SetTaskBranchProvider(prov)
@@ -368,7 +369,7 @@ func TestCheckSinglePRWatch_OpenPR_NoChange_NoSync(t *testing.T) {
 		Branch:          "stable-branch",
 		LastCheckStatus: "success", // same -> hasNew=false
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
@@ -415,7 +416,7 @@ func TestRefreshStaleBranches_UpdatesBranchWhenChanged(t *testing.T) {
 		PRNumber:  0,
 		Branch:    "old-branch",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
@@ -455,7 +456,7 @@ func TestRefreshStaleBranches_SkipsWhenBranchUnchanged(t *testing.T) {
 		PRNumber:  0,
 		Branch:    "same-branch",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
@@ -488,7 +489,7 @@ func TestRefreshStaleBranches_SkipsWatchesWithPR(t *testing.T) {
 		PRNumber:  42,
 		Branch:    "old-branch",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
@@ -521,7 +522,7 @@ func TestRefreshStaleBranches_SkipsWhenResolverReturnsEmpty(t *testing.T) {
 		PRNumber:  0,
 		Branch:    "old-branch",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
@@ -588,6 +589,7 @@ func setupBatchedPollerTest(t *testing.T) (*Poller, *Service, *graphQLMockClient
 	poller, svc, mockClient, store := setupPollerTest(t)
 	wrapped := &graphQLMockClient{MockClient: mockClient}
 	svc.client = wrapped
+	configureTestWorkspaceAuth(t, svc, wrapped, testWorkspaceID, "ws-1", "ws1")
 	return poller, svc, wrapped, store
 }
 
@@ -616,7 +618,7 @@ func TestTryBatchedPRWatchCheck_NumberedWatch_AppliesStatus(t *testing.T) {
 		SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 42, Branch: "feat",
 		LastCheckStatus: "pending", LastReviewState: "",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 	taskPR := &TaskPR{
@@ -682,7 +684,7 @@ func TestTryBatchedPRWatchCheck_PublishesOnPRFeedbackWatermarkChange(t *testing.
 		LastCheckStatus: "success",
 		LastReviewState: "",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 	if err := store.CreateTaskPR(ctx, &TaskPR{
@@ -761,7 +763,7 @@ func TestTriggerPRSyncAll_ReturnsPerWatchFallbackErrors(t *testing.T) {
 		PRNumber:  42,
 		Branch:    "feat",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
@@ -795,7 +797,7 @@ func TestTriggerPRSyncAll_ReturnsPartialErrorWithSuccessfulPRs(t *testing.T) {
 		{SessionID: "s1", TaskID: "t1", RepositoryID: "repo-live", Owner: "o", Repo: "r", PRNumber: 1, Branch: "feat-live"},
 		{SessionID: "s2", TaskID: "t1", RepositoryID: "repo-dead", Owner: "o", Repo: "r", PRNumber: 2, Branch: "feat-dead"},
 	} {
-		if err := store.CreatePRWatch(ctx, watch); err != nil {
+		if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 			t.Fatalf("create PR watch: %v", err)
 		}
 	}
@@ -850,7 +852,7 @@ func TestTryBatchedPRWatchCheck_SearchingWatch_DetectsPR(t *testing.T) {
 	watch := &PRWatch{
 		SessionID: "s2", TaskID: "t2", Owner: "o", Repo: "r", PRNumber: 0, Branch: "feat",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 
@@ -874,7 +876,7 @@ func TestTryBatchedPRWatchCheck_FallsBackOnUnsupportedClient(t *testing.T) {
 	ctx := context.Background()
 
 	watch := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 1, Branch: "feat"}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 	if poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
@@ -910,7 +912,7 @@ func TestSyncWatchesBatched_ManyWatches_TwoGraphQLCalls(t *testing.T) {
 	for i := 0; i < 3; i++ {
 		w := &PRWatch{SessionID: "n" + string(rune('a'+i)), TaskID: "tn" + string(rune('a'+i)),
 			Owner: "o", Repo: "r", PRNumber: i + 1, Branch: "n"}
-		if err := store.CreatePRWatch(ctx, w); err != nil {
+		if err := store.CreatePRWatch(ctx, withTestWorkspace(w)); err != nil {
 			t.Fatalf("create numbered: %v", err)
 		}
 		watches = append(watches, w)
@@ -918,7 +920,7 @@ func TestSyncWatchesBatched_ManyWatches_TwoGraphQLCalls(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		w := &PRWatch{SessionID: "s" + string(rune('a'+i)), TaskID: "ts" + string(rune('a'+i)),
 			Owner: "o", Repo: "r", PRNumber: 0, Branch: "s" + string(rune('a'+i))}
-		if err := store.CreatePRWatch(ctx, w); err != nil {
+		if err := store.CreatePRWatch(ctx, withTestWorkspace(w)); err != nil {
 			t.Fatalf("create searching: %v", err)
 		}
 		watches = append(watches, w)
@@ -973,7 +975,7 @@ func TestSyncWatchesBatched_MergedPR_ResetsWatch(t *testing.T) {
 	watch := &PRWatch{
 		SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 99, Branch: "feat",
 	}
-	if err := store.CreatePRWatch(ctx, watch); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
 		t.Fatalf("create PR watch: %v", err)
 	}
 	taskPR := &TaskPR{
@@ -1031,8 +1033,8 @@ func TestRefreshStaleWorkspaceWatches_CoalescesConcurrentCalls(t *testing.T) {
 	// means refreshStaleWorkspaceWatches drives them through the branch
 	// query path, which is what onExecute will block on.
 	for _, id := range []string{"t1", "t2"} {
-		w := &PRWatch{SessionID: "sess-" + id, TaskID: id, Owner: "o", Repo: "r", PRNumber: 0, Branch: "br-" + id}
-		if err := store.CreatePRWatch(ctx, w); err != nil {
+		w := &PRWatch{WorkspaceID: "ws1", SessionID: "sess-" + id, TaskID: id, Owner: "o", Repo: "r", PRNumber: 0, Branch: "br-" + id}
+		if err := store.CreatePRWatch(ctx, withTestWorkspace(w)); err != nil {
 			t.Fatalf("create watch: %v", err)
 		}
 	}
@@ -1115,8 +1117,8 @@ func TestServiceStop_DrainsRefreshGoroutine(t *testing.T) {
 		_, svc, gh, store := setupBatchedPollerTest(t)
 		ctx := context.Background()
 
-		w := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 0, Branch: "br-1"}
-		if err := store.CreatePRWatch(ctx, w); err != nil {
+		w := &PRWatch{WorkspaceID: "ws1", SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 0, Branch: "br-1"}
+		if err := store.CreatePRWatch(ctx, withTestWorkspace(w)); err != nil {
 			t.Fatalf("create watch: %v", err)
 		}
 
@@ -1207,6 +1209,21 @@ func TestSearchBucketExhausted(t *testing.T) {
 	})
 	if poller2.searchBucketExhausted("test") {
 		t.Errorf("expected false when only core (not search) is exhausted")
+	}
+}
+
+func TestDetectPRForWatch_FailsClosedWithoutWorkspace(t *testing.T) {
+	poller, _, mockClient, _ := setupPollerTest(t)
+
+	poller.detectPRForWatch(context.Background(), &PRWatch{
+		ID:     "legacy-watch",
+		Owner:  "owner",
+		Repo:   "repo",
+		Branch: "feature",
+	})
+
+	if got := mockClient.FindPRByBranchCallCount(); got != 0 {
+		t.Fatalf("FindPRByBranch calls = %d, want 0 for unowned watch", got)
 	}
 }
 

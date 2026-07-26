@@ -20,7 +20,6 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
 	"github.com/kandev/kandev/internal/system/jobs"
-	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 // PollInterval is the cadence at which the background goroutine polls GitHub.
@@ -54,11 +53,6 @@ var ErrNoUpdateAvailable = errors.New("no update available")
 // ErrApplyInProgress indicates that a self-update helper has already been
 // launched and not yet completed, so a second apply is refused.
 var ErrApplyInProgress = errors.New("a self-update is already in progress")
-
-// ErrNotifyStoreUnavailable indicates that SaveNotifySettings was called on
-// a Service constructed without WithNotifyStore (e.g. the system settings
-// table failed to initialize at boot).
-var ErrNotifyStoreUnavailable = errors.New("update notification settings are not available")
 
 // devVersion is the sentinel used by the ldflags-injected current version
 // when no release tag was baked in (i.e. local dev builds).
@@ -112,24 +106,9 @@ type Service struct {
 	now        func() time.Time
 	applyRun   applyRunner
 
-	// notifyStore persists whether/how the user wants to be told about a
-	// newly detected update (see notify_settings.go, notify_store.go). Nil
-	// when the caller didn't wire one (e.g. some tests) — treated as
-	// DefaultNotifySettings().
-	notifyStore *NotifyStore
-
-	// broadcast delivers a WS notification to connected clients when a new
-	// update is detected and notifications are enabled. Nil-safe: when unset,
-	// notifyIfNewUpdate is a no-op beyond the settings/dedup check.
-	broadcast Broadcaster
-
-	// notifyMu serializes the read-check-broadcast-write sequence in
-	// notifyIfNewUpdate. fetchAndPersist can run concurrently from a manual
-	// Check() and the poller's tick (Check is rate-limited against itself,
-	// but not against a poller tick landing in the same instant), so without
-	// this the notified-version read and write could interleave and fire the
-	// broadcast twice for the same release.
-	notifyMu sync.Mutex
+	// notifier routes update availability through the canonical notification
+	// service. It is nil-safe for isolated updates tests and minimal startup.
+	notifier UpdateNotifier
 
 	// applyStartedAt holds the unix-nano timestamp of the last self-update launch
 	// (0 = none in flight). It guards against two concurrent /updates/apply calls
@@ -161,20 +140,12 @@ type Service struct {
 // the poller and Check() without spinning up an httptest server.
 type Fetcher func(ctx context.Context) (tag, url string, err error)
 
-// Broadcaster delivers a WS notification message to connected clients. Kept
-// as a bare function type (rather than depending on gateway/websocket.Hub or
-// a user-store package) so this package stays free of unrelated wiring —
-// callers close over whatever targeting (broadcast-to-all, broadcast-to-user)
-// makes sense for their deployment.
-//
-// The returned bool reports only whether at least one client was connected
-// (eligible to receive) at broadcast time — Hub.Broadcast has no per-client
-// ack, so this cannot guarantee actual receipt (a client can still drop the
-// connection between the eligibility check and the send). It is precise
-// enough to close the common gap: the poller's immediate on-Start tick can
-// run before any WS client has connected, which would otherwise mark a
-// release "notified" that nobody was ever eligible to see.
-type Broadcaster func(msg *ws.Message) (eligible bool)
+// UpdateNotifier is the narrow canonical notification-service boundary used
+// by release detection. Provider policy and occurrence de-duplication remain
+// owned by that service.
+type UpdateNotifier interface {
+	HandleUpdateAvailable(ctx context.Context, version, releaseURL string)
+}
 
 // Option customises Service construction without growing NewService's public
 // parameter list.
@@ -210,15 +181,6 @@ func WithApplyRunner(r applyRunner) Option {
 		if r != nil {
 			s.applyRun = r
 		}
-	}
-}
-
-// WithNotifyStore wires the persisted update-notification preferences
-// (enable/disable + desktop/in_view/both channel). Without it,
-// notifyIfNewUpdate falls back to DefaultNotifySettings().
-func WithNotifyStore(store *NotifyStore) Option {
-	return func(s *Service) {
-		s.notifyStore = store
 	}
 }
 
@@ -288,32 +250,11 @@ func (s *Service) SetReleaseURL(url string) {
 	s.mu.Unlock()
 }
 
-// SetBroadcaster wires the WS broadcaster used to announce a newly detected
-// update. Constructed post-hoc (rather than via Option) because the WS hub
-// is composed after this service in the current wiring order — see
-// internal/backendapp/main.go.
-func (s *Service) SetBroadcaster(b Broadcaster) {
+// SetNotifier wires the canonical notifier after gateway composition.
+func (s *Service) SetNotifier(notifier UpdateNotifier) {
 	s.mu.Lock()
-	s.broadcast = b
+	s.notifier = notifier
 	s.mu.Unlock()
-}
-
-// GetNotifySettings returns the persisted update-notification preferences,
-// or DefaultNotifySettings() when no NotifyStore was wired.
-func (s *Service) GetNotifySettings(ctx context.Context) (NotifySettings, error) {
-	if s.notifyStore == nil {
-		return DefaultNotifySettings(), nil
-	}
-	return s.notifyStore.GetSettings(ctx)
-}
-
-// SaveNotifySettings validates and persists the update-notification
-// preferences. Returns an error if no NotifyStore was wired.
-func (s *Service) SaveNotifySettings(ctx context.Context, settings NotifySettings) (NotifySettings, error) {
-	if s.notifyStore == nil {
-		return NotifySettings{}, ErrNotifyStoreUnavailable
-	}
-	return s.notifyStore.SaveSettings(ctx, settings)
 }
 
 // Get returns the last-known state from kandev_meta without contacting
@@ -435,61 +376,33 @@ func (s *Service) fetchAndPersist(ctx context.Context) (UpdatesResponse, error) 
 		s.log.Warn("updates: persist latest version failed", zap.Error(werr))
 		return UpdatesResponse{}, werr
 	}
-	s.notifyIfNewUpdate(ctx, tag, releaseURL)
+	s.notifyUpdateAvailable(ctx, tag, releaseURL)
 	return s.buildResponse(tag, releaseURL, now), nil
 }
 
-// notifyIfNewUpdate broadcasts a WS notification the first time a given
-// release tag is observed as newer than the running binary, provided the
-// user hasn't disabled update notifications. Dedup is durable (kandev_meta),
-// not in-memory, so a backend restart doesn't re-announce a release the user
-// already saw. Disabling notifications does not mark the version as
-// notified, so re-enabling later still surfaces the current release.
-func (s *Service) notifyIfNewUpdate(ctx context.Context, tag, releaseURL string) {
+// ReplayCachedUpdate delivers a previously persisted newer release without
+// contacting GitHub. It is called when the default user becomes eligible for
+// Local delivery after an early startup poll.
+func (s *Service) ReplayCachedUpdate(ctx context.Context) error {
+	tag, releaseURL, _, err := persistence.ReadLatestVersion(s.pool.Reader())
+	if err != nil {
+		return err
+	}
+	s.notifyUpdateAvailable(ctx, tag, releaseURL)
+	return nil
+}
+
+func (s *Service) notifyUpdateAvailable(ctx context.Context, tag, releaseURL string) {
 	if !s.updateAvailable(tag) {
 		return
 	}
 	s.mu.Lock()
-	broadcast := s.broadcast
+	notifier := s.notifier
 	s.mu.Unlock()
-	if broadcast == nil {
+	if notifier == nil {
 		return
 	}
-	settings, err := s.GetNotifySettings(ctx)
-	if err != nil {
-		s.log.Warn("updates: read notify settings failed", zap.Error(err))
-		return
-	}
-	if !settings.Enabled {
-		return
-	}
-	s.notifyMu.Lock()
-	defer s.notifyMu.Unlock()
-	notified, err := persistence.ReadNotifiedUpdateVersion(s.pool.Reader())
-	if err != nil {
-		s.log.Warn("updates: read notified version failed", zap.Error(err))
-		return
-	}
-	if notified == tag {
-		return
-	}
-	msg, err := ws.NewNotification(ws.ActionUpdateAvailable, map[string]interface{}{
-		"version": tag,
-		"url":     releaseURL,
-	})
-	if err != nil {
-		s.log.Warn("updates: build notification message failed", zap.Error(err))
-		return
-	}
-	if !broadcast(msg) {
-		// No client was connected to receive this — don't mark the release
-		// notified. The next poll tick (or a manual "Check now") will retry
-		// once at least one client is connected.
-		return
-	}
-	if werr := persistence.WriteNotifiedUpdateVersion(s.pool.Writer(), tag); werr != nil {
-		s.log.Warn("updates: persist notified version failed", zap.Error(werr))
-	}
+	notifier.HandleUpdateAvailable(ctx, tag, releaseURL)
 }
 
 func (s *Service) buildResponse(latest, url string, checkedAt time.Time) UpdatesResponse {

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -926,5 +927,41 @@ func TestAddBranchToTask_MaterializeSkippedPreLaunchStillSucceeds(t *testing.T) 
 	rows, _ := repo.ListTaskRepositories(ctx, task.ID)
 	if len(rows) != 2 {
 		t.Errorf("expected row to remain after pre-launch materialize failure; got %d rows", len(rows))
+	}
+}
+
+func TestAddBranchToTask_RejectsActiveTaskBeforePersisting(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-add-idle", Name: "WS"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-add-idle", WorkspaceID: "ws-add-idle", Name: "WF"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-add-idle", WorkspaceID: "ws-add-idle", Name: "app", DefaultBranch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{WorkspaceID: "ws-add-idle", WorkflowID: "wf-add-idle", WorkflowStepID: "step", Title: "Task", Repositories: []TaskRepositoryInput{{RepositoryID: "repo-add-idle", BaseBranch: "main"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-add-idle", TaskID: task.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.StartTurn(ctx, "session-add-idle"); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.AddBranchToTask(ctx, AddBranchToTaskRequest{TaskID: task.ID, RepositoryID: "repo-add-idle", BaseBranch: "main", CheckoutBranch: "feature/source"})
+	if !errors.Is(err, ErrWorkspaceSourceActive) {
+		t.Fatalf("error = %v, want active-task rejection", err)
+	}
+	rows, err := repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("task repositories = %#v, want no added branch", rows)
 	}
 }

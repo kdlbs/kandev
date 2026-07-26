@@ -29,7 +29,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
 function buildUserSettingsState(state: AppState, payload: UserSettingsUpdatedPayload) {
   return {
     ...state.userSettings,
-    ...buildBehaviorSettings(payload),
+    ...buildBehaviorSettings(state, payload),
     ...buildSidebarSettings(state, payload),
     ...buildLspSettings(payload),
     ...buildSyncedLocalSettings(state, payload),
@@ -74,7 +74,7 @@ function buildSyncedLocalSettings(state: AppState, payload: UserSettingsUpdatedP
   };
 }
 
-function buildBehaviorSettings(payload: UserSettingsUpdatedPayload) {
+function buildBehaviorSettings(state: AppState, payload: UserSettingsUpdatedPayload) {
   return {
     preferredShell: payload.preferred_shell || null,
     defaultEditorId: payload.default_editor_id || null,
@@ -91,6 +91,10 @@ function buildBehaviorSettings(payload: UserSettingsUpdatedPayload) {
       payload.terminal_link_behavior === "browser_panel"
         ? ("browser_panel" as const)
         : ("new_tab" as const),
+    tasksListShowDetails:
+      payload.tasks_list_show_details === undefined
+        ? state.userSettings.tasksListShowDetails
+        : payload.tasks_list_show_details,
   };
 }
 

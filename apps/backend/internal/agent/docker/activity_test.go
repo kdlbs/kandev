@@ -6,9 +6,9 @@ import (
 	"io"
 	"testing"
 
-	"github.com/docker/docker/api/types/build"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/moby/moby/client"
 	"go.uber.org/zap"
 )
 
@@ -19,7 +19,7 @@ func TestBuildImageHoldsActivityUntilResponseBodyCloses(t *testing.T) {
 	}
 	coordinator := activity.NewCoordinator(activity.Options{})
 	client := &Client{
-		builder: &fakeImageBuilder{response: build.ImageBuildResponse{
+		builder: &fakeImageBuilder{response: client.ImageBuildResult{
 			Body: io.NopCloser(bytes.NewBufferString("build output")),
 		}},
 		logger: log,
@@ -44,10 +44,10 @@ func TestBuildImageHoldsActivityUntilResponseBodyCloses(t *testing.T) {
 }
 
 type fakeImageBuilder struct {
-	response build.ImageBuildResponse
+	response client.ImageBuildResult
 	err      error
 }
 
-func (f *fakeImageBuilder) ImageBuild(context.Context, io.Reader, build.ImageBuildOptions) (build.ImageBuildResponse, error) {
+func (f *fakeImageBuilder) ImageBuild(context.Context, io.Reader, client.ImageBuildOptions) (client.ImageBuildResult, error) {
 	return f.response, f.err
 }

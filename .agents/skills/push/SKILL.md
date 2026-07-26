@@ -47,7 +47,10 @@ Push the already committed branch to its remote.
    ```bash
    git push
    ```
-   If the branch has no upstream, use `git push -u origin <branch>`.
+   If the branch has no upstream, use `git push -u origin HEAD` rather than
+   transcribing the branch name. Then verify
+   `git rev-parse HEAD` equals `git rev-parse '@{upstream}'`, and report the
+   branch from `git branch --show-current`.
    If the branch was rebased or history was rewritten, first confirm the current
    branch is not `main` or `master`, then use `git push --force-with-lease`.
    If the branch modifies `.github/workflows/*` and GitHub rejects the push with

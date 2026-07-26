@@ -255,6 +255,19 @@ describe("CreateLocalRepositorySurface submission", () => {
     expect(mocks.initialize).not.toHaveBeenCalled();
   });
 
+  it("allows workspace repository creation without changing an executor", async () => {
+    mocks.initialize.mockResolvedValue(createdRepository);
+    const props = renderSurface({ context: "workspace", executorSelection: null });
+
+    fireEvent.change(await screen.findByLabelText(REPOSITORY_NAME_LABEL), {
+      target: { value: REPOSITORY_NAME },
+    });
+    expect(screen.getByText(/registers it in this workspace/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: CREATE_BUTTON_NAME }));
+
+    await waitFor(() => expect(props.onCreated).toHaveBeenCalledWith(createdRepository));
+  });
+
   it("uses a mobile drawer instead of the desktop dialog on phones", async () => {
     mocks.isMobile = true;
     renderSurface();

@@ -27,7 +27,7 @@ Or invoke the binary directly: `apps/backend/bin/acpdbg <subcommand> [flags]`.
 | `probe <agent>` | `initialize` → `session/new` → close. Shows models, modes, auth methods. |
 | `probe --exec "<cmd> [args...]"` | Same but against an arbitrary binary not in the registry |
 | `prompt <agent> --prompt "..." [--model M] [--mode M]` | Full prompt round-trip, collects text chunks from `session/update` |
-| `session-load <agent> --session-id <id>` | Reproduce `session/load` for an existing session |
+| `session-load <agent> --session-id <id> [--prompt "..."]` | Load an existing session in `--workdir`, then optionally verify it with a prompt |
 | `matrix` | Probe every registered ACP agent in parallel, write one JSONL per agent + `matrix-summary.json` |
 
 ### Shared flags
@@ -38,6 +38,28 @@ Or invoke the binary directly: `apps/backend/bin/acpdbg <subcommand> [flags]`.
 - `--workdir PATH` — child cwd (default: fresh `/tmp/kandev-acpdbg-<pid>-*`)
 - `--verbose` — mirror frames to stderr as they're sent/received
 - `--stderr` — capture child stderr into the JSONL (useful when an agent crashes before the handshake completes)
+
+### Verify resume under a different working directory
+
+Create a session in one directory, then load it from another and ask the agent
+to report its working directory:
+
+```bash
+apps/backend/bin/acpdbg prompt codex-acp \
+  --workdir /tmp/folder-a \
+  --prompt "Reply with pwd only" \
+  --file /tmp/codex-new.jsonl
+
+apps/backend/bin/acpdbg session-load codex-acp \
+  --session-id <session-id-from-first-run> \
+  --workdir /tmp/folder-b \
+  --prompt "Reply with pwd only" \
+  --file /tmp/codex-load.jsonl
+```
+
+`session-load` sends the selected `--workdir` as the ACP `cwd` parameter. The
+JSONL wire frames are authoritative when a provider replays earlier session
+messages during load.
 
 ## JSONL format
 

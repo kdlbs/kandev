@@ -67,7 +67,7 @@ Without a volume, data is lost when the container is removed.
 | `/data/.npm-global/` | Agent CLIs installed via `npm install -g` (`NPM_CONFIG_PREFIX`) |
 | `/data/home/` | `$HOME` for the in-container `kandev` user — `gh` CLI and agent CLI auth state |
 
-### Persistent agent and `gh` CLI auth
+### Persistent agent and selectable `gh` CLI auth
 
 The image sets `HOME=/data/home`, so every CLI that writes its auth under `$HOME` lands on the volume and survives container restarts and image upgrades:
 
@@ -78,9 +78,11 @@ The image sets `HOME=/data/home`, so every CLI that writes its auth under `$HOME
 - GitHub Copilot — `~/.copilot/...`
 - OpenCode, Amp — `~/.config/<tool>/...`
 
-A one-time `docker exec -it kandev gh auth login` (or `claude login`, `codex login`, etc.) is enough; you do not need to redo it after `docker pull` and recreating the container.
+A one-time `docker exec -it kandev gh auth login` makes that named GitHub account available for selection in each workspace. Agent CLI logins such as `claude login` and `codex login` also persist, so you do not need to redo them after `docker pull` and recreating the container.
 
-> The GitHub PAT configured in **Settings → Integrations → GitHub** is stored as a secret in the database and has always persisted. The `HOME=/data/home` setup covers the separate `gh auth login` flow that the backend falls back to when no `GITHUB_TOKEN` secret is set.
+> Workspace PATs are stored in Kandev's encrypted secret store. A workspace configured for GitHub CLI resolves the exact selected host/login without changing the active CLI account. Host-active `gh`, backend `GITHUB_TOKEN`/`GH_TOKEN`, and old globally named secrets are consulted only by migration-only **Legacy shared** connections.
+
+Set `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL` to an HTTPS Kandev URL reachable from agent containers and remote executors. This is independent of GitHub App setup and is required for managed PAT or CLI credentials outside local/worktree execution. The reverse proxy must pass both `GET` and `POST` on `/api/v1/github/credentials/resolve`; executors require the non-secret `GET` readiness response before startup, while credential redemption uses the lease-authenticated `POST`.
 
 ## Configuration
 

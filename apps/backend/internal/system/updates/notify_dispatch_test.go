@@ -3,167 +3,138 @@ package updates
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/db"
+	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	notificationservice "github.com/kandev/kandev/internal/notifications/service"
+	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	"github.com/kandev/kandev/internal/persistence"
-	ws "github.com/kandev/kandev/pkg/websocket"
+	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
-// capturingBroadcaster records every message handed to it so tests can
-// assert whether (and what) the service broadcast, and can simulate "no
-// client connected" by setting eligible=false.
-type capturingBroadcaster struct {
-	messages []*ws.Message
-	eligible bool
+type capturingNotifier struct {
+	calls []updateNotification
 }
 
-func (c *capturingBroadcaster) broadcast(msg *ws.Message) bool {
-	c.messages = append(c.messages, msg)
-	return c.eligible
+type updateNotification struct {
+	version string
+	url     string
 }
 
-// newNotifyTestService wires a Service against a stub GitHub release server
-// plus a fresh NotifyStore (defaults: enabled, both channels) and a
-// capturing broadcaster, for tests that assert on the notify-on-new-update
-// side effect of Check()/fetchAndPersist.
-func newNotifyTestService(t *testing.T, tag, url string) (svc *Service, bc *capturingBroadcaster, notifyStore *NotifyStore) {
+func (n *capturingNotifier) HandleUpdateAvailable(_ context.Context, version, releaseURL string) {
+	n.calls = append(n.calls, updateNotification{version: version, url: releaseURL})
+}
+
+func TestService_ReplayCachedUpdate_NotifiesCachedNewerReleaseWithoutFetching(t *testing.T) {
+	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default())
+	notifier := &capturingNotifier{}
+	svc.SetNotifier(notifier)
+	svc.SetFetcher(func(context.Context) (string, string, error) {
+		t.Fatal("ReplayCachedUpdate must not fetch GitHub")
+		return "", "", nil
+	})
+
+	if err := persistence.WriteLatestVersion(svc.pool.Writer(), "v1.0.1", "https://example.test/v1.0.1", time.Now()); err != nil {
+		t.Fatalf("write cached release: %v", err)
+	}
+	if err := svc.ReplayCachedUpdate(context.Background()); err != nil {
+		t.Fatalf("ReplayCachedUpdate: %v", err)
+	}
+
+	if len(notifier.calls) != 1 {
+		t.Fatalf("notifier calls = %d, want 1", len(notifier.calls))
+	}
+	if got := notifier.calls[0]; got.version != "v1.0.1" || got.url != "https://example.test/v1.0.1" {
+		t.Errorf("notifier call = %+v, want cached release", got)
+	}
+}
+
+func TestService_FetchAndPersist_NotifiesCanonicalServiceForNewerRelease(t *testing.T) {
+	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default())
+	notifier := &capturingNotifier{}
+	svc.SetNotifier(notifier)
+	svc.SetFetcher(func(context.Context) (string, string, error) {
+		return "v1.0.1", "https://example.test/v1.0.1", nil
+	})
+
+	if _, err := svc.fetchAndPersist(context.Background()); err != nil {
+		t.Fatalf("fetchAndPersist: %v", err)
+	}
+
+	if len(notifier.calls) != 1 {
+		t.Fatalf("notifier calls = %d, want 1", len(notifier.calls))
+	}
+}
+
+func TestService_PollBeforeLocalSubscription_ReplaysCachedUpdateExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	t.Setenv("KANDEV_DESKTOP_NATIVE_NOTIFICATIONS", "true")
+	pool := newTestPool(t)
+	repo, closeRepo, err := notificationstore.Provide(ctx, pool.Writer(), pool.Reader())
+	if err != nil {
+		t.Fatalf("provide notification repository: %v", err)
+	}
+	t.Cleanup(func() { _ = closeRepo() })
+
+	hub := gateways.NewHub(nil, logger.Default())
+	notifier := notificationservice.NewService(repo, nil, hub, logger.Default())
+	svc := NewService(pool, "v1.0.0", nil, logger.Default())
+	svc.SetNotifier(notifier)
+	fetches := 0
+	svc.SetFetcher(func(context.Context) (string, string, error) {
+		fetches++
+		return "v1.0.1", "https://example.test/v1.0.1", nil
+	})
+	hub.AddUserSubscriptionListener(func(userID string) {
+		if userID != userstore.DefaultUserID {
+			return
+		}
+		if err := svc.ReplayCachedUpdate(ctx); err != nil {
+			t.Errorf("replay cached update: %v", err)
+		}
+	})
+
+	if _, err := svc.fetchAndPersist(ctx); err != nil {
+		t.Fatalf("initial poll: %v", err)
+	}
+	if got := localUpdateDeliveryCount(t, pool); got != 0 {
+		t.Fatalf("Local delivery claims after poll without subscriber = %d, want 0", got)
+	}
+
+	first := gateways.NewClient("first", authn.Identity{}, nil, hub, logger.Default())
+	hub.SubscribeToUser(first, userstore.DefaultUserID)
+	if got := localUpdateDeliveryCount(t, pool); got != 1 {
+		t.Fatalf("Local delivery claims after first subscription = %d, want 1", got)
+	}
+	if fetches != 1 {
+		t.Fatalf("GitHub fetches after cached replay = %d, want 1", fetches)
+	}
+
+	second := gateways.NewClient("second", authn.Identity{}, nil, hub, logger.Default())
+	hub.SubscribeToUser(second, userstore.DefaultUserID)
+	if got := localUpdateDeliveryCount(t, pool); got != 1 {
+		t.Fatalf("Local delivery claims after second subscription = %d, want 1", got)
+	}
+	if fetches != 1 {
+		t.Fatalf("GitHub fetches after second replay = %d, want 1", fetches)
+	}
+}
+
+func localUpdateDeliveryCount(t *testing.T, pool *db.Pool) int {
 	t.Helper()
-	pool := newTestPool(t)
-	srv, _ := newStubGitHub(t, tag, url)
-	notifyStore = newTestNotifyStore(t)
-	svc = NewService(pool, "v1.0.0", srv.Client(), logger.Default(), WithNotifyStore(notifyStore))
-	svc.SetReleaseURL(srv.URL)
-	bc = &capturingBroadcaster{eligible: true}
-	svc.SetBroadcaster(bc.broadcast)
-	return svc, bc, notifyStore
-}
-
-func TestService_Check_BroadcastsUpdateAvailable_WhenEnabled(t *testing.T) {
-	svc, bc, _ := newNotifyTestService(t, "v1.0.1", "https://example/v1.0.1")
-
-	if _, err := svc.Check(context.Background()); err != nil {
-		t.Fatalf("Check: %v", err)
+	var count int
+	if err := pool.Reader().Get(&count, `
+		SELECT COUNT(*)
+		FROM notification_deliveries deliveries
+		JOIN notification_providers providers ON providers.id = deliveries.provider_id
+		WHERE providers.type = 'local'
+			AND deliveries.event_type = 'system.update_available'
+			AND deliveries.occurrence_id = 'v1.0.1'
+	`); err != nil {
+		t.Fatalf("count Local update deliveries: %v", err)
 	}
-
-	if len(bc.messages) != 1 {
-		t.Fatalf("expected 1 broadcast, got %d", len(bc.messages))
-	}
-	if bc.messages[0].Action != ws.ActionUpdateAvailable {
-		t.Errorf("action = %q, want %q", bc.messages[0].Action, ws.ActionUpdateAvailable)
-	}
-}
-
-func TestService_Check_NoBroadcast_WhenNotifyDisabled(t *testing.T) {
-	svc, bc, notifyStore := newNotifyTestService(t, "v1.0.1", "https://example/v1.0.1")
-	if _, err := notifyStore.SaveSettings(context.Background(), NotifySettings{Enabled: false, Channel: NotifyChannelBoth}); err != nil {
-		t.Fatalf("SaveSettings: %v", err)
-	}
-
-	if _, err := svc.Check(context.Background()); err != nil {
-		t.Fatalf("Check: %v", err)
-	}
-
-	if len(bc.messages) != 0 {
-		t.Fatalf("expected no broadcast while disabled, got %d", len(bc.messages))
-	}
-}
-
-func TestService_Check_NoBroadcast_WhenNoUpdateAvailable(t *testing.T) {
-	// current == latest -> not an update.
-	svc, bc, _ := newNotifyTestService(t, "v1.0.0", "https://example/v1.0.0")
-
-	if _, err := svc.Check(context.Background()); err != nil {
-		t.Fatalf("Check: %v", err)
-	}
-	if len(bc.messages) != 0 {
-		t.Fatalf("expected no broadcast when already up to date, got %d", len(bc.messages))
-	}
-}
-
-func TestService_Check_DedupesRepeatedBroadcastForSameVersion(t *testing.T) {
-	svc, bc, _ := newNotifyTestService(t, "v1.0.1", "https://example/v1.0.1")
-
-	// Simulate two separate poll ticks of the same release (fetchAndPersist
-	// is what both Check() and the poller call; using it directly avoids the
-	// unrelated 30s manual-check rate limiter tested elsewhere).
-	if _, err := svc.fetchAndPersist(context.Background()); err != nil {
-		t.Fatalf("fetchAndPersist 1: %v", err)
-	}
-	if _, err := svc.fetchAndPersist(context.Background()); err != nil {
-		t.Fatalf("fetchAndPersist 2: %v", err)
-	}
-
-	if len(bc.messages) != 1 {
-		t.Fatalf("expected exactly 1 broadcast across repeated polls of the same version, got %d", len(bc.messages))
-	}
-}
-
-func TestService_Check_DoesNotPersistNotified_WhenNoClientEligible(t *testing.T) {
-	// Regression test for the immediate on-Start poller tick landing before
-	// any WS client has connected: Hub.Broadcast has no delivery guarantee,
-	// so a release must not be marked notified until a broadcast reports at
-	// least one eligible client — otherwise the first real client to
-	// connect would never see the one-time notification for that release.
-	svc, bc, _ := newNotifyTestService(t, "v1.0.1", "https://example/v1.0.1")
-	bc.eligible = false
-
-	if _, err := svc.fetchAndPersist(context.Background()); err != nil {
-		t.Fatalf("fetchAndPersist (no clients): %v", err)
-	}
-	if len(bc.messages) != 1 {
-		t.Fatalf("expected the broadcast attempt to still happen, got %d messages", len(bc.messages))
-	}
-	if notified, err := persistence.ReadNotifiedUpdateVersion(svc.pool.Reader()); err != nil {
-		t.Fatalf("ReadNotifiedUpdateVersion: %v", err)
-	} else if notified != "" {
-		t.Fatalf("expected no version marked notified while ineligible, got %q", notified)
-	}
-
-	// A later tick with a client now connected must still deliver it.
-	bc.eligible = true
-	if _, err := svc.fetchAndPersist(context.Background()); err != nil {
-		t.Fatalf("fetchAndPersist (client connected): %v", err)
-	}
-	if len(bc.messages) != 2 {
-		t.Fatalf("expected a retried broadcast once eligible, got %d messages", len(bc.messages))
-	}
-	if notified, err := persistence.ReadNotifiedUpdateVersion(svc.pool.Reader()); err != nil {
-		t.Fatalf("ReadNotifiedUpdateVersion: %v", err)
-	} else if notified != "v1.0.1" {
-		t.Fatalf("expected v1.0.1 marked notified after eligible retry, got %q", notified)
-	}
-}
-
-func TestService_Check_NilBroadcaster_DoesNotPanic(t *testing.T) {
-	pool := newTestPool(t)
-	srv, _ := newStubGitHub(t, "v1.0.1", "https://example/v1.0.1")
-	svc := NewService(pool, "v1.0.0", srv.Client(), logger.Default())
-	svc.SetReleaseURL(srv.URL)
-
-	if _, err := svc.Check(context.Background()); err != nil {
-		t.Fatalf("Check: %v", err)
-	}
-}
-
-func TestService_Check_ConcurrentChecks_DoNotDoubleBroadcast(t *testing.T) {
-	// Regression test for a race between fetchAndPersist calls that land
-	// concurrently (e.g. a manual Check racing the poller's tick): only one
-	// of them should win the notified-version dedup and broadcast.
-	svc, bc, _ := newNotifyTestService(t, "v1.0.1", "https://example/v1.0.1")
-
-	const n = 8
-	done := make(chan struct{}, n)
-	for range n {
-		go func() {
-			defer func() { done <- struct{}{} }()
-			svc.notifyIfNewUpdate(context.Background(), "v1.0.1", "https://example/v1.0.1")
-		}()
-	}
-	for range n {
-		<-done
-	}
-
-	if got := len(bc.messages); got != 1 {
-		t.Fatalf("expected exactly 1 broadcast across %d concurrent notifyIfNewUpdate calls, got %d", n, got)
-	}
+	return count
 }

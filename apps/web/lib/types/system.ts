@@ -79,13 +79,6 @@ export interface UpdatesResponse {
   manual_commands?: string[];
 }
 
-export type UpdateNotificationChannel = "desktop" | "in_view" | "both";
-
-export interface UpdateNotificationSettings {
-  enabled: boolean;
-  channel: UpdateNotificationChannel;
-}
-
 export interface InstallState {
   running_as_service: boolean;
   managed_service: boolean;

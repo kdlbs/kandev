@@ -50,13 +50,18 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 	// Ensure we have a turn ID - get active turn or start a new one
 	turnID := req.TurnID
 	if turnID == "" {
-		turn, err := s.getOrStartTurnWithRetry(
-			ctx,
-			req.TaskSessionID,
-			messageID,
-			messageCreateMaxRetries,
-			messageCreateRetryDelay,
-		)
+		var turn *models.Turn
+		if req.CompletedTurn {
+			turn, err = s.createCompletedTurn(ctx, session)
+		} else {
+			turn, err = s.getOrStartTurnWithRetry(
+				ctx,
+				req.TaskSessionID,
+				messageID,
+				messageCreateMaxRetries,
+				messageCreateRetryDelay,
+			)
+		}
 		if err != nil {
 			s.logger.Warn("failed to get or start turn for message",
 				zap.String("session_id", req.TaskSessionID),
@@ -265,11 +270,17 @@ func (s *Service) GetMessage(ctx context.Context, id string) (*models.Message, e
 
 // ListMessages returns all messages for a session.
 func (s *Service) ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error) {
+	if err := s.AuthorizeSessionAccess(ctx, sessionID); err != nil {
+		return nil, err
+	}
 	return s.messages.ListMessages(ctx, sessionID)
 }
 
 // ListMessagesPaginated returns messages for a session with pagination options.
 func (s *Service) ListMessagesPaginated(ctx context.Context, req ListMessagesRequest) ([]*models.Message, bool, error) {
+	if err := s.AuthorizeSessionAccess(ctx, req.TaskSessionID); err != nil {
+		return nil, false, err
+	}
 	limit := req.Limit
 	if limit <= 0 && (req.Before != "" || req.After != "") {
 		limit = DefaultMessagesPageSize
@@ -295,6 +306,9 @@ func (s *Service) ListMessagesForPlugin(ctx context.Context, filter models.Plugi
 
 // SearchMessages returns messages whose content matches the query in the given session.
 func (s *Service) SearchMessages(ctx context.Context, sessionID, query string, limit int) ([]*models.Message, error) {
+	if err := s.AuthorizeSessionAccess(ctx, sessionID); err != nil {
+		return nil, err
+	}
 	return s.messages.SearchMessages(ctx, sessionID, models.SearchMessagesOptions{
 		Query: query,
 		Limit: limit,

@@ -5,6 +5,7 @@ export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
   kanbanMulti: { snapshots: {}, isLoading: false },
   workflows: { items: [], activeId: null },
+  workspaceContextGeneration: 0,
   tasks: {
     activeTaskId: null,
     activeSessionId: null,
@@ -20,6 +21,12 @@ export const createKanbanSlice: StateCreator<
   KanbanSlice
 > = (set) => ({
   ...defaultKanbanState,
+  resetKanbanWorkspaceContext: () =>
+    set((draft) => {
+      const nextGeneration = draft.workspaceContextGeneration + 1;
+      Object.assign(draft, defaultKanbanState);
+      draft.workspaceContextGeneration = nextGeneration;
+    }),
   setActiveWorkflow: (workflowId) =>
     set((draft) => {
       if (draft.workflows.activeId === workflowId) return;

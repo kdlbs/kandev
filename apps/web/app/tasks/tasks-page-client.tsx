@@ -18,6 +18,8 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useTaskListingView } from "@/hooks/use-task-listing-view";
+import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
@@ -485,9 +487,12 @@ function useTasksListPreferenceSync({
 
 export function TasksPageClient(props: TasksPageClientProps) {
   const s = useTasksPageSetup(props);
+  const { setView } = useTaskListingView();
   const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
   const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const { isMobile } = useResponsiveBreakpoint();
+  const showTaskDetails = useAppStore((state) => state.userSettings.tasksListShowDetails ?? false);
+  useWorkspacePRs(showTaskDetails ? s.activeWorkspaceId : null);
   const { handleSortChange, handleGroupChange } = useTasksListPreferenceSync({
     tasksListSort: s.tasksListSort,
     setTasksListSort: s.setTasksListSort,
@@ -501,6 +506,10 @@ export function TasksPageClient(props: TasksPageClientProps) {
     setMobileSearchOpen(false);
     return () => setMobileSearchOpen(false);
   }, [setMobileSearchOpen]);
+
+  useEffect(() => {
+    setView("list");
+  }, [setView]);
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
@@ -525,6 +534,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
         tasks={s.tasks}
         workflows={s.workflows}
         repositories={s.repositories}
+        showTaskDetails={showTaskDetails}
         total={s.total}
         pageCount={s.pageCount}
         pagination={s.pagination}

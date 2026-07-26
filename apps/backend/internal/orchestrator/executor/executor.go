@@ -44,6 +44,7 @@ type executorStore interface {
 	// Task↔repo junction
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
+	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
 	// Session
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
@@ -372,13 +373,16 @@ type LaunchAgentRequest struct {
 	// When non-empty it is the source of truth and the legacy single-repo
 	// top-level fields above are populated from Repositories[0] for backwards
 	// compatibility with code paths that have not yet been updated.
-	Repositories []RepoSpec
+	Repositories     []RepoSpec
+	WorkspaceFolders []WorkspaceFolderSpec
 
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. nil when routing is disabled or this is a kanban
 	// launch.
 	RouteOverride *RouteOverride
 }
+
+type WorkspaceFolderSpec struct{ Name, LocalPath string }
 
 // RepoSpec describes one repository for a multi-repo task launch from the
 // orchestrator. Mirrors lifecycle.RepoLaunchSpec; kept as a separate type so
@@ -624,6 +628,9 @@ type Executor struct {
 	gitlabCredentials GitLabCredentialResolver
 	logger            *logger.Logger
 
+	githubCredentialIssuer    GitHubCredentialLeaseIssuer
+	githubCredentialBrokerURL string
+
 	// Configuration
 	retryLimit int
 	retryDelay time.Duration
@@ -702,35 +709,33 @@ func (e *Executor) taskEnvLock(taskID string) *sync.Mutex {
 
 // RepoCloner clones remote repositories to local disk.
 type RepoCloner interface {
-	EnsureClonedForProvider(
-		ctx context.Context,
-		cloneURL, provider, providerHost, owner, name, credentialHost, token string,
+	EnsureWorkspaceClonedForProvider(
+		ctx context.Context, workspaceID, cloneURL, provider, providerHost,
+		owner, name, credentialHost, token string,
 	) (string, error)
+	ShouldRecloneForWorkspace(workspaceID, path string) bool
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
 	BuildCloneURLWithHost(provider, host, owner, name string) (string, error)
 }
 
 type authenticatedRepoCloner interface {
-	EnsureClonedWithBasicAuth(ctx context.Context, cloneURL, owner, name, username, password string) (string, error)
+	EnsureWorkspaceClonedWithBasicAuth(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, username, password string,
+	) (string, error)
 }
 
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
 ) (string, error) {
-	if strings.EqualFold(repo.Provider, "gitlab") {
-		credentialHost, token := "", ""
-		if e.gitlabCredentials != nil {
-			credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
-		}
-		return e.repoCloner.EnsureClonedForProvider(
-			ctx, cloneURL, repo.Provider, repo.ProviderHost,
-			repo.ProviderOwner, repo.ProviderName, credentialHost, token,
-		)
+	credentialHost, token := "", ""
+	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
+		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 	}
 	if repo.Provider != "azure_devops" || !strings.HasPrefix(cloneURL, "https://") {
-		return e.repoCloner.EnsureClonedForProvider(
-			ctx, cloneURL, repo.Provider, repo.ProviderHost,
-			repo.ProviderOwner, repo.ProviderName, "", "",
+		return e.repoCloner.EnsureWorkspaceClonedForProvider(
+			ctx, repo.WorkspaceID, cloneURL, repo.Provider, repo.ProviderHost,
+			repo.ProviderOwner, repo.ProviderName, credentialHost, token,
 		)
 	}
 	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
@@ -742,7 +747,10 @@ func (e *Executor) ensureClonedWithWorkspaceAuth(
 		return "", fmt.Errorf("read Azure DevOps clone credential: %w", err)
 	}
 	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
-	return authCloner.EnsureClonedWithBasicAuth(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat)
+	return authCloner.EnsureWorkspaceClonedWithBasicAuth(
+		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
+		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+	)
 }
 
 // RepoUpdater updates repository records in the database.

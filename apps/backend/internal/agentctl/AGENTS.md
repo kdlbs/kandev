@@ -71,9 +71,9 @@ Env knobs (all optional): `KANDEV_DEBUG_ACP_MAX_FILES` (default 200), `KANDEV_DE
 
 **PRIVACY / PERF:** frames carry the full prompt, file, and tool-call content. Keep this strictly behind the debug flag and local-dev-scoped — never enable in a shared/production deployment. When agentctl runs inside a Docker executor the files land *inside the container*, so this is meant for standalone/dev.
 
-### Recognizing claude-acp meta-tagged tools
+### Recognizing agent-specific ACP meta-tagged tools
 
-`claude-agent-acp` tags certain tool calls with `_meta.claudeCode.toolName` (e.g. `Monitor`, `ScheduleWakeup`, `Agent` for subagents) and may carry results in `_meta.claudeCode.toolResponse`. These are normalized into typed `streams.NormalizedPayload` kinds in `server/adapter/transport/acp/`. The established pattern is **one file per recognized tool** (`monitor.go`, `wakeup.go`, `subagent.go`), each with a defensive untyped-map recognizer (`recognize*`/`is*Meta`/`extract*`), a typed payload, and a sibling `*_test.go`. `convertToolCallUpdate` stashes `title`/`Meta` into the normalizer args; result enrichment happens in `convertToolCallResultUpdate`. To add another claude-acp meta-tool, copy that shape — don't inline detection in `adapter.go`. Detection can also be cross-agent: subagent recognition keys off Claude's `_meta`, OpenCode's tool `title`, and Cursor's `rawInput._toolName`.
+`claude-agent-acp` tags certain tool calls with `_meta.claudeCode.toolName` (e.g. `Monitor`, `ScheduleWakeup`, `Agent` for subagents) and may carry results in `_meta.claudeCode.toolResponse`. `codex-acp` reports collaboration and subagent lifecycle through `_meta.codex`. These are normalized into typed `streams.NormalizedPayload` kinds in `server/adapter/transport/acp/`. The established pattern is a defensive untyped-map recognizer, typed normalized data, and sibling tests. Shared recognized tools live in files such as `monitor.go`, `wakeup.go`, and `subagent.go`; agent-scoped wire translation belongs in `dialect_<agent>.go` (for example `dialect_codex.go`). `convertToolCallUpdate` stashes `title`/`Meta` into the normalizer args; result enrichment happens in `convertToolCallResultUpdate`. Don't inline detection in `adapter.go`. Detection can also be cross-agent: common subagent recognition keys off Claude's `_meta`, OpenCode's tool `title`, Cursor's `rawInput._toolName`, and Auggie's title prefix.
 
 ### Subagent tool-call nesting: what each agent emits
 
@@ -82,10 +82,11 @@ Kandev renders subagents (the `Task` tool) as cards and *wants* to nest each sub
 | Agent | Subagent-internal tool calls | Nestable? |
 |---|---|---|
 | **Claude** | emitted on the parent session, each tagged with **`_meta.claudeCode.parentToolUseId`** = the parent Task tool_call's id | **Yes** — `parentToolUseID()` reads it in `adapter_tools.go` and sets `AgentEvent.ParentToolCallID`, which becomes the message's `parent_tool_call_id` and nests under the card |
+| **Codex** | **not emitted over ACP**; `codex-acp` emits top-level collaboration and lifecycle tool calls with `_meta.codex.collaboration` / `_meta.codex.subagent` | No — spawn/start signals render through `subagent_task` and preserve the child thread ID, but there are no child internal tool calls to attach |
 | **Cursor** | **not emitted over ACP at all** (Task `tool_call_update` carries only `{durationMs, isBackground}`) | No — no child data exists |
 | **OpenCode** | emitted into a **separate child ACP session** (the `metadata.sessionId` we store as `SubagentTaskPayload.ChildSessionID`) | Not yet — they never reach the parent stream; would require merging that child session via the stored `child_session_id` |
 
-Claude is the one that works today: `claude-agent-acp` (since PR #341) sets `_meta.claudeCode.parentToolUseId` on a subagent's internal calls, and its value already equals the parent Task tool_call id — so it maps straight onto our `parent_tool_call_id`. Cursor exposes nothing to nest. OpenCode needs a kandev-side child-session merge. (Top-level `parentToolCallId` is NOT in the ACP schema — `_meta` is the spec-compliant carrier.)
+Claude is the one that supports nested child tools today: `claude-agent-acp` (since PR #859) sets `_meta.claudeCode.parentToolUseId` on a subagent's internal calls, and its value already equals the parent Task tool_call id — so it maps straight onto our `parent_tool_call_id`. Codex reports child lifecycle but not child tools. Cursor exposes nothing to nest. OpenCode needs a Kandev-side child-session merge. (Top-level `parentToolCallId` is NOT in the ACP schema — `_meta` is the spec-compliant carrier.)
 
 ## Process-group cleanup and `RequiresProcessKill`
 

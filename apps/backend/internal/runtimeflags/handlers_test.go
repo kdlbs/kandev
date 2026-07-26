@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/kandev/kandev/internal/auth/authn"
 )
 
 func TestHandlersPatchRejectsEnvLockedFlag(t *testing.T) {
@@ -18,7 +20,7 @@ func TestHandlersPatchRejectsEnvLockedFlag(t *testing.T) {
 		EnvValues:     map[string]bool{"KANDEV_FEATURES_OFFICE": true},
 		IsExplicitEnv: func(name string) bool { return name == "KANDEV_FEATURES_OFFICE" },
 	})
-	router := gin.New()
+	router := newAdminTestRouter()
 	RegisterRoutes(router, svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/runtime-flags/features.office", strings.NewReader(`{"override":false}`))
@@ -35,7 +37,7 @@ func TestHandlersPatchRejectsEnvLockedFlag(t *testing.T) {
 func TestHandlersPatchUnknownFlag(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := NewService(&memoryStore{}, Options{})
-	router := gin.New()
+	router := newAdminTestRouter()
 	RegisterRoutes(router, svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/runtime-flags/missing.flag", strings.NewReader(`{"override":true}`))
@@ -52,7 +54,7 @@ func TestHandlersPatchUnknownFlag(t *testing.T) {
 func TestHandlersPatchMalformedJSON(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := NewService(&memoryStore{}, Options{})
-	router := gin.New()
+	router := newAdminTestRouter()
 	RegisterRoutes(router, svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/runtime-flags/features.office", strings.NewReader(`{`))
@@ -70,7 +72,7 @@ func TestHandlersPatchEmptyBodyClearsOverride(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := &memoryStore{values: map[string]bool{"features.office": true}}
 	svc := NewService(store, Options{})
-	router := gin.New()
+	router := newAdminTestRouter()
 	RegisterRoutes(router, svc)
 
 	req := httptest.NewRequest(http.MethodPatch, "/api/v1/runtime-flags/features.office", nil)
@@ -97,4 +99,16 @@ func assertJSONError(t *testing.T, body, want string) {
 	if payload.Error != want {
 		t.Fatalf("error = %q, want %q", payload.Error, want)
 	}
+}
+
+// newAdminTestRouter mounts an admin identity the way the global auth
+// middleware does in disabled mode, so RequireAdmin-guarded routes are
+// exercisable in isolation.
+func newAdminTestRouter() *gin.Engine {
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, authn.Identity{UserID: "test-admin", Role: authn.RoleAdmin, Synthetic: true})
+		c.Next()
+	})
+	return router
 }

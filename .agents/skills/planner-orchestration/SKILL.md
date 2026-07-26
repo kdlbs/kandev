@@ -57,6 +57,11 @@ manage Kandev platform entities and may be used only when the user explicitly
 asks to create or manage Kandev tasks or sessions. They are not a delegation
 fallback. If native harness delegation is unavailable, stop and report it.
 
+In Codex, a registered `agent_type` is a role override. Spawn it with
+`fork_turns: "none"` or a bounded recent-turn count, never `fork_turns: "all"`.
+Put the complete work packet and the paths to read in the initial prompt so the
+worker has the context that an all-history fork would otherwise provide.
+
 ## Worker Contract
 
 A worker executes exactly one bounded assignment. It follows the assigned

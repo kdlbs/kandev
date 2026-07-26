@@ -32,7 +32,7 @@ type stubRescanCall struct {
 	workDir   string
 }
 
-func (s *stubRescanner) RescanWorkspaceForSession(_ context.Context, sessionID, workDir string) error {
+func (s *stubRescanner) RescanWorkspaceForSession(_ context.Context, sessionID, workDir string, _ ...[]string) error {
 	s.calls = append(s.calls, stubRescanCall{sessionID: sessionID, workDir: workDir})
 	return nil
 }

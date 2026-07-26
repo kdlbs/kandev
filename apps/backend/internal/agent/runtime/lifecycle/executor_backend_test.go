@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/stretchr/testify/require"
 )
 
@@ -66,4 +67,13 @@ func TestFilterPersistentMetadata(t *testing.T) {
 		require.Equal(t, true, got[MetadataKeyIsRemote])
 		require.NotContains(t, got, "task_description")
 	})
+}
+
+func TestToAgentExecutionRecordsHistoryForWorkspaceRebindFallback(t *testing.T) {
+	instance := &ExecutorInstance{InstanceID: "execution"}
+	execution := instance.ToAgentExecution(&ExecutorCreateRequest{
+		AgentConfig: agents.NewOpenCodeACP(),
+	})
+
+	require.True(t, execution.historyEnabled)
 }

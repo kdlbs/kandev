@@ -50,8 +50,6 @@ export function resolveBoardWorkflowSteps<TStep>({
  *
  * `null` is a valid "All Workflows" selection: when the user has explicitly
  * cleared the filter, we must not silently fall back to the first workflow.
- * Auto-selecting only happens when there is exactly one visible workflow —
- * otherwise the user would never be able to keep "All Workflows" picked.
  */
 export function resolveDesiredWorkflowId({
   activeWorkflowId,
@@ -72,6 +70,5 @@ export function resolveDesiredWorkflowId({
   ) {
     return settingsWorkflowId;
   }
-  if (visibleWorkflows.length === 1) return visibleWorkflows[0].id;
   return null;
 }

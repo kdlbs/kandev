@@ -393,8 +393,8 @@ export function useDialogFormState(
   const repos = useRepositoriesState();
   const remoteRepos = useRemoteReposState();
   const freshBranch = useFreshBranchState();
-  const branchesByUrl = useBranchesByURL();
-  const prInfoByUrl = usePRInfoByURL();
+  const branchesByUrl = useBranchesByURL(workspaceId);
+  const prInfoByUrl = usePRInfoByURL(workspaceId);
 
   useFormResetEffects({
     open,

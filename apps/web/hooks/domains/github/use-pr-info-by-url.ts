@@ -37,12 +37,14 @@ export type PRInfo = {
 type URLState = {
   info: PRInfo | undefined;
   loading: boolean;
+  error?: Error;
 };
 
 export type UsePRInfoByURLResult = {
   ensure: (url: string) => void;
   info: (url: string) => PRInfo | undefined;
   loading: (url: string) => boolean;
+  error: (url: string) => Error | undefined;
   clear: (url: string) => void;
 };
 
@@ -93,10 +95,18 @@ export function parseGitHubAnyUrl(
  *  fetch flow into focused steps without re-deriving the closure each call. */
 type Refs = {
   mountedRef: React.MutableRefObject<boolean>;
+  workspaceIdRef: React.MutableRefObject<string | null>;
+  workspaceEpochRef: React.MutableRefObject<number>;
   inFlightRef: React.MutableRefObject<Set<string>>;
   loadedRef: React.MutableRefObject<Set<string>>;
   abortersRef: React.MutableRefObject<Map<string, AbortController>>;
   seqRef: React.MutableRefObject<Map<string, number>>;
+};
+
+type RequestIdentity = {
+  workspaceId: string | null;
+  workspaceEpoch: number;
+  sequence: number;
 };
 
 type SetState = React.Dispatch<React.SetStateAction<Record<string, URLState>>>;
@@ -105,7 +115,7 @@ type SuccessArgs<T> = {
   refs: Refs;
   setState: SetState;
   url: string;
-  seq: number;
+  request: RequestIdentity;
   value: T;
   buildInfo: (value: T) => PRInfo;
 };
@@ -116,7 +126,7 @@ function initRequest(
   refs: Refs,
   setState: SetState,
   url: string,
-): { seq: number; signal: AbortSignal } {
+): { request: RequestIdentity; signal: AbortSignal } {
   setState((prev) => ({
     ...prev,
     [url]: { info: prev[url]?.info, loading: true },
@@ -124,57 +134,85 @@ function initRequest(
   refs.inFlightRef.current.add(url);
   const controller = new AbortController();
   refs.abortersRef.current.set(url, controller);
-  const seq = (refs.seqRef.current.get(url) ?? 0) + 1;
-  refs.seqRef.current.set(url, seq);
-  return { seq, signal: controller.signal };
+  const sequence = (refs.seqRef.current.get(url) ?? 0) + 1;
+  refs.seqRef.current.set(url, sequence);
+  return {
+    request: {
+      workspaceId: refs.workspaceIdRef.current,
+      workspaceEpoch: refs.workspaceEpochRef.current,
+      sequence,
+    },
+    signal: controller.signal,
+  };
+}
+
+function isCurrentRequest(refs: Refs, url: string, request: RequestIdentity): boolean {
+  return (
+    refs.workspaceIdRef.current === request.workspaceId &&
+    refs.workspaceEpochRef.current === request.workspaceEpoch &&
+    refs.seqRef.current.get(url) === request.sequence
+  );
 }
 
 /** Writes successful GitHub URL info when the request is still current. */
 function handleSuccess<T>(args: SuccessArgs<T>): void {
-  const { refs, setState, url, seq, value, buildInfo } = args;
+  const { refs, setState, url, request, value, buildInfo } = args;
   if (!refs.mountedRef.current) return;
-  if (refs.seqRef.current.get(url) !== seq) return;
+  if (!isCurrentRequest(refs, url, request)) return;
   refs.loadedRef.current.add(url);
   setState((prev) => ({ ...prev, [url]: { info: buildInfo(value), loading: false } }));
 }
 
 /** Marks loaded on failure (we don't want to retry in a tight loop) and
  *  clears the loading flag. Callers that want to retry can clear() + ensure(). */
-function handleFailure(refs: Refs, setState: SetState, url: string, seq: number): void {
+function handleFailure(
+  refs: Refs,
+  setState: SetState,
+  url: string,
+  request: RequestIdentity,
+  error: unknown,
+): void {
   if (!refs.mountedRef.current) return;
-  if (refs.seqRef.current.get(url) !== seq) return;
+  if (!isCurrentRequest(refs, url, request)) return;
   refs.loadedRef.current.add(url);
   setState((prev) => ({
     ...prev,
-    [url]: { info: prev[url]?.info, loading: false },
+    [url]: {
+      info: prev[url]?.info,
+      loading: false,
+      error: error instanceof Error ? error : new Error("Could not load GitHub metadata."),
+    },
   }));
 }
 
 /** Cleans up the in-flight + aborters maps for the request that just settled. */
-function finalizeRequest(refs: Refs, url: string, seq: number): void {
-  if (refs.seqRef.current.get(url) !== seq) return;
+function finalizeRequest(refs: Refs, url: string, request: RequestIdentity): void {
+  if (!isCurrentRequest(refs, url, request)) return;
   refs.inFlightRef.current.delete(url);
   refs.abortersRef.current.delete(url);
 }
 
 function runGitHubInfoRequest(args: {
+  workspaceId: string;
   refs: Refs;
   setState: SetState;
   url: string;
-  seq: number;
+  request: RequestIdentity;
   signal: AbortSignal;
   pr: NonNullable<ReturnType<typeof parseGitHubPrUrl>> | null;
   issue: ReturnType<typeof parseGitHubIssueUrl>;
 }): void {
-  const { refs, setState, url, seq, signal, pr, issue } = args;
-  let request: Promise<void>;
+  const { workspaceId, refs, setState, url, request, signal, pr, issue } = args;
+  let pendingRequest: Promise<void>;
   if (pr) {
-    request = fetchPRInfo(pr.owner, pr.repo, pr.prNumber, { init: { signal } }).then((res) =>
+    pendingRequest = fetchPRInfo(workspaceId, pr.owner, pr.repo, pr.prNumber, {
+      init: { signal },
+    }).then((res) =>
       handleSuccess({
         refs,
         setState,
         url,
-        seq,
+        request,
         value: res,
         buildInfo: (value) => ({
           prHeadBranch: value.head_branch,
@@ -185,14 +223,14 @@ function runGitHubInfoRequest(args: {
       }),
     );
   } else if (issue) {
-    request = fetchIssueInfo(issue.owner, issue.repo, issue.issueNumber, {
+    pendingRequest = fetchIssueInfo(workspaceId, issue.owner, issue.repo, issue.issueNumber, {
       init: { signal },
     }).then((res) =>
       handleSuccess({
         refs,
         setState,
         url,
-        seq,
+        request,
         value: res,
         buildInfo: (value) => ({
           issueNumber: value.number,
@@ -203,22 +241,26 @@ function runGitHubInfoRequest(args: {
   } else {
     return;
   }
-  request
-    .catch(() => handleFailure(refs, setState, url, seq))
-    .finally(() => finalizeRequest(refs, url, seq));
+  pendingRequest
+    .catch((error) => handleFailure(refs, setState, url, request, error))
+    .finally(() => finalizeRequest(refs, url, request));
 }
 
-export function usePRInfoByURL(): UsePRInfoByURLResult {
+export function usePRInfoByURL(workspaceId: string | null): UsePRInfoByURLResult {
   const [state, setState] = useState<Record<string, URLState>>({});
   const inFlightRef = useRef<Set<string>>(new Set());
   const loadedRef = useRef<Set<string>>(new Set());
   const abortersRef = useRef<Map<string, AbortController>>(new Map());
+  const workspaceIdRef = useRef(workspaceId);
+  const workspaceEpochRef = useRef(0);
   // Per-URL request sequence number. Incremented before each fetch so the
   // settled callbacks can confirm they're still the latest request for `url`.
   const seqRef = useRef<Map<string, number>>(new Map());
   const mountedRef = useRef(true);
   const refsRef = useRef<Refs>({
     mountedRef,
+    workspaceIdRef,
+    workspaceEpochRef,
     inFlightRef,
     loadedRef,
     abortersRef,
@@ -241,28 +283,50 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     };
   }, []);
 
-  const ensure = useCallback((rawUrl: string) => {
-    // Normalize on entry so all internal state (in-flight, loaded, aborters,
-    // sequence counter, state map) is keyed on the same canonical form.
-    // Without this, a chip wiring that called ensure() with stray whitespace
-    // could cache under the whitespaced key while consumers that look up
-    // via the trimmed URL would miss the cache.
-    const url = rawUrl.trim();
-    if (!url) return;
-    if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
-    const pr = parseGitHubPrUrl(url);
-    const issue = pr ? null : parseGitHubIssueUrl(url);
-    if (!pr && !issue) {
-      // Non-PR URLs (plain repo, invalid) are recorded as "loaded with no
-      // info" so subsequent ensure() calls for the same URL no-op instead
-      // of re-parsing on every call.
-      loadedRef.current.add(url);
-      return;
-    }
-    const refs = refsRef.current;
-    const { seq, signal } = initRequest(refs, setState, url);
-    runGitHubInfoRequest({ refs, setState, url, seq, signal, pr, issue });
-  }, []);
+  useEffect(() => {
+    workspaceIdRef.current = workspaceId;
+    workspaceEpochRef.current += 1;
+    for (const controller of abortersRef.current.values()) controller.abort();
+    abortersRef.current.clear();
+    inFlightRef.current.clear();
+    loadedRef.current.clear();
+    setState({});
+  }, [workspaceId]);
+
+  const ensure = useCallback(
+    (rawUrl: string) => {
+      // Normalize on entry so all internal state (in-flight, loaded, aborters,
+      // sequence counter, state map) is keyed on the same canonical form.
+      // Without this, a chip wiring that called ensure() with stray whitespace
+      // could cache under the whitespaced key while consumers that look up
+      // via the trimmed URL would miss the cache.
+      const url = rawUrl.trim();
+      if (!url || !workspaceId) return;
+      if (inFlightRef.current.has(url) || loadedRef.current.has(url)) return;
+      const pr = parseGitHubPrUrl(url);
+      const issue = pr ? null : parseGitHubIssueUrl(url);
+      if (!pr && !issue) {
+        // Non-PR URLs (plain repo, invalid) are recorded as "loaded with no
+        // info" so subsequent ensure() calls for the same URL no-op instead
+        // of re-parsing on every call.
+        loadedRef.current.add(url);
+        return;
+      }
+      const refs = refsRef.current;
+      const { request: requestIdentity, signal } = initRequest(refs, setState, url);
+      runGitHubInfoRequest({
+        workspaceId,
+        refs,
+        setState,
+        url,
+        request: requestIdentity,
+        signal,
+        pr,
+        issue,
+      });
+    },
+    [workspaceId],
+  );
 
   const info = useCallback(
     (rawUrl: string): PRInfo | undefined => state[rawUrl.trim()]?.info,
@@ -270,6 +334,10 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
   );
   const loading = useCallback(
     (rawUrl: string): boolean => Boolean(state[rawUrl.trim()]?.loading),
+    [state],
+  );
+  const error = useCallback(
+    (rawUrl: string): Error | undefined => state[rawUrl.trim()]?.error,
     [state],
   );
   const clear = useCallback((rawUrl: string) => {
@@ -293,5 +361,5 @@ export function usePRInfoByURL(): UsePRInfoByURLResult {
     });
   }, []);
 
-  return { ensure, info, loading, clear };
+  return { ensure, info, loading, error, clear };
 }

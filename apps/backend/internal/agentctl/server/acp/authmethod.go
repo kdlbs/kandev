@@ -9,11 +9,11 @@ import "github.com/coder/acp-go-sdk"
 func AuthMethodFields(m acp.AuthMethod) (id, name string, description *string, meta map[string]any) {
 	switch {
 	case m.Agent != nil:
-		return m.Agent.Id, m.Agent.Name, m.Agent.Description, m.Agent.Meta
+		return string(m.Agent.Id), m.Agent.Name, m.Agent.Description, m.Agent.Meta
 	case m.Terminal != nil:
-		return m.Terminal.Id, m.Terminal.Name, m.Terminal.Description, m.Terminal.Meta
+		return string(m.Terminal.Id), m.Terminal.Name, m.Terminal.Description, m.Terminal.Meta
 	case m.EnvVar != nil:
-		return m.EnvVar.Id, m.EnvVar.Name, m.EnvVar.Description, m.EnvVar.Meta
+		return string(m.EnvVar.Id), m.EnvVar.Name, m.EnvVar.Description, m.EnvVar.Meta
 	}
 	return "", "", nil, nil
 }

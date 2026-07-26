@@ -36,6 +36,7 @@ Product-wide capabilities that are not tied to a single feature area.
 
 | Spec | Status |
 |---|---|
+| [background-work-liveness](platform/background-work-liveness.md) | shipped |
 | [plugins](plugins/spec.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
 | [semantic-notifications](platform/notifications.md) | shipped |
@@ -52,6 +53,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [labels](tasks/labels.md) | shipped |
 | [model-unification](tasks/model-unification.md) | draft |
 | [without-repositories](tasks/without-repositories.md) | draft |
+| [attach-workspace-sources](tasks/attach-workspace-sources.md) | building |
 | [subtask-checklist](tasks/subtask-checklist.md) | shipped |
 | [subtask-detachment](tasks/subtask-detachment.md) | shipped |
 | [subtask-completion-trigger](tasks/subtask-completion-trigger.md) | draft |
@@ -88,7 +90,8 @@ Per-workspace credentials and triage triggers for external services.
 | [azure-devops-integration](azure-devops-integration/spec.md) | shipped |
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
-| [gitlab-integration](gitlab-integration/spec.md) | building |
+| [github-authentication](integrations/github-authentication.md) | draft |
+| [gitlab-integration](gitlab-integration/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
@@ -128,6 +131,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
+| [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -145,6 +149,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 
 | Spec | Status |
 |---|---|
+| [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
 | [improve-kandev](improve-kandev/spec.md) | draft |

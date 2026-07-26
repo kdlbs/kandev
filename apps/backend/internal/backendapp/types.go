@@ -3,6 +3,8 @@ package backendapp
 import (
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
+	authservice "github.com/kandev/kandev/internal/auth"
+	authstore "github.com/kandev/kandev/internal/auth/store"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
 	editorservice "github.com/kandev/kandev/internal/editors/service"
@@ -43,15 +45,20 @@ type Repositories struct {
 	Analytics     analyticsrepository.Repository
 	AgentSettings settingsstore.Repository
 	User          userstore.Repository
-	Notification  notificationstore.Repository
-	Editor        editorstore.Repository
-	Prompts       promptstore.Repository
-	Utility       utilitystore.Repository
-	Workflow      *workflowrepository.Repository
-	Secrets       secrets.SecretStore
-	Office        *officesqlite.Repository
-	Terminal      *terminalrepo.Repository
-	RuntimeFlags  *runtimeflags.SQLiteStore
+	// UserAccounts is the account-management view of the same user store
+	// (list/create/role/status), consumed by the auth service.
+	UserAccounts userstore.AccountRepository
+	Notification notificationstore.Repository
+	Editor       editorstore.Repository
+	Prompts      promptstore.Repository
+	Utility      utilitystore.Repository
+	Workflow     *workflowrepository.Repository
+	Secrets      secrets.SecretStore
+	Office       *officesqlite.Repository
+	Terminal     *terminalrepo.Repository
+	RuntimeFlags *runtimeflags.SQLiteStore
+	// Auth persists login identities, sessions, PATs, and invites.
+	Auth *authstore.Store
 }
 
 type Services struct {
@@ -99,4 +106,8 @@ type Services struct {
 	Plugins *plugins.Service
 	// Mentions owns the provider registry shared by # search and submission authorization.
 	Mentions *MentionComponents
+	// Auth is the opt-in authentication service (mode state machine, sessions,
+	// PATs, invites). Always non-nil; in disabled mode it only answers
+	// Mode() == ModeDisabled and the middleware injects the synthetic identity.
+	Auth *authservice.Service
 }

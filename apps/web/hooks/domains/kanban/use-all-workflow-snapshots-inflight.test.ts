@@ -13,6 +13,8 @@ type SnapshotTask = {
 type MockState = {
   connection: { status: string };
   workflows: { items: Workflow[] };
+  workspaces: { activeId: string | null };
+  workspaceContextGeneration: number;
   kanbanMulti: {
     snapshots: Record<
       string,
@@ -60,6 +62,8 @@ function resetState() {
   mocks.state = {
     connection: { status: "connected" },
     workflows: { items: [{ id: WORKFLOW_ID, workspaceId: WORKSPACE_ID, name: "A" }] },
+    workspaces: { activeId: WORKSPACE_ID },
+    workspaceContextGeneration: 0,
     kanbanMulti: { snapshots: {}, isLoading: false },
     clearKanbanMulti: mocks.clearKanbanMulti,
     setKanbanMultiLoading: mocks.setKanbanMultiLoading,

@@ -2,6 +2,19 @@ package acpdbg
 
 import "testing"
 
+func TestSessionLoadParamsIncludeChangedWorkdir(t *testing.T) {
+	t.Parallel()
+
+	got := sessionLoadParams("session-1", "/workspace-b")
+
+	if got["sessionId"] != "session-1" {
+		t.Fatalf("sessionId = %v, want session-1", got["sessionId"])
+	}
+	if got["cwd"] != "/workspace-b" {
+		t.Fatalf("cwd = %v, want /workspace-b", got["cwd"])
+	}
+}
+
 func TestBuildProbeResult_FallsBackToConfigOptionModels(t *testing.T) {
 	t.Parallel()
 

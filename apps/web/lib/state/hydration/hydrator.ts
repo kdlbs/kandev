@@ -304,7 +304,7 @@ export function hydrateState(
 
   // System slice - shallow-merge whichever fields the caller supplied.
   // `system` aggregates many independently-fetched fields (info, diskUsage,
-  // updates, updateNotificationSettings, ...); callers only ever provide the
+  // updates, jobs, metrics, ...); callers only ever provide the
   // subset they fetched, so use the same leaf-level deepMerge as the other
   // multi-field slices above rather than overwriting the whole object.
   if (state.system) deepMerge(draft.system, state.system);
@@ -313,6 +313,9 @@ export function hydrateState(
 /** Hydrate GitHub slices, preserving loading states. */
 function hydrateGitHub(draft: Draft<AppState>, state: HydrationState): void {
   if (state.githubStatus) mergeWithLoading(draft.githubStatus, state.githubStatus);
+  if (state.githubAppRegistrations) {
+    mergeWithLoading(draft.githubAppRegistrations, state.githubAppRegistrations);
+  }
   if (state.taskPRs) deepMerge(draft.taskPRs, state.taskPRs);
   if (state.azureDevOpsTaskPullRequests) {
     deepMerge(draft.azureDevOpsTaskPullRequests, state.azureDevOpsTaskPullRequests);

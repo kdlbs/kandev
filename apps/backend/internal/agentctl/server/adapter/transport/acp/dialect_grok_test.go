@@ -406,7 +406,7 @@ func TestGrokContextFromNotificationMeta(t *testing.T) {
 				Content: acp.TextBlock("hi"),
 			},
 		},
-	})
+	}, 0)
 
 	events := drainEvents(a)
 	var ctx *AgentEvent
@@ -428,7 +428,7 @@ func TestGrokContextFromNotificationMeta(t *testing.T) {
 		Update: acp.SessionUpdate{
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{Content: acp.TextBlock("again")},
 		},
-	})
+	}, 0)
 	for _, event := range drainEvents(a) {
 		if event.Type == streams.EventTypeContextWindow {
 			t.Fatal("unchanged totalTokens must not emit duplicate context_window")
@@ -444,7 +444,7 @@ func TestGrokContextFromNotificationMeta(t *testing.T) {
 		Update: acp.SessionUpdate{
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{Content: acp.TextBlock("next turn")},
 		},
-	})
+	}, 0)
 	for _, event := range drainEvents(a) {
 		if event.Type == streams.EventTypeContextWindow {
 			t.Fatal("usage tracker reset must not duplicate unchanged dialect context")
@@ -458,7 +458,7 @@ func TestGrokContextFromNotificationMeta(t *testing.T) {
 		Update: acp.SessionUpdate{
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{Content: acp.TextBlock("compacted")},
 		},
-	})
+	}, 0)
 	compactedUsed := int64(0)
 	compactedFound := false
 	for _, event := range drainEvents(a) {
@@ -478,7 +478,7 @@ func TestGrokContextFromNotificationMeta(t *testing.T) {
 		Update: acp.SessionUpdate{
 			AgentMessageChunk: &acp.SessionUpdateAgentMessageChunk{Content: acp.TextBlock("stale")},
 		},
-	})
+	}, 0)
 	for _, event := range drainEvents(a) {
 		if event.Type == streams.EventTypeContextWindow {
 			t.Fatal("stale session must not emit dialect context")
@@ -503,7 +503,7 @@ func TestGrokUserMessageEchoIsSuppressedWithoutDroppingContext(t *testing.T) {
 				Content: acp.TextBlock("echoed prompt"),
 			},
 		},
-	})
+	}, 0)
 
 	contextFound := false
 	for _, event := range drainEvents(a) {

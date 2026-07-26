@@ -22,8 +22,8 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 		t.Errorf("env = %q, want %q (no selector env vars set)", env, EnvProd)
 	}
 	// Prod writes each registered feature flag with its safe shipped default.
-	if count != 3 {
-		t.Errorf("ApplyProfile wrote %d vars in prod; want 3", count)
+	if count != 4 {
+		t.Errorf("ApplyProfile wrote %d vars in prod; want 4", count)
 	}
 	if v := os.Getenv("KANDEV_FEATURES_OFFICE"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_OFFICE = %q after prod ApplyProfile; want %q", v, "false")
@@ -33,6 +33,9 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	}
 	if v := os.Getenv("KANDEV_FEATURES_APP_STATUS_BAR"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_APP_STATUS_BAR = %q after prod ApplyProfile; want %q", v, "false")
+	}
+	if v := os.Getenv("KANDEV_FEATURES_AUTH"); v != "false" {
+		t.Errorf("KANDEV_FEATURES_AUTH = %q after prod ApplyProfile; want %q", v, "false")
 	}
 }
 
@@ -58,6 +61,11 @@ func TestApplyProfile_DevUsesDevelopmentDefaults(t *testing.T) {
 	}
 	if v := os.Getenv("KANDEV_FEATURES_APP_STATUS_BAR"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_APP_STATUS_BAR = %q in dev; want %q", v, "false")
+	}
+	// Auth is off by default even in dev — it locks the instance behind a
+	// login, so it must be an explicit opt-in.
+	if v := os.Getenv("KANDEV_FEATURES_AUTH"); v != "false" {
+		t.Errorf("KANDEV_FEATURES_AUTH = %q in dev; want %q", v, "false")
 	}
 }
 

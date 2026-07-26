@@ -38,6 +38,10 @@ func TestServiceSearchMentionsUsesServerBuiltTitleOnlyQuery(t *testing.T) {
 		prs:        []*PR{{ID: 202, NodeID: "PR_kwDOB", Number: 8, Title: "Fix auth flow", RepoOwner: "acme", RepoName: "web"}},
 	}
 	service := &Service{client: client, searchCache: newTTLCache()}
+	// Mention search is a workspace-scoped personal-read operation. Seed the
+	// workspace's human automation identity explicitly rather than relying on
+	// the legacy, process-wide test client.
+	configureTestWorkspaceAuth(t, service, client, "workspace-1")
 
 	issues, err := service.SearchMentionIssuesForWorkspace(
 		context.Background(),

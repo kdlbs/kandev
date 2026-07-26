@@ -14,7 +14,7 @@ vi.mock("@/hooks/domains/github/use-branches-by-url", () => ({
 
 describe("useSubtaskFormState — remoteRepos seed", () => {
   it("seeds one empty remoteRepos row when useRemote toggles on with an empty list", () => {
-    const { result } = renderHook(() => useSubtaskFormState());
+    const { result } = renderHook(() => useSubtaskFormState("ws-1"));
     expect(result.current.remoteRepos).toHaveLength(0);
 
     act(() => {
@@ -27,7 +27,7 @@ describe("useSubtaskFormState — remoteRepos seed", () => {
 
   it("preserves remoteRepos rows when toggling Remote → off → on", () => {
     const PASTED_URL = "github.com/owner/repo";
-    const { result } = renderHook(() => useSubtaskFormState());
+    const { result } = renderHook(() => useSubtaskFormState("ws-1"));
 
     act(() => {
       result.current.setUseRemote(true);

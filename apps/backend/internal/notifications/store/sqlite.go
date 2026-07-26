@@ -24,13 +24,13 @@ type sqliteRepository struct {
 
 var _ Repository = (*sqliteRepository)(nil)
 
-func newSQLiteRepositoryWithDB(writer, reader *sqlx.DB) (*sqliteRepository, error) {
-	return newSQLiteRepository(writer, reader, false)
+func newSQLiteRepositoryWithDB(ctx context.Context, writer, reader *sqlx.DB) (*sqliteRepository, error) {
+	return newSQLiteRepository(ctx, writer, reader, false)
 }
 
-func newSQLiteRepository(writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
+func newSQLiteRepository(ctx context.Context, writer, reader *sqlx.DB, ownsDB bool) (*sqliteRepository, error) {
 	repo := &sqliteRepository{db: writer, ro: reader, ownsDB: ownsDB}
-	if err := repo.initSchema(); err != nil {
+	if err := repo.initSchema(ctx); err != nil {
 		if ownsDB {
 			if closeErr := writer.Close(); closeErr != nil {
 				return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)
@@ -48,7 +48,7 @@ func (r *sqliteRepository) Close() error {
 	return r.db.Close()
 }
 
-func (r *sqliteRepository) initSchema() error {
+func (r *sqliteRepository) initSchema(ctx context.Context) error {
 	schema := `
 	CREATE TABLE IF NOT EXISTS notification_providers (
 		id TEXT PRIMARY KEY,
@@ -84,6 +84,11 @@ func (r *sqliteRepository) initSchema() error {
 		UNIQUE(provider_id, event_type, occurrence_id)
 	);
 
+	CREATE TABLE IF NOT EXISTS notification_migrations (
+		name TEXT PRIMARY KEY,
+		completed_at TIMESTAMP NOT NULL
+	);
+
 	CREATE INDEX IF NOT EXISTS idx_notification_providers_user_id ON notification_providers(user_id);
 	CREATE INDEX IF NOT EXISTS idx_notification_subscriptions_provider_id ON notification_subscriptions(provider_id);
 	CREATE INDEX IF NOT EXISTS idx_notification_subscriptions_user_id ON notification_subscriptions(user_id);
@@ -96,7 +101,65 @@ func (r *sqliteRepository) initSchema() error {
 	if err := r.migrateDeliveries(); err != nil {
 		return err
 	}
-	return r.migrateLegacySubscriptions()
+	if err := r.migrateLegacySubscriptions(); err != nil {
+		return err
+	}
+	return r.migrateUpdateAvailableSubscriptions(ctx)
+}
+
+const updateAvailableSubscriptionMigration = "add_system_update_available_to_local_and_system_v1"
+
+func (r *sqliteRepository) migrateUpdateAvailableSubscriptions(ctx context.Context) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var completed bool
+	err = tx.GetContext(ctx, &completed, r.db.Rebind(`SELECT TRUE FROM notification_migrations WHERE name = ?`), updateAvailableSubscriptionMigration)
+	if err == nil {
+		return tx.Commit()
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+	rows, err := tx.QueryxContext(ctx, r.db.Rebind(`
+		SELECT p.id, p.user_id FROM notification_providers p
+		WHERE p.type IN (?, ?)
+		AND NOT EXISTS (
+			SELECT 1 FROM notification_subscriptions s
+			WHERE s.provider_id = p.id AND s.event_type = ?
+		)
+	`), "local", "system", "system.update_available")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rows.Close() }()
+	type providerRow struct{ id, userID string }
+	var providers []providerRow
+	for rows.Next() {
+		var provider providerRow
+		if err := rows.Scan(&provider.id, &provider.userID); err != nil {
+			return err
+		}
+		providers = append(providers, provider)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, provider := range providers {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO notification_subscriptions (id, user_id, provider_id, event_type, enabled, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`), uuid.New().String(), provider.userID, provider.id, "system.update_available", dialect.BoolToInt(true), now, now); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`INSERT INTO notification_migrations (name, completed_at) VALUES (?, ?)`), updateAvailableSubscriptionMigration, now); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (r *sqliteRepository) migrateDeliveries() error {

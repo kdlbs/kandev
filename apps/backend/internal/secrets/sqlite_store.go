@@ -9,6 +9,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 )
 
@@ -36,13 +38,41 @@ func (s *sqliteStore) initSchema() error {
 	CREATE TABLE IF NOT EXISTS secrets (
 		id              TEXT PRIMARY KEY,
 		name            TEXT NOT NULL,
+		user_id         TEXT NOT NULL DEFAULT '',
 		encrypted_value %s NOT NULL,
 		nonce           %s NOT NULL,
 		created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 		updated_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
 	`, binaryType, binaryType)
-	_, err := s.db.Exec(schema)
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	// Existing databases: CREATE TABLE IF NOT EXISTS is a no-op, so the
+	// column must also be added via an idempotent migration (ADR 0027).
+	migrate := db.NewMigrateLogger(s.db, nil)
+	migrate.Apply("secrets.user_id", "ALTER TABLE secrets ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
+	return nil
+}
+
+// scopeOwner returns the per-user scoping ID for a request context.
+// Empty = unscoped (internal caller or auth disabled), matching the
+// task-service scoping semantics. Rows with user_id=” (created pre-auth or
+// by internal flows) stay visible to every caller until the setup wizard
+// claims them for the admin.
+func scopeOwner(ctx context.Context) string {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic {
+		return ""
+	}
+	return identity.UserID
+}
+
+// ClaimUnowned assigns every unowned secret to ownerID. Called by the auth
+// setup wizard; idempotent.
+func (s *sqliteStore) ClaimUnowned(ctx context.Context, ownerID string) error {
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE secrets SET user_id = ? WHERE user_id = ''`), ownerID)
 	return err
 }
 
@@ -67,9 +97,9 @@ func (s *sqliteStore) Create(ctx context.Context, secret *SecretWithValue) error
 	}
 
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO secrets (id, name, encrypted_value, nonce, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)`),
-		secret.ID, secret.Name, ciphertext, nonce, now, now,
+		INSERT INTO secrets (id, name, user_id, encrypted_value, nonce, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`),
+		secret.ID, secret.Name, scopeOwner(ctx), ciphertext, nonce, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("insert secret: %w", err)
@@ -81,7 +111,8 @@ func (s *sqliteStore) Get(ctx context.Context, id string) (*Secret, error) {
 	var row secretRow
 	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
 		SELECT id, name, created_at, updated_at
-		FROM secrets WHERE id = ?`), id)
+		FROM secrets WHERE id = ? AND (user_id = '' OR ? = '' OR user_id = ?)`),
+		id, scopeOwner(ctx), scopeOwner(ctx))
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
@@ -94,7 +125,9 @@ func (s *sqliteStore) Get(ctx context.Context, id string) (*Secret, error) {
 func (s *sqliteStore) Reveal(ctx context.Context, id string) (string, error) {
 	var ciphertext, nonce []byte
 	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
-		SELECT encrypted_value, nonce FROM secrets WHERE id = ?`), id).
+		SELECT encrypted_value, nonce FROM secrets
+		WHERE id = ? AND (user_id = '' OR ? = '' OR user_id = ?)`),
+		id, scopeOwner(ctx), scopeOwner(ctx)).
 		Scan(&ciphertext, &nonce)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -149,7 +182,9 @@ func (s *sqliteStore) Update(ctx context.Context, id string, req *UpdateSecretRe
 }
 
 func (s *sqliteStore) Delete(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM secrets WHERE id = ?`), id)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		DELETE FROM secrets WHERE id = ? AND (user_id = '' OR ? = '' OR user_id = ?)`),
+		id, scopeOwner(ctx), scopeOwner(ctx))
 	if err != nil {
 		return fmt.Errorf("delete secret: %w", err)
 	}
@@ -162,9 +197,11 @@ func (s *sqliteStore) Delete(ctx context.Context, id string) error {
 
 func (s *sqliteStore) List(ctx context.Context) ([]*SecretListItem, error) {
 	var rows []secretListRow
-	err := s.ro.SelectContext(ctx, &rows, `
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
 		SELECT id, name, 1 as has_value, created_at, updated_at
-		FROM secrets ORDER BY created_at DESC`)
+		FROM secrets WHERE (user_id = '' OR ? = '' OR user_id = ?)
+		ORDER BY created_at DESC`),
+		scopeOwner(ctx), scopeOwner(ctx))
 	if err != nil {
 		return nil, fmt.Errorf("list secrets: %w", err)
 	}

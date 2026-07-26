@@ -48,7 +48,7 @@ function remoteTestURL(repo: AccessibleRepo): string {
   }
   return `https://${repo.provider}.com/${repo.owner}/${repo.name}`;
 }
-import { RemoteRepoChip } from "./task-create-dialog-remote-repo-chip";
+import { RemoteRepoChip, type RemoteRepoChipProps } from "./task-create-dialog-remote-repo-chip";
 
 const TRIGGER_TID = "remote-repo-chip-trigger";
 const INPUT_TID = "remote-repo-input";
@@ -66,18 +66,60 @@ function githubSite(overrides: Partial<AccessibleRepo> = {}): AccessibleRepo {
     ...overrides,
   };
 }
-afterEach(() => {
-  cleanup();
-});
+afterEach(cleanup);
 function row(overrides: Partial<TaskRemoteRepoRow> = {}): TaskRemoteRepoRow {
   return { key: "remote-0", url: "", branch: "", source: "paste", ...overrides };
 }
 function renderInProvider(ui: Parameters<typeof render>[0]) {
   return render(<TooltipProvider>{ui}</TooltipProvider>);
 }
+function renderRemoteRepoChip(overrides: Partial<RemoteRepoChipProps> = {}) {
+  return renderInProvider(
+    <RemoteRepoChip
+      row={row()}
+      branches={[]}
+      branchesLoading={false}
+      accessibleRepos={makeAccessible()}
+      onURLChange={vi.fn()}
+      onBranchChange={noopBranch}
+      onRemove={noopRemove}
+      {...overrides}
+    />,
+  );
+}
 const noopBranch = () => undefined;
 const noopRemove = () => undefined;
 describe("RemoteRepoChip — write paths", () => {
+  it("keeps the committed URL visible and exposes an actionable resolution retry", () => {
+    const onRetry = vi.fn();
+    renderInProvider(
+      <RemoteRepoChip
+        row={row({ url: URL_ACME_SITE, branch: "main" })}
+        branches={[{ name: "main", type: "remote" }]}
+        branchesLoading={false}
+        accessibleRepos={makeAccessible()}
+        onURLChange={vi.fn()}
+        onBranchChange={noopBranch}
+        onRemove={noopRemove}
+        resolutionError={new Error("GitHub rate limit exceeded")}
+        onRetry={onRetry}
+      />,
+    );
+
+    expect(screen.getByTestId("remote-repo-chip").getAttribute("data-remote-url")).toBe(
+      URL_ACME_SITE,
+    );
+    expect(screen.getByTestId("remote-repo-chip-wrapper").className).toContain("flex-col");
+    expect(screen.getByTestId("remote-repo-chip").className).toContain("inline-flex");
+    const alert = screen.getByRole("alert");
+    expect(alert.className).toContain("max-w-full");
+    expect(alert.textContent).toContain("GitHub rate limit exceeded");
+    fireEvent.click(screen.getByRole("button", { name: /retry remote repository resolution/i }));
+    expect(onRetry).toHaveBeenCalledOnce();
+  });
+});
+
+describe("RemoteRepoChip — selection write paths", () => {
   it("picker selection writes URL + picker metadata (incl. default_branch) via onURLChange", () => {
     const accessibleRepos = makeAccessible({
       repos: [githubSite({ default_branch: "trunk" })],
@@ -322,17 +364,7 @@ describe("RemoteRepoChip — picker focus", () => {
 });
 describe("RemoteRepoChip — branch pill", () => {
   it("is disabled when the URL is empty", () => {
-    renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={vi.fn()}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
+    renderRemoteRepoChip();
     const branchTrigger = screen.getByTestId("remote-branch-chip-trigger") as HTMLButtonElement;
     expect(branchTrigger.disabled).toBe(true);
   });
@@ -341,33 +373,16 @@ describe("RemoteRepoChip — branch pill", () => {
       { name: "main", type: "remote", remote: "origin" },
       { name: "develop", type: "remote", remote: "origin" },
     ];
-    renderInProvider(
-      <RemoteRepoChip
-        row={row({ url: URL_ACME_SITE })}
-        branches={branches}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={vi.fn()}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
+    renderRemoteRepoChip({ row: row({ url: URL_ACME_SITE }), branches });
     const branchTrigger = screen.getByTestId("remote-branch-chip-trigger") as HTMLButtonElement;
     expect(branchTrigger.disabled).toBe(false);
   });
 
   it("is enabled when the row already has a branch even if branch options haven't loaded yet", () => {
-    renderInProvider(
-      <RemoteRepoChip
-        row={row({ url: URL_ACME_SITE, branch: "trunk" })}
-        branches={[]}
-        branchesLoading={true}
-        accessibleRepos={makeAccessible()}
-        onURLChange={vi.fn()}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
+    renderRemoteRepoChip({
+      row: row({ url: URL_ACME_SITE, branch: "trunk" }),
+      branchesLoading: true,
+    });
     const branchTrigger = screen.getByTestId("remote-branch-chip-trigger") as HTMLButtonElement;
     expect(branchTrigger.disabled).toBe(false);
     expect(branchTrigger.textContent).toContain("trunk");
@@ -477,18 +492,20 @@ describe("RemoteRepoChip — picker loading state", () => {
 });
 
 describe("RemoteRepoChip — popover content", () => {
+  it.each([
+    "git@github.com:acme/api.git",
+    "git@gitlab.com:acme/api.git",
+    "git@ssh.dev.azure.com:v3/acme/project/api",
+  ])("shows the Enter hint for supported SCP remote %s", (remoteURL) => {
+    renderRemoteRepoChip();
+    fireEvent.click(screen.getByTestId(TRIGGER_TID));
+    fireEvent.change(screen.getByTestId(INPUT_TID), { target: { value: remoteURL } });
+
+    expect(screen.getByText(/press Enter to submit it/i)).toBeTruthy();
+  });
+
   it("renders one top-level input for both repository search and GitHub URLs", () => {
-    renderInProvider(
-      <RemoteRepoChip
-        row={row()}
-        branches={[]}
-        branchesLoading={false}
-        accessibleRepos={makeAccessible()}
-        onURLChange={vi.fn()}
-        onBranchChange={noopBranch}
-        onRemove={noopRemove}
-      />,
-    );
+    renderRemoteRepoChip();
     fireEvent.click(screen.getByTestId(TRIGGER_TID));
     const input = screen.getByTestId(INPUT_TID) as HTMLInputElement;
     expect(input.placeholder).toBe("Search repositories or paste a remote URL");

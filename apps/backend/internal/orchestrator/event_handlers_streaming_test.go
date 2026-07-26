@@ -147,6 +147,25 @@ type serviceBackedMessageCreator struct {
 	svc *taskservice.Service
 }
 
+func (m *serviceBackedMessageCreator) CreateSessionMessage(
+	ctx context.Context,
+	taskID, content, sessionID, messageType, turnID string,
+	metadata map[string]interface{},
+	requestsInput bool,
+) error {
+	_, err := m.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+		RequestsInput: requestsInput,
+	})
+	return err
+}
+
 func (m *serviceBackedMessageCreator) UpdateToolCallMessage(
 	ctx context.Context,
 	taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string,
@@ -825,6 +844,72 @@ func TestStatuslessToolUpdateDoesNotCreateTurn(t *testing.T) {
 
 	require.Zero(t, messages.toolUpdateWrites)
 	require.Zero(t, openTurnCount(t, repo, "session1"))
+}
+
+func TestResumedSessionStatusDoesNotCreateTurnForWaitingSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
+
+	svc.handleSessionStatusEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task1",
+		SessionID: "session1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:          "session_status",
+			SessionStatus: streams.SessionStatusResumed,
+		},
+	})
+
+	require.Zero(t, openTurnCount(t, repo, "session1"),
+		"resume status metadata must not create a phantom active turn")
+	messages, err := repo.ListMessages(ctx, "session1")
+	require.NoError(t, err)
+	require.Empty(t, messages, "resume status without an active turn must not create a message")
+}
+
+func TestResumedSessionStatusUsesExistingActiveTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn1",
+		TaskSessionID: "session1",
+		TaskID:        "task1",
+		StartedAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
+
+	svc.handleSessionStatusEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task1",
+		SessionID: "session1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:          "session_status",
+			SessionStatus: streams.SessionStatusResumed,
+		},
+	})
+
+	require.Equal(t, 1, openTurnCount(t, repo, "session1"))
+	messages, err := repo.ListMessages(ctx, "session1")
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Equal(t, "turn1", messages[0].TurnID)
+	require.Equal(t, "Session resumed", messages[0].Content)
 }
 
 func TestToolUpdateFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {

@@ -80,12 +80,13 @@ func DetectToolOperationType(toolKind string, args map[string]any) string {
 // Normalizer converts ACP protocol tool data to NormalizedPayload.
 type Normalizer struct {
 	agentID string
+	dialect acpDialect
 }
 
 // NewNormalizer creates a new ACP normalizer. agentID selects per-agent enrichers
 // (e.g. "codex-acp"); pass "" for common-layer-only normalization in tests.
 func NewNormalizer(agentID string) *Normalizer {
-	return &Normalizer{agentID: agentID}
+	return &Normalizer{agentID: agentID, dialect: newACPDialect(agentID)}
 }
 
 // NormalizeToolCall converts ACP tool call data to NormalizedPayload.
@@ -297,6 +298,14 @@ func updateShellExecInput(se *streams.ShellExecPayload, inputMap map[string]any)
 	if desc := shared.GetString(inputMap, "description"); desc != "" && se.Description == "" {
 		se.Description = desc
 	}
+	// Claude's Bash tool streams `command` and `run_in_background:true` in a
+	// tool_call_update after an initial tool_call with empty rawInput, so the
+	// background flag must be honored on merge, not only at initial normalize.
+	// Only ever set true — a later foreground update must not clear a flag an
+	// earlier frame already established.
+	if isBackgroundExecInput(inputMap) {
+		se.Background = true
+	}
 }
 
 func updateModifyFileInput(mf *streams.ModifyFilePayload, supplemental, inputMap map[string]any) {
@@ -374,7 +383,28 @@ func (n *Normalizer) EnrichFromToolCallUpdate(
 	rawInput any,
 	supplemental map[string]any,
 ) {
+	n.enrichDialectSubagent(payload, meta, rawInput)
 	applyAgentEnrichment(n.agentID, payload, enrichFrameFromUpdate(title, meta, rawInput, supplemental))
+}
+
+func (n *Normalizer) enrichDialectSubagent(
+	payload *streams.NormalizedPayload,
+	meta map[string]any,
+	rawInput any,
+) {
+	if payload == nil || payload.Kind() != streams.ToolKindSubagentTask {
+		return
+	}
+	frame, ok := n.dialect.parseSubagentFrame(meta, "", rawInput)
+	if !ok {
+		return
+	}
+	updateSubagentTaskInput(payload.SubagentTask(), map[string]any{
+		subagentKeyDescription:  frame.description,
+		subagentKeyPrompt:       frame.prompt,
+		subagentKeySubagentType: frame.subagentType,
+	})
+	applySubagentResult(payload.SubagentTask(), frame.result)
 }
 
 // normalizeEdit converts ACP edit tool data.
@@ -475,13 +505,21 @@ func (n *Normalizer) normalizeExecute(args map[string]any) *streams.NormalizedPa
 	workDir := shared.GetString(rawInput, "cwd")
 	timeout := shared.GetInt(rawInput, "max_wait_seconds")
 
-	// Background is true if wait is explicitly false
-	background := false
-	if wait, ok := rawInput["wait"].(bool); ok && !wait {
-		background = true
-	}
+	return streams.NewShellExec(command, workDir, "", timeout, isBackgroundExecInput(rawInput))
+}
 
-	return streams.NewShellExec(command, workDir, "", timeout, background)
+// isBackgroundExecInput reports whether an execute/bash rawInput marks the
+// command as background work. Claude's Bash tool signals it with
+// run_in_background:true (and no `wait` field); other agents use wait:false.
+// Either shape counts as background.
+func isBackgroundExecInput(inputMap map[string]any) bool {
+	if wait, ok := inputMap["wait"].(bool); ok && !wait {
+		return true
+	}
+	if bg, ok := inputMap["run_in_background"].(bool); ok && bg {
+		return true
+	}
+	return false
 }
 
 // normalizeCodeSearch converts ACP search tool data.
@@ -531,6 +569,11 @@ func (n *Normalizer) normalizeSubagent(args map[string]any) (*streams.Normalized
 	meta, _ := args[argKeyMeta].(map[string]any)
 	title, _ := args[argKeyTitle].(string)
 	rawInput := args["raw_input"]
+	if frame, ok := n.dialect.parseSubagentFrame(meta, title, rawInput); ok {
+		payload := streams.NewSubagentTask(frame.description, frame.prompt, frame.subagentType)
+		applySubagentResult(payload.SubagentTask(), frame.result)
+		return payload, true
+	}
 	desc, prompt, subagentType, ok := recognizeSubagent(meta, title, rawInput)
 	if !ok {
 		return nil, false

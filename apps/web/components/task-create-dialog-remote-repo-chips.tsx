@@ -24,36 +24,36 @@ import { useRemoteRepositories } from "@/hooks/domains/integrations/use-remote-r
  * `ensure("")` is a no-op anyway.
  */
 export type RemoteRepoChipsRowProps = {
+  workspaceId?: string | null;
   fs: DialogFormState;
   onUpdateRow: (key: string, update: Partial<TaskRemoteRepoRow>) => void;
   onAddRow: () => void;
   onRemoveRow: (key: string) => void;
-  workspaceId?: string;
 };
 
 export function RemoteRepoChipsRow({
+  workspaceId = null,
   fs,
   onUpdateRow,
   onAddRow,
   onRemoveRow,
-  workspaceId = "",
 }: RemoteRepoChipsRowProps) {
   // Keep the per-URL caches warm. Destructure the stable `ensure` callbacks
   // out of the parent cache objects so the effect deps array doesn't churn
   // every render: `fs.branchesByUrl` / `fs.prInfoByUrl` themselves are new
   // object refs each render (they wrap hook results), but the underlying
-  // `ensure` callbacks are stable (`useCallback(..., [])`). Both calls are
-  // internally idempotent so re-firing on unrelated re-renders is cheap.
+  // `ensure` callbacks are stable until their workspace context changes. Both calls are
+  // internally idempotent so re-firing after a workspace change is cheap.
   // PR-info is a no-op for plain repo URLs.
   const { ensure: ensureBranches } = fs.branchesByUrl;
   const { ensure: ensurePRInfo } = fs.prInfoByUrl;
   useEffect(() => {
     for (const row of fs.remoteRepos) {
       if (!row.url) continue;
-      ensureBranches(row.url, workspaceId);
+      ensureBranches(row.url);
       ensurePRInfo(row.url);
     }
-  }, [fs.remoteRepos, ensureBranches, ensurePRInfo, workspaceId]);
+  }, [fs.remoteRepos, ensureBranches, ensurePRInfo]);
 
   // Hoist the accessible-repos hook to the row level so a single backend
   // request serves every chip's popover. Previously each chip called the
@@ -62,7 +62,7 @@ export function RemoteRepoChipsRow({
   // popover doesn't reset another), at the cost of the shared cache: if
   // two popovers are open with different searches, both see the latest
   // search's results. In practice only one popover is open at a time.
-  const accessibleRepos = useRemoteRepositories(workspaceId);
+  const accessibleRepos = useRemoteRepositories(workspaceId ?? "");
 
   const rows = fs.remoteRepos;
   return (
@@ -79,10 +79,12 @@ export function RemoteRepoChipsRow({
             branches={fs.branchesByUrl.branches(row.url)}
             branchesLoading={fs.branchesByUrl.loading(row.url)}
             prInfo={fs.prInfoByUrl.info(row.url)}
+            resolutionError={fs.branchesByUrl.error(row.url) ?? fs.prInfoByUrl.error(row.url)}
             accessibleRepos={accessibleRepos}
             selectedRepositoryIdentities={selectedRepositoryIdentities}
             onURLChange={makeURLChange(onUpdateRow, row.key)}
             onBranchChange={(branch) => onUpdateRow(row.key, { branch })}
+            onRetry={() => retryRemoteResolution(fs, row.url)}
             onRemove={() => onRemoveRow(row.key)}
           />
         );
@@ -90,6 +92,13 @@ export function RemoteRepoChipsRow({
       <AddRowButton onAddRow={onAddRow} />
     </div>
   );
+}
+
+function retryRemoteResolution(fs: DialogFormState, url: string): void {
+  fs.branchesByUrl.clear(url);
+  fs.prInfoByUrl.clear(url);
+  fs.branchesByUrl.ensure(url);
+  fs.prInfoByUrl.ensure(url);
 }
 
 /**

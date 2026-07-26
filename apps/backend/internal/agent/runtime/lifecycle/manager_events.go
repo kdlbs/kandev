@@ -24,6 +24,16 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	if event.Role == "user" || event.Text == "" {
 		return
 	}
+	// ACP message chunks do not carry the lifecycle prompt generation. The
+	// messageMu acquisition is therefore the only reliable turn boundary: a
+	// chunk observed before an atomic reset is detached with the old turn,
+	// while one observed after reset is retained for the replacement turn.
+	m.appendAssistantHistoryChunk(execution, event.Text)
+	if event.ProtocolMessageID != "" {
+		m.flushPendingLegacyMessage(execution)
+		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text)
+		return
+	}
 	execution.messageMu.Lock()
 	execution.messageBuffer.WriteString(event.Text)
 	bufferLenAfterWrite := execution.messageBuffer.Len()
@@ -53,6 +63,11 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 // handleReasoningEvent handles a "reasoning" agent event, accumulating and flushing on newlines.
 func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.ReasoningText == "" {
+		return
+	}
+	if event.ProtocolMessageID != "" {
+		m.flushPendingLegacyThinking(execution)
+		m.publishProtocolThinking(execution, event.ProtocolMessageID, event.ReasoningText)
 		return
 	}
 	execution.messageMu.Lock()
@@ -155,9 +170,10 @@ func handleCompleteEventSignal(execution *AgentExecution, event *agentctl.AgentE
 	}
 	select {
 	case execution.promptDoneCh <- PromptCompletionSignal{
-		StopReason: stopReason,
-		IsError:    isError,
-		Error:      errorMsg,
+		StopReason:       stopReason,
+		IsError:          isError,
+		Error:            errorMsg,
+		PromptGeneration: event.PromptGeneration,
 	}:
 	default:
 		// Channel full or no one waiting — that's fine (e.g., initial prompt in goroutine)
@@ -296,14 +312,13 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 
 	// Flush the message buffer to publish any remaining content as a streaming message.
 	flushedText := m.flushMessageBuffer(execution)
+	execution.messageMu.Lock()
+	execution.clearProtocolMessageCorrelationLocked()
+	execution.messageMu.Unlock()
 	if flushedText != "" {
 		event.Text = flushedText
-		if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
-			if err := m.historyManager.AppendAgentMessage(execution.SessionID, flushedText); err != nil {
-				m.logger.Warn("failed to store final agent message to history", zap.Error(err))
-			}
-		}
 	}
+	m.flushAssistantHistory(execution)
 
 	m.logger.Info("complete event processed",
 		zap.String("execution_id", execution.ID),
@@ -334,6 +349,7 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 		// the streaming path itself and always returns "".
 		m.flushMessageBuffer(execution)
 	}
+	m.flushAssistantHistory(execution)
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" {
 		if err := m.historyManager.AppendToolCall(execution.SessionID, event); err != nil {
 			m.logger.Warn("failed to store tool call to history", zap.Error(err))
@@ -349,6 +365,7 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 // handleToolUpdateEvent stores completed tool results in session history.
 func (m *Manager) handleToolUpdateEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" && event.ToolStatus == toolStatusComplete {
+		m.flushAssistantHistory(execution)
 		if err := m.historyManager.AppendToolResult(execution.SessionID, event); err != nil {
 			m.logger.Warn("failed to store tool result to history", zap.Error(err))
 		}
@@ -489,11 +506,55 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 // handleStreamDisconnect handles unexpected updates stream disconnections.
 // It proactively updates execution status and publishes an error event so the
 // orchestrator can transition the session state without waiting for a future prompt.
-func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
+func (m *Manager) handleStreamDisconnect(
+	execution *AgentExecution,
+	err error,
+	promptGeneration uint64,
+) {
 	m.logger.Warn("agent updates stream disconnected",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID),
+		zap.Uint64("prompt_generation", promptGeneration),
 		zap.Error(err))
+
+	if promptGeneration != 0 {
+		execution.promptLifecycleMu.Lock()
+		defer execution.promptLifecycleMu.Unlock()
+
+		var claimed bool
+		var updated *AgentExecution
+		statusErr := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+			if current != execution || current.promptGeneration != promptGeneration {
+				return
+			}
+			current.Status = v1.AgentStatusFailed
+			updated = current
+			claimed = true
+		})
+		if statusErr != nil {
+			m.logger.Warn("failed to persist stream disconnect failed status",
+				zap.String("execution_id", execution.ID),
+				zap.Error(statusErr))
+			return
+		}
+		if !claimed {
+			m.logger.Debug("ignoring stream disconnect for superseded prompt generation",
+				zap.String("execution_id", execution.ID),
+				zap.Uint64("disconnect_prompt_generation", promptGeneration))
+			return
+		}
+
+		m.flushAssistantHistory(execution)
+		m.persistExecutorRunning(context.Background(), updated)
+		m.publishStreamDisconnectError(execution, err)
+		return
+	}
+
+	// The stream callback may race with the caller starting another prompt
+	// after promptDoneCh is signaled. Drain the partial assistant transcript
+	// here as well as at prompt setup; the shared buffer lock makes either
+	// path the single owner and prevents a later reset from dropping it.
+	m.flushAssistantHistory(execution)
 
 	if err := m.UpdateStatus(execution.ID, v1.AgentStatusFailed); err != nil {
 		m.logger.Warn("failed to persist stream disconnect failed status",
@@ -501,6 +562,10 @@ func (m *Manager) handleStreamDisconnect(execution *AgentExecution, err error) {
 			zap.Error(err))
 	}
 
+	m.publishStreamDisconnectError(execution, err)
+}
+
+func (m *Manager) publishStreamDisconnectError(execution *AgentExecution, err error) {
 	m.eventPublisher.PublishAgentctlEvent(
 		context.Background(), events.AgentctlError, execution,
 		"agent stream disconnected: "+err.Error(),

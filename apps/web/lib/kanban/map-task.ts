@@ -4,7 +4,12 @@ import {
   issueFieldsFromMetadata,
 } from "@/lib/metadata-utils";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
-import type { TaskPendingAction, TaskState, TaskSessionState } from "@/lib/types/http";
+import type {
+  ForegroundActivity,
+  TaskPendingAction,
+  TaskState,
+  TaskSessionState,
+} from "@/lib/types/http";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -32,10 +37,18 @@ export type TaskLike = {
     checkout_branch?: string;
     position?: number;
   }>;
+  workspace_folders?: Array<{
+    id: string;
+    local_path: string;
+    display_name: string;
+    position: number;
+  }>;
   repository_id?: string;
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | string | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  task_pending_action?: TaskPendingAction | null;
+  foreground_activity?: ForegroundActivity | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -70,11 +83,18 @@ function pickId(source: TaskLike): string {
   return (source.id ?? source.task_id ?? "") as string;
 }
 
-export function pickPendingAction(action: unknown): TaskPendingAction | undefined {
+export function pickPendingAction(action: unknown): TaskPendingAction | null | undefined {
+  if (action === null) return null;
   if (action === "clarification" || action === "permission") {
     return action;
   }
   return undefined;
+}
+
+function pickForegroundActivity(
+  activity: TaskLike["foreground_activity"],
+): ForegroundActivity | null | undefined {
+  return activity === null ? null : (activity ?? undefined);
 }
 
 type KanbanTaskRepository = NonNullable<KanbanTask["repositories"]>[number];
@@ -88,6 +108,10 @@ function pickRepositories(source: TaskLike): KanbanTaskRepository[] | undefined 
     checkout_branch: r.checkout_branch,
     position: r.position ?? idx,
   }));
+}
+
+function pickWorkspaceFolders(source: TaskLike): KanbanTask["workspaceFolders"] | undefined {
+  return source.workspace_folders?.map((folder) => ({ ...folder }));
 }
 
 /**
@@ -106,9 +130,12 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     state: source.state,
     repositoryId: pickRepositoryId(source),
     repositories: pickRepositories(source),
+    workspaceFolders: pickWorkspaceFolders(source),
     primarySessionId: source.primary_session_id ?? undefined,
     primarySessionState: source.primary_session_state ?? undefined,
     primarySessionPendingAction: pickPendingAction(source.primary_session_pending_action),
+    taskPendingAction: pickPendingAction(source.task_pending_action),
+    foregroundActivity: pickForegroundActivity(source.foreground_activity),
     sessionCount: source.session_count ?? undefined,
     reviewStatus: source.review_status ?? undefined,
     primaryExecutorId: source.primary_executor_id ?? undefined,

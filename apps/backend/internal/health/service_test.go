@@ -29,7 +29,7 @@ func TestRunChecks_NoCheckers(t *testing.T) {
 
 func TestRunChecks_AllHealthy(t *testing.T) {
 	svc := NewService(newTestLogger(),
-		NewGitHubChecker(&mockGitHubProvider{authenticated: true}),
+		NewGitHubChecker(&mockGitHubProvider{health: GitHubConnectionHealth{WorkspaceCount: 1, Active: 1}}),
 		NewAgentChecker(&mockAgentProvider{available: true}),
 	)
 	result := svc.RunChecks(context.Background())

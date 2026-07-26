@@ -23,9 +23,10 @@ export async function requestPRReviewers(
   repo: string,
   number: number,
   reviewers: string[],
+  workspaceId: string,
 ) {
   return fetchJson<{ requested: boolean }>(
-    `/api/v1/github/prs/${owner}/${repo}/${number}/requested-reviewers`,
+    `/api/v1/github/prs/${owner}/${repo}/${number}/requested-reviewers?workspace_id=${encodeURIComponent(workspaceId)}`,
     {
       init: {
         method: "POST",

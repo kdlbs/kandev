@@ -9,7 +9,7 @@ The native Kandev launcher can install itself as a systemd service on Linux or a
 
 Install Kandev first using a persistent [CLI installation](cli.md#install). Do not install a long-lived service from an ephemeral `npx` invocation: the generated unit records the absolute native executable and release-bundle paths.
 
-> **Network security:** the backend listens on `0.0.0.0` by default, and the Kandev web, HTTP, and WebSocket endpoints do not provide an authentication boundary. Bind it to loopback and use an authenticated TLS reverse proxy or private VPN before allowing remote access. The `auth.jwtSecret` configuration field is not a web-login password. See [server configuration](configuration.md#root-and-server).
+> **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. Before allowing remote access, enable [opt-in authentication](authentication.md) (the **Authentication & users** feature toggle, or `KANDEV_FEATURES_AUTH=true`) and terminate TLS in a reverse proxy — authentication does not replace HTTPS. A server bound to non-loopback interfaces without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
 
 ## Choose a service mode
 
@@ -159,9 +159,9 @@ sudo journalctl -u kandev.service -n 200 --no-pager
 
 ## Upgrade safely
 
-The current native service implementation does not write the legacy install metadata used by the Settings update workflow. Consequently, **Settings → System → Updates cannot apply an update to this service**, including a user service.
+For a user service installed by `kandev service install`, use **Settings → System → Updates → Apply update** when a newer release is available. Kandev verifies the managed unit or plist and its owner-only `<home>/service/install.json` metadata before enabling this action. System services still require a terminal update because they need elevated privileges.
 
-Upgrade the package, reinstall with the same mode and home flags so absolute paths and bundle metadata are refreshed, then restart explicitly:
+If the Apply action is unavailable or fails, upgrade the package manually, reinstall with the same mode and home flags so absolute paths and bundle metadata are refreshed, then restart explicitly:
 
 ```bash
 # npm example; use `brew upgrade kandev` for Homebrew

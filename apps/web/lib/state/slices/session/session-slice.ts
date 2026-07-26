@@ -2,6 +2,7 @@ import type { StateCreator } from "zustand";
 import { original } from "immer";
 import type { Message, TaskSession } from "@/lib/types/http";
 import type { SessionSlice, SessionSliceState } from "./types";
+import { buildTurnActions } from "./turn-actions";
 import { reconcileMessages } from "./message-signature";
 import {
   migrateEnvKeyedData,
@@ -113,6 +114,43 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,
   };
+}
+
+const IDLE_SESSION_STATES = new Set<TaskSession["state"]>([
+  "IDLE",
+  "WAITING_FOR_INPUT",
+  "COMPLETED",
+  "FAILED",
+  "CANCELLED",
+]);
+
+/**
+ * An API session snapshot is authoritative about whether a session is idle,
+ * while turn history can be incomplete after boot or a WS reconnect. Drop an
+ * orphaned active-turn marker, but only retire a known turn when the idle
+ * session snapshot is at least as new as that turn's start time.
+ */
+function reconcileActiveTurnForIdleSession(draft: SessionSliceState, session: TaskSession): void {
+  if (!IDLE_SESSION_STATES.has(session.state)) return;
+
+  const activeTurnId = draft.turns.activeBySession[session.id];
+  if (!activeTurnId) return;
+
+  const activeTurn = draft.turns.bySession[session.id]?.find((turn) => turn.id === activeTurnId);
+  if (!activeTurn || activeTurn.completed_at) {
+    draft.turns.activeBySession[session.id] = null;
+    return;
+  }
+
+  const sessionUpdatedAt = Date.parse(session.updated_at);
+  const turnStartedAt = Date.parse(activeTurn.started_at);
+  if (
+    !Number.isNaN(sessionUpdatedAt) &&
+    !Number.isNaN(turnStartedAt) &&
+    turnStartedAt <= sessionUpdatedAt
+  ) {
+    draft.turns.activeBySession[session.id] = null;
+  }
 }
 
 export const defaultSessionState: SessionSliceState = {
@@ -443,6 +481,7 @@ function buildTaskSessionActions(set: ImmerSet) {
           if (sessionIndex >= 0) sessionsByTask[sessionIndex] = mergedSession;
         }
         syncEnvironmentMapping(draft, session.id, mergedSession.task_environment_id);
+        reconcileActiveTurnForIdleSession(draft, mergedSession);
       }),
     removeTaskSession: (taskId: string, sessionId: string) =>
       set((draft) => {
@@ -478,11 +517,9 @@ function buildTaskSessionActions(set: ImmerSet) {
           draft.taskSessions.items[session.id] = session;
           syncEnvironmentMapping(draft, session.id, session.task_environment_id);
           syncPrepareProgress(draft, session);
+          reconcileActiveTurnForIdleSession(draft, session);
         }
       }),
-    // Upsert a session from a WS event without flipping the per-task `loadedByTaskId`
-    // flag — partial event-driven records must not gate the API hydration that
-    // fills in fields like agent_profile_id / repository_id / worktree_path.
     upsertTaskSessionFromEvent: (
       taskId: string,
       session: Parameters<SessionSlice["upsertTaskSessionFromEvent"]>[1],
@@ -500,6 +537,7 @@ function buildTaskSessionActions(set: ImmerSet) {
           draft.taskSessionsByTask.itemsByTaskId[taskId] = [merged];
         }
         syncEnvironmentMapping(draft, session.id, merged.task_environment_id);
+        reconcileActiveTurnForIdleSession(draft, merged);
       }),
     setTaskSessionsLoading: (taskId: string, loading: boolean) =>
       set((draft) => {
@@ -516,26 +554,7 @@ export const createSessionSlice: StateCreator<
 > = (set, get) => ({
   ...defaultSessionState,
   ...buildMessageActions(set),
-  addTurn: (turn) =>
-    set((draft) => {
-      const sessionId = turn.session_id;
-      if (!draft.turns.bySession[sessionId]) draft.turns.bySession[sessionId] = [];
-      if (!draft.turns.bySession[sessionId].find((t) => t.id === turn.id)) {
-        draft.turns.bySession[sessionId].push(turn);
-      }
-    }),
-  completeTurn: (sessionId, turnId, completedAt, metadata) =>
-    set((draft) => {
-      const turn = draft.turns.bySession[sessionId]?.find((t) => t.id === turnId);
-      if (turn) {
-        turn.completed_at = completedAt;
-        if (metadata) turn.metadata = metadata;
-      }
-    }),
-  setActiveTurn: (sessionId, turnId) =>
-    set((draft) => {
-      draft.turns.activeBySession[sessionId] = turnId;
-    }),
+  ...buildTurnActions(set),
   ...buildTaskSessionActions(set),
   setSessionAgentctlStatus: (sessionId, status) =>
     set((draft) => {

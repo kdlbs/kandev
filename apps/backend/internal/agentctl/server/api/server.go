@@ -113,6 +113,8 @@ func (s *Server) setupRoutes() {
 		// Rebuilds the per-repo tracker set so the new worktree's git/file
 		// events reach the UI without a session restart.
 		api.POST("/workspace/rescan", s.handleRescanWorkspace)
+		api.POST("/workspace/reconcile", s.handleReconcileWorkspace)
+		api.POST("/workspace/rebind", s.handleRebindWorkspace)
 
 		// Per-task base-branch map update: kandev backend hits this when
 		// the user picks a different "Compare against" branch via the
@@ -135,6 +137,8 @@ func (s *Server) setupRoutes() {
 		// Docker, Sprites — to seed the workspace with gitignored config
 		// after the in-container clone).
 		api.POST("/workspace/copy-files", s.handleWorkspaceCopyFiles)
+		api.POST("/workspace/materialize-repository", s.handleWorkspaceMaterializeRepository)
+		api.POST("/workspace/materialize-repository/remove", s.handleWorkspaceRemoveMaterializedRepository)
 
 		// Shell access (HTTP endpoints only - streaming is via /workspace/stream)
 		api.GET("/shell/status", s.handleShellStatus)

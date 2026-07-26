@@ -1,5 +1,6 @@
 import type { ExecutorType } from "./executor";
 import type { UserSettings } from "./http-user-settings";
+import type { TaskRepository, WorkspaceFolder } from "./http-workspace-sources";
 import type {
   AgentProfileId,
   RepositoryId,
@@ -24,6 +25,15 @@ export type {
   UserSettingsResponse,
   UserSettingsUpdatePayload,
 } from "./http-user-settings";
+export type {
+  AttachTaskWorkspaceSourcesRequest,
+  AttachTaskWorkspaceSourcesResponse,
+  TaskRepository,
+  WorkspaceFolder,
+  WorkspaceFolderSourceRequest,
+  WorkspaceRepositorySourceRequest,
+  WorkspaceSourceRequest,
+} from "./http-workspace-sources";
 export * from "./ids";
 export type {
   MoveToStepConfig,
@@ -157,6 +167,17 @@ export type TaskSessionState =
 
 export type TaskPendingAction = "clarification" | "permission";
 
+/**
+ * Fine-grained busy substate of a session (see ADR-0049). Distinguishes
+ * a foreground turn that is actively generating from one that is idle, held open
+ * only by spawned background work (a subagent task, a run-in-background shell, an
+ * active Monitor). `generating` is meaningful while `state === "RUNNING"`;
+ * `background` may outlive the foreground turn. Delivered live over the
+ * `session.activity_changed` WS event and carried on `session.state_changed`;
+ * absent/`null` is treated as "generating" for a RUNNING session.
+ */
+export type ForegroundActivity = "generating" | "background";
+
 export type Workflow = {
   id: WorkflowId;
   workspace_id: WorkspaceId;
@@ -259,22 +280,6 @@ export type ProcessInfo = {
   output?: ProcessOutputChunk[];
 };
 
-export type TaskRepository = {
-  id: string;
-  task_id: TaskId;
-  repository_id: RepositoryId;
-  base_branch: string;
-  /**
-   * Optional branch to fetch and check out after worktree creation
-   * (e.g. a PR head branch). Empty when no specific branch is requested.
-   */
-  checkout_branch?: string;
-  position: number;
-  metadata?: Record<string, unknown>;
-  created_at: string;
-  updated_at: string;
-};
-
 /**
  * Returns the primary task repository (lowest Position, first by created_at on
  * tie). Returns undefined for repo-less tasks. Consumers that historically
@@ -303,9 +308,21 @@ export type Task = {
   state: TaskState;
   priority: number;
   repositories?: TaskRepository[];
+  workspace_folders?: WorkspaceFolder[];
   primary_session_id?: SessionId | null;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  task_pending_action?: TaskPendingAction | null;
+  /**
+   * Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions
+   * The aggregate is "generating" when any session is generating,
+   * "background" when none is generating but at least one RUNNING session holds a
+   * turn open for background work, and absent/`null` when no session is running
+   * (task-level surfaces then fall through to the coarse task state). Computed on
+   * the backend and carried on the task record so every task-level surface reads
+   * one authoritative value.
+   */
+  foreground_activity?: ForegroundActivity | null;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primary_executor_id?: string | null;
@@ -401,6 +418,11 @@ export type TaskSession = {
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   state: TaskSessionState;
+  /**
+   * Fine-grained busy substate (ADR-0049). Pushed over
+   * `session.activity_changed`; background may outlive the foreground turn.
+   */
+  foreground_activity?: ForegroundActivity | null;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
   agent_profile_snapshot?: Record<string, unknown> | null;
@@ -724,10 +746,7 @@ export type StepPortable = {
   pull_from_step_position?: number;
 };
 
-export type ImportWorkflowsResult = {
-  created: string[];
-  skipped: string[];
-};
+export type ImportWorkflowsResult = { created: string[]; skipped: string[] };
 
 // Helper function to check if a step has a specific on_enter action
 export function stepHasOnEnterAction(

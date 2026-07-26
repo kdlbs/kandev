@@ -12,6 +12,7 @@ import {
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultAuthState,
   defaultAutomationsState,
   defaultSystemState,
   defaultReviewState,
@@ -71,6 +72,7 @@ export const defaultState = {
   promptUsage: defaultSessionRuntimeState.promptUsage,
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   githubStatus: defaultGitHubState.githubStatus,
+  githubAppRegistrations: defaultGitHubState.githubAppRegistrations,
   taskPRs: defaultGitHubState.taskPRs,
   taskIssues: defaultGitHubState.taskIssues,
   pendingPrUrlByTaskId: defaultGitHubState.pendingPrUrlByTaskId,
@@ -92,6 +94,7 @@ export const defaultState = {
   linearIssueWatches: defaultLinearState.linearIssueWatches,
   office: defaultOfficeState.office,
   features: defaultFeaturesState.features,
+  auth: defaultAuthState.auth,
   automations: defaultAutomationsState.automations,
   automationRuns: defaultAutomationsState.automationRuns,
   system: defaultSystemState.system,
@@ -230,6 +233,16 @@ function mergeAgentReviewArtifacts(initialState: HydrationState) {
   };
 }
 
+function mergeGitHubState(initialState: HydrationState) {
+  return {
+    githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
+    githubAppRegistrations: {
+      ...defaultState.githubAppRegistrations,
+      ...initialState.githubAppRegistrations,
+    },
+  };
+}
+
 export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
   return {
@@ -287,7 +300,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },
     promptUsage: { ...defaultState.promptUsage, ...initialState.promptUsage },
     sessionPollMode: { ...defaultState.sessionPollMode, ...initialState.sessionPollMode },
-    githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
+    ...mergeGitHubState(initialState),
     taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
     taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },
     pendingPrUrlByTaskId: {
@@ -308,9 +321,19 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     },
     office: { ...defaultState.office, ...initialState.office },
     features: { ...defaultState.features, ...initialState.features },
+    auth: { ...defaultState.auth, ...initialState.auth },
     automations: { ...defaultState.automations, ...initialState.automations },
     automationRuns: { ...defaultState.automationRuns, ...initialState.automationRuns },
     system: { ...defaultState.system, ...initialState.system },
+    ...mergeUIPanelState(initialState),
+  };
+}
+
+// Split out of mergeInitialState to stay under the per-function line limit —
+// these fields are the UI/panel slice of the merge and have no cross-field
+// dependencies on the rest of DefaultState.
+function mergeUIPanelState(initialState: HydrationState) {
+  return {
     previewPanel: { ...defaultState.previewPanel, ...initialState.previewPanel },
     rightPanel: { ...defaultState.rightPanel, ...initialState.rightPanel },
     diffs: { ...defaultState.diffs, ...initialState.diffs },

@@ -381,6 +381,14 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 	}
 	return &executor.PromptResult{}, nil
 }
+
+func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	result, err := m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+	if err == nil && onDispatched != nil {
+		onDispatched()
+	}
+	return result, err
+}
 func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error {
 	m.cancelAgentCalls.Add(1)
 	if m.cancelAgentEntered != nil {
@@ -607,6 +615,7 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 	// Create task
 	task := &models.Task{
 		ID:             taskID,
+		WorkspaceID:    "ws1",
 		WorkflowID:     "wf1",
 		WorkflowStepID: workflowStepID,
 		Title:          "Test Task",

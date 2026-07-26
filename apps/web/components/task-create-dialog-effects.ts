@@ -19,9 +19,7 @@ import {
   useAgentProfileAutopickEffect,
   useWorkflowAgentProfileEffect,
 } from "@/components/task-create-dialog-autopick";
-import { useMultiRepoGuardEffect } from "@/components/task-create-dialog-multi-repo-guard";
 import { useRepositoryAutoSelectEffect } from "@/components/task-create-dialog-repository-autopick";
-import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 // Re-export autopick hooks for callers that imported them from this module.
@@ -447,7 +445,6 @@ export function useDefaultSelectionsEffect(
     noRepository,
     useRemote,
     repositories,
-    remoteRepos,
   } = fs;
   const preferLocalExecutor =
     !noRepository && !useRemote && repositories.some((row) => Boolean(row.localPath));
@@ -500,25 +497,6 @@ export function useDefaultSelectionsEffect(
       }
     }
   }, [executorProfileId, executors, setExecutorId]);
-
-  const selectedRepoCount = useMemo(
-    () =>
-      computeSelectedRepoCount({
-        noRepository,
-        useRemote,
-        remoteRepos,
-        repositories,
-      } as DialogFormState),
-    [noRepository, useRemote, remoteRepos, repositories],
-  );
-  useMultiRepoGuardEffect({
-    open,
-    executorProfileId,
-    setExecutorProfileId,
-    executors,
-    selectedRepoCount,
-    lastUsedExecutorProfileId: sel.lastUsedExecutorProfileId ?? null,
-  });
 }
 
 /**

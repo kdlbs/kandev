@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import type { ReactNode } from "react";
 import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
+import { StateProvider } from "@/components/state-provider";
 
 const mockGetSubtaskCount = vi.fn();
 
@@ -8,6 +10,35 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
+
+type SeedTask = { id: string; foregroundActivity?: "generating" | "background" | null };
+
+// The dialog reads live foreground_activity from the store via useTaskInFlight,
+// so every render needs a StateProvider. `tasks` seeds the active kanban tasks
+// the guard resolves.
+function renderDialog(ui: ReactNode, tasks: SeedTask[] = []) {
+  return render(
+    <StateProvider
+      initialState={{
+        kanban: {
+          workflowId: "wf-1",
+          steps: [],
+          tasks: tasks.map((t) => ({
+            id: t.id,
+            workflowStepId: "step-1",
+            title: t.id,
+            position: 0,
+            foregroundActivity: t.foregroundActivity ?? undefined,
+          })),
+        },
+      }}
+    >
+      {ui}
+    </StateProvider>,
+  );
+}
+
+const WARNING_TESTID = "still-working-warning";
 
 beforeEach(() => {
   mockGetSubtaskCount.mockReset();
@@ -19,7 +50,7 @@ describe("TaskDeleteConfirmDialog", () => {
   it("hides the cascade checkbox when the task has no subtasks", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
     const onConfirm = vi.fn();
-    render(
+    renderDialog(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -39,7 +70,7 @@ describe("TaskDeleteConfirmDialog", () => {
   it("shows the cascade checkbox when the task has subtasks; defaults to unchecked", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 3 });
     const onConfirm = vi.fn();
-    render(
+    renderDialog(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -59,7 +90,7 @@ describe("TaskDeleteConfirmDialog", () => {
   it("propagates cascade=true when the user ticks the checkbox", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 2 });
     const onConfirm = vi.fn();
-    render(
+    renderDialog(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -79,7 +110,7 @@ describe("TaskDeleteConfirmDialog", () => {
     mockGetSubtaskCount.mockImplementation((id: string) =>
       Promise.resolve({ count: id === "a" ? 2 : 5 }),
     );
-    render(
+    renderDialog(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -96,7 +127,7 @@ describe("TaskDeleteConfirmDialog", () => {
 describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
   it("local reassures repo is untouched", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
-    render(
+    renderDialog(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -112,7 +143,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
 
   it("worktree describes worktree+branch removal", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
-    render(
+    renderDialog(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -127,7 +158,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
 
   it("groups bulk delete copy by executor type", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
-    render(
+    renderDialog(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -144,7 +175,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
 
   it("falls back to a generic message when no executorType is provided", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
-    render(
+    renderDialog(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
@@ -154,5 +185,77 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
       />,
     );
     expect(screen.getByText(/Any running agent sessions will be stopped/i)).toBeTruthy();
+  });
+});
+
+describe("TaskDeleteConfirmDialog still-working guard", () => {
+  it("warns when the task is generating", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: "generating" }],
+    );
+    expect(screen.getByTestId(WARNING_TESTID)).toBeTruthy();
+    expect(screen.getByTestId(WARNING_TESTID).textContent).toMatch(/still working/i);
+  });
+
+  it("warns when spawned background work is still running", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: "background" }],
+    );
+    expect(screen.getByTestId(WARNING_TESTID)).toBeTruthy();
+  });
+
+  it("omits the warning for an idle task", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId="task-1"
+        executorType="worktree"
+        onConfirm={() => {}}
+      />,
+      [{ id: "task-1", foregroundActivity: null }],
+    );
+    expect(screen.getByRole("alertdialog")).toBeTruthy();
+    expect(screen.queryByTestId(WARNING_TESTID)).toBeNull();
+  });
+
+  it("warns for a bulk delete when any selected task is in-flight", () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        isBulkOperation
+        count={2}
+        taskIds={["a", "b"]}
+        executorTypes={["worktree", "worktree"]}
+        onConfirm={() => {}}
+      />,
+      [
+        { id: "a", foregroundActivity: null },
+        { id: "b", foregroundActivity: "generating" },
+      ],
+    );
+    expect(screen.getByTestId(WARNING_TESTID)).toBeTruthy();
   });
 });

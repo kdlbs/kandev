@@ -9,15 +9,15 @@ A task is the unit of work. A workflow is the ordered process that task follows.
 
 ## Understand the model
 
-| Concept | What it controls |
-|---|---|
-| Workspace | The scope containing repositories, workflows, tasks, integrations, and workspace defaults. |
-| Workflow | An ordered set of steps plus the rules that run when a task or agent turn reaches an event. |
-| Workflow step | The task's current process position, such as Backlog, Work, Review, or Done. |
-| Task | The title, prompt, workflow position, repository attachments, sessions, and one shared plan. |
-| Task repository | A repository, base branch, and optional checkout branch attached to a task. A task can have more than one. |
-| Session | One agent conversation attached to a task. Several sessions can share the same task environment. |
-| Plan | The task's single editable Markdown plan, with version history. Consecutive writes can be coalesced into one revision. |
+| Concept         | What it controls                                                                                                       |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Workspace       | The scope containing repositories, workflows, tasks, integrations, and workspace defaults.                             |
+| Workflow        | An ordered set of steps plus the rules that run when a task or agent turn reaches an event.                            |
+| Workflow step   | The task's current process position, such as Backlog, Work, Review, or Done.                                           |
+| Task            | The title, prompt, workflow position, repository attachments, sessions, and one shared plan.                           |
+| Task repository | A repository, base branch, and optional checkout branch attached to a task. A task can have more than one.             |
+| Session         | One agent conversation attached to a task. Several sessions can share the same task environment.                       |
+| Plan            | The task's single editable Markdown plan, with version history. Consecutive writes can be coalesced into one revision. |
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
 
@@ -52,16 +52,15 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 2. Select the workspace and workflow when Kandev cannot infer them. A regular non-ephemeral task must belong to a workflow.
 3. Select a source:
 
-   | Source | Use it for | Important behavior |
-   |---|---|---|
-   | **Repo** | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task. |
-   | **Remote** | A remote repository | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL; then select the branch. Clone and fetch require valid credentials. |
-   | **None** | Planning, research, or work outside Git | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable. |
+   | Source     | Use it for                                        | Important behavior                                                                                                                                                                                                                                                                                                                                                                                                   |
+   | ---------- | ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | **Repo**   | A configured, discovered, or new local repository | Select a base branch for each repository row. For a single-row new task, **Create new repository** initializes an empty `main` repository in a parent folder you choose. Add more rows for a multi-repository task.                                                                                                                                                                                                  |
+   | **Remote** | A remote repository                               | Search configured GitHub, GitLab, or Azure DevOps repositories, or paste a supported URL. A pasted URL stays editable until you press Enter; then select the branch. Anonymous, credential-free reads include public GitHub repository branches, pull requests, and issues, plus public `gitlab.com` branch discovery. Private resources and authenticated browse/write features require valid provider credentials. |
+   | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable.                                                                                                                                                                                                                                            |
 
 4. Select a compatible executor profile and agent profile. A workflow default agent profile locks the task-level agent selector. Executor and agent compatibility is validated before launch.
 5. Enter the initial description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode**; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. A nonempty description exposes the standard split actions.
 6. Choose the applicable action:
-
    - **Start Plan Mode** is the primary empty-description action and creates the task through the plan-mode path.
    - **Start task** requires a nonempty description, creates the task, and starts its agent.
    - **Start task in plan mode** requires a nonempty description and starts the agent with plan mode enabled. This path starts in the first positional workflow step, even if another step is marked **Start step**.
@@ -84,9 +83,35 @@ Select an option, then choose **Save changes**. The only affected Kandev MCP too
 
 ### Multiple repositories
 
-A task can include several local or remote repository rows. Multi-repository task creation currently requires the **git-worktree** executor; the dialog leaves incompatible executors visible but disables them with `Multi-repo tasks only support the git-worktree executor.` Each remote needs credentials that can clone and fetch its selected base branch.
+A task can include several local or remote repository rows. Multi-repository creation supports **Worktree**, **Local Docker**, **SSH**, and **Sprites**. Local/Local PC creation remains unavailable until its initial-launch path can materialize sibling repositories, and Remote Docker is not implemented. Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.
+
+If Kandev cannot resolve a pasted remote URL or its branch, the repository row keeps the URL and shows the provider error. Use **Retry** after correcting the URL or when a transient provider failure has cleared.
 
 Changes and review are scoped by repository. State the expected deliverable, base branch, and pull-request target for every attachment. See [Coordinate work](coordination.md) for adding branches after creation and splitting multi-repository work.
+
+### Add sources to an existing task
+
+For a non-archived, repository-backed task, open the **Files** panel and choose **Workspace actions → Add Repositories to workspace**. Use **Add repository** to choose a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. Use **Add folder** for an arbitrary local folder when the executor supports it. Add one or more rows in a single submission. Repository rows choose a base branch once; the flow does not ask for a second checkout branch. Local/Local PC uses the user-owned repository's current checkout and never switches it. The whole mixed batch succeeds or fails together.
+
+The task must be idle: Kandev disables the action while a turn or tool call is active, and rejects a race without changing the task. Desktop opens a dialog; phones open the same flow in a full-height drawer. On success, repositories appear in Files and repository-aware Changes, branch, editor, and pull-request surfaces; folders are Files-only.
+
+Before submission, the dialog or drawer summarizes the effect on the workspace, session context,
+and running processes. **Cancel** or closing the surface sends no request and changes nothing. A
+submitted batch remains all-or-nothing.
+
+If adding a source promotes a Worktree or Local/Local PC workspace from one repository directory to
+the task root, Kandev restarts the idle agent in the new root. Existing files, Git changes, task
+state, messages, plan, attached sources, model, and mode remain. Native cross-directory resume is
+retained where supported; otherwise Kandev starts a fresh provider session and supplies recorded
+conversation context with the next prompt. Provider-private context not recorded by Kandev may not
+carry over. The intentional restart is not shown as a previous agent error.
+
+The host rebind stops open task terminals, dev servers, the task editor server, and other
+agentctl-managed workspace processes, so save unsaved work and restart those processes afterward.
+Local Docker, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
+without restarting the agent or changing its CWD.
+
+Folders are live host paths and are available only to **Local/Local PC** and **Worktree** tasks. Repository sources are supported for **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Local Git rows need a cloneable origin on Docker, SSH, and Sprites; Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
 
 ### Attachments and local-change consent
 
@@ -110,10 +135,11 @@ If the selected profile is unhealthy or incompatible with the executor, fix that
 
 ## Find and organize tasks
 
-On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
+On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Kandev remembers the last selected view in that browser on the current device. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
 
 - Search matches tasks without changing their state.
 - The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**.
+- In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
 - **List** can group by **State**, **Workflow**, **Repository**, or **None**.
 - **List** can sort by updated time, created time, or title in either direction.
 - **Show archived** reveals archived tasks in List.
@@ -135,18 +161,18 @@ You can add, reorder, edit, and delete steps. Deleting a step that still contain
 
 New steps allow manual moves by default. **Show in command panel** also defaults on. WIP is unlimited and auto-archive is off until configured.
 
-| Setting | Effect |
-|---|---|
-| **Start step** | Makes this the normal starting step. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step. |
-| Agent profile | Overrides the workflow/task profile when entering this step. A different profile creates a new session with fresh conversation context. |
-| **Auto-start agent** | Starts an agent whenever a task enters the step. |
-| **Plan mode** | Enables plan mode when the task enters the step. |
-| **Reset agent context** | Starts with fresh conversation context on entry. It is disabled when the step has a profile override because the profile switch already creates a fresh session. |
-| **Allow manual move** | Allows dragging a task into this step. Treat it as workflow UX, not as a security or approval boundary. |
-| **Show in command panel** | Includes tasks in this step in the default, empty-search **Cmd+K** task list. Typed task search currently searches every step and can also return archived tasks, regardless of this setting. |
-| **Auto-archive** | Archives inactive tasks after the configured number of hours. Enabling it starts at 24 hours; the minimum is 1. |
-| **WIP limit** | Maximum active, non-archived, non-ephemeral tasks accepted by the step. `0` means unlimited. A move into a full step is rejected; reordering within the same step does not consume another slot. |
-| **Pull from** | Optional feeder step. When capacity opens, Kandev pulls eligible work from that step. It requires a nonzero WIP limit. |
+| Setting                   | Effect                                                                                                                                                                                           |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Start step**            | Makes this the normal starting step. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step.                                         |
+| Agent profile             | Overrides the workflow/task profile when entering this step. A different profile creates a new session with fresh conversation context.                                                          |
+| **Auto-start agent**      | Starts an agent whenever a task enters the step.                                                                                                                                                 |
+| **Plan mode**             | Enables plan mode when the task enters the step.                                                                                                                                                 |
+| **Reset agent context**   | Starts with fresh conversation context on entry. It is disabled when the step has a profile override because the profile switch already creates a fresh session.                                 |
+| **Allow manual move**     | Allows dragging a task into this step. Treat it as workflow UX, not as a security or approval boundary.                                                                                          |
+| **Show in command panel** | Includes tasks in this step in the default, empty-search **Cmd+K** task list. Typed task search currently searches every step and can also return archived tasks, regardless of this setting.    |
+| **Auto-archive**          | Archives inactive tasks after the configured number of hours. Enabling it starts at 24 hours; the minimum is 1.                                                                                  |
+| **WIP limit**             | Maximum active, non-archived, non-ephemeral tasks accepted by the step. `0` means unlimited. A move into a full step is rejected; reordering within the same step does not consume another slot. |
+| **Pull from**             | Optional feeder step. When capacity opens, Kandev pulls eligible work from that step. It requires a nonzero WIP limit.                                                                           |
 
 Auto-archive is checked on a five-minute background interval and uses the task's last update time. Any task update postpones eligibility, so the archive is not guaranteed at the exact configured minute. Auto-archive affects the task itself, not its children.
 
@@ -154,10 +180,10 @@ Pull configuration rejects self-references, cycles, and cross-workflow feeders. 
 
 ### Configure events and transitions
 
-| Event | Available transition |
-|---|---|
-| **On Turn Start** | Do nothing, move next, move previous, or move to a selected step when the user sends a message. |
-| **On Turn Complete** | **Do nothing (wait for user)**, move next, move previous, or move to a selected step after the agent turn. |
+| Event                         | Available transition                                                                                                                                                                       |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **On Turn Start**             | Do nothing, move next, move previous, or move to a selected step when the user sends a message.                                                                                            |
+| **On Turn Complete**          | **Do nothing (wait for user)**, move next, move previous, or move to a selected step after the agent turn.                                                                                 |
 | **When Child Tasks Complete** | Do nothing, move next, move previous, or move to a selected step after every active direct child reaches `COMPLETED`, `FAILED`, or `CANCELLED`, provided the parent has an active session. |
 
 The child-completion event ignores archived and ephemeral children, does not inspect grandchildren, and does nothing when the parent has no children. It also requires a parent session in `CREATED`, `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT`; a parent with no session, or only an `IDLE`, `COMPLETED`, `FAILED`, or `CANCELLED` session, does not transition.
@@ -213,12 +239,12 @@ Revision history is not an immutable record of every autosave. Consecutive write
 > [!EXPERIMENTAL]
 > Office is feature-flagged, disabled in the production profile by default, and still in progress. Its named documents, labels, and blocker controls are not stable regular-Kanban features.
 
-| Capability | Regular Kanban | Office |
-|---|---|---|
-| One versioned task plan | Available | Available in Office-specific surfaces where enabled |
-| Multiple named task documents | Not exposed | In-progress Office capability |
-| Task label editor and label filters | Not exposed | In-progress Office capability |
-| Blocked-by / blocking property editor | Not exposed | In-progress Office capability |
+| Capability                            | Regular Kanban | Office                                              |
+| ------------------------------------- | -------------- | --------------------------------------------------- |
+| One versioned task plan               | Available      | Available in Office-specific surfaces where enabled |
+| Multiple named task documents         | Not exposed    | In-progress Office capability                       |
+| Task label editor and label filters   | Not exposed    | In-progress Office capability                       |
+| Blocked-by / blocking property editor | Not exposed    | In-progress Office capability                       |
 
 Stored related-task data can include blocker relationships, but regular Kanban has no blocker editor or blocker filter. Use workflow gates, direct-child completion, and explicit messages for supported Kanban coordination. Do not treat Office's named documents, labels, or blocker UI as a stable public contract yet.
 
@@ -226,20 +252,22 @@ Stored related-task data can include blocker relationships, but regular Kanban h
 
 Archive records the task as archived and removes it from active views immediately. Runtime stopping and physical cleanup then run in the background with a 60-second timeout. Cleanup is best-effort: a stop or deletion failure is logged and does not undo the archive, and Kandev preserves a runtime or environment when a nonterminal session cannot be stopped. Shared inherited environments and borrowed worktrees are also preserved while another active task still uses them.
 
-| Executor | Archive cleanup |
-|---|---|
-| Local | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched. |
-| Git worktree | Attempts to remove the Kandev-owned worktree and its local task branch. It does not delete the remote branch, and shared or borrowed worktrees can remain until their last active user is gone. |
-| Local Docker | Attempts to stop and remove the container; the host repository remains. |
-| Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow. |
-| Sprites | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost. |
-| SSH | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them. |
+| Executor      | Archive cleanup                                                                                                                                                                                 |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local         | Attempts to stop the agent runtime; leaves the local folder, files, and branch untouched.                                                                                                       |
+| Git worktree  | Attempts to remove the Kandev-owned worktree and its local task branch. It does not delete the remote branch, and shared or borrowed worktrees can remain until their last active user is gone. |
+| Local Docker  | Attempts to stop and remove the container; the host repository remains.                                                                                                                         |
+| Remote Docker | Runtime create and stop are not implemented. This executor is in progress and cannot currently start a task, so it has no supported archive-cleanup flow.                                       |
+| Sprites       | Attempts to destroy the sandbox; if cleanup succeeds, uncommitted sandbox work is lost.                                                                                                         |
+| SSH           | Attempts to stop the remote session runtime, but the remote task directory remains. Audit and remove retained task directories manually after confirming that no session needs them.            |
 
 The archive confirmation is enabled by default at **Settings → General → Task Actions → Archive Confirmation** under **Confirm before archiving tasks**. If a parent has children, **Also archive _N_ subtasks** is unchecked by default; without it, the children remain active. Task MCP archive/delete operations affect only the selected task and do not offer the cascade checkbox. MCP delete also does not reparent direct children the way the UI's non-cascade delete does; use the UI rather than task MCP to delete a parent that still has children.
 
 To restore a task, open **List**, enable **Show archived**, and choose unarchive. If the parent was archived with its children, the cascade-owned children are restored with it. For worktree tasks, Kandev probes the newest historical worktree branch for each repository. If that branch still exists locally or on `origin`, Kandev restores it as the checkout branch so the next session can pick it up. Recovery is best-effort and does not rewrite ambiguous multi-row attachments for the same repository. If the branch is missing, the unarchive toast warns that the next session starts fresh from the base branch; work that existed only on the deleted local branch is unrecoverable. Removed worktree directories, containers, and sandboxes are materialized again on a later launch rather than resumed in place.
 
 Delete is permanent. If **Also delete _N_ subtasks** is left unchecked, direct children become root tasks. If selected, descendants are deleted. The operation cannot be undone, and executor cleanup follows the same asynchronous, best-effort rules as archive.
+
+When a task still has an agent generating or background work outstanding, the confirmation dialog adds a still-working warning: proceeding discards work that is in progress. Delete always shows this warning; archive shows it only when the archive confirmation is enabled.
 
 ## Troubleshooting
 

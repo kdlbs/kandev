@@ -1,25 +1,30 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook } from "@testing-library/react";
 import type { UpdateAvailableNotification } from "@/lib/state/slices/ui/types";
-import type { UpdateNotificationSettings } from "@/lib/types/system";
 import type { useUpdateAvailableToast as UseUpdateAvailableToastHook } from "./use-update-available-toast";
 
 let mockNotification: UpdateAvailableNotification | null = null;
-let mockSettings: UpdateNotificationSettings | null = null;
 const mockClearNotification = vi.fn();
-const mockSetSettings = vi.fn();
 const mockToast = vi.fn();
 const mockNativeIsAvailable = vi.fn(() => false);
 const mockNativeShow = vi.fn().mockResolvedValue("shown");
-const mockFetchSettings = vi.fn();
+const UPDATE_VERSION = "v1.2.3";
+const UPDATE_TITLE = "Kandev update available";
+
+function updateNotification(): UpdateAvailableNotification {
+  return {
+    version: UPDATE_VERSION,
+    title: UPDATE_TITLE,
+    body: `Kandev ${UPDATE_VERSION} is available.`,
+    occurrence_id: UPDATE_VERSION,
+  };
+}
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) =>
     selector({
       updateAvailableNotification: mockNotification,
       setUpdateAvailableNotification: mockClearNotification,
-      system: { updateNotificationSettings: mockSettings },
-      setSystemUpdateNotificationSettings: mockSetSettings,
     }),
 }));
 
@@ -34,35 +39,14 @@ vi.mock("@/lib/desktop/native-notification-client", () => ({
   },
 }));
 
-vi.mock("@/lib/api/domains/system-api", () => ({
-  fetchUpdateNotificationSettings: (...args: unknown[]) => mockFetchSettings(...args),
-}));
-
 let useUpdateAvailableToast: typeof UseUpdateAvailableToastHook;
-
-async function flushMicrotasks() {
-  await Promise.resolve();
-  await Promise.resolve();
-}
 
 describe("useUpdateAvailableToast", () => {
   beforeEach(async () => {
     vi.clearAllMocks();
-    // The hook module caches in-flight settings fetches in a module-scoped
-    // variable (`settingsRequest`) so concurrent hook instances share one
-    // request. Reset the module and re-import per test so that cache
-    // doesn't leak a resolved/rejected promise from a previous test into
-    // this one (e.g. the fetch-failure test below would otherwise silently
-    // reuse a prior test's already-resolved fetch and never exercise the
-    // catch branch).
     vi.resetModules();
     mockNativeIsAvailable.mockReturnValue(false);
     mockNotification = null;
-    mockSettings = null;
-    // Dynamic import is required here (not a static one): vi.resetModules()
-    // above clears Vitest's module registry, and only a fresh import()
-    // after that call picks up a new module instance with the module-scoped
-    // `settingsRequest` cache reset to null.
     ({ useUpdateAvailableToast } = await import("./use-update-available-toast"));
   });
 
@@ -73,104 +57,50 @@ describe("useUpdateAvailableToast", () => {
     expect(mockClearNotification).not.toHaveBeenCalled();
   });
 
-  it("shows an in-app toast when the channel is in_view", async () => {
-    mockSettings = { enabled: true, channel: "in_view" };
-    mockNotification = { version: "v1.2.3" };
+  it("always shows an in-app toast for a Local update occurrence", () => {
+    mockNotification = updateNotification();
     renderHook(() => useUpdateAvailableToast());
-    await flushMicrotasks();
-
     expect(mockToast).toHaveBeenCalledWith(
       expect.objectContaining({
-        title: "Update available",
-        description: expect.stringContaining("v1.2.3"),
+        title: UPDATE_TITLE,
+        description: expect.stringContaining(UPDATE_VERSION),
       }),
     );
     expect(mockNativeShow).not.toHaveBeenCalled();
     expect(mockClearNotification).toHaveBeenCalledWith(null);
   });
 
-  it("shows a native notification (not a toast) when the channel is desktop and native is available", async () => {
-    mockSettings = { enabled: true, channel: "desktop" };
-    mockNotification = { version: "v1.2.3" };
+  it("also attempts native delivery without replacing the toast", () => {
+    mockNotification = updateNotification();
     mockNativeIsAvailable.mockReturnValue(true);
     renderHook(() => useUpdateAvailableToast());
-    await flushMicrotasks();
-
-    expect(mockToast).not.toHaveBeenCalled();
+    expect(mockToast).toHaveBeenCalledTimes(1);
     expect(mockNativeShow).toHaveBeenCalledWith(
       expect.objectContaining({
-        eventId: "system.update_available:v1.2.3",
-        title: "Update available",
+        eventId: `system.update_available:${UPDATE_VERSION}`,
+        title: UPDATE_TITLE,
       }),
     );
   });
 
-  it("shows both a toast and a native notification when the channel is both", async () => {
-    mockSettings = { enabled: true, channel: "both" };
-    mockNotification = { version: "v1.2.3" };
+  it("retains the toast when native delivery is denied", () => {
+    mockNotification = updateNotification();
     mockNativeIsAvailable.mockReturnValue(true);
+    mockNativeShow.mockResolvedValueOnce("permission-denied");
     renderHook(() => useUpdateAvailableToast());
-    await flushMicrotasks();
-
     expect(mockToast).toHaveBeenCalledTimes(1);
     expect(mockNativeShow).toHaveBeenCalledTimes(1);
   });
 
-  it("does not notify on any channel when notifications are disabled", async () => {
-    mockSettings = { enabled: false, channel: "both" };
-    mockNotification = { version: "v1.2.3" };
-    mockNativeIsAvailable.mockReturnValue(true);
-    renderHook(() => useUpdateAvailableToast());
-    await flushMicrotasks();
-
-    expect(mockToast).not.toHaveBeenCalled();
-    expect(mockNativeShow).not.toHaveBeenCalled();
-    expect(mockClearNotification).toHaveBeenCalledWith(null);
-  });
-
-  it("fetches settings lazily when not yet loaded, then caches them in the store", async () => {
-    mockSettings = null;
-    mockFetchSettings.mockResolvedValue({ enabled: true, channel: "in_view" });
-    mockNotification = { version: "v1.2.3" };
-    renderHook(() => useUpdateAvailableToast());
-    await flushMicrotasks();
-
-    expect(mockFetchSettings).toHaveBeenCalledTimes(1);
-    expect(mockSetSettings).toHaveBeenCalledWith({ enabled: true, channel: "in_view" });
-    expect(mockToast).toHaveBeenCalledTimes(1);
-  });
-
-  it("falls back to both channels when the settings fetch fails", async () => {
-    mockSettings = null;
-    mockFetchSettings.mockRejectedValue(new Error("network error"));
-    mockNotification = { version: "v1.2.3" };
-    renderHook(() => useUpdateAvailableToast());
-    await flushMicrotasks();
-    await flushMicrotasks();
-
-    expect(mockFetchSettings).toHaveBeenCalledTimes(1);
-    expect(mockToast).toHaveBeenCalledTimes(1);
-    expect(mockToast).toHaveBeenCalledWith(
-      expect.objectContaining({ description: expect.stringContaining("v1.2.3") }),
-    );
-    // The fallback must not be persisted to the store - a later notification
-    // should still see settings as unset and retry the real fetch.
-    expect(mockSetSettings).not.toHaveBeenCalled();
-  });
-
-  it("deduplicates repeated notifications for the same version", async () => {
-    mockSettings = { enabled: true, channel: "in_view" };
-    mockNotification = { version: "v1.2.3" };
+  it("deduplicates repeated notifications for the same version", () => {
+    mockNotification = updateNotification();
     const { rerender } = renderHook(() => useUpdateAvailableToast());
-    await flushMicrotasks();
     expect(mockToast).toHaveBeenCalledTimes(1);
 
     mockToast.mockClear();
     mockClearNotification.mockClear();
-    mockNotification = { version: "v1.2.3" };
+    mockNotification = updateNotification();
     rerender();
-    await flushMicrotasks();
-
     expect(mockToast).not.toHaveBeenCalled();
     expect(mockClearNotification).toHaveBeenCalledWith(null);
   });

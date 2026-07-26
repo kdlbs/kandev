@@ -690,6 +690,9 @@ func (m *mockRepository) ListTaskRepositories(ctx context.Context, taskID string
 	}
 	return out, nil
 }
+func (m *mockRepository) ListTaskWorkspaceFolders(context.Context, string) ([]*models.TaskWorkspaceFolder, error) {
+	return nil, nil
+}
 func (m *mockRepository) ListTaskRepositoriesByTaskIDs(_ context.Context, _ []string) (map[string][]*models.TaskRepository, error) {
 	return make(map[string][]*models.TaskRepository), nil
 }

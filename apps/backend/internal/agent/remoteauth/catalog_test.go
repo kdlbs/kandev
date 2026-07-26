@@ -37,3 +37,28 @@ func TestBuildCatalog_MockSpecSerializesEmptyMethodsAsArray(t *testing.T) {
 		t.Errorf("expected `\"methods\":[]` in JSON, got: %s", out)
 	}
 }
+
+func TestBuildCatalog_GitHubCLIOnlyOffersExplicitSecret(t *testing.T) {
+	cat := BuildCatalogForHost(nil, "linux", "")
+
+	var githubCLI *Spec
+	for i := range cat.Specs {
+		if cat.Specs[i].ID == ghCLISpecID {
+			githubCLI = &cat.Specs[i]
+			break
+		}
+	}
+	if githubCLI == nil {
+		t.Fatal("GitHub CLI auth spec missing")
+	}
+	if len(githubCLI.Methods) != 1 {
+		t.Fatalf("GitHub CLI methods = %+v, want only explicit secret method", githubCLI.Methods)
+	}
+	method := githubCLI.Methods[0]
+	if method.MethodID != ghCLIEnvMethodID || method.Type != "env" || method.EnvVar != ghCLIEnvVar {
+		t.Fatalf("GitHub CLI method = %+v, want explicit GITHUB_TOKEN secret", method)
+	}
+	if _, ok := cat.FindMethod("gh_cli_token"); ok {
+		t.Fatal("host-global gh CLI token method must not be selectable")
+	}
+}

@@ -4,11 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"maps"
 	"os/exec"
 	"regexp"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -52,9 +50,8 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 }
 
 // isContainerizedExecutor returns true for executor types that run agents in
-// containers or remote sandboxes (Docker variants + Sprites). These executors
-// need GitHub token injection for git operations since they don't have access
-// to the host's git credentials, and they're the same set that needs the
+// containers or remote sandboxes (Docker variants + Sprites). These are the
+// same executors that need explicitly configured remote credentials and the
 // kandev-managed feature branch propagated through env metadata.
 func isContainerizedExecutor(executorType string) bool {
 	switch models.ExecutorType(executorType) {
@@ -66,10 +63,9 @@ func isContainerizedExecutor(executorType string) bool {
 }
 
 // executorNeedsResolvedCredentials reports whether an executor runs the agent
-// off the control-plane host and therefore needs credentials resolved into
-// req.Env (rather than inherited from the kandev process environment). This is
-// every containerized executor plus SSH, whose remote agentctl only receives
-// the credential keys we forward in req.Env.
+// off the control-plane host and therefore needs explicitly selected profile
+// credentials resolved into req.Env. This is every containerized executor plus
+// SSH, whose remote agentctl only receives the keys we forward in req.Env.
 func executorNeedsResolvedCredentials(executorType string) bool {
 	return isContainerizedExecutor(executorType) ||
 		models.ExecutorType(executorType) == models.ExecutorTypeSSH
@@ -1125,12 +1121,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		}
 	}
 
-	// For remote executors (containerized *and* SSH), resolve credentials into
-	// req.Env in this order:
-	// 1. Profile remote_auth_secrets (e.g., gh_cli_env method with secret)
-	// 2. Profile remote_credentials with gh_cli_token (extract from local gh CLI)
-	// 3. Global GITHUB_TOKEN secret (fallback)
-	// 4. Auto-extract from local gh CLI (final fallback)
+	// For remote executors (containerized *and* SSH), resolve only explicitly
+	// selected profile auth secrets. Workspace GitHub automation is configured
+	// below through a scoped renewable broker lease.
 	// SSH is included so env-authenticated agents (e.g. claude-acp reading
 	// CLAUDE_CODE_OAUTH_TOKEN) and remote git get their credentials from the
 	// configured profile/secret store rather than from a blanket forward of the
@@ -1145,6 +1138,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if err != nil {
 		return nil, execConfig, err
 	}
+	if err := e.configureGitHubCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
+		return nil, execConfig, err
+	}
 
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree
@@ -1154,6 +1150,15 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.Repositories = buildRepoSpecs(allRepos)
 		for i := range req.Repositories {
 			req.Repositories[i].WorktreeBranchTicket = req.WorktreeBranchTicket
+		}
+	}
+	if folders, folderErr := e.repo.ListTaskWorkspaceFolders(ctx, task.ID); folderErr != nil {
+		return nil, execConfig, folderErr
+	} else {
+		for _, f := range folders {
+			if f != nil {
+				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{Name: f.DisplayName, LocalPath: f.LocalPath})
+			}
 		}
 	}
 
@@ -1181,11 +1186,9 @@ func mergeEnv(req *LaunchAgentRequest, env map[string]string) {
 	}
 }
 
-// applyContainerCredentials resolves and injects credentials for containerized executors.
+// applyContainerCredentials resolves explicit profile credentials for remote executors.
 func (e *Executor) applyContainerCredentials(ctx context.Context, req *LaunchAgentRequest, metadata map[string]interface{}) {
 	e.resolveRemoteCredentials(ctx, req, metadata)
-	e.injectGitHubToken(ctx, req)        // Fallback to global secret
-	e.injectGitHubTokenFromCLI(ctx, req) // Final fallback to local gh CLI
 }
 
 // buildRepoSpecs converts resolved repoInfos into per-repo launch specs for
@@ -1239,114 +1242,27 @@ type repoBranchPlan struct {
 }
 
 func buildRepoBranchPlans(allRepos []*repoInfo) map[*repoInfo]repoBranchPlan {
-	groups := make(map[string][]*repoInfo, len(allRepos))
+	plans := make(map[*repoInfo]repoBranchPlan, len(allRepos))
+	inputs := make([]worktree.BranchIdentityInput, 0, len(allRepos))
+	infos := make([]*repoInfo, 0, len(allRepos))
 	for _, info := range allRepos {
 		if info == nil || info.RepositoryID == "" {
 			continue
 		}
-		groups[info.RepositoryID] = append(groups[info.RepositoryID], info)
+		defaultBranch := ""
+		if info.Repository != nil {
+			defaultBranch = info.Repository.DefaultBranch
+		}
+		inputs = append(inputs, worktree.BranchIdentityInput{
+			RepositoryID: info.RepositoryID, BaseBranch: info.BaseBranch, CheckoutBranch: info.CheckoutBranch,
+			DefaultBranch: defaultBranch, PRNumber: info.PRNumber, Position: info.Position,
+		})
+		infos = append(infos, info)
 	}
-
-	plans := make(map[*repoInfo]repoBranchPlan, len(allRepos))
-	for repoID, group := range groups {
-		identities := branchIdentitySlugsForGroup(repoID, group)
-		if len(group) < 2 {
-			for _, info := range group {
-				plans[info] = repoBranchPlan{identitySlug: identities[info]}
-			}
-			continue
-		}
-		flatIdentity := selectFlatBranchIdentity(group, identities)
-		for _, info := range group {
-			identity := identities[info]
-			pathSlug := identity
-			if identity == flatIdentity {
-				pathSlug = ""
-			}
-			plans[info] = repoBranchPlan{identitySlug: identity, pathSlug: pathSlug}
-		}
+	for index, plan := range worktree.BuildBranchIdentityPlans(inputs) {
+		plans[infos[index]] = repoBranchPlan{identitySlug: plan.IdentitySlug, pathSlug: plan.PathSlug}
 	}
 	return plans
-}
-
-func branchIdentitySlugsForGroup(repoID string, group []*repoInfo) map[*repoInfo]string {
-	raw := make(map[*repoInfo]string, len(group))
-	counts := make(map[string]int, len(group))
-	for _, info := range group {
-		slug := preferredBranchIdentitySlug(info)
-		if slug == "" {
-			slug = "branch-" + branchIdentityHash(repoID, info)
-		}
-		raw[info] = slug
-		counts[slug]++
-	}
-
-	out := make(map[*repoInfo]string, len(group))
-	for _, info := range group {
-		slug := raw[info]
-		if counts[slug] > 1 {
-			slug += "-" + branchIdentityHash(repoID, info)
-		}
-		slug = worktree.SanitizeBranchSlug(slug)
-		if slug == "" {
-			slug = "branch-" + branchIdentityHash(repoID, info)
-		}
-		out[info] = slug
-	}
-	return out
-}
-
-func preferredBranchIdentitySlug(info *repoInfo) string {
-	branch := info.CheckoutBranch
-	if branch == "" {
-		branch = info.BaseBranch
-	}
-	if branch == "" && info.Repository != nil {
-		branch = info.Repository.DefaultBranch
-	}
-	return worktree.SanitizeBranchSlug(branch)
-}
-
-func branchIdentityHash(repoID string, info *repoInfo) string {
-	seed := strings.Join([]string{
-		repoID,
-		info.BaseBranch,
-		info.CheckoutBranch,
-		fmt.Sprintf("%d", info.PRNumber),
-	}, "\x00")
-	h := fnv.New32a()
-	_, _ = h.Write([]byte(seed))
-	return fmt.Sprintf("%08x", h.Sum32())
-}
-
-func selectFlatBranchIdentity(group []*repoInfo, identities map[*repoInfo]string) string {
-	candidates := make([]*repoInfo, 0, len(group))
-	candidates = append(candidates, group...)
-	sort.SliceStable(candidates, func(i, j int) bool {
-		if candidates[i].Position != candidates[j].Position {
-			return candidates[i].Position < candidates[j].Position
-		}
-		leftRank := flatBranchRank(candidates[i])
-		rightRank := flatBranchRank(candidates[j])
-		if leftRank != rightRank {
-			return leftRank < rightRank
-		}
-		return identities[candidates[i]] < identities[candidates[j]]
-	})
-	return identities[candidates[0]]
-}
-
-func flatBranchRank(info *repoInfo) int {
-	if info.CheckoutBranch != "" {
-		return 3
-	}
-	if info.Repository != nil && info.Repository.DefaultBranch != "" && info.BaseBranch == info.Repository.DefaultBranch {
-		return 0
-	}
-	if info.BaseBranch == defaultBaseBranch {
-		return 1
-	}
-	return 2
 }
 
 // applyRepositoryConfig sets repository-related fields on the request and resolves clone URLs.
@@ -1363,11 +1279,18 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree
 		if repoInfo.Repository != nil {
 			req.DefaultBranch = repoInfo.Repository.DefaultBranch
+			if req.UseWorktree {
+				req.RepoName = repoInfo.Repository.Name
+			} else {
+				req.RepoName = worktree.SanitizeRepoDirName(repoInfo.Repository.Name)
+				if req.RepoName == "" {
+					req.RepoName = worktree.SanitizeRepoDirName(repoInfo.RepositoryID)
+				}
+			}
 		}
 		// Task directory mode: place worktree inside per-task directory
 		if req.UseWorktree && repoInfo.Repository != nil && repoInfo.Repository.Name != "" {
 			req.TaskDirName = worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
-			req.RepoName = repoInfo.Repository.Name
 		}
 		if repoInfo.Repository != nil && repoInfo.Repository.SetupScript != "" {
 			if metadata == nil {

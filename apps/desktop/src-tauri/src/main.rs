@@ -39,6 +39,8 @@ fn main() {
             updater::check_for_updates,
             updater::install_update,
             native_notifications::show_native_notification,
+            native_notifications::get_native_notification_permission,
+            native_notifications::request_native_notification_permission,
             external_links::open_external_url,
         ])
         .menu(build_menu)

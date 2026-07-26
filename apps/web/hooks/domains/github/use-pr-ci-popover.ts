@@ -26,15 +26,15 @@ type Result = {
  * on hover-open). Keeping the fetch logic shared means the request-counter
  * dedup is preserved across both call sites.
  */
-function useFeedbackFetch(pr: TaskPR | null) {
+function useFeedbackFetch(workspaceId: string | null, pr: TaskPR | null) {
   const setEntry = useAppStore((state) => state.setPRFeedbackCacheEntry);
   const [isFetching, setIsFetching] = useState(false);
   const requestRef = useRef(0);
   const refetch = useCallback(() => {
-    if (!pr) return;
+    if (!workspaceId || !pr) return;
     const requestId = ++requestRef.current;
     setIsFetching(true);
-    getPRFeedback(pr.owner, pr.repo, pr.pr_number, { cache: "no-store" })
+    getPRFeedback(workspaceId, pr.owner, pr.repo, pr.pr_number, { cache: "no-store" })
       .then((response) => {
         if (requestRef.current !== requestId) return;
         if (response) setEntry(prFeedbackKey(pr), response);
@@ -46,7 +46,7 @@ function useFeedbackFetch(pr: TaskPR | null) {
       .finally(() => {
         if (requestRef.current === requestId) setIsFetching(false);
       });
-  }, [pr, setEntry]);
+  }, [workspaceId, pr, setEntry]);
   return { refetch, isFetching };
 }
 
@@ -60,8 +60,8 @@ function useFeedbackFetch(pr: TaskPR | null) {
  * before showing fresh data — the user sees a stale popover for ~150ms
  * + network latency.
  */
-export function usePRFeedbackBackgroundSync(pr: TaskPR | null): void {
-  const { refetch } = useFeedbackFetch(pr);
+export function usePRFeedbackBackgroundSync(workspaceId: string | null, pr: TaskPR | null): void {
+  const { refetch } = useFeedbackFetch(workspaceId, pr);
   // Compound the cache key with the timestamp so that switching the active
   // task to a different PR (different key) always refetches even when the
   // two PRs happen to share the same updated_at string. Tracking
@@ -83,10 +83,14 @@ export function usePRFeedbackBackgroundSync(pr: TaskPR | null): void {
  * mostly serves as a safety net for the very first hover (before any
  * sync has fired).
  */
-export function usePRCIPopover(pr: TaskPR | null, enabled: boolean): Result {
+export function usePRCIPopover(
+  workspaceId: string | null,
+  pr: TaskPR | null,
+  enabled: boolean,
+): Result {
   const key = pr ? prFeedbackKey(pr) : null;
   const cached = useAppStore((state) => (key ? (state.prFeedbackCache.byKey[key] ?? null) : null));
-  const { refetch, isFetching } = useFeedbackFetch(pr);
+  const { refetch, isFetching } = useFeedbackFetch(workspaceId, pr);
 
   const wasEnabledRef = useRef(false);
   useEffect(() => {

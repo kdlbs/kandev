@@ -9,7 +9,7 @@ useRegularMode();
 
 /**
  * Helper: switch the create-task dialog to the Remote tab and type a URL
- * into the (newly nested) chip popover. Replaces the old "click
+ * into the (newly nested) chip popover and submit it with Enter. Replaces the old "click
  * toggle-github-url + fill github-url-input" pair after Task 5/8 swapped the
  * top-level URL input for a per-row chip + popover.
  */
@@ -20,7 +20,7 @@ async function openRemoteAndPasteURL(testPage: Page, url: string): Promise<void>
   const urlInput = testPage.getByTestId("remote-repo-input");
   await expect(urlInput).toBeVisible();
   await urlInput.fill(url);
-  await urlInput.press("Tab");
+  await urlInput.press("Enter");
 }
 
 test.describe("Task creation from GitHub URL", () => {

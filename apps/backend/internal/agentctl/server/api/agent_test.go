@@ -245,6 +245,25 @@ func TestHandleWSNewSession_NoAdapter(t *testing.T) {
 	}
 }
 
+func TestHandleWSNewSession_UsesExtendedDeadline(t *testing.T) {
+	s := newTestServer(t)
+	capture := &newSessionDeadlineCaptureAdapter{}
+	s.procMgr.SetAdapterForTest(capture)
+
+	msg, err := ws.NewRequest("req-1", "agent.session.new", NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	resp := s.handleWSNewSession(context.Background(), msg)
+	if resp.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeResponse)
+	}
+	const want = 2 * time.Minute
+	if capture.remaining < want-time.Second || capture.remaining > want {
+		t.Fatalf("session/new deadline = %v from now, want about %v", capture.remaining, want)
+	}
+}
+
 func TestHandleWSLoadSession_NoAdapter(t *testing.T) {
 	s := newTestServer(t)
 	ctx := context.Background()
@@ -380,6 +399,20 @@ type mcpCaptureAdapter struct {
 	promptErrorAdapter
 	newSessionServers  []types.McpServer
 	loadSessionServers []types.McpServer
+}
+
+type newSessionDeadlineCaptureAdapter struct {
+	promptErrorAdapter
+	remaining time.Duration
+}
+
+func (a *newSessionDeadlineCaptureAdapter) NewSession(ctx context.Context, _ []types.McpServer) (string, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return "", errors.New("session/new context has no deadline")
+	}
+	a.remaining = time.Until(deadline)
+	return "session-1", nil
 }
 
 func (a *mcpCaptureAdapter) NewSession(_ context.Context, servers []types.McpServer) (string, error) {

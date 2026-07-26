@@ -152,6 +152,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		ToolStatus:              event.ToolStatus,
 		Error:                   event.Error,
 		SessionStatus:           event.SessionStatus,
+		PromptGeneration:        event.PromptGeneration,
 		Data:                    event.Data,
 		Normalized:              event.NormalizedPayload,
 		AvailableCommands:       event.AvailableCommands,

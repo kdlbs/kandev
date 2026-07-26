@@ -22,10 +22,11 @@ type FetchArgs = {
   customQuery: string;
   repoFilter: string;
   page: number;
-  workspaceId: string | null;
+  workspaceId: string;
 };
 
 type UseGitHubSearchOptions = {
+  enabled?: boolean;
   kind: SearchKind;
   presets: PresetOption[];
   preset: string;
@@ -51,6 +52,7 @@ export function buildParams(
 }
 
 export function useGitHubSearch<T extends GitHubPR | GitHubIssue>({
+  enabled = true,
   kind,
   presets,
   preset,
@@ -122,13 +124,18 @@ export function useGitHubSearch<T extends GitHubPR | GitHubIssue>({
   );
 
   useEffect(() => {
+    if (!enabled || !workspaceId) {
+      requestSeq.current += 1;
+      setState({ items: [], loading: false, error: null, lastFetchedAt: null, total: 0 });
+      return;
+    }
     void fetchData({ preset, customQuery, repoFilter, page, workspaceId });
-  }, [fetchData, preset, customQuery, repoFilter, page, workspaceId]);
+  }, [enabled, fetchData, preset, customQuery, repoFilter, page, workspaceId]);
 
-  const refresh = useCallback(
-    () => fetchData({ preset, customQuery, repoFilter, page, workspaceId }),
-    [fetchData, preset, customQuery, repoFilter, page, workspaceId],
-  );
+  const refresh = useCallback(() => {
+    if (!enabled || !workspaceId) return Promise.resolve();
+    return fetchData({ preset, customQuery, repoFilter, page, workspaceId });
+  }, [enabled, fetchData, preset, customQuery, repoFilter, page, workspaceId]);
 
   return { ...state, page, setPage, pageSize: SEARCH_PAGE_SIZE, refresh };
 }

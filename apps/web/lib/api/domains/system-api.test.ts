@@ -27,8 +27,6 @@ import {
   fetchSystemJob,
   fetchRestartCapability,
   requestRestart,
-  fetchUpdateNotificationSettings,
-  saveUpdateNotificationSettings,
   adoptStorageGoCache,
   analyzeStorage,
   deleteStorageQuarantine,
@@ -391,28 +389,5 @@ describe("storage maintenance", () => {
     expect((await runStorageMaintenance(["workspaces"])).job_id).toBe("cleanup");
     expect(JSON.parse(String(lastCall().init?.body))).toEqual({ resources: ["workspaces"] });
     expect((await restoreStorageQuarantine("entry-1")).id).toBe("restored");
-  });
-});
-
-describe("update notification settings", () => {
-  it("fetchUpdateNotificationSettings GETs the notification-settings endpoint and bypasses cache", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ enabled: true, channel: "desktop" }));
-    const settings = await fetchUpdateNotificationSettings({ cache: "force-cache" });
-    expect(lastCall().url).toBe(`${BASE}/updates/notification-settings`);
-    expect(method()).toBe("GET");
-    expect(lastCall().init?.cache).toBe("no-store");
-    expect(settings).toEqual({ enabled: true, channel: "desktop" });
-  });
-
-  it("saveUpdateNotificationSettings PUTs the settings body to the same endpoint", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ enabled: false, channel: "in_view" }));
-    const persisted = await saveUpdateNotificationSettings({ enabled: false, channel: "in_view" });
-    expect(lastCall().url).toBe(`${BASE}/updates/notification-settings`);
-    expect(method()).toBe("PUT");
-    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
-      enabled: false,
-      channel: "in_view",
-    });
-    expect(persisted).toEqual({ enabled: false, channel: "in_view" });
   });
 });

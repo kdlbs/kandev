@@ -10,7 +10,9 @@ import {
   IconWand,
 } from "@tabler/icons-react";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
+import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
+import { AccountGroup } from "./account-group";
 import { AgentsGroup } from "./agents-group";
 import { ExecutorsGroup } from "./executors-group";
 import { GeneralGroup } from "./general-group";
@@ -35,6 +37,7 @@ const GROUP_ROUTES = [
   { id: "agents", prefix: "/settings/agents" },
   { id: "executors", prefix: "/settings/executors" },
   { id: "system", prefix: "/settings/system" },
+  { id: "account", prefix: "/settings/account" },
 ] as const;
 
 /** The settings accordion group that owns `pathname`, or null for a standalone leaf. */
@@ -56,6 +59,9 @@ export function settingsOpenGroupIdForPath(pathname: string): string {
  */
 export function SettingsTree({ pathname }: { pathname: string }) {
   const pluginsEnabled = useFeature("plugins");
+  const authEnabled = useFeature("auth");
+  const authMode = useAppStore((s) => s.auth.mode);
+  const showAccountGroup = authEnabled && authMode === "enabled";
   const [openGroup, setOpenGroup] = useState<string | null>(() =>
     settingsOpenGroupIdForPath(pathname),
   );
@@ -118,6 +124,7 @@ export function SettingsTree({ pathname }: { pathname: string }) {
         />
       )}
       <SystemGroup pathname={pathname} {...groupProps("system")} />
+      {showAccountGroup && <AccountGroup pathname={pathname} {...groupProps("account")} />}
     </>
   );
 }

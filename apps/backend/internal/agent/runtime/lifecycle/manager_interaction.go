@@ -86,6 +86,12 @@ func fallbackAuthMethods(agentID string) []streams.AuthMethodInfo {
 // When dispatchOnly is true, returns once the prompt is accepted instead of
 // waiting for the agent's turn to complete.
 func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*PromptResult, error) {
+	return m.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, nil)
+}
+
+// PromptAgentWithDispatchCallback exposes agentctl acceptance to callers that
+// must keep admission serialized until the queued prompt is actually dispatched.
+func (m *Manager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*PromptResult, error) {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return nil, fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
@@ -96,7 +102,7 @@ func (m *Manager) PromptAgent(ctx context.Context, executionID string, prompt st
 	}
 	key := executionActivityKey(executionID)
 	m.trackActivity(key, lease)
-	result, err := m.sessionManager.SendPrompt(ctx, execution, prompt, true, attachments, dispatchOnly)
+	result, err := m.sessionManager.SendPromptWithDispatchCallback(ctx, execution, prompt, true, attachments, dispatchOnly, onDispatched)
 	if err != nil || !dispatchOnly {
 		m.releaseActivity(key)
 	}
@@ -210,8 +216,9 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 
 	select {
 	case execution.promptDoneCh <- PromptCompletionSignal{
-		IsError: true,
-		Error:   "cancel escalated: agent did not complete turn within timeout",
+		IsError:          true,
+		Error:            "cancel escalated: agent did not complete turn within timeout",
+		PromptGeneration: execution.promptGenerationSnapshot(),
 	}:
 	default:
 		// Channel already has a pending signal; SendPrompt will pick that up instead.
@@ -451,12 +458,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		exec.needsResumeContext = false
 		exec.resumeContextInjected = false
 
-		exec.messageMu.Lock()
-		exec.messageBuffer.Reset()
-		exec.thinkingBuffer.Reset()
-		exec.currentMessageID = ""
-		exec.currentThinkingID = ""
-		exec.messageMu.Unlock()
+		m.resetStreamingStateWithHistory(exec)
 
 		// Drain any stale prompt completion signal
 		select {
@@ -731,12 +733,7 @@ func (m *Manager) resetAgentRestartState(executionID string, commands agentComma
 		exec.ContinueCommand = commands.continue_
 		exec.AgentArgs = commands.args
 		exec.ContinueArgs = commands.continueArgs
-		exec.messageMu.Lock()
-		exec.messageBuffer.Reset()
-		exec.thinkingBuffer.Reset()
-		exec.currentMessageID = ""
-		exec.currentThinkingID = ""
-		exec.messageMu.Unlock()
+		m.resetStreamingStateWithHistory(exec)
 		select {
 		case <-exec.promptDoneCh:
 		default:

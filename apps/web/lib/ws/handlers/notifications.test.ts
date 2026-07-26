@@ -4,6 +4,7 @@ import type { AppState } from "@/lib/state/store";
 import {
   NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED,
   NOTIFICATION_EVENT_SESSION_TURN_FINISHED,
+  NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE,
 } from "@/lib/notifications/events";
 import type { BackendMessageMap } from "@/lib/types/backend";
 import { registerNotificationsHandlers } from "./notifications";
@@ -76,6 +77,38 @@ function getHandler(
   )[action]!;
 }
 
+describe("notification handler registration", () => {
+  it("registers handlers for both semantic notification events", () => {
+    const handlers = registerNotificationsHandlers(makeStore()) as Record<string, unknown>;
+
+    expect(handlers[NOTIFICATION_EVENT_SESSION_TURN_FINISHED]).toEqual(expect.any(Function));
+    expect(handlers[NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED]).toEqual(
+      expect.any(Function),
+    );
+    expect(handlers["office.inbox_item"]).toEqual(expect.any(Function));
+    expect(handlers[NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE]).toEqual(expect.any(Function));
+  });
+
+  it("routes a Local update occurrence into the in-app toast bridge", () => {
+    const setUpdateAvailableNotification = vi.fn();
+    const store = makeStore({ setUpdateAvailableNotification } as unknown as Partial<AppState>);
+    const handler = (
+      registerNotificationsHandlers(store) as Record<string, (message: unknown) => void>
+    )[NOTIFICATION_EVENT_SYSTEM_UPDATE_AVAILABLE]!;
+    const payload = {
+      version: "v1.2.3",
+      url: "https://example.test/releases/v1.2.3",
+      title: "Kandev update available",
+      body: "Kandev v1.2.3 is available.",
+      occurrence_id: "v1.2.3",
+    };
+
+    handler({ payload });
+
+    expect(setUpdateAvailableNotification).toHaveBeenCalledWith(payload);
+  });
+});
+
 describe("semantic session notification handlers", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -88,16 +121,6 @@ describe("semantic session notification handlers", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__;
-  });
-
-  it("registers handlers for both semantic notification events", () => {
-    const handlers = registerNotificationsHandlers(makeStore()) as Record<string, unknown>;
-
-    expect(handlers[NOTIFICATION_EVENT_SESSION_TURN_FINISHED]).toEqual(expect.any(Function));
-    expect(handlers[NOTIFICATION_EVENT_SESSION_CLARIFICATION_REQUESTED]).toEqual(
-      expect.any(Function),
-    );
-    expect(handlers["office.inbox_item"]).toEqual(expect.any(Function));
   });
 
   it("delegates event deduplication to the native notification command", () => {

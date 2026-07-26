@@ -40,6 +40,7 @@ type AgentExecution struct {
 	ContainerID          string
 	ContainerIP          string               // IP address of the container for agentctl communication
 	WorkspacePath        string               // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots []string             // Canonical durable source roots permitted by agentctl file operations
 	ACPSessionID         string               // ACP session ID to resume, if available
 	AgentCommand         string               // Command to start the agent subprocess
 	ContinueCommand      string               // Command for follow-up prompts (one-shot agents like Amp)
@@ -107,13 +108,24 @@ type AgentExecution struct {
 	thinkingBuffer strings.Builder
 	messageMu      sync.Mutex
 
-	// Streaming message tracking - IDs of the current in-progress messages being streamed
-	// These are set when we create a streaming message and cleared on tool_call/complete
+	// Legacy streaming message tracking for agents that omit protocol message IDs.
+	// These are set when we create a streaming message and cleared on tool_call/complete.
 	currentMessageID  string
 	currentThinkingID string
 
+	// Protocol message correlation maps source-protocol IDs to Kandev message
+	// record IDs. Assistant and thought IDs use separate namespaces so an agent
+	// reusing the same source ID cannot merge visible and reasoning content.
+	protocolMessageIDs  map[string]string
+	protocolThinkingIDs map[string]string
+	// assistantHistoryBuffer accumulates assistant chunks in wire order for
+	// history-context injection. Tool and completion boundaries persist it as
+	// one segment before recording the boundary event.
+	assistantHistoryBuffer strings.Builder
+
 	// History-based context injection for agents without native session resume (e.g. Auggie).
-	// historyEnabled gates recording and injection; set from SessionConfig.HistoryContextInjection.
+	// historyEnabled gates recording and injection; it is enabled by either
+	// HistoryContextInjection or NewSessionOnWorkspaceRebind.
 	// needsResumeContext is set to true when the session has history that should be injected.
 	// resumeContextInjected is set to true after context has been injected into a prompt.
 	historyEnabled        bool
@@ -146,6 +158,11 @@ type AgentExecution struct {
 	// Channel signaled by handleAgentEvent(complete) or stream disconnect to unblock SendPrompt.
 	// Buffered (size 1) so the sender never blocks.
 	promptDoneCh chan PromptCompletionSignal
+	// promptMu keeps exactly one SendPrompt completion waiter and one set of
+	// response buffers active for an execution. Agentctl accepts prompt requests
+	// asynchronously, so its transport-level gate alone cannot provide this.
+	promptMu                sync.Mutex
+	dispatchedPromptPending bool
 
 	// Closed when the current SendPrompt returns, so CancelAgent can wait
 	// for the in-flight prompt to finish before the caller retries.
@@ -176,9 +193,16 @@ func (e *AgentExecution) officeProfileID() string {
 
 // PromptCompletionSignal carries the result from a complete event or disconnect.
 type PromptCompletionSignal struct {
-	StopReason string
-	IsError    bool
-	Error      string
+	StopReason       string
+	IsError          bool
+	Error            string
+	PromptGeneration uint64
+}
+
+func (e *AgentExecution) promptGenerationSnapshot() uint64 {
+	e.promptLifecycleMu.Lock()
+	defer e.promptLifecycleMu.Unlock()
+	return e.promptGeneration
 }
 
 // GetAgentCtlClient returns the agentctl client for this execution
@@ -479,6 +503,30 @@ type RepoLaunchSpec struct {
 	BranchIdentitySlug string
 }
 
+// WorkspaceFolderSpec is a durable host folder attachment projected into both
+// fresh launches and workspace-only resume construction.
+type WorkspaceFolderSpec struct {
+	Name      string
+	LocalPath string
+}
+
+// WorkspaceRepositorySpec is the durable host-side source needed to recreate
+// a task's owned repository entry after a restart.
+type WorkspaceRepositorySpec struct {
+	RepositoryID           string
+	RepositoryPath         string
+	RepoName               string
+	BaseBranch             string
+	DefaultBranch          string
+	CheckoutBranch         string
+	WorktreeID             string
+	WorktreeBranchPrefix   string
+	WorktreeBranchTemplate string
+	PullBeforeWorktree     bool
+	BranchSlug             string
+	BranchIdentitySlug     string
+}
+
 // RouteOverride carries a fully resolved provider profile for one
 // routing-driven launch. Empty fields mean "use the base profile value"
 // — so when the dispatcher does NOT supply an override, launch behavior
@@ -571,7 +619,8 @@ type LaunchRequest struct {
 	// When non-empty it is the source of truth; the legacy single-repo top-level
 	// fields above are populated from Repositories[0] for callers that have not
 	// yet been updated.
-	Repositories []RepoLaunchSpec
+	Repositories     []RepoLaunchSpec
+	WorkspaceFolders []WorkspaceFolderSpec
 
 	// managedGoCachePath is resolved once before local preparation so setup
 	// scripts and the runtime instance cannot observe different settings.
@@ -678,14 +727,18 @@ type McpConfigProvider interface {
 
 // WorkspaceInfo contains information about a task's workspace for on-demand execution creation
 type WorkspaceInfo struct {
-	TaskID             string
-	SessionID          string // Task session ID (from task_sessions table)
-	TaskEnvironmentID  string // Env this session belongs to (shared across sessions in same task)
-	WorkspacePath      string // Path to the workspace/repository
-	AgentProfileID     string // Stable Office agent identity (or the execution profile for legacy sessions)
-	ExecutionProfileID string // Concrete CLI profile selected for this execution
-	AgentID            string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID       string // Agent's session ID for conversation resumption (from session metadata)
+	TaskID                string
+	SessionID             string // Task session ID (from task_sessions table)
+	TaskEnvironmentID     string // Env this session belongs to (shared across sessions in same task)
+	WorkspacePath         string // Path to the workspace/repository
+	WorkspaceFolders      []WorkspaceFolderSpec
+	WorkspaceRepositories []WorkspaceRepositorySpec
+	TaskDirName           string
+	WorkspaceID           string
+	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
+	ExecutionProfileID    string // Concrete CLI profile selected for this execution
+	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
 	// from session metadata, declared via the set_session_mode workflow action or
 	// a user toggle. Applied as a mode override at ACP session init so a fresh

@@ -14,7 +14,6 @@ const (
 	metaKeyLatestVersion          = "latest_version"
 	metaKeyLatestVersionURL       = "latest_version_url"
 	metaKeyLatestVersionCheckedAt = "latest_version_checked_at"
-	metaKeyNotifiedUpdateVersion  = "notified_update_version"
 )
 
 const metaTableDDL = `
@@ -109,21 +108,6 @@ func ReadLatestVersion(db *sqlx.DB) (string, string, time.Time, error) {
 		checkedAt = time.Unix(secs, 0).UTC()
 	}
 	return version, url, checkedAt, nil
-}
-
-// WriteNotifiedUpdateVersion records the release tag that the update
-// notification was last sent for. This is independent of
-// latest_version/ReadLatestVersion so a user who dismisses/misses a
-// notification isn't re-notified for the same release on every subsequent
-// poll tick or backend restart — only when a *newer* tag appears.
-func WriteNotifiedUpdateVersion(db *sqlx.DB, version string) error {
-	return writeKey(db, metaKeyNotifiedUpdateVersion, version)
-}
-
-// ReadNotifiedUpdateVersion returns the release tag last notified about, or
-// "" when no update notification has been sent yet.
-func ReadNotifiedUpdateVersion(db *sqlx.DB) (string, error) {
-	return readKey(db, metaKeyNotifiedUpdateVersion)
 }
 
 // hasUserTables returns true when the DB contains at least one table that is
