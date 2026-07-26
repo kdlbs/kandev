@@ -261,8 +261,11 @@ func (s *Service) recordToolOwnership(
 }
 
 func (s *Service) toolOwnership(sessionID, toolCallID, executionID string) toolOwnership {
+	if toolCallID == "" {
+		return toolOwnershipUnknown
+	}
 	ta := s.lockTurnActivity(sessionID, false)
-	if ta == nil || toolCallID == "" {
+	if ta == nil {
 		return toolOwnershipUnknown
 	}
 	defer ta.mu.Unlock()
@@ -274,8 +277,11 @@ func (s *Service) toolOwnership(sessionID, toolCallID, executionID string) toolO
 }
 
 func (s *Service) clearToolOwnership(sessionID, toolCallID, executionID string) {
+	if toolCallID == "" {
+		return
+	}
 	ta := s.lockTurnActivity(sessionID, false)
-	if ta == nil || toolCallID == "" {
+	if ta == nil {
 		return
 	}
 	defer ta.mu.Unlock()

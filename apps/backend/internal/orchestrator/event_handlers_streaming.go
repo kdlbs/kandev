@@ -1198,11 +1198,33 @@ func (s *Service) markTerminalExecution(sessionID, executionID string, allowComp
 	}
 	key := terminalExecutionKey(sessionID, executionID)
 	expiresAt := time.Now().Add(completedExecutionRetention)
-	s.completedExecutions.Store(key, terminalExecutionMarker{
+	candidate := terminalExecutionMarker{
 		expiresAt:           expiresAt,
 		allowCompleteStream: allowCompleteStream,
 		turnID:              s.currentTurnIDForSession(context.Background(), sessionID),
-	})
+	}
+	for {
+		value, loaded := s.completedExecutions.LoadOrStore(key, candidate)
+		if !loaded {
+			break
+		}
+		current, ok := value.(terminalExecutionMarker)
+		if !ok || time.Now().After(current.expiresAt) {
+			s.completedExecutions.CompareAndDelete(key, value)
+			continue
+		}
+		merged := candidate
+		if current.allowCompleteStream {
+			// Terminal stream permission is monotonic for an execution:
+			// StopExecution may emit agent.stopped after agent.completed but
+			// before the successful execution's buffered complete stream.
+			merged.allowCompleteStream = true
+			merged.turnID = current.turnID
+		}
+		if s.completedExecutions.CompareAndSwap(key, value, merged) {
+			break
+		}
+	}
 	time.AfterFunc(completedExecutionRetention, func() {
 		s.deleteCompletedExecutionIfExpired(key, expiresAt)
 	})

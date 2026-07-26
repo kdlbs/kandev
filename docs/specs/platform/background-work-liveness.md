@@ -111,7 +111,8 @@ execution so each prompt owns its completion wait and response buffers.
   cleanup, and session removal retire all activity owned by that execution.
   Cleanup is idempotent and must preserve activity already claimed by a
   successor on the same session. Session removal quiesces any still-live
-  lifecycle execution and rejects deletion if that stop fails. Per-session
+  lifecycle execution and rejects deletion if that stop fails, except when the
+  runtime reports that the exact execution is already absent. Per-session
   activity validation and delivery remain ordered across record replacement;
   each publication snapshots its activity value and active-subagent count
   together. Per-task publication is FIFO: a newly computed activity value must

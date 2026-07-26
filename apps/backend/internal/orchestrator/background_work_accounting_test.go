@@ -390,6 +390,43 @@ func TestExecutionTeardown_StaleToolOwnershipIsNotVisibleToReusedSuccessorID(t *
 	}
 }
 
+func TestToolOwnership_EmptyIDDoesNotLeakActivityLock(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		call func(*Service, string)
+	}{
+		{
+			name: "lookup",
+			call: func(svc *Service, sessionID string) {
+				svc.toolOwnership(sessionID, "", "execution")
+			},
+		},
+		{
+			name: "clear",
+			call: func(svc *Service, sessionID string) {
+				svc.clearToolOwnership(sessionID, "", "execution")
+			},
+		},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			const sessionID = "session-empty-tool-id"
+			svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+			svc.recordToolOwnership(sessionID, "real-tool", "execution", toolOwnershipForeground)
+
+			testCase.call(svc, sessionID)
+
+			activity, ok := turnActivityRecord(t, svc, sessionID)
+			if !ok {
+				t.Fatal("tool ownership precondition did not create activity")
+			}
+			if !activity.mu.TryLock() {
+				t.Fatal("empty tool ID returned while retaining the activity lock")
+			}
+			activity.mu.Unlock()
+		})
+	}
+}
+
 func TestExecutionStop_RetiresOnlyOwnedBackgroundWorkAndPublishesFinalTransition(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1258,6 +1295,38 @@ func TestDeleteSession_StopFailurePreservesSessionAndActivity(t *testing.T) {
 	}
 	if svc.isExecutionCompleted(sessionID, executionID) {
 		t.Fatal("stop failure terminal-marked a still-live execution")
+	}
+}
+
+func TestDeleteSession_AlreadyMissingRuntimeStillDeletesSession(t *testing.T) {
+	const (
+		taskID      = "task-delete-runtime-gone"
+		sessionID   = "session-delete-runtime-gone"
+		executionID = "execution-delete-runtime-gone"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return executionID, nil
+		},
+		stopAgentWithReasonErr: lifecycle.ErrExecutionNotFound,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.registerBackgroundWork(sessionID, "background-stale", executionID, "work-stale")
+
+	if err := svc.DeleteSession(t.Context(), sessionID); err != nil {
+		t.Fatalf("DeleteSession with already-missing runtime: %v", err)
+	}
+	if _, err := repo.GetTaskSession(t.Context(), sessionID); err == nil {
+		t.Fatal("session remained after its runtime was already gone")
+	}
+	if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+		t.Fatal("already-missing runtime left stale activity after session deletion")
+	}
+	if !svc.isExecutionCompleted(sessionID, executionID) {
+		t.Fatal("already-missing runtime was not terminal-marked before deletion")
 	}
 }
 

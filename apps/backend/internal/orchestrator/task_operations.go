@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -2240,7 +2241,13 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		executionID, executionErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 		if executionErr == nil && executionID != "" {
 			if err := s.executor.StopExecution(ctx, executionID, "session deleted", true); err != nil {
-				return fmt.Errorf("failed to stop session execution before deletion: %w", err)
+				if !errors.Is(err, agentruntime.ErrNotFound) {
+					return fmt.Errorf("failed to stop session execution before deletion: %w", err)
+				}
+				s.logger.Debug("session execution already absent during deletion",
+					zap.String("session_id", sessionID),
+					zap.String("agent_execution_id", executionID),
+					zap.Error(err))
 			}
 			s.markExecutionFailed(sessionID, executionID)
 			s.retireExecutionActivityAndPublish(
