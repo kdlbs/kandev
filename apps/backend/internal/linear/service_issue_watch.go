@@ -63,12 +63,43 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 
 // ListIssueWatches returns the watches configured for a workspace.
 func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	return s.store.ListIssueWatches(ctx, workspaceID)
 }
 
-// ListAllIssueWatches returns every watch across all workspaces.
+// ListAllIssueWatches returns every watch the caller may see. For a scoped
+// caller that is only their own workspaces' watches; for an identity-less
+// internal caller (unscoped) it is every watch, as before auth. The unscoped
+// list form is only reachable when workspace_id is omitted, which the query-only
+// integration middleware does not authorize — without this filter it leaked
+// every workspace's watch config (filters, repo/agent/profile IDs, spawn prompt).
 func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
-	return s.store.ListAllIssueWatches(ctx)
+	watches, err := s.store.ListAllIssueWatches(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.filterIssueWatchesByAccess(ctx, watches), nil
+}
+
+// filterIssueWatchesByAccess keeps only watches whose workspace the caller may
+// access. Access decisions are memoized per workspace so a long list costs one
+// authorize call per distinct workspace, not one per watch.
+func (s *Service) filterIssueWatchesByAccess(ctx context.Context, watches []*IssueWatch) []*IssueWatch {
+	decision := make(map[string]bool)
+	visible := make([]*IssueWatch, 0, len(watches))
+	for _, w := range watches {
+		allowed, seen := decision[w.WorkspaceID]
+		if !seen {
+			allowed = s.authorizeWorkspaceAccess(ctx, w.WorkspaceID) == nil
+			decision[w.WorkspaceID] = allowed
+		}
+		if allowed {
+			visible = append(visible, w)
+		}
+	}
+	return visible
 }
 
 // GetIssueWatch returns a single watch by ID or ErrIssueWatchNotFound.

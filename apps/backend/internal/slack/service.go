@@ -36,6 +36,43 @@ type Service struct {
 	clientFn  ClientFactory
 	clients   map[string]Client
 	probeHook func()
+	// workspaceAuthorizer is the per-user workspace access boundary, wired
+	// post-construction via SetWorkspaceAuthorizer. Nil (unit tests, auth
+	// disabled) means unscoped — every workspace is visible, as before auth.
+	workspaceAuthorizer func(context.Context, string) error
+}
+
+// SetWorkspaceAuthorizer installs the per-user workspace access boundary applied
+// before user-facing Slack config reads/mutations. Wired to
+// taskSvc.AuthorizeWorkspaceAccess so a caller cannot reach a workspace it does
+// not own by naming its ID (e.g. the copy target, or the resolved default).
+func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
+	if s != nil {
+		s.workspaceAuthorizer = authorizer
+	}
+}
+
+func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
+	if s == nil || s.workspaceAuthorizer == nil {
+		return nil
+	}
+	return s.workspaceAuthorizer(ctx, workspaceID)
+}
+
+// resolveWorkspaceID normalizes an optional workspace ID (empty → default) and
+// authorizes the caller against the resolved workspace. Using it instead of
+// normalizeWorkspaceID on user-facing entry points closes the default-workspace
+// fallback: a scoped caller that omits workspace_id cannot land on a global
+// default it does not own.
+func (s *Service) resolveWorkspaceID(ctx context.Context, workspaceID string) (string, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return "", err
+	}
+	return workspaceID, nil
 }
 
 // AgentRunner runs the configured utility agent for a Slack match. Defined as
@@ -101,7 +138,7 @@ func (s *Service) GetConfig(ctx context.Context) (*SlackConfig, error) {
 
 // GetConfigForWorkspace returns a workspace config enriched with HasToken/HasCookie.
 func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string) (*SlackConfig, error) {
-	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	workspaceID, err := s.resolveWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +202,7 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*SlackC
 
 // SetConfigForWorkspace is upsert. Empty Token/Cookie on update keeps existing values.
 func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string, req *SetConfigRequest) (*SlackConfig, error) {
-	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	workspaceID, err := s.resolveWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +239,7 @@ func (s *Service) DeleteConfig(ctx context.Context) error {
 
 // DeleteConfigForWorkspace removes both the row and the stored secrets.
 func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
-	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	workspaceID, err := s.resolveWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return err
 	}

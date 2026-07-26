@@ -569,10 +569,15 @@ func registerRoutes(p routeParams) {
 	if p.services.Jira != nil {
 		p.services.Jira.SetTaskDeleter(handoffSvc)
 		p.services.Jira.SetRepositoryLookup(repoLookup)
+		p.services.Jira.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
 	if p.services.Linear != nil {
 		p.services.Linear.SetTaskDeleter(handoffSvc)
 		p.services.Linear.SetRepositoryLookup(repoLookup)
+		p.services.Linear.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
+	}
+	if p.services.Slack != nil {
+		p.services.Slack.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)

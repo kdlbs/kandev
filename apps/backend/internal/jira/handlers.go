@@ -11,8 +11,16 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+// workspaceDenied reports whether err is the per-user workspace access denial
+// surfaced by the workspace authorizer. Handlers map it to 404 so a workspace
+// the caller may not access is indistinguishable from a missing one.
+func workspaceDenied(err error) bool {
+	return errors.Is(err, repoerrors.ErrWorkspaceNotFound)
+}
 
 // RegisterRoutes wires the Jira HTTP and WebSocket handlers.
 func RegisterRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *Service, log *logger.Logger) {
@@ -55,6 +63,10 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 func (c *Controller) httpGetConfig(ctx *gin.Context) {
 	cfg, err := c.service.GetConfigForWorkspace(ctx.Request.Context(), c.workspaceID(ctx))
 	if err != nil {
+		if workspaceDenied(err) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+			return
+		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -74,8 +86,11 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 	cfg, err := c.service.SetConfigForWorkspace(ctx.Request.Context(), c.workspaceID(ctx), &req)
 	if err != nil {
 		status := http.StatusInternalServerError
-		if errors.Is(err, ErrInvalidConfig) {
+		switch {
+		case errors.Is(err, ErrInvalidConfig):
 			status = http.StatusBadRequest
+		case workspaceDenied(err):
+			status = http.StatusNotFound
 		}
 		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
@@ -85,6 +100,10 @@ func (c *Controller) httpSetConfig(ctx *gin.Context) {
 
 func (c *Controller) httpDeleteConfig(ctx *gin.Context) {
 	if err := c.service.DeleteConfigForWorkspace(ctx.Request.Context(), c.workspaceID(ctx)); err != nil {
+		if workspaceDenied(err) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+			return
+		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
@@ -214,6 +233,8 @@ func (c *Controller) httpCopyConfig(ctx *gin.Context) {
 		switch {
 		case errors.Is(err, ErrSameWorkspace), errors.Is(err, ErrNothingToCopy), errors.Is(err, ErrInvalidConfig):
 			status = http.StatusBadRequest
+		case workspaceDenied(err):
+			status = http.StatusNotFound
 		}
 		ctx.JSON(status, gin.H{"error": err.Error()})
 		return
