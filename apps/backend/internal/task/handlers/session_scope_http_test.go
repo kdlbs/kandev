@@ -147,3 +147,45 @@ func TestHTTPGetTaskSessionDeniesForeignSessionWith404(t *testing.T) {
 		t.Fatalf("foreign session body leaked: %s", body)
 	}
 }
+
+// TestHTTPGetShellOutputDeniesForeignMessageWith404 pins the status mapping for
+// the shell-output route. GetMessage became per-user scoped, so a denial now
+// arrives as ErrTaskNotFound rather than sql.ErrNoRows; matching only the latter
+// answered 500 for a foreign message and 404 for a missing one, which is an
+// existence signal.
+func TestHTTPGetShellOutputDeniesForeignMessageWith404(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &foreignMessageRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &MessageHandlers{service: svc, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodGet,
+		"/api/v1/task-sessions/sess-b/messages/msg-b/shell-output", nil)
+	c.Request = c.Request.WithContext(authn.WithIdentity(
+		c.Request.Context(), authn.Identity{UserID: "user-a", Role: authn.RoleMember}))
+	c.Params = gin.Params{{Key: "id", Value: "sess-b"}, {Key: "message_id", Value: "msg-b"}}
+
+	h.httpGetShellOutput(c)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404 (body: %s)", rec.Code, rec.Body.String())
+	}
+}
+
+// foreignMessageRepo owns the message's session as "user-b".
+type foreignMessageRepo struct {
+	foreignSessionRepo
+}
+
+func (r *foreignMessageRepo) GetMessage(context.Context, string) (*models.Message, error) {
+	return &models.Message{ID: "msg-b", TaskSessionID: "sess-b"}, nil
+}
