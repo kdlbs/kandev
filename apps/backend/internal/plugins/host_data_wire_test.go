@@ -255,13 +255,13 @@ func TestPluginHostData_Wire_Messages(t *testing.T) {
 }
 
 // TestPluginHostData_Wire_Writes proves the write RPCs (CreateTask/UpdateTask/
-// CreateComment) travel intact over the real broker transport and enforce
+// SendMessage) travel intact over the real broker transport and enforce
 // api_write:<resource> host-side, exactly like the reads. A plugin declaring
-// api_write:tasks (but not comments) can create/update tasks over the wire, and
-// its undeclared comment write is denied with the exact wire message on the
+// api_write:tasks (but not messages) can create/update tasks over the wire, and
+// its undeclared message send is denied with the exact wire message on the
 // same connection.
 func TestPluginHostData_Wire_Writes(t *testing.T) {
-	t.Run("TasksCreateUpdateSucceed_CommentDenied", func(t *testing.T) {
+	t.Run("TasksCreateUpdateSucceed_MessageDenied", func(t *testing.T) {
 		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
 		d.taskWriter.created = &taskmodels.Task{ID: "task-new", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate"}
 		d.taskWriter.updated = &taskmodels.Task{ID: "task-1", Title: "Renamed"}
@@ -280,24 +280,26 @@ func TestPluginHostData_Wire_Writes(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, "task-1", updated.ID)
 
-		// The undeclared comment write is denied, per-resource, on the same host.
-		_, err = host.Comments().Create(context.Background(), "task-1", "hi")
+		// The undeclared message write is denied, per-resource, on the same host.
+		_, err = host.Messages().Send(context.Background(), "task-1", "", "hi")
 		require.Error(t, err)
 		st, ok := status.FromError(err)
 		require.True(t, ok, "expected a gRPC status error, got %v", err)
 		require.Equal(t, codes.PermissionDenied, st.Code())
-		require.Equal(t, "capability 'api_write:comments' not declared", st.Message())
+		require.Equal(t, "capability 'api_write:messages' not declared", st.Message())
 	})
 
-	t.Run("CommentCreateSucceeds", func(t *testing.T) {
-		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"comments"}})
+	t.Run("SendMessageSucceeds", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"messages"}})
+		d.messenger.result = PluginMessageResult{SessionID: "session-2", Status: "queued"}
 		host := dialPluginHostOverWire(t, d.host)
 
-		comment, err := host.Comments().Create(context.Background(), "task-1", "from the plugin")
+		dispatch, err := host.Messages().Send(context.Background(), "task-1", "session-2", "from the plugin")
 		require.NoError(t, err)
-		require.Equal(t, "comment-1", comment.ID)
-		require.Equal(t, "plugin:p1", comment.Source)
-		require.Equal(t, "from the plugin", d.comments.last.Body)
+		require.Equal(t, "session-2", dispatch.SessionID)
+		require.Equal(t, "queued", dispatch.Status)
+		require.Equal(t, "from the plugin", d.messenger.lastText)
+		require.Equal(t, "plugin:p1", d.messenger.lastSource)
 	})
 
 	t.Run("TaskCreateDeniedWithoutCapability", func(t *testing.T) {

@@ -864,35 +864,23 @@ func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
 	}
 }
 
-// Comment is the Go-native mirror of kandev.plugin.v1.Comment — a task comment
-// created by a plugin. Source is the server-stamped "plugin:<id>" provenance.
-type Comment struct {
-	ID        string
-	TaskID    string
-	Body      string
-	Source    string
-	CreatedAt string // RFC3339
+// MessageDispatch is the Go-native mirror of
+// kandev.plugin.v1.SendMessageResponse — the result of delivering a prompt to a
+// task session. Status is "queued" (the session was running and the message
+// was queued for its next turn), "sent" (delivered to an idle/resumed session),
+// or "started" (the session was launched with it as the first prompt).
+type MessageDispatch struct {
+	SessionID string
+	Status    string
 }
 
-func (c Comment) toProto() *pluginv1.Comment {
-	return &pluginv1.Comment{
-		Id:        c.ID,
-		TaskId:    c.TaskID,
-		Body:      c.Body,
-		Source:    c.Source,
-		CreatedAt: c.CreatedAt,
-	}
+func (d MessageDispatch) toProto() *pluginv1.SendMessageResponse {
+	return &pluginv1.SendMessageResponse{SessionId: d.SessionID, Status: d.Status}
 }
 
-func commentFromProto(p *pluginv1.Comment) *Comment {
+func messageDispatchFromProto(p *pluginv1.SendMessageResponse) *MessageDispatch {
 	if p == nil {
 		return nil
 	}
-	return &Comment{
-		ID:        p.GetId(),
-		TaskID:    p.GetTaskId(),
-		Body:      p.GetBody(),
-		Source:    p.GetSource(),
-		CreatedAt: p.GetCreatedAt(),
-	}
+	return &MessageDispatch{SessionID: p.GetSessionId(), Status: p.GetStatus()}
 }

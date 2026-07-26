@@ -45,7 +45,6 @@ const (
 	resourceAgentProfiles = "agent_profiles"
 	resourceRepositories  = "repositories"
 	resourceMessages      = "messages"
-	resourceComments      = "comments"
 )
 
 // apiReadCapability formats resource as the api_read:<resource> capability
@@ -248,13 +247,11 @@ func (h *pluginHost) Repositories() pluginsdk.RepositoryReader {
 	return repositoryReader{host: h}
 }
 
+// Messages mixes read (List, api_read:messages) and write (Send,
+// api_write:messages) with independent capabilities, so — like Tasks() — the
+// gate can't live at the accessor; each method checks its own capability (List
+// here, Send in host_write.go).
 func (h *pluginHost) Messages() pluginsdk.MessageReader {
-	if !h.capabilities.CanRead(resourceMessages) {
-		return deniedMessageReader{}
-	}
-	if h.messageData == nil {
-		return h.UnimplementedHostData.Messages()
-	}
 	return messageReader{host: h}
 }
 
@@ -296,12 +293,6 @@ type deniedRepositoryReader struct{}
 
 func (deniedRepositoryReader) List(context.Context, string, pluginsdk.Page) ([]pluginsdk.Repository, *pluginsdk.PageInfo, error) {
 	return nil, nil, permissionDenied(apiReadCapability(resourceRepositories))
-}
-
-type deniedMessageReader struct{}
-
-func (deniedMessageReader) List(context.Context, pluginsdk.MessageFilter, pluginsdk.Page) ([]pluginsdk.Message, *pluginsdk.PageInfo, error) {
-	return nil, nil, permissionDenied(apiReadCapability(resourceMessages))
 }
 
 // ── Real readers ────────────────────────────────────────────────────────
@@ -508,6 +499,12 @@ type messageReader struct{ host *pluginHost }
 // messageModelToDTO (kandev-system blocks stripped) before it reaches the
 // plugin.
 func (r messageReader) List(ctx context.Context, filter pluginsdk.MessageFilter, page pluginsdk.Page) ([]pluginsdk.Message, *pluginsdk.PageInfo, error) {
+	if !r.host.capabilities.CanRead(resourceMessages) {
+		return nil, nil, permissionDenied(apiReadCapability(resourceMessages))
+	}
+	if r.host.messageData == nil {
+		return r.host.UnimplementedHostData.Messages().List(ctx, filter, page)
+	}
 	// Each session/task/type value becomes its own SQL bind parameter; cap
 	// their combined count well under SQLite's host-parameter limit
 	// (~500-999) so a large filter fails fast with a clear InvalidArgument

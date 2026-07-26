@@ -1,46 +1,32 @@
 // host_write.go implements pluginHost's Host data API WRITE surface (ADR 0043
 // phase 2): the CreateTask/UpdateTask methods on the task accessor
-// (Host.Tasks()) and the CreateComment method behind Host.Comments(). Writes
-// are gated on api_write:<resource> — undeclared → gRPC PermissionDenied,
+// (Host.Tasks()) and the Send method on the message accessor (Host.Messages()).
+// Writes are gated on api_write:<resource> — undeclared → gRPC PermissionDenied,
 // exactly mirroring the read gating in host_data.go.
 //
-// Every write routes through the same first-party service layer the REST/MCP
-// API uses (internal/task/service for tasks, internal/office/service for
-// comments), never a repository directly — that is how task.* / comment-created
-// events fire and WS-driven UI stays in sync (apps/backend/CLAUDE.md: "any code
-// path that mutates a task row must publish via the event bus"). The service
-// types can't be referenced here without an import cycle (see SetDataSources'
-// doc), so task writes go through a narrow taskWriter interface satisfied by a
-// backendapp adapter, while comment writes use office/models.TaskComment
-// directly (a leaf model package, no cycle) and are satisfied structurally by
-// internal/office/service.Service.
+// Every write routes through the same first-party layer the REST/MCP API uses,
+// never a repository — that is how task.* events fire and how a message reaches
+// the agent through the orchestrator's real delivery path (queue when the
+// session is running, resume/start it otherwise). The service types can't be
+// referenced here without an import cycle (see SetDataSources' doc), so task
+// writes go through a narrow taskWriter interface and message delivery through a
+// narrow taskMessenger interface, both satisfied by backendapp adapters.
 package plugins
 
 import (
 	"context"
 	"errors"
-	"time"
 
-	orchmodels "github.com/kandev/kandev/internal/office/models"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 )
 
-// commentAuthorType is the author_type stamped on plugin-created comments.
-// kandev's comment author vocabulary is user | agent; a plugin is a
-// non-human author, so it posts as "agent" with a "plugin:<id>" source/author
-// id carrying the real provenance.
-const commentAuthorType = "agent"
-
 // ── Narrow write data-source interfaces ─────────────────────────────────
 //
-// taskWriter is satisfied by a backendapp adapter over internal/task/service
-// (the service request types would create an import cycle here, so the adapter
-// translates plugins-local inputs into service.CreateTaskRequest/
-// UpdateTaskRequest). commentDataSource is satisfied structurally by
-// internal/office/service.Service.CreateComment. taskStarter is satisfied by a
-// backendapp adapter over the orchestrator's StartTask.
+// Both are satisfied by backendapp adapters (the service request types would
+// create an import cycle here): taskWriter over internal/task/service,
+// taskMessenger over the task service + orchestrator delivery path.
 
 // TaskCreateInput is the plugins-local task-create request a taskWriter adapter
 // translates into internal/task/service.CreateTaskRequest. Source is the
@@ -66,6 +52,13 @@ type TaskUpdateInput struct {
 	WorkflowStepID *string
 }
 
+// PluginMessageResult is the outcome of delivering a message to a task session,
+// returned by a taskMessenger adapter. Status is "queued" | "sent" | "started".
+type PluginMessageResult struct {
+	SessionID string
+	Status    string
+}
+
 // taskWriter is the narrow slice of the task service the CreateTask/UpdateTask
 // RPCs need, adapted by backendapp to avoid an internal/task/service import
 // cycle. Both methods return the persisted *taskmodels.Task so the reader can
@@ -75,12 +68,13 @@ type taskWriter interface {
 	UpdateTask(ctx context.Context, in TaskUpdateInput) (*taskmodels.Task, error)
 }
 
-// commentDataSource is the narrow slice of internal/office/service.Service the
-// CreateComment RPC needs. CreateComment persists and publishes the
-// comment-created event; it mutates the passed *TaskComment in place with the
-// server-assigned id and created_at.
-type commentDataSource interface {
-	CreateComment(ctx context.Context, comment *orchmodels.TaskComment) error
+// taskMessenger delivers a prompt to a task session through the orchestrator's
+// real message-delivery path (resolve session, record the user message, then
+// queue/resume/start by session state — the same behavior as message_task).
+// Source is the "plugin:<id>" provenance stamped on the recorded message. An
+// empty sessionID targets the task's primary session.
+type taskMessenger interface {
+	SendMessage(ctx context.Context, taskID, sessionID, text, source string) (PluginMessageResult, error)
 }
 
 // taskStarter is the narrow slice of the orchestrator the CreateTask RPC needs
@@ -91,18 +85,18 @@ type taskStarter interface {
 }
 
 // pluginSource is the "plugin:<id>" provenance stamped on rows this plugin
-// creates, so a created task/comment is attributable and a plugin can never
+// creates, so a created task/message is attributable and a plugin can never
 // spoof another origin.
 func (h *pluginHost) pluginSource() string {
 	return "plugin:" + h.pluginID
 }
 
-// writeDependencies returns the live comment writer and task starter (wired via
+// writeDependencies returns the live task messenger and task starter (wired via
 // SetWriteDeps). Read live rather than snapshotted at hostForPlugin time for
-// the same reason as the utility agent (ADR 0048): the office service and
-// orchestrator are constructed after StartActivePlugins has spawned boot-active
-// plugins, so a snapshot would strand those hosts. nil on a bare test host.
-func (h *pluginHost) writeDependencies() (commentDataSource, taskStarter) {
+// the same reason as the utility agent (ADR 0048): the orchestrator is
+// constructed after StartActivePlugins spawns boot-active plugins, so a
+// snapshot would strand those hosts. nil on a bare test host.
+func (h *pluginHost) writeDependencies() (taskMessenger, taskStarter) {
 	if h.writeDeps == nil {
 		return nil, nil
 	}
@@ -239,52 +233,27 @@ func (h *pluginHost) startTaskBestEffort(ctx context.Context, taskID string) {
 	_ = starter.StartTask(ctx, taskID)
 }
 
-// ── Comment writes (api_write:comments) ─────────────────────────────────
+// ── Message send (api_write:messages) ───────────────────────────────────
 
-func (h *pluginHost) Comments() pluginsdk.CommentWriter {
-	if !h.capabilities.CanWrite(resourceComments) {
-		return deniedCommentWriter{}
+func (r messageReader) Send(ctx context.Context, taskID, sessionID, text string) (*pluginsdk.MessageDispatch, error) {
+	if !r.host.capabilities.CanWrite(resourceMessages) {
+		return nil, permissionDenied(apiWriteCapability(resourceMessages))
 	}
-	if comments, _ := h.writeDependencies(); comments == nil {
-		return h.UnimplementedHostData.Comments()
+	messenger, _ := r.host.writeDependencies()
+	if messenger == nil {
+		return r.host.UnimplementedHostData.Messages().Send(ctx, taskID, sessionID, text)
 	}
-	return commentWriter{host: h}
-}
-
-type deniedCommentWriter struct{}
-
-func (deniedCommentWriter) Create(context.Context, string, string) (*pluginsdk.Comment, error) {
-	return nil, permissionDenied(apiWriteCapability(resourceComments))
-}
-
-type commentWriter struct{ host *pluginHost }
-
-func (w commentWriter) Create(ctx context.Context, taskID, body string) (*pluginsdk.Comment, error) {
 	if taskID == "" {
 		return nil, invalidArgument("task_id is required")
 	}
-	if body == "" {
-		return nil, invalidArgument("body is required")
+	if text == "" {
+		return nil, invalidArgument("text is required")
 	}
-	comments, _ := w.host.writeDependencies()
-	source := w.host.pluginSource()
-	comment := &orchmodels.TaskComment{
-		TaskID:     taskID,
-		AuthorType: commentAuthorType,
-		AuthorID:   source,
-		Body:       body,
-		Source:     source,
-	}
-	if err := comments.CreateComment(ctx, comment); err != nil {
+	result, err := messenger.SendMessage(ctx, taskID, sessionID, text, r.host.pluginSource())
+	if err != nil {
 		return nil, err
 	}
-	return &pluginsdk.Comment{
-		ID:        comment.ID,
-		TaskID:    comment.TaskID,
-		Body:      comment.Body,
-		Source:    comment.Source,
-		CreatedAt: comment.CreatedAt.UTC().Format(time.RFC3339),
-	}, nil
+	return &pluginsdk.MessageDispatch{SessionID: result.SessionID, Status: result.Status}, nil
 }
 
 // strDeref returns the pointed-to string, or "" when the pointer is nil —

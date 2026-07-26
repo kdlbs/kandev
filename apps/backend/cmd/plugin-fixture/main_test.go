@@ -129,12 +129,12 @@ func TestHandleWebhook_AppendsJSONLineAndRespondsOK(t *testing.T) {
 }
 
 // TestHandleWebhook_WriteKeyRoundTripsHostWrites proves the "write" webhook
-// drives the Host data API write RPCs (CreateTask then CreateComment on the
+// drives the Host data API write RPCs (CreateTask then SendMessage to the
 // returned task) and records the outcome to write-probe.json.
 func TestHandleWebhook_WriteKeyRoundTripsHostWrites(t *testing.T) {
 	dir := t.TempDir()
 	p := &fixturePlugin{dataDir: dir}
-	host := &fakeHost{createdTaskID: "task-42", createdCommentID: "comment-7"}
+	host := &fakeHost{createdTaskID: "task-42"}
 	p.SetHost(host)
 
 	resp, err := p.HandleWebhook(context.Background(), &pluginsdk.WebhookRequest{WebhookKey: "write"})
@@ -142,11 +142,12 @@ func TestHandleWebhook_WriteKeyRoundTripsHostWrites(t *testing.T) {
 	require.Equal(t, "ok", string(resp.Body))
 
 	require.Equal(t, "fixture write probe", host.lastCreateInput.Title)
-	require.Equal(t, "task-42", host.lastCommentTask, "the comment must target the task the Host returned")
+	require.Equal(t, "task-42", host.lastSendTask, "the message must target the task the Host returned")
+	require.Equal(t, "fixture probe message", host.lastSendText)
 
 	rec := readSingleJSON[writeProbeRecord](t, filepath.Join(dir, "write-probe.json"))
 	require.Equal(t, "task-42", rec.TaskID)
-	require.Equal(t, "comment-7", rec.CommentID)
+	require.Equal(t, "queued", rec.MessageStatus)
 	require.Empty(t, rec.TaskError)
 }
 
@@ -189,14 +190,14 @@ type fakeHost struct {
 	setStateErr   error
 
 	// Host data API write recording (ADR 0043 phase 2).
-	createdTaskID    string
-	createdCommentID string
-	lastCreateInput  pluginsdk.CreateTaskInput
-	lastCommentTask  string
+	createdTaskID   string
+	lastCreateInput pluginsdk.CreateTaskInput
+	lastSendTask    string
+	lastSendText    string
 }
 
 func (h *fakeHost) Tasks() pluginsdk.TaskReader       { return fakeHostTaskReader{h} }
-func (h *fakeHost) Comments() pluginsdk.CommentWriter { return fakeHostCommentWriter{h} }
+func (h *fakeHost) Messages() pluginsdk.MessageReader { return fakeHostMessageReader{h} }
 
 type fakeHostTaskReader struct{ h *fakeHost }
 
@@ -213,11 +214,16 @@ func (r fakeHostTaskReader) Create(_ context.Context, in pluginsdk.CreateTaskInp
 	return &pluginsdk.Task{ID: r.h.createdTaskID, Title: in.Title}, nil
 }
 
-type fakeHostCommentWriter struct{ h *fakeHost }
+type fakeHostMessageReader struct{ h *fakeHost }
 
-func (w fakeHostCommentWriter) Create(_ context.Context, taskID, body string) (*pluginsdk.Comment, error) {
-	w.h.lastCommentTask = taskID
-	return &pluginsdk.Comment{ID: w.h.createdCommentID, TaskID: taskID, Body: body}, nil
+func (fakeHostMessageReader) List(context.Context, pluginsdk.MessageFilter, pluginsdk.Page) ([]pluginsdk.Message, *pluginsdk.PageInfo, error) {
+	return nil, nil, nil
+}
+
+func (r fakeHostMessageReader) Send(_ context.Context, taskID, sessionID, text string) (*pluginsdk.MessageDispatch, error) {
+	r.h.lastSendTask = taskID
+	r.h.lastSendText = text
+	return &pluginsdk.MessageDispatch{SessionID: "session-1", Status: "queued"}, nil
 }
 
 func (h *fakeHost) GetState(context.Context, string, string, string) (map[string]any, bool, error) {

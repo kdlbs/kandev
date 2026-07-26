@@ -86,12 +86,13 @@ service Host {
   rpc ListSessionCodeStats(ListSessionCodeStatsRequest) returns (ListSessionCodeStatsResponse);
 
   // Host data API — writes, capability api_write:<resource>. Route through the
-  // first-party service layer so task.* / comment-created events fire (§3a
-  // "Writes"). api_write:tasks gates CreateTask/UpdateTask; api_write:comments
-  // gates CreateComment. Undeclared → gRPC PermissionDenied.
+  // first-party service layer so events fire (§3a "Writes"). api_write:tasks
+  // gates CreateTask/UpdateTask; api_write:messages gates SendMessage (delivers
+  // a prompt to a task session through the orchestrator). Undeclared → gRPC
+  // PermissionDenied.
   rpc CreateTask(CreateTaskRequest) returns (Task);
   rpc UpdateTask(UpdateTaskRequest) returns (Task);
-  rpc CreateComment(CreateCommentRequest) returns (Comment);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
 }
 
 message Event {
@@ -146,13 +147,13 @@ instance is bound to the plugin's record at spawn time.
 
 ### 3a. Host data API (ADR 0043)
 
-Read/write RPCs let plugins read (and, later, write) kandev's own domain data —
-tasks, sessions, workspaces, workflows, agent profiles, repositories, comments —
+Read/write RPCs let plugins read and write kandev's own domain data —
+tasks, sessions, workspaces, workflows, agent profiles, repositories, messages —
 over the same Host gRPC channel used for state/secrets, instead of opening the
 kandev database file directly. Full message definitions (`Page`, `PageInfo`,
 `Task`, `TaskFilter`, `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`,
-`Repository`, `Session`, `SessionFilter`, `SessionCodeStats`, and the deferred
-`CreateTaskRequest`/`UpdateTaskRequest`/`Comment`/`CreateCommentRequest`) live in
+`Repository`, `Session`, `SessionFilter`, `SessionCodeStats`, and the write
+`CreateTaskRequest`/`UpdateTaskRequest`/`SendMessageRequest`/`SendMessageResponse`) live in
 the real proto — `apps/backend/proto/kandev/plugin/v1/plugin.proto` — and are not
 duplicated here; this section covers the RPC list (added to `service Host` above),
 capability gating, and cross-cutting conventions. See ADR 0043
@@ -179,20 +180,28 @@ grants every RPC listed against it; there is no finer-grained gate within a
 resource (e.g. `api_read:workflows` covers both `ListWorkflows` and
 `ListWorkflowSteps`).
 
-**Writes.** `CreateTask`, `UpdateTask`, and `CreateComment` are implemented and
-gated by `api_write:tasks` (create/update) / `api_write:comments`. Writes route
-through the first-party service layer — `internal/task/service` for tasks,
-`internal/office/service` for comments — never a repository, so the standard
-`task.*` / comment-created events fire and WS-driven UI stays in sync. The
-server stamps `source = "plugin:<id>"` on the created row/comment (task
-metadata `source` for tasks; `TaskComment.Source` for comments) — a plugin
-cannot set it itself. `CreateTask` resolves sane placement defaults when the
-plugin omits them: an empty `workspace_id` resolves to the single workspace
-(ambiguous otherwise → `InvalidArgument`), an empty `workflow_id` to that
-workspace's first workflow. `UpdateTask` accepts a conservative field mask —
-`title`, `description`, `state`, `workflow_step_id` (each optional/leave-unset).
-`start_agent` best-effort auto-launches an agent through the orchestrator; a
-launch failure does not fail the create.
+**Writes.** `CreateTask`, `UpdateTask`, and `SendMessage` are implemented.
+`CreateTask`/`UpdateTask` are gated by `api_write:tasks` and route through
+`internal/task/service` (never a repository), so `task.*` events fire and
+WS-driven UI stays in sync. The server stamps `source = "plugin:<id>"` on the
+created task's metadata — a plugin cannot set it itself. `CreateTask` resolves
+sane placement defaults when the plugin omits them: an empty `workspace_id`
+resolves to the single workspace (ambiguous otherwise → `InvalidArgument`), an
+empty `workflow_id` to that workspace's first workflow. `UpdateTask` accepts a
+conservative field mask — `title`, `description`, `state`, `workflow_step_id`
+(each optional/leave-unset). `start_agent` best-effort auto-launches an agent
+through the orchestrator; a launch failure does not fail the create.
+
+`SendMessage` is gated by `api_write:messages` and delivers a prompt to a task
+session through the orchestrator's real delivery path (the same one
+`message_task` uses), so the message reaches the agent and drives a turn — not
+an office comment. It resolves the target session (explicit `session_id`,
+verified to belong to the task, or the task's primary session), records a user
+message stamped `source = "plugin:<id>"`, and dispatches by session state: a
+running session queues the prompt (`status: "queued"`); an idle/completed one is
+prompted, resuming the agent if its process is gone (`"sent"`); a never-started
+one is launched with the prompt as its first turn (`"started"`). A failed
+dispatch deletes the recorded message so no orphan prompt is left.
 
 **Reads and writes go through the service layer, never a repository.** Each read
 handler calls the relevant internal service (task service, workflow service, the
@@ -368,10 +377,11 @@ the API, never the DB.
   before doing any work — `state` for `GetState`/`SetState`/`DeleteState`/
   `ListState`, `secrets` for `RevealSecret`, `api_read:<resource>` for each Host
   data API read RPC (§3a), `api_write:tasks` for `CreateTask`/`UpdateTask` and
-  `api_write:comments` for `CreateComment` — and returns PermissionDenied with
+  `api_write:messages` for `SendMessage` — and returns PermissionDenied with
   `capability '<name>' not declared` on a miss. `EmitEvent` is ungated. Reads
   and writes gate independently on the same resource, so a plugin can declare
-  `api_read:tasks` without `api_write:tasks` (or vice versa).
+  `api_read:tasks` without `api_write:tasks` (or vice versa), and likewise for
+  `messages`.
 
 ## 6. Package format (`<id>-<version>.tar.gz`)
 

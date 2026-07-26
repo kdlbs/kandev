@@ -1003,13 +1003,15 @@ func initOfficeServices(
 	services.Task.SetBlockerRepository(repos.Office)
 	services.Task.SetCommentRepository(repos.Office)
 
-	// Wire the Host data API's late write dependencies (ADR 0043 phase 2):
-	// the office comment service backs CreateComment (api_write:comments), and
-	// the orchestrator backs CreateTask's start_agent. Both are constructed
-	// after StartActivePlugins spawns boot-active plugins, so the plugins
-	// service reads them live rather than snapshotting (see SetWriteDeps).
+	// Wire the Host data API's late write dependencies (ADR 0043 phase 2): the
+	// task-message delivery path backs SendMessage (api_write:messages), and
+	// the orchestrator backs CreateTask's start_agent. The orchestrator is
+	// constructed after StartActivePlugins spawns boot-active plugins, so the
+	// plugins service reads these live rather than snapshotting (see
+	// SetWriteDeps).
 	if services.Plugins != nil {
-		services.Plugins.SetWriteDeps(services.Office, pluginsTaskStarterAdapter{orch: orchestratorSvc})
+		messenger := pluginsTaskMessengerAdapter{tasks: services.Task, orch: orchestratorSvc, log: log}
+		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc})
 	}
 
 	// Build feature-package services and wire all inter-service dependencies.

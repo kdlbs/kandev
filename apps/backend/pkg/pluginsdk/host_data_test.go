@@ -44,9 +44,10 @@ type dataRecordingHost struct {
 	lastCreateInput CreateTaskInput
 	updatedTask     Task
 	lastUpdateInput UpdateTaskInput
-	createdComment  Comment
-	lastCommentTask string
-	lastCommentBody string
+	messageDispatch MessageDispatch
+	lastSendTask    string
+	lastSendSession string
+	lastSendText    string
 }
 
 func (h *dataRecordingHost) GetState(context.Context, string, string, string) (map[string]any, bool, error) {
@@ -81,7 +82,6 @@ func (h *dataRecordingHost) Repositories() RepositoryReader {
 	return dataRecordingRepositoryReader{h}
 }
 func (h *dataRecordingHost) Messages() MessageReader { return dataRecordingMessageReader{h} }
-func (h *dataRecordingHost) Comments() CommentWriter { return dataRecordingCommentWriter{h} }
 func (h *dataRecordingHost) InvokeUtilityAgent(_ context.Context, prompt string) (string, error) {
 	h.lastUtilityPrompt = prompt
 	return h.utilityText, nil
@@ -112,15 +112,6 @@ func (r dataRecordingTaskReader) Update(_ context.Context, in UpdateTaskInput) (
 	r.h.lastUpdateInput = in
 	task := r.h.updatedTask
 	return &task, nil
-}
-
-type dataRecordingCommentWriter struct{ h *dataRecordingHost }
-
-func (w dataRecordingCommentWriter) Create(_ context.Context, taskID, body string) (*Comment, error) {
-	w.h.lastCommentTask = taskID
-	w.h.lastCommentBody = body
-	comment := w.h.createdComment
-	return &comment, nil
 }
 
 type dataRecordingSessionReader struct{ h *dataRecordingHost }
@@ -173,6 +164,14 @@ func (r dataRecordingMessageReader) List(_ context.Context, filter MessageFilter
 	return r.h.messages, r.h.messagePage, nil
 }
 
+func (r dataRecordingMessageReader) Send(_ context.Context, taskID, sessionID, text string) (*MessageDispatch, error) {
+	r.h.lastSendTask = taskID
+	r.h.lastSendSession = sessionID
+	r.h.lastSendText = text
+	dispatch := r.h.messageDispatch
+	return &dispatch, nil
+}
+
 func TestHostData_TasksListAndGet(t *testing.T) {
 	impl := &dataRecordingHost{
 		tasks: map[string]Task{
@@ -198,15 +197,15 @@ func TestHostData_TasksListAndGet(t *testing.T) {
 	require.Equal(t, codes.NotFound, status.Code(err))
 }
 
-// TestHostData_TaskWritesAndComment proves the write RPCs (CreateTask,
-// UpdateTask, CreateComment) round-trip inputs and results through
+// TestHostData_TaskWritesAndMessage proves the write RPCs (CreateTask,
+// UpdateTask, SendMessage) round-trip inputs and results through
 // grpcHostClient -> proto -> grpcHostServer, including the optional-pointer
 // fields on the update mask.
-func TestHostData_TaskWritesAndComment(t *testing.T) {
+func TestHostData_TaskWritesAndMessage(t *testing.T) {
 	impl := &dataRecordingHost{
-		createdTask:    Task{ID: "task-new", Title: "Investigate crash", State: "TODO"},
-		updatedTask:    Task{ID: "task-1", Title: "Renamed", State: "IN_PROGRESS"},
-		createdComment: Comment{ID: "c1", TaskID: "task-1", Body: "from the plugin", Source: "plugin:acme"},
+		createdTask:     Task{ID: "task-new", Title: "Investigate crash", State: "TODO"},
+		updatedTask:     Task{ID: "task-1", Title: "Renamed", State: "IN_PROGRESS"},
+		messageDispatch: MessageDispatch{SessionID: "session-1", Status: "queued"},
 	}
 	host := dialHostOverBufconn(t, impl)
 
@@ -232,12 +231,13 @@ func TestHostData_TaskWritesAndComment(t *testing.T) {
 	require.Equal(t, "Renamed", *impl.lastUpdateInput.Title)
 	require.Nil(t, impl.lastUpdateInput.Description, "an unset field must stay nil across the wire")
 
-	comment, err := host.Comments().Create(context.Background(), "task-1", "from the plugin")
+	dispatch, err := host.Messages().Send(context.Background(), "task-1", "session-1", "rerun the tests")
 	require.NoError(t, err)
-	require.Equal(t, "c1", comment.ID)
-	require.Equal(t, "plugin:acme", comment.Source)
-	require.Equal(t, "task-1", impl.lastCommentTask)
-	require.Equal(t, "from the plugin", impl.lastCommentBody)
+	require.Equal(t, "session-1", dispatch.SessionID)
+	require.Equal(t, "queued", dispatch.Status)
+	require.Equal(t, "task-1", impl.lastSendTask)
+	require.Equal(t, "session-1", impl.lastSendSession)
+	require.Equal(t, "rerun the tests", impl.lastSendText)
 }
 
 func TestHostData_SessionsListAndCodeStats(t *testing.T) {
@@ -365,7 +365,7 @@ func TestHostData_UnimplementedHostData_ReturnsUnimplemented(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 
-	_, err = host.Comments().Create(context.Background(), "task-1", "body")
+	_, err = host.Messages().Send(context.Background(), "task-1", "", "body")
 	require.Error(t, err)
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 }

@@ -106,7 +106,7 @@ min_kandev_version: "0.78.0"                 # optional
 capabilities:
   events: ["task.created", "task.state_changed", "agent.completed"]
   api_read: ["tasks", "sessions"]             # Host data API reads (see below); live now
-  api_write: ["tasks", "comments"]            # Host data API writes (CreateTask/UpdateTask/CreateComment); live now
+  api_write: ["tasks", "messages"]            # Host data API writes (CreateTask/UpdateTask/SendMessage); live now
   state: true
   secrets: true
   auth: true                                  # establish a login session for an
@@ -141,8 +141,7 @@ restart_count: 0
 RPCs (both reads and writes live now) — the vocabulary is a list of
 resource names: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`,
 `agent_profiles`, `repositories` for `api_read`, plus `tasks` (CreateTask/
-UpdateTask) and `comments` (CreateComment) for `api_write` (there is no
-`ListComments` read RPC). They are unrelated to office. See "Host data API".
+UpdateTask) and `messages` (SendMessage) for `api_write`. See "Host data API".
 
 **Declaring data access.** Listing a resource under `api_read` grants the
 corresponding Host data reads for that resource only — e.g. `api_read:
@@ -362,7 +361,7 @@ ungated (no boolean capability applies).
 ### Host data API (plugin -> kandev, gRPC)
 
 Plugins read and write kandev's own domain data — tasks,
-sessions, workspaces, workflows, agent profiles, repositories, comments — over the
+sessions, workspaces, workflows, agent profiles, repositories, messages — over the
 same capability-gated Host gRPC channel they use for state and secrets, instead of
 opening the kandev database file. The wire contract is the `kandev.plugin.v1`
 Host data RPCs; DTOs are hand-mapped, versioned proto messages, never internal
@@ -404,20 +403,30 @@ system context is inline markup removed at read time. Reads route through the
 task service's `ListMessagesForPlugin` (a single filtered
 session/task/time/type query), never a repository or the DB file directly.
 
-**Host data API writes.** `CreateTask`, `UpdateTask`, and `CreateComment` are
-implemented. Each is gated by `api_write:<resource>` — `api_write:tasks` for
-`Host.Tasks().Create`/`Update`, `api_write:comments` for
-`Host.Comments().Create` — and routes through the first-party service layer
-(`internal/task/service` for tasks, `internal/office/service` for comments),
-never a repository, so `task.*` / comment-created events fire and WS clients
-update. The server stamps `source = "plugin:<id>"` on the created row/comment
-(task metadata `source`; `TaskComment.Source`) — a plugin cannot set provenance
-itself. `CreateTask` fills sane placement defaults when the plugin omits them
-(single workspace; that workspace's first workflow — ambiguous → `InvalidArgument`),
-accepts an optional `start_agent` that best-effort auto-launches an agent, and
-requires a title. `UpdateTask` accepts a conservative field mask —
-`title` / `description` / `state` / `workflow_step_id`, each optional (a nil field
-is left unchanged). A missing task on update returns gRPC `NotFound`.
+**Host data API writes.** `CreateTask`, `UpdateTask`, and `SendMessage` are
+implemented, each gated by `api_write:<resource>` and routed through the
+first-party service layer (never a repository) so the corresponding events fire
+and WS clients update. The server stamps `source = "plugin:<id>"` — a plugin
+cannot set provenance itself.
+
+`Host.Tasks().Create`/`Update` (capability `api_write:tasks`) go through
+`internal/task/service` so `task.*` events fire. `CreateTask` fills sane
+placement defaults when the plugin omits them (single workspace; that
+workspace's first workflow — ambiguous → `InvalidArgument`), accepts an optional
+`start_agent` that best-effort auto-launches an agent, and requires a title.
+`UpdateTask` accepts a conservative field mask — `title` / `description` /
+`state` / `workflow_step_id`, each optional (a nil field is left unchanged); a
+missing task returns gRPC `NotFound`.
+
+`Host.Messages().Send` (capability `api_write:messages`) delivers a prompt to a
+task session through the orchestrator's real delivery path — the same one
+`message_task` uses — so the message reaches the agent and drives a turn (it is
+*not* an office comment). It resolves the target session (an explicit
+`session_id`, verified to belong to the task, or the task's primary session),
+records a user message stamped with the plugin source, and dispatches by session
+state: a running session queues the prompt (`status: queued`); an idle/completed
+one is prompted, resuming the agent process if it has gone (`sent`); a
+never-started one is launched with the prompt as its first turn (`started`).
 
 **Conventions.**
 
@@ -706,10 +715,12 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
   **WHEN** a plugin without `api_write:tasks` calls `CreateTask`, **THEN** kandev
   returns gRPC `PermissionDenied` with `capability 'api_write:tasks' not declared`.
 
-- **GIVEN** a plugin whose manifest declares `api_write: ["comments"]`, **WHEN**
-  it calls `CreateComment` on a task, **THEN** kandev creates the comment through
-  the office comment service (firing the comment-created event) with
-  `source = "plugin:<id>"`; a plugin lacking `api_write:comments` is denied.
+- **GIVEN** a plugin whose manifest declares `api_write: ["messages"]`, **WHEN**
+  it calls `SendMessage` on a task, **THEN** kandev delivers the prompt to the
+  task's session through the orchestrator (queueing if running, resuming/starting
+  otherwise), records a user message with `source = "plugin:<id>"`, and returns
+  the target session and a `queued`/`sent`/`started` status; a plugin lacking
+  `api_write:messages` is denied.
 
 ## Out of scope
 
@@ -745,9 +756,10 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
 - **Rate limiting.** No per-plugin rate limits in v1. Misbehaving plugins can be disabled manually.
 - **Plugin database namespaces.** Plugins do not get their own SQLite schemas. KV state is sufficient for v1.
 - **Broader write surface.** The Host data API writes cover task create/update
-  (conservative field mask) and comment create. Deleting or archiving tasks,
-  writing sessions/workspaces/workflows/repositories, and a wider task-update mask
-  are out of scope for now. See "Host data API".
+  (conservative field mask) and sending a message to a task session. Deleting or
+  archiving tasks, writing sessions/workspaces/workflows/repositories, a wider
+  task-update mask, and delivery-mode/interrupt control on SendMessage are out of
+  scope for now. See "Host data API".
 - **Per-session code-stats precomputation.** `SessionCodeStats` is computed on
   demand per request in v1; a materialized or cached aggregation is future work.
 - **Workspace-scoped plugin data access.** v1 reads are global to the instance with

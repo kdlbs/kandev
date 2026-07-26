@@ -90,14 +90,16 @@ service Host {
   rpc InvokeUtilityAgent(InvokeUtilityAgentRequest) returns (InvokeUtilityAgentResponse);
 
   // Writes — capability api_write:<resource>. Route through the first-party
-  // service layer (internal/task/service, internal/office/service) so the
-  // corresponding task.* / comment-created events fire and WS clients update —
-  // the whole reason not to let plugins write the DB. CreateTask/UpdateTask
-  // require api_write:tasks; CreateComment requires api_write:comments. kandev
-  // stamps source = "plugin:<id>" on created rows; a plugin cannot set it.
+  // service layer so events fire and WS clients update — the whole reason not
+  // to let plugins write the DB. CreateTask/UpdateTask require api_write:tasks
+  // and go through the task service (task.* events; kandev stamps
+  // source = "plugin:<id>" on created rows, a plugin cannot set it). SendMessage
+  // requires api_write:messages and delivers a prompt to a task session through
+  // the orchestrator — the same delivery path message_task uses (queue when the
+  // session is running, resume/start it otherwise).
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
-  rpc CreateComment(CreateCommentRequest) returns (CreateCommentResponse);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
 }
 
 message Event {
@@ -440,7 +442,7 @@ message InvokeUtilityAgentResponse {
   string text = 1;
 }
 
-// ── Writes (phase 2; api_write) ──────────────────────────────────────────────
+// ── Writes (api_write) ───────────────────────────────────────────────────────
 message CreateTaskRequest {
   string workspace_id = 1;
   string workflow_id = 2;
@@ -464,17 +466,18 @@ message UpdateTaskRequest {
 message UpdateTaskResponse {
   Task task = 1;
 }
-message Comment {
-  string id = 1;
-  string task_id = 2;
-  string body = 3;
-  string source = 4; // "plugin:<id>"
-  string created_at = 5;
-}
-message CreateCommentRequest {
+// SendMessage delivers a prompt to a task session (api_write:messages). The
+// server records a user message stamped source = "plugin:<id>" and dispatches
+// it through the orchestrator, resolving session_id (empty → the task's primary
+// session) and handling session state: a running session queues the message;
+// an idle/completed session is resumed and prompted; a never-started session is
+// launched with it as the first prompt.
+message SendMessageRequest {
   string task_id = 1;
-  string body = 2;
+  string session_id = 2; // empty → the task's primary session
+  string text = 3;
 }
-message CreateCommentResponse {
-  Comment comment = 1;
+message SendMessageResponse {
+  string session_id = 1; // the session the message was delivered to
+  string status = 2;     // "queued" | "sent" | "started"
 }

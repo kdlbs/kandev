@@ -105,15 +105,11 @@ type Host interface {
 	// RPCs (capability api_read:repositories).
 	Repositories() RepositoryReader
 
-	// Messages returns the reader for the Host data API's message RPC
-	// (capability api_read:messages). It reads historical user/agent
-	// conversation content; kandev-injected system blocks are stripped.
+	// Messages returns the accessor for the Host data API's message RPCs.
+	// List (capability api_read:messages) reads historical user/agent
+	// conversation content; Send (capability api_write:messages) delivers a
+	// prompt to a task session.
 	Messages() MessageReader
-
-	// Comments returns the writer for the Host data API's CreateComment RPC
-	// (capability api_write:comments per ADR 0043). Comments are read-less in
-	// v1, so this accessor is write-only.
-	Comments() CommentWriter
 
 	// InvokeUtilityAgent runs a one-shot, non-interactive completion using
 	// the operator-configured "utility agent" (Settings > System) and returns
@@ -145,16 +141,6 @@ type TaskReader interface {
 	// (title/description/state/workflow_step_id) and returns the updated task.
 	// Requires api_write:tasks.
 	Update(ctx context.Context, in UpdateTaskInput) (*Task, error)
-}
-
-// CommentWriter is the write-only accessor behind Host.Comments(), mirroring
-// the Host data API's CreateComment RPC (ADR 0043). Requires
-// api_write:comments.
-type CommentWriter interface {
-	// Create posts a comment on a task through kandev's comment service (so
-	// the comment-created event fires) and returns the created comment with
-	// its server-assigned id, timestamp, and "plugin:<id>" source.
-	Create(ctx context.Context, taskID, body string) (*Comment, error)
 }
 
 // SessionReader is the read-only accessor behind Host.Sessions(), mirroring
@@ -198,12 +184,22 @@ type RepositoryReader interface {
 	List(ctx context.Context, workspaceID string, page Page) ([]Repository, *PageInfo, error)
 }
 
-// MessageReader is the read-only accessor behind Host.Messages(), mirroring
-// the Host data API's ListMessages RPC. It reads historical conversation
-// content filtered by session, task, and/or time range.
+// MessageReader is the accessor behind Host.Messages(), mirroring the Host
+// data API's ListMessages/SendMessage RPCs. List (api_read:messages) reads
+// historical conversation content filtered by session, task, and/or time
+// range; Send (api_write:messages) delivers a prompt to a task session. The
+// two capabilities gate independently. (The name is kept for source stability
+// with already-shipped read-only plugins; the interface now also writes.)
 type MessageReader interface {
 	// List returns messages matching filter, oldest first within a page.
 	List(ctx context.Context, filter MessageFilter, page Page) ([]Message, *PageInfo, error)
+
+	// Send delivers text as a prompt to a task session through kandev's
+	// orchestrator (the same delivery path message_task uses), recording a
+	// user message stamped "plugin:<id>". sessionID may be empty to target the
+	// task's primary session. Returns the target session and a dispatch status
+	// ("queued" | "sent" | "started"). Requires api_write:messages.
+	Send(ctx context.Context, taskID, sessionID, text string) (*MessageDispatch, error)
 }
 
 // newHostClient wraps a *grpc.ClientConn (dialed over the go-plugin broker)
@@ -324,8 +320,6 @@ func (h *grpcHostClient) Repositories() RepositoryReader {
 
 func (h *grpcHostClient) Messages() MessageReader { return grpcMessageReader{client: h.client} }
 
-func (h *grpcHostClient) Comments() CommentWriter { return grpcCommentWriter{client: h.client} }
-
 func (h *grpcHostClient) InvokeUtilityAgent(ctx context.Context, prompt string) (string, error) {
 	resp, err := h.client.InvokeUtilityAgent(ctx, &pluginv1.InvokeUtilityAgentRequest{Prompt: prompt})
 	if err != nil {
@@ -388,19 +382,6 @@ func (r grpcTaskReader) Update(ctx context.Context, in UpdateTaskInput) (*Task, 
 		return nil, err
 	}
 	return &task, nil
-}
-
-// grpcCommentWriter implements CommentWriter on the plugin side.
-type grpcCommentWriter struct {
-	client pluginv1.HostClient
-}
-
-func (w grpcCommentWriter) Create(ctx context.Context, taskID, body string) (*Comment, error) {
-	resp, err := w.client.CreateComment(ctx, &pluginv1.CreateCommentRequest{TaskId: taskID, Body: body})
-	if err != nil {
-		return nil, err
-	}
-	return commentFromProto(resp.GetComment()), nil
 }
 
 // grpcSessionReader implements SessionReader on the plugin side.
@@ -495,6 +476,14 @@ func (r grpcMessageReader) List(ctx context.Context, filter MessageFilter, page 
 		return nil, nil, err
 	}
 	return messagesFromProto(resp.GetMessages()), pageInfoFromProto(resp.GetPageInfo()), nil
+}
+
+func (r grpcMessageReader) Send(ctx context.Context, taskID, sessionID, text string) (*MessageDispatch, error) {
+	resp, err := r.client.SendMessage(ctx, &pluginv1.SendMessageRequest{TaskId: taskID, SessionId: sessionID, Text: text})
+	if err != nil {
+		return nil, err
+	}
+	return messageDispatchFromProto(resp), nil
 }
 
 // registerHostServer registers a grpc server that dispatches
@@ -772,12 +761,12 @@ func (s *grpcHostServer) UpdateTask(ctx context.Context, req *pluginv1.UpdateTas
 	return &pluginv1.UpdateTaskResponse{Task: protoTask}, nil
 }
 
-func (s *grpcHostServer) CreateComment(ctx context.Context, req *pluginv1.CreateCommentRequest) (*pluginv1.CreateCommentResponse, error) {
-	comment, err := s.impl.Comments().Create(ctx, req.GetTaskId(), req.GetBody())
+func (s *grpcHostServer) SendMessage(ctx context.Context, req *pluginv1.SendMessageRequest) (*pluginv1.SendMessageResponse, error) {
+	dispatch, err := s.impl.Messages().Send(ctx, req.GetTaskId(), req.GetSessionId(), req.GetText())
 	if err != nil {
 		return nil, err
 	}
-	return &pluginv1.CreateCommentResponse{Comment: comment.toProto()}, nil
+	return dispatch.toProto(), nil
 }
 
 var _ pluginv1.HostServer = (*grpcHostServer)(nil)
@@ -804,7 +793,6 @@ func (UnimplementedHostData) Repositories() RepositoryReader {
 	return unimplementedRepositoryReader{}
 }
 func (UnimplementedHostData) Messages() MessageReader { return unimplementedMessageReader{} }
-func (UnimplementedHostData) Comments() CommentWriter { return unimplementedCommentWriter{} }
 
 // InvokeUtilityAgent is the embeddable default for the agent_invoke Host
 // method (ADR 0048). It lives on UnimplementedHostData — the shared
@@ -881,8 +869,6 @@ func (unimplementedMessageReader) List(context.Context, MessageFilter, Page) ([]
 	return nil, nil, errUnimplementedHostData("messages")
 }
 
-type unimplementedCommentWriter struct{}
-
-func (unimplementedCommentWriter) Create(context.Context, string, string) (*Comment, error) {
-	return nil, errUnimplementedHostData("comments")
+func (unimplementedMessageReader) Send(context.Context, string, string, string) (*MessageDispatch, error) {
+	return nil, errUnimplementedHostData("messages")
 }

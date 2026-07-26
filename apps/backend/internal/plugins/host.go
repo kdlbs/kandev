@@ -69,12 +69,12 @@ type pluginHost struct {
 	// host_write.go.
 	taskWriter taskWriter
 
-	// writeDeps returns the live comment writer and task starter behind the
-	// CreateComment RPC (api_write:comments) and CreateTask's start_agent.
-	// Read live (not snapshotted at hostForPlugin) because the office service
-	// and orchestrator are constructed after boot-active plugins spawn — same
-	// rationale as utilityDeps. nil on a bare test host. See host_write.go.
-	writeDeps func() (commentDataSource, taskStarter)
+	// writeDeps returns the live task messenger and task starter behind the
+	// SendMessage RPC (api_write:messages) and CreateTask's start_agent. Read
+	// live (not snapshotted at hostForPlugin) because the orchestrator is
+	// constructed after boot-active plugins spawn — same rationale as
+	// utilityDeps. nil on a bare test host. See host_write.go.
+	writeDeps func() (taskMessenger, taskStarter)
 
 	// utilityDeps returns the live utility-agent dependencies (ADR 0048) at
 	// call time rather than a spawn-time snapshot. hostUtilityMgr is

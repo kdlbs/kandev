@@ -21,9 +21,9 @@ import (
 //   - HandleWebhook echoes the request body back as the response body,
 //     except webhook key "crash" which exits the process immediately (to
 //     exercise crash detection + restart), and webhook key "write" which
-//     drives the Host data API write RPCs (CreateTask then CreateComment on
-//     the returned task) so a test can observe them arrive at the Host over
-//     the real subprocess transport.
+//     drives the Host data API write RPCs (CreateTask then SendMessage to the
+//     returned task) so a test can observe them arrive at the Host over the
+//     real subprocess transport.
 type fixturePlugin struct {
 	pluginsdk.UnimplementedPlugin
 }
@@ -50,9 +50,9 @@ func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.Webhoo
 }
 
 // handleWrite exercises the Host data API write RPCs end to end: CreateTask,
-// then CreateComment on the task the Host returns. It responds "ok" on success
-// so the test can assert the round-trip completed; a Host error is surfaced as
-// a 500 with the error text.
+// then SendMessage to the task the Host returns. It responds "ok" on success so
+// the test can assert the round-trip completed; a Host error is surfaced as a
+// 500 with the error text.
 func (p *fixturePlugin) handleWrite(ctx context.Context) (*pluginsdk.WebhookResponse, error) {
 	host := p.Host()
 	if host == nil {
@@ -66,7 +66,7 @@ func (p *fixturePlugin) handleWrite(ctx context.Context) (*pluginsdk.WebhookResp
 	if err != nil {
 		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
 	}
-	if _, err := host.Comments().Create(ctx, task.ID, "fixture probe comment"); err != nil {
+	if _, err := host.Messages().Send(ctx, task.ID, "", "fixture probe message"); err != nil {
 		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
 	}
 	return &pluginsdk.WebhookResponse{Status: 200, Body: []byte("ok")}, nil

@@ -139,19 +139,21 @@ func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.Webhoo
 }
 
 // writeProbeRecord captures the outcome of the Host data API write round-trip
-// so tests can poll write-probe.json as evidence a plugin created a task and a
-// comment over the real gRPC transport (or was denied — the error is recorded).
+// so tests can poll write-probe.json as evidence a plugin created a task and
+// sent a message to its session over the real gRPC transport (or was denied —
+// the error is recorded).
 type writeProbeRecord struct {
-	TaskID    string `json:"task_id,omitempty"`
-	TaskError string `json:"task_error,omitempty"`
-	CommentID string `json:"comment_id,omitempty"`
+	TaskID        string `json:"task_id,omitempty"`
+	TaskError     string `json:"task_error,omitempty"`
+	MessageStatus string `json:"message_status,omitempty"`
+	MessageError  string `json:"message_error,omitempty"`
 }
 
 // snapshotWriteProbeBestEffort exercises the write RPCs end to end: Host
-// CreateTask then, on success, Host CreateComment on the new task, writing the
-// result (ids, or the error) to write-probe.json. Best-effort — the Host may
-// deny the write when the fixture's manifest lacks api_write, which is itself
-// useful evidence.
+// CreateTask then, on success, Host SendMessage to the new task, writing the
+// result (task id, dispatch status, or the error) to write-probe.json.
+// Best-effort — the Host may deny the write when the fixture's manifest lacks
+// api_write, which is itself useful evidence.
 func (p *fixturePlugin) snapshotWriteProbeBestEffort(ctx context.Context) {
 	host := p.Host()
 	if host == nil {
@@ -168,8 +170,10 @@ func (p *fixturePlugin) snapshotWriteProbeBestEffort(ctx context.Context) {
 		rec.TaskError = err.Error()
 	} else if task != nil {
 		rec.TaskID = task.ID
-		if comment, cerr := host.Comments().Create(ctx, task.ID, "fixture probe comment"); cerr == nil && comment != nil {
-			rec.CommentID = comment.ID
+		if dispatch, merr := host.Messages().Send(ctx, task.ID, "", "fixture probe message"); merr != nil {
+			rec.MessageError = merr.Error()
+		} else if dispatch != nil {
+			rec.MessageStatus = dispatch.Status
 		}
 	}
 	data, err := json.Marshal(rec)

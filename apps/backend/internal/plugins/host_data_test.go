@@ -9,7 +9,6 @@ import (
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	analyticsmodels "github.com/kandev/kandev/internal/analytics/models"
-	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -193,23 +192,28 @@ func (f *fakeTaskWriter) UpdateTask(_ context.Context, in TaskUpdateInput) (*tas
 	return &taskmodels.Task{ID: in.ID, Title: "updated"}, nil
 }
 
-// fakeCommentWriter records CreateComment calls and stamps an id/created_at
-// like the real office repository does.
-type fakeCommentWriter struct {
-	calls int
-	last  *orchmodels.TaskComment
-	err   error
+// fakeMessenger records SendMessage calls, standing in for the backendapp
+// adapter over the task service + orchestrator delivery path.
+type fakeMessenger struct {
+	calls       int
+	lastTaskID  string
+	lastSession string
+	lastText    string
+	lastSource  string
+	result      PluginMessageResult
+	err         error
 }
 
-func (f *fakeCommentWriter) CreateComment(_ context.Context, comment *orchmodels.TaskComment) error {
+func (f *fakeMessenger) SendMessage(_ context.Context, taskID, sessionID, text, source string) (PluginMessageResult, error) {
 	f.calls++
+	f.lastTaskID, f.lastSession, f.lastText, f.lastSource = taskID, sessionID, text, source
 	if f.err != nil {
-		return f.err
+		return PluginMessageResult{}, f.err
 	}
-	comment.ID = "comment-1"
-	comment.CreatedAt = time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
-	f.last = comment
-	return nil
+	if f.result == (PluginMessageResult{}) {
+		return PluginMessageResult{SessionID: "session-x", Status: "sent"}, nil
+	}
+	return f.result, nil
 }
 
 // fakeTaskStarter records StartTask calls behind CreateTask's start_agent.
@@ -239,7 +243,7 @@ type testDataHost struct {
 	utilAgents *fakeUtilityAgentSource
 	utilRun    *fakeUtilityRunner
 	taskWriter *fakeTaskWriter
-	comments   *fakeCommentWriter
+	messenger  *fakeMessenger
 	starter    *fakeTaskStarter
 }
 
@@ -257,7 +261,7 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		utilAgents: &fakeUtilityAgentSource{},
 		utilRun:    &fakeUtilityRunner{text: "ok"},
 		taskWriter: &fakeTaskWriter{},
-		comments:   &fakeCommentWriter{},
+		messenger:  &fakeMessenger{},
 		starter:    &fakeTaskStarter{},
 	}
 	d.host = &pluginHost{
@@ -274,8 +278,8 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		utilityDeps: func() (utilityAgentSource, utilityRunner) {
 			return d.utilAgents, d.utilRun
 		},
-		writeDeps: func() (commentDataSource, taskStarter) {
-			return d.comments, d.starter
+		writeDeps: func() (taskMessenger, taskStarter) {
+			return d.messenger, d.starter
 		},
 	}
 	return d

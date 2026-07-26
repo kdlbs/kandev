@@ -31,13 +31,15 @@ func TestPluginHost_Tasks_CreateDeniedWithoutWriteCapability(t *testing.T) {
 	}
 }
 
-func TestPluginHost_Comments_CreateDeniedWithoutWriteCapability(t *testing.T) {
-	d := newTestDataHost(manifest.Capabilities{})
+func TestPluginHost_Messages_SendDeniedWithoutWriteCapability(t *testing.T) {
+	// api_read:messages granted but api_write:messages is NOT — the read and
+	// write capabilities on the messages resource gate independently.
+	d := newTestDataHost(manifest.Capabilities{APIRead: []string{"messages"}})
 
-	_, err := d.host.Comments().Create(context.Background(), "task-1", "hello")
-	assertPermissionDenied(t, err, "api_write:comments")
-	if d.comments.calls != 0 {
-		t.Fatalf("comment writer called %d times despite missing api_write:comments", d.comments.calls)
+	_, err := d.host.Messages().Send(context.Background(), "task-1", "", "hello")
+	assertPermissionDenied(t, err, "api_write:messages")
+	if d.messenger.calls != 0 {
+		t.Fatalf("messenger called %d times despite missing api_write:messages", d.messenger.calls)
 	}
 }
 
@@ -200,42 +202,54 @@ func TestPluginHost_Tasks_UpdateNotFoundMapsToGRPCNotFound(t *testing.T) {
 	}
 }
 
-// ── Comment create ──────────────────────────────────────────────────────
+// ── Message send ────────────────────────────────────────────────────────
 
-func TestPluginHost_Comments_CreateSucceedsAndStampsSource(t *testing.T) {
-	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"comments"}})
+func TestPluginHost_Messages_SendSucceedsAndStampsSource(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"messages"}})
+	d.messenger.result = PluginMessageResult{SessionID: "session-9", Status: "queued"}
 
-	comment, err := d.host.Comments().Create(context.Background(), "task-1", "from the plugin")
+	dispatch, err := d.host.Messages().Send(context.Background(), "task-1", "session-9", "please rerun the tests")
 	if err != nil {
-		t.Fatalf("Create() unexpected error: %v", err)
+		t.Fatalf("Send() unexpected error: %v", err)
 	}
-	if comment == nil || comment.ID != "comment-1" || comment.TaskID != "task-1" {
-		t.Fatalf("Create() = %+v, want comment-1 on task-1", comment)
+	if dispatch == nil || dispatch.SessionID != "session-9" || dispatch.Status != "queued" {
+		t.Fatalf("Send() = %+v, want session-9/queued", dispatch)
 	}
-	if comment.Source != "plugin:p1" {
-		t.Fatalf("comment source = %q, want plugin:p1", comment.Source)
+	if d.messenger.calls != 1 {
+		t.Fatalf("messenger calls = %d, want 1 (routes through the orchestrator delivery path)", d.messenger.calls)
 	}
-	if comment.CreatedAt == "" {
-		t.Fatalf("comment created_at not stamped")
+	if d.messenger.lastTaskID != "task-1" || d.messenger.lastSession != "session-9" || d.messenger.lastText != "please rerun the tests" {
+		t.Fatalf("messenger recorded taskID=%q session=%q text=%q", d.messenger.lastTaskID, d.messenger.lastSession, d.messenger.lastText)
 	}
-	if d.comments.calls != 1 {
-		t.Fatalf("comment writer calls = %d, want 1 (routes through the event-publishing service)", d.comments.calls)
-	}
-	if d.comments.last.AuthorType != commentAuthorType {
-		t.Fatalf("comment author_type = %q, want %q", d.comments.last.AuthorType, commentAuthorType)
+	if d.messenger.lastSource != "plugin:p1" {
+		t.Fatalf("message source = %q, want plugin:p1 (server-stamped provenance)", d.messenger.lastSource)
 	}
 }
 
-func TestPluginHost_Comments_CreateRequiresTaskAndBody(t *testing.T) {
-	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"comments"}})
+// TestPluginHost_Messages_ReadAndWriteGateIndependently proves List
+// (api_read:messages) and Send (api_write:messages) are enforced separately on
+// the shared Messages() accessor: a write-only manifest can Send but not List.
+func TestPluginHost_Messages_ReadAndWriteGateIndependently(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"messages"}})
 
-	if _, err := d.host.Comments().Create(context.Background(), "", "body"); status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("Create() without task_id error = %v, want InvalidArgument", err)
+	_, _, err := d.host.Messages().List(context.Background(), pluginsdk.MessageFilter{}, pluginsdk.Page{})
+	assertPermissionDenied(t, err, "api_read:messages")
+
+	if _, err := d.host.Messages().Send(context.Background(), "task-1", "", "hi"); err != nil {
+		t.Fatalf("Send() with api_write:messages unexpected error: %v", err)
 	}
-	if _, err := d.host.Comments().Create(context.Background(), "task-1", ""); status.Code(err) != codes.InvalidArgument {
-		t.Fatalf("Create() without body error = %v, want InvalidArgument", err)
+}
+
+func TestPluginHost_Messages_SendRequiresTaskAndText(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"messages"}})
+
+	if _, err := d.host.Messages().Send(context.Background(), "", "", "body"); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Send() without task_id error = %v, want InvalidArgument", err)
 	}
-	if d.comments.calls != 0 {
-		t.Fatalf("comment writer called %d times despite invalid input", d.comments.calls)
+	if _, err := d.host.Messages().Send(context.Background(), "task-1", "", ""); status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Send() without text error = %v, want InvalidArgument", err)
+	}
+	if d.messenger.calls != 0 {
+		t.Fatalf("messenger called %d times despite invalid input", d.messenger.calls)
 	}
 }
