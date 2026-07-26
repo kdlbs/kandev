@@ -422,6 +422,37 @@ func TestRetryTransientPrompt_OwningStopSurvivesCoordinatorCancellation(t *testi
 	require.False(t, activityPresent, "forced retry teardown retained predecessor activity")
 }
 
+func TestRetryTransientPrompt_StopFailureStillRetiresTerminalActivity(t *testing.T) {
+	repo := setupTestRepo(t)
+	const (
+		taskID      = "task-retry-stop-failure"
+		sessionID   = "session-retry-stop-failure"
+		executionID = "execution-retry-stop-failure"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	retryCtx, cancelRetry := context.WithCancel(t.Context())
+	agentManager := &mockAgentManager{
+		stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+			cancelRetry()
+			return errors.New("runtime did not acknowledge stop")
+		},
+	}
+	svc := newCoordinatorStopTestService(repo, taskRepo, agentManager)
+	svc.rememberTurnPrompt(sessionID, "retry me", "", false, nil)
+	svc.registerBackgroundWork(sessionID, "orphaned-work", executionID, "work")
+	svc.markForegroundIdle(sessionID)
+	svc.markExecutionFailed(sessionID, executionID)
+
+	svc.retryTransientPrompt(retryCtx, taskID, sessionID, executionID)
+
+	if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+		t.Fatal("failed transient stop retained terminal execution activity")
+	}
+	require.Empty(t, agentManager.capturedPromptCalls, "cancelled retry must not relaunch")
+}
+
 func TestTransientRetryEntryClaimPreventsDoubleFire(t *testing.T) {
 	entry := &transientRetryEntry{}
 	if !entry.claim() {
