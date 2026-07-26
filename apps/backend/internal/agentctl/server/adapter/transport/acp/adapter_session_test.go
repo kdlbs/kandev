@@ -14,6 +14,8 @@ import (
 type sessionRequestCaptureAgent struct {
 	newRequest  acpsdk.NewSessionRequest
 	loadRequest acpsdk.LoadSessionRequest
+	newStarted  chan struct{}
+	releaseNew  chan struct{}
 }
 
 var (
@@ -51,6 +53,10 @@ func (*sessionRequestCaptureAgent) ListSessions(context.Context, acpsdk.ListSess
 
 func (a *sessionRequestCaptureAgent) NewSession(_ context.Context, request acpsdk.NewSessionRequest) (acpsdk.NewSessionResponse, error) {
 	a.newRequest = request
+	if a.newStarted != nil {
+		close(a.newStarted)
+		<-a.releaseNew
+	}
 	return acpsdk.NewSessionResponse{SessionId: "session-1"}, nil
 }
 
@@ -150,6 +156,54 @@ func TestResetSessionInvalidatesPromptOwnership(t *testing.T) {
 	if len(adapter.toolCallParents) != 0 || len(adapter.handoffProtectedToolCalls) != 0 {
 		t.Fatal("reset retained stale prompt handoff tool ownership")
 	}
+}
+
+func TestResetSessionCannotInvalidateInheritedPromptOwnership(t *testing.T) {
+	adapter, capture := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+	capture.newStarted = make(chan struct{})
+	capture.releaseNew = make(chan struct{})
+
+	_, owner := newPromptTurnState(context.Background(), 1, true)
+	if err := adapter.acquirePromptTurn(context.Background(), owner, true); err != nil {
+		t.Fatalf("acquire original prompt: %v", err)
+	}
+	if !adapter.markPromptHandoff("session-1", 1) {
+		t.Fatal("original prompt did not accept handoff")
+	}
+
+	resetDone := make(chan error, 1)
+	go func() {
+		_, err := adapter.ResetSession(context.Background(), nil)
+		resetDone <- err
+	}()
+	select {
+	case <-capture.newStarted:
+	case <-time.After(time.Second):
+		t.Fatal("reset did not reach provider session creation")
+	}
+
+	_, successor := newPromptTurnState(context.Background(), 2, true)
+	if err := adapter.acquirePromptTurn(context.Background(), successor, true); err != nil {
+		t.Fatalf("successor did not inherit prompt ownership: %v", err)
+	}
+	close(capture.releaseNew)
+	select {
+	case err := <-resetDone:
+		if err != nil {
+			t.Fatalf("ResetSession: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reset did not complete")
+	}
+
+	if !adapter.claimPromptTurnCompletion(successor) {
+		t.Fatal("reset invalidated the inherited successor prompt")
+	}
+	if adapter.claimPromptTurnCompletion(owner) {
+		t.Fatal("transferred predecessor reclaimed completion ownership")
+	}
+	adapter.finishPromptTurn(owner)
+	adapter.finishPromptTurn(successor)
 }
 
 func newSessionRequestCaptureAdapter(t *testing.T, capabilities acpsdk.McpCapabilities) (*Adapter, *sessionRequestCaptureAgent) {

@@ -116,17 +116,22 @@ func (a *Adapter) finishPromptTurn(turn *promptTurnState) {
 	}
 }
 
-// invalidatePromptTurnOwnership detaches the active prompt from a session that
-// has just been replaced. The old RPC may still return, but it no longer owns
-// completion finalization or the physical gate token.
-func (a *Adapter) invalidatePromptTurnOwnership() {
-	a.promptTurnMu.Lock()
-	turn := a.promptTurn
-	a.promptTurn = nil
-	releaseGate := turn != nil && turn.gateOwned
-	if turn != nil {
-		turn.gateOwned = false
+// invalidatePromptTurnOwnership detaches the prompt captured before a session
+// replacement began. A successor may inherit ownership while session/new or
+// session/load is in flight; the identity guard must not drain that successor's
+// gate. The old RPC may still return, but it no longer owns finalization.
+func (a *Adapter) invalidatePromptTurnOwnership(turn *promptTurnState) {
+	if turn == nil {
+		return
 	}
+	a.promptTurnMu.Lock()
+	if a.promptTurn != turn {
+		a.promptTurnMu.Unlock()
+		return
+	}
+	a.promptTurn = nil
+	releaseGate := turn.gateOwned
+	turn.gateOwned = false
 	a.promptTurnMu.Unlock()
 	if releaseGate {
 		<-a.promptGate

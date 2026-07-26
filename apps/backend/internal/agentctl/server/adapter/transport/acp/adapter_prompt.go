@@ -157,7 +157,8 @@ func (a *Adapter) sendPrompt(
 	if !ownsCompletion {
 		a.logger.Debug("suppressing completion from handed-off prompt RPC",
 			zap.String("session_id", sessionID),
-			zap.Uint64("prompt_generation", promptGeneration))
+			zap.Uint64("prompt_generation", promptGeneration),
+			zap.Error(err))
 		return nil
 	}
 	if err != nil {
