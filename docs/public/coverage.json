@@ -150,13 +150,11 @@
       "sources": [
         "apps/backend/internal/profiles/profiles.go",
         "apps/web/app/settings/agents/page.tsx",
-        "apps/web/components/settings/agent-usage-section.tsx",
         "apps/web/hooks/domains/settings/use-dynamic-models.ts"
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
         "apps/web/components/settings/agent-profile-page.test.tsx",
-        "apps/web/components/settings/agent-usage-section.test.tsx",
         "apps/web/hooks/domains/settings/use-dynamic-models.test.ts"
       ],
       "settingsRoutes": ["/settings/agents", "/settings/prompts", "/settings/utility-agents"],
