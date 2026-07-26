@@ -80,8 +80,9 @@ expect git-bash Windows_NT MINGW64 start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true 
 grep_status=0
 # `#` starts a comment anywhere in a Makefile line, so the match must not span
 # one: [^#]* keeps a prose mention like `FOO = bar # $(shell x 2>/dev/null)`
-# from failing CI, while the leading [^#] drops whole-line comments.
-devnull_hits=$(grep -nE '^[[:space:]]*[^#][^#]*\$\(shell[^#]*/dev/null' \
+# from failing CI, and cannot reach past a whole-line comment either. It matches
+# empty so a bare `$(shell ...)` in column 0 still counts.
+devnull_hits=$(grep -nE '^[[:space:]]*[^#]*\$\(shell[^#]*/dev/null' \
 	"$backend_dir/../../Makefile" "$backend_dir/Makefile") || grep_status=$?
 if [ "$grep_status" -gt 1 ]; then
 	printf 'FAIL  %-16s unable to scan Makefiles (grep exit %s)\n' "static" "$grep_status"
