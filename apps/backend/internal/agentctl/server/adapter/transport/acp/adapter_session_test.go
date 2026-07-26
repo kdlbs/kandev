@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"testing"
+	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
 	acpclient "github.com/kandev/kandev/internal/agentctl/server/acp"
@@ -103,6 +104,47 @@ func TestMCPSessionNewAndLoadUseHTTPWithSSEFallback(t *testing.T) {
 			assertCapturedKandevTransport(t, capture.loadRequest.McpServers, tt.wantType)
 		})
 	}
+}
+
+func TestResetSessionInvalidatesPromptOwnership(t *testing.T) {
+	adapter, _ := newSessionRequestCaptureAdapter(t, acpsdk.McpCapabilities{})
+
+	_, owner := newPromptTurnState(context.Background(), 1, false)
+	if err := adapter.acquirePromptTurn(context.Background(), owner, true); err != nil {
+		t.Fatalf("acquire original prompt: %v", err)
+	}
+
+	type acquireResult struct {
+		turn *promptTurnState
+		err  error
+	}
+	waiterDone := make(chan acquireResult, 1)
+	go func() {
+		_, waiter := newPromptTurnState(context.Background(), 0, false)
+		err := adapter.acquirePromptTurn(context.Background(), waiter, false)
+		waiterDone <- acquireResult{turn: waiter, err: err}
+	}()
+
+	if _, err := adapter.ResetSession(context.Background(), nil); err != nil {
+		t.Fatalf("ResetSession: %v", err)
+	}
+
+	var successor *promptTurnState
+	select {
+	case result := <-waiterDone:
+		if result.err != nil {
+			t.Fatalf("queued prompt did not acquire after reset: %v", result.err)
+		}
+		successor = result.turn
+	case <-time.After(time.Second):
+		t.Fatal("reset leaked the queued prompt ownership waiter")
+	}
+	defer adapter.finishPromptTurn(successor)
+
+	if adapter.claimPromptTurnCompletion(owner) {
+		t.Fatal("stale pre-reset prompt retained response ownership")
+	}
+	adapter.finishPromptTurn(owner)
 }
 
 func newSessionRequestCaptureAdapter(t *testing.T, capabilities acpsdk.McpCapabilities) (*Adapter, *sessionRequestCaptureAgent) {

@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-07-21
-updated: 2026-07-25
+updated: 2026-07-26
 owner: kandev
 ---
 
@@ -21,6 +21,11 @@ and incorrectly prevents prompt delivery.
   may appear as done.
 - A foreground-idle session with recognized background work accepts a new
   prompt. A session with foreground activity continues to reject it.
+- When a provider-attested, generation-bearing foreground-idle boundary also
+  guarantees prompt handoff, the next human prompt reaches the provider
+  immediately even if the prior prompt RPC remains open for detached work.
+  Synthetic wakeups remain serialized behind the owning RPC. Providers that do
+  not attest handoff keep the follow-up queued until they release ownership.
 - Only adapter-attested workloads relax prompt admission. An adapter opts in a
   workload only when Kandev has fixture-tested both its launch and accountable
   terminal lifecycle. Claude subagents, background shells, and Monitor watches,
@@ -77,12 +82,20 @@ and incorrectly prevents prompt delivery.
 Prompt admission is atomic: only one prompt can claim foreground ownership for
 a session. Delayed release or completion from an earlier prompt cycle cannot
 mutate a later accepted claim. Prompt delivery is serialized per agent
-execution so each prompt owns its completion wait and response buffers.
+execution except for one generation-matched human ownership transfer at an
+adapter-attested provider handoff. The transfer finalizes the earlier lifecycle
+buffer/completion owner before the successor starts; synthetic wakeups cannot
+consume it, and a delayed response from the earlier RPC cannot finalize the
+successor.
 
 ## Failure modes
 
 - An unknown activity value for an in-flight `RUNNING` session is rendered as
   generating, not done.
+- A foreground-idle signal without a nonzero matching prompt generation and
+  adapter-attested handoff capability does not relax transport serialization.
+  The session remains visibly foreground-owned and the follow-up remains
+  queued rather than being reported as delivered.
 - A normalized tool-card shape cannot attest to background capability. An
   unsupported adapter that emits a subagent-looking card remains foreground-busy
   until its launch, yield, and terminal lifecycle are explicitly supported.
@@ -122,6 +135,16 @@ survive as before.
 - **GIVEN** a foreground-idle session with a recognized background workload,
   **WHEN** the operator sends a prompt, **THEN** the prompt is accepted while
   the status remains background-running until foreground activity begins.
+- **GIVEN** an attested provider keeps a prompt RPC open for a detached child
+  after emitting foreground-idle for the matching generation, **WHEN** the
+  operator sends a follow-up, **THEN** that human prompt reaches the provider
+  immediately and the detached child may continue streaming.
+- **GIVEN** a synthetic wakeup is waiting when an attested human handoff occurs,
+  **WHEN** a human follow-up is submitted, **THEN** the human prompt inherits
+  ownership and the wakeup remains serialized until the human turn completes.
+- **GIVEN** the provider has not authoritatively released the foreground,
+  **WHEN** the operator submits a follow-up, **THEN** Kandev reports it as
+  queued and does not send it concurrently.
 - **GIVEN** two adapter-attested subagents and one background shell are live,
   **WHEN** the session is serialized or publishes an activity update, **THEN**
   `active_subagent_count` is two while all three workloads still contribute to

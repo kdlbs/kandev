@@ -10,6 +10,7 @@ import (
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -572,6 +573,53 @@ func (m *Manager) publishStreamDisconnectError(execution *AgentExecution, err er
 	)
 }
 
+// handlePromptHandoffEvent finalizes lifecycle's shared streaming-buffer and
+// completion-wait ownership at the same generation-bearing boundary where the
+// ACP adapter made one human successor eligible to inherit prompt ownership.
+// It does not mark the execution Ready: foreground/background activity and
+// coarse turn completion remain separate orchestrator/provider concerns.
+func (m *Manager) handlePromptHandoffEvent(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+) {
+	handoff, _ := event.Data[streams.AgentEventDataPromptHandoff].(bool)
+	if !handoff || event.PromptGeneration == 0 {
+		return
+	}
+
+	execution.promptLifecycleMu.Lock()
+	defer execution.promptLifecycleMu.Unlock()
+
+	ownsGeneration := false
+	err := m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		ownsGeneration = current == execution &&
+			current.promptGeneration == event.PromptGeneration
+	})
+	if err != nil || !ownsGeneration {
+		m.logger.Debug("ignoring prompt handoff for superseded generation",
+			zap.String("execution_id", execution.ID),
+			zap.Uint64("event_prompt_generation", event.PromptGeneration))
+		return
+	}
+
+	m.flushMessageBuffer(execution)
+	execution.messageMu.Lock()
+	execution.clearProtocolMessageCorrelationLocked()
+	execution.messageMu.Unlock()
+	m.flushAssistantHistory(execution)
+
+	select {
+	case execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       streams.EventTypeForegroundIdle,
+		PromptGeneration: event.PromptGeneration,
+	}:
+	default:
+		m.logger.Warn("prompt handoff could not signal lifecycle waiter",
+			zap.String("execution_id", execution.ID),
+			zap.Uint64("prompt_generation", event.PromptGeneration))
+	}
+}
+
 // handleAgentEvent processes incoming agent events from the agent
 func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.PromptGeneration == 0 || (event.Type != toolStatusComplete && event.Type != "error") {
@@ -658,6 +706,9 @@ func (m *Manager) handleAgentEvent(execution *AgentExecution, event agentctl.Age
 		}
 		// No return — must flow through to PublishAgentStreamEvent so the orchestrator
 		// can persist the model and re-publish to the dedicated session models subject.
+
+	case streams.EventTypeForegroundIdle:
+		m.handlePromptHandoffEvent(execution, event)
 	}
 
 	m.eventPublisher.PublishAgentStreamEvent(execution, event)

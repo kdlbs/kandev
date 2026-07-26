@@ -88,6 +88,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.availableModels = initialModels.AvailableModels
 	}
 	a.mu.Unlock()
+	a.invalidatePromptTurnOwnership()
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
@@ -374,6 +375,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.availableModels = initialModels.AvailableModels
 	}
 	a.mu.Unlock()
+	a.invalidatePromptTurnOwnership()
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))

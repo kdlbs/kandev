@@ -11,6 +11,7 @@ import (
 
 func TestEnqueueACPUpdateSnapshotsPromptGenerationBeforeWorkerConversion(t *testing.T) {
 	a := newTestAdapter()
+	a.agentID = claudeAgentID
 	t.Cleanup(func() { _ = a.Close() })
 
 	var notification sdk.SessionNotification
@@ -59,6 +60,7 @@ func TestEnqueueACPUpdateSnapshotsPromptGenerationBeforeWorkerConversion(t *test
 // shared.LogNormalizedEvent.
 func TestHandleACPUpdate_HumanOriginDeliversLeadingContextWindowThenForegroundIdle(t *testing.T) {
 	a := newTestAdapter()
+	a.agentID = claudeAgentID
 	t.Cleanup(func() { _ = a.Close() })
 
 	var notification sdk.SessionNotification
@@ -67,7 +69,7 @@ func TestHandleACPUpdate_HumanOriginDeliversLeadingContextWindowThenForegroundId
 		t.Fatalf("decode notification: %v", err)
 	}
 
-	a.handleACPUpdate(notification, 0)
+	a.handleACPUpdate(notification, 42)
 
 	events := drainEvents(a)
 	if len(events) != 2 {
@@ -79,5 +81,35 @@ func TestHandleACPUpdate_HumanOriginDeliversLeadingContextWindowThenForegroundId
 	}
 	if events[1].Type != streams.EventTypeForegroundIdle {
 		t.Fatalf("second delivered event type = %q, want %q", events[1].Type, streams.EventTypeForegroundIdle)
+	}
+}
+
+func TestHandleACPUpdate_HumanOriginWithoutAttestedGenerationStaysForegroundOwned(t *testing.T) {
+	var notification sdk.SessionNotification
+	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":23638,"_meta":{"_claude/origin":{"kind":"human"}}}}`)
+	if err := json.Unmarshal(raw, &notification); err != nil {
+		t.Fatalf("decode notification: %v", err)
+	}
+
+	for _, test := range []struct {
+		name             string
+		agentID          string
+		promptGeneration uint64
+	}{
+		{name: "unsupported adapter", agentID: "other-acp", promptGeneration: 42},
+		{name: "missing generation", agentID: claudeAgentID, promptGeneration: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a := newTestAdapter()
+			a.agentID = test.agentID
+			t.Cleanup(func() { _ = a.Close() })
+
+			a.handleACPUpdate(notification, test.promptGeneration)
+
+			events := drainEvents(a)
+			if len(events) != 1 || events[0].Type != streams.EventTypeContextWindow {
+				t.Fatalf("events = %+v, want context-window only", events)
+			}
+		})
 	}
 }

@@ -173,7 +173,17 @@ func (a *Adapter) handleACPUpdate(
 	if !suppressed {
 		event = a.convertNotification(n)
 		if n.Update.UsageUpdate != nil {
-			if lifecycleEvent := usageLifecycleEvent(sessionID, n.Update.UsageUpdate.Meta, promptGeneration); lifecycleEvent != nil {
+			lifecycleEvent := usageLifecycleEvent(
+				sessionID,
+				n.Update.UsageUpdate.Meta,
+				promptGeneration,
+			)
+			if lifecycleEvent != nil &&
+				lifecycleEvent.Type == streams.EventTypeForegroundIdle &&
+				(!a.supportsPromptHandoff() || promptGeneration == 0) {
+				lifecycleEvent = nil
+			}
+			if lifecycleEvent != nil {
 				leadingEvent, event = event, lifecycleEvent
 			}
 		}
@@ -186,6 +196,13 @@ func (a *Adapter) handleACPUpdate(
 		a.maybeScheduleAsyncTurnComplete(*leadingEvent)
 	}
 	if event != nil {
+		if event.Type == streams.EventTypeForegroundIdle &&
+			a.markPromptHandoff(event.PromptGeneration) {
+			if event.Data == nil {
+				event.Data = make(map[string]any)
+			}
+			event.Data[streams.AgentEventDataPromptHandoff] = true
+		}
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, event)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
 			event.Type, rawData, event)

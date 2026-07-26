@@ -1,6 +1,6 @@
 # 0049: Fine-grained foreground-idle busy signal
 
-**Status:** accepted (amended 2026-07-25)
+**Status:** accepted (amended 2026-07-26)
 **Date:** 2026-07-11
 **Area:** backend, frontend, protocol
 **Related:** [Background work liveness spec](../specs/platform/background-work-liveness.md)
@@ -48,6 +48,13 @@ to the foreground only:
   the ACP prompt RPC remains held open for spawned subagents; a later
   task-notification-origin cycle may temporarily take foreground precedence
   while it generates the completion summary.
+- A generation-bearing human-origin idle boundary may also attest transport
+  handoff, but only for adapters whose provider bridge is fixture-tested to
+  accept the next human prompt echo while the earlier RPC remains open. The
+  adapter transfers its existing prompt-gate token directly to one human
+  successor; it does not release the token into the general queue. Synthetic
+  `ScheduleWakeup` prompts therefore remain serialized and cannot consume or
+  misalign the human handoff.
 
 - A `RUNNING` session accepts a new prompt when its foreground turn is idle and at least one recognized background task is outstanding; otherwise it keeps rejecting input exactly as before.
 - Recognition rests on **adapter attestation, not normalized presentation
@@ -88,7 +95,18 @@ to the foreground only:
   current UI to one.
 - Admission is **check-and-claim, not check-then-act**. The gate is a pure read, so `PromptTask` follows a passing read with an atomic `claimForegroundTurn` before it drives the turn: the check and the flip back to foreground-generating happen under one lock. Without this, two prompts landing in the background-idle window together (a double-send, two tabs) would both pass the read — the window spans a session reload, `ensureSessionRunning`, and a possibly network-bound model switch — and both reach `executor.Prompt`, starting overlapping turns on one ACP session. Exactly one prompt wins; the losers are rejected with `ErrAgentPromptInProgress` just as they were before this ADR.
 - The claim is **held, not merely taken**, and is tracked independently of background-idle activity. It survives until agentctl accepts the prompt, so a background tool call landing while the prompt is in preflight or queued cannot reopen the gate underneath it. The lifecycle adapter reports that exact dispatch boundary before waiting for turn completion. Claim tokens bind the activity record and a monotonically increasing admission generation, so a delayed completion or release cannot mutate a newer claim for the same session. A failed pre-dispatch prompt reopens the gate only if no newer foreground output invalidated its captured foreground epoch. Every transition that changes the substate is broadcast, including a release and background work that becomes visible when a claim completes, so clients cannot remain stranded on the admission-time value.
-- Lifecycle prompt delivery is serialized per agent execution. Agentctl acknowledges transport dispatch before the adapter's prompt RPC completes, so adapter-level queuing alone does not protect lifecycle's shared completion channel and response buffers from concurrent callers. An execution-scoped mutex gives each prompt one waiter and one buffer set; dispatch-only sends leave a pending-completion barrier that the next send must consume before resetting those buffers.
+- Lifecycle prompt delivery is serialized per agent execution. Agentctl
+  acknowledges transport dispatch before the adapter's prompt RPC completes,
+  so adapter-level queuing alone does not protect lifecycle's shared completion
+  channel and response buffers from concurrent callers. An execution-scoped
+  mutex gives each prompt one waiter and one buffer set; dispatch-only sends
+  leave a pending-completion barrier that the next send must consume before
+  resetting those buffers. The sole exception is an adapter-attested,
+  generation-matched human handoff: lifecycle flushes the earlier streaming
+  boundary and releases its waiter before the successor can reset shared state.
+  A delayed result from the earlier RPC is then stale by generation and is
+  suppressed before prompt-end sweeps, usage consumption, trace clearing, or
+  completion emission can affect the successor.
 - Tool activity marks the foreground as generating only from positive ownership
   evidence. The initial tool call records whether it is top-level foreground,
   recognized background work, or a child of background work; subsequent
@@ -124,7 +142,14 @@ The distinction is surfaced to the operator as a fine-grained substate (`foregro
 
 ## Consequences
 
-The operator is no longer falsely locked out while background work runs, and the UI truthfully shows "working in the background" as distinct from both "generating" and "done". Accepting input earlier does not make delivery earlier for a held-open subagent turn — that message still waits behind the open exchange, as the queue does today — but out-of-turn work (a Monitor burst, a backgrounded shell after the main turn yielded) is forwarded promptly with no false "already running" rejection.
+The operator is no longer falsely locked out while background work runs, and
+the UI truthfully shows "working in the background" as distinct from both
+"generating" and "done". For an attested held-open Claude subagent turn,
+acceptance now also means immediate provider delivery after the matching
+human-origin idle boundary; detached child output may continue concurrently.
+Without that authoritative, generation-matched handoff, the prompt remains
+queued and the UI retains the foreground-busy state. Out-of-turn work such as a
+Monitor burst or backgrounded shell keeps its existing behavior.
 
 The signal and count are best-effort across a backend or agent-execution
 restart. Connected executions retain background liveness and exact subagent
@@ -136,6 +161,10 @@ initial attested adapters; all others keep the conservative busy behavior.
 
 - **Rely on upstream synthetic idle-turn completion alone.** Rejected: it structurally cannot arm while the foreground prompt exchange is open, and its debounce re-extends under event bursts, so the held-open and chained-burst windows remain. A falsifiable acceptance test drives a chatty Monitor and confirms a prompt sent during a burst is accepted only with the fine-grained gate.
 - **Drop the `RUNNING` gate / always accept input.** Rejected: it would let a new message race a genuinely-generating foreground turn, risking dropped or reordered messages and regressing non-steering agents.
+- **Remove ACP prompt serialization after any foreground-idle event.** Rejected:
+  synthetic wakeups and unsupported providers could race the held prompt,
+  stealing or shifting prompt responses. Handoff is generation-matched,
+  adapter-attested, and transferable only to a human successor.
 - **Persist the foreground/background distinction to the database (like the coarse states).** Rejected: persistence without an agent-side reconciliation API becomes a second source of truth and can survive restart as a false live value after the workload has died. Connected-execution tracking is kept in memory and read at serialization boundaries; turn close no longer destroys it, while execution teardown does.
 - **Recognize background work by normalized payload shape.** Rejected: the shape
   is shared presentation data and proves neither provider capability nor

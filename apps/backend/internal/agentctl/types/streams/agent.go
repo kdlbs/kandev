@@ -75,6 +75,11 @@ const (
 	EventTypeAuthRequired = "auth_required"
 )
 
+// AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event
+// whose provider and transport have attested that the next human prompt may
+// take ownership before the held session/prompt RPC returns.
+const AgentEventDataPromptHandoff = "prompt_handoff"
+
 // Session status constants for EventTypeSessionStatus events.
 const (
 	SessionStatusResumed = "resumed"

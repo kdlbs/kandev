@@ -42,15 +42,16 @@ func (a *Adapter) sendPrompt(
 	expectSession string,
 	promptGeneration uint64,
 ) error {
-	// Acquire the prompt gate, honouring ctx so a queued wakeup whose context
-	// is cancelled (timeout / adapter Close) aborts instead of blocking on a
-	// stuck in-flight turn.
-	select {
-	case a.promptGate <- struct{}{}:
-		defer func() { <-a.promptGate }()
-	case <-ctx.Done():
-		return ctx.Err()
+	humanPrompt := expectSession == ""
+	promptCtx, turn := newPromptTurnState(
+		ctx,
+		promptGeneration,
+		humanPrompt && a.supportsPromptHandoff() && promptGeneration != 0,
+	)
+	if err := a.acquirePromptTurn(ctx, turn, humanPrompt); err != nil {
+		return err
 	}
+	defer a.finishPromptTurn(turn)
 
 	a.mu.Lock()
 	conn := a.acpConn
@@ -93,15 +94,18 @@ func (a *Adapter) sendPrompt(
 	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
 
 	// Start prompt span — notification spans become children via getPromptTraceCtx()
-	traceCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "prompt")
+	traceCtx, promptSpan := shared.TraceProtocolRequest(
+		promptCtx,
+		shared.ProtocolACP,
+		a.agentID,
+		"prompt",
+	)
 	promptSpan.SetAttributes(
 		attribute.String("session_id", sessionID),
 		attribute.Int("prompt_length", len(finalMessage)),
 		attribute.Int("image_count", len(attachments)),
 	)
-	promptCtx, turn := a.registerPromptTurn(traceCtx, promptGeneration)
-	defer a.clearPromptTurn(turn)
-	a.setPromptTraceCtx(promptCtx)
+	a.setPromptTraceCtx(turn, traceCtx)
 
 	// Clear the loading flag before sending the prompt.
 	// If we're resuming a session, history replay is complete by the time we send a new prompt.
@@ -124,7 +128,7 @@ func (a *Adapter) sendPrompt(
 	var err error
 	go func() {
 		defer close(turn.rpcDone)
-		resp, err = conn.Prompt(promptCtx, acp.PromptRequest{
+		resp, err = conn.Prompt(traceCtx, acp.PromptRequest{
 			SessionId: acp.SessionId(sessionID),
 			Prompt:    contentBlocks,
 		})
@@ -133,12 +137,14 @@ func (a *Adapter) sendPrompt(
 	if waitErr := a.waitForPromptRPCAfterUserCancel(turn); waitErr != nil {
 		promptSpan.RecordError(waitErr)
 		promptSpan.End()
-		a.clearPromptTraceCtx()
+		a.clearPromptTraceCtx(turn)
 		return waitErr
 	}
 
-	// Clear prompt context and end span regardless of outcome
-	a.clearPromptTraceCtx()
+	ownsCompletion := a.claimPromptTurnCompletion(turn)
+	// Clear prompt context and end span regardless of outcome. A transferred
+	// predecessor cannot clear the successor's trace.
+	a.clearPromptTraceCtx(turn)
 	stopReason := ""
 	if err != nil {
 		promptSpan.RecordError(err)
@@ -148,8 +154,14 @@ func (a *Adapter) sendPrompt(
 	}
 	promptSpan.End()
 
+	if !ownsCompletion {
+		a.logger.Debug("suppressing completion from handed-off prompt RPC",
+			zap.String("session_id", sessionID),
+			zap.Uint64("prompt_generation", promptGeneration))
+		return nil
+	}
 	if err != nil {
-		return normalizePromptErrorAfterCancel(promptCtx, err)
+		return normalizePromptErrorAfterCancel(traceCtx, err)
 	}
 
 	// Drain queued ACP notifications before running the post-prompt sweeps and
@@ -216,6 +228,10 @@ func (a *Adapter) sendPrompt(
 	})
 
 	return nil
+}
+
+func (a *Adapter) supportsPromptHandoff() bool {
+	return a.agentID == claudeAgentID || a.agentID == mockAgentID
 }
 
 func normalizePromptErrorAfterCancel(promptCtx context.Context, err error) error {
