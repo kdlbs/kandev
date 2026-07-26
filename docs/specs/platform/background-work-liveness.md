@@ -86,7 +86,9 @@ execution except for one generation-matched human ownership transfer at an
 adapter-attested provider handoff. The transfer finalizes the earlier lifecycle
 buffer/completion owner before the successor starts; synthetic wakeups cannot
 consume it, and a delayed response from the earlier RPC cannot finalize the
-successor.
+successor. Prompt-end cleanup for that successor excludes predecessor background
+work and its nested tool/Monitor lineage, while explicit cancellation and session
+replacement still clear all ownership.
 
 ## Failure modes
 
@@ -142,6 +144,10 @@ survive as before.
 - **GIVEN** a synthetic wakeup is waiting when an attested human handoff occurs,
   **WHEN** a human follow-up is submitted, **THEN** the human prompt inherits
   ownership and the wakeup remains serialized until the human turn completes.
+- **GIVEN** predecessor background tools or Monitors are still live after the
+  follow-up completes, **WHEN** the successor runs prompt-end cleanup, **THEN**
+  those predecessor-owned streams remain tracked until their authoritative
+  terminal event, explicit cancellation, or session replacement.
 - **GIVEN** the provider has not authoritatively released the foreground,
   **WHEN** the operator submits a follow-up, **THEN** Kandev reports it as
   queued and does not send it concurrently.

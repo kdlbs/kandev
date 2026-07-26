@@ -136,7 +136,7 @@ func (a *Adapter) invalidatePromptTurnOwnership() {
 // markPromptHandoff records the generation-matched provider boundary and wakes
 // waiting human callers. It deliberately leaves the physical gate token in
 // place so synthetic wakeups cannot consume the handoff.
-func (a *Adapter) markPromptHandoff(promptGeneration uint64) bool {
+func (a *Adapter) markPromptHandoff(sessionID string, promptGeneration uint64) bool {
 	if promptGeneration == 0 {
 		return false
 	}
@@ -151,6 +151,7 @@ func (a *Adapter) markPromptHandoff(promptGeneration uint64) bool {
 		return false
 	}
 	if !turn.handedOff {
+		a.protectActiveBackgroundWorkForHandoff(sessionID)
 		turn.handedOff = true
 		close(turn.handoffCh)
 	}

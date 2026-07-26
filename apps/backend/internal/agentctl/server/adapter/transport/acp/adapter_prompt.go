@@ -181,7 +181,7 @@ func (a *Adapter) sendPrompt(
 
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
-	a.cancelActiveToolCalls(sessionID)
+	a.cancelPromptEndToolCalls(sessionID)
 
 	// Mark any tracked Monitors as ended. They live longer than a typical tool
 	// call (the script keeps running across model turns), so this sweep runs
@@ -454,7 +454,24 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 // when the subagent finishes seconds later. Leaving the entry in
 // activeToolCalls lets that authoritative terminal update land naturally.
 func (a *Adapter) cancelActiveToolCalls(sessionID string) {
+	a.cancelActiveToolCallsPreservingHandoff(sessionID, false)
+}
+
+// cancelPromptEndToolCalls preserves background work inherited from a
+// handed-off predecessor. Explicit session cancellation still uses
+// cancelActiveToolCalls so it can terminate the whole session.
+func (a *Adapter) cancelPromptEndToolCalls(sessionID string) {
+	a.cancelActiveToolCallsPreservingHandoff(sessionID, true)
+}
+
+func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
+	sessionID string,
+	preserveHandoff bool,
+) {
 	a.mu.Lock()
+	if !preserveHandoff {
+		a.clearPromptHandoffToolTrackingLocked()
+	}
 	monitorToolCallIDs := make(map[string]bool)
 	for _, tcID := range a.activeMonitors[sessionID] {
 		monitorToolCallIDs[tcID] = true
@@ -463,12 +480,15 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 	preserved := make(map[string]*streams.NormalizedPayload)
 	for tcID, payload := range a.activeToolCalls {
 		switch {
+		case preserveHandoff && a.isPromptHandoffToolProtectedLocked(tcID):
+			preserved[tcID] = payload
 		case monitorToolCallIDs[tcID]:
 			preserved[tcID] = payload
 		case payload != nil && payload.Kind() == streams.ToolKindSubagentTask:
 			preserved[tcID] = payload
 		default:
 			toCancel[tcID] = payload
+			a.forgetPromptHandoffToolLocked(tcID)
 		}
 	}
 	a.activeToolCalls = preserved
@@ -486,4 +506,61 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 			NormalizedPayload: normalized,
 		})
 	}
+}
+
+func (a *Adapter) protectActiveBackgroundWorkForHandoff(sessionID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	for toolCallID, payload := range a.activeToolCalls {
+		if payload != nil && payload.IsActiveBackgroundWork() {
+			a.handoffProtectedToolCalls[toolCallID] = struct{}{}
+		}
+	}
+	for _, toolCallID := range a.activeMonitors[sessionID] {
+		a.handoffProtectedToolCalls[toolCallID] = struct{}{}
+	}
+
+	// Include nested children that were already live at the handoff boundary.
+	// Children arriving later inherit protection in trackToolCallLineage.
+	for changed := true; changed; {
+		changed = false
+		for toolCallID, parentToolCallID := range a.toolCallParents {
+			if _, parentProtected := a.handoffProtectedToolCalls[parentToolCallID]; !parentProtected {
+				continue
+			}
+			if _, alreadyProtected := a.handoffProtectedToolCalls[toolCallID]; alreadyProtected {
+				continue
+			}
+			a.handoffProtectedToolCalls[toolCallID] = struct{}{}
+			changed = true
+		}
+	}
+}
+
+func (a *Adapter) trackToolCallLineage(toolCallID, parentToolCallID string) {
+	if toolCallID == "" || parentToolCallID == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.toolCallParents[toolCallID] = parentToolCallID
+	if _, protected := a.handoffProtectedToolCalls[parentToolCallID]; protected {
+		a.handoffProtectedToolCalls[toolCallID] = struct{}{}
+	}
+}
+
+func (a *Adapter) isPromptHandoffToolProtectedLocked(toolCallID string) bool {
+	_, protected := a.handoffProtectedToolCalls[toolCallID]
+	return protected
+}
+
+func (a *Adapter) forgetPromptHandoffToolLocked(toolCallID string) {
+	delete(a.toolCallParents, toolCallID)
+	delete(a.handoffProtectedToolCalls, toolCallID)
+}
+
+func (a *Adapter) clearPromptHandoffToolTrackingLocked() {
+	clear(a.toolCallParents)
+	clear(a.handoffProtectedToolCalls)
 }

@@ -227,6 +227,17 @@ func TestHumanPromptHandoffAfterAuthoritativeForegroundIdle(t *testing.T) {
 	if complete.PromptGeneration != 42 {
 		t.Fatalf("delivered completion generation = %d, want follow-up generation 42", complete.PromptGeneration)
 	}
+	a.mu.RLock()
+	_, parentStillTracked := a.activeToolCalls["subagent-1"]
+	_, childStillTracked := a.activeToolCalls["child-bash-1"]
+	a.mu.RUnlock()
+	if !parentStillTracked || !childStillTracked {
+		t.Fatalf(
+			"follow-up completion dropped predecessor background lineage: parent=%t child=%t",
+			parentStillTracked,
+			childStillTracked,
+		)
+	}
 	for _, event := range drainEvents(a) {
 		if event.Type == streams.EventTypeComplete && event.PromptGeneration == 41 {
 			t.Fatal("held original RPC emitted a stale completion after handoff")

@@ -198,7 +198,7 @@ func TestTransferredPromptOwnsCancelAndReleasesGate(t *testing.T) {
 	if err := a.acquirePromptTurn(context.Background(), first, true); err != nil {
 		t.Fatalf("acquire first prompt: %v", err)
 	}
-	if !a.markPromptHandoff(1) {
+	if !a.markPromptHandoff("session-1", 1) {
 		t.Fatal("first prompt did not accept authoritative handoff")
 	}
 

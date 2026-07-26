@@ -106,7 +106,10 @@ to the foreground only:
   boundary and releases its waiter before the successor can reset shared state.
   A delayed result from the earlier RPC is then stale by generation and is
   suppressed before prompt-end sweeps, usage consumption, trace clearing, or
-  completion emission can affect the successor.
+  completion emission can affect the successor. The successor's own prompt-end
+  sweeps also preserve typed background work that was live at handoff, including
+  nested child-tool and Monitor lineage; explicit session cancellation or reset
+  still owns full cleanup.
 - Tool activity marks the foreground as generating only from positive ownership
   evidence. The initial tool call records whether it is top-level foreground,
   recognized background work, or a child of background work; subsequent

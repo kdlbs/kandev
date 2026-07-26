@@ -113,6 +113,8 @@ func TestResetSessionInvalidatesPromptOwnership(t *testing.T) {
 	if err := adapter.acquirePromptTurn(context.Background(), owner, true); err != nil {
 		t.Fatalf("acquire original prompt: %v", err)
 	}
+	adapter.toolCallParents["child-1"] = "parent-1"
+	adapter.handoffProtectedToolCalls["parent-1"] = struct{}{}
 
 	type acquireResult struct {
 		turn *promptTurnState
@@ -145,6 +147,9 @@ func TestResetSessionInvalidatesPromptOwnership(t *testing.T) {
 		t.Fatal("stale pre-reset prompt retained response ownership")
 	}
 	adapter.finishPromptTurn(owner)
+	if len(adapter.toolCallParents) != 0 || len(adapter.handoffProtectedToolCalls) != 0 {
+		t.Fatal("reset retained stale prompt handoff tool ownership")
+	}
 }
 
 func newSessionRequestCaptureAdapter(t *testing.T, capabilities acpsdk.McpCapabilities) (*Adapter, *sessionRequestCaptureAgent) {

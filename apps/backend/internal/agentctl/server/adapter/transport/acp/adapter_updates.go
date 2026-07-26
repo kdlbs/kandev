@@ -197,7 +197,7 @@ func (a *Adapter) handleACPUpdate(
 	}
 	if event != nil {
 		if event.Type == streams.EventTypeForegroundIdle &&
-			a.markPromptHandoff(event.PromptGeneration) {
+			a.markPromptHandoff(sessionID, event.PromptGeneration) {
 			if event.Data == nil {
 				event.Data = make(map[string]any)
 			}
