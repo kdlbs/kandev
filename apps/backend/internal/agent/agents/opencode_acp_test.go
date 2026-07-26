@@ -2,11 +2,9 @@ package agents
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -29,7 +27,7 @@ func TestOpenCodeACPUsesInstalledBinaryAndPinnedInstaller(t *testing.T) {
 }
 
 func TestOpenCodeACPDiscoveryMatchesRuntimeExecutable(t *testing.T) {
-	binaryPath := writeOpenCodeTestBinary(t, "printf '1.18.4\\n'")
+	binaryPath := writeOpenCodeTestBinary(t, "exit 7")
 
 	a := NewOpenCodeACP()
 	result, err := a.IsInstalled(context.Background())
@@ -47,93 +45,15 @@ func TestOpenCodeACPDiscoveryMatchesRuntimeExecutable(t *testing.T) {
 	}
 }
 
-func TestOpenCodeACPDiscoveryAcceptsSupportedVersionOutput(t *testing.T) {
-	tests := []struct {
-		name   string
-		output string
-	}{
-		{name: "exact", output: "1.18.4"},
-		{name: "prefixed and whitespace", output: "  OpenCode version v1.18.4  "},
-		{name: "slash prefix", output: "opencode/1.18.4 linux-x64"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			writeOpenCodeTestBinary(t, "printf '%s\\n' \"$OPEN_CODE_VERSION_OUTPUT\"")
-			t.Setenv("OPEN_CODE_VERSION_OUTPUT", tt.output)
-
-			result, err := NewOpenCodeACP().IsInstalled(context.Background())
-			if err != nil {
-				t.Fatalf("IsInstalled() error = %v", err)
-			}
-			if !result.Available {
-				t.Fatal("IsInstalled() Available = false, want true")
-			}
-		})
-	}
-}
-
-func TestOpenCodeACPDiscoveryRejectsUnsupportedVersion(t *testing.T) {
-	binaryPath := writeOpenCodeTestBinary(t, "printf '1.16.2\\n'")
-
-	result, err := NewOpenCodeACP().IsInstalled(context.Background())
-	if err == nil {
-		t.Fatal("IsInstalled() error = nil, want version mismatch")
-	}
-	if result.Available {
-		t.Fatal("IsInstalled() Available = true, want false")
-	}
-	if result.MatchedPath != binaryPath {
-		t.Fatalf("MatchedPath = %q, want %q", result.MatchedPath, binaryPath)
-	}
-	for _, want := range []string{"1.16.2", "requires 1.18.4", "npm install -g opencode-ai@1.18.4"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not contain %q", err, want)
-		}
-	}
-}
-
-func TestOpenCodeACPDiscoveryRejectsMalformedVersion(t *testing.T) {
-	writeOpenCodeTestBinary(t, "printf 'OpenCode development build\\n'")
-
-	result, err := NewOpenCodeACP().IsInstalled(context.Background())
-	if err == nil {
-		t.Fatal("IsInstalled() error = nil, want parse failure")
-	}
-	if result.Available {
-		t.Fatal("IsInstalled() Available = true, want false")
-	}
-	if !strings.Contains(err.Error(), "npm install -g opencode-ai@1.18.4") {
-		t.Fatalf("error %q does not contain pinned remediation", err)
-	}
-}
-
-func TestOpenCodeACPDiscoveryHandlesVersionCommandFailure(t *testing.T) {
+func TestOpenCodeACPDiscoveryDoesNotRunVersionCommand(t *testing.T) {
 	writeOpenCodeTestBinary(t, "exit 7")
 
 	result, err := NewOpenCodeACP().IsInstalled(context.Background())
-	if err == nil {
-		t.Fatal("IsInstalled() error = nil, want command failure")
+	if err != nil {
+		t.Fatalf("IsInstalled() error = %v", err)
 	}
-	if result.Available {
-		t.Fatal("IsInstalled() Available = true, want false")
-	}
-	if !strings.Contains(err.Error(), "npm install -g opencode-ai@1.18.4") {
-		t.Fatalf("error %q does not contain pinned remediation", err)
-	}
-}
-
-func TestOpenCodeACPDiscoveryHonorsCancellation(t *testing.T) {
-	writeOpenCodeTestBinary(t, "/bin/sleep 10")
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	result, err := NewOpenCodeACP().IsInstalled(ctx)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("IsInstalled() error = %v, want context.Canceled", err)
-	}
-	if result.Available {
-		t.Fatal("IsInstalled() Available = true, want false")
+	if !result.Available {
+		t.Fatal("IsInstalled() Available = false, want true")
 	}
 }
 
