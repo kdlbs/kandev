@@ -60,7 +60,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0050 | [Plugins provide OIDC/SAML login via a capability-gated, host-minted session](0050-plugin-external-auth-capability.md)               | accepted   | backend, security, protocol | 2026-07-26 |
 | 2026-07-23-opencode-review-evidence-trust | [Trusted OpenCode Review Evidence](2026-07-23-opencode-review-evidence-trust.md) | accepted | workflow, infra | 2026-07-23 |
 | 2026-07-23-planner-direct-small-work | [Planner Direct Small Work](2026-07-23-planner-direct-small-work.md) | accepted | workflow | 2026-07-23 |
-| 2026-07-23-post-commit-hook-aware-verification | [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md) | accepted | workflow | 2026-07-23 |
+| 2026-07-23-post-commit-hook-aware-verification | [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md) | accepted (amended 2026-07-26) | workflow | 2026-07-23 |
 | 2026-07-23-workspace-source-root-move-boundary | [Workspace Source Root Move Boundary](2026-07-23-workspace-source-root-move-boundary.md) | accepted | backend | 2026-07-23 |
 | 2026-07-24-operator-owned-agent-launcher-settings | [Operator-Owned Agent Launcher Settings](2026-07-24-operator-owned-agent-launcher-settings.md) | accepted | backend, frontend, protocol | 2026-07-24 |
 | 2026-07-18-turn-configuration-snapshots | [Attribute runtime configuration to turns](2026-07-18-turn-configuration-snapshots.md) | accepted | backend, frontend | 2026-07-18 |

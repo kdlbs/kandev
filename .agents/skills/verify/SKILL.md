@@ -25,11 +25,13 @@ Invoke the `verify` worker in a single call. Wait for it to complete and surface
 Only one verification worker may run for an artifact at a time. Do not launch
 a replacement merely because the first worker has not yet returned: overlapping
 full suites contend for the same checkout and can make both results unreliable.
-If it appears stalled, use the harness's normal worker-status or interruption
-mechanism first; start a replacement only after the prior worker is confirmed
-stopped (and its command/process group is gone when that evidence is exposed).
-If that cannot be confirmed, report verification as blocked rather than
-proceeding to push or PR delivery.
+After two normal status waits without a report, inspect the worker state and
+its owned command/process group. If no command remains, interrupt that same
+worker once to retrieve a buffered completion report. Start a replacement only
+after the prior worker is confirmed stopped (and its command/process group is
+gone when that evidence is exposed) and did not yield a usable exact-artifact
+result. If that cannot be confirmed, report verification as blocked rather
+than proceeding to push or PR delivery.
 
 - If verify passes cleanly: report success.
 - If verify fails: create a bounded remediation assignment from its report and
@@ -61,6 +63,9 @@ scoped pass is `changed-scope PASS`, never `full PASS`.
 In `mode=full`, run the pipeline below and ignore hook omissions. In
 `mode=changed`, run only uncovered matrix commands for impacted categories; do
 not run unrelated suites or repeat eligible hook-covered formatting/lint.
+Evaluate the narrowly scoped pure-web-helper row in the impact matrix before
+the generic `apps/web/**` row; use the generic row whenever any eligibility
+condition is not proven.
 
 ```bash
 # Fresh worktrees share .git/ but not apps/node_modules.

@@ -104,6 +104,15 @@ explicitly requests task tracking.
 5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.
    If a formatter changes files and prevents the commit, review and re-stage
    those files, then create a new commit attempt; do not use `--amend`.
+   Capture the normal hook stream in a temporary log while committing and use
+   that log to record each hook ID and result. Do not infer hook results from a
+   condensed launcher summary. For example:
+   ```bash
+   COMMIT_LOG="$(mktemp "${TMPDIR:-/tmp}/kandev-commit.XXXXXX.log")"
+   set -o pipefail
+   git commit -m "type(scope): description" 2>&1 | tee "$COMMIT_LOG"
+   ```
+   Remove the temporary log after copying the receipt into the handoff.
 
 6. **Return a hook receipt:** After a successful commit, report:
    ```text
