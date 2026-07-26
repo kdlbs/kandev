@@ -6,7 +6,7 @@ import Link from "@/components/routing/app-link";
 import { PageTopbar } from "@/components/page-topbar";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
-import { MobileMenuSheet } from "./mobile-menu-sheet";
+import { MobileMenuSheet, type TasksListDisplayOptions } from "./mobile-menu-sheet";
 import { useAppStore } from "@/components/state-provider";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { workspaceHomeHref } from "@/components/app-sidebar/app-sidebar-workspace-navigation";
@@ -20,6 +20,7 @@ type KanbanHeaderMobileProps = {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
+  tasksListOptions?: TasksListDisplayOptions;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 };
@@ -110,6 +111,7 @@ export function KanbanHeaderMobile({
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
+  tasksListOptions,
   showHealthIndicator,
   onOpenHealthDialog,
 }: KanbanHeaderMobileProps) {
@@ -169,6 +171,7 @@ export function KanbanHeaderMobile({
         searchQuery={searchQuery}
         onSearchChange={onSearchChange}
         isSearchLoading={isSearchLoading}
+        tasksListOptions={tasksListOptions}
         showHealthIndicator={showHealthIndicator}
         onOpenHealthDialog={onOpenHealthDialog}
       />
