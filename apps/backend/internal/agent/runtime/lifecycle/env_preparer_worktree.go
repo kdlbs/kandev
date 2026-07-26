@@ -285,6 +285,11 @@ func buildWorktreeCreateRequest(req *EnvPrepareRequest) worktree.CreateRequest {
 		RepoName:               req.RepoName,
 		BranchSlug:             req.BranchSlug,
 		BranchIdentitySlug:     req.BranchIdentitySlug,
+		// Export resolved executor-profile env vars into the repository setup
+		// script so tokens (e.g. an npm auth token) are available during
+		// install. Set for both single-repo and multi-repo launches, which both
+		// build their CreateRequest here (multi-repo copies req.Env per spec).
+		ScriptEnv: req.Env,
 	}
 }
 

@@ -287,7 +287,7 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 
 	// Setup script failures are non-fatal — runWorktreeSetupScript records a
 	// warning on wt and keeps the worktree so the agent can still launch.
-	m.runWorktreeSetupScript(ctx, wt)
+	m.runWorktreeSetupScript(ctx, wt, req.ScriptEnv)
 
 	m.logger.Info("created worktree in task directory",
 		zap.String("session_id", req.SessionID),
