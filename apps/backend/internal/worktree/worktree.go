@@ -204,9 +204,10 @@ type CreateRequest struct {
 	// ScriptEnv carries resolved executor-profile environment variables
 	// (secrets already revealed) that must be exported into the repository
 	// setup script's process environment — e.g. an npm auth token needed by
-	// `npm install`. Merged over the install-managed script environment
-	// (GOCACHE) when the per-repo setup script runs. Transient per Create;
-	// never persisted on the Worktree record, so secrets stay out of the DB.
+	// `npm install`. Merged with the install-managed script environment;
+	// managed values such as GOCACHE take precedence on key collisions.
+	// Transient per Create; never persisted on the Worktree record, so
+	// secrets stay out of the DB.
 	ScriptEnv map[string]string
 
 	// OnSyncProgress receives progress updates for pre-worktree branch sync.

@@ -369,7 +369,7 @@ func mergeScriptEnv(profileEnv, managed map[string]string) map[string]string {
 	if len(profileEnv) == 0 && len(managed) == 0 {
 		return nil
 	}
-	merged := make(map[string]string, len(profileEnv)+len(managed))
+	merged := make(map[string]string, len(profileEnv))
 	for k, v := range profileEnv {
 		merged[k] = v
 	}
