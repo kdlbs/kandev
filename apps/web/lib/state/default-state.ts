@@ -15,6 +15,7 @@ import {
   defaultAuthState,
   defaultAutomationsState,
   defaultSystemState,
+  defaultReviewState,
 } from "./slices";
 import { getStoredQuickChatNames } from "@/lib/local-storage";
 import type { HydrationState } from "./store";
@@ -51,6 +52,7 @@ export const defaultState = {
   activeModel: defaultSessionState.activeModel,
   taskPlans: defaultSessionState.taskPlans,
   walkthroughs: defaultSessionState.walkthroughs,
+  taskReview: defaultReviewState.taskReview,
   queue: defaultSessionState.queue,
   terminal: defaultSessionRuntimeState.terminal,
   shell: defaultSessionRuntimeState.shell,
@@ -70,6 +72,7 @@ export const defaultState = {
   promptUsage: defaultSessionRuntimeState.promptUsage,
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   githubStatus: defaultGitHubState.githubStatus,
+  githubAppRegistrations: defaultGitHubState.githubAppRegistrations,
   taskPRs: defaultGitHubState.taskPRs,
   taskIssues: defaultGitHubState.taskIssues,
   pendingPrUrlByTaskId: defaultGitHubState.pendingPrUrlByTaskId,
@@ -219,6 +222,27 @@ function mergeSessionFailureNotification(initialState: HydrationState) {
   return initialState.sessionFailureNotification ?? defaultState.sessionFailureNotification;
 }
 
+/**
+ * Merges the agent-authored review artifacts (walkthroughs and code-review
+ * findings). Extracted so mergeInitialState stays under the function line cap.
+ */
+function mergeAgentReviewArtifacts(initialState: HydrationState) {
+  return {
+    walkthroughs: { ...defaultState.walkthroughs, ...initialState.walkthroughs },
+    taskReview: { ...defaultState.taskReview, ...initialState.taskReview },
+  };
+}
+
+function mergeGitHubState(initialState: HydrationState) {
+  return {
+    githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
+    githubAppRegistrations: {
+      ...defaultState.githubAppRegistrations,
+      ...initialState.githubAppRegistrations,
+    },
+  };
+}
+
 export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
   return {
@@ -259,7 +283,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     pendingModel: { ...defaultState.pendingModel, ...initialState.pendingModel },
     activeModel: { ...defaultState.activeModel, ...initialState.activeModel },
     taskPlans: { ...defaultState.taskPlans, ...initialState.taskPlans },
-    walkthroughs: { ...defaultState.walkthroughs, ...initialState.walkthroughs },
+    ...mergeAgentReviewArtifacts(initialState),
     queue: { ...defaultState.queue, ...initialState.queue },
     terminal: { ...defaultState.terminal, ...initialState.terminal },
     shell: { ...defaultState.shell, ...initialState.shell },
@@ -276,7 +300,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },
     promptUsage: { ...defaultState.promptUsage, ...initialState.promptUsage },
     sessionPollMode: { ...defaultState.sessionPollMode, ...initialState.sessionPollMode },
-    githubStatus: { ...defaultState.githubStatus, ...initialState.githubStatus },
+    ...mergeGitHubState(initialState),
     taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
     taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },
     pendingPrUrlByTaskId: {

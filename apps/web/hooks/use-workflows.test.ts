@@ -7,17 +7,20 @@ const mockSetWorkflows = vi.fn();
 type MockState = {
   workflows: { items: Array<{ id: string; workspaceId: string; name: string }> };
   workspaces: { activeId: string | null };
+  workspaceContextGeneration: number;
   setWorkflows: typeof mockSetWorkflows;
 };
 
 let mockState: MockState = {
   workflows: { items: [] },
   workspaces: { activeId: null },
+  workspaceContextGeneration: 0,
   setWorkflows: mockSetWorkflows,
 };
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: MockState) => unknown) => selector(mockState),
+  useAppStoreApi: () => ({ getState: () => mockState }),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -44,9 +47,34 @@ describe("useWorkflows — stale response guard", () => {
     vi.clearAllMocks();
     mockState = {
       workflows: { items: [] },
-      workspaces: { activeId: null },
+      workspaces: { activeId: "ws-A" },
+      workspaceContextGeneration: 0,
       setWorkflows: mockSetWorkflows,
     };
+  });
+
+  it("discards an A response that resolves after reset activates B but before rerender", async () => {
+    let resolveA: (value: { workflows: ReturnType<typeof makeWorkflow>[] }) => void = () => {};
+    mockState.workspaces.activeId = "ws-A";
+    mockListWorkflows.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveA = resolve;
+        }),
+    );
+
+    renderHook(() => useWorkflows("ws-A", true));
+    await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledWith("ws-A", expect.anything()));
+
+    mockState = {
+      ...mockState,
+      workspaces: { activeId: "ws-B" },
+      workspaceContextGeneration: 1,
+    };
+    resolveA({ workflows: [makeWorkflow("wf-A", "ws-A")] });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+
+    expect(mockSetWorkflows).not.toHaveBeenCalled();
   });
 
   it("discards a stale in-flight response when the workspace switches mid-fetch", async () => {
@@ -65,6 +93,11 @@ describe("useWorkflows — stale response guard", () => {
     await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledWith("ws-A", expect.anything()));
 
     // Switch to workspace B before A's fetch resolves; B resolves first.
+    mockState = {
+      ...mockState,
+      workspaces: { activeId: "ws-B" },
+      workspaceContextGeneration: 1,
+    };
     mockListWorkflows.mockResolvedValueOnce({ workflows: [makeWorkflow("wf-B", "ws-B")] });
     rerender({ workspaceId: "ws-B" });
     await waitFor(() =>
@@ -98,6 +131,11 @@ describe("useWorkflows — stale response guard", () => {
     await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledWith("ws-A", expect.anything()));
 
     // Switch to workspace B; B resolves with data.
+    mockState = {
+      ...mockState,
+      workspaces: { activeId: "ws-B" },
+      workspaceContextGeneration: 1,
+    };
     mockListWorkflows.mockResolvedValueOnce({ workflows: [makeWorkflow("wf-B", "ws-B")] });
     rerender({ workspaceId: "ws-B" });
     await waitFor(() =>
@@ -130,6 +168,30 @@ describe("useWorkflows — stale response guard", () => {
   });
 });
 
+describe("useWorkflows — explicit workspace selection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockState = {
+      workflows: { items: [] },
+      workspaces: { activeId: "ws-A" },
+      workspaceContextGeneration: 0,
+      setWorkflows: mockSetWorkflows,
+    };
+  });
+
+  it("loads workflows when the selected workspace is not globally active", async () => {
+    mockListWorkflows.mockResolvedValueOnce({ workflows: [makeWorkflow("wf-B", "ws-B")] });
+
+    renderHook(() => useWorkflows("ws-B", true));
+
+    await waitFor(() =>
+      expect(mockSetWorkflows).toHaveBeenCalledWith([
+        expect.objectContaining({ id: "wf-B", workspaceId: "ws-B" }),
+      ]),
+    );
+  });
+});
+
 describe("useEnsureWorkspaceWorkflows", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -137,6 +199,7 @@ describe("useEnsureWorkspaceWorkflows", () => {
     mockState = {
       workflows: { items: [] },
       workspaces: { activeId: "ws-A" },
+      workspaceContextGeneration: 0,
       setWorkflows: mockSetWorkflows,
     };
   });

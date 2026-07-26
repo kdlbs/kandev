@@ -17,6 +17,20 @@ type StatePayload struct {
 	// Always true in disabled mode (synthetic single-user identity).
 	Authenticated bool             `json:"authenticated"`
 	User          *usermodels.User `json:"user,omitempty"`
+	// SSOProviders lists the external login buttons the pre-auth login page
+	// renders (OIDC/SAML, contributed by auth-capable plugins). Populated by
+	// the boot-payload assembler for anonymous visitors on an auth-enabled
+	// instance; empty otherwise.
+	SSOProviders []SSOProvider `json:"ssoProviders,omitempty"`
+}
+
+// SSOProvider is one external login option shown on the login screen. Clicking
+// it navigates the browser to InitiateURL (the plugin's login-initiate webhook,
+// which 302-redirects to the IdP).
+type SSOProvider struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+	InitiateURL string `json:"initiateUrl"`
 }
 
 // StateFor builds the StatePayload for a request identity (nil identity =

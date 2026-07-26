@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path"
 	"regexp"
@@ -388,23 +389,7 @@ func (r *SpritesExecutor) createAgentInstance(
 	sprite *sprites.Sprite,
 	req *ExecutorCreateRequest,
 ) (int, error) {
-	instanceReq := agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: spritesWorkspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     agentTypeFromReq(req),
-		AutoApprovePermissions: autoApprovePermissionsOverride(
-			req.AutoApprovePermissions,
-			req.AutoApprovePermissionsOverride,
-		),
-		McpServers:          req.McpServers,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKillFromReq(req),
-		StripEnv:            stripEnvFromReq(req),
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-	}
+	instanceReq := spriteCreateInstanceRequest(req)
 	reqJSON, err := json.Marshal(instanceReq)
 	if err != nil {
 		return 0, fmt.Errorf("failed to marshal instance request: %w", err)
@@ -432,6 +417,73 @@ func (r *SpritesExecutor) createAgentInstance(
 		zap.Int("port", resp.Port))
 
 	return resp.Port, nil
+}
+
+func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInstanceRequest {
+	return agentctl.CreateInstanceRequest{
+		ID:            req.InstanceID,
+		WorkspacePath: spritesWorkspacePath,
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
+		Protocol:      req.Protocol,
+		AgentType:     agentTypeFromReq(req),
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
+		McpServers:          req.McpServers,
+		McpMode:             req.McpMode,
+		RequiresProcessKill: requiresProcessKillFromReq(req),
+		StripEnv:            stripEnvFromReq(req),
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		Env:                 cloneStringMap(req.Env),
+	}
+}
+
+type spriteReconnectInstanceControl interface {
+	Delete(context.Context, string) error
+	Create(context.Context, *ExecutorCreateRequest) (int, error)
+}
+
+type liveSpriteReconnectInstanceControl struct {
+	executor *SpritesExecutor
+	sprite   *sprites.Sprite
+}
+
+func (c liveSpriteReconnectInstanceControl) Delete(ctx context.Context, instanceID string) error {
+	return c.executor.deleteAgentInstance(ctx, c.sprite, instanceID)
+}
+
+func (c liveSpriteReconnectInstanceControl) Create(ctx context.Context, req *ExecutorCreateRequest) (int, error) {
+	return c.executor.createAgentInstance(ctx, c.sprite, req)
+}
+
+func replaceSpriteReconnectInstance(
+	ctx context.Context,
+	control spriteReconnectInstanceControl,
+	req *ExecutorCreateRequest,
+	instanceID string,
+) (int, error) {
+	if err := control.Delete(ctx, instanceID); err != nil {
+		return 0, err
+	}
+	return control.Create(ctx, req)
+}
+
+func (r *SpritesExecutor) deleteAgentInstance(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	instanceID string,
+) error {
+	stepCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	cmd := sprite.CommandContext(stepCtx, "sh", "-c",
+		fmt.Sprintf("curl -sf -X DELETE http://localhost:%d/api/v1/instances/%s",
+			r.agentctlPort, url.PathEscape(instanceID)))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("delete agent instance for GitHub credential refresh: %w (output: %s)", err, string(out))
+	}
+	return nil
 }
 
 // getExistingInstancePort queries agentctl inside the sprite to check if a

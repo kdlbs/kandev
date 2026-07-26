@@ -298,7 +298,7 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         const homeDir = path.join(tmpDir, ".kandev");
         const dbPath = path.join(tmpDir, "kandev.db");
         const worktreeBase = path.join(tmpDir, "worktrees");
-        const repoCloneBase = path.join(tmpDir, "repos");
+        const repoCloneBase = path.join(tmpDir, "managed-repos");
 
         fs.mkdirSync(homeDir, { recursive: true });
         fs.mkdirSync(worktreeBase, { recursive: true });

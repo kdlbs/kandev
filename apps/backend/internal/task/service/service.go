@@ -247,8 +247,9 @@ type Service struct {
 	// taskActivityMu guards lastTaskActivity, the last task-level activity aggregate
 	// emitted per task. It bounds live-propagation task.updated emissions to an
 	// actual change of the aggregated three-state value.
-	taskActivityMu   sync.Mutex
-	lastTaskActivity map[string]v1.ForegroundActivity
+	taskActivityMu        sync.Mutex
+	lastTaskActivity      map[string]v1.ForegroundActivity
+	lastTaskSubagentCount map[string]int
 	// taskPublicationMu guards the per-task FIFO dispatchers. It is held only
 	// while enqueueing/dequeueing; repository reads and synchronous EventBus
 	// delivery always happen after it is released.
@@ -275,27 +276,28 @@ type Service struct {
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
-		workspaces:        repos.Workspaces,
-		tasks:             repos.Tasks,
-		taskRepos:         repos.TaskRepos,
-		workspaceFolders:  repos.WorkspaceFolders,
-		workflows:         repos.Workflows,
-		messages:          repos.Messages,
-		turns:             repos.Turns,
-		sessions:          repos.Sessions,
-		gitSnapshots:      repos.GitSnapshots,
-		repoEntities:      repos.RepoEntities,
-		repositoryCleanup: repos.RepositoryCleanup,
-		executors:         repos.Executors,
-		environments:      repos.Environments,
-		taskEnvironments:  repos.TaskEnvironments,
-		reviews:           repos.Reviews,
-		resourceCleanups:  repos.ResourceCleanups,
-		eventBus:          eventBus,
-		logger:            log,
-		discoveryConfig:   discoveryConfig,
-		branchFetcher:     newBranchFetcher(log.Zap()),
-		lastTaskActivity:  make(map[string]v1.ForegroundActivity),
+		workspaces:            repos.Workspaces,
+		tasks:                 repos.Tasks,
+		taskRepos:             repos.TaskRepos,
+		workspaceFolders:      repos.WorkspaceFolders,
+		workflows:             repos.Workflows,
+		messages:              repos.Messages,
+		turns:                 repos.Turns,
+		sessions:              repos.Sessions,
+		gitSnapshots:          repos.GitSnapshots,
+		repoEntities:          repos.RepoEntities,
+		repositoryCleanup:     repos.RepositoryCleanup,
+		executors:             repos.Executors,
+		environments:          repos.Environments,
+		taskEnvironments:      repos.TaskEnvironments,
+		reviews:               repos.Reviews,
+		resourceCleanups:      repos.ResourceCleanups,
+		eventBus:              eventBus,
+		logger:                log,
+		discoveryConfig:       discoveryConfig,
+		branchFetcher:         newBranchFetcher(log.Zap()),
+		lastTaskActivity:      make(map[string]v1.ForegroundActivity),
+		lastTaskSubagentCount: make(map[string]int),
 	}
 }
 
@@ -385,7 +387,7 @@ func (s *Service) SetQuickChatDir(dir string) {
 // registered as remote ("Remote" badge in the UI) can serve branches before
 // or even without the orchestrator finishing its clone.
 type RemoteBranchLister interface {
-	ListRepoBranches(ctx context.Context, owner, repo string) ([]Branch, error)
+	ListRepoBranches(ctx context.Context, workspaceID, owner, repo string) ([]Branch, error)
 }
 
 // SetRemoteBranchLister wires the remote branch source. Currently only GitHub

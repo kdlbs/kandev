@@ -27,6 +27,7 @@ import (
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -315,6 +316,14 @@ type captureCreateTaskRepo struct {
 	updateStateErr error
 }
 
+type missingWorkflowCreateTaskRepo struct {
+	captureCreateTaskRepo
+}
+
+func (*missingWorkflowCreateTaskRepo) GetWorkflow(_ context.Context, id string) (*models.Workflow, error) {
+	return nil, fmt.Errorf("workflow not found: %s", id)
+}
+
 type captureTaskCreateLastUsedRecorder struct {
 	calls int
 	got   usermodels.TaskCreateLastUsed
@@ -328,6 +337,22 @@ func (m *captureTaskCreateLastUsedRecorder) RecordTaskCreateLastUsed(_ context.C
 
 func (m *captureCreateTaskRepo) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
 	return "KAN", "wf-office", nil
+}
+
+func (m *captureCreateTaskRepo) GetWorkflow(_ context.Context, id string) (*models.Workflow, error) {
+	return &models.Workflow{ID: id, WorkspaceID: "ws-1"}, nil
+}
+
+func (m *captureCreateTaskRepo) GetStep(_ context.Context, id string) (*wfmodels.WorkflowStep, error) {
+	return &wfmodels.WorkflowStep{ID: id, WorkflowID: "wf-1"}, nil
+}
+
+func (m *captureCreateTaskRepo) GetNextStepByPosition(
+	context.Context,
+	string,
+	int,
+) (*wfmodels.WorkflowStep, error) {
+	return nil, nil
 }
 
 func (m *captureCreateTaskRepo) GetRepository(_ context.Context, id string) (*models.Repository, error) {
@@ -410,6 +435,7 @@ func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -454,6 +480,7 @@ func TestHTTPCreateTaskRecordsRepositoryWithoutProfileIDs(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -575,6 +602,7 @@ func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -616,6 +644,7 @@ func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -644,6 +673,67 @@ func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
 	}, recorder.got)
 }
 
+func TestWSCreateTaskReturnsValidationErrorForMissingWorkflow(t *testing.T) {
+	log := newTestLogger(t)
+	repo := &missingWorkflowCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id": "ws-1",
+		"workflow_id":  "missing-workflow",
+		"title":        "Broken workflow",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	assert.Contains(t, payload.Message, "workflow not found")
+}
+
+func TestWSCreateTaskReturnsValidationErrorForStepOutsideWorkflow(t *testing.T) {
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id":     "ws-1",
+		"workflow_id":      "wf-2",
+		"workflow_step_id": "step-1",
+		"title":            "Broken step",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	assert.Contains(t, payload.Message, "workflow step not found")
+}
+
 func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := newTestLogger(t)
@@ -656,6 +746,7 @@ func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	startCreatedCalled := make(chan struct{}, 1)
 	orch := &captureOrchestrator{startCreatedCalled: startCreatedCalled}
 	h := &TaskHandlers{service: svc, orchestrator: orch, logger: log}
@@ -697,6 +788,7 @@ func TestHTTPCreateTask_StartAgentKeepsCreatedStateWhenSchedulingUpdateFails(t *
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	startCreatedCalled := make(chan struct{}, 1)
 	orch := &captureOrchestrator{startCreatedCalled: startCreatedCalled}
 	h := &TaskHandlers{service: svc, orchestrator: orch, logger: log}

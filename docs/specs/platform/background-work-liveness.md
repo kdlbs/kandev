@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-07-21
-updated: 2026-07-24
+updated: 2026-07-26
 owner: kandev
 ---
 
@@ -21,8 +21,25 @@ and incorrectly prevents prompt delivery.
   may appear as done.
 - A foreground-idle session with recognized background work accepts a new
   prompt. A session with foreground activity continues to reject it.
+- When a provider-attested, generation-bearing foreground-idle boundary also
+  guarantees prompt handoff, the next human prompt reaches the provider
+  immediately even if the prior prompt RPC remains open for detached work.
+  Synthetic wakeups remain serialized behind the owning RPC. Providers that do
+  not attest handoff keep the follow-up queued until they release ownership.
+- Only adapter-attested workloads relax prompt admission. An adapter opts in a
+  workload only when Kandev has fixture-tested both its launch and accountable
+  terminal lifecycle. Claude subagents, background shells, and Monitor watches
+  are initially supported. Codex and other ACP agents remain conservatively
+  foreground-busy until their providers reliably emit the terminal lifecycle
+  Kandev needs.
+- The runtime retains one registration per live subagent and derives an active
+  subagent count from those registrations. Background shells and Monitor
+  watches contribute to background liveness but not to the subagent count.
 - Task and session status surfaces distinguish generating,
-  background-running, and done without relying on color alone. A pending
+  background-running, and done with text or accessible labels in addition to
+  color. The compact sidebar uses the same dashed spinner for both running
+  states: yellow for foreground generation and violet for background work, with
+  a distinct background-work tooltip and accessible label. A pending
   permission request takes precedence over a pending clarification request,
   which in turn takes precedence over the work-state indicator for a current,
   input-capable session only; stale pending flags on starting or terminal
@@ -32,6 +49,9 @@ and incorrectly prevents prompt delivery.
 - A terminal asynchronous launch result closes its tool card but does not end
   the launched workload. Work remains live until accountable completion or
   execution teardown.
+- Terminal execution teardown retires every tool-ownership and background-work
+  entry owned by that execution. It releases the whole session activity record
+  when no successor execution or in-flight prompt/dispatch token still owns it.
 - The delete confirmation warns when a task has foreground or recognized
   background work. Archive uses the same warning only when archive confirmation
   is enabled.
@@ -41,11 +61,18 @@ and incorrectly prevents prompt delivery.
 - Session records and boot payloads expose `foreground_activity` as
   `generating`, `background`, or absent when no fine-grained activity is known.
   `background` can be present after the coarse session state settles.
-- `session.activity_changed` publishes a changed fine-grained session value;
-  `session.state_changed` carries it with coarse state changes.
+- Session records, boot payloads, activity/state notifications, task records,
+  and `task.updated` always expose `active_subagent_count` as an integer. It is
+  zero when no adapter-attested subagent is live and may be positive while
+  `foreground_activity` is either `generating` or `background`.
+- `session.activity_changed` publishes the changed fine-grained session value
+  and active subagent count; a count-only transition is publishable even when
+  the activity tier does not change. `session.state_changed` carries both with
+  coarse state changes.
 - Task records and `task.updated` carry the most-active-wins
-  `foreground_activity` aggregate. A task update is emitted when that aggregate
-  changes, including a generating-to-background transition with no coarse state
+  `foreground_activity` aggregate and the sum of active subagents across its
+  sessions. A task update is emitted when either aggregate changes, including a
+  generating-to-background or count-only transition with no coarse state
   change.
 
 ## State machine
@@ -59,39 +86,99 @@ and incorrectly prevents prompt delivery.
 Prompt admission is atomic: only one prompt can claim foreground ownership for
 a session. Delayed release or completion from an earlier prompt cycle cannot
 mutate a later accepted claim. Prompt delivery is serialized per agent
-execution so each prompt owns its completion wait and response buffers.
+execution except for one generation-matched human ownership transfer at an
+adapter-attested provider handoff. The transfer finalizes the earlier lifecycle
+buffer/completion owner before the successor starts; synthetic wakeups cannot
+consume it, and a delayed response from the earlier RPC cannot finalize the
+successor. Prompt-end cleanup for that successor excludes predecessor background
+work and its nested tool/Monitor lineage, while explicit cancellation and session
+replacement still clear all ownership.
 
 ## Failure modes
 
 - An unknown activity value for an in-flight `RUNNING` session is rendered as
   generating, not done.
+- A foreground-idle signal without a nonzero matching prompt generation and
+  adapter-attested handoff capability does not relax transport serialization.
+  The session remains visibly foreground-owned and the follow-up remains
+  queued rather than being reported as delivered.
+- A normalized tool-card shape cannot attest to background capability. An
+  unsupported adapter that emits a subagent-looking card remains foreground-busy
+  until its launch, yield, and terminal lifecycle are explicitly supported.
+- The development/E2E mock provider may replay captured Claude lifecycle
+  metadata through the same attested path. This is a deterministic test seam,
+  not an additional production-agent capability.
+- Codex child thread/session identity may correlate launch and activity cards
+  for presentation, but Codex subagents do not attest background liveness.
+  Observed Codex ACP streams can omit accountable terminal child activity, so a
+  started card must not create a live registration or nonzero subagent count.
 - Tool-call ownership is established by the initial call and retained across
-  incremental updates. An update with unknown ownership preserves the current
-  activity; missing parent metadata is not evidence that background-child work
-  became foreground work.
+  incremental updates from the same execution. Ownership includes the execution
+  identity because provider-local tool-call IDs may be reused after rotation.
+  An update with unknown ownership preserves the current activity; missing
+  parent metadata is not evidence that background-child work became foreground
+  work.
 - A task aggregate that cannot be recomputed preserves its last-known value
   rather than publishing a spurious done reading.
 - When provider completion identifies a workload, only that registration is
   retired; duplicate completion is harmless. An uncorrelated completion retires
   only one outstanding registration and leaves an ambiguous remainder live.
-- Execution stop, failure, cancellation, session removal, and teardown retire
-  all registrations owned by that execution. Per-task publication is FIFO: a
-  newly computed activity value must not be published ahead of an earlier value
-  for the same task, and stale publication work must not overwrite a newer
-  aggregate.
+- Execution completion, stop, failure, cancellation, crash cleanup, forced
+  cleanup, and session removal retire all activity owned by that execution.
+  Cleanup is idempotent and must preserve activity already claimed by a
+  successor on the same session. Session removal quiesces any still-live
+  lifecycle execution and rejects deletion if that stop fails, except when the
+  runtime reports that the exact execution is already absent. Per-session
+  activity validation and delivery remain ordered across record replacement;
+  each publication snapshots its activity value and active-subagent count
+  together. Per-task publication is FIFO: a newly computed activity value must
+  not be published ahead of an earlier value for the same task, and a detached
+  predecessor record or stale publication must not overwrite a newer session or
+  task aggregate.
 
 ## Persistence guarantees
 
 Fine-grained activity is in memory and is authoritative only while the owning
 agent execution remains connected. A backend or agent-execution restart does
-not reconstruct detached work; it must not preserve a stale live reading.
-Durable coarse state continues to survive as before.
+not reconstruct detached work or active subagent counts; it must not preserve a
+stale live reading. Counts are derived from the live registration map rather
+than persisted or incremented independently. Execution teardown releases the
+record when it has no successor owner; completed session history does not retain
+an empty activity record. Durable coarse state continues to survive as before.
 
 ## Scenarios
 
 - **GIVEN** a foreground-idle session with a recognized background workload,
   **WHEN** the operator sends a prompt, **THEN** the prompt is accepted while
   the status remains background-running until foreground activity begins.
+- **GIVEN** an attested provider keeps a prompt RPC open for a detached child
+  after emitting foreground-idle for the matching generation, **WHEN** the
+  operator sends a follow-up, **THEN** that human prompt reaches the provider
+  immediately and the detached child may continue streaming.
+- **GIVEN** a synthetic wakeup is waiting when an attested human handoff occurs,
+  **WHEN** a human follow-up is submitted, **THEN** the human prompt inherits
+  ownership and the wakeup remains serialized until the human turn completes.
+- **GIVEN** predecessor background tools or Monitors are still live after the
+  follow-up completes, **WHEN** the successor runs prompt-end cleanup, **THEN**
+  those predecessor-owned streams remain tracked until their authoritative
+  terminal event, explicit cancellation, or session replacement.
+- **GIVEN** the provider has not authoritatively released the foreground,
+  **WHEN** the operator submits a follow-up, **THEN** Kandev reports it as
+  queued and does not send it concurrently.
+- **GIVEN** two adapter-attested subagents and one background shell are live,
+  **WHEN** the session is serialized or publishes an activity update, **THEN**
+  `active_subagent_count` is two while all three workloads still contribute to
+  background liveness.
+- **GIVEN** one generating session with one live subagent and another session
+  with two live subagents, **WHEN** the task is serialized, **THEN** its
+  `foreground_activity` is generating and its `active_subagent_count` is three.
+- **GIVEN** a Codex subagent launch card without an accountable terminal
+  lifecycle, **WHEN** its prompt remains in flight or later settles, **THEN**
+  Kandev may render the card but reports no recognized background work and the
+  active subagent count remains zero.
+- **GIVEN** an unsupported ACP adapter emits a normalized subagent-shaped tool
+  card, **WHEN** its prompt remains in flight, **THEN** Kandev reports the
+  foreground as generating and the active subagent count remains zero.
 - **GIVEN** a task with one generating session and one background-running
   session, **WHEN** its aggregate is rendered, **THEN** it shows generating.
 - **GIVEN** a task with no generating session and one background-running
@@ -108,6 +195,18 @@ Durable coarse state continues to survive as before.
 - **GIVEN** an activity transition for a task, **WHEN** a later transition is
   computed before earlier publication completes, **THEN** observers never see
   the later value followed by the stale earlier value.
+- **GIVEN** an execution terminates with orphaned tool ownership and background
+  work and no successor exists, **WHEN** teardown runs, **THEN** all owned state
+  and the session activity record are released.
+- **GIVEN** execution B has claimed the same session before delayed teardown for
+  execution A, **WHEN** A is retired, **THEN** B's prompt claim, prompt
+  generation, foreground state, tools, and background work remain unchanged.
+- **GIVEN** execution B reuses a tool-call ID left nonterminal by execution A,
+  **WHEN** B emits an ownership-incomplete update, **THEN** A's classification
+  is not observable as ownership evidence for B.
+- **GIVEN** execution A's cleanup publication is delayed until after execution B
+  claims the session, **WHEN** the delayed publication resumes, **THEN** it
+  cannot recreate A's record or overwrite B's activity.
 - **GIVEN** a task with active foreground or recognized background work,
   **WHEN** the operator deletes it, **THEN** the confirmation warns that work is
   still in progress.
@@ -123,6 +222,7 @@ Durable coarse state continues to survive as before.
 - Mid-turn steering for agents without concurrent-prompt capability.
 - Reconstructing detached-work liveness after backend or agent-execution
   restart.
+- Rendering the active subagent count or individual subagent details in the UI.
 - Changing Office autonomous-agent status vocabulary.
 - Changing archive behavior when the operator has disabled archive
   confirmation.

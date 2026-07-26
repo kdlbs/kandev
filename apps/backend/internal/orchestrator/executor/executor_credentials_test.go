@@ -2,14 +2,222 @@ package executor
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+const (
+	envGitHubCredentialBrokerURL  = githubauth.CredentialBrokerURLEnv
+	envGitHubCredentialLease      = githubauth.CredentialLeaseEnv
+	envGitHubCredentialTaskID     = githubauth.CredentialTaskIDEnv
+	envGitHubCredentialSessionID  = githubauth.CredentialSessionIDEnv
+	envGitHubCredentialRepository = githubauth.CredentialRepositoryEnv
+	envGitHubCredentialOwner      = githubauth.CredentialOwnerEnv
+	envGitHubCredentialRepo       = githubauth.CredentialRepoEnv
+	envGitHubCredentialHost       = githubauth.CredentialHostEnv
+	envGitHubCredentialScopes     = githubauth.CredentialScopesEnv
+)
+
+type fakeGitHubCredentialLeaseIssuer struct {
+	request  GitHubCredentialLeaseRequest
+	requests []GitHubCredentialLeaseRequest
+	lease    GitHubCredentialLease
+	err      error
+	calls    int
+}
+
+func (f *fakeGitHubCredentialLeaseIssuer) IssueGitHubCredentialLease(
+	_ context.Context,
+	req GitHubCredentialLeaseRequest,
+) (GitHubCredentialLease, error) {
+	f.calls++
+	f.request = req
+	f.requests = append(f.requests, req)
+	return f.lease, f.err
+}
+
+func TestConfigureGitHubCredentialBroker(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID:       "task-1",
+		WorkspaceID:  "workspace-1",
+		SessionID:    "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker),
+		Env: map[string]string{
+			"GIT_CONFIG_COUNT":   "1",
+			"GIT_CONFIG_KEY_0":   "http.version",
+			"GIT_CONFIG_VALUE_0": "HTTP/1.1",
+		},
+	}
+	info := &repoInfo{
+		RepositoryID: "repo-1",
+		Repository: &models.Repository{
+			Provider:      "github",
+			ProviderOwner: "acme",
+			ProviderName:  "widgets",
+		},
+	}
+
+	err := exec.configureGitHubCredentialBroker(context.Background(), req, info)
+	if err != nil {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+	}
+	if issuer.calls != 1 {
+		t.Fatalf("IssueGitHubCredentialLease calls = %d, want 1", issuer.calls)
+	}
+	if issuer.request.WorkspaceID != "workspace-1" || issuer.request.RepositoryID != "repo-1" {
+		t.Fatalf("lease scope = %+v", issuer.request)
+	}
+	wantEnv := map[string]string{
+		envGitHubCredentialBrokerURL:  "https://kandev.example/api/github/credentials/resolve",
+		envGitHubCredentialLease:      "opaque-lease",
+		envGitHubCredentialTaskID:     "task-1",
+		envGitHubCredentialSessionID:  "session-1",
+		envGitHubCredentialRepository: "repo-1",
+		envGitHubCredentialOwner:      "acme",
+		envGitHubCredentialRepo:       "widgets",
+		envGitHubCredentialHost:       "github.com",
+		"GIT_CONFIG_COUNT":            "3",
+		"GIT_CONFIG_KEY_1":            "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_1":          "!agentctl git-credential",
+		"GIT_CONFIG_KEY_2":            "credential.useHttpPath",
+		"GIT_CONFIG_VALUE_2":          "true",
+		"GIT_TERMINAL_PROMPT":         "0",
+	}
+	if got := req.Env[envGitHubCredentialScopes]; !strings.Contains(got, `"repository_id":"repo-1"`) {
+		t.Fatalf("credential scopes = %q, want repository scope", got)
+	}
+	for key, want := range wantEnv {
+		if got := req.Env[key]; got != want {
+			t.Errorf("Env[%q] = %q, want %q", key, got, want)
+		}
+	}
+	if _, ok := req.Env[envGitHubToken]; ok {
+		t.Error("managed credential configuration exposed GITHUB_TOKEN")
+	}
+	if _, ok := req.Env[envGHToken]; ok {
+		t.Error("managed credential configuration exposed GH_TOKEN")
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerIssuesOneLeasePerRepository(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker), Env: map[string]string{},
+	}
+	infos := []*repoInfo{
+		{RepositoryID: "repo-1", Repository: &models.Repository{
+			Provider: "github", ProviderOwner: "acme", ProviderName: "frontend",
+		}},
+		{RepositoryID: "repo-2", Repository: &models.Repository{
+			Provider: "github", ProviderOwner: "acme", ProviderName: "backend",
+		}},
+	}
+	issuer.lease = GitHubCredentialLease{Token: "opaque-lease"}
+
+	if err := exec.configureGitHubCredentialBrokerForRepositories(context.Background(), req, infos); err != nil {
+		t.Fatalf("configureGitHubCredentialBrokerForRepositories() error = %v", err)
+	}
+	if len(issuer.requests) != 2 {
+		t.Fatalf("lease requests = %d, want 2", len(issuer.requests))
+	}
+	if issuer.requests[0].RepositoryID != "repo-1" || issuer.requests[1].RepositoryID != "repo-2" {
+		t.Fatalf("lease scopes = %+v", issuer.requests)
+	}
+	var scopes []githubCredentialScope
+	if err := json.Unmarshal([]byte(req.Env[envGitHubCredentialScopes]), &scopes); err != nil {
+		t.Fatalf("decode credential scopes: %v", err)
+	}
+	if len(scopes) != 2 || scopes[0].Repo != "frontend" || scopes[1].Repo != "backend" {
+		t.Fatalf("credential scopes = %+v", scopes)
+	}
+	if got := req.Env[envGitHubCredentialRepo]; got != "frontend" {
+		t.Fatalf("primary gh scope = %q, want frontend", got)
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerPreservesExplicitProfileToken(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeRemoteDocker),
+		Env:          map[string]string{envGHToken: "profile-token"},
+	}
+	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
+		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
+	}}
+
+	if err := exec.configureGitHubCredentialBroker(context.Background(), req, info); err != nil {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+	}
+	if issuer.calls != 0 {
+		t.Fatalf("IssueGitHubCredentialLease calls = %d, want 0", issuer.calls)
+	}
+	if got := req.Env[envGHToken]; got != "profile-token" {
+		t.Fatalf("GH_TOKEN = %q, want explicit profile value", got)
+	}
+	if got := req.Env[envGitHubCredentialLease]; got != "" {
+		t.Fatalf("broker lease = %q, want none with explicit profile auth", got)
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerRejectsRemoteLoopbackURL(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "http://127.0.0.1:8080/api/github/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeSSH), Env: map[string]string{},
+	}
+	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
+		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
+	}}
+
+	err := exec.configureGitHubCredentialBroker(context.Background(), req, info)
+	if err == nil || !errors.Is(err, ErrGitHubCredentialBrokerURL) {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v, want broker URL error", err)
+	}
+	if issuer.calls != 0 {
+		t.Fatalf("IssueGitHubCredentialLease calls = %d, want 0", issuer.calls)
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerAllowsLocalLoopbackURL(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "http://localhost:8080/api/github/credentials/resolve")
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeWorktree), Env: map[string]string{},
+	}
+	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
+		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
+	}}
+
+	if err := exec.configureGitHubCredentialBroker(context.Background(), req, info); err != nil {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+	}
+	if issuer.calls != 1 {
+		t.Fatalf("IssueGitHubCredentialLease calls = %d, want 1", issuer.calls)
+	}
+}
 
 type fakeGitLabCredentialResolver struct {
 	byWorkspace map[string]struct{ host, token string }
@@ -264,84 +472,7 @@ func TestResolveAuthSecrets(t *testing.T) {
 	}
 }
 
-func TestResolveGHCLIToken(t *testing.T) {
-	repo := newMockRepository()
-	agentManager := &mockAgentManager{}
-	executor := newTestExecutor(t, agentManager, repo)
-
-	tests := []struct {
-		name        string
-		metadata    map[string]interface{}
-		existingEnv map[string]string
-		expectSkip  bool
-	}{
-		{
-			name:       "no remote_credentials",
-			metadata:   map[string]interface{}{},
-			expectSkip: true,
-		},
-		{
-			name: "gh_cli_token not in list",
-			metadata: map[string]interface{}{
-				"remote_credentials": `["other_credential"]`,
-			},
-			expectSkip: true,
-		},
-		{
-			name: "skip if GITHUB_TOKEN already set",
-			metadata: map[string]interface{}{
-				"remote_credentials": `["gh_cli_token"]`,
-			},
-			existingEnv: map[string]string{
-				envGitHubToken: "existing",
-			},
-			expectSkip: true,
-		},
-		{
-			name: "skip if GH_TOKEN already set",
-			metadata: map[string]interface{}{
-				"remote_credentials": `["gh_cli_token"]`,
-			},
-			existingEnv: map[string]string{
-				envGHToken: "existing-gh-token",
-			},
-			expectSkip: true,
-		},
-		{
-			name: "invalid JSON ignored",
-			metadata: map[string]interface{}{
-				"remote_credentials": `{invalid}`,
-			},
-			expectSkip: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			req := &LaunchAgentRequest{
-				Env: tt.existingEnv,
-			}
-			if req.Env == nil {
-				req.Env = make(map[string]string)
-			}
-			initialGHToken := req.Env[envGitHubToken]
-			initialGH := req.Env[envGHToken]
-
-			executor.resolveGHCLIToken(req, tt.metadata)
-
-			if tt.expectSkip {
-				if req.Env[envGitHubToken] != initialGHToken {
-					t.Errorf("expected GITHUB_TOKEN to remain %q, got %q", initialGHToken, req.Env[envGitHubToken])
-				}
-				if req.Env[envGHToken] != initialGH {
-					t.Errorf("expected GH_TOKEN to remain %q, got %q", initialGH, req.Env[envGHToken])
-				}
-			}
-		})
-	}
-}
-
-func TestInjectGitHubToken(t *testing.T) {
+func TestApplyContainerCredentialsDoesNotInjectGlobalGitHubToken(t *testing.T) {
 	repo := newMockRepository()
 	agentManager := &mockAgentManager{}
 	executor := newTestExecutor(t, agentManager, repo)
@@ -351,54 +482,36 @@ func TestInjectGitHubToken(t *testing.T) {
 		names:   map[string]string{"secret-1": envGitHubToken},
 	}
 
-	t.Run("injects token when not set", func(t *testing.T) {
-		req := &LaunchAgentRequest{Env: make(map[string]string)}
-		executor.injectGitHubToken(context.Background(), req)
-		if req.Env[envGitHubToken] != "ghp_globaltoken" {
-			t.Errorf("expected GITHUB_TOKEN to be set, got %q", req.Env[envGitHubToken])
-		}
-		if req.Env[envGHToken] != "ghp_globaltoken" {
-			t.Errorf("expected GH_TOKEN to be set, got %q", req.Env[envGHToken])
-		}
-	})
-
-	t.Run("skips if GITHUB_TOKEN already set", func(t *testing.T) {
-		req := &LaunchAgentRequest{Env: map[string]string{envGitHubToken: "existing-token"}}
-		executor.injectGitHubToken(context.Background(), req)
-		if req.Env[envGitHubToken] != "existing-token" {
-			t.Errorf("expected GITHUB_TOKEN to remain unchanged, got %q", req.Env[envGitHubToken])
-		}
-	})
-
-	t.Run("skips if GH_TOKEN already set", func(t *testing.T) {
-		req := &LaunchAgentRequest{Env: map[string]string{envGHToken: "existing-gh-token"}}
-		executor.injectGitHubToken(context.Background(), req)
-		if req.Env[envGitHubToken] != "" {
-			t.Errorf("expected GITHUB_TOKEN to not be injected when GH_TOKEN is set, got %q", req.Env[envGitHubToken])
-		}
-	})
+	req := &LaunchAgentRequest{Env: make(map[string]string)}
+	executor.applyContainerCredentials(context.Background(), req, nil)
+	if got := req.Env[envGitHubToken]; got != "" {
+		t.Fatalf("GITHUB_TOKEN = %q, want no installation-wide fallback", got)
+	}
+	if got := req.Env[envGHToken]; got != "" {
+		t.Fatalf("GH_TOKEN = %q, want no installation-wide fallback", got)
+	}
 }
 
-func TestInjectGitHubTokenFromCLI(t *testing.T) {
-	repo := newMockRepository()
-	agentManager := &mockAgentManager{}
-	executor := newTestExecutor(t, agentManager, repo)
+func TestApplyContainerCredentialsDoesNotExtractAmbientGitHubCLIAccount(t *testing.T) {
+	binDir := t.TempDir()
+	ghPath := filepath.Join(binDir, "gh")
+	if err := os.WriteFile(ghPath, []byte("#!/bin/sh\nprintf ambient-host-token\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := &LaunchAgentRequest{Env: make(map[string]string)}
 
-	t.Run("skips if GITHUB_TOKEN already set", func(t *testing.T) {
-		req := &LaunchAgentRequest{Env: map[string]string{envGitHubToken: "existing-token"}}
-		executor.injectGitHubTokenFromCLI(context.Background(), req)
-		if req.Env[envGitHubToken] != "existing-token" {
-			t.Errorf("expected GITHUB_TOKEN to remain unchanged, got %q", req.Env[envGitHubToken])
-		}
+	executor.applyContainerCredentials(context.Background(), req, map[string]interface{}{
+		profileKeyRemoteCredentials: `["gh_cli_token"]`,
 	})
 
-	t.Run("skips if GH_TOKEN already set", func(t *testing.T) {
-		req := &LaunchAgentRequest{Env: map[string]string{envGHToken: "existing-gh-token"}}
-		executor.injectGitHubTokenFromCLI(context.Background(), req)
-		if req.Env[envGHToken] != "existing-gh-token" {
-			t.Errorf("expected GH_TOKEN to remain unchanged, got %q", req.Env[envGHToken])
-		}
-	})
+	if got := req.Env[envGitHubToken]; got != "" {
+		t.Fatalf("GITHUB_TOKEN = %q, want no ambient gh credential", got)
+	}
+	if got := req.Env[envGHToken]; got != "" {
+		t.Fatalf("GH_TOKEN = %q, want no ambient gh credential", got)
+	}
 }
 
 // mockSecretStore implements secrets.SecretStore for testing

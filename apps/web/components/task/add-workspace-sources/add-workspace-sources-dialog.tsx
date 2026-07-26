@@ -568,11 +568,11 @@ function RemoteRepositoryRow({
   workspaceId: string | null;
   onUpdate: (key: string, patch: Partial<WorkspaceSourceRow>) => void;
 }) {
-  const branches = useBranchesByURL();
-  const prInfo = usePRInfoByURL();
+  const branches = useBranchesByURL(workspaceId);
+  const prInfo = usePRInfoByURL(workspaceId);
   const accessibleRepos = useRemoteRepositories(workspaceId ?? "");
   useEffect(() => {
-    if (row.remoteUrl) branches.ensure(row.remoteUrl, workspaceId ?? undefined);
+    if (row.remoteUrl) branches.ensure(row.remoteUrl);
   }, [branches, row.remoteUrl, workspaceId]);
   const remoteRow: TaskRemoteRepoRow = {
     key: row.key,

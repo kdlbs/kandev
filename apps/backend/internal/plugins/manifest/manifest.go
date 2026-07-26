@@ -39,6 +39,13 @@ type Manifest struct {
 
 	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
 
+	// AuthProviders declares external login options (OIDC/SAML) this plugin
+	// contributes to the pre-auth login screen. Only meaningful alongside
+	// capabilities.auth. Each provider's Initiate names one of the plugin's
+	// webhook keys — the login button navigates to that webhook, which
+	// 302-redirects the browser to the IdP.
+	AuthProviders []AuthProvider `yaml:"auth_providers,omitempty" json:"auth_providers,omitempty"`
+
 	ConfigSchema map[string]any `yaml:"config_schema,omitempty" json:"config_schema,omitempty"`
 
 	UI UISection `yaml:"ui,omitempty" json:"ui,omitempty"`
@@ -75,6 +82,24 @@ type Capabilities struct {
 	// AgentInvoke gates Host.InvokeUtilityAgent (ADR 0048): a one-shot,
 	// non-interactive completion run by the operator-configured utility agent.
 	AgentInvoke bool `yaml:"agent_invoke,omitempty" json:"agent_invoke,omitempty"`
+	// Auth gates a plugin's ability to establish an authenticated kandev
+	// browser session for an external identity it has validated against an
+	// OIDC/SAML IdP. The plugin asserts the identity via the reserved login
+	// directive header on its webhook response; the host mints and sets the
+	// session cookie itself, so the plugin never receives the raw session
+	// token. This is the highest-privilege capability — a plugin that holds it
+	// can log a visitor in as any (or a new) user — so it should only be
+	// granted to plugins an operator explicitly trusts.
+	Auth bool `yaml:"auth,omitempty" json:"auth,omitempty"`
+}
+
+// AuthProvider is a login option a plugin contributes to the pre-auth login
+// screen. ID is a stable provider key; DisplayName is the button label;
+// Initiate is the plugin webhook key that starts the login redirect.
+type AuthProvider struct {
+	ID          string `yaml:"id" json:"id"`
+	DisplayName string `yaml:"display_name" json:"display_name"`
+	Initiate    string `yaml:"initiate" json:"initiate"`
 }
 
 // Webhook is a proxied external webhook endpoint the plugin declares.

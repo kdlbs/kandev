@@ -74,8 +74,12 @@ function deriveSubagentDisplay(
     isActive,
     resultText,
     prompt,
-    hasExpandableContent: childCount > 0 || Boolean(resultText) || Boolean(prompt) || isActive,
+    hasExpandableContent: childCount > 0 || Boolean(resultText) || Boolean(prompt),
   };
+}
+
+function labelsMatch(left: string, right: string): boolean {
+  return left.trim().toLowerCase() === right.trim().toLowerCase();
 }
 
 type SubagentHeaderProps = {
@@ -97,6 +101,8 @@ function SubagentHeader({
   hasExpandableContent,
   onToggle,
 }: SubagentHeaderProps) {
+  const showDescription = !labelsMatch(subagentType, description);
+  const showInlineWorking = isActive && !hasExpandableContent;
   const content = (
     <>
       {hasExpandableContent &&
@@ -117,14 +123,19 @@ function SubagentHeader({
       >
         {subagentType}
       </span>
-      <span
-        data-testid="subagent-description"
-        title={description}
-        className="font-mono text-xs truncate text-muted-foreground inline-flex items-center gap-1.5 min-w-0"
-      >
-        {description}
-        {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
-      </span>
+      {showDescription && (
+        <span
+          data-testid="subagent-description"
+          title={description}
+          className="font-mono text-xs truncate text-muted-foreground min-w-0"
+        >
+          {description}
+        </span>
+      )}
+      {showInlineWorking && (
+        <span className="text-xs text-muted-foreground italic">Working...</span>
+      )}
+      {isActive && <GridSpinner className="text-muted-foreground shrink-0" />}
       {childCount > 0 && (
         <span
           data-testid="subagent-child-count"
@@ -165,7 +176,6 @@ const NESTED_BORDER = "ml-2 pl-4 border-l-2 border-border/30 mt-1";
 type SubagentContentProps = {
   isExpanded: boolean;
   childMessages: Message[];
-  isActive: boolean;
   prompt?: string;
   resultText?: string;
   renderChild: (message: Message) => React.ReactNode;
@@ -174,7 +184,6 @@ type SubagentContentProps = {
 function SubagentContent({
   isExpanded,
   childMessages,
-  isActive,
   prompt,
   resultText,
   renderChild,
@@ -186,13 +195,6 @@ function SubagentContent({
         {childMessages.map((child) => (
           <div key={child.id}>{renderChild(child)}</div>
         ))}
-      </div>
-    );
-  }
-  if (isActive) {
-    return (
-      <div className={NESTED_BORDER}>
-        <span className="text-xs text-muted-foreground italic">Subagent working...</span>
       </div>
     );
   }
@@ -268,7 +270,6 @@ export const ToolSubagentMessage = memo(function ToolSubagentMessage({
       <SubagentContent
         isExpanded={isExpanded}
         childMessages={childMessages}
-        isActive={isActive}
         prompt={prompt}
         resultText={resultText}
         renderChild={renderChild}

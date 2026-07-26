@@ -133,6 +133,14 @@ A task created with **Create without starting agent** opens in a prepared workbe
 
 If the selected profile is unhealthy or incompatible with the executor, fix that configuration before launch. Starting an agent is separate from moving the task through its workflow; entry actions and turn-complete transitions can move or restart work afterward.
 
+When a session shows **Working in background**, its foreground turn has ended
+but recognized child work is still live. You can send a follow-up without
+waiting for that work to finish. Providers with an attested handoff, including
+Claude ACP, receive the follow-up immediately while the child may continue
+streaming. While the session still shows **Generating**, the provider retains
+foreground ownership and Kandev keeps another message queued until that
+ownership is released.
+
 ## Find and organize tasks
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Kandev remembers the last selected view in that browser on the current device. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.

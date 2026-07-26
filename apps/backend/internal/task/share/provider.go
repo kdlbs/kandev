@@ -6,7 +6,6 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/github"
 )
 
 // Config is the boot-time configuration for the share package. KandevVersion
@@ -18,13 +17,13 @@ type Config struct {
 
 // Provide wires the share package's repository, service, and HTTP handlers.
 // The taskReader is typically *sqliterepo.Repository from the task package;
-// only the three methods on TaskReader are used. The github.Client may be
-// nil, in which case CreateShare will fail at the IsAuthenticated probe.
+// only the three methods on TaskReader are used. The GitHub resolver selects
+// the owning workspace's automation principal for each operation.
 // Cleanup is a no-op; the repository does not own its database connection.
 func Provide(
 	writer, reader *sqlx.DB,
 	taskReader TaskReader,
-	ghClient github.Client,
+	githubResolver GitHubClientResolver,
 	log *logger.Logger,
 	cfg Config,
 ) (*HTTPHandlers, func() error, error) {
@@ -32,9 +31,9 @@ func Provide(
 	if err != nil {
 		return nil, nil, fmt.Errorf("share: provide repository: %w", err)
 	}
-	backend := NewGistBackend(ghClient)
+	backend := NewWorkspaceGistBackend(githubResolver)
 	svc := New(repo, taskReader, backend, log, cfg.KandevVersion)
-	h := NewHTTPHandlers(svc, ghClient, log)
+	h := NewHTTPHandlers(svc, log)
 	// Cleanup is a true no-op — the repository doesn't own its database
 	// connection (the pool is owned by cmd/kandev).
 	return h, func() error { return nil }, nil

@@ -482,6 +482,16 @@ func (c *GHClient) ListAccessibleRepos(ctx context.Context, query string, limit 
 	return filterReposByQuery(repos, query), nil
 }
 
+// HasRepositoryAccess probes the repository root through the selected gh
+// account. It does not rely on the first page returned by /user/repos.
+func (c *GHClient) HasRepositoryAccess(ctx context.Context, owner, repo string) (bool, error) {
+	out, err := c.run(ctx, "api", fmt.Sprintf("/repos/%s/%s", owner, repo), "--jq", ".full_name")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
 // buildAccessibleReposGHArgs constructs the `gh api /user/repos?...` argv for
 // ListAccessibleRepos. Keeping it pure makes the endpoint/query construction
 // unit-testable without spawning gh. Callers must clamp `limit` via

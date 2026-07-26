@@ -49,6 +49,14 @@ func (h *PassthroughHandlers) wsAgentStdin(ctx context.Context, msg *ws.Message)
 		return nil, fmt.Errorf("session_id is required")
 	}
 
+	// Per-user scoping: this resolves the execution by a bare in-memory
+	// lookup, which skips the GetOrEnsure* chokepoint where the check runs.
+	// Unguarded, a caller with any live session ID could write bytes into
+	// another user's agent process.
+	if err := h.lifecycleMgr.CheckSessionAccess(ctx, req.SessionID); err != nil {
+		return nil, fmt.Errorf("session not found")
+	}
+
 	// Get the agent execution for this session
 	execution, ok := h.lifecycleMgr.GetExecutionBySessionID(req.SessionID)
 	if !ok {
@@ -90,6 +98,14 @@ func (h *PassthroughHandlers) wsAgentResize(ctx context.Context, msg *ws.Message
 
 	if req.SessionID == "" {
 		return nil, fmt.Errorf("session_id is required")
+	}
+
+	// Per-user scoping: this resolves the execution by a bare in-memory
+	// lookup, which skips the GetOrEnsure* chokepoint where the check runs.
+	// Unguarded, a caller with any live session ID could write bytes into
+	// another user's agent process.
+	if err := h.lifecycleMgr.CheckSessionAccess(ctx, req.SessionID); err != nil {
+		return nil, fmt.Errorf("session not found")
 	}
 
 	if req.Cols == 0 || req.Rows == 0 {

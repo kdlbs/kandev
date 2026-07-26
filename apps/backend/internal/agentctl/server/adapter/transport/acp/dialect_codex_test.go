@@ -80,6 +80,27 @@ func TestParseCodexSubagentFrameStartedActivity(t *testing.T) {
 	}
 }
 
+func TestParseCodexSubagentFrameTerminalActivity(t *testing.T) {
+	for _, status := range []string{
+		toolStatusCompleted,
+		"interrupted",
+		toolStatusCancelled,
+		"errored",
+		"shutdown",
+		"notFound",
+	} {
+		t.Run(status, func(t *testing.T) {
+			frame, ok := parseCodexSubagentFrame(codexActivityMeta(status), "", nil)
+			if !ok {
+				t.Fatalf("expected %q activity to be recognized", status)
+			}
+			if frame.result.ChildSessionID != "thread-child" || frame.result.Status != status {
+				t.Fatalf("terminal frame = %+v", frame)
+			}
+		})
+	}
+}
+
 func TestParseCodexSubagentFrameRejectsControlsAndMalformedMeta(t *testing.T) {
 	tests := []struct {
 		name string
@@ -89,7 +110,6 @@ func TestParseCodexSubagentFrameRejectsControlsAndMalformedMeta(t *testing.T) {
 		{"wait", codexCollaborationMeta("wait", []any{"thread-child"})},
 		{"close", codexCollaborationMeta("close", []any{"thread-child"})},
 		{"interacted activity", codexActivityMeta("interacted")},
-		{"interrupted activity", codexActivityMeta("interrupted")},
 		{"missing codex", map[string]any{"other": map[string]any{}}},
 		{"wrong codex type", map[string]any{"codex": "invalid"}},
 		{"wrong collaboration type", map[string]any{"codex": map[string]any{"collaboration": 42}}},

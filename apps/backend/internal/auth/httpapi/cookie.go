@@ -17,6 +17,16 @@ func setSessionCookie(c *gin.Context, name, token string, ttl time.Duration) {
 	c.SetCookie(name, token, int(ttl.Seconds()), "/", "", requestIsTLS(c), true)
 }
 
+// SetSessionCookie writes the kandev session cookie with the same flags as the
+// login/setup handlers. Exported for callers outside this package that mint a
+// session and must set the cookie themselves — the plugin SSO login bridge
+// (internal/backendapp) after an auth-capable plugin validates an external
+// identity. Keeping this the single cookie-writing path means TLS/SameSite/
+// HttpOnly flags never drift between the local and SSO login flows.
+func SetSessionCookie(c *gin.Context, name, token string, ttl time.Duration) {
+	setSessionCookie(c, name, token, ttl)
+}
+
 func clearSessionCookie(c *gin.Context, name string) {
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(name, "", -1, "/", "", requestIsTLS(c), true)

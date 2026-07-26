@@ -1,6 +1,69 @@
 // GitHub integration types
 
-export type GitHubAuthMethod = "gh_cli" | "pat" | "none";
+import type { GitHubAppRegistration } from "./github-app";
+
+export * from "./github-app";
+
+export type GitHubAuthMethod =
+  | "gh_cli"
+  | "pat"
+  | "github_app_installation"
+  | "legacy_shared"
+  | "none";
+
+export type GitHubConnectionSource = Exclude<GitHubAuthMethod, "none">;
+export type GitHubConnectionState = "active" | "invalid" | "suspended" | "revoked";
+
+export type GitHubAuthPrincipal = {
+  kind: "human" | "app";
+  source: GitHubConnectionSource | "github_app_user";
+  login?: string;
+  installation_id?: number;
+  app_registration_id?: string;
+  app_credential_generation?: number;
+  workspace_id: string;
+  user_id?: string;
+};
+
+export type GitHubAutomationConnection = {
+  workspace_id: string;
+  source: GitHubConnectionSource;
+  github_host: string;
+  login?: string;
+  installation_id?: number;
+  installation_account_login?: string;
+  installation_account_type?: string;
+  app_registration_id?: string;
+  status: GitHubConnectionState;
+  actor?: GitHubAuthPrincipal;
+  capabilities?: Record<string, boolean>;
+  missing_capabilities?: string[];
+  missing_permissions?: string[];
+  legacy_migration?: boolean;
+  credential_generation: number;
+  last_error?: string;
+};
+
+export type GitHubPersonalConnection = {
+  workspace_id: string;
+  user_id: string;
+  app_registration_id: string;
+  github_user_id: number;
+  login: string;
+  status: GitHubConnectionState;
+  access_expires_at: string;
+  refresh_expires_at?: string;
+  credential_generation: number;
+  last_error?: string;
+};
+
+export type GitHubCLIAccount = {
+  host: string;
+  login: string;
+  active: boolean;
+  state: string;
+  selected?: boolean;
+};
 
 export type AuthDiagnostics = {
   command: string;
@@ -9,6 +72,15 @@ export type AuthDiagnostics = {
 };
 
 export type GitHubStatus = {
+  workspace_id?: string;
+  automation?: GitHubAutomationConnection | null;
+  personal?: GitHubPersonalConnection | null;
+  app_registration?: GitHubAppRegistration | null;
+  app_available?: boolean;
+  github_app_available?: boolean;
+  effective_personal_actor?: GitHubAuthPrincipal | null;
+  effective_manual_mutation_actor?: GitHubAuthPrincipal | null;
+  /** Compatibility fields for existing PR/issue surfaces. */
   authenticated: boolean;
   username: string;
   auth_method: GitHubAuthMethod;

@@ -652,6 +652,7 @@
   .border-flash-animation::after,
   .node-border-running::after,
   .search-flash,
+  .review-finding-flash,
   .animate-queue-open,
   .animate-queue-close {
     animation: none;
@@ -1727,6 +1728,22 @@
     background-color: color-mix(in oklab, var(--warning) 48%, transparent);
   }
   100% {
+    background-color: transparent;
+  }
+}
+
+/* Highlights a review finding card after "go to finding" scrolls it into view,
+ * so the eye lands on the right card among several inline in the diff. */
+.review-finding-flash {
+  animation: review-finding-flash 1.4s ease-out;
+}
+@keyframes review-finding-flash {
+  0% {
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 70%, transparent);
+    background-color: color-mix(in oklab, var(--primary) 16%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 2px transparent;
     background-color: transparent;
   }
 }

@@ -11,16 +11,15 @@ Choose sync when workflow changes should be reviewed and versioned in Git. Choos
 
 ## Prerequisites and credentials
 
-You need a GitHub repository and a branch containing valid portable workflow files. The Kandev backend—not the browser and not a task executor—reads the repository. Its GitHub identity must therefore have contents-read access to the configured branch, including for private repositories.
+You need a GitHub repository and a branch containing valid portable workflow files. The Kandev backend—not the browser and not a task executor—reads the repository. The workspace automation connection must therefore have contents-read access to the configured branch, including for private repositories, and the repository must be inside the workspace's effective scope.
 
-Kandev selects GitHub authentication in this order:
+Configure one automation connection under the workspace's GitHub integration:
 
-1. An installed and authenticated `gh` CLI.
-2. `GITHUB_TOKEN` in the backend environment.
-3. `GH_TOKEN` in the backend environment.
-4. A stored Kandev secret named exactly `GITHUB_TOKEN` or `github_token`.
+- a personal access token;
+- an exact named `gh` CLI host/login; or
+- a GitHub App installation with **Contents: read** permission for the repository.
 
-Without one of those, sync fails. Grant only the repository access that this operation needs, protect the backend environment and secret store, and do not commit a token into a workflow file.
+Without a usable workspace automation connection, sync fails. Existing migrated workspaces may temporarily use **Legacy shared**, which alone consults ambient backend `gh`, `GITHUB_TOKEN`, `GH_TOKEN`, or old globally named secrets. Grant only the repository access that this operation needs, protect the backend environment and secret store, and do not commit a token into a workflow file.
 
 ## Configure a workspace
 

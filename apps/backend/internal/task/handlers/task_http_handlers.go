@@ -201,6 +201,7 @@ func buildTaskDTOsWithSessionInfo(
 	ctx context.Context,
 	svc *service.Service,
 	log *logger.Logger,
+	activityProvider dto.ForegroundActivityProvider,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
@@ -253,6 +254,7 @@ func buildTaskDTOsWithSessionInfo(
 			pendingActionPtr(si.sessionID, pendingActionsBySession),
 		)
 		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
+		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		result = append(result, taskDTO)
 	}
 	return result, nil
@@ -368,7 +370,7 @@ func pendingActionPtr(
 }
 
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, tasks)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {
@@ -377,7 +379,7 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, []*models.Task{task})
+	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, h.foregroundActivity, []*models.Task{task})
 	if err != nil {
 		h.logger.Error("failed to build task DTO with session info", zap.Error(err))
 		c.JSON(http.StatusOK, dto.FromTask(task))
@@ -500,8 +502,10 @@ func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 func (h *TaskHandlers) httpApproveSession(c *gin.Context) {
 	result, err := h.service.ApproveSession(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		h.logger.Error("failed to approve session", zap.String("session_id", c.Param("id")), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Route not-found through the shared mapper so a per-user scoping
+		// denial answers 404 like every other session route, rather than
+		// surfacing as a 500 that distinguishes "yours" from "someone else's".
+		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
 

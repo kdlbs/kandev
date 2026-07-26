@@ -99,12 +99,20 @@ func (h *MessageHandlers) registerHTTP(router *gin.Engine) {
 func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 	message, err := h.service.GetMessage(c.Request.Context(), c.Param("message_id"))
 	if err != nil {
-		if !errors.Is(err, sql.ErrNoRows) {
-			h.logger.Error("failed to get shell output message", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get shell output"})
+		// A missing row surfaces as bare sql.ErrNoRows, which isNotFound does
+		// not classify (it matches typed sentinels and the "not found" substring,
+		// neither of which covers "sql: no rows in result set") — so keep that
+		// case explicit.
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
 			return
 		}
-		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+		// Everything else goes through the shared mapper: GetMessage is now
+		// per-user scoped, so a denial arrives as ErrTaskNotFound. Answering 500
+		// for a foreign message while a missing one gets 404 would be an
+		// existence signal, and inconsistent with the 404-everywhere rule the
+		// other session routes follow.
+		handleNotFound(c, h.logger, err, "message not found")
 		return
 	}
 	output, ok := models.ExtractShellExecOutput(message.Metadata)

@@ -56,6 +56,10 @@ func acquireEnsureLock(taskID string) func() {
 // not. This is used by the office advanced mode where one-off tasks may have
 // their execution torn down after completion.
 func (s *Service) EnsureSession(ctx context.Context, taskID string, opts ...EnsureSessionOptions) (*EnsureSessionResponse, error) {
+	if err := s.authorizeTask(ctx, taskID); err != nil {
+		return nil, err
+	}
+
 	if taskID == "" {
 		return nil, fmt.Errorf("task_id is required")
 	}

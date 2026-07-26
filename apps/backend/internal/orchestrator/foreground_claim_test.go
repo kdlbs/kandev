@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
-	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -145,7 +144,7 @@ func TestPromptTask_ConcurrentPromptsIntoBackgroundIdleStartOneTurn(t *testing.T
 			Type:       "tool_update",
 			ToolCallID: "bash-1",
 			ToolStatus: "in_progress",
-			Normalized: streams.NewShellExec("npm run dev", "", "", 0, true),
+			Normalized: attestedBackgroundShellPayload("npm run dev"),
 		},
 	})
 	emitForegroundIdle(svc, taskID, sessionID)

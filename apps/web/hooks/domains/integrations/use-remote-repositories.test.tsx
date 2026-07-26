@@ -31,6 +31,13 @@ function rejectUnavailableProviders() {
   mocks.listAzureDevOpsProjects.mockRejectedValue(new Error("Azure DevOps not configured"));
 }
 
+function expectWorkspaceScopedGitHubRequest() {
+  expect(mocks.fetchAccessibleRepos).toHaveBeenCalledWith({
+    workspaceId: WORKSPACE_ID,
+    limit: 100,
+  });
+}
+
 describe("useRemoteRepositories", () => {
   it("combines successful providers while tolerating a provider failure", async () => {
     mocks.fetchAccessibleRepos.mockResolvedValue([
@@ -69,6 +76,7 @@ describe("useRemoteRepositories", () => {
     const { result } = renderHook(() => useRemoteRepositories(WORKSPACE_ID));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
+    expectWorkspaceScopedGitHubRequest();
     expect(result.current.repos.map((repo) => `${repo.provider}:${repo.fullName}`)).toEqual([
       "github:acme/web",
       "azure_devops:Platform/api",

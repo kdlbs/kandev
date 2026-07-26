@@ -391,11 +391,13 @@ func TestApplyResumeRepoConfig_SelfHealsStaleProviderPath(t *testing.T) {
 // fakeRepoCloner returns a fixed local path for any clone request.
 type fakeRepoCloner struct{ returnPath string }
 
-func (f *fakeRepoCloner) EnsureClonedForProvider(
-	_ context.Context, _, _, _, _, _, _, _ string,
+func (f *fakeRepoCloner) EnsureWorkspaceClonedForProvider(
+	_ context.Context, _, _, _, _, _, _, _, _ string,
 ) (string, error) {
 	return f.returnPath, nil
 }
+
+func (f *fakeRepoCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
 
 func (f *fakeRepoCloner) BuildCloneURLWithHost(_, _, owner, name string) (string, error) {
 	return "https://github.com/" + owner + "/" + name + ".git", nil

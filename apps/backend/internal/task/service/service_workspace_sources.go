@@ -61,6 +61,13 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	if req.TaskID == "" || len(req.Sources) == 0 {
 		return nil, fmt.Errorf("%w: task_id and at least one source are required", ErrInvalidWorkspaceSource)
 	}
+	// Per-user scoping: this attaches repositories and folders to the task and
+	// materializes them into its workspace, so it must be owner-only. Guard
+	// before taking the per-task lock. Denial surfaces as ErrTaskNotFound,
+	// which the HTTP layer already maps to 404.
+	if err := s.authorizeTaskID(ctx, req.TaskID); err != nil {
+		return nil, err
+	}
 	unlock := s.lockWorkspaceSources(req.TaskID)
 	defer unlock()
 	task, err := s.tasks.GetTask(ctx, req.TaskID)

@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/base64"
 	"strconv"
+	"strings"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -26,8 +27,7 @@ type codexSubagentCorrelation struct {
 	emittedToolCallID string
 	parentToolCallID  string
 	payload           *streams.NormalizedPayload
-	collaborationSeen bool
-	activitySeen      bool
+	terminalSeen      bool
 	lastSeen          uint64
 }
 
@@ -130,13 +130,16 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	normalizedPayload := a.normalizer.NormalizeToolCall(toolKind, args)
 
 	toolCallID := string(tc.ToolCallId)
-	normalizedPayload, eventType, codexSignal, emittedToolCallID, codexParentToolCallID := a.trackToolCallPayload(
+	normalizedPayload, eventType, codexSignal, emittedToolCallID, codexParentToolCallID, suppress := a.trackToolCallPayload(
 		sessionID,
 		toolCallID,
 		normalizedPayload,
 		tc.Meta,
 		string(tc.Status),
 	)
+	if suppress {
+		return nil
+	}
 
 	// ScheduleWakeup tracking: meta carries `_meta.claudeCode.toolName`
 	// on the initial tool_call; rawInput is usually empty here but record
@@ -158,6 +161,7 @@ func (a *Adapter) convertToolCallUpdate(sessionID string, tc *acp.SessionUpdateT
 	if codexParentToolCallID != "" {
 		parentToolCallID = codexParentToolCallID
 	}
+	a.trackToolCallLineage(emittedToolCallID, parentToolCallID)
 
 	return &AgentEvent{
 		Type:              eventType,
@@ -178,7 +182,7 @@ func (a *Adapter) trackToolCallPayload(
 	payload *streams.NormalizedPayload,
 	meta map[string]any,
 	status string,
-) (*streams.NormalizedPayload, string, codexSubagentSignal, string, string) {
+) (*streams.NormalizedPayload, string, codexSubagentSignal, string, string, bool) {
 	eventType := streams.EventTypeToolCall
 	signal := codexSubagentSignalNone
 	if a.agentID == codexAgentID {
@@ -192,43 +196,57 @@ func (a *Adapter) trackToolCallPayload(
 	defer a.mu.Unlock()
 	if signal == codexSubagentSignalNone {
 		a.activeToolCalls[toolCallID] = payload
-		return payload, eventType, signal, toolCallID, ""
+		return payload, eventType, signal, toolCallID, "", false
 	}
 
-	correlation, duplicate := a.correlateCodexSubagentToolCallLocked(
+	correlation, duplicate, correlated := a.correlateCodexSubagentToolCallLocked(
 		sessionID,
 		toolCallID,
 		payload,
-		signal,
 		codexSenderThreadID(meta),
 	)
+	if !correlated {
+		return nil, "", signal, "", "", true
+	}
 	if !duplicate {
 		a.activeToolCalls[correlation.emittedToolCallID] = correlation.payload
 		return cloneSubagentPayload(correlation.payload), eventType, signal,
-			correlation.emittedToolCallID, correlation.parentToolCallID
+			correlation.emittedToolCallID, correlation.parentToolCallID, false
 	}
-	if active := a.activeToolCalls[correlation.emittedToolCallID]; sameCodexSubagentChild(active, correlation.payload) {
+	if correlation.terminalSeen {
+		delete(a.activeToolCalls, correlation.emittedToolCallID)
+	} else if active := a.activeToolCalls[correlation.emittedToolCallID]; sameCodexSubagentChild(active, correlation.payload) {
 		a.activeToolCalls[correlation.emittedToolCallID] = correlation.payload
 	}
 	return cloneSubagentPayload(correlation.payload), streams.EventTypeToolUpdate, signal,
-		correlation.emittedToolCallID, correlation.parentToolCallID
+		correlation.emittedToolCallID, correlation.parentToolCallID, false
 }
 
 func (a *Adapter) correlateCodexSubagentToolCallLocked(
 	sessionID string,
 	toolCallID string,
 	candidate *streams.NormalizedPayload,
-	signal codexSubagentSignal,
 	parentThreadID string,
-) (*codexSubagentCorrelation, bool) {
+) (*codexSubagentCorrelation, bool, bool) {
 	if a.codexSubagentCorrelations == nil {
 		a.codexSubagentCorrelations = make(map[codexSubagentCorrelationKey]*codexSubagentCorrelation)
 	}
 	childSessionID := codexSubagentChildID(candidate)
+	if codexSubagentPayloadTerminal(candidate) {
+		correlation, found := a.findCodexSubagentByChildLocked(sessionID, childSessionID)
+		if !found {
+			return nil, false, false
+		}
+		mergeCodexSubagentPayload(correlation.payload, candidate)
+		correlation.terminalSeen = true
+		a.touchCodexSubagentCorrelationLocked(correlation)
+		a.pruneCodexCompletedCorrelationsLocked()
+		return correlation, true, true
+	}
 	key, correlation, found := a.findCodexSubagentCorrelationLocked(sessionID, toolCallID, childSessionID)
 	if found {
 		mergeCodexSubagentPayload(correlation.payload, candidate)
-		a.touchCodexSubagentCorrelationLocked(correlation, signal)
+		a.touchCodexSubagentCorrelationLocked(correlation)
 		if childSessionID != "" && key.childSessionID == "" {
 			delete(a.codexSubagentCorrelations, key)
 			key.childSessionID = childSessionID
@@ -239,7 +257,7 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 			correlation.parentToolCallID = a.codexParentToolCallIDLocked(sessionID, parentThreadID)
 		}
 		a.pruneCodexCompletedCorrelationsLocked()
-		return correlation, true
+		return correlation, true, true
 	}
 	key = codexSubagentCorrelationKey{
 		sessionID:      sessionID,
@@ -257,10 +275,42 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 		correlation,
 	)
 	correlation.parentToolCallID = a.codexParentToolCallIDLocked(sessionID, parentThreadID)
-	a.touchCodexSubagentCorrelationLocked(correlation, signal)
+	a.touchCodexSubagentCorrelationLocked(correlation)
 	a.codexSubagentCorrelations[key] = correlation
 	a.pruneCodexCompletedCorrelationsLocked()
-	return correlation, false
+	return correlation, false, true
+}
+
+func (a *Adapter) findCodexSubagentByChildLocked(
+	sessionID string,
+	childSessionID string,
+) (*codexSubagentCorrelation, bool) {
+	if childSessionID == "" {
+		return nil, false
+	}
+	var live *codexSubagentCorrelation
+	liveCount := 0
+	var terminal *codexSubagentCorrelation
+	terminalCount := 0
+	for key, correlation := range a.codexSubagentCorrelations {
+		if key.sessionID != sessionID || codexSubagentChildID(correlation.payload) != childSessionID {
+			continue
+		}
+		if correlation.terminalSeen {
+			terminal = correlation
+			terminalCount++
+			continue
+		}
+		live = correlation
+		liveCount++
+	}
+	if liveCount == 1 {
+		return live, true
+	}
+	if liveCount == 0 && terminalCount == 1 {
+		return terminal, true
+	}
+	return nil, false
 }
 
 func (a *Adapter) findCodexSubagentCorrelationLocked(
@@ -322,7 +372,7 @@ func (a *Adapter) codexCorrelationSiblingCountLocked(sessionID, toolCallID strin
 }
 
 func codexCorrelationComplete(correlation *codexSubagentCorrelation) bool {
-	return correlation != nil && correlation.collaborationSeen && correlation.activitySeen
+	return correlation != nil && correlation.terminalSeen
 }
 
 func codexSubagentChildID(payload *streams.NormalizedPayload) string {
@@ -337,18 +387,9 @@ func sameCodexSubagentChild(left, right *streams.NormalizedPayload) bool {
 	return left != nil && right != nil && leftID == rightID
 }
 
-func (a *Adapter) touchCodexSubagentCorrelationLocked(
-	correlation *codexSubagentCorrelation,
-	signal codexSubagentSignal,
-) {
+func (a *Adapter) touchCodexSubagentCorrelationLocked(correlation *codexSubagentCorrelation) {
 	a.codexSubagentSequence++
 	correlation.lastSeen = a.codexSubagentSequence
-	switch signal {
-	case codexSubagentSignalCollaboration:
-		correlation.collaborationSeen = true
-	case codexSubagentSignalActivity:
-		correlation.activitySeen = true
-	}
 }
 
 func (a *Adapter) evictCodexSubagentCorrelationLocked() {
@@ -376,6 +417,8 @@ func (a *Adapter) oldestCodexSubagentCorrelationLocked() (codexSubagentCorrelati
 }
 
 func (a *Adapter) pruneCodexCompletedCorrelationsLocked() {
+	// Completed correlations are capped at 256, so this simple scan remains
+	// bounded while keeping the correlation bookkeeping easy to audit.
 	for a.codexCompletedCorrelationCountLocked() > maxCodexCompletedSubagentCorrelations {
 		a.evictCodexSubagentCorrelationLocked()
 	}
@@ -482,7 +525,7 @@ func (a *Adapter) codexSubagentUpdateTargetLocked(
 		// until it can be correlated coherently.
 		return nil, "", "", true
 	}
-	a.touchCodexSubagentCorrelationLocked(correlation, signal)
+	a.touchCodexSubagentCorrelationLocked(correlation)
 	a.pruneCodexCompletedCorrelationsLocked()
 	return correlation.payload, correlation.emittedToolCallID, correlation.parentToolCallID, false
 }
@@ -524,6 +567,14 @@ func cloneSubagentPayload(payload *streams.NormalizedPayload) *streams.Normalize
 	dst.OutputFile = src.OutputFile
 	dst.CanReadOutputFile = src.CanReadOutputFile
 	dst.SetIsAuggie(src.IsAuggie())
+	if background := payload.BackgroundWork(); background != nil {
+		clone.SetBackgroundWorkIdentity(
+			background.Kind,
+			background.WorkID,
+			background.Detached,
+			background.Ended,
+		)
+	}
 	return clone
 }
 
@@ -553,7 +604,8 @@ func fillCodexStatus(payload *streams.SubagentTaskPayload, status string) {
 
 func codexSubagentStatusRank(status string) int {
 	switch status {
-	case toolStatusCompleted, toolStatusComplete, "errored", "error", "interrupted", "shutdown", "notFound", toolStatusCancelled:
+	case toolStatusCompleted, toolStatusComplete, toolStatusErrored, toolStatusError,
+		toolStatusInterrupted, toolStatusShutdown, toolStatusNotFound, toolStatusCancelled:
 		return 3
 	case codexSubagentRunningStatus, "inProgress", toolStatusInProgress:
 		return 2
@@ -564,8 +616,14 @@ func codexSubagentStatusRank(status string) int {
 	}
 }
 
+func codexSubagentPayloadTerminal(payload *streams.NormalizedPayload) bool {
+	return payload != nil &&
+		payload.SubagentTask() != nil &&
+		codexSubagentStatusRank(payload.SubagentTask().Status) == 3
+}
+
 func codexActivityToolStatus(payload *streams.NormalizedPayload) string {
-	if payload != nil && payload.SubagentTask() != nil && codexSubagentStatusRank(payload.SubagentTask().Status) == 3 {
+	if codexSubagentPayloadTerminal(payload) {
 		return toolStatusComplete
 	}
 	return toolStatusInProgress
@@ -696,6 +754,16 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// rawOutput (OpenCode/Cursor); enrich the stored payload from both.
 	if payload != nil && payload.Kind() == streams.ToolKindSubagentTask {
 		a.normalizer.EnrichSubagentResult(payload, tcu.Meta, tcu.RawOutput)
+		if isTerminal && a.agentID == codexAgentID &&
+			strings.TrimSpace(payload.SubagentTask().Status) == "" {
+			fillCodexStatus(payload.SubagentTask(), status)
+		}
+		if payload.BackgroundWork() != nil {
+			stampSubagentBackgroundWork(payload, a.agentID)
+		}
+		if isTerminal && a.agentID == codexAgentID && codexSubagentPayloadTerminal(payload) {
+			a.markCodexSubagentTerminalLocked(sessionID, emittedToolCallID)
+		}
 	}
 
 	// Seed the Monitor view AFTER NormalizeToolResult so we overwrite the
@@ -705,6 +773,9 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// tool_call instead.
 	if isMonitorRegistration && payload != nil {
 		seedMonitorView(payload, monitorTaskID, monitorCommand)
+		if a.agentID == claudeAgentID || a.agentID == mockAgentID {
+			payload.SetMonitorIdentity(monitorTaskID, false)
+		}
 	}
 
 	// Preserve and mark-ended the Monitor view on tracked-Monitor terminal
@@ -724,6 +795,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 
 	if isTerminal {
 		delete(a.activeToolCalls, emittedToolCallID)
+		a.forgetPromptHandoffToolLocked(emittedToolCallID)
 		// Also drop tracked Monitor: this terminal update is the
 		// agent-emitted close, so the prompt-end sweep must not re-emit a
 		// "Monitor exited" event for this same toolCallID.
@@ -789,6 +861,22 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		NormalizedPayload: emittedPayload,
 		ToolCallContents:  convertedContents,
 	}
+}
+
+func (a *Adapter) markCodexSubagentTerminalLocked(sessionID, emittedToolCallID string) {
+	if a.agentID != codexAgentID || emittedToolCallID == "" {
+		return
+	}
+	for key, correlation := range a.codexSubagentCorrelations {
+		if key.sessionID != sessionID || correlation.emittedToolCallID != emittedToolCallID {
+			continue
+		}
+		correlation.terminalSeen = true
+		a.codexSubagentSequence++
+		correlation.lastSeen = a.codexSubagentSequence
+		break
+	}
+	a.pruneCodexCompletedCorrelationsLocked()
 }
 
 // enrichModifyFileFromContents updates a ModifyFilePayload with data from

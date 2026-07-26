@@ -13,7 +13,10 @@ export function prStatusKey(owner: string, repo: string, number: number): string
 // prStatusKey(owner, repo, number). When the PR list changes (new page,
 // different preset) we refetch; the backend caches per-PR so fast
 // pagination stays cheap.
-export function usePRStatuses(prs: GitHubPR[]): Map<string, GitHubPRStatus> {
+export function usePRStatuses(
+  workspaceId: string | null,
+  prs: GitHubPR[],
+): Map<string, GitHubPRStatus> {
   const [statuses, setStatuses] = useState<Map<string, GitHubPRStatus>>(new Map());
   // `completedKey` is set only after a fetch resolves (success or failure), so
   // a transient error can be retried on the next render, and React Strict
@@ -22,7 +25,10 @@ export function usePRStatuses(prs: GitHubPR[]): Map<string, GitHubPRStatus> {
   // completedKey stays empty and the second mount retries.
   const completedKey = useRef<string>("");
 
-  const key = prs.map((p) => prStatusKey(p.repo_owner, p.repo_name, p.number)).join(",");
+  const key =
+    workspaceId && prs.length > 0
+      ? `${workspaceId}:${prs.map((p) => prStatusKey(p.repo_owner, p.repo_name, p.number)).join(",")}`
+      : "";
 
   // We deliberately depend only on `key`: `prs` gets a new array identity on
   // every render, and including it would cancel an in-flight request whose
@@ -30,7 +36,11 @@ export function usePRStatuses(prs: GitHubPR[]): Map<string, GitHubPRStatus> {
   // authoritative content signal; when it matches we reuse the latest `prs`
   // closure for building request refs.
   useEffect(() => {
-    if (key === "") return;
+    if (key === "") {
+      completedKey.current = "";
+      setStatuses(new Map());
+      return;
+    }
     if (completedKey.current === key) return;
     const refs: PRStatusRef[] = prs.map((p) => ({
       owner: p.repo_owner,
@@ -38,7 +48,7 @@ export function usePRStatuses(prs: GitHubPR[]): Map<string, GitHubPRStatus> {
       number: p.number,
     }));
     let cancelled = false;
-    getPRStatusesBatch(refs)
+    getPRStatusesBatch(workspaceId!, refs)
       .then((resp) => {
         if (cancelled) return;
         completedKey.current = key;
@@ -55,7 +65,7 @@ export function usePRStatuses(prs: GitHubPR[]): Map<string, GitHubPRStatus> {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key]);
+  }, [key, workspaceId]);
 
   return statuses;
 }

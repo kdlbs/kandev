@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
-	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -53,7 +52,7 @@ func TestForegroundActivitySignal_FollowUpPromptKeepsIndependentCompletionIdenti
 			Type:       agentEventToolCall,
 			ToolCallID: "subagent-follow-up",
 			ToolStatus: "running",
-			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+			Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 		},
 	})
 	emitForegroundIdle(svc, taskID, sessionID)
@@ -80,6 +79,7 @@ func TestForegroundActivitySignal_FollowUpPromptKeepsIndependentCompletionIdenti
 	}
 	got := activityValues(eb)
 	want := []string{
+		string(v1.ForegroundActivityGenerating),
 		string(v1.ForegroundActivityBackground),
 		string(v1.ForegroundActivityGenerating),
 		string(v1.ForegroundActivityBackground),
@@ -127,7 +127,7 @@ func TestForegroundActivitySignal_PreDispatchEventsUseCurrentPromptCycle(t *test
 				Type:       agentEventToolCall,
 				ToolCallID: "subagent-before-dispatch",
 				ToolStatus: "running",
-				Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+				Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 			},
 		})
 		emitForegroundIdle(svc, taskID, sessionID)
@@ -153,6 +153,7 @@ func TestForegroundActivitySignal_PreDispatchEventsUseCurrentPromptCycle(t *test
 	}
 	got := activityValues(eb)
 	want := []string{
+		string(v1.ForegroundActivityGenerating),
 		string(v1.ForegroundActivityBackground),
 		string(v1.ForegroundActivityGenerating),
 		string(v1.ForegroundActivityBackground),

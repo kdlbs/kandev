@@ -173,7 +173,22 @@ func (a *Adapter) handleACPUpdate(
 	if !suppressed {
 		event = a.convertNotification(n)
 		if n.Update.UsageUpdate != nil {
-			if lifecycleEvent := usageLifecycleEvent(sessionID, n.Update.UsageUpdate.Meta, promptGeneration); lifecycleEvent != nil {
+			lifecycleEvent := usageLifecycleEvent(
+				sessionID,
+				n.Update.UsageUpdate.Meta,
+				promptGeneration,
+			)
+			// Generation zero identifies synthetic/legacy turns such as
+			// ScheduleWakeup. They cannot transfer human prompt ownership, but
+			// their foreground-idle activity event must still close the wakeup
+			// cycle as it did before handoff support.
+			if lifecycleEvent != nil &&
+				lifecycleEvent.Type == streams.EventTypeForegroundIdle &&
+				promptGeneration != 0 &&
+				!a.supportsPromptHandoff() {
+				lifecycleEvent = nil
+			}
+			if lifecycleEvent != nil {
 				leadingEvent, event = event, lifecycleEvent
 			}
 		}
@@ -186,6 +201,13 @@ func (a *Adapter) handleACPUpdate(
 		a.maybeScheduleAsyncTurnComplete(*leadingEvent)
 	}
 	if event != nil {
+		if event.Type == streams.EventTypeForegroundIdle &&
+			a.markPromptHandoff(sessionID, event.PromptGeneration) {
+			if event.Data == nil {
+				event.Data = make(map[string]any)
+			}
+			event.Data[streams.AgentEventDataPromptHandoff] = true
+		}
 		shared.LogNormalizedEvent(shared.ProtocolACP, a.agentID, sessionID, event)
 		shared.TraceProtocolEvent(a.getPromptTraceCtx(), shared.ProtocolACP, a.agentID,
 			event.Type, rawData, event)

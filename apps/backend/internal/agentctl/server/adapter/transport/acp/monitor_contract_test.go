@@ -28,9 +28,14 @@ func newMonitorGeneric() *streams.NormalizedPayload {
 	return streams.NewGeneric("other", map[string]any{})
 }
 
+func seedTrustedMonitorView(payload *streams.NormalizedPayload) {
+	seedMonitorView(payload, "task-abc", "gh pr checks --watch")
+	payload.SetMonitorIdentity("task-abc", false)
+}
+
 func TestMonitorViewContract_SeededMonitorIsRecognizedAsActive(t *testing.T) {
 	p := newMonitorGeneric()
-	seedMonitorView(p, "task-abc", "gh pr checks --watch")
+	seedTrustedMonitorView(p)
 
 	if !p.IsActiveMonitor() {
 		t.Fatal("a Monitor view written by seedMonitorView must be recognized as active background work")
@@ -39,7 +44,7 @@ func TestMonitorViewContract_SeededMonitorIsRecognizedAsActive(t *testing.T) {
 
 func TestMonitorViewContract_EventsKeepMonitorActive(t *testing.T) {
 	p := newMonitorGeneric()
-	seedMonitorView(p, "task-abc", "gh pr checks --watch")
+	seedTrustedMonitorView(p)
 	appendMonitorEvent(p, "task-abc", "gh pr checks --watch", "all checks passing")
 
 	if !p.IsActiveMonitor() {
@@ -49,7 +54,7 @@ func TestMonitorViewContract_EventsKeepMonitorActive(t *testing.T) {
 
 func TestMonitorViewContract_EndedMonitorIsNotActive(t *testing.T) {
 	p := newMonitorGeneric()
-	seedMonitorView(p, "task-abc", "gh pr checks --watch")
+	seedTrustedMonitorView(p)
 	markMonitorEnded(p, "exited")
 
 	if p.IsActiveMonitor() {
@@ -62,7 +67,7 @@ func TestMonitorViewContract_EndedMonitorIsNotActive(t *testing.T) {
 // ever sees it. The contract has to survive that, not just hold in-process.
 func TestMonitorViewContract_SurvivesSerializationToOrchestrator(t *testing.T) {
 	p := newMonitorGeneric()
-	seedMonitorView(p, "task-abc", "gh pr checks --watch")
+	seedTrustedMonitorView(p)
 
 	data, err := p.MarshalJSON()
 	if err != nil {
@@ -113,16 +118,15 @@ func TestMonitorViewContract_ArbitraryToolOutputIsNotMistakenForAMonitor(t *test
 	}
 }
 
-// The attestation must actually be stamped by the real producer path — if
-// seedMonitorView ever stopped calling SetMonitorIdentity, IsActiveMonitor would
-// silently return false for every genuine Monitor and quietly un-ship the feature.
-func TestMonitorViewContract_SeedStampsAdapterAttestation(t *testing.T) {
+// Once the adapter has trusted a Monitor registration, later presentation
+// updates must keep its out-of-band attestation in sync.
+func TestMonitorViewContract_AttestationTracksPresentationUpdates(t *testing.T) {
 	p := newMonitorGeneric()
-	seedMonitorView(p, "task-abc", "gh pr checks --watch")
+	seedTrustedMonitorView(p)
 
 	m := p.Monitor()
 	if m == nil {
-		t.Fatal("seedMonitorView must stamp the adapter's Monitor attestation")
+		t.Fatal("trusted Monitor must carry adapter attestation")
 	}
 	if m.TaskID != "task-abc" {
 		t.Fatalf("attested task ID = %q, want task-abc", m.TaskID)

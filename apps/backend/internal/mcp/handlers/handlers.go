@@ -212,6 +212,12 @@ type Handlers struct {
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
 	taskPRLister TaskPRLister
+
+	// Native code review (optional, set via SetReviewService /
+	// SetReviewRunner). Without them the review actions are simply not
+	// registered — see registerReviewHandlers.
+	reviewService *service.ReviewService
+	reviewRunner  ReviewRunner
 }
 
 // NewHandlers creates new MCP handlers.
@@ -319,6 +325,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
 	count := 25
+	count += h.registerReviewHandlers(d)
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -646,7 +653,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		h.logger.Error("failed to create task", zap.Error(err))
 		// Defense-in-depth: resolveTaskRepositories already catches this for the
 		// MCP path, but non-MCP callers (UI, internal engine) reach here directly.
-		if errors.Is(err, service.ErrSubtaskDepthExceeded) {
+		if errors.Is(err, service.ErrSubtaskDepthExceeded) ||
+			errors.Is(err, service.ErrInvalidTaskWorkflow) ||
+			isMCPWorkflowNotFoundError(err) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
@@ -1014,11 +1023,6 @@ func (h *Handlers) mcpTaskAgentProfileDefault(ctx context.Context, explicitAgent
 	return usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault), nil
 }
 
-func (h *Handlers) resolveWorkflowAgentProfile(ctx context.Context, workflowStepID, workflowID string) string {
-	profileID, _ := h.resolveWorkflowAgentProfileWithError(ctx, workflowStepID, workflowID)
-	return profileID
-}
-
 func (h *Handlers) resolveWorkflowAgentProfileWithError(ctx context.Context, workflowStepID, workflowID string) (string, error) {
 	profileID, resolvedWorkflowID := h.resolveWorkflowControllerAgentProfile(ctx, workflowStepID, workflowID)
 	if profileID != "" {
@@ -1064,11 +1068,6 @@ func (h *Handlers) resolveWorkflowStartStepAgentProfile(ctx context.Context, wor
 		return ""
 	}
 	return startStepAgentProfile(resp.Steps)
-}
-
-func (h *Handlers) workflowDefaultAgentProfile(ctx context.Context, workflowID string) string {
-	profileID, _ := h.workflowDefaultAgentProfileWithError(ctx, workflowID)
-	return profileID
 }
 
 func (h *Handlers) workflowDefaultAgentProfileWithError(ctx context.Context, workflowID string) (string, error) {

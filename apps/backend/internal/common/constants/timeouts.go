@@ -19,6 +19,10 @@ const (
 	// including cleanup scripts and worktree removal.
 	TaskDeleteTimeout = 2 * time.Minute
 
+	// SessionNewTimeout is the maximum time for ACP session/new. Session creation
+	// can initialize providers, plugins, and MCP servers before the agent responds.
+	SessionNewTimeout = 2 * time.Minute
+
 	// SessionLoadTimeout is the maximum time for ACP session/load (resume).
 	// Session loading may involve deserializing large conversation histories.
 	SessionLoadTimeout = 2 * time.Minute

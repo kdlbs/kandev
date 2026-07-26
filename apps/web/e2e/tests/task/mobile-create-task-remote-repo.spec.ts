@@ -54,14 +54,21 @@ test.describe("Create task Remote repo picker on mobile", () => {
     await apiClient.mockGitHubReset();
   });
 
-  test("stages a pasted URL until Enter without resolving it", async ({ testPage, apiClient }) => {
+  test("stages a pasted URL until Enter without resolving it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
     const owner = "phone-entry-owner";
     const repo = "phone-entry-repo";
     const url = `https://github.com/${owner}/${repo}`;
-    const branchPattern = `**/api/v1/github/repos/${owner}/${repo}/branches`;
+    const branchPattern = new RegExp(`/api/v1/github/repos/${owner}/${repo}/branches\\?.+$`);
     let branchRequests = 0;
     await apiClient.mockGitHubAddBranches(owner, repo, [{ name: "main" }]);
     await testPage.route(branchPattern, async (route) => {
+      expect(new URL(route.request().url()).searchParams.get("workspace_id")).toBe(
+        seedData.workspaceId,
+      );
       branchRequests += 1;
       await route.continue();
     });
@@ -71,7 +78,7 @@ test.describe("Create task Remote repo picker on mobile", () => {
     await input.fill(`${url}-draft`);
     await expect(input).toHaveValue(`${url}-draft`);
     await expect(testPage.getByText("Remote URL", { exact: true })).toBeVisible();
-    await expect(testPage.getByText(/press Enter to submit it/i)).toBeVisible();
+    await expect(testPage.getByText(/press Enter to submit/i)).toBeVisible();
     await expectPopoverFitsViewport(testPage);
     expect(branchRequests).toBe(0);
 
@@ -87,14 +94,18 @@ test.describe("Create task Remote repo picker on mobile", () => {
   test("keeps a failed URL row touch-usable and retries its branch resolution", async ({
     testPage,
     apiClient,
+    seedData,
   }) => {
     const owner = "phone-retry-owner";
     const repo = "phone-retry-repo";
     const url = `https://github.com/${owner}/${repo}`;
-    const branchPattern = `**/api/v1/github/repos/${owner}/${repo}/branches`;
+    const branchPattern = new RegExp(`/api/v1/github/repos/${owner}/${repo}/branches\\?.+$`);
     let branchRequests = 0;
     await apiClient.mockGitHubAddBranches(owner, repo, [{ name: "main" }]);
     await testPage.route(branchPattern, async (route) => {
+      expect(new URL(route.request().url()).searchParams.get("workspace_id")).toBe(
+        seedData.workspaceId,
+      );
       branchRequests += 1;
       if (branchRequests === 1) {
         await route.fulfill({
@@ -115,7 +126,7 @@ test.describe("Create task Remote repo picker on mobile", () => {
     const row = testPage.getByTestId("remote-repo-chip");
     const retry = testPage.getByRole("button", { name: "Retry remote repository resolution" });
     await expect(row).toHaveAttribute("data-remote-url", url);
-    await expect(testPage.getByRole("alert")).toContainText("Temporary provider outage");
+    await expect(testPage.getByRole("alert")).toContainText(/Temporary provider outage/i);
     await expect(retry).toBeVisible();
     await expectLocatorFitsViewport(testPage, "remote-repo-chip-wrapper");
     const retryBox = await retry.boundingBox();
@@ -163,6 +174,10 @@ test.describe("Create task Remote repo picker on mobile", () => {
     seedData,
     testPage,
   }) => {
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
     await apiClient.configureGitLab(seedData.workspaceId);
     await apiClient.mockAzureDevOpsSeed({
       authenticated: true,
@@ -223,8 +238,17 @@ test.describe("Create task Remote repo picker on mobile", () => {
 
   test("marks an already selected provider repository without disabling its touch selection", async ({
     apiClient,
+    seedData,
     testPage,
   }) => {
+    // mockGitHubReset clears workspace-owned credentials. Reconnect this
+    // workspace before seeding the provider response so the picker exercises
+    // the same workspace-scoped auth boundary as production.
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "pat",
+      status: "active",
+      login: "mock-user",
+    });
     await apiClient.mockGitHubAddRepos("mock-user", [
       { full_name: "mock-user/duplicate", owner: "mock-user", name: "duplicate", private: false },
     ]);

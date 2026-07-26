@@ -1269,6 +1269,31 @@ func (r *Repository) UpdateTaskStateIfSessionState(
 	expectedSessionState models.TaskSessionState,
 	state v1.TaskState,
 ) (v1.TaskState, bool, error) {
+	return r.updateTaskStateIfSessionState(
+		ctx, taskID, sessionID, expectedSessionState, state, false,
+	)
+}
+
+// UpdateTaskStateIfPrimarySessionState additionally requires the named
+// session to remain primary.
+func (r *Repository) UpdateTaskStateIfPrimarySessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (v1.TaskState, bool, error) {
+	return r.updateTaskStateIfSessionState(
+		ctx, taskID, sessionID, expectedSessionState, state, true,
+	)
+}
+
+func (r *Repository) updateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+	requirePrimary bool,
+) (v1.TaskState, bool, error) {
 	for attempt := range updateTaskStateIfNotArchivedMaxAttempts {
 		if attempt > 0 {
 			select {
@@ -1278,7 +1303,7 @@ func (r *Repository) UpdateTaskStateIfSessionState(
 			}
 		}
 		oldState, updated, retry, err := r.tryUpdateTaskStateIfSessionState(
-			ctx, taskID, sessionID, expectedSessionState, state,
+			ctx, taskID, sessionID, expectedSessionState, state, requirePrimary,
 		)
 		if err != nil || !retry {
 			return oldState, updated, err
@@ -1293,6 +1318,7 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 	taskID, sessionID string,
 	expectedSessionState models.TaskSessionState,
 	state v1.TaskState,
+	requirePrimary bool,
 ) (oldState v1.TaskState, updated, retry bool, err error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1302,20 +1328,26 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 
 	var archivedAt sql.NullTime
 	var currentSessionState models.TaskSessionState
+	var currentSessionIsPrimary bool
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT tasks.state, tasks.archived_at, task_sessions.state
+		SELECT tasks.state, tasks.archived_at, task_sessions.state, task_sessions.is_primary
 		FROM tasks
 		JOIN task_sessions ON task_sessions.task_id = tasks.id
 		WHERE tasks.id = ? AND task_sessions.id = ?
-	`), taskID, sessionID).Scan(&oldState, &archivedAt, &currentSessionState)
+	`), taskID, sessionID).Scan(&oldState, &archivedAt, &currentSessionState, &currentSessionIsPrimary)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, false, nil
 	}
 	if err != nil {
 		return "", false, false, err
 	}
-	if archivedAt.Valid || currentSessionState != expectedSessionState {
+	if archivedAt.Valid || currentSessionState != expectedSessionState ||
+		(requirePrimary && !currentSessionIsPrimary) {
 		return oldState, false, false, nil
+	}
+	requirePrimaryValue := 0
+	if requirePrimary {
+		requirePrimaryValue = 1
 	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -1330,8 +1362,9 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 			WHERE task_sessions.id = ?
 			  AND task_sessions.task_id = tasks.id
 			  AND task_sessions.state = ?
+			  AND (? = 0 OR task_sessions.is_primary = 1)
 		  )
-	`), state, time.Now().UTC(), taskID, oldState, sessionID, expectedSessionState)
+	`), state, time.Now().UTC(), taskID, oldState, sessionID, expectedSessionState, requirePrimaryValue)
 	if err != nil {
 		if isRetryableStateRaceError(err) {
 			return oldState, false, true, nil

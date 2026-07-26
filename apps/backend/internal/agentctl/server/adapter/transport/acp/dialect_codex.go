@@ -75,7 +75,17 @@ func codexCollaborationSignal(collaboration map[string]any) bool {
 
 func codexActivitySignal(activity map[string]any) bool {
 	activityKind, _ := activity["activity"].(string)
-	return activityKind == codexSubagentStarted
+	return activityKind == codexSubagentStarted || codexActivityTerminal(activityKind)
+}
+
+func codexActivityTerminal(activity string) bool {
+	switch activity {
+	case toolStatusCompleted, toolStatusComplete, toolStatusInterrupted, toolStatusCancelled,
+		toolStatusErrored, toolStatusError, toolStatusShutdown, toolStatusNotFound:
+		return true
+	default:
+		return false
+	}
 }
 
 func parseCodexCollaboration(collaboration map[string]any, rawInput any) (subagentFrame, bool) {

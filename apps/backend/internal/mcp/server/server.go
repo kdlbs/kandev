@@ -371,6 +371,8 @@ func (s *Server) registerTools() {
 		count += 4
 		s.registerWalkthroughTools()
 		count += 3
+		s.registerReviewTools()
+		count++
 		s.registerRelatedTasksTool()
 		count++
 		// Task-mode only: requires a live session to attach the new
@@ -1016,6 +1018,72 @@ func (s *Server) registerWalkthroughTools() {
 		),
 		s.wrapHandler("delete_walkthrough_kandev", s.deleteWalkthroughHandler()),
 	)
+}
+
+// registerReviewTools registers the native code-review publishing tool. An
+// agent uses it to turn its own reading of the diff into anchored findings that
+// render as inline comments in the user's Changes/Review panel, in the same
+// place the built-in review pass writes to.
+func (s *Server) registerReviewTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("publish_review_findings_kandev",
+			mcp.WithDescription(
+				"Publish code-review findings for this task. Each finding anchors a markdown explanation "+
+					"to a file and line range in the task's current changes, and renders as an inline "+
+					"review comment the user can resolve, dismiss, or send back to an agent. Findings are "+
+					"advisory: nothing is applied automatically. Only anchor to files that appear in the "+
+					"task's current changes, and use line numbers from the new version of the file. "+
+					"Report real defects — correctness, security, concurrency, error handling, resource "+
+					"leaks, contract breaks, missing tests — not style or formatting a linter owns. "+
+					"Be honest with severity; marking everything a blocker makes the review useless. "+
+					"Publishing adds to the task's findings; it does not replace earlier ones, except "+
+					"that an unresolved finding with the same file, line range, and title is refreshed."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to attach the findings to")),
+			mcp.WithString("summary", mcp.Description("Optional one-paragraph summary of the review")),
+			mcp.WithArray("findings", mcp.Required(),
+				mcp.Description("Findings to publish, each anchored to a file and line range."),
+				mcp.Items(buildReviewFindingSchemaItem()),
+			),
+		),
+		s.wrapHandler("publish_review_findings_kandev", s.publishReviewFindingsHandler()),
+	)
+}
+
+// buildReviewFindingSchemaItem describes one finding object in the
+// publish_review_findings_kandev tool schema.
+func buildReviewFindingSchemaItem() map[string]any {
+	const typeKey = "type"
+	str := func(desc string) map[string]any {
+		return map[string]any{typeKey: "string", descriptionArg: desc}
+	}
+	num := func(desc string) map[string]any {
+		return map[string]any{typeKey: "integer", descriptionArg: desc}
+	}
+	return map[string]any{
+		typeKey: "object",
+		"properties": map[string]any{
+			"repo": str("Optional repository name; required only in a multi-repository task."),
+			"file": str("Path to a file in the task's current changes, relative to the repo root."),
+			"line": num("1-based start line in the new version of the file."),
+			"line_end": num(
+				"Optional 1-based end line. Use it only when the finding genuinely spans a range.",
+			),
+			"severity": map[string]any{
+				typeKey:        "string",
+				"enum":         []string{"blocker", "major", "minor", "nit"},
+				descriptionArg: "blocker breaks correctness or security; nit is genuinely optional.",
+			},
+			"category": str("Short kebab-case slug for the kind of issue, e.g. correctness, security."),
+			"title":    str("One line naming the specific defect."),
+			"body": str(
+				"Markdown explanation: what is wrong, the input or state that triggers it, and the consequence.",
+			),
+			"suggestion": str(
+				"Optional replacement code. Shown to the user but never applied automatically.",
+			),
+		},
+		"required": []string{"file", "line", "severity", "category", titleArg, "body"},
+	}
 }
 
 // buildWalkthroughStepSchemaItem describes one step object in the

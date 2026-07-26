@@ -134,6 +134,13 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
 });
 
 describe("toKanbanTask — state normalization", () => {
+  it("maps the task-wide active subagent count for future status surfaces", () => {
+    const mapped = toKanbanTask(
+      wsPayload({ active_subagent_count: 3 } as Partial<TaskLike>),
+    ) as ReturnType<typeof toKanbanTask> & { activeSubagentCount?: number };
+    expect(mapped.activeSubagentCount).toBe(3);
+  });
+
   it("preserves explicit null pending and activity fields so snapshot updates clear stale values", () => {
     const mapped = toKanbanTask(
       wsPayload({

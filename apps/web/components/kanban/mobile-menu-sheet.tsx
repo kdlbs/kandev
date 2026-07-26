@@ -20,6 +20,10 @@ import {
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
 import { TaskSearchInput } from "./task-search-input";
+import {
+  MobileTasksListOptions,
+  type TasksListDisplayOptions,
+} from "./mobile-menu-task-list-options";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { linkToTasks } from "@/lib/links";
 import { cn } from "@/lib/utils";
@@ -36,6 +40,7 @@ type MobileMenuSheetProps = {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
+  tasksListOptions?: TasksListDisplayOptions;
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 };
@@ -67,6 +72,7 @@ type MobileDisplayOptionsProps = {
   onToggleTasksListShowDetails: (checked: boolean) => void;
   showTaskDetails: boolean;
   showWorkflow: boolean;
+  tasksListOptions?: TasksListDisplayOptions;
 };
 
 function MobileDisplaySelects({
@@ -85,6 +91,7 @@ function MobileDisplaySelects({
   | "tasksListShowDetails"
   | "onToggleTasksListShowDetails"
   | "showTaskDetails"
+  | "tasksListOptions"
 >) {
   return (
     <>
@@ -143,6 +150,7 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
     tasksListShowDetails,
     onToggleTasksListShowDetails,
     showTaskDetails,
+    tasksListOptions,
     ...selectProps
   } = props;
   return (
@@ -176,6 +184,7 @@ function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
           </p>
         </div>
       )}
+      {tasksListOptions && <MobileTasksListOptions options={tasksListOptions} />}
     </div>
   );
 }
@@ -387,6 +396,55 @@ function ResponsiveMenuSurface({
   );
 }
 
+function MobileMenuContent({
+  searchQuery,
+  onSearchChange,
+  isSearchLoading,
+  onOpenChange,
+  viewValue,
+  onViewChange,
+  showPipeline,
+  displayOptions,
+  showHealthIndicator,
+  onOpenHealthDialog,
+}: Pick<
+  MobileMenuSheetProps,
+  | "searchQuery"
+  | "onSearchChange"
+  | "isSearchLoading"
+  | "onOpenChange"
+  | "showHealthIndicator"
+  | "onOpenHealthDialog"
+> & {
+  viewValue: string;
+  onViewChange: (value: string) => void;
+  showPipeline: boolean;
+  displayOptions: MobileDisplayOptionsProps;
+}) {
+  return (
+    <div className="flex min-h-full flex-col gap-6 p-4">
+      <MobileSearchSection
+        searchQuery={searchQuery ?? ""}
+        onSearchChange={onSearchChange}
+        isSearchLoading={isSearchLoading ?? false}
+      />
+      <MobileWorkspaceSection onOpenChange={onOpenChange} />
+      <MobileViewSection
+        viewValue={viewValue}
+        onViewChange={onViewChange}
+        showPipeline={showPipeline}
+      />
+      <MobileDisplayOptions {...displayOptions} />
+      <MobileIntegrationsSection onNavigate={() => onOpenChange(false)} />
+      <MobileUtilityActions
+        showHealthIndicator={showHealthIndicator}
+        onOpenHealthDialog={onOpenHealthDialog}
+        onOpenChange={onOpenChange}
+      />
+    </div>
+  );
+}
+
 export function MobileMenuSheet({
   open,
   onOpenChange,
@@ -395,6 +453,7 @@ export function MobileMenuSheet({
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
+  tasksListOptions,
   showHealthIndicator,
   onOpenHealthDialog,
 }: MobileMenuSheetProps) {
@@ -417,10 +476,8 @@ export function MobileMenuSheet({
     effectiveTaskListingView,
     onViewModeChange,
   } = useKanbanDisplaySettings();
-
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
   const viewValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;
-
   const handleViewChange = (value: string) => {
     if (!value) return;
     if (value === "list") {
@@ -437,46 +494,22 @@ export function MobileMenuSheet({
       onOpenChange(false);
     }
   };
-
-  const menuContent = (
-    <div className="flex min-h-full flex-col gap-6 p-4">
-      <MobileSearchSection
-        searchQuery={searchQuery}
-        onSearchChange={onSearchChange}
-        isSearchLoading={isSearchLoading}
-      />
-      <MobileWorkspaceSection onOpenChange={onOpenChange} />
-      <MobileViewSection
-        viewValue={viewValue}
-        onViewChange={handleViewChange}
-        showPipeline={!isMobile}
-      />
-
-      <MobileDisplayOptions
-        activeWorkflowId={activeWorkflowId}
-        workflows={workflows}
-        onWorkflowChange={onWorkflowChange}
-        repositoryValue={repositoryValue}
-        repositories={repositories}
-        repositoriesLoading={repositoriesLoading}
-        onRepositoryChange={onRepositoryChange}
-        enablePreviewOnClick={enablePreviewOnClick}
-        onTogglePreviewOnClick={onTogglePreviewOnClick}
-        tasksListShowDetails={tasksListShowDetails}
-        onToggleTasksListShowDetails={onToggleTasksListShowDetails}
-        showTaskDetails={currentPage === "tasks"}
-        showWorkflow={!isMobile || currentPage !== "kanban"}
-      />
-
-      <MobileIntegrationsSection onNavigate={() => onOpenChange(false)} />
-
-      <MobileUtilityActions
-        showHealthIndicator={showHealthIndicator}
-        onOpenHealthDialog={onOpenHealthDialog}
-        onOpenChange={onOpenChange}
-      />
-    </div>
-  );
+  const displayOptions = {
+    activeWorkflowId,
+    workflows,
+    onWorkflowChange,
+    repositoryValue,
+    repositories,
+    repositoriesLoading,
+    onRepositoryChange,
+    enablePreviewOnClick,
+    onTogglePreviewOnClick,
+    tasksListShowDetails,
+    onToggleTasksListShowDetails,
+    showTaskDetails: currentPage === "tasks",
+    showWorkflow: !isMobile || currentPage !== "kanban",
+    tasksListOptions: isMobile && currentPage === "tasks" ? tasksListOptions : undefined,
+  };
   const focusMenu = (event: Event) => {
     event.preventDefault();
     contentRef.current?.focus({ preventScroll: true });
@@ -490,7 +523,18 @@ export function MobileMenuSheet({
       contentRef={contentRef}
       onOpenAutoFocus={focusMenu}
     >
-      {menuContent}
+      <MobileMenuContent
+        searchQuery={searchQuery}
+        onSearchChange={onSearchChange}
+        isSearchLoading={isSearchLoading}
+        onOpenChange={onOpenChange}
+        viewValue={viewValue}
+        onViewChange={handleViewChange}
+        showPipeline={!isMobile}
+        displayOptions={displayOptions}
+        showHealthIndicator={showHealthIndicator}
+        onOpenHealthDialog={onOpenHealthDialog}
+      />
     </ResponsiveMenuSurface>
   );
 }

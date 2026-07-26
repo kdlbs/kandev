@@ -90,7 +90,8 @@ Per-workspace credentials and triage triggers for external services.
 | [azure-devops-integration](azure-devops-integration/spec.md) | shipped |
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
-| [gitlab-integration](gitlab-integration/spec.md) | building |
+| [github-authentication](integrations/github-authentication.md) | draft |
+| [gitlab-integration](gitlab-integration/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
@@ -160,6 +161,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [cli-mode-parity](cli-mode-parity/spec.md) | draft |
 | [workflow-settings-autosave](workflow-settings-autosave/spec.md) | archived; superseded by settings-manual-save |
 | [mobile-quick-chat-topbar](mobile-quick-chat-topbar/spec.md) | building |
+| [native-code-review](native-code-review/spec.md) | building |
 
 ---
 

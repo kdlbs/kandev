@@ -77,7 +77,7 @@ func TestUpdateTaskStateIfSessionState_SkipsArchivedTask(t *testing.T) {
 	}
 }
 
-func TestUpdateTaskStateIfSessionState_UpdatesMatchingSession(t *testing.T) {
+func TestUpdateTaskStateIfSessionState_UpdatesMatchingNonPrimarySession(t *testing.T) {
 	repo := newRepoForHealTests(t)
 	ctx := context.Background()
 	insertTask(t, repo.db, "task-session-match")
@@ -103,6 +103,44 @@ func TestUpdateTaskStateIfSessionState_UpdatesMatchingSession(t *testing.T) {
 		t.Fatalf("old state = %q, want %q", oldState, v1.TaskStateReview)
 	}
 	task, err := repo.GetTask(ctx, "task-session-match")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.State != v1.TaskStateInProgress {
+		t.Fatalf("task state = %q, want %q", task.State, v1.TaskStateInProgress)
+	}
+}
+
+func TestUpdateTaskStateIfPrimarySessionState_RejectsSupersededPrimarySession(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-session-superseded")
+	insertSession(t, repo, "session-old", "task-session-superseded", string(models.TaskSessionStateFailed))
+	insertSession(t, repo, "session-new", "task-session-superseded", string(models.TaskSessionStateRunning))
+	if err := repo.SetSessionPrimary(ctx, "session-new"); err != nil {
+		t.Fatalf("set newer primary: %v", err)
+	}
+	if err := repo.UpdateTaskState(ctx, "task-session-superseded", v1.TaskStateInProgress); err != nil {
+		t.Fatalf("seed IN_PROGRESS: %v", err)
+	}
+
+	oldState, updated, err := repo.UpdateTaskStateIfPrimarySessionState(
+		ctx,
+		"task-session-superseded",
+		"session-old",
+		models.TaskSessionStateFailed,
+		v1.TaskStateFailed,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskStateIfSessionState: %v", err)
+	}
+	if updated {
+		t.Fatal("superseded primary session changed task state")
+	}
+	if oldState != v1.TaskStateInProgress {
+		t.Fatalf("old state = %q, want %q", oldState, v1.TaskStateInProgress)
+	}
+	task, err := repo.GetTask(ctx, "task-session-superseded")
 	if err != nil {
 		t.Fatalf("get task: %v", err)
 	}

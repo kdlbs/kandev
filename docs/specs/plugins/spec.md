@@ -109,6 +109,8 @@ capabilities:
   api_write: ["tasks", "comments"]            # Host data API writes; deferred, no effect yet
   state: true
   secrets: true
+  auth: true                                  # establish a login session for an
+                                              # external (OIDC/SAML) identity — see ADR 0050
 
 webhooks:
   - key: "slack-events"
@@ -151,6 +153,19 @@ still resolves to a reader/accessor (no nil pointer), but every method on it
 returns gRPC `PermissionDenied` with message `capability 'api_read:<resource>'
 not declared`. `api_write` entries are accepted and stored but currently have no
 effect (see "Write phase (deferred)").
+
+**External login (`auth`).** An `auth`-capable plugin can log a visitor in
+against an external IdP (OIDC/SAML): its webhook (the callback / SAML ACS)
+validates the token, then asserts the identity to kandev via the reserved
+`X-Kandev-Auth-Login` response header (`{provider, subject, email,
+display_name}`). The host maps it to a user (link-by-email or just-in-time
+member provisioning), mints the session, and sets the `kandev_session` cookie
+itself — the plugin never receives the raw token. Requires auth enabled; new
+users are members, and the host never creates an admin nor auto-links to an
+existing admin account. The plugin **must** only assert IdP-verified emails (an
+unverified email claim is an account-takeover vector the host cannot detect).
+This is the highest-privilege capability; grant it only to trusted plugins.
+See [ADR 0050](../../decisions/0050-plugin-external-auth-capability.md).
 
 ### Install pipeline
 

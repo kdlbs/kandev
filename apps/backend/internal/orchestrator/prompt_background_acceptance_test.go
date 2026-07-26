@@ -57,7 +57,7 @@ func TestPromptTask_BackgroundWorkAcceptsInput(t *testing.T) {
 			toolCallID: "bash-1",
 			burst:      1,
 			normalized: func() *streams.NormalizedPayload {
-				return streams.NewShellExec("npm run dev", "", "", 0, true)
+				return attestedBackgroundShellPayload("npm run dev")
 			},
 		},
 		{

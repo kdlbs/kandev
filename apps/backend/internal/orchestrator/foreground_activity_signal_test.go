@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -70,6 +71,65 @@ func activityValues(eb *recordingEventBus) []string {
 	return vals
 }
 
+func activitySubagentCounts(eb *recordingEventBus) []int {
+	var vals []int
+	for _, rec := range eb.events {
+		if rec.subject != events.TaskSessionActivityChanged {
+			continue
+		}
+		if data, ok := rec.event.Data.(map[string]interface{}); ok {
+			if v, ok := data["active_subagent_count"].(int); ok {
+				vals = append(vals, v)
+			}
+		}
+	}
+	return vals
+}
+
+func TestForegroundActivitySignal_PublishesCountOnlySubagentTransitions(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	svc.messageCreator = &mockMessageCreator{}
+
+	const taskID, sessionID = "task-count-only", "session-count-only"
+	for _, toolCallID := range []string{"subagent-1", "subagent-2"} {
+		svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+			TaskID: taskID, SessionID: sessionID, ExecutionID: "execution-count-only",
+			Data: &lifecycle.AgentStreamEventData{
+				Type:       agentEventToolCall,
+				ToolCallID: toolCallID,
+				ToolStatus: "in_progress",
+				Normalized: attestedSubagentPayload("audit", "inspect", "reviewer"),
+			},
+		})
+	}
+	terminal := attestedSubagentPayload("audit", "inspect", "reviewer")
+	terminal.SetBackgroundWorkIdentity(
+		streams.BackgroundWorkKindSubagent,
+		"test-subagent",
+		false,
+		true,
+	)
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID, ExecutionID: "execution-count-only",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "tool_update",
+			ToolCallID: "subagent-1",
+			ToolStatus: "completed",
+			Normalized: terminal,
+		},
+	})
+
+	if got := activitySubagentCounts(eb); !slices.Equal(got, []int{1, 2, 1}) {
+		t.Fatalf("count-only activity updates = %v, want [1 2 1]", got)
+	}
+	if got := activityValues(eb); !slices.Equal(got, []string{"generating", "generating", "generating"}) {
+		t.Fatalf("count-only foreground activity = %v", got)
+	}
+}
+
 // TestForegroundActivitySignal_PublishesOnFlips proves the WS1 producer emits
 // the fine-grained busy signal exactly when the foreground/background substate
 // flips — background when the agent yields to a spawned task, generating again
@@ -96,7 +156,7 @@ func TestForegroundActivitySignal_PublishesOnFlips(t *testing.T) {
 			Type:       agentEventToolCall,
 			ToolCallID: "subagent-1",
 			ToolStatus: "running",
-			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+			Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 		},
 	})
 	emitForegroundIdle(svc, taskID, sessionID)
@@ -114,7 +174,11 @@ func TestForegroundActivitySignal_PublishesOnFlips(t *testing.T) {
 	})
 
 	got := activityValues(eb)
-	want := []string{string(v1.ForegroundActivityBackground), string(v1.ForegroundActivityGenerating)}
+	want := []string{
+		string(v1.ForegroundActivityGenerating),
+		string(v1.ForegroundActivityBackground),
+		string(v1.ForegroundActivityGenerating),
+	}
 	if len(got) != len(want) {
 		t.Fatalf("expected activity signal on each flip %v, got %v", want, got)
 	}
@@ -125,9 +189,8 @@ func TestForegroundActivitySignal_PublishesOnFlips(t *testing.T) {
 	}
 }
 
-// TestForegroundActivitySignal_NoPublishWithoutFlip proves the signal is emitted
-// only on a real substate transition, never per background frame: a second
-// concurrent background task, and completing all-but-the-last, must NOT publish.
+// TestForegroundActivitySignal_NoPublishWithoutFlip proves count-only
+// transitions publish even when foreground activity does not flip.
 func TestForegroundActivitySignal_NoPublishWithoutFlip(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
@@ -148,7 +211,7 @@ func TestForegroundActivitySignal_NoPublishWithoutFlip(t *testing.T) {
 				Type:       agentEventToolCall,
 				ToolCallID: id,
 				ToolStatus: "running",
-				Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+				Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 			},
 		}
 	}
@@ -160,7 +223,7 @@ func TestForegroundActivitySignal_NoPublishWithoutFlip(t *testing.T) {
 				Type:       "tool_update",
 				ToolCallID: id,
 				ToolStatus: agentEventComplete,
-				Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+				Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 			},
 		}
 	}
@@ -180,7 +243,13 @@ func TestForegroundActivitySignal_NoPublishWithoutFlip(t *testing.T) {
 	svc.handleAgentStreamEvent(context.Background(), terminal("subagent-2"))
 
 	got := activityValues(eb)
-	want := []string{string(v1.ForegroundActivityBackground), string(v1.ForegroundActivityGenerating)}
+	want := []string{
+		string(v1.ForegroundActivityGenerating),
+		string(v1.ForegroundActivityGenerating),
+		string(v1.ForegroundActivityBackground),
+		string(v1.ForegroundActivityBackground),
+		string(v1.ForegroundActivityGenerating),
+	}
 	if len(got) != len(want) {
 		t.Fatalf("expected exactly one publish per real flip %v, got %v", want, got)
 	}
@@ -342,7 +411,7 @@ func TestForegroundActivitySignal_PropagatesToTaskLevel(t *testing.T) {
 			Type:       agentEventToolCall,
 			ToolCallID: "subagent-1",
 			ToolStatus: "running",
-			Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+			Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 		},
 	})
 	emitForegroundIdle(svc, taskID, sessionID)
@@ -356,7 +425,7 @@ func TestForegroundActivitySignal_PropagatesToTaskLevel(t *testing.T) {
 		},
 	})
 
-	want := []string{taskID, taskID}
+	want := []string{taskID, taskID, taskID}
 	if len(taskEvents.activityTaskIDs) != len(want) {
 		t.Fatalf("expected task-level recompute on each flip %v, got %v", want, taskEvents.activityTaskIDs)
 	}
@@ -510,7 +579,7 @@ func TestForegroundActivitySignal_SamePromptOutputAfterIdleDoesNotInvalidateComp
 					Type:       agentEventToolCall,
 					ToolCallID: "subagent-1",
 					ToolStatus: "running",
-					Normalized: streams.NewSubagentTask("explore", "find files", "general-purpose"),
+					Normalized: attestedSubagentPayload("explore", "find files", "general-purpose"),
 				},
 			})
 			if tt.outputType == "tool_update" {
@@ -541,6 +610,7 @@ func TestForegroundActivitySignal_SamePromptOutputAfterIdleDoesNotInvalidateComp
 			}
 			got := activityValues(eb)
 			want := []string{
+				string(v1.ForegroundActivityGenerating),
 				string(v1.ForegroundActivityBackground),
 				string(v1.ForegroundActivityGenerating),
 				string(v1.ForegroundActivityBackground),
@@ -553,8 +623,8 @@ func TestForegroundActivitySignal_SamePromptOutputAfterIdleDoesNotInvalidateComp
 					t.Fatalf("activity publication %d = %q, want %q (all %v)", i, got[i], want[i], got)
 				}
 			}
-			if len(taskEvents.activityTaskIDs) != 3 {
-				t.Fatalf("task activity publications = %v, want exactly three", taskEvents.activityTaskIDs)
+			if len(taskEvents.activityTaskIDs) != 4 {
+				t.Fatalf("task activity publications = %v, want exactly four", taskEvents.activityTaskIDs)
 			}
 			for _, publishedTaskID := range taskEvents.activityTaskIDs {
 				if publishedTaskID != taskID {
@@ -578,8 +648,14 @@ func TestForegroundActivitySignal_DetachedLaunchTerminalOutputStaysBackground(t 
 		toolID    = "async-subagent-launch"
 	)
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
-	launch := streams.NewSubagentTask("explore", "find files", "general-purpose")
+	launch := attestedSubagentPayload("explore", "find files", "general-purpose")
 	launch.SubagentTask().IsAsync = true
+	launch.SetBackgroundWorkIdentity(
+		streams.BackgroundWorkKindSubagent,
+		"test-subagent",
+		true,
+		false,
+	)
 	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
 		TaskID: taskID, SessionID: sessionID,
 		Data: &lifecycle.AgentStreamEventData{
@@ -606,8 +682,11 @@ func TestForegroundActivitySignal_DetachedLaunchTerminalOutputStaysBackground(t 
 	if !svc.hasBackgroundTask(sessionID, toolID) {
 		t.Fatal("terminal launch card must not complete its detached workload")
 	}
-	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityBackground) {
-		t.Fatalf("detached launch should publish only the foreground idle transition, got %v", got)
+	if got := activityValues(eb); !slices.Equal(got, []string{
+		string(v1.ForegroundActivityGenerating),
+		string(v1.ForegroundActivityBackground),
+	}) {
+		t.Fatalf("detached launch activity sequence = %v", got)
 	}
 }
 

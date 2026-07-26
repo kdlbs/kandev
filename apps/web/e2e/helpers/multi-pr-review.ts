@@ -75,6 +75,7 @@ export async function seedMultiPRReviewTask(
       },
     ]);
     await apiClient.associateGitHubTaskPR({
+      workspace_id: seedData.workspaceId,
       task_id: task.id,
       repository_id: seedData.repositoryId,
       pr_url: `https://github.com/${REVIEW_OWNER}/${REVIEW_REPO}/pull/${pr.number}`,

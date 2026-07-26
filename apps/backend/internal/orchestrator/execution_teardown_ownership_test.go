@@ -119,6 +119,37 @@ func TestReapPromptUnreadyExecution_StopsOnlyWhenRecoveryOwnsExecution(t *testin
 	require.Zero(t, stopCalls.Load(), "recovery must not duplicate coordinator-owned teardown")
 }
 
+func TestReapPromptUnreadyExecution_RetiresActivityAfterForcedStop(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const (
+		taskID      = "task-recovery-activity"
+		sessionID   = "session-recovery-activity"
+		executionID = "execution-recovery-activity"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return executionID, nil
+		},
+		stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+			return nil
+		},
+	}
+	svc := newCoordinatorStopTestService(repo, newMockTaskRepo(), manager)
+	svc.registerBackgroundWork(sessionID, "orphaned-work", executionID, "work")
+	svc.markForegroundIdle(sessionID)
+
+	require.NoError(t, svc.reapPromptUnreadyExecution(
+		ctx,
+		sessionID,
+		errors.New("agent never became prompt-ready"),
+	))
+	_, ok := turnActivityRecord(t, svc, sessionID)
+	require.False(t, ok, "forced prompt-readiness teardown retained activity")
+}
+
 func TestReapPromptUnreadyExecution_DoesNotResumeAfterConcurrentCancellation(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

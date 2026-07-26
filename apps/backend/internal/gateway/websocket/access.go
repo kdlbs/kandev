@@ -38,6 +38,11 @@ type AuthPolicy struct {
 	Subscriptions SubscriptionAccessPolicy
 	// WorkspaceOwner powers BroadcastToWorkspace owner routing.
 	WorkspaceOwner WorkspaceOwnerResolver
+	// ActionEnvironment gates dispatched actions that name a task environment
+	// rather than a task or session — the user-shell actions, which treat
+	// task_id as optional. Kept off SubscriptionAccessPolicy because there is
+	// no environment subscription topic; this is dispatch-only.
+	ActionEnvironment func(ctx context.Context, taskEnvironmentID string) error
 }
 
 // SetAuthPolicy installs the auth hooks. Call during startup wiring, before

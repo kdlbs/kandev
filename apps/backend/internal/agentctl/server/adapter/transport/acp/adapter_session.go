@@ -24,6 +24,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	if conn == nil {
 		return "", fmt.Errorf("adapter not initialized")
 	}
+	priorPromptTurn := a.currentPromptTurn()
 
 	// A fresh session invalidates any pending wakeup keyed to the prior
 	// session. Reset pendingWakeups and cancel the scheduler under one
@@ -32,6 +33,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearPromptHandoffToolTrackingLocked()
 	clear(a.usageBySession)
 	a.wakeup.cancel()
 	a.mu.Unlock()
@@ -88,6 +90,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.availableModels = initialModels.AvailableModels
 	}
 	a.mu.Unlock()
+	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
@@ -296,6 +299,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			zap.String("session_id", sessionID))
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
 	}
+	priorPromptTurn := a.currentPromptTurn()
 
 	// Loading a different session invalidates any pending wakeup or async turn
 	// finalizer keyed to the prior session — same reset block as NewSession to
@@ -304,6 +308,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearPromptHandoffToolTrackingLocked()
 	a.wakeup.cancel()
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
@@ -374,6 +379,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.availableModels = initialModels.AvailableModels
 	}
 	a.mu.Unlock()
+	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))

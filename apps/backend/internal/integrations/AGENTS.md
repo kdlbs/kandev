@@ -21,6 +21,32 @@ This file covers both halves of the playbook (backend + frontend) so the pattern
 - "Auth required / reconnect" UI reuses `<IntegrationAuthErrorMessage>` (`components/integrations/auth-error-message.tsx`) — supply the integration's display name, regex check, and reconnect href.
 - Link / import popovers reuse `<ValidatedPopover>` (`components/integrations/validated-popover.tsx`) — supply the icon, label, key regex, fetch function, and success callback.
 
+## Per-user scoping (the integration route group is query-only)
+
+The global `integrationWorkspaceScopeMiddleware` (`backendapp/helpers.go`) only
+authorizes the workspace named in the **`workspace_id` query param**, and it
+**falls through when that param is absent**. So two shapes bypass it and MUST
+guard themselves at the service layer:
+
+- **A body-supplied workspace** — e.g. `POST /config/copy`'s `targetWorkspaceId`.
+  The middleware authorizes the source (query) but never the target (body), so a
+  copy must call `authorizeWorkspaceAccess` on **both** source and target, up
+  front — before any per-workspace side effect (the pre-write `UpdateAuthHealth`
+  flip counts). Mirror `github/copy.go`.
+- **An omitted `workspace_id`** — `normalizeWorkspaceID("")` resolves a global
+  *default* workspace not owned by the caller. User-facing config entry points
+  resolve+authorize in one step via `resolveWorkspaceID(ctx, id)` instead of bare
+  `normalizeWorkspaceID`. The unscoped `ListAllIssueWatches` (reached by omitting
+  `workspace_id`) filters to the caller's workspaces; an identity-less internal
+  caller (nil authorizer) still sees all, preserving poller use.
+
+Wire the boundary with `SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)`
+in `backendapp/helpers.go`; nil (unit tests, auth disabled) means unscoped.
+Denials surface `repoerrors.ErrWorkspaceNotFound`, which handlers map to 404 (no
+existence leak). Jira/Linear/Slack follow this; **Sentry and GitLab's
+`ListAllIssueWatches` still need the same filter** — the WS gateway backstop does
+not read `workspace_id`, so GitLab's `workspace_id`-keyed WS list is unscoped too.
+
 ## Where Jira and Linear deliberately diverge
 
 - **Issue model:** Jira uses transitions + JQL; Linear uses state IDs + structured filters. Don't merge these schemas — the upstream APIs are genuinely different.

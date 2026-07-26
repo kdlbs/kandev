@@ -120,7 +120,7 @@ function TasksListControls({
   onTasksListGroupChange: (group: TasksListGroup) => void;
 }) {
   return (
-    <div className="flex min-h-9 flex-wrap items-center justify-end gap-3">
+    <div className="hidden min-h-9 flex-wrap items-center justify-end gap-3 sm:flex">
       <ListOptionSelect
         label="Sort"
         value={tasksListSort}

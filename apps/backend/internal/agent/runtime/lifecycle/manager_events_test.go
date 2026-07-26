@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -1483,6 +1484,46 @@ func TestHandleAgentEvent_ForegroundIdlePreservesPromptGeneration(t *testing.T) 
 	}
 	if events[0].Data.PromptGeneration != 42 {
 		t.Fatalf("prompt generation = %d, want 42", events[0].Data.PromptGeneration)
+	}
+	select {
+	case signal := <-execution.promptDoneCh:
+		t.Fatalf("unattested foreground idle released lifecycle waiter: %+v", signal)
+	default:
+	}
+}
+
+func TestHandleAgentEvent_StalePromptHandoffCannotReleaseReplacement(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-stale-handoff", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	if _, err := mgr.executionStore.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin original prompt: %v", err)
+	}
+	if _, err := mgr.executionStore.BeginPrompt(execution.ID); err != nil {
+		t.Fatalf("begin replacement prompt: %v", err)
+	}
+	execution.messageMu.Lock()
+	execution.messageBuffer.WriteString("replacement output")
+	execution.messageMu.Unlock()
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeForegroundIdle,
+		PromptGeneration: 1,
+		Data:             map[string]any{streams.AgentEventDataPromptHandoff: true},
+	})
+
+	select {
+	case signal := <-execution.promptDoneCh:
+		t.Fatalf("stale handoff released replacement waiter: %+v", signal)
+	default:
+	}
+	execution.messageMu.Lock()
+	buffer := execution.messageBuffer.String()
+	execution.messageMu.Unlock()
+	if buffer != "replacement output" {
+		t.Fatalf("stale handoff mutated replacement buffer: %q", buffer)
 	}
 }
 

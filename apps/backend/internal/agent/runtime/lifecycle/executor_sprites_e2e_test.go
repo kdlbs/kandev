@@ -133,9 +133,9 @@ func TestSpritesE2E_FullFlow(t *testing.T) {
 		require.Contains(t, content.Content, "github.com/gin-gonic/gin")
 		t.Logf("go.mod: %d bytes", len(content.Content))
 
-		_, err = client.CreateFile(ctx, "e2e-test.txt")
+		_, err = client.CreateFile(ctx, "e2e-test.txt", "")
 		require.NoError(t, err)
-		_, err = client.DeleteFile(ctx, "e2e-test.txt")
+		_, err = client.DeleteFile(ctx, "e2e-test.txt", "")
 		require.NoError(t, err)
 		t.Log("file create+delete roundtrip OK")
 	})
@@ -317,7 +317,7 @@ func TestSpritesE2E_FullFlow(t *testing.T) {
 		time.Sleep(2 * time.Second) // let config complete
 
 		// Create a file, stage, commit via git API
-		_, err = client.CreateFile(ctx, "e2e-change.txt")
+		_, err = client.CreateFile(ctx, "e2e-change.txt", "")
 		require.NoError(t, err)
 
 		result, err := client.GitStage(ctx, []string{"e2e-change.txt"}, "")
@@ -408,8 +408,9 @@ func TestSpritesE2E_FullFlow(t *testing.T) {
 }
 
 // TestSpritesE2E_CredentialsAndAuth verifies credential copying and agent auth on a Sprites sandbox.
-// It copies all locally available credentials (SSH, gh, auggie, codex, gemini) to the sprite,
-// then runs subtests for gh auth, SSH git clone, and one-off agent invocations.
+// It copies all locally available agent credentials to the sprite, then runs
+// subtests for SSH git clone and one-off agent invocations. Workspace GitHub
+// authentication is supplied by the task-scoped broker, not host CLI state.
 func TestSpritesE2E_CredentialsAndAuth(t *testing.T) {
 	token := os.Getenv("SPRITES_API_TOKEN")
 	if token == "" {
@@ -430,8 +431,7 @@ func TestSpritesE2E_CredentialsAndAuth(t *testing.T) {
 	agentRegistry := registry.NewRegistry(log)
 	agentRegistry.LoadDefaults()
 	catalog := remoteauth.BuildCatalog(agentRegistry.ListEnabled())
-	credIDs := make([]string, 0, len(catalog.Specs)+1)
-	credIDs = append(credIDs, "gh_cli_token") // auto-detect GH CLI token
+	credIDs := make([]string, 0, len(catalog.Specs))
 	for _, spec := range catalog.Specs {
 		for _, method := range spec.Methods {
 			if method.Type != "files" || !method.HasLocalFiles {
@@ -514,28 +514,6 @@ func TestSpritesE2E_CredentialsAndAuth(t *testing.T) {
 			"git config --global --get user.email 2>&1", 30*time.Second)
 		require.Equal(t, 0, res.ExitCode, "git config user.email should succeed")
 		require.Equal(t, gitUserEmail, strings.TrimSpace(res.Output), "sprite git user.email mismatch")
-	})
-
-	t.Run("GhCliAuth", func(t *testing.T) {
-		if !hasCredential(credIDs, "gh_cli_token") {
-			t.Skip("gh_cli_token not selected")
-		}
-		// GITHUB_TOKEN is injected via gh_cli_token auto-detect — verify gh can use it.
-		// gh auth status makes a network call that can be slow on sprites; retry with short timeout.
-		var res spriteCmdResult
-		for attempt := 1; attempt <= 2; attempt++ {
-			res = runSpriteCmdNoFail(t, client, localPort, log, "gh auth status 2>&1", 10*time.Second)
-			if res.Output != "" {
-				break
-			}
-			t.Logf("gh auth status attempt %d timed out, retrying...", attempt)
-		}
-		t.Logf("gh auth status output:\n%s", res.Output)
-		require.NotEmpty(t, res.Output, "gh auth status should produce output")
-		lower := strings.ToLower(res.Output)
-		require.True(t,
-			strings.Contains(lower, "logged in") || strings.Contains(lower, "github_token"),
-			"gh auth status should indicate logged in or GITHUB_TOKEN active, got: %s", res.Output)
 	})
 
 	t.Run("AuggieAuth", func(t *testing.T) {
@@ -706,100 +684,9 @@ func runSpriteCmd(
 	}
 }
 
-// runSpriteCmdNoFail is like runSpriteCmd but returns an empty result on timeout instead of failing.
-func runSpriteCmdNoFail(
-	t *testing.T,
-	client *agentctl.Client,
-	localPort int,
-	log *logger.Logger,
-	cmd string,
-	timeout time.Duration,
-) spriteCmdResult {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	defer cancel()
-
-	marker := "END_MARKER_" + randomSuffix()
-
-	var output strings.Builder
-	var mu sync.Mutex
-	connected := make(chan struct{})
-
-	streamClient := agentctl.NewClient("127.0.0.1", localPort, log)
-	defer streamClient.Close()
-
-	stream, err := streamClient.StreamWorkspace(ctx, agentctl.WorkspaceStreamCallbacks{
-		OnConnected: func() { close(connected) },
-		OnProcessOutput: func(o *agentctl.ProcessOutput) {
-			mu.Lock()
-			output.WriteString(o.Data)
-			mu.Unlock()
-		},
-	})
-	if err != nil {
-		return spriteCmdResult{ExitCode: -1}
-	}
-	defer stream.Close()
-
-	select {
-	case <-connected:
-	case <-ctx.Done():
-		return spriteCmdResult{ExitCode: -1}
-	}
-
-	wrappedCmd := fmt.Sprintf("(%s); _ec=$?; echo \"%s EXIT_CODE=$_ec\"", cmd, marker)
-	if _, err = client.StartProcess(ctx, agentctl.StartProcessRequest{
-		SessionID: "e2e-creds-session",
-		Command:   wrappedCmd,
-	}); err != nil {
-		return spriteCmdResult{ExitCode: -1}
-	}
-
-	// Wait for marker — return empty on timeout
-	deadline := time.After(timeout)
-	for {
-		select {
-		case <-deadline:
-			return spriteCmdResult{ExitCode: -1}
-		case <-time.After(500 * time.Millisecond):
-			mu.Lock()
-			if strings.Contains(output.String(), marker) {
-				fullOutput := output.String()
-				mu.Unlock()
-
-				exitCode := -1
-				idx := strings.Index(fullOutput, marker)
-				if idx >= 0 {
-					markerLine := fullOutput[idx:]
-					if ecIdx := strings.Index(markerLine, "EXIT_CODE="); ecIdx >= 0 {
-						ecStr := strings.TrimSpace(markerLine[ecIdx+len("EXIT_CODE="):])
-						if n, parseErr := strconv.Atoi(strings.Split(ecStr, "\n")[0]); parseErr == nil {
-							exitCode = n
-						}
-					}
-					return spriteCmdResult{Output: strings.TrimSpace(fullOutput[:idx]), ExitCode: exitCode}
-				}
-				return spriteCmdResult{Output: strings.TrimSpace(fullOutput), ExitCode: exitCode}
-			}
-			mu.Unlock()
-		}
-	}
-}
-
 func hasCredentialPrefix(credIDs []string, prefix string) bool {
 	for _, c := range credIDs {
 		if strings.HasPrefix(c, prefix) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasCredential checks for an exact credential ID match.
-// Kept for compatibility with optional e2e subtests that may be toggled on/off.
-func hasCredential(credIDs []string, target string) bool {
-	for _, c := range credIDs {
-		if c == target {
 			return true
 		}
 	}

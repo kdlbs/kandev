@@ -5,9 +5,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/auth"
+	authhttpapi "github.com/kandev/kandev/internal/auth/httpapi"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -15,6 +17,30 @@ import (
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+// pluginSSOBridge adapts the auth service to plugins.AuthLoginBridge: it
+// authenticates a plugin-asserted external identity (OIDC/SAML) and sets the
+// kandev_session cookie, so an auth-capable plugin can complete SSO login
+// without ever holding the raw session token. AuthenticateExternal enforces
+// that auth is enabled, so this returns an error (surfaced as 403 by the
+// plugin webhook relay) when it is not.
+type pluginSSOBridge struct {
+	auth *auth.Service
+}
+
+func (b pluginSSOBridge) LoginExternal(c *gin.Context, provider, subject, email, displayName string) error {
+	_, token, err := b.auth.AuthenticateExternal(c.Request.Context(), auth.ExternalIdentity{
+		Provider:    provider,
+		Subject:     subject,
+		Email:       email,
+		DisplayName: displayName,
+	}, c.Request.UserAgent(), c.ClientIP())
+	if err != nil {
+		return err
+	}
+	authhttpapi.SetSessionCookie(c, b.auth.CookieName(), token, b.auth.SessionTTL())
+	return nil
+}
 
 // provideAuthService wires the opt-in authentication service. Whether auth is
 // enforced is read from cfg.Features.Auth (the `features.auth` runtime flag,
@@ -60,6 +86,9 @@ func gatewayAuthPolicy(authSvc *auth.Service, taskSvc *taskservice.Service, task
 			Session: taskSvc.AuthorizeSessionAccess,
 		},
 		WorkspaceOwner: newWorkspaceOwnerResolver(taskRepo),
+		// The user-shell actions name a task environment and treat task_id as
+		// optional, so the dispatch backstop needs an environment-keyed check.
+		ActionEnvironment: taskSvc.AuthorizeEnvironmentAccess,
 	}
 }
 

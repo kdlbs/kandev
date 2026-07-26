@@ -7,12 +7,42 @@ import { Input } from "@kandev/ui/input";
 import { IconLock } from "@tabler/icons-react";
 import { ApiError } from "@/lib/api/client";
 import { login } from "@/lib/api/domains/auth-api";
+import { useAppStore } from "@/components/state-provider";
+import type { SsoProvider } from "@/lib/state/slices/auth/types";
+
+// LoginSsoButtons renders one "Continue with <provider>" button per
+// plugin-contributed SSO provider, below a divider. Each button is a plain
+// navigation to the plugin's login-initiate webhook.
+function LoginSsoButtons({ providers }: { providers: SsoProvider[] }) {
+  if (providers.length === 0) return null;
+  return (
+    <div className="mt-4 flex flex-col gap-2" data-testid="login-sso">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="h-px flex-1 bg-border" />
+        or continue with
+        <span className="h-px flex-1 bg-border" />
+      </div>
+      {providers.map((provider) => (
+        <Button
+          key={provider.id}
+          asChild
+          variant="outline"
+          className="cursor-pointer"
+          data-testid={`login-sso-${provider.id}`}
+        >
+          <a href={provider.initiateUrl}>Continue with {provider.displayName}</a>
+        </Button>
+      ))}
+    </div>
+  );
+}
 
 export function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const ssoProviders = useAppStore((s) => s.auth.ssoProviders) ?? [];
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -90,6 +120,7 @@ export function LoginPage() {
               {submitting ? "Signing in..." : "Sign in"}
             </Button>
           </form>
+          <LoginSsoButtons providers={ssoProviders} />
         </CardContent>
       </Card>
     </div>

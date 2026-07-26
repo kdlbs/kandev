@@ -10,17 +10,21 @@ const COMPLETE = "complete";
 const SUBAGENT_CHEVRON = "subagent-chevron";
 const IN_PROGRESS = "in_progress";
 const STARTED = "started";
-const SUBAGENT_WORKING = "Subagent working...";
+const WORKING = "Working...";
 
 function subagentMessage({
   metadataStatus = "in_progress",
   payloadStatus = "started",
+  description = "ten_second_probe",
+  subagentType = "subagent",
   prompt,
   resultText,
   durationMs,
 }: {
   metadataStatus?: ToolCallMetadata["status"];
   payloadStatus?: string;
+  description?: string;
+  subagentType?: string;
   prompt?: string;
   resultText?: string;
   durationMs?: number;
@@ -39,8 +43,8 @@ function subagentMessage({
       normalized: {
         kind: "subagent_task",
         subagent_task: {
-          description: "ten_second_probe",
-          subagent_type: "subagent",
+          description,
+          subagent_type: subagentType,
           status: payloadStatus,
           child_session_id: "child-session-123456",
           prompt,
@@ -165,7 +169,23 @@ describe("ToolSubagentMessage", () => {
     expect(screen.queryByRole("button")).toBeNull();
 
     fireEvent.click(screen.getByTestId("subagent-header"));
-    expect(screen.queryByText(SUBAGENT_WORKING)).toBeNull();
+    expect(screen.queryByText(WORKING)).toBeNull();
+  });
+
+  it("shows a contentless active subagent as one non-expandable status row", () => {
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: "running",
+        description: "verify",
+        subagentType: "verify",
+      }),
+    );
+
+    expect(screen.getByTestId("subagent-type").textContent).toBe("verify");
+    expect(screen.queryByTestId("subagent-description")).toBeNull();
+    expect(screen.getByText(WORKING)).toBeTruthy();
+    expect(screen.queryByTestId(SUBAGENT_CHEVRON)).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 
   it("shows work only while a stale Codex lifecycle is in an active turn", () => {
@@ -173,7 +193,7 @@ describe("ToolSubagentMessage", () => {
     const { rerender } = renderSubagent(comment, { isContainingTurnActive: true });
 
     expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
-    expect(screen.getByText(SUBAGENT_WORKING)).toBeTruthy();
+    expect(screen.getByText(WORKING)).toBeTruthy();
 
     rerender(
       <ToolSubagentMessage
@@ -185,7 +205,7 @@ describe("ToolSubagentMessage", () => {
     );
 
     expect(screen.queryByRole("status", { name: "Loading" })).toBeNull();
-    expect(screen.queryByText(SUBAGENT_WORKING)).toBeNull();
+    expect(screen.queryByText(WORKING)).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
   });
 });
@@ -227,16 +247,14 @@ describe("ToolSubagentMessage expansion", () => {
     );
   });
 
-  it("keeps a manual collapse after an active subagent completes", () => {
+  it("keeps a completed result collapsed after a contentless active state", () => {
     const activeComment = subagentMessage({
       metadataStatus: "running",
       payloadStatus: STARTED,
     });
     const { rerender } = renderSubagent(activeComment);
 
-    expect(screen.getByText(SUBAGENT_WORKING)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button"));
-    expect(screen.queryByText(SUBAGENT_WORKING)).toBeNull();
+    expect(screen.getByText(WORKING)).toBeTruthy();
 
     rerender(
       <ToolSubagentMessage

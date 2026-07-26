@@ -54,6 +54,10 @@ type NormalizedPayload struct {
 	showPlan     *ShowPlanPayload
 	manageTodos  *ManageTodosPayload
 	misc         *MiscPayload
+	// backgroundWork is adapter-issued provenance. Tool kind and payload shape
+	// are presentation contracts and cannot relax prompt admission by
+	// themselves.
+	backgroundWork *BackgroundWorkPayload
 	// monitor is adapter-only provenance, deliberately a sibling of generic
 	// rather than a key inside GenericPayload.Output. Output is assigned the
 	// agent's raw tool result verbatim (see NormalizeToolResult), so anything
@@ -82,19 +86,20 @@ func (p *NormalizedPayload) Misc() *MiscPayload                 { return p.misc 
 // MarshalJSON implements custom JSON marshaling for NormalizedPayload.
 func (p *NormalizedPayload) MarshalJSON() ([]byte, error) {
 	type jsonPayload struct {
-		Kind         ToolKind             `json:"kind"`
-		ReadFile     *ReadFilePayload     `json:"read_file,omitempty"`
-		ModifyFile   *ModifyFilePayload   `json:"modify_file,omitempty"`
-		ShellExec    *ShellExecPayload    `json:"shell_exec,omitempty"`
-		CodeSearch   *CodeSearchPayload   `json:"code_search,omitempty"`
-		HttpRequest  *HttpRequestPayload  `json:"http_request,omitempty"`
-		Generic      *GenericPayload      `json:"generic,omitempty"`
-		CreateTask   *CreateTaskPayload   `json:"create_task,omitempty"`
-		SubagentTask *SubagentTaskPayload `json:"subagent_task,omitempty"`
-		ShowPlan     *ShowPlanPayload     `json:"show_plan,omitempty"`
-		ManageTodos  *ManageTodosPayload  `json:"manage_todos,omitempty"`
-		Misc         *MiscPayload         `json:"misc,omitempty"`
-		Monitor      *MonitorPayload      `json:"monitor,omitempty"`
+		Kind         ToolKind               `json:"kind"`
+		ReadFile     *ReadFilePayload       `json:"read_file,omitempty"`
+		ModifyFile   *ModifyFilePayload     `json:"modify_file,omitempty"`
+		ShellExec    *ShellExecPayload      `json:"shell_exec,omitempty"`
+		CodeSearch   *CodeSearchPayload     `json:"code_search,omitempty"`
+		HttpRequest  *HttpRequestPayload    `json:"http_request,omitempty"`
+		Generic      *GenericPayload        `json:"generic,omitempty"`
+		CreateTask   *CreateTaskPayload     `json:"create_task,omitempty"`
+		SubagentTask *SubagentTaskPayload   `json:"subagent_task,omitempty"`
+		ShowPlan     *ShowPlanPayload       `json:"show_plan,omitempty"`
+		ManageTodos  *ManageTodosPayload    `json:"manage_todos,omitempty"`
+		Misc         *MiscPayload           `json:"misc,omitempty"`
+		Background   *BackgroundWorkPayload `json:"background_work,omitempty"`
+		Monitor      *MonitorPayload        `json:"monitor,omitempty"`
 	}
 	return json.Marshal(jsonPayload{
 		Kind:         p.kind,
@@ -109,6 +114,7 @@ func (p *NormalizedPayload) MarshalJSON() ([]byte, error) {
 		ShowPlan:     p.showPlan,
 		ManageTodos:  p.manageTodos,
 		Misc:         p.misc,
+		Background:   p.backgroundWork,
 		Monitor:      p.monitor,
 	})
 }
@@ -117,19 +123,20 @@ func (p *NormalizedPayload) MarshalJSON() ([]byte, error) {
 // This is required because the struct has unexported fields.
 func (p *NormalizedPayload) UnmarshalJSON(data []byte) error {
 	type jsonPayload struct {
-		Kind         ToolKind             `json:"kind"`
-		ReadFile     *ReadFilePayload     `json:"read_file,omitempty"`
-		ModifyFile   *ModifyFilePayload   `json:"modify_file,omitempty"`
-		ShellExec    *ShellExecPayload    `json:"shell_exec,omitempty"`
-		CodeSearch   *CodeSearchPayload   `json:"code_search,omitempty"`
-		HttpRequest  *HttpRequestPayload  `json:"http_request,omitempty"`
-		Generic      *GenericPayload      `json:"generic,omitempty"`
-		CreateTask   *CreateTaskPayload   `json:"create_task,omitempty"`
-		SubagentTask *SubagentTaskPayload `json:"subagent_task,omitempty"`
-		ShowPlan     *ShowPlanPayload     `json:"show_plan,omitempty"`
-		ManageTodos  *ManageTodosPayload  `json:"manage_todos,omitempty"`
-		Misc         *MiscPayload         `json:"misc,omitempty"`
-		Monitor      *MonitorPayload      `json:"monitor,omitempty"`
+		Kind         ToolKind               `json:"kind"`
+		ReadFile     *ReadFilePayload       `json:"read_file,omitempty"`
+		ModifyFile   *ModifyFilePayload     `json:"modify_file,omitempty"`
+		ShellExec    *ShellExecPayload      `json:"shell_exec,omitempty"`
+		CodeSearch   *CodeSearchPayload     `json:"code_search,omitempty"`
+		HttpRequest  *HttpRequestPayload    `json:"http_request,omitempty"`
+		Generic      *GenericPayload        `json:"generic,omitempty"`
+		CreateTask   *CreateTaskPayload     `json:"create_task,omitempty"`
+		SubagentTask *SubagentTaskPayload   `json:"subagent_task,omitempty"`
+		ShowPlan     *ShowPlanPayload       `json:"show_plan,omitempty"`
+		ManageTodos  *ManageTodosPayload    `json:"manage_todos,omitempty"`
+		Misc         *MiscPayload           `json:"misc,omitempty"`
+		Background   *BackgroundWorkPayload `json:"background_work,omitempty"`
+		Monitor      *MonitorPayload        `json:"monitor,omitempty"`
 	}
 	var jp jsonPayload
 	if err := json.Unmarshal(data, &jp); err != nil {
@@ -148,6 +155,7 @@ func (p *NormalizedPayload) UnmarshalJSON(data []byte) error {
 	p.showPlan = jp.ShowPlan
 	p.manageTodos = jp.ManageTodos
 	p.misc = jp.Misc
+	p.backgroundWork = jp.Background
 	return nil
 }
 

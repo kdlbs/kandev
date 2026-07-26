@@ -155,7 +155,7 @@ test.describe("mobile PR re-request review", () => {
       observeSecondFeedback = resolve;
     });
     await testPage.route(
-      `**/api/v1/github/prs/${OWNER}/${REPO}/${SWITCH_SECOND_PR_NUMBER}`,
+      (url) => url.pathname === `/api/v1/github/prs/${OWNER}/${REPO}/${SWITCH_SECOND_PR_NUMBER}`,
       async (route) => {
         const response = await route.fetch();
         observeSecondFeedback();

@@ -1,10 +1,4 @@
-import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
-
-async function selectListOption(page: Page, testId: string, optionLabel: string) {
-  await page.getByTestId(testId).click();
-  await page.getByRole("listbox").getByRole("option", { name: optionLabel }).click();
-}
 
 test.describe("Mobile task list search", () => {
   test("topbar search icon reveals, filters, and clears on collapse", async ({
@@ -46,7 +40,7 @@ test.describe("Mobile task list search", () => {
     await expect(taskList.getByText("List Beta Task")).toBeVisible({ timeout: 5000 });
   });
 
-  test("sort control reorders the compact list", async ({ testPage, apiClient, seedData }) => {
+  test("display menu configures the compact list", async ({ testPage, apiClient, seedData }) => {
     await apiClient.createTask(seedData.workspaceId, "Alpha mobile sort", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -55,6 +49,15 @@ test.describe("Mobile task list search", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
+    const archivedTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Archived mobile sort task",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+    await apiClient.archiveTask(archivedTask.id);
 
     await testPage.goto("/tasks?group=none");
     await testPage.waitForLoadState("networkidle");
@@ -64,11 +67,27 @@ test.describe("Mobile task list search", () => {
       .getByPlaceholder("Search tasks...")
       .fill("mobile sort");
 
-    await selectListOption(testPage, "tasks-list-sort", "Title Z-A");
+    await expect(testPage.getByTestId("tasks-list-sort")).not.toBeVisible();
+    await testPage.getByRole("button", { name: "Open menu" }).tap();
+    const menu = testPage.getByRole("dialog", { name: "Menu" });
+    await menu.getByTestId("mobile-tasks-list-sort").tap();
+    await testPage.getByRole("listbox").getByRole("option", { name: "Title Z-A" }).tap();
 
     await expect(testPage).toHaveURL((url) => url.searchParams.get("sort") === "title_desc");
     await expect
       .poll(() => testPage.getByTestId("tasks-list-row-title").allTextContents())
       .toEqual(["Zulu mobile sort", "Alpha mobile sort"]);
+
+    await menu.getByTestId("mobile-tasks-list-group").tap();
+    await testPage.getByRole("listbox").getByRole("option", { name: "State" }).tap();
+    await expect(testPage).toHaveURL((url) => url.searchParams.get("group") === "state");
+
+    await expect(
+      testPage.getByTestId("tasks-list").getByText("Archived mobile sort task"),
+    ).toHaveCount(0);
+    await menu.getByTestId("mobile-tasks-list-show-archived").tap();
+    await expect(
+      testPage.getByTestId("tasks-list").getByText("Archived mobile sort task"),
+    ).toBeVisible();
   });
 });

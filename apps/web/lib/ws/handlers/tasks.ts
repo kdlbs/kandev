@@ -86,6 +86,12 @@ function mergeTaskUpdate(
   ) {
     merged.foregroundActivity = existing.foregroundActivity;
   }
+  if (
+    !hasPayloadField(payload, "active_subagent_count") &&
+    nextTask.activeSubagentCount === undefined
+  ) {
+    merged.activeSubagentCount = existing.activeSubagentCount;
+  }
   return merged;
 }
 

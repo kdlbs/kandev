@@ -2,10 +2,13 @@ package github
 
 import (
 	"context"
+	"crypto/sha256"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 func TestListActivePRWatches_ExcludesArchivedTasks(t *testing.T) {
@@ -107,6 +110,22 @@ func TestHandleTaskDeleted_DeletesWatches(t *testing.T) {
 	}
 }
 
+func TestHandleTaskDeletedRevokesCredentialLeases(t *testing.T) {
+	_, svc, _, _ := setupPollerTest(t)
+	broker := revocationTestBroker("workspace-1", "t1", "s1")
+	svc.SetCredentialBroker(broker)
+
+	event := bus.NewEvent(events.TaskDeleted, "task-service", map[string]interface{}{
+		"task_id": "t1",
+	})
+	if err := svc.handleTaskDeleted(context.Background(), event); err != nil {
+		t.Fatalf("handleTaskDeleted: %v", err)
+	}
+	if got := len(broker.leases); got != 0 {
+		t.Fatalf("lease records = %d, want 0", got)
+	}
+}
+
 func TestHandleTaskEvents_MalformedPayloadIsNoop(t *testing.T) {
 	_, svc, _, store := setupPollerTest(t)
 	ctx := context.Background()
@@ -128,6 +147,66 @@ func TestHandleTaskEvents_MalformedPayloadIsNoop(t *testing.T) {
 
 	if got, _ := store.GetPRWatchBySession(ctx, "s1"); got == nil {
 		t.Error("expected watch to persist when payload is malformed")
+	}
+}
+
+func TestHandleWorkspaceDeletedRemovesOnlyOwnedConnectionSecrets(t *testing.T) {
+	svc, secrets := newWorkspaceConnectionService(t, "octocat")
+	secrets.values[WorkspacePATSecretKey("ws-1")] = "pat"
+	secrets.values[UserAccessTokenSecretKey("ws-1", "user-1")] = "access"
+	secrets.values[UserRefreshTokenSecretKey("ws-1", "user-1")] = "refresh"
+	secrets.values[WorkspacePATSecretKey("ws-2")] = "other"
+
+	event := bus.NewEvent(events.WorkspaceDeleted, "task-service", map[string]interface{}{"id": "ws-1"})
+	if err := svc.handleWorkspaceDeleted(context.Background(), event); err != nil {
+		t.Fatalf("handleWorkspaceDeleted: %v", err)
+	}
+	for _, id := range []string{
+		WorkspacePATSecretKey("ws-1"),
+		UserAccessTokenSecretKey("ws-1", "user-1"),
+		UserRefreshTokenSecretKey("ws-1", "user-1"),
+	} {
+		if _, ok := secrets.values[id]; ok {
+			t.Fatalf("workspace-owned secret %q was not deleted", id)
+		}
+	}
+	if got := secrets.values[WorkspacePATSecretKey("ws-2")]; got != "other" {
+		t.Fatalf("unrelated workspace secret changed: %q", got)
+	}
+}
+
+func TestHandleWorkspaceDeletedRevokesCredentialLeasesWithoutSecretStore(t *testing.T) {
+	_, svc, _, _ := setupPollerTest(t)
+	broker := revocationTestBroker("workspace-1", "t1", "s1")
+	svc.SetCredentialBroker(broker)
+	svc.connectionSecrets = nil
+
+	event := bus.NewEvent(events.WorkspaceDeleted, "task-service", map[string]interface{}{"id": "workspace-1"})
+	if err := svc.handleWorkspaceDeleted(context.Background(), event); err != nil {
+		t.Fatalf("handleWorkspaceDeleted: %v", err)
+	}
+	if got := len(broker.leases); got != 0 {
+		t.Fatalf("lease records = %d, want 0", got)
+	}
+}
+
+func TestSubscribeTaskEventsTerminalSessionRevokesCredentialLease(t *testing.T) {
+	_, svc, _, _ := setupPollerTest(t)
+	broker := revocationTestBroker("workspace-1", "t1", "s1")
+	svc.SetCredentialBroker(broker)
+	svc.subscribeTaskEvents()
+	t.Cleanup(svc.unsubscribeTaskEvents)
+
+	event := bus.NewEvent(events.TaskSessionStateChanged, "orchestrator", map[string]interface{}{
+		"task_id":    "t1",
+		"session_id": "s1",
+		"new_state":  string(taskmodels.TaskSessionStateCompleted),
+	})
+	if err := svc.eventBus.Publish(context.Background(), events.TaskSessionStateChanged, event); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if got := len(broker.leases); got != 0 {
+		t.Fatalf("lease records = %d, want 0", got)
 	}
 }
 
@@ -167,5 +246,20 @@ func mustCreateWatch(t *testing.T, store *Store, sessionID, taskID string) {
 	}
 	if err := store.CreatePRWatch(context.Background(), w); err != nil {
 		t.Fatalf("create PR watch: %v", err)
+	}
+}
+
+func revocationTestBroker(workspaceID, taskID, sessionID string) *CredentialBroker {
+	hash := sha256.Sum256([]byte(workspaceID + taskID + sessionID))
+	return &CredentialBroker{
+		leases: map[[sha256.Size]byte]credentialLeaseRecord{
+			hash: {
+				WorkspaceID: workspaceID,
+				TaskID:      taskID,
+				SessionID:   sessionID,
+				ExpiresAt:   time.Now().Add(time.Hour),
+			},
+		},
+		now: time.Now,
 	}
 }

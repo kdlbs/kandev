@@ -3,10 +3,6 @@ package agents
 import (
 	"context"
 	_ "embed"
-	"fmt"
-	"os/exec"
-	"regexp"
-	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
@@ -24,11 +20,6 @@ const (
 	opencodeACPPackage     = "opencode-ai"
 	opencodeACPVersion     = "1.18.5"
 	opencodeACPPackageSpec = opencodeACPPackage + "@" + opencodeACPVersion
-	opencodeVersionTimeout = 5 * time.Second
-)
-
-var opencodeVersionPattern = regexp.MustCompile(
-	`(?:^|[^0-9A-Za-z])[vV]?([0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)(?:$|[^0-9A-Za-z.+-])`,
 )
 
 var (
@@ -83,52 +74,17 @@ func (a *OpenCodeACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	// Check for the opencode CLI on PATH. Auth state is surfaced later by
-	// the ACP probe, not by scanning ~/.opencode.
+	// Check for the opencode CLI on PATH. Any installed version is eligible
+	// for the ACP probe; auth and protocol compatibility are surfaced there.
 	result, err := Detect(ctx, WithCommand("opencode"))
 	if err != nil || !result.Available {
 		return result, err
-	}
-	version, err := probeOpenCodeVersion(ctx, result.MatchedPath)
-	if err != nil {
-		return unsupportedOpenCodeResult(result.MatchedPath), fmt.Errorf(
-			"cannot verify OpenCode %s at %q: %w; reinstall with `%s`",
-			opencodeACPVersion, result.MatchedPath, err, a.InstallScript(),
-		)
-	}
-	if version != opencodeACPVersion {
-		return unsupportedOpenCodeResult(result.MatchedPath), fmt.Errorf(
-			"unsupported OpenCode version %s at %q; Kandev requires %s; reinstall with `%s`",
-			version, result.MatchedPath, opencodeACPVersion, a.InstallScript(),
-		)
 	}
 	result.SupportsMCP = true
 	result.Capabilities = DiscoveryCapabilities{
 		SupportsSessionResume: true,
 	}
 	return result, nil
-}
-
-func probeOpenCodeVersion(ctx context.Context, path string) (string, error) {
-	probeCtx, cancel := context.WithTimeout(ctx, opencodeVersionTimeout)
-	defer cancel()
-
-	output, err := exec.CommandContext(probeCtx, path, "--version").CombinedOutput()
-	if err != nil {
-		if probeCtx.Err() != nil {
-			return "", probeCtx.Err()
-		}
-		return "", fmt.Errorf("run --version: %w", err)
-	}
-	match := opencodeVersionPattern.FindStringSubmatch(strings.TrimSpace(string(output)))
-	if len(match) != 2 {
-		return "", fmt.Errorf("parse --version output %q", strings.TrimSpace(string(output)))
-	}
-	return match[1], nil
-}
-
-func unsupportedOpenCodeResult(path string) *DiscoveryResult {
-	return &DiscoveryResult{MatchedPath: path}
 }
 
 func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {

@@ -10,6 +10,7 @@ export const defaultAuthState: AuthSliceState = {
     mode: "disabled",
     authenticated: true,
     user: null,
+    ssoProviders: [],
   },
 };
 

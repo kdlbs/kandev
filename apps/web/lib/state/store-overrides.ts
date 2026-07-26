@@ -50,6 +50,7 @@ export function buildStateOverrides(m: DefaultState) {
     promptUsage: m.promptUsage,
     sessionPollMode: m.sessionPollMode,
     githubStatus: m.githubStatus,
+    githubAppRegistrations: m.githubAppRegistrations,
     taskPRs: m.taskPRs,
     pendingPrUrlByTaskId: m.pendingPrUrlByTaskId,
     prWatches: m.prWatches,

@@ -110,14 +110,23 @@
       "audiences": ["user"],
       "stability": "stable",
       "docs": ["sessions-and-review", "developer-tools", "automation-and-mcp"],
-      "sources": ["apps/web/components/review/review-dialog.tsx", "apps/web/components/review/walkthrough-overlay.tsx"],
-      "tests": ["apps/web/components/review/review-dialog.build-files.test.ts", "apps/web/components/review/walkthrough-overlay.test.tsx"],
+      "sources": [
+        "apps/backend/internal/mcp/handlers/review.go",
+        "apps/web/components/review/review-dialog.tsx",
+        "apps/web/components/review/walkthrough-overlay.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/mcp/handlers/review_test.go",
+        "apps/web/components/review/review-dialog.build-files.test.ts",
+        "apps/web/components/review/walkthrough-overlay.test.tsx"
+      ],
       "mcpTools": [
         "create_task_plan_kandev",
         "delete_task_plan_kandev",
         "delete_walkthrough_kandev",
         "get_task_plan_kandev",
         "get_walkthrough_kandev",
+        "publish_review_findings_kandev",
         "show_walkthrough_kandev",
         "update_task_plan_kandev"
       ]
@@ -150,13 +159,11 @@
       "sources": [
         "apps/backend/internal/profiles/profiles.go",
         "apps/web/app/settings/agents/page.tsx",
-        "apps/web/components/settings/agent-usage-section.tsx",
         "apps/web/hooks/domains/settings/use-dynamic-models.ts"
       ],
       "tests": [
         "apps/backend/internal/profiles/profiles_test.go",
         "apps/web/components/settings/agent-profile-page.test.tsx",
-        "apps/web/components/settings/agent-usage-section.test.tsx",
         "apps/web/hooks/domains/settings/use-dynamic-models.test.ts"
       ],
       "settingsRoutes": ["/settings/agents", "/settings/prompts", "/settings/utility-agents"],
@@ -190,8 +197,8 @@
       "audiences": ["user", "operator"],
       "stability": "stable",
       "docs": ["integrations", "configuration"],
-      "sources": ["apps/web/components/app-sidebar/sections/integrations-section.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope.go", "apps/backend/internal/azuredevops/service.go", "apps/web/app/azure-devops/azure-devops-page-client.tsx"],
-      "tests": ["apps/web/components/app-sidebar/sections/integrations-section.test.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope_test.go", "apps/backend/internal/azuredevops/service_test.go", "apps/web/e2e/tests/integrations/azure-devops.spec.ts"],
+      "sources": ["apps/web/components/app-sidebar/sections/integrations-section.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope.go", "apps/backend/internal/azuredevops/service.go", "apps/web/app/azure-devops/azure-devops-page-client.tsx", "apps/backend/internal/github/app_registration_lifecycle_service.go", "apps/backend/internal/github/app_registration_import.go", "apps/web/lib/api/domains/github-auth-api.ts"],
+      "tests": ["apps/web/components/app-sidebar/sections/integrations-section.test.tsx", "apps/backend/internal/integrations/workspacescope/workspacescope_test.go", "apps/backend/internal/azuredevops/service_test.go", "apps/web/e2e/tests/integrations/azure-devops.spec.ts", "apps/backend/internal/github/controller_app_registration_test.go", "apps/backend/internal/github/app_registration_import_test.go", "apps/web/e2e/tests/settings/github-app-registration.spec.ts"],
       "settingsRoutes": [
         "/settings/integrations",
         "/settings/integrations/azure-devops",

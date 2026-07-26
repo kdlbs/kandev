@@ -10,8 +10,6 @@ export type {
   AgentProfilePayload,
   AgentRole,
   AgentStatus,
-  AgentSubscriptionUsage,
-  AgentSubscriptionUsageResponse,
   BillingType,
   CLIFlag,
   UtilizationWindow,

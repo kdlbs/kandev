@@ -170,6 +170,12 @@ type Adapter struct {
 	// Tool call tracking for result normalization
 	// Maps toolCallId -> NormalizedPayload so we can update with results
 	activeToolCalls map[string]*streams.NormalizedPayload
+	// toolCallParents preserves nested tool lineage while a handed-off
+	// predecessor continues streaming beside its human successor.
+	toolCallParents map[string]string
+	// handoffProtectedToolCalls identifies predecessor background work that a
+	// successor's prompt-end sweep must not terminate.
+	handoffProtectedToolCalls map[string]struct{}
 	// codexSubagentCorrelations deduplicates the collaboration and activity
 	// tool_call frames codex-acp emits for one logical child, keyed by session,
 	// wire tool-call ID, and child session ID. Incomplete entries are retained
@@ -202,8 +208,9 @@ type Adapter struct {
 
 	// OTel tracing: active prompt span context.
 	// Notification spans become children of the prompt span for visual grouping.
-	promptTraceCtx context.Context
-	promptTraceMu  sync.RWMutex
+	promptTraceCtx  context.Context
+	promptTraceTurn *promptTurnState
+	promptTraceMu   sync.RWMutex
 
 	// Attachment management
 	attachMgr *shared.AttachmentManager
@@ -255,16 +262,12 @@ type Adapter struct {
 	promptTurnMu sync.Mutex
 	promptTurn   *promptTurnState
 
-	// promptGate is a 1-slot semaphore that serializes session/prompt calls so
-	// at most one is in flight against the bridge at a time. The ScheduleWakeup
-	// path injects a synthetic prompt via fireWakeup; without this gate it can
-	// race a user prompt, and the claude-agent-acp bridge then returns each
-	// prompt's stop_reason against the wrong turn — shifting chat turns one
-	// prompt behind. A queued synthetic prompt waits here and drains the wakeup
-	// turn once the in-flight prompt finishes. It is a channel rather than a
-	// sync.Mutex so the wait honours the caller's context (a wakeup whose
-	// timeout/lifetime context is cancelled while queued aborts instead of
-	// blocking on a stuck turn).
+	// promptGate is a 1-slot ownership token for session/prompt calls. Calls are
+	// serialized by default so ScheduleWakeup cannot race a user prompt and
+	// misalign the bridge's prompt responses. A provider-attested human
+	// foreground handoff may transfer the existing token directly to one waiting
+	// human successor while the old RPC returns; synthetic wakeups never observe
+	// that handoff and continue waiting for the owning RPC to finish.
 	promptGate chan struct{}
 
 	// asyncTurnFinalizers synthesize a turn completion for ACP updates that
@@ -288,7 +291,12 @@ type promptTurnState struct {
 	endTurn          context.CancelCauseFunc
 	rpcDone          chan struct{}
 	abortCh          chan struct{}
+	handoffCh        chan struct{}
 	promptGeneration uint64
+	allowHandoff     bool
+	handedOff        bool
+	gateOwned        bool
+	finishing        bool
 }
 
 type asyncTurnFinalizer struct {
@@ -308,24 +316,26 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 	l := log.WithFields(zap.String("adapter", "acp"), zap.String("agent_id", cfg.AgentID))
 	ctx, cancel := context.WithCancel(context.Background())
 	a := &Adapter{
-		cfg:                 cfg,
-		logger:              l,
-		agentID:             cfg.AgentID,
-		normalizer:          NewNormalizer(cfg.AgentID),
-		dialect:             newACPDialect(cfg.AgentID),
-		updatesCh:           make(chan AgentEvent, 100),
-		notifQueue:          make(chan notifWork, notifQueueCapacity),
-		activeToolCalls:     make(map[string]*streams.NormalizedPayload),
-		activeMonitors:      make(map[string]map[string]string),
-		pendingWakeups:      make(map[string]*pendingWakeup),
-		usageBySession:      make(map[string]*usageTracker),
-		contextSamples:      make(map[string]contextWindowSample),
-		attachMgr:           shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
-		promptGate:          make(chan struct{}, 1),
-		asyncTurnFinalizers: make(map[string]*asyncTurnFinalizer),
-		asyncTurnEpochs:     make(map[string]uint64),
-		lifetimeCtx:         ctx,
-		lifetimeCancel:      cancel,
+		cfg:                       cfg,
+		logger:                    l,
+		agentID:                   cfg.AgentID,
+		normalizer:                NewNormalizer(cfg.AgentID),
+		dialect:                   newACPDialect(cfg.AgentID),
+		updatesCh:                 make(chan AgentEvent, 100),
+		notifQueue:                make(chan notifWork, notifQueueCapacity),
+		activeToolCalls:           make(map[string]*streams.NormalizedPayload),
+		toolCallParents:           make(map[string]string),
+		handoffProtectedToolCalls: make(map[string]struct{}),
+		activeMonitors:            make(map[string]map[string]string),
+		pendingWakeups:            make(map[string]*pendingWakeup),
+		usageBySession:            make(map[string]*usageTracker),
+		contextSamples:            make(map[string]contextWindowSample),
+		attachMgr:                 shared.NewAttachmentManager(cfg.WorkDir, l.Zap()),
+		promptGate:                make(chan struct{}, 1),
+		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
+		asyncTurnEpochs:           make(map[string]uint64),
+		lifetimeCtx:               ctx,
+		lifetimeCancel:            cancel,
 	}
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
 	// Start the update worker before returning so any caller that connects
@@ -543,6 +553,7 @@ func (a *Adapter) Close() error {
 	a.workerWg.Wait()
 	a.mu.Lock()
 	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearPromptHandoffToolTrackingLocked()
 	clear(a.usageBySession)
 	a.mu.Unlock()
 
@@ -580,17 +591,22 @@ func (a *Adapter) getPromptTraceCtx() context.Context {
 }
 
 // setPromptTraceCtx stores the prompt span context.
-func (a *Adapter) setPromptTraceCtx(ctx context.Context) {
+func (a *Adapter) setPromptTraceCtx(turn *promptTurnState, ctx context.Context) {
 	a.promptTraceMu.Lock()
 	defer a.promptTraceMu.Unlock()
 	a.promptTraceCtx = ctx
+	a.promptTraceTurn = turn
 }
 
-// clearPromptTraceCtx clears the prompt span context.
-func (a *Adapter) clearPromptTraceCtx() {
+// clearPromptTraceCtx clears the prompt span context only when turn still owns
+// it. A handed-off RPC may return after its successor installed a new trace.
+func (a *Adapter) clearPromptTraceCtx(turn *promptTurnState) {
 	a.promptTraceMu.Lock()
 	defer a.promptTraceMu.Unlock()
-	a.promptTraceCtx = nil
+	if a.promptTraceTurn == turn {
+		a.promptTraceCtx = nil
+		a.promptTraceTurn = nil
+	}
 }
 
 // GetACPConnection returns the underlying ACP connection for advanced usage.

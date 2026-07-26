@@ -19,11 +19,10 @@ part of `AgentCommand`, which existing lifecycle diagnostics log as
 OpenCode intentionally uses the direct `opencode acp` command for discovery,
 normal sessions, container commands, and one-shot inference. This keeps startup
 offline-compatible and ensures discovery validates the executable actually
-launched. Its installer remains pinned to `opencode-ai@1.18.5`, and discovery
-runs that executable with `--version` before reporting it as supported. Missing,
-malformed, failing, or mismatched version output reports the agent as unavailable
-with the pinned install command as remediation. The ACP initialize response
-separately records the runtime-reported agent name and version.
+launched. Its installer remains pinned to `opencode-ai@1.18.5`, but discovery
+accepts any `opencode` executable found on `PATH`; the ACP probe surfaces auth
+or protocol-compatibility failures. The ACP initialize response separately
+records the runtime-reported agent name and version.
 
 Copilot always uses its exact package spec for ACP launch, even when a global
 `copilot` binary is present on `PATH`, so sessions remain reproducible

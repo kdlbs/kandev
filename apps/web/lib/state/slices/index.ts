@@ -19,6 +19,7 @@ export { createAuthSlice, defaultAuthState } from "./auth/auth-slice";
 export { createAutomationsSlice, defaultAutomationsState } from "./automations/automations-slice";
 export { createSystemSlice, defaultSystemState } from "./system/system-slice";
 export { createPluginsSlice, defaultPluginsState } from "./plugins/plugins-slice";
+export { createReviewSlice, defaultReviewState } from "./review/review-slice";
 
 // Export types
 export type { KanbanSlice, KanbanSliceState, KanbanSliceActions } from "./kanban/types";
@@ -91,6 +92,7 @@ export type {
   PluginsSliceActions,
   PluginsState,
 } from "./plugins/types";
+export type { ReviewSlice, ReviewSliceActions, ReviewSliceState } from "./review/types";
 
 // Re-export commonly used types from each domain
 export type {
@@ -179,6 +181,7 @@ export type {
 } from "./ui/types";
 export type {
   GitHubStatusState,
+  GitHubAppRegistrationsState,
   TaskPRsState,
   PRWatchesState,
   ReviewWatchesState,

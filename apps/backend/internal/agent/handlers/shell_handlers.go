@@ -560,6 +560,16 @@ func (h *ShellHandlers) wsUserShellStop(ctx context.Context, msg *ws.Message) (*
 		return nil, fmt.Errorf("terminal_id is required")
 	}
 
+	// Per-user scoping. Guard on the environment, not task_id: task_id is
+	// optional here, and the legacy fallback below tears down the PTY through
+	// the interactive runner directly, never reaching
+	// GetOrEnsureExecutionForEnvironment where the check normally runs. Without
+	// this, an empty task_id plus a foreign task_environment_id stopped another
+	// user's terminal.
+	if err := h.lifecycleMgr.CheckEnvironmentAccess(ctx, req.TaskEnvironmentID); err != nil {
+		return nil, errors.New("task environment not found")
+	}
+
 	// Managed terminal — route through the service so the DB row is
 	// deleted alongside the PTY tear-down. Destroy errors propagate so
 	// the frontend doesn't optimistically remove a row that the backend

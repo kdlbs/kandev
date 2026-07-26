@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -41,6 +42,10 @@ const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
 // subtask of a kanban subtask (nesting depth > 1). Office task trees are
 // intentionally exempt.
 var ErrSubtaskDepthExceeded = fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+
+// ErrInvalidTaskWorkflow identifies task creation requests whose explicit
+// workflow or workflow step relationship is inconsistent.
+var ErrInvalidTaskWorkflow = errors.New("invalid task workflow")
 
 // ErrTaskAlreadyArchived is returned by ArchiveTask when the target task
 // already has archived_at set. Sentinel so cascade callers (e.g.
@@ -113,6 +118,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		if err := s.resolveOfficeWorkflow(ctx, req); err != nil {
 			return nil, err
 		}
+	}
+	if err := s.validateTaskWorkflow(ctx, req); err != nil {
+		return nil, err
 	}
 
 	workflowStepID := s.resolveWorkflowStep(ctx, req)
@@ -204,6 +212,39 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	}
 	if err := validateTaskRepositoryBranches(req.Repositories); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *Service) validateTaskWorkflow(ctx context.Context, req *CreateTaskRequest) error {
+	if req.WorkflowID == "" {
+		if req.WorkflowStepID != "" {
+			return fmt.Errorf("%w: workflow_step_id requires workflow_id", ErrInvalidTaskWorkflow)
+		}
+		return nil
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, req.WorkflowID)
+	if err != nil {
+		return err
+	}
+	if workflow == nil {
+		return fmt.Errorf("%w: workflow not found", ErrInvalidTaskWorkflow)
+	}
+	if workflow.WorkspaceID != req.WorkspaceID {
+		return repoerrors.ErrWorkspaceNotFound
+	}
+	if req.WorkflowStepID == "" {
+		return nil
+	}
+	if s.workflowStepGetter == nil {
+		return fmt.Errorf("%w: workflow step validation unavailable", ErrInvalidTaskWorkflow)
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, req.WorkflowStepID)
+	if err != nil {
+		return fmt.Errorf("%w: workflow_step_id: %w", ErrInvalidTaskWorkflow, err)
+	}
+	if step == nil || step.WorkflowID != req.WorkflowID {
+		return fmt.Errorf("%w: workflow step not found: %s", ErrInvalidTaskWorkflow, req.WorkflowStepID)
 	}
 	return nil
 }
@@ -923,20 +964,6 @@ func (s *Service) probeProviderDefaultBranchIfMissing(
 		return ""
 	}
 	return probed
-}
-
-// parseGitHubRepoURL parses a GitHub repository URL into owner and name.
-// Supports: https://github.com/owner/repo, github.com/owner/repo,
-// https://github.com/owner/repo.git, with optional trailing slashes.
-func parseGitHubRepoURL(rawURL string) (owner, name string, err error) {
-	provider, owner, name, _, parseErr := parseRemoteRepositoryURL(rawURL, "")
-	if parseErr != nil {
-		return "", "", parseErr
-	}
-	if provider != providerGitHub {
-		return "", "", fmt.Errorf("not a GitHub URL")
-	}
-	return owner, name, nil
 }
 
 // resolvePRNumber returns the GitHub PR number for a repository input. Prefers
@@ -2392,10 +2419,18 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 	if err := s.authorizeWorkflowID(ctx, workflowID); err != nil {
 		return nil, err
 	}
+	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if workflow == nil {
+		return nil, fmt.Errorf("workflow not found: %s", workflowID)
+	}
 	tasks, err := s.tasks.ListTasks(ctx, workflowID)
 	if err != nil {
 		return nil, err
 	}
+	tasks = filterTasksByWorkspace(tasks, workflow.WorkspaceID)
 
 	if err := s.loadTaskRepositoriesBatch(ctx, tasks); err != nil {
 		s.logger.Error("failed to batch-load task repositories", zap.Error(err))
@@ -2403,6 +2438,16 @@ func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.T
 	s.hydrateTaskWorkspaceFoldersBatch(ctx, tasks)
 
 	return tasks, nil
+}
+
+func filterTasksByWorkspace(tasks []*models.Task, workspaceID string) []*models.Task {
+	filtered := tasks[:0]
+	for _, task := range tasks {
+		if task != nil && task.WorkspaceID == workspaceID {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
 }
 
 // ListTasksByWorkspace returns paginated tasks for a workspace with task repositories loaded.

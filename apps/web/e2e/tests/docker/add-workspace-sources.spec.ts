@@ -65,6 +65,18 @@ test.describe("Docker executor — attach workspace sources", () => {
         cleanup_script: "",
         env_vars: fixture.gitConfigEnvVars,
       });
+      const fixtureRepository = await apiClient.createRepository(
+        seedData.workspaceId,
+        fixture.checkoutPath,
+        "main",
+        {
+          name: "fixture/docker-second-source",
+          provider: "gitlab",
+          provider_host: "https://gitlab.com",
+          provider_owner: "fixture",
+          provider_name: "docker-second-source",
+        },
+      );
       const task = await apiClient.createTaskWithAgent(
         seedData.workspaceId,
         "Docker remote workspace sources",
@@ -101,7 +113,11 @@ test.describe("Docker executor — attach workspace sources", () => {
       const attached = await apiClient.rawRequest(
         "POST",
         `/api/v1/tasks/${task.id}/workspace-sources`,
-        sourcePayload(fixture.remoteURL),
+        {
+          sources: [
+            { kind: "repository", repository_id: fixtureRepository.id, base_branch: "main" },
+          ],
+        },
       );
       expect(attached.status).toBe(200);
       expect(

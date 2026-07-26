@@ -24,16 +24,17 @@ func TestSyncWatchesBatched_NegativeCache_ShortCircuits(t *testing.T) {
 	ctx := context.Background()
 
 	w := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "Dead", Repo: "Repo", PRNumber: 7, Branch: "br"}
-	if err := store.CreatePRWatch(ctx, w); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(w)); err != nil {
 		t.Fatalf("create watch: %v", err)
 	}
 	// CreatePRWatch evicts the negative cache, so prime it AFTER the
 	// watch is in place.
-	svc.markRepoAsMissing(w.Owner, w.Repo, svc.repoErrorGenSnapshot())
+	scope := testAutomationScope(t, svc, testWorkspaceID)
+	svc.markRepoAsMissingForScope(scope, w.Owner, w.Repo, svc.repoErrorGenSnapshot())
 
 	// No canned responses — if anything reaches gh the test fails fast
 	// with "no canned PR response" / "no canned branch response".
-	results, err := svc.SyncWatchesBatched(ctx, []*PRWatch{w})
+	results, err := svc.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{w})
 	if err != nil {
 		t.Fatalf("SyncWatchesBatched: %v", err)
 	}
@@ -58,7 +59,7 @@ func TestSyncWatchesBatched_LearnsAndCachesMissingRepo(t *testing.T) {
 	ctx := context.Background()
 
 	w := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "Dead", Repo: "Repo", PRNumber: 7, Branch: "br"}
-	if err := store.CreatePRWatch(ctx, w); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(w)); err != nil {
 		t.Fatalf("create watch: %v", err)
 	}
 
@@ -70,15 +71,15 @@ func TestSyncWatchesBatched_LearnsAndCachesMissingRepo(t *testing.T) {
 		"errors": [{"message": "Could not resolve to a Repository with the name 'Dead/Repo'.", "type": "NOT_FOUND", "path": ["repo0"]}]
 	}`}
 
-	if _, err := svc.SyncWatchesBatched(ctx, []*PRWatch{w}); err != nil {
+	if _, err := svc.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{w}); err != nil {
 		t.Fatalf("first SyncWatchesBatched: %v", err)
 	}
-	if !svc.isRepoCachedAsMissing(w.Owner, w.Repo) {
+	if !svc.isRepoCachedAsMissingForScope(testAutomationScope(t, svc, testWorkspaceID), w.Owner, w.Repo) {
 		t.Fatalf("expected repo to be negative-cached after first sync; cache=%v", svc.repoErrorCache.entries)
 	}
 
 	// Second call must NOT hit gh — the cache short-circuits everything.
-	if _, err := svc.SyncWatchesBatched(ctx, []*PRWatch{w}); err != nil {
+	if _, err := svc.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{w}); err != nil {
 		t.Fatalf("second SyncWatchesBatched: %v", err)
 	}
 	if got := len(gh.prQueries); got != 1 {
@@ -113,7 +114,7 @@ func TestSyncWatchesBatched_NegativeCache_CoalescesConcurrentCalls(t *testing.T)
 	_, svc, gh, store := setupBatchedPollerTest(t)
 
 	w := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "Dead", Repo: "Repo", PRNumber: 7, Branch: "br"}
-	if err := store.CreatePRWatch(context.Background(), w); err != nil {
+	if err := store.CreatePRWatch(context.Background(), withTestWorkspace(w)); err != nil {
 		t.Fatalf("create watch: %v", err)
 	}
 
@@ -122,10 +123,12 @@ func TestSyncWatchesBatched_NegativeCache_CoalescesConcurrentCalls(t *testing.T)
 	// ExecuteGraphQL. (Coalescing-via-singleflight inside the cache is
 	// covered by lower-level cache tests; here we just need to confirm
 	// SyncWatchesBatched honors the cache under concurrency.)
-	svc.markRepoAsMissing(w.Owner, w.Repo, svc.repoErrorGenSnapshot())
+	scope := testAutomationScope(t, svc, testWorkspaceID)
+	svc.markRepoAsMissingForScope(scope, w.Owner, w.Repo, svc.repoErrorGenSnapshot())
 
 	blocker := &blockingExec{graphQLMockClient: gh, release: make(chan struct{})}
 	svc.client = blocker
+	configureTestWorkspaceAuth(t, svc, blocker, testWorkspaceID, "ws-1", "ws1")
 	close(blocker.release) // never block — if any call reaches gh the test will catch it via blocker.calls
 
 	const n = 16
@@ -134,7 +137,9 @@ func TestSyncWatchesBatched_NegativeCache_CoalescesConcurrentCalls(t *testing.T)
 	for i := 0; i < n; i++ {
 		go func() {
 			defer wg.Done()
-			if _, err := svc.SyncWatchesBatched(context.Background(), []*PRWatch{w}); err != nil {
+			if _, err := svc.SyncWorkspaceWatchesBatched(
+				context.Background(), testWorkspaceID, []*PRWatch{w},
+			); err != nil {
 				t.Errorf("concurrent SyncWatchesBatched: %v", err)
 			}
 		}()
@@ -159,7 +164,7 @@ func TestSyncWatchesBatched_FirstMissCoalesces(t *testing.T) {
 	_, svc, gh, store := setupBatchedPollerTest(t)
 
 	w := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "Dead", Repo: "Repo", PRNumber: 7, Branch: "br"}
-	if err := store.CreatePRWatch(context.Background(), w); err != nil {
+	if err := store.CreatePRWatch(context.Background(), withTestWorkspace(w)); err != nil {
 		t.Fatalf("create watch: %v", err)
 	}
 
@@ -193,7 +198,9 @@ func TestSyncWatchesBatched_FirstMissCoalesces(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			joined.Add(1)
-			if _, err := svc.SyncWatchesBatched(context.Background(), []*PRWatch{w}); err != nil {
+			if _, err := svc.SyncWorkspaceWatchesBatched(
+				context.Background(), testWorkspaceID, []*PRWatch{w},
+			); err != nil {
 				errs <- err
 			}
 		}()
@@ -217,7 +224,7 @@ func TestSyncWatchesBatched_FirstMissCoalesces(t *testing.T) {
 	if got := len(gh.prQueries); got != 1 {
 		t.Errorf("expected 1 upstream PR call when concurrent first-time misses coalesce, got %d", got)
 	}
-	if !svc.isRepoCachedAsMissing(w.Owner, w.Repo) {
+	if !svc.isRepoCachedAsMissingForScope(testAutomationScope(t, svc, testWorkspaceID), w.Owner, w.Repo) {
 		t.Errorf("expected repo to be negative-cached after the coalesced fetch")
 	}
 }
@@ -263,7 +270,9 @@ func TestService_EvictRepoNegative_OnWatchCreate(t *testing.T) {
 	// CreatePRWatch must evict regardless of input casing, because the
 	// cache key is case-insensitive.
 	w := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "dead", Repo: "repo", PRNumber: 1, Branch: "main"}
-	if _, err := svc.CreatePRWatch(ctx, w.SessionID, w.TaskID, "", w.Owner, w.Repo, w.PRNumber, w.Branch); err != nil {
+	if _, err := svc.CreatePRWatchForWorkspace(
+		ctx, testWorkspaceID, w.SessionID, w.TaskID, "", w.Owner, w.Repo, w.PRNumber, w.Branch,
+	); err != nil {
 		t.Fatalf("CreatePRWatch: %v", err)
 	}
 	_ = store
@@ -283,10 +292,11 @@ func TestService_TriggerPRSyncAllPermanent_FlagsDeadRepos(t *testing.T) {
 	ctx := context.Background()
 
 	w1 := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "Dead", Repo: "Repo", PRNumber: 0, Branch: "x"}
-	if err := store.CreatePRWatch(ctx, w1); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(w1)); err != nil {
 		t.Fatalf("create w1: %v", err)
 	}
-	svc.markRepoAsMissing(w1.Owner, w1.Repo, svc.repoErrorGenSnapshot())
+	scope := testAutomationScope(t, svc, testWorkspaceID)
+	svc.markRepoAsMissingForScope(scope, w1.Owner, w1.Repo, svc.repoErrorGenSnapshot())
 	// No canned responses needed — the cache short-circuits both watches.
 
 	_, permanent, err := svc.TriggerPRSyncAllPermanent(ctx, "t1")
@@ -300,7 +310,7 @@ func TestService_TriggerPRSyncAllPermanent_FlagsDeadRepos(t *testing.T) {
 	// Add a second watch on a live repo; permanent must flip to false
 	// even though w1 is still cached-missing.
 	w2 := &PRWatch{SessionID: "s2", TaskID: "t1", Owner: "Live", Repo: "Repo", PRNumber: 0, Branch: "y"}
-	if err := store.CreatePRWatch(ctx, w2); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(w2)); err != nil {
 		t.Fatalf("create w2: %v", err)
 	}
 	gh.branchResponses = []string{`{"data":{"b0":{"pullRequests":{"nodes":[]}}}}`}
@@ -329,7 +339,7 @@ func TestWSSyncTaskPR_ReturnsPermanentEnvelopeWhenSyncErrors(t *testing.T) {
 	ctx := context.Background()
 
 	w := &PRWatch{SessionID: "s1", TaskID: "t1", Owner: "Dead", Repo: "Repo", PRNumber: 0, Branch: "x"}
-	if err := store.CreatePRWatch(ctx, w); err != nil {
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(w)); err != nil {
 		t.Fatalf("create watch: %v", err)
 	}
 	gh.branchErr = &batchedMissingReposErr{

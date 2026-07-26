@@ -58,12 +58,16 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
   };
 }
 
-function makeActivityMessage(payload: TaskSessionActivityChangedPayload) {
+function makeActivityMessage(
+  payload: Omit<TaskSessionActivityChangedPayload, "active_subagent_count"> & {
+    active_subagent_count?: number;
+  },
+) {
   return {
     id: "m",
     type: "notification" as const,
     action: "session.activity_changed" as const,
-    payload,
+    payload: { ...payload, active_subagent_count: payload.active_subagent_count ?? 0 },
   };
 }
 
@@ -936,6 +940,39 @@ describe("session.state_changed → agentctl ready fallback", () => {
   });
 });
 
+function applyActivityCount(existingCount: number, nextCount?: number) {
+  const upsert = vi.fn();
+  const store = makeStore({
+    taskSessions: {
+      items: {
+        "s-1": {
+          id: "s-1",
+          task_id: "t-1",
+          state: "RUNNING",
+          active_subagent_count: existingCount,
+        },
+      },
+    },
+    upsertTaskSessionFromEvent: upsert,
+  });
+  const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (
+    msg: ReturnType<typeof makeActivityMessage>,
+  ) => void;
+  const payload: Record<string, unknown> = {
+    task_id: "t-1",
+    session_id: "s-1",
+    foreground_activity: "background",
+  };
+  if (nextCount !== undefined) payload.active_subagent_count = nextCount;
+  handler({
+    id: "m",
+    type: "notification",
+    action: "session.activity_changed",
+    payload,
+  } as ReturnType<typeof makeActivityMessage>);
+  return upsert.mock.calls[0][1];
+}
+
 describe("session.activity_changed handler — fine-grained busy signal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -951,7 +988,12 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
     const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
 
     handler(
-      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+      makeActivityMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        foreground_activity: "background",
+        active_subagent_count: 2,
+      }),
     );
 
     expect(upsert).toHaveBeenCalledTimes(1);
@@ -959,7 +1001,16 @@ describe("session.activity_changed handler — fine-grained busy signal", () => 
       id: "s-1",
       state: "RUNNING",
       foreground_activity: "background",
+      active_subagent_count: 2,
     });
+  });
+
+  it("preserves the known count when an older activity event omits it", () => {
+    expect(applyActivityCount(4)).toMatchObject({ active_subagent_count: 4 });
+  });
+
+  it("clears the known count when an activity event explicitly sends zero", () => {
+    expect(applyActivityCount(4, 0)).toMatchObject({ active_subagent_count: 0 });
   });
 
   it("keeps accepting detached activity updates after the foreground settles", () => {
@@ -1051,12 +1102,14 @@ describe("session.state_changed carries and resets the busy substate", () => {
         new_state: "RUNNING",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         foreground_activity: "generating" as any,
+        active_subagent_count: 2,
       }),
     );
 
     expect(upsert.mock.calls[0][1]).toMatchObject({
       state: "RUNNING",
       foreground_activity: "generating",
+      active_subagent_count: 2,
     });
   });
 

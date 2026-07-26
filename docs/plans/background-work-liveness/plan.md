@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/platform/background-work-liveness.md
 created: 2026-07-21
-status: done
+status: in_progress
 ---
 
 # Implementation Plan: Background work liveness
@@ -26,6 +26,21 @@ remains held open for that subagent; the eventual autonomous completion cycle
 ends with `_meta._claude/origin.kind=task-notification`. A terminal launch-tool
 frame therefore cannot be treated as terminal evidence for either foreground
 idleness or detached-work completion.
+
+## Lifecycle hardening amendment (2026-07-25)
+
+The next pass replaces global normalized-shape recognition with typed
+adapter-issued background-work attestation. Claude retains its covered
+subagent, background-shell, and Monitor paths; Codex subagents opt in after
+terminal child activities are correlated by child thread ID across ACP
+tool-call IDs. Other adapters remain conservatively foreground-busy.
+
+The orchestrator extends each live registration with workload kind and derives
+`active_subagent_count` from the registration map. Session REST/boot/WS payloads
+carry the per-session count, task payloads sum it across sessions, and count-only
+changes publish even if `foreground_activity` stays generating or background.
+The count is runtime-only and does not include background shells or Monitor
+watches. This pass does not add a count badge or subagent list to the UI.
 
 ## Backend
 
@@ -94,6 +109,18 @@ idleness or detached-work completion.
   normalization, so desktop and mobile use the same view model with no new
   composition, touch, navigation, or responsive behavior.
 
+### Sidebar background spinner
+
+- In `apps/web/components/task/task-item.tsx`, render background work with the
+  same `IconCircleDashed` spinner used for foreground running, using violet
+  instead of yellow.
+- Preserve `task-state-background-running` and add the distinct
+  “Background work is running” tooltip/accessibility name. Do not change the
+  board, graph, header, or chat status icon vocabulary in this pass.
+- Treat this as a shared compact-row styling change. The nearest mobile
+  exemplar is the existing mobile task switcher/sidebar row; verify the shared
+  component at mobile width without introducing desktop-only composition.
+
 ## Tests
 
 - **Foreground precedence:** background + foreground output/claim reads
@@ -115,6 +142,24 @@ idleness or detached-work completion.
 - **Frontend flags/store:** settled+background is working but not busy;
   `RUNNING`+generating is busy; foreground always wins; final completion is
   idle. Files: `use-session-state.test.ts` and relevant session WS slice tests.
+- **Adapter trust:** presentation-only subagent/shell payloads do not relax the
+  gate; only Claude/Codex adapter fixtures stamp trusted lifecycle provenance.
+  Files: stream payload tests, ACP normalizer/dialect tests, and
+  `foreground_busy_signal_test.go`.
+- **Codex cross-ID terminal correlation:** start under one tool-call ID followed
+  by completed/interrupted/cancelled/error/shutdown/not-found child activity
+  under another retires the original registration exactly once; controls do not
+  create a second card. Files: `dialect_codex_test.go`, `subagent_test.go`, and
+  focused orchestrator lifecycle tests.
+- **Active subagent count:** one typed registration per live subagent; duplicate
+  terminal events are harmless; shells/Monitor do not count; execution teardown
+  clears registrations; session and task DTOs expose exact count on fresh load;
+  count-only WS/task updates publish. Files: stream payload tests,
+  `background_work_accounting_test.go`, foreground activity fresh-load/signal
+  tests, and task DTO/service tests.
+- **Sidebar spinner:** background uses `IconCircleDashed`, violet spinning
+  classes, a distinct test ID, and an accessible background label while
+  generating stays yellow. File: `apps/web/components/task/task-item.test.tsx`.
 
 ## E2E Tests
 
@@ -130,6 +175,10 @@ idleness or detached-work completion.
   foreground-ended/background-live outcome at Pixel 5 width. No mobile layout
   contract changes; this covers the shared state normalization already rendered
   by the existing mobile surface.
+- Re-run desktop and Pixel 5 busy-signal scenarios to prove the composer accepts
+  input only for attested background work and the shared sidebar/task-switcher
+  renders the violet dashed spinner. Provider coverage itself stays at captured
+  ACP fixture level; CI does not need live credentials for every agent.
 
 ## Implementation Waves
 
@@ -184,3 +233,19 @@ Wave 12:
 Wave 13:
 
 - [x] [Task 13: Async lifecycle review and verification](task-13-async-lifecycle-review-and-verification.md)
+
+Wave 14:
+
+- [x] [Task 14: Attest supported background lifecycles](task-14-attest-background-lifecycles.md)
+
+Wave 15:
+
+- [x] [Task 15: Publish active subagent counts](task-15-publish-active-subagent-counts.md)
+
+Wave 16:
+
+- [x] [Task 16: Align the sidebar background spinner](task-16-sidebar-background-spinner.md)
+
+Wave 17:
+
+- [ ] [Task 17: Verify hardened background liveness](task-17-verify-hardened-background-liveness.md)

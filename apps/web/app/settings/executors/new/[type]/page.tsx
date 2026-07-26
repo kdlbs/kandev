@@ -219,10 +219,8 @@ function useCreateRemoteFlags(executorType: ExecutorType) {
   };
 }
 
-function useCreateRemoteAuthState(executorType: ExecutorType) {
-  const [remoteCredentials, setRemoteCredentials] = useState<string[]>(() =>
-    executorType === "sprites" ? ["gh_cli_token"] : [],
-  );
+function useCreateRemoteAuthState() {
+  const [remoteCredentials, setRemoteCredentials] = useState<string[]>([]);
   const [agentEnvVars, setAgentEnvVars] = useState<Record<string, string | null>>({});
   const [networkPolicyRules, setNetworkPolicyRules] = useState<NetworkPolicyRule[]>([]);
 
@@ -290,7 +288,7 @@ function useCreateProfileFormState(executorType: ExecutorType) {
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar } = useEnvVarRows([]);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
   const [spritesSecretId, setSpritesSecretId] = useState<string | null>(null);
-  const remoteAuth = useCreateRemoteAuthState(executorType);
+  const remoteAuth = useCreateRemoteAuthState();
   const [dockerfile, setDockerfile] = useState("");
   const [imageTag, setImageTag] = useState("");
   const [builtDockerImage, setBuiltDockerImage] = useState<DockerBuildSuccess | null>(null);

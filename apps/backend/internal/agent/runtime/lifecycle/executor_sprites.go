@@ -162,6 +162,10 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 			return nil, err
 		}
 	}
+	if err := r.preflightGitHubCredentialBroker(ctx, sprite, req); err != nil {
+		r.cleanupOnFailure(ctx, sprite, req.InstanceID, destroyOnFailure)
+		return nil, err
+	}
 
 	// Steps 1-3: Upload agentctl, credentials, prepare script
 	if err := r.stepSetupEnvironment(ctx, sprite, req, reconnect, report); err != nil {
@@ -201,6 +205,24 @@ func (r *SpritesExecutor) CreateInstance(ctx context.Context, req *ExecutorCreat
 		zap.Int("instance_port", instancePort))
 
 	return r.buildInstanceResult(req, spriteName, sprite, localPort, instancePort, reusingExisting), nil
+}
+
+func (r *SpritesExecutor) preflightGitHubCredentialBroker(
+	ctx context.Context,
+	sprite *sprites.Sprite,
+	req *ExecutorCreateRequest,
+) error {
+	return runBrokerReachabilityPreflight(ctx, req.Env, func(
+		ctx context.Context,
+		command string,
+		env map[string]string,
+	) ([]byte, error) {
+		stepCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		defer cancel()
+		cmd := sprite.CommandContext(stepCtx, "sh", "-c", command)
+		cmd.Env = r.buildSpriteEnv(env)
+		return cmd.CombinedOutput()
+	})
 }
 
 // resolveSpriteName determines the sprite name based on request and reconnect state.
@@ -418,14 +440,28 @@ func (r *SpritesExecutor) stepEnsureAgentInstance(
 	if reconnect {
 		instanceID := spritesAgentInstanceID(req)
 		port, portErr := r.getExistingInstancePort(ctx, sprite, instanceID)
-		if portErr == nil && port > 0 && r.isAgentSubprocessRunning(ctx, sprite, port) {
-			instancePort = port
-			reusingExisting = true
-		} else if portErr == nil && port > 0 {
-			instancePort = port
-			r.logger.Info("existing instance found but agent subprocess not running",
-				zap.String("instance_id", instanceID),
-				zap.Int("port", port))
+		if portErr == nil && port > 0 {
+			switch {
+			case hasManagedGitHubBrokerEnv(req.Env):
+				replacementPort, err := replaceSpriteReconnectInstance(ctx,
+					liveSpriteReconnectInstanceControl{executor: r, sprite: sprite}, req, instanceID)
+				if err != nil {
+					completeStepError(&step, err.Error())
+					report(spriteStepAgentInstance, step)
+					return 0, false, err
+				}
+				instancePort = replacementPort
+				r.logger.Info("deleted existing agent instance to refresh managed GitHub credentials",
+					zap.String("instance_id", instanceID))
+			case r.isAgentSubprocessRunning(ctx, sprite, port):
+				instancePort = port
+				reusingExisting = true
+			default:
+				instancePort = port
+				r.logger.Info("existing instance found but agent subprocess not running",
+					zap.String("instance_id", instanceID),
+					zap.Int("port", port))
+			}
 		}
 	}
 	if instancePort == 0 {

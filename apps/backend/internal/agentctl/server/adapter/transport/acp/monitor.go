@@ -206,6 +206,28 @@ func (a *Adapter) takeActiveMonitors(sessionID string) map[string]string {
 	return monitors
 }
 
+// takePromptEndMonitors removes only monitors owned by the completing prompt.
+// Monitors protected at a human handoff continue routing predecessor output
+// until their authoritative terminal update or an explicit session reset.
+func (a *Adapter) takePromptEndMonitors(sessionID string) map[string]string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	active := a.activeMonitors[sessionID]
+	taken := make(map[string]string)
+	for taskID, toolCallID := range active {
+		if a.isPromptHandoffToolProtectedLocked(toolCallID) {
+			continue
+		}
+		taken[taskID] = toolCallID
+		delete(active, taskID)
+	}
+	if len(active) == 0 {
+		delete(a.activeMonitors, sessionID)
+	}
+	return taken
+}
+
 // extractMonitorEvents parses every `<task-notification>` envelope out of an
 // agent_message_chunk text, replaces each match with empty string, and
 // returns the cleaned text plus the parsed events in order.
@@ -291,9 +313,6 @@ func seedMonitorView(payload *streams.NormalizedPayload, taskID, command string)
 		view.Command = command
 	}
 	g.Output = monitorOutputWrapper(view)
-	// Attest, out of band of the agent-shaped Output map, that WE recognized this
-	// as a Monitor — this is what the background-work classifier trusts.
-	payload.SetMonitorIdentity(view.TaskID, view.Ended)
 }
 
 // updateMonitorPayloadView mutates the Monitor tool's NormalizedPayload to
@@ -323,7 +342,9 @@ func appendMonitorEvent(payload *streams.NormalizedPayload, taskID, command, bod
 	view.EventCount++
 	view.RecentEvents = appendCapped(view.RecentEvents, body, monitorPayloadCap)
 	g.Output = monitorOutputWrapper(view)
-	payload.SetMonitorIdentity(view.TaskID, view.Ended)
+	if payload.Monitor() != nil {
+		payload.SetMonitorIdentity(view.TaskID, view.Ended)
+	}
 	return payload
 }
 
@@ -343,7 +364,9 @@ func markMonitorEnded(payload *streams.NormalizedPayload, reason string) *stream
 	g.Output = monitorOutputWrapper(view)
 	// Keep the attestation in step with the view: an ended Monitor no longer holds
 	// the busy signal open.
-	payload.SetMonitorIdentity(view.TaskID, true)
+	if payload.Monitor() != nil {
+		payload.SetMonitorIdentity(view.TaskID, true)
+	}
 	return payload
 }
 
@@ -528,11 +551,12 @@ func (a *Adapter) dropMonitorByToolCallID(sessionID, toolCallID string) {
 // parent prompt naturally completes — the Monitor process exits with the
 // agent turn, so the card should flip from "watching" to "ended".
 func (a *Adapter) sweepMonitorsOnPromptEnd(sessionID string) {
-	for _, toolCallID := range a.takeActiveMonitors(sessionID) {
+	for _, toolCallID := range a.takePromptEndMonitors(sessionID) {
 		a.mu.Lock()
 		payload := a.activeToolCalls[toolCallID]
 		markMonitorEnded(payload, "exited")
 		delete(a.activeToolCalls, toolCallID)
+		a.forgetPromptHandoffToolLocked(toolCallID)
 		a.mu.Unlock()
 		a.sendUpdate(monitorTerminalEvent(sessionID, toolCallID, toolStatusComplete, "Monitor exited", payload))
 	}
@@ -549,6 +573,7 @@ func (a *Adapter) sweepMonitorsOnReplayEnd(sessionID string) {
 		payload := a.activeToolCalls[toolCallID]
 		markMonitorEnded(payload, "session_restart")
 		delete(a.activeToolCalls, toolCallID)
+		a.forgetPromptHandoffToolLocked(toolCallID)
 		a.mu.Unlock()
 		a.sendUpdate(monitorTerminalEvent(sessionID, toolCallID, toolStatusCancelled, "Monitor ended (session restart)", payload))
 	}

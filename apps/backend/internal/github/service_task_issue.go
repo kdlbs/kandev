@@ -64,6 +64,42 @@ func (s *Service) LinkTaskIssue(ctx context.Context, taskID string, req LinkTask
 	if s.client == nil {
 		return nil, ErrNoClient
 	}
+	return s.linkTaskIssueWithClient(ctx, s.client, taskID, req)
+}
+
+// LinkTaskIssueForUser derives workspace ownership from the task before
+// resolving a personal-read credential. A task without ownership fails closed.
+func (s *Service) LinkTaskIssueForUser(
+	ctx context.Context, userID, taskID string, req LinkTaskIssueRequest,
+) (*TaskIssueLinkResponse, error) {
+	store := s.getTaskIssueStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	task, err := store.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil || strings.TrimSpace(task.WorkspaceID) == "" {
+		return nil, ErrGitHubWorkspaceRequired
+	}
+	owner, repo, number, err := resolveIssueReference(req)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, task.WorkspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, task.WorkspaceID, userID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	return s.linkTaskIssueResolved(ctx, resolved.Client, store, task, taskID, owner, repo, number)
+}
+
+func (s *Service) linkTaskIssueWithClient(
+	ctx context.Context, client Client, taskID string, req LinkTaskIssueRequest,
+) (*TaskIssueLinkResponse, error) {
 	store := s.getTaskIssueStore()
 	if store == nil {
 		return nil, errStoreUnavailable
@@ -76,7 +112,20 @@ func (s *Service) LinkTaskIssue(ctx context.Context, taskID string, req LinkTask
 	if err != nil {
 		return nil, err
 	}
-	issue, err := s.client.GetIssue(ctx, owner, repo, number)
+	return s.linkTaskIssueResolved(ctx, client, store, task, taskID, owner, repo, number)
+}
+
+func (s *Service) linkTaskIssueResolved(
+	ctx context.Context,
+	client Client,
+	store TaskIssueStore,
+	task *taskmodels.Task,
+	taskID string,
+	owner string,
+	repo string,
+	number int,
+) (*TaskIssueLinkResponse, error) {
+	issue, err := client.GetIssue(ctx, owner, repo, number)
 	if err != nil {
 		return nil, err
 	}

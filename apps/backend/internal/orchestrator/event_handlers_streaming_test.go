@@ -1006,6 +1006,10 @@ func TestCompleteStreamFromCompletedExecutionFlushesAgentText(t *testing.T) {
 	firstTurn, err := svc.turnService.StartTurn(ctx, "s1")
 	require.NoError(t, err)
 	svc.markExecutionCompleted("s1", "exec-1")
+	// StopExecution can emit agent.stopped after agent.completed but before this
+	// buffered terminal stream. The stopped marker must not downgrade permission
+	// to flush the successful execution's final text and metadata.
+	svc.markExecutionFailed("s1", "exec-1")
 	svc.completeTurnForSession(ctx, "s1")
 	nextTurn, err := svc.turnService.StartTurn(ctx, "s1")
 	require.NoError(t, err)
@@ -1736,6 +1740,35 @@ func TestCompletedExecutionMarkerExpiresAndDeletes(t *testing.T) {
 	svc.deleteCompletedExecutionIfExpired(currentKey, laterExpiry)
 	_, ok = svc.completedExecutions.Load(currentKey)
 	require.False(t, ok, "matching expiry callback should delete the marker")
+}
+
+func TestTerminalExecutionMarker_CompletionPermissionIsMonotonic(t *testing.T) {
+	svc := &Service{}
+	const sessionID, executionID = "session-terminal-race", "execution-terminal-race"
+	key := terminalExecutionKey(sessionID, executionID)
+
+	for range 25 {
+		svc.completedExecutions.Delete(key)
+		start := make(chan struct{})
+		var wait sync.WaitGroup
+		wait.Add(2)
+		go func() {
+			defer wait.Done()
+			<-start
+			svc.markExecutionCompleted(sessionID, executionID)
+		}()
+		go func() {
+			defer wait.Done()
+			<-start
+			svc.markExecutionFailed(sessionID, executionID)
+		}()
+		close(start)
+		wait.Wait()
+
+		marker, ok := svc.terminalCompleteStreamMarker(sessionID, executionID)
+		require.True(t, ok, "concurrent stopped marker downgraded successful completion")
+		require.True(t, marker.allowCompleteStream)
+	}
 }
 
 // TestSetSessionRunning_NoRedundantTaskWrites locks in the dedup: when the

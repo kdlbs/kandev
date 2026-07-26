@@ -55,12 +55,26 @@ func (s *Service) WaitForSessionReady(ctx context.Context, sessionID string) err
 
 // ListTaskSessions returns all sessions for a task.
 func (s *Service) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
 	return s.sessions.ListTaskSessions(ctx, taskID)
 }
 
 // GetTaskSession returns a single session by ID.
+//
+// Scoping authorizes off the row we just read rather than calling
+// AuthorizeSessionAccess, which would re-read the same session: this is a hot
+// path (every session-keyed HTTP route and several MCP tools land here).
 func (s *Service) GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error) {
-	return s.sessions.GetTaskSession(ctx, sessionID)
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeTaskID(ctx, session.TaskID); err != nil {
+		return nil, err
+	}
+	return session, nil
 }
 
 // GetExecutorRunningBySessionID returns the live executor row for sessionID,
@@ -80,6 +94,9 @@ func (s *Service) GetExecutorRunningBySessionID(ctx context.Context, sessionID s
 func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp string) (*models.TaskSession, error) {
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.authorizeTaskID(ctx, session.TaskID); err != nil {
 		return nil, err
 	}
 	lastErr, ok := models.LoadLastAgentError(session.Metadata)
@@ -102,6 +119,9 @@ func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp st
 
 // GetPrimarySession returns the primary session for a task.
 func (s *Service) GetPrimarySession(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
 	return s.sessions.GetPrimarySessionByTaskID(ctx, taskID)
 }
 

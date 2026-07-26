@@ -265,6 +265,7 @@ type mockRepository struct {
 	// Optional hook to inject behavior into GetTaskSession (e.g. simulate a
 	// transient DB error); if nil, the default map lookup is used.
 	getTaskSessionFunc                 func(ctx context.Context, id string) (*models.TaskSession, error)
+	getTaskEnvironmentByTaskIDFunc     func(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	createTaskSessionFunc              func(ctx context.Context, session *models.TaskSession) error
 	updateTaskSessionStateFunc         func(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error
 	listActiveTaskSessionsByTaskIDFunc func(ctx context.Context, taskID string) ([]*models.TaskSession, error)
@@ -483,7 +484,32 @@ func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.setSessionPrimaryCalls = append(m.setSessionPrimaryCalls, sessionID)
+	for _, session := range m.sessions {
+		session.IsPrimary = session.ID == sessionID
+	}
 	return nil
+}
+
+func (m *mockRepository) UpdateTaskStateIfPrimarySessionState(
+	_ context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (v1.TaskState, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	task := m.tasks[taskID]
+	session := m.sessions[sessionID]
+	if task == nil || session == nil {
+		return "", false, nil
+	}
+	oldState := task.State
+	if task.ArchivedAt != nil || session.TaskID != taskID ||
+		session.State != expectedSessionState || !session.IsPrimary {
+		return oldState, false, nil
+	}
+	task.State = state
+	return oldState, true, nil
 }
 
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, sessionID string, state models.TaskSessionState, errorMessage string) error {
@@ -1042,7 +1068,10 @@ func (m *mockRepository) GetTaskEnvironment(_ context.Context, id string) (*mode
 	}
 	return nil, nil
 }
-func (m *mockRepository) GetTaskEnvironmentByTaskID(_ context.Context, taskID string) (*models.TaskEnvironment, error) {
+func (m *mockRepository) GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
+	if m.getTaskEnvironmentByTaskIDFunc != nil {
+		return m.getTaskEnvironmentByTaskIDFunc(ctx, taskID)
+	}
 	for _, env := range m.taskEnvironments {
 		if env.TaskID == taskID {
 			return env, nil

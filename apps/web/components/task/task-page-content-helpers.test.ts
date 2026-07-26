@@ -84,7 +84,7 @@ describe("buildDebugEntries", () => {
     );
 
     expect(entries.acp_session_id).toBe("acp-1");
-    expect(entries.acp_session_title).toBe("List files");
+    expect(entries).not.toHaveProperty("acp_session_title");
     expect(entries.acp_session_updated_at).toBe("2026-06-13T19:37:46Z");
     expect(entries.acp_meta).toEqual({ cursor: { requestId: "req-1" } });
   });

@@ -195,3 +195,11 @@ fix becomes large/complex, changes a contract or trust boundary, invalidates
 prior evidence, or exposes a gap that gate must assess. A bug fix preserving
 an existing ADR or invariant is not by itself a new boundary. Simplification,
 when used, happens before semantic review so its edits are covered.
+
+When a final verifier is silent after two normal status waits, inspect the
+worker state and its owned command/process group before waiting again. If no
+command remains, interrupt that same worker once to retrieve its buffered
+completion report; do not replace it. Start another verifier only after the
+first is confirmed stopped and did not produce a usable exact-artifact result.
+If liveness cannot be established, report verification blocked. This recovers
+completed reports without paying for duplicate full suites.

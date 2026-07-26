@@ -85,6 +85,14 @@ const (
 	TaskWalkthroughDeleted = "task_walkthrough.deleted"
 )
 
+// Event types for native code review (agent-authored anchored findings)
+const (
+	TaskReviewRunUpdated        = "task_review.run_updated"
+	TaskReviewFindingsPublished = "task_review.findings_published"
+	TaskReviewFindingUpdated    = "task_review.finding_updated"
+	TaskReviewCleared           = "task_review.cleared"
+)
+
 // Event types for session turns
 const (
 	TurnStarted   = "turn.started"
