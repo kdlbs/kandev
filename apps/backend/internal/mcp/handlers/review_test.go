@@ -34,14 +34,30 @@ func wsErrorDetails(t *testing.T, resp *ws.Message) map[string]interface{} {
 
 // stubReviewRunner records the launch request and returns a canned outcome.
 type stubReviewRunner struct {
-	run      *models.TaskReviewRun
-	err      error
-	launched []review.RunRequest
+	run       *models.TaskReviewRun
+	err       error
+	launched  []review.RunRequest
+	cancelled []string
+	cancelRun *models.TaskReviewRun
+	cancelErr error
 }
 
 func (s *stubReviewRunner) Launch(_ context.Context, req review.RunRequest) (*models.TaskReviewRun, error) {
 	s.launched = append(s.launched, req)
 	return s.run, s.err
+}
+
+func (s *stubReviewRunner) Cancel(_ context.Context, runID string) (*models.TaskReviewRun, error) {
+	s.cancelled = append(s.cancelled, runID)
+	if s.cancelErr != nil {
+		return nil, s.cancelErr
+	}
+	// Mirror the real runner, which delegates to the service and therefore
+	// surfaces not-found for a run it does not know.
+	if s.cancelRun == nil {
+		return nil, models.ErrTaskReviewRunNotFound
+	}
+	return s.cancelRun, nil
 }
 
 func newReviewHandlers(t *testing.T) (*Handlers, *service.ReviewService, *stubReviewRunner) {
@@ -305,7 +321,10 @@ func TestHandleGetAndClearTaskReview(t *testing.T) {
 }
 
 func TestHandleCancelTaskReview(t *testing.T) {
+	// Exercises the service-backed semantics directly. Runner routing (which also
+	// stops live inference) has its own test below.
 	h, reviewSvc, _ := newReviewHandlers(t)
+	h.SetReviewRunner(nil)
 	seedReviewHandlerTask(t, h, "task-cancel")
 	run, err := reviewSvc.CreateRun(context.Background(), service.CreateRunRequest{TaskID: "task-cancel"})
 	require.NoError(t, err)
@@ -328,4 +347,35 @@ func TestHandleCancelTaskReview(t *testing.T) {
 		require.NoError(t, err)
 		assertWSError(t, resp, ws.ErrorCodeNotFound)
 	})
+}
+
+// TestHandleCancelTaskReview_RoutesThroughRunner pins the fix for cancel only
+// marking the DB row: the handler must go through the runner, which also cancels
+// the live inference context, otherwise a finishing pass overwrites the status.
+func TestHandleCancelTaskReview_RoutesThroughRunner(t *testing.T) {
+	h, reviewSvc, runner := newReviewHandlers(t)
+	seedReviewHandlerTask(t, h, "task-runner-cancel")
+	run, err := reviewSvc.CreateRun(context.Background(), service.CreateRunRequest{TaskID: "task-runner-cancel"})
+	require.NoError(t, err)
+	runner.cancelRun = run
+
+	msg := makeWSMessage(t, ws.ActionTaskReviewCancel, map[string]interface{}{"run_id": run.ID})
+	resp, err := h.handleCancelTaskReview(context.Background(), msg)
+	require.NoError(t, err)
+	requireWSSuccess(t, resp)
+	require.Equal(t, []string{run.ID}, runner.cancelled,
+		"cancel must reach the runner so the live pass stops, not just the DB row")
+}
+
+func TestHandleCancelTaskReview_FallsBackToServiceWithoutRunner(t *testing.T) {
+	h, reviewSvc, _ := newReviewHandlers(t)
+	h.SetReviewRunner(nil)
+	seedReviewHandlerTask(t, h, "task-no-runner")
+	run, err := reviewSvc.CreateRun(context.Background(), service.CreateRunRequest{TaskID: "task-no-runner"})
+	require.NoError(t, err)
+
+	msg := makeWSMessage(t, ws.ActionTaskReviewCancel, map[string]interface{}{"run_id": run.ID})
+	resp, err := h.handleCancelTaskReview(context.Background(), msg)
+	require.NoError(t, err)
+	requireWSSuccess(t, resp)
 }

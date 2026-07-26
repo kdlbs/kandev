@@ -15,9 +15,9 @@ export function registerReviewHandlers(store: StoreApi<AppState>): WsHandlers {
       store.getState().upsertReviewRun(task_id, run);
     },
     "task.review.findings_published": (message) => {
-      const { task_id, findings } = message.payload;
+      const { task_id, findings, superseded_ids } = message.payload;
       if (!task_id || !findings?.length) return;
-      store.getState().addReviewFindings(task_id, findings);
+      store.getState().addReviewFindings(task_id, findings, superseded_ids);
     },
     "task.review.finding_updated": (message) => {
       const { task_id, finding } = message.payload;

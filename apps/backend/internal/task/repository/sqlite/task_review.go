@@ -260,35 +260,50 @@ func (r *Repository) UpdateTaskReviewFindingStatus(ctx context.Context, findingI
 // runs that anchor to the same place with the same title as one of keys. A
 // re-review therefore refreshes an issue instead of listing it twice, while
 // findings the human already resolved or dismissed stay untouched.
-func (r *Repository) DeleteSupersededTaskReviewFindings(ctx context.Context, taskID, runID string, keys []models.ReviewFindingKey) (int, error) {
+func (r *Repository) DeleteSupersededTaskReviewFindings(ctx context.Context, taskID, runID string, keys []models.ReviewFindingKey) ([]string, error) {
 	if len(keys) == 0 {
-		return 0, nil
+		return nil, nil
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("failed to begin supersede tx: %w", err)
+		return nil, fmt.Errorf("failed to begin supersede tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// RETURNING id rather than a bare row count: a connected client holds the
+	// old findings in memory and needs the exact ids to drop, otherwise a
+	// re-review shows the superseded finding alongside its replacement.
 	// One statement per key keeps the SQL simple and stays well inside SQLite's
 	// bound-parameter limit even for a large review.
 	stmt := tx.Rebind(`DELETE FROM task_review_findings
 		WHERE task_id = ? AND run_id != ? AND status = ?
 			AND repository_name = ? AND file_path = ?
-			AND start_line = ? AND end_line = ? AND title = ?`)
-	deleted := 0
+			AND start_line = ? AND end_line = ? AND title = ?
+		RETURNING id`)
+	var deleted []string
 	for _, k := range keys {
-		result, execErr := tx.ExecContext(ctx, stmt, taskID, runID,
+		rows, execErr := tx.QueryContext(ctx, stmt, taskID, runID,
 			string(models.ReviewFindingOpen), k.RepositoryName, k.FilePath,
 			k.StartLine, k.EndLine, k.Title)
 		if execErr != nil {
-			return 0, fmt.Errorf("failed to delete superseded task review finding: %w", execErr)
+			return nil, fmt.Errorf("failed to delete superseded task review finding: %w", execErr)
 		}
-		rows, _ := result.RowsAffected()
-		deleted += int(rows)
+		for rows.Next() {
+			var id string
+			if scanErr := rows.Scan(&id); scanErr != nil {
+				_ = rows.Close()
+				return nil, fmt.Errorf("failed to scan superseded finding id: %w", scanErr)
+			}
+			deleted = append(deleted, id)
+		}
+		if rowsErr := rows.Err(); rowsErr != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("failed to iterate superseded finding ids: %w", rowsErr)
+		}
+		_ = rows.Close()
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, fmt.Errorf("failed to commit supersede tx: %w", err)
+		return nil, fmt.Errorf("failed to commit supersede tx: %w", err)
 	}
 	return deleted, nil
 }

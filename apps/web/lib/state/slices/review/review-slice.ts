@@ -37,12 +37,13 @@ function mergeFindings(
   return Array.from(byId.values());
 }
 
-export const createReviewSlice: StateCreator<
-  ReviewSlice,
-  [["zustand/immer", never]],
-  [],
-  ReviewSlice
-> = (set: ImmerSet) => ({
+/**
+ * Typed as a plain factory over `set` rather than a full `StateCreator` because
+ * that is all this slice uses. Declaring the unused `get`/`api` params only to
+ * satisfy the broader signature makes every call site pass superfluous
+ * arguments (CodeQL js/superfluous-trailing-arguments).
+ */
+export const createReviewSlice = (set: ImmerSet): ReviewSlice => ({
   ...defaultReviewState,
 
   setTaskReview: (taskId, snapshot) =>
@@ -65,12 +66,17 @@ export const createReviewSlice: StateCreator<
       );
     }),
 
-  addReviewFindings: (taskId, findings) =>
+  addReviewFindings: (taskId, findings, supersededIds) =>
     set((draft) => {
-      draft.taskReview.findingsByTaskId[taskId] = mergeFindings(
-        draft.taskReview.findingsByTaskId[taskId] ?? [],
-        findings,
-      );
+      // The backend deletes a superseded finding and inserts a replacement with a
+      // new id, so merging by id alone would leave both visible at the same
+      // anchor until a reload. Drop the superseded ids first.
+      const existing = draft.taskReview.findingsByTaskId[taskId] ?? [];
+      const kept =
+        supersededIds && supersededIds.length > 0
+          ? existing.filter((f) => !supersededIds.includes(f.id))
+          : existing;
+      draft.taskReview.findingsByTaskId[taskId] = mergeFindings(kept, findings);
     }),
 
   updateReviewFinding: (taskId, finding) =>

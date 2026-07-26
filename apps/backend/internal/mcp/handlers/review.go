@@ -17,6 +17,9 @@ import (
 // unavailable rather than panicking.
 type ReviewRunner interface {
 	Launch(ctx context.Context, req review.RunRequest) (*models.TaskReviewRun, error)
+	// Cancel stops a live pass as well as marking the row, so inference cannot
+	// finish afterwards and overwrite the cancelled status.
+	Cancel(ctx context.Context, runID string) (*models.TaskReviewRun, error)
 }
 
 // SetReviewService wires the code-review persistence service, enabling the
@@ -194,7 +197,13 @@ func (h *Handlers) handleCancelTaskReview(ctx context.Context, msg *ws.Message) 
 	if req.RunID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "run_id is required", nil)
 	}
-	run, err := h.reviewService.CancelRun(ctx, req.RunID)
+	// Prefer the runner: it cancels the live context too. The service alone only
+	// marks the row, which a still-running pass would overwrite.
+	cancel := h.reviewService.CancelRun
+	if h.reviewRunner != nil {
+		cancel = h.reviewRunner.Cancel
+	}
+	run, err := cancel(ctx, req.RunID)
 	if err != nil {
 		if errors.Is(err, service.ErrReviewRunNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Review run not found", nil)

@@ -43,7 +43,21 @@ describe("registerReviewHandlers", () => {
         findings: [finding],
       }),
     );
-    expect(actions.addReviewFindings).toHaveBeenCalledWith("t1", [finding]);
+    expect(actions.addReviewFindings).toHaveBeenCalledWith("t1", [finding], undefined);
+  });
+
+  it("forwards superseded ids so the client drops replaced findings", () => {
+    const { store, actions } = newFakeStore();
+    const handlers = registerReviewHandlers(store);
+    handlers["task.review.findings_published"]!(
+      message("task.review.findings_published", {
+        task_id: "t1",
+        run_id: "run-1",
+        findings: [finding],
+        superseded_ids: ["old-1"],
+      }),
+    );
+    expect(actions.addReviewFindings).toHaveBeenCalledWith("t1", [finding], ["old-1"]);
   });
 
   it("updates a finding on task.review.finding_updated", () => {

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
@@ -76,6 +77,10 @@ func (f *fakeStore) MarkRunRunning(_ context.Context, runID string) (*models.Tas
 func (f *fakeStore) CompleteRun(_ context.Context, req taskservice.CompleteRunRequest) (*models.TaskReviewRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// Mirror ReviewService.mutateRunIfLive: a terminal run is never resurrected.
+	if run := f.runs[req.RunID]; run != nil && run.Status.IsTerminal() {
+		return run, nil
+	}
 	f.completed = append(f.completed, req)
 	f.statuses = append(f.statuses, models.ReviewRunCompleted)
 	run := f.runs[req.RunID]
@@ -88,6 +93,10 @@ func (f *fakeStore) CompleteRun(_ context.Context, req taskservice.CompleteRunRe
 func (f *fakeStore) FailRun(_ context.Context, runID, code, message string, _ int) (*models.TaskReviewRun, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	// Mirror ReviewService.mutateRunIfLive: a terminal run is never resurrected.
+	if run := f.runs[runID]; run != nil && run.Status.IsTerminal() {
+		return run, nil
+	}
 	f.failures = append(f.failures, fakeFailure{code: code, message: message})
 	f.statuses = append(f.statuses, models.ReviewRunFailed)
 	run := f.runs[runID]
@@ -95,6 +104,37 @@ func (f *fakeStore) FailRun(_ context.Context, runID, code, message string, _ in
 		run.Status = models.ReviewRunFailed
 	}
 	return run, nil
+}
+
+func (f *fakeStore) CancelRun(_ context.Context, runID string) (*models.TaskReviewRun, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.statuses = append(f.statuses, models.ReviewRunCancelled)
+	run := f.runs[runID]
+	if run == nil {
+		return nil, models.ErrTaskReviewRunNotFound
+	}
+	// Mirror the real service: a terminal run is left alone.
+	if run.Status.IsTerminal() {
+		return run, nil
+	}
+	run.Status = models.ReviewRunCancelled
+	return run, nil
+}
+
+func (f *fakeStore) statusOf(runID string) models.ReviewRunStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if run := f.runs[runID]; run != nil {
+		return run.Status
+	}
+	return ""
+}
+
+func (f *fakeStore) runCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.runs)
 }
 
 func (f *fakeStore) PublishFindings(_ context.Context, req taskservice.PublishFindingsRequest) (*models.TaskReviewRun, []*models.TaskReviewFinding, error) {
@@ -669,5 +709,168 @@ func TestRunner_TaskContextErrorDoesNotFailTheRun(t *testing.T) {
 	}
 	if _, ok := store.lastCompleted(); !ok {
 		t.Fatal("missing task metadata must not fail the review")
+	}
+}
+
+// blockingInference holds a pass open until released, so a test can observe the
+// window between "inference started" and "run completed".
+type blockingInference struct {
+	started  chan struct{}
+	release  chan struct{}
+	response string
+	once     sync.Once
+}
+
+func (b *blockingInference) Run(ctx context.Context, identity ReviewerIdentity, _ string, _ string) (*PromptResult, error) {
+	b.once.Do(func() { close(b.started) })
+	select {
+	case <-b.release:
+		return &PromptResult{Response: b.response, Model: identity.Model}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func newBlockingHarness(t *testing.T, response string) (*Runner, *fakeStore, *blockingInference) {
+	t.Helper()
+	store := newFakeStore()
+	inference := &blockingInference{
+		started:  make(chan struct{}),
+		release:  make(chan struct{}),
+		response: response,
+	}
+	runner := NewRunner(RunnerDeps{
+		Store:     store,
+		Resolver:  NewResolver(nil, &fakeUtility{found: true, enabled: true, agentID: "a", model: "m"}, nil),
+		Changes:   &fakeChangeSource{uncommitted: map[string]any{"a.go": fileEntry("a.go", "@@ -1 +1,2 @@\n x\n+y\n", "", "")}},
+		Inference: inference,
+		Prompts:   &fakePrompts{},
+		Sessions:  &fakeSessions{sessionID: "sess-1"},
+		Logger:    testLogger(t),
+	})
+	runner.Start(context.Background())
+	t.Cleanup(func() {
+		close(inference.release)
+		runner.Stop()
+	})
+	return runner, store, inference
+}
+
+// TestRunner_CancelStopsInferenceAndKeepsRunCancelled covers the bug where
+// cancelling only marked the DB row: the goroutine finished anyway and its
+// completion overwrote the cancelled status, publishing declined findings.
+func TestRunner_CancelStopsInferenceAndKeepsRunCancelled(t *testing.T) {
+	runner, store, inference := newBlockingHarness(t, okResponse("a.go", 2))
+
+	run, err := runner.Launch(context.Background(), RunRequest{TaskID: "task-cancel"})
+	if err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	<-inference.started
+
+	if _, err := runner.Cancel(context.Background(), run.ID); err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	// The pass must unwind on its own now that its context is cancelled.
+	deadline := time.After(5 * time.Second)
+	for store.statusOf(run.ID) != models.ReviewRunCancelled {
+		select {
+		case <-deadline:
+			t.Fatalf("run did not settle as cancelled, got %q", store.statusOf(run.ID))
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	runner.Stop()
+	if got := store.statusOf(run.ID); got != models.ReviewRunCancelled {
+		t.Fatalf("a cancelled run must stay cancelled after the pass unwinds, got %q", got)
+	}
+	if _, published := store.lastPublished(); published {
+		t.Fatal("a cancelled review must not publish findings")
+	}
+}
+
+// TestRunner_ConcurrentLaunchesCreateOneRun covers the race where the DB check
+// and the in-memory claim were not atomic, leaving the loser's pending run row
+// orphaned with no goroutine behind it.
+func TestRunner_ConcurrentLaunchesCreateOneRun(t *testing.T) {
+	runner, store, inference := newBlockingHarness(t, okResponse("a.go", 2))
+
+	const launches = 8
+	var wg sync.WaitGroup
+	errs := make([]error, launches)
+	for i := range launches {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			_, errs[idx] = runner.Launch(context.Background(), RunRequest{TaskID: "task-race"})
+		}(i)
+	}
+	wg.Wait()
+	<-inference.started
+
+	if got := store.runCount(); got != 1 {
+		t.Fatalf("concurrent launches must create exactly one run row, got %d", got)
+	}
+	// Losers either rejoin the winner's run or report the in-flight pass; none
+	// may invent a second one.
+	for i, err := range errs {
+		if err != nil && !errors.Is(err, ErrExecutionFailed) {
+			t.Fatalf("launch %d returned an unexpected error: %v", i, err)
+		}
+	}
+}
+
+// TestRunner_RunWaitsOnlyForItsOwnPass covers the suggestion that Run() blocked
+// on the shared WaitGroup and therefore on every other task's review.
+func TestRunner_RunWaitsOnlyForItsOwnPass(t *testing.T) {
+	store := newFakeStore()
+	slow := &blockingInference{started: make(chan struct{}), release: make(chan struct{})}
+	changes := &fakeChangeSource{uncommitted: map[string]any{"a.go": fileEntry("a.go", "@@ -1 +1,2 @@\n x\n+y\n", "", "")}}
+	resolver := NewResolver(nil, &fakeUtility{found: true, enabled: true, agentID: "a", model: "m"}, nil)
+
+	slowRunner := NewRunner(RunnerDeps{
+		Store: store, Resolver: resolver, Changes: changes, Inference: slow,
+		Prompts: &fakePrompts{}, Sessions: &fakeSessions{sessionID: "s"}, Logger: testLogger(t),
+	})
+	slowRunner.Start(context.Background())
+	defer func() { close(slow.release); slowRunner.Stop() }()
+
+	if _, err := slowRunner.Launch(context.Background(), RunRequest{TaskID: "task-slow"}); err != nil {
+		t.Fatalf("Launch slow: %v", err)
+	}
+	<-slow.started
+
+	// A second task on the same runner must complete without waiting for the
+	// still-blocked first pass.
+	fastStore := newFakeStore()
+	fastRunner := NewRunner(RunnerDeps{
+		Store: fastStore, Resolver: resolver, Changes: changes,
+		Inference: &fakeInference{responses: []string{okResponse("a.go", 2)}},
+		Prompts:   &fakePrompts{}, Sessions: &fakeSessions{sessionID: "s"}, Logger: testLogger(t),
+	})
+	fastRunner.Start(context.Background())
+	defer fastRunner.Stop()
+
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		if _, err := fastRunner.Run(context.Background(), RunRequest{TaskID: "task-fast"}); err != nil {
+			t.Errorf("Run fast: %v", err)
+		}
+	}()
+	select {
+	case <-finished:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Run() blocked on an unrelated task's pass")
+	}
+	if _, ok := fastStore.lastCompleted(); !ok {
+		t.Fatal("expected the fast pass to complete")
+	}
+}
+
+func TestRunner_CancelUnknownRunSurfacesNotFound(t *testing.T) {
+	h := newRunnerHarness(t, map[string]any{}, []string{""})
+	if _, err := h.runner.Cancel(context.Background(), "nope"); !errors.Is(err, models.ErrTaskReviewRunNotFound) {
+		t.Fatalf("expected ErrTaskReviewRunNotFound, got %v", err)
 	}
 }

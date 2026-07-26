@@ -29,11 +29,12 @@ var (
 
 // Event payload keys, hoisted to constants to satisfy goconst.
 const (
-	rvFieldTaskID   = "task_id"
-	rvFieldRunID    = "run_id"
-	rvFieldFinding  = "finding"
-	rvFieldFindings = "findings"
-	rvFieldRun      = "run"
+	rvFieldTaskID     = "task_id"
+	rvFieldRunID      = "run_id"
+	rvFieldFinding    = "finding"
+	rvFieldFindings   = "findings"
+	rvFieldRun        = "run"
+	rvFieldSuperseded = "superseded_ids"
 )
 
 // reviewRepo is the minimal repository surface ReviewService needs. The SQLite
@@ -49,7 +50,7 @@ type reviewRepo interface {
 	ListTaskReviewFindings(ctx context.Context, taskID string) ([]*models.TaskReviewFinding, error)
 	GetTaskReviewFinding(ctx context.Context, findingID string) (*models.TaskReviewFinding, error)
 	UpdateTaskReviewFindingStatus(ctx context.Context, findingID string, status models.ReviewFindingStatus, resolvedAt *time.Time) error
-	DeleteSupersededTaskReviewFindings(ctx context.Context, taskID, runID string, keys []models.ReviewFindingKey) (int, error)
+	DeleteSupersededTaskReviewFindings(ctx context.Context, taskID, runID string, keys []models.ReviewFindingKey) ([]string, error)
 	DeleteTaskReviewByTask(ctx context.Context, taskID string) error
 }
 
@@ -141,9 +142,13 @@ type CompleteRunRequest struct {
 }
 
 // CompleteRun marks a run completed with its counts.
+//
+// A run the user already cancelled stays cancelled: without that guard a pass
+// whose inference finished after the cancel would flip the status back to
+// completed and publish findings the user declined.
 func (s *ReviewService) CompleteRun(ctx context.Context, req CompleteRunRequest) (*models.TaskReviewRun, error) {
 	now := time.Now().UTC()
-	return s.mutateRun(ctx, req.RunID, func(run *models.TaskReviewRun) {
+	return s.mutateRunIfLive(ctx, req.RunID, func(run *models.TaskReviewRun) {
 		run.Status = models.ReviewRunCompleted
 		run.Summary = req.Summary
 		run.FindingCount = req.FindingCount
@@ -164,13 +169,14 @@ func (s *ReviewService) CompleteRun(ctx context.Context, req CompleteRunRequest)
 const maxRunErrorMessage = 2000
 
 // FailRun marks a run failed with a client-facing code and a bounded message.
+// Like CompleteRun, it leaves an already-terminal run alone.
 func (s *ReviewService) FailRun(ctx context.Context, runID, code, message string, durationMs int) (*models.TaskReviewRun, error) {
 	now := time.Now().UTC()
 	trimmed := message
 	if len(trimmed) > maxRunErrorMessage {
 		trimmed = trimmed[:maxRunErrorMessage]
 	}
-	return s.mutateRun(ctx, runID, func(run *models.TaskReviewRun) {
+	return s.mutateRunIfLive(ctx, runID, func(run *models.TaskReviewRun) {
 		run.Status = models.ReviewRunFailed
 		run.ErrorCode = code
 		run.ErrorMessage = trimmed
@@ -194,6 +200,25 @@ func (s *ReviewService) CancelRun(ctx context.Context, runID string) (*models.Ta
 		r.Status = models.ReviewRunCancelled
 		r.CompletedAt = &now
 	})
+}
+
+// mutateRunIfLive applies a transition only while the run is still non-terminal,
+// so an external cancel wins over a late completion. Returns the untouched run
+// (and publishes nothing) when it has already finished.
+func (s *ReviewService) mutateRunIfLive(ctx context.Context, runID string, apply func(*models.TaskReviewRun)) (*models.TaskReviewRun, error) {
+	if runID == "" {
+		return nil, fmt.Errorf("%w: run id is required", ErrReviewRunNotFound)
+	}
+	existing, err := s.repo.GetTaskReviewRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Status.IsTerminal() {
+		s.logger.Debug("skipping transition on a terminal review run",
+			zap.String(rvFieldRunID, runID), zap.String("status", string(existing.Status)))
+		return existing, nil
+	}
+	return s.mutateRun(ctx, runID, apply)
 }
 
 func (s *ReviewService) mutateRun(ctx context.Context, runID string, apply func(*models.TaskReviewRun)) (*models.TaskReviewRun, error) {
@@ -277,8 +302,8 @@ func (s *ReviewService) PublishFindings(ctx context.Context, req PublishFindings
 		s.logger.Error("create review findings", zap.String(rvFieldTaskID, req.TaskID), zap.Error(err))
 		return nil, nil, err
 	}
-	s.supersedePriorFindings(ctx, req.TaskID, run.ID, findings)
-	s.publishFindings(ctx, req.TaskID, run.ID, findings)
+	superseded := s.supersedePriorFindings(ctx, req.TaskID, run.ID, findings)
+	s.publishFindings(ctx, req.TaskID, run.ID, findings, superseded)
 	return run, findings, nil
 }
 
@@ -311,18 +336,23 @@ func (s *ReviewService) resolvePublishRun(ctx context.Context, req PublishFindin
 
 // supersedePriorFindings is best-effort: the new findings are already stored, so
 // a failure to prune duplicates is logged rather than failing the publish.
-func (s *ReviewService) supersedePriorFindings(ctx context.Context, taskID, runID string, findings []*models.TaskReviewFinding) {
+// supersedePriorFindings prunes duplicate anchors and returns the ids removed so
+// the publish event can tell connected clients which findings to drop.
+// Best-effort: the new findings are already stored, so a prune failure is logged
+// rather than failing the publish.
+func (s *ReviewService) supersedePriorFindings(ctx context.Context, taskID, runID string, findings []*models.TaskReviewFinding) []string {
 	keys := supersedeKeys(findings)
 	deleted, err := s.repo.DeleteSupersededTaskReviewFindings(ctx, taskID, runID, keys)
 	if err != nil {
 		s.logger.Warn("supersede prior review findings",
 			zap.String(rvFieldTaskID, taskID), zap.String(rvFieldRunID, runID), zap.Error(err))
-		return
+		return nil
 	}
-	if deleted > 0 {
+	if len(deleted) > 0 {
 		s.logger.Debug("superseded prior review findings",
-			zap.String(rvFieldTaskID, taskID), zap.Int("deleted", deleted))
+			zap.String(rvFieldTaskID, taskID), zap.Int("deleted", len(deleted)))
 	}
+	return deleted
 }
 
 func supersedeKeys(findings []*models.TaskReviewFinding) []models.ReviewFindingKey {
@@ -469,11 +499,15 @@ func (s *ReviewService) publishRun(ctx context.Context, run *models.TaskReviewRu
 	})
 }
 
-func (s *ReviewService) publishFindings(ctx context.Context, taskID, runID string, findings []*models.TaskReviewFinding) {
+func (s *ReviewService) publishFindings(ctx context.Context, taskID, runID string, findings []*models.TaskReviewFinding, supersededIDs []string) {
+	if supersededIDs == nil {
+		supersededIDs = []string{}
+	}
 	s.publishEvent(ctx, events.TaskReviewFindingsPublished, map[string]any{
-		rvFieldTaskID:   taskID,
-		rvFieldRunID:    runID,
-		rvFieldFindings: findings,
+		rvFieldTaskID:     taskID,
+		rvFieldRunID:      runID,
+		rvFieldFindings:   findings,
+		rvFieldSuperseded: supersededIDs,
 	})
 }
 

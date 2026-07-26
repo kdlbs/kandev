@@ -208,8 +208,13 @@ func TestTaskReviewFindings_SupersedeOnlyOpenFromOtherRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteSupersededTaskReviewFindings: %v", err)
 	}
-	if deleted != 1 {
-		t.Fatalf("expected exactly the open duplicate deleted, got %d", deleted)
+	// The exact ids matter, not just the count: a connected client holds the old
+	// findings in memory and needs to know which to drop.
+	if len(deleted) != 1 {
+		t.Fatalf("expected exactly the open duplicate deleted, got %v", deleted)
+	}
+	if deleted[0] != sameAnchor.ID {
+		t.Fatalf("expected the open duplicate's id returned, got %q want %q", deleted[0], sameAnchor.ID)
 	}
 
 	remaining, err := repo.ListTaskReviewFindings(ctx, "task-sup")
@@ -231,8 +236,8 @@ func TestTaskReviewFindings_SupersedeNoKeysIsNoop(t *testing.T) {
 	ctx := context.Background()
 
 	deleted, err := repo.DeleteSupersededTaskReviewFindings(ctx, "task", "run", nil)
-	if err != nil || deleted != 0 {
-		t.Fatalf("expected no-op, got deleted=%d err=%v", deleted, err)
+	if err != nil || len(deleted) != 0 {
+		t.Fatalf("expected no-op, got deleted=%v err=%v", deleted, err)
 	}
 }
 

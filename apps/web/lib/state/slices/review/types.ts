@@ -19,8 +19,16 @@ export type ReviewSliceActions = {
   ) => void;
   /** Inserts or replaces a run by id, keeping newest-first order. */
   upsertReviewRun: (taskId: string, run: TaskReviewRun) => void;
-  /** Adds findings, replacing any with the same id so a re-publish never duplicates. */
-  addReviewFindings: (taskId: string, findings: TaskReviewFinding[]) => void;
+  /**
+   * Adds findings, replacing any with the same id so a re-publish never
+   * duplicates. `supersededIds` are findings the backend deleted in favour of
+   * these; they are removed so a re-review does not show both at one anchor.
+   */
+  addReviewFindings: (
+    taskId: string,
+    findings: TaskReviewFinding[],
+    supersededIds?: string[],
+  ) => void;
   /** Replaces a single finding, typically after a status change. */
   updateReviewFinding: (taskId: string, finding: TaskReviewFinding) => void;
   /** Drops all review state for a task. */

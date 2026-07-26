@@ -552,8 +552,10 @@ export function createAppStore(initialState?: HydrationState) {
       ...createAutomationsSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createPluginsSlice(set as any, get as any, api as any),
+      // createReviewSlice only needs `set`; passing get/api would be superfluous
+      // arguments (CodeQL js/superfluous-trailing-arguments).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      ...createReviewSlice(set as any, get as any, api as any),
+      ...createReviewSlice(set as any),
       // Re-assert merged initial state so caller-supplied values win over slice defaults.
       ...buildStateOverrides(merged),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

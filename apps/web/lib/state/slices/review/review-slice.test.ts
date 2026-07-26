@@ -6,7 +6,7 @@ import { createReviewSlice } from "./review-slice";
 import type { ReviewSlice } from "./types";
 
 function newStore() {
-  return create<ReviewSlice>()(immer((...args) => createReviewSlice(...args)));
+  return create<ReviewSlice>()(immer((set) => createReviewSlice(set)));
 }
 
 function run(overrides: Partial<TaskReviewRun> = {}): TaskReviewRun {
@@ -125,6 +125,38 @@ describe("addReviewFindings", () => {
     store.getState().addReviewFindings("t1", [finding({ id: "f1" })]);
     store.getState().addReviewFindings("t1", [finding({ id: "f2" })]);
     expect(store.getState().taskReview.findingsByTaskId.t1).toHaveLength(2);
+  });
+
+  it("drops superseded findings so a re-review shows one per anchor", () => {
+    // The backend deletes the old finding and inserts a replacement with a new
+    // id; merging by id alone would leave both visible at the same line.
+    const store = newStore();
+    store.getState().addReviewFindings("t1", [finding({ id: "old" })]);
+    store.getState().addReviewFindings("t1", [finding({ id: "new" })], ["old"]);
+
+    const findings = store.getState().taskReview.findingsByTaskId.t1;
+    expect(findings).toHaveLength(1);
+    expect(findings[0].id).toBe("new");
+  });
+
+  it("leaves unrelated findings alone when superseding", () => {
+    const store = newStore();
+    store.getState().addReviewFindings("t1", [finding({ id: "old" }), finding({ id: "keep" })]);
+    store.getState().addReviewFindings("t1", [finding({ id: "new" })], ["old"]);
+
+    const ids = store
+      .getState()
+      .taskReview.findingsByTaskId.t1.map((f) => f.id)
+      .sort();
+    expect(ids).toEqual(["keep", "new"]);
+  });
+
+  it("tolerates an absent or empty superseded list", () => {
+    const store = newStore();
+    store.getState().addReviewFindings("t1", [finding({ id: "a" })]);
+    store.getState().addReviewFindings("t1", [finding({ id: "b" })], []);
+    store.getState().addReviewFindings("t1", [finding({ id: "c" })], undefined);
+    expect(store.getState().taskReview.findingsByTaskId.t1).toHaveLength(3);
   });
 
   it("ignores an empty batch", () => {

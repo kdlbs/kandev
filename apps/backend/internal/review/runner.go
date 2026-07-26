@@ -64,6 +64,7 @@ type Store interface {
 	MarkRunRunning(ctx context.Context, runID string) (*models.TaskReviewRun, error)
 	CompleteRun(ctx context.Context, req taskservice.CompleteRunRequest) (*models.TaskReviewRun, error)
 	FailRun(ctx context.Context, runID, code, message string, durationMs int) (*models.TaskReviewRun, error)
+	CancelRun(ctx context.Context, runID string) (*models.TaskReviewRun, error)
 	PublishFindings(ctx context.Context, req taskservice.PublishFindingsRequest) (*models.TaskReviewRun, []*models.TaskReviewFinding, error)
 }
 
@@ -97,11 +98,20 @@ type Runner struct {
 	budgetBytes int
 
 	mu       sync.Mutex
-	inFlight map[string]string // taskID -> runID
+	inFlight map[string]*inFlightRun
 	ctx      context.Context
 	cancel   context.CancelFunc
 	wg       sync.WaitGroup
 	started  bool
+}
+
+// inFlightRun is the live state of one review pass. The cancel handle is what
+// makes a user-requested cancel actually stop inference: without it, cancelling
+// only marks the DB row and the goroutine keeps going and overwrites it.
+type inFlightRun struct {
+	runID  string
+	cancel context.CancelFunc
+	done   chan struct{}
 }
 
 // RunnerDeps groups the runner's collaborators.
@@ -129,7 +139,7 @@ func NewRunner(deps RunnerDeps) *Runner {
 		sessions:    deps.Sessions,
 		logger:      deps.Logger.WithFields(zap.String("component", "review-runner")),
 		budgetBytes: deps.BudgetBytes,
-		inFlight:    make(map[string]string),
+		inFlight:    make(map[string]*inFlightRun),
 	}
 }
 
@@ -167,16 +177,51 @@ const runTimeout = 10 * time.Minute
 // A task that already has a pending or running pass returns that run untouched —
 // re-clicking Review must not fan out into duplicate provider calls.
 func (r *Runner) Launch(ctx context.Context, req RunRequest) (*models.TaskReviewRun, error) {
+	run, _, err := r.launch(ctx, req)
+	return run, err
+}
+
+// launch does the work of Launch and additionally returns a channel closed when
+// the pass finishes, so a synchronous caller can wait for its own run instead of
+// every run in the process.
+func (r *Runner) launch(ctx context.Context, req RunRequest) (*models.TaskReviewRun, <-chan struct{}, error) {
 	if req.TaskID == "" {
-		return nil, taskservice.ErrTaskIDRequired
+		return nil, nil, taskservice.ErrTaskIDRequired
 	}
+
+	// Claim the task's slot before touching the DB. Claiming after CreateRun
+	// would let two concurrent launches both insert a run and leave the loser's
+	// row pending forever with no goroutine behind it.
+	if !r.claim(req.TaskID) {
+		existing, err := r.store.ActiveRun(ctx, req.TaskID)
+		if err != nil {
+			return nil, nil, err
+		}
+		if existing == nil {
+			// Claimed by a launch that has not created its row yet; report the
+			// in-flight pass rather than starting a competing one.
+			return nil, nil, fmt.Errorf("%w: a review is already starting for this task", ErrExecutionFailed)
+		}
+		return existing, nil, nil
+	}
+	// Every early return below must free the slot; only the launched goroutine
+	// keeps it.
+	launched := false
+	defer func() {
+		if !launched {
+			r.release(req.TaskID)
+		}
+	}()
+
+	// A pass that survived a restart has a DB row but no in-memory claim, so the
+	// claim above succeeds. Rejoin it instead of starting a second one.
 	if existing, err := r.store.ActiveRun(ctx, req.TaskID); err == nil && existing != nil {
-		return existing, nil
+		return existing, nil, nil
 	}
 
 	sessionID, err := r.resolveSessionID(ctx, req)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	req.SessionID = sessionID
 
@@ -185,14 +230,14 @@ func (r *Runner) Launch(ctx context.Context, req RunRequest) (*models.TaskReview
 	// see immediately, and neither deserves a failed run in the history.
 	identity, err := r.resolver.Resolve(ctx, req.AgentProfileID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	files, err := CollectChanges(ctx, r.changes, sessionID, req.RepositoryID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(files) == 0 {
-		return nil, fmt.Errorf("%w: the task has no changed files to review", ErrNoChanges)
+		return nil, nil, fmt.Errorf("%w: the task has no changed files to review", ErrNoChanges)
 	}
 
 	run, err := r.store.CreateRun(ctx, taskservice.CreateRunRequest{
@@ -204,24 +249,34 @@ func (r *Runner) Launch(ctx context.Context, req RunRequest) (*models.TaskReview
 		Model:          identity.Model,
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if !r.reserve(req.TaskID, run.ID) {
-		return run, nil
-	}
+
+	runCtx, cancel := context.WithTimeout(r.backgroundContext(), runTimeout)
+	done := r.attach(req.TaskID, run.ID, cancel)
+	launched = true
 
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
 		defer r.release(req.TaskID)
-		runCtx, cancel := context.WithTimeout(r.backgroundContext(), runTimeout)
 		defer cancel()
 		if err := r.execute(runCtx, req, run.ID, identity, files); err != nil {
 			r.logger.Warn("review run failed",
 				zap.String("task_id", req.TaskID), zap.String("run_id", run.ID), zap.Error(err))
 		}
 	}()
-	return run, nil
+	return run, done, nil
+}
+
+// Cancel stops a review pass and records the cancellation.
+//
+// Cancelling the live context is the half that matters: marking only the DB row
+// would let the goroutine finish inference and overwrite the cancelled status
+// with a completed one, publishing findings the user already declined.
+func (r *Runner) Cancel(ctx context.Context, runID string) (*models.TaskReviewRun, error) {
+	r.cancelInFlight(runID)
+	return r.store.CancelRun(ctx, runID)
 }
 
 // backgroundContext returns the runner's own context so a detached pass outlives
@@ -235,20 +290,59 @@ func (r *Runner) backgroundContext() context.Context {
 	return context.Background()
 }
 
-func (r *Runner) reserve(taskID, runID string) bool {
+// claim takes the task's single review slot before any DB row exists.
+//
+// Claiming first is what closes the duplicate-row race: if the slot were taken
+// only after CreateRun, two concurrent launches could both create a run and the
+// loser would return a pending row with no goroutine behind it, leaving a review
+// that never completes.
+func (r *Runner) claim(taskID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, busy := r.inFlight[taskID]; busy {
 		return false
 	}
-	r.inFlight[taskID] = runID
+	r.inFlight[taskID] = &inFlightRun{done: make(chan struct{})}
 	return true
 }
 
-func (r *Runner) release(taskID string) {
+// attach records the run id and cancel handle on an already-claimed slot and
+// returns its done channel.
+func (r *Runner) attach(taskID, runID string, cancel context.CancelFunc) <-chan struct{} {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	entry := r.inFlight[taskID]
+	if entry == nil {
+		return nil
+	}
+	entry.runID = runID
+	entry.cancel = cancel
+	return entry.done
+}
+
+// release frees the task's slot and wakes anyone waiting on the pass.
+func (r *Runner) release(taskID string) {
+	r.mu.Lock()
+	entry := r.inFlight[taskID]
 	delete(r.inFlight, taskID)
+	r.mu.Unlock()
+	if entry != nil {
+		close(entry.done)
+	}
+}
+
+// cancelInFlight cancels the live pass for runID, if this process owns it.
+// Returns true when a goroutine was actually signalled.
+func (r *Runner) cancelInFlight(runID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, entry := range r.inFlight {
+		if entry.runID == runID && entry.cancel != nil {
+			entry.cancel()
+			return true
+		}
+	}
+	return false
 }
 
 // resolveSessionID prefers the caller's session and otherwise asks the lookup.
@@ -272,11 +366,15 @@ func (r *Runner) resolveSessionID(ctx context.Context, req RunRequest) (string, 
 // Run performs a review pass synchronously. Used by tests and by callers that
 // want to await the result; Launch is the normal entry point.
 func (r *Runner) Run(ctx context.Context, req RunRequest) (*models.TaskReviewRun, error) {
-	run, err := r.Launch(ctx, req)
+	run, done, err := r.launch(ctx, req)
 	if err != nil {
 		return nil, err
 	}
-	r.wg.Wait()
+	// Wait only for this task's pass. Waiting on the shared WaitGroup would
+	// block on every other task's review too.
+	if done != nil {
+		<-done
+	}
 	return run, nil
 }
 
@@ -297,6 +395,15 @@ func (r *Runner) execute(ctx context.Context, req RunRequest, runID string, iden
 	accumulated, err := r.reviewBatches(ctx, plan, identity, req.SessionID, promptCtx)
 	if err != nil {
 		return r.fail(ctx, runID, err, started)
+	}
+
+	// A cancel that landed while inference was running must win: publishing here
+	// would store findings the user already declined, and CompleteRun below would
+	// be a no-op against the cancelled row, leaving orphaned findings.
+	if err := ctx.Err(); err != nil {
+		r.logger.Debug("review run cancelled before publishing",
+			zap.String("run_id", runID), zap.Error(err))
+		return nil
 	}
 
 	index := FileByKey(files)
@@ -388,8 +495,15 @@ func (r *Runner) reviewBatches(ctx context.Context, plan BatchPlan, identity Rev
 }
 
 func (r *Runner) fail(ctx context.Context, runID string, cause error, started time.Time) error {
+	// An explicit cancel already recorded the terminal state, so re-reporting it
+	// as a failure would only churn the row (and would overwrite it on any store
+	// without a terminal guard). A deadline is different: nobody recorded that.
+	if errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
+		r.logger.Debug("review run unwound after cancellation", zap.String("run_id", runID))
+		return cause
+	}
 	code := CodeFor(cause)
-	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+	if errors.Is(cause, context.DeadlineExceeded) {
 		code = CodeCancelled
 	}
 	// Persist the failure on a context detached from the (possibly cancelled)

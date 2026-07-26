@@ -89,7 +89,13 @@ export type ReviewBackendMessageMap = {
   >;
   "task.review.findings_published": BackendMessage<
     "task.review.findings_published",
-    { task_id: string; run_id: string; findings: TaskReviewFinding[] }
+    {
+      task_id: string;
+      run_id: string;
+      findings: TaskReviewFinding[];
+      /** Findings the backend replaced; clients must drop these ids. */
+      superseded_ids?: string[];
+    }
   >;
   "task.review.finding_updated": BackendMessage<
     "task.review.finding_updated",

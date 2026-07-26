@@ -493,3 +493,136 @@ func TestReviewService_NilEventBusIsSafe(t *testing.T) {
 		t.Fatalf("publishing without an event bus must still persist, got %v", err)
 	}
 }
+
+// TestReviewService_CompleteDoesNotResurrectCancelledRun covers the direction the
+// original suite missed: cancel-over-terminal was tested, but complete-over-
+// cancelled was not, so a pass whose inference finished after the user cancelled
+// silently flipped back to completed.
+func TestReviewService_CompleteDoesNotResurrectCancelledRun(t *testing.T) {
+	svc, _, repo := createTestReviewService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-cancel-race")
+	run, err := svc.CreateRun(ctx, CreateRunRequest{TaskID: "task-cancel-race"})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := svc.MarkRunRunning(ctx, run.ID); err != nil {
+		t.Fatalf("MarkRunRunning: %v", err)
+	}
+	if _, err := svc.CancelRun(ctx, run.ID); err != nil {
+		t.Fatalf("CancelRun: %v", err)
+	}
+
+	got, err := svc.CompleteRun(ctx, CompleteRunRequest{RunID: run.ID, FindingCount: 3})
+	if err != nil {
+		t.Fatalf("CompleteRun after cancel should be a no-op, got %v", err)
+	}
+	if got.Status != models.ReviewRunCancelled {
+		t.Fatalf("a cancelled run must stay cancelled, got %q", got.Status)
+	}
+	if got.FindingCount != 0 {
+		t.Fatalf("a cancelled run must not take the completion's counts, got %d", got.FindingCount)
+	}
+}
+
+func TestReviewService_FailDoesNotResurrectCancelledRun(t *testing.T) {
+	svc, _, repo := createTestReviewService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-fail-race")
+	run, _ := svc.CreateRun(ctx, CreateRunRequest{TaskID: "task-fail-race"})
+	if _, err := svc.CancelRun(ctx, run.ID); err != nil {
+		t.Fatalf("CancelRun: %v", err)
+	}
+
+	got, err := svc.FailRun(ctx, run.ID, "review_execution_failed", "late failure", 10)
+	if err != nil {
+		t.Fatalf("FailRun after cancel should be a no-op, got %v", err)
+	}
+	if got.Status != models.ReviewRunCancelled {
+		t.Fatalf("a cancelled run must stay cancelled, got %q", got.Status)
+	}
+}
+
+func TestReviewService_TerminalGuardStillAllowsLiveTransitions(t *testing.T) {
+	// The guard must not block the normal path.
+	svc, _, repo := createTestReviewService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-live")
+	run, _ := svc.CreateRun(ctx, CreateRunRequest{TaskID: "task-live"})
+	if _, err := svc.MarkRunRunning(ctx, run.ID); err != nil {
+		t.Fatalf("MarkRunRunning: %v", err)
+	}
+	got, err := svc.CompleteRun(ctx, CompleteRunRequest{RunID: run.ID, FindingCount: 2})
+	if err != nil {
+		t.Fatalf("CompleteRun: %v", err)
+	}
+	if got.Status != models.ReviewRunCompleted || got.FindingCount != 2 {
+		t.Fatalf("expected a normal completion, got %+v", got)
+	}
+}
+
+func TestReviewService_PublishReportsSupersededIDs(t *testing.T) {
+	svc, eventBus, repo := createTestReviewService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-superseded")
+
+	_, first, err := svc.PublishFindings(ctx, PublishFindingsRequest{
+		TaskID:   "task-superseded",
+		Findings: []ReviewFindingInput{validFindingInput()},
+	})
+	if err != nil {
+		t.Fatalf("first publish: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if _, _, err := svc.PublishFindings(ctx, PublishFindingsRequest{
+		TaskID:   "task-superseded",
+		Findings: []ReviewFindingInput{validFindingInput()},
+	}); err != nil {
+		t.Fatalf("second publish: %v", err)
+	}
+
+	// A connected client holds the old finding in memory; the event must name the
+	// id it should drop, or the panel shows both at one anchor until a reload.
+	var supersededIDs []string
+	for _, e := range eventBus.GetPublishedEvents() {
+		if e.Type != events.TaskReviewFindingsPublished {
+			continue
+		}
+		payload, ok := e.Data.(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected payload type %T", e.Data)
+		}
+		ids, ok := payload["superseded_ids"].([]string)
+		if !ok {
+			t.Fatalf("expected superseded_ids on the payload, got %#v", payload["superseded_ids"])
+		}
+		supersededIDs = ids
+	}
+	if len(supersededIDs) != 1 || supersededIDs[0] != first[0].ID {
+		t.Fatalf("expected the first finding's id reported as superseded, got %v", supersededIDs)
+	}
+}
+
+func TestReviewService_PublishReportsEmptySupersededList(t *testing.T) {
+	svc, eventBus, repo := createTestReviewService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-nosupersede")
+
+	if _, _, err := svc.PublishFindings(ctx, PublishFindingsRequest{
+		TaskID:   "task-nosupersede",
+		Findings: []ReviewFindingInput{validFindingInput()},
+	}); err != nil {
+		t.Fatalf("PublishFindings: %v", err)
+	}
+	for _, e := range eventBus.GetPublishedEvents() {
+		if e.Type != events.TaskReviewFindingsPublished {
+			continue
+		}
+		payload := e.Data.(map[string]any)
+		ids, ok := payload["superseded_ids"].([]string)
+		if !ok || len(ids) != 0 {
+			t.Fatalf("expected an empty (not nil) superseded list, got %#v", payload["superseded_ids"])
+		}
+	}
+}

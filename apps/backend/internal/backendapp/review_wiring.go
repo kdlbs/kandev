@@ -2,6 +2,8 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/agent/handlers"
@@ -97,10 +99,14 @@ func (l reviewProfileLookup) ReviewerProfile(ctx context.Context, profileID stri
 	}
 	profile, err := l.profiles.GetAgentProfile(ctx, profileID)
 	if err != nil {
-		// A missing profile is "not found", not a fault: the step may reference a
-		// profile the user has since deleted, and the review should fail closed
-		// with a clear message rather than surface a storage error.
-		return review.ReviewerProfile{}, false, nil
+		// Only a genuinely absent row is "not found" — a step may reference a
+		// profile the user has since deleted. Any other error is a storage fault
+		// and must surface as such; collapsing it into "not configured" would
+		// tell the user to go configure an agent they already have.
+		if errors.Is(err, sql.ErrNoRows) {
+			return review.ReviewerProfile{}, false, nil
+		}
+		return review.ReviewerProfile{}, false, err
 	}
 	if profile == nil {
 		return review.ReviewerProfile{}, false, nil
