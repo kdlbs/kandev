@@ -199,3 +199,31 @@ func TestSessionScopingInternalAndSyntheticCallersUnscoped(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionScopingAttachWorkspaceSources covers POST
+// /tasks/:id/workspace-sources and the add_workspace_sources_kandev MCP tool.
+// The route arrived on main while this branch was in review with no ownership
+// check, so a caller could attach repositories and folders to another user's
+// task and have them materialized into that task's workspace.
+func TestSessionScopingAttachWorkspaceSources(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedSessionScopeFixture(t, repo)
+
+	_, err := svc.AttachWorkspaceSources(ctxAs("user-a"), AttachWorkspaceSourcesRequest{
+		TaskID:  "task-b",
+		Sources: []WorkspaceSourceInput{{Kind: WorkspaceSourceFolder, LocalPath: t.TempDir()}},
+	})
+	if !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("attach to foreign task = %v, want ErrTaskNotFound", err)
+	}
+
+	// The owner is not denied: it gets past the guard and fails (or succeeds)
+	// on the source-materialization logic this test does not set up.
+	_, ownErr := svc.AttachWorkspaceSources(ctxAs("user-a"), AttachWorkspaceSourcesRequest{
+		TaskID:  "task-a",
+		Sources: []WorkspaceSourceInput{{Kind: WorkspaceSourceFolder, LocalPath: t.TempDir()}},
+	})
+	if errors.Is(ownErr, repoerrors.ErrTaskNotFound) {
+		t.Error("owner was denied access to their own task")
+	}
+}
