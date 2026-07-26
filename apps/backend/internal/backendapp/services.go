@@ -42,6 +42,8 @@ import (
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/workflowsync"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
@@ -713,8 +715,16 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 // same task.*-event-publishing service methods the REST/MCP API uses. The
 // plugin's provenance is stamped into task metadata (`source`), since the Task
 // model has no dedicated source column.
+// pluginTaskWriteService is the narrow slice of the task service the write
+// adapter needs, so the adapter's field mapping + state validation are
+// unit-testable with a fake. *taskservice.Service satisfies it.
+type pluginTaskWriteService interface {
+	CreateTask(ctx context.Context, req *taskservice.CreateTaskRequest) (*taskmodels.Task, error)
+	UpdateTask(ctx context.Context, id string, req *taskservice.UpdateTaskRequest) (*taskmodels.Task, error)
+}
+
 type pluginsTaskWriterAdapter struct {
-	svc *taskservice.Service
+	svc pluginTaskWriteService
 }
 
 func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.TaskCreateInput) (*taskmodels.Task, error) {
@@ -740,10 +750,31 @@ func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.Tas
 		WorkflowStepID: in.WorkflowStepID,
 	}
 	if in.State != nil {
+		// v1.TaskState is a string type, so the cast can't fail — validate the
+		// value against the known enum here (the REST/MCP path validates state
+		// at its HTTP handler) so a plugin typo can't forward a bogus state to
+		// the service and risk persisting it.
 		state := v1.TaskState(*in.State)
+		if !validPluginTaskState(state) {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid task state %q", *in.State)
+		}
 		req.State = &state
 	}
 	return a.svc.UpdateTask(ctx, in.ID, req)
+}
+
+// validPluginTaskState reports whether state is a state a plugin may set via
+// UpdateTask. SCHEDULING is intentionally excluded — it is an orchestrator-owned
+// transient state, not a value a plugin should assign directly.
+func validPluginTaskState(state v1.TaskState) bool {
+	switch state {
+	case v1.TaskStateTODO, v1.TaskStateCreated, v1.TaskStateInProgress,
+		v1.TaskStateReview, v1.TaskStateBlocked, v1.TaskStateWaitingForInput,
+		v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled:
+		return true
+	default:
+		return false
+	}
 }
 
 // workflowProviderAdapter adapts task service to workflow service's WorkflowProvider interface.

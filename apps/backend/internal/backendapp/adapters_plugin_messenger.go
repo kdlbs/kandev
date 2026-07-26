@@ -131,6 +131,11 @@ func (a pluginsTaskMessengerAdapter) startOrPromptSession(ctx context.Context, t
 // promptWithResume dispatches the prompt, resuming the agent process first when
 // its execution has gone (e.g. after a backend restart), mirroring the MCP
 // message_task path's auto-resume.
+//
+// Once ResumeTaskSession succeeds the resume is a committed side effect (the
+// agent is starting), so the subsequent wait+retry run on a detached context —
+// the plugin's incoming deadline must not abort a session start already in
+// flight, which would leave the agent awake with no prompt to act on.
 func (a pluginsTaskMessengerAdapter) promptWithResume(ctx context.Context, taskID, sessionID, text string) error {
 	_, err := a.orch.PromptTask(ctx, taskID, sessionID, text, "", false, nil, true)
 	if err == nil {
@@ -142,10 +147,11 @@ func (a pluginsTaskMessengerAdapter) promptWithResume(ctx context.Context, taskI
 	if _, resumeErr := a.orch.ResumeTaskSession(ctx, taskID, sessionID); resumeErr != nil {
 		return fmt.Errorf("failed to resume session: %w", resumeErr)
 	}
-	if waitErr := a.tasks.WaitForSessionReady(ctx, sessionID); waitErr != nil {
+	resumeCtx := context.WithoutCancel(ctx)
+	if waitErr := a.tasks.WaitForSessionReady(resumeCtx, sessionID); waitErr != nil {
 		return fmt.Errorf("session not ready after resume: %w", waitErr)
 	}
-	if _, retryErr := a.orch.PromptTask(ctx, taskID, sessionID, text, "", false, nil, true); retryErr != nil {
+	if _, retryErr := a.orch.PromptTask(resumeCtx, taskID, sessionID, text, "", false, nil, true); retryErr != nil {
 		return fmt.Errorf("failed to send prompt after resume: %w", retryErr)
 	}
 	return nil

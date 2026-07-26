@@ -225,12 +225,17 @@ func (h *pluginHost) defaultWorkflowID(ctx context.Context, workspaceID string) 
 // plugin requested start_agent. Best-effort and non-fatal, matching the
 // REST/MCP path's asynchronous auto-start: a missing starter (orchestrator not
 // wired) or a launch error leaves the task on the board for a manual start.
+//
+// The context is detached (context.WithoutCancel) because the task row already
+// exists: the plugin's incoming gRPC call may carry a short deadline (e.g. a
+// webhook handler's), and letting that abort a launch we've already committed
+// to would silently drop the start_agent request with no observable signal.
 func (h *pluginHost) startTaskBestEffort(ctx context.Context, taskID string) {
 	_, starter := h.writeDependencies()
 	if starter == nil {
 		return
 	}
-	_ = starter.StartTask(ctx, taskID)
+	_ = starter.StartTask(context.WithoutCancel(ctx), taskID)
 }
 
 // ── Message send (api_write:messages) ───────────────────────────────────

@@ -148,6 +148,27 @@ func TestPluginsMessenger_PromptResumesWhenExecutionGone(t *testing.T) {
 	require.Empty(t, tasks.deleted)
 }
 
+// TestPluginsMessenger_ResumeWaitTimeoutDeletesMessage pins the explicit
+// choice: when the agent execution is gone, resume succeeds, but the session
+// isn't ready in time (WaitForSessionReady errors), the send fails and the
+// recorded user message is deleted — so a plugin retry doesn't stack a
+// duplicate prompt (queueing is not idempotent). The retry prompt is never
+// reached.
+func TestPluginsMessenger_ResumeWaitTimeoutDeletesMessage(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{
+		primary: &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateWaitingForInput, AgentExecutionID: "exec-1"},
+		waitErr: errors.New("session not ready in time"),
+	}
+	orch := &fakeMessengerOrch{promptErr: orchexecutor.ErrExecutionNotFound}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	_, err := a.SendMessage(context.Background(), "t1", "", "wake up", "plugin:p")
+	require.Error(t, err)
+	require.Equal(t, 1, orch.resumeCalls, "resume is attempted")
+	require.Equal(t, 1, orch.promptCalls, "the retry prompt is not reached after a wait timeout")
+	require.Equal(t, []string{"msg-1"}, tasks.deleted, "the recorded message is removed so a retry can't duplicate it")
+}
+
 func TestPluginsMessenger_PromptFailureDeletesRecordedMessage(t *testing.T) {
 	tasks := &fakeMessengerTaskSvc{primary: &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateWaitingForInput, AgentExecutionID: "exec-1"}}
 	orch := &fakeMessengerOrch{promptErr: errors.New("dispatch boom")}

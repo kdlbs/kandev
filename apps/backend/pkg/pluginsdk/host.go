@@ -732,15 +732,20 @@ func (s *grpcHostServer) ListMessages(ctx context.Context, req *pluginv1.ListMes
 // ── Host data API writes (ADR 0043) ─────────────────────────────────────
 //
 // Each dispatches to the injected impl's writer accessor (impl.Tasks() for
-// Create/Update, impl.Comments() for CreateComment) and converts native<->proto
+// Create/Update, impl.Messages() for SendMessage) and converts native<->proto
 // at the boundary. Capability gating (api_write:<resource>) and the real
 // service-layer calls live in the kandev-side impl, exactly like the reads
-// above.
+// above. The nil checks are defense-in-depth for the trust boundary: the
+// in-tree Host never returns (nil, nil) on success, but a custom or test Host
+// might, and a plugin should get a gRPC error rather than a server panic.
 
 func (s *grpcHostServer) CreateTask(ctx context.Context, req *pluginv1.CreateTaskRequest) (*pluginv1.CreateTaskResponse, error) {
 	task, err := s.impl.Tasks().Create(ctx, createTaskInputFromProto(req))
 	if err != nil {
 		return nil, err
+	}
+	if task == nil {
+		return nil, status.Error(codes.Internal, "CreateTask returned nil task")
 	}
 	protoTask, err := task.toProto()
 	if err != nil {
@@ -754,6 +759,9 @@ func (s *grpcHostServer) UpdateTask(ctx context.Context, req *pluginv1.UpdateTas
 	if err != nil {
 		return nil, err
 	}
+	if task == nil {
+		return nil, status.Error(codes.Internal, "UpdateTask returned nil task")
+	}
 	protoTask, err := task.toProto()
 	if err != nil {
 		return nil, err
@@ -765,6 +773,9 @@ func (s *grpcHostServer) SendMessage(ctx context.Context, req *pluginv1.SendMess
 	dispatch, err := s.impl.Messages().Send(ctx, req.GetTaskId(), req.GetSessionId(), req.GetText())
 	if err != nil {
 		return nil, err
+	}
+	if dispatch == nil {
+		return nil, status.Error(codes.Internal, "SendMessage returned nil dispatch")
 	}
 	return dispatch.toProto(), nil
 }
