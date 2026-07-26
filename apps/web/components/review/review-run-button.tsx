@@ -2,7 +2,6 @@
 
 import { useCallback, useState } from "react";
 import { IconLoader2, IconSparkles, IconX } from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import Link from "@/components/routing/app-link";
@@ -14,7 +13,6 @@ export type ReviewRunButtonProps = {
   taskId: string | null | undefined;
   sessionId?: string | null;
   activeRun: TaskReviewRun | null;
-  openCount: number;
   /** Compact presentation for a toolbar with limited width. */
   compact?: boolean;
 };
@@ -135,7 +133,6 @@ export function ReviewRunButton({
   taskId,
   sessionId,
   activeRun,
-  openCount,
   compact = false,
 }: ReviewRunButtonProps) {
   const { notice, starting, start, clearNotice } = useRunReview(taskId, sessionId);
@@ -170,16 +167,6 @@ export function ReviewRunButton({
           <IconX className="h-3.5 w-3.5" />
           Cancel
         </Button>
-      )}
-
-      {!running && openCount > 0 && (
-        <Badge
-          variant="outline"
-          className="px-1.5 py-0 text-[10px]"
-          data-testid="review-open-count"
-        >
-          {openCount} finding{openCount === 1 ? "" : "s"}
-        </Badge>
       )}
 
       {shown && <RunNotice code={shown.code} message={shown.message} />}

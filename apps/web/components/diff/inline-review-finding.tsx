@@ -3,6 +3,7 @@
 import { useAppStore } from "@/components/state-provider";
 import { useFindingActions } from "@/hooks/domains/review/use-finding-actions";
 import { useSendFindingToAgent } from "@/hooks/domains/review/use-send-finding-to-agent";
+import { FINDING_DOM_ATTR } from "@/lib/review/navigation";
 import type { TaskReviewFinding } from "@/lib/types/review";
 import { ReviewFindingCard } from "./review-finding-card";
 
@@ -28,7 +29,7 @@ export function InlineReviewFinding({
   const sendToAgent = useSendFindingToAgent({ taskId, sessionId });
 
   return (
-    <div className="my-1 px-2">
+    <div className="my-1 scroll-mt-24 px-2 rounded-md" {...{ [FINDING_DOM_ATTR]: finding.id }}>
       <ReviewFindingCard
         finding={finding}
         staleReason={staleReason}

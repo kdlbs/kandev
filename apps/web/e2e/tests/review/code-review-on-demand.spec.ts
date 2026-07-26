@@ -113,6 +113,26 @@ test.describe("Native code review — on demand", () => {
       fullPage: false,
     });
 
+    // The findings count is a navigator: open it and jump straight to a finding
+    // instead of scrolling the diff to hunt for it. The popover portals to the
+    // document body, so it is scoped to the page rather than the dialog.
+    await dialog.getByTestId("review-open-count").click();
+    const navItem = testPage.getByTestId("review-finding-nav-item").first();
+    await expect(navItem).toBeVisible();
+    await expect(testPage.getByTestId("review-findings-popover")).toBeVisible();
+    await testPage.screenshot({
+      path: "e2e-artifacts/review-04-findings-navigator.png",
+      fullPage: false,
+    });
+    await navItem.click();
+    await expect(dialog.locator("[data-review-finding-id]").first()).toBeInViewport({
+      timeout: 15_000,
+    });
+    await testPage.screenshot({
+      path: "e2e-artifacts/review-05-jumped-to-finding.png",
+      fullPage: false,
+    });
+
     // A finding is advisory: resolving it is the human's call and it persists.
     await findingCard.getByTestId("review-finding-resolve").click();
     await expect(dialog.getByTestId("review-finding-card").first()).toHaveAttribute(

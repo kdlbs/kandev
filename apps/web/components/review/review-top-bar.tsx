@@ -24,8 +24,10 @@ import { useTaskReview } from "@/hooks/domains/review/use-task-review";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateUserSettings } from "@/lib/api";
 import { VcsSplitButton } from "@/components/vcs-split-button";
+import { isRunActive } from "@/lib/review/findings";
 import { FixCommentsButton } from "./review-fix-comments-button";
 import { ReviewRunButton } from "./review-run-button";
+import { ReviewFindingsButton } from "./review-findings-button";
 import { ReviewPRSelector } from "./review-pr-selector";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -41,6 +43,8 @@ type ReviewTopBarProps = {
   onToggleWordWrap: (wrap: boolean) => void;
   onSendComments: (comments: DiffComment[]) => void;
   onClose: () => void;
+  /** Selects a file in the review diff — used to jump to a finding's file. */
+  onSelectFile: (fileKey: string) => void;
   onRequestWalkthrough?: () => void;
   requestWalkthroughDisabled?: boolean;
   getPendingComments: () => DiffComment[];
@@ -202,6 +206,7 @@ export const ReviewTopBar = memo(function ReviewTopBar({
   onToggleWordWrap,
   onSendComments,
   onClose,
+  onSelectFile,
   onRequestWalkthrough,
   requestWalkthroughDisabled,
   getPendingComments,
@@ -212,7 +217,8 @@ export const ReviewTopBar = memo(function ReviewTopBar({
   prDiffLoading,
 }: ReviewTopBarProps) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const { activeRun, openCount } = useTaskReview(activeTaskId);
+  const { activeRun, findings } = useTaskReview(activeTaskId);
+  const reviewRunning = isRunActive(activeRun);
   const reviewAutoMarkOnScroll = useAppStore((state) => state.userSettings.reviewAutoMarkOnScroll);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const userSettings = useAppStore((state) => state.userSettings);
@@ -261,12 +267,8 @@ export const ReviewTopBar = memo(function ReviewTopBar({
           onFixComments={handleFixComments}
         />
       )}
-      <ReviewRunButton
-        taskId={activeTaskId}
-        sessionId={sessionId}
-        activeRun={activeRun}
-        openCount={openCount}
-      />
+      <ReviewRunButton taskId={activeTaskId} sessionId={sessionId} activeRun={activeRun} />
+      {!reviewRunning && <ReviewFindingsButton findings={findings} onSelectFile={onSelectFile} />}
       <ReviewWalkthroughButton
         onRequestWalkthrough={onRequestWalkthrough}
         disabled={requestWalkthroughDisabled}

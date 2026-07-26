@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { IconAlertTriangle, IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { sortFindings } from "@/lib/review/findings";
+import { NAVIGATE_FINDING_EVENT, type NavigateFindingEventDetail } from "@/lib/review/navigation";
 import type { TaskReviewFinding } from "@/lib/types/review";
 import { InlineReviewFinding } from "./inline-review-finding";
 
@@ -21,6 +22,21 @@ const STALE_REASON =
 export function UnanchoredFindingsBanner({ findings }: { findings: TaskReviewFinding[] }) {
   const [expanded, setExpanded] = useState(false);
   const open = findings.filter((f) => f.status === "open");
+
+  // A stale finding lives inside this collapsed banner, so a "go to finding"
+  // from the overview can't scroll to a card that isn't in the DOM. Expand when
+  // the navigation target is one of ours so its card renders and can be found.
+  useEffect(() => {
+    const onNavigate = (event: Event) => {
+      const { findingId } = (event as CustomEvent<NavigateFindingEventDetail>).detail ?? {};
+      if (findingId && findings.some((f) => f.status === "open" && f.id === findingId)) {
+        setExpanded(true);
+      }
+    };
+    window.addEventListener(NAVIGATE_FINDING_EVENT, onNavigate);
+    return () => window.removeEventListener(NAVIGATE_FINDING_EVENT, onNavigate);
+  }, [findings]);
+
   if (open.length === 0) return null;
 
   return (

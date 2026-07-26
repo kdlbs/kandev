@@ -100,6 +100,7 @@ export function ReviewDialogSurface(props: ReviewDialogSurfaceProps) {
           onToggleWordWrap={state.setWordWrap}
           onSendComments={state.handleSendComments}
           onClose={() => onOpenChange(false)}
+          onSelectFile={state.handleSelectFile}
           onRequestWalkthrough={props.onRequestWalkthrough}
           requestWalkthroughDisabled={state.allFiles.length === 0}
           getPendingComments={state.getPendingComments}
