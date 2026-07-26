@@ -2,16 +2,46 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	eventtypes "github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type blockingRetirementEventBus struct {
+	*recordingEventBus
+	mu                sync.Mutex
+	retirementEntered chan struct{}
+	releaseRetirement chan struct{}
+	once              sync.Once
+}
+
+func (b *blockingRetirementEventBus) Publish(
+	ctx context.Context,
+	subject string,
+	event *bus.Event,
+) error {
+	if subject == eventtypes.TaskSessionActivityChanged {
+		data, _ := event.Data.(map[string]interface{})
+		if value, present := data["foreground_activity"]; present && value == nil {
+			b.once.Do(func() { close(b.retirementEntered) })
+			<-b.releaseRetirement
+		}
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.recordingEventBus.Publish(ctx, subject, event)
+}
 
 func registerAsyncWorkForExecution(
 	t *testing.T,
@@ -32,6 +62,14 @@ func registerAsyncWorkForExecution(
 			Normalized: payload,
 		},
 	})
+}
+
+func turnActivityRecord(t *testing.T, svc *Service, sessionID string) (*turnActivity, bool) {
+	t.Helper()
+	svc.foregroundActivityMu.Lock()
+	defer svc.foregroundActivityMu.Unlock()
+	activity, ok := svc.foregroundActivity[sessionID]
+	return activity, ok
 }
 
 func TestActiveSubagentCount_DerivesOnlyLiveSubagentRegistrations(t *testing.T) {
@@ -302,6 +340,56 @@ func TestDelayedOldExecutionToolCompletionPreservesSuccessorRegistration(t *test
 	}
 }
 
+func TestExecutionTeardown_StaleToolOwnershipIsNotVisibleToReusedSuccessorID(t *testing.T) {
+	repo := setupTestRepo(t)
+	const (
+		taskID       = "task-tool-collision"
+		sessionID    = "session-tool-collision"
+		oldExecution = "execution-old"
+		newExecution = "execution-new"
+		toolCallID   = "provider-reused-tool-id"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return newExecution, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.messageCreator = &mockMessageCreator{}
+
+	// The predecessor never emits a terminal update for this foreground tool.
+	svc.recordToolOwnership(sessionID, toolCallID, oldExecution, toolOwnershipForeground)
+
+	// The successor is already background-idle when delayed predecessor teardown
+	// arrives. Its later update reuses the provider-local tool-call ID but carries
+	// no positive ownership metadata.
+	svc.registerBackgroundWork(sessionID, "successor-work", newExecution, "work-new")
+	svc.markForegroundIdle(sessionID)
+	svc.handleAgentStopped(t.Context(), watcher.AgentEventData{
+		TaskID: taskID, SessionID: sessionID, AgentExecutionID: oldExecution,
+	})
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID, ExecutionID: newExecution,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       "tool_update",
+			ToolCallID: toolCallID,
+			ToolStatus: agentEventCompleted,
+			ToolCallContents: []streams.ToolCallContentItem{{
+				Type: "content",
+				Content: &streams.ContentBlock{
+					Type: "text",
+					Text: "successor update",
+				},
+			}},
+		},
+	})
+
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("stale predecessor tool ownership changed successor activity to %q", got)
+	}
+}
+
 func TestExecutionStop_RetiresOnlyOwnedBackgroundWorkAndPublishesFinalTransition(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -312,16 +400,45 @@ func TestExecutionStop_RetiresOnlyOwnedBackgroundWorkAndPublishesFinalTransition
 
 	registerAsyncWorkForExecution(t, svc, "task-stop-accounting", "session-stop-accounting", "execution-old", "tool-old", "work-old")
 	registerAsyncWorkForExecution(t, svc, "task-stop-accounting", "session-stop-accounting", "execution-new", "tool-new", "work-new")
+	svc.recordToolOwnership(
+		"session-stop-accounting",
+		"foreground-old",
+		"execution-old",
+		toolOwnershipForeground,
+	)
+	svc.recordToolOwnership(
+		"session-stop-accounting",
+		"child-new",
+		"execution-new",
+		toolOwnershipChild,
+	)
 	svc.markForegroundIdle("session-stop-accounting")
 
 	svc.handleAgentStopped(ctx, watcher.AgentEventData{
 		TaskID: "task-stop-accounting", SessionID: "session-stop-accounting", AgentExecutionID: "execution-old",
 	})
+	if _, ok := turnActivityRecord(t, svc, "session-stop-accounting"); !ok {
+		t.Fatal("predecessor cleanup retired activity already owned by the successor execution")
+	}
 	if svc.hasBackgroundTask("session-stop-accounting", "tool-old") {
 		t.Fatal("stopped execution left its background registration behind")
 	}
 	if !svc.hasBackgroundTask("session-stop-accounting", "tool-new") {
 		t.Fatal("old execution cleanup removed successor execution background work")
+	}
+	if got := svc.toolOwnership(
+		"session-stop-accounting",
+		"foreground-old",
+		"execution-old",
+	); got != toolOwnershipUnknown {
+		t.Fatalf("predecessor tool ownership survived teardown: %d", got)
+	}
+	if got := svc.toolOwnership(
+		"session-stop-accounting",
+		"child-new",
+		"execution-new",
+	); got != toolOwnershipChild {
+		t.Fatalf("successor tool ownership = %d, want child", got)
 	}
 	if got := svc.ForegroundActivity("session-stop-accounting"); got != v1.ForegroundActivityBackground {
 		t.Fatalf("successor background work should remain visible, got %q", got)
@@ -335,6 +452,9 @@ func TestExecutionStop_RetiresOnlyOwnedBackgroundWorkAndPublishesFinalTransition
 	}
 	if got := svc.ForegroundActivity("session-stop-accounting"); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("final execution cleanup left stale background activity: %q", got)
+	}
+	if _, ok := turnActivityRecord(t, svc, "session-stop-accounting"); ok {
+		t.Fatal("final stopped execution retained the session activity record")
 	}
 
 	var activityValues []interface{}
@@ -359,6 +479,34 @@ func TestExecutionStop_RetiresOnlyOwnedBackgroundWorkAndPublishesFinalTransition
 	}
 }
 
+func TestExecutionStop_DropsLateFramesAfterActivityRetirement(t *testing.T) {
+	const (
+		taskID      = "task-stopped-late-frame"
+		sessionID   = "session-stopped-late-frame"
+		executionID = "execution-stopped-late-frame"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.registerBackgroundWork(sessionID, "background-old", executionID, "work-old")
+
+	svc.handleAgentStopped(t.Context(), watcher.AgentEventData{
+		TaskID: taskID, SessionID: sessionID, AgentExecutionID: executionID,
+	})
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID, ExecutionID: executionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       agentEventToolCall,
+			ToolCallID: "late-tool",
+			ToolStatus: "in_progress",
+		},
+	})
+
+	if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+		t.Fatal("late stopped-execution frame recreated retired activity")
+	}
+}
+
 func TestExecutionCleanup_DelayedPublicationCannotOverwriteSuccessorActivity(t *testing.T) {
 	repo := setupTestRepo(t)
 	const taskID, sessionID = "task-cleanup-race", "session-cleanup-race"
@@ -374,8 +522,10 @@ func TestExecutionCleanup_DelayedPublicationCannotOverwriteSuccessorActivity(t *
 	cleanupMutated := make(chan struct{})
 	releaseCleanupPublish := make(chan struct{})
 	cleanupDone := make(chan struct{})
+	retiredActivity := make(chan *turnActivity, 1)
 	go func() {
-		publication, changed := svc.clearExecutionBackgroundWorkSnapshot(sessionID, "execution-old")
+		publication, changed := svc.retireExecutionActivitySnapshot(sessionID, "execution-old")
+		retiredActivity <- publication.activity
 		if !changed {
 			close(cleanupMutated)
 			close(cleanupDone)
@@ -390,6 +540,13 @@ func TestExecutionCleanup_DelayedPublicationCannotOverwriteSuccessorActivity(t *
 
 	svc.registerBackgroundWork(sessionID, "tool-new", "execution-new", "work-new")
 	svc.markForegroundIdle(sessionID)
+	current, ok := turnActivityRecord(t, svc, sessionID)
+	if !ok {
+		t.Fatal("successor registration did not create an activity record")
+	}
+	if current == <-retiredActivity {
+		t.Fatal("successor mutated the predecessor activity record after it was retired")
+	}
 	svc.publishForegroundActivityChanged(t.Context(), taskID, sessionID)
 	close(releaseCleanupPublish)
 	<-cleanupDone
@@ -410,6 +567,179 @@ func TestExecutionCleanup_DelayedPublicationCannotOverwriteSuccessorActivity(t *
 	}
 }
 
+func TestExecutionCleanup_PublicationDeliveryIsOrderedAcrossRecordGenerations(t *testing.T) {
+	repo := setupTestRepo(t)
+	const taskID, sessionID = "task-delivery-race", "session-delivery-race"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	recorded := &recordingEventBus{}
+	blocking := &blockingRetirementEventBus{
+		recordingEventBus: recorded,
+		retirementEntered: make(chan struct{}),
+		releaseRetirement: make(chan struct{}),
+	}
+	svc.eventBus = blocking
+	svc.registerBackgroundWork(sessionID, "tool-old", "execution-old", "work-old")
+	svc.markForegroundIdle(sessionID)
+
+	publication, changed := svc.retireExecutionActivitySnapshot(sessionID, "execution-old")
+	if !changed {
+		t.Fatal("final execution retirement did not create a publication")
+	}
+	retirementDone := make(chan struct{})
+	go func() {
+		svc.publishForegroundActivitySnapshot(t.Context(), taskID, sessionID, publication)
+		close(retirementDone)
+	}()
+	<-blocking.retirementEntered
+
+	svc.registerBackgroundWorkKind(
+		sessionID,
+		"tool-new",
+		"execution-new",
+		"work-new",
+		streams.BackgroundWorkKindSubagent,
+	)
+	svc.markForegroundIdle(sessionID)
+	successorDone := make(chan struct{})
+	go func() {
+		svc.publishForegroundActivityChanged(t.Context(), taskID, sessionID)
+		close(successorDone)
+	}()
+
+	// The predecessor has passed identity validation and is blocked in delivery.
+	// A successor publication must queue behind that delivery even though it owns
+	// a different turnActivity record.
+	select {
+	case <-successorDone:
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(blocking.releaseRetirement)
+	<-retirementDone
+	<-successorDone
+
+	var values []interface{}
+	var counts []int
+	for _, record := range recorded.events {
+		if record.subject != eventtypes.TaskSessionActivityChanged {
+			continue
+		}
+		data, _ := record.event.Data.(map[string]interface{})
+		values = append(values, data["foreground_activity"])
+		counts = append(counts, data["active_subagent_count"].(int))
+	}
+	want := []interface{}{nil, string(v1.ForegroundActivityBackground)}
+	if !slices.Equal(values, want) {
+		t.Fatalf("cross-generation publications = %#v, want %#v", values, want)
+	}
+	if !slices.Equal(counts, []int{0, 1}) {
+		t.Fatalf("cross-generation subagent counts = %v, want [0 1]", counts)
+	}
+	svc.activityPublicationGuardsMu.Lock()
+	guardCount := len(svc.activityPublicationGuards)
+	svc.activityPublicationGuardsMu.Unlock()
+	if guardCount != 0 {
+		t.Fatalf("publication guard registry retained %d idle entries", guardCount)
+	}
+}
+
+func TestExecutionCleanup_PreservesSuccessorPromptClaimAndGeneration(t *testing.T) {
+	const (
+		sessionID    = "session-successor-claim"
+		oldExecution = "execution-old"
+		newExecution = "execution-new"
+	)
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	svc.registerBackgroundWork(sessionID, "old-work", oldExecution, "work-old")
+	svc.markForegroundIdle(sessionID)
+
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("successor prompt did not claim predecessor background-idle activity")
+	}
+	svc.retireExecutionActivitySnapshot(sessionID, oldExecution)
+	if !svc.isForegroundClaimCurrent(sessionID, claim) {
+		t.Fatal("predecessor cleanup invalidated the successor prompt claim")
+	}
+
+	dispatch := svc.beginForegroundDispatch(sessionID, claim, newExecution)
+	if dispatch == nil {
+		t.Fatal("successor prompt claim could not establish its prompt generation")
+	}
+	if dispatch.generation == 0 {
+		t.Fatal("successor prompt generation was not advanced")
+	}
+	svc.acceptForegroundDispatch(dispatch)
+
+	ta := svc.lockTurnActivity(sessionID, false)
+	if ta == nil {
+		t.Fatal("predecessor cleanup retired the successor-owned activity record")
+	}
+	defer ta.mu.Unlock()
+	if _, ok := ta.executionClaims[newExecution]; !ok {
+		t.Fatalf("successor execution %q did not retain its activity claim", newExecution)
+	}
+	if ta.promptCycleGeneration != dispatch.generation {
+		t.Fatalf("prompt generation = %d, want %d", ta.promptCycleGeneration, dispatch.generation)
+	}
+}
+
+func TestExecutionCleanup_RetiresRecordAfterSuccessorClaimIsAbandoned(t *testing.T) {
+	const (
+		sessionID    = "session-abandoned-successor-claim"
+		oldExecution = "execution-old"
+	)
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	svc.registerBackgroundWork(sessionID, "old-work", oldExecution, "work-old")
+	svc.markForegroundIdle(sessionID)
+
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("successor prompt did not claim predecessor background-idle activity")
+	}
+	svc.retireExecutionActivitySnapshot(sessionID, oldExecution)
+	if svc.releaseForegroundClaim(claim) {
+		t.Fatal("abandoned claim reopened background-idle without live background work")
+	}
+	if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+		t.Fatal("abandoned successor claim retained an otherwise unused activity record")
+	}
+}
+
+func TestExecutionCleanup_RetiresRecordAfterDispatchAcceptReleasesLastToken(t *testing.T) {
+	const sessionID = "session-dispatch-accept-retirement"
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	svc.registerBackgroundWork(sessionID, "old-work", "execution-old", "work-old")
+	dispatch := svc.beginForegroundDispatch(sessionID, nil)
+	if dispatch == nil {
+		t.Fatal("failed to begin successor dispatch")
+	}
+
+	svc.retireExecutionActivitySnapshot(sessionID, "execution-old")
+	svc.acceptForegroundDispatch(dispatch)
+
+	if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+		t.Fatal("dispatch accept retained an ownerless record after terminal teardown")
+	}
+}
+
+func TestExecutionCleanup_RetiresRecordAfterDispatchRollbackReleasesLastToken(t *testing.T) {
+	const sessionID = "session-dispatch-rollback-retirement"
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	svc.registerBackgroundWork(sessionID, "old-work", "execution-old", "work-old")
+	dispatch := svc.beginForegroundDispatch(sessionID, nil)
+	if dispatch == nil {
+		t.Fatal("failed to begin successor dispatch")
+	}
+
+	svc.retireExecutionActivitySnapshot(sessionID, "execution-old")
+	svc.rollbackForegroundDispatch(dispatch)
+
+	if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+		t.Fatal("dispatch rollback retained an ownerless record after terminal teardown")
+	}
+}
+
 func TestExecutionCleanup_DelayedNullCannotOverwriteClaimlessSuccessorStart(t *testing.T) {
 	repo := setupTestRepo(t)
 	const taskID, sessionID = "task-cleanup-claimless-race", "session-cleanup-claimless-race"
@@ -424,7 +754,7 @@ func TestExecutionCleanup_DelayedNullCannotOverwriteClaimlessSuccessorStart(t *t
 	releaseCleanupPublish := make(chan struct{})
 	cleanupDone := make(chan struct{})
 	go func() {
-		publication, changed := svc.clearExecutionBackgroundWorkSnapshot(sessionID, "execution-old")
+		publication, changed := svc.retireExecutionActivitySnapshot(sessionID, "execution-old")
 		close(cleanupMutated)
 		if changed {
 			<-releaseCleanupPublish
@@ -516,7 +846,7 @@ func TestExecutionCleanup_AfterClaimlessBeginCannotCreateSuccessorNull(t *testin
 	releaseCleanupPublish := make(chan struct{})
 	cleanupDone := make(chan struct{})
 	go func() {
-		publication, changed := svc.clearExecutionBackgroundWorkSnapshot(sessionID, "execution-old")
+		publication, changed := svc.retireExecutionActivitySnapshot(sessionID, "execution-old")
 		close(cleanupMutated)
 		<-releaseCleanupPublish
 		if changed {
@@ -730,6 +1060,9 @@ func TestExecutionTerminalEvents_ReconcileMissingBackgroundCompletion(t *testing
 			if svc.hasBackgroundTask(sessionID, "tool-terminal") {
 				t.Fatal("terminal execution event left missing-completion registration behind")
 			}
+			if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+				t.Fatal("terminal execution event retained the session activity record")
+			}
 			if got := countActivityClears(recorded); got != 1 {
 				t.Fatalf("terminal session activity clears = %d, want exactly one", got)
 			}
@@ -814,8 +1147,117 @@ func TestCleanupAgentExecution_ForcedPathIsOwnedAndIdempotent(t *testing.T) {
 	if got := countActivityClears(recorded); got != 1 {
 		t.Fatalf("forced final cleanup clears = %d, want exactly one", got)
 	}
+	if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+		t.Fatal("forced final cleanup retained the session activity record")
+	}
 	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
 		t.Fatalf("forced cleanup task recomputes = %v, want [%s]", taskEvents.activityTaskIDs, taskID)
+	}
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID, ExecutionID: "execution-new",
+		Data: &lifecycle.AgentStreamEventData{
+			Type: agentEventToolCall, ToolCallID: "late-forced-tool", ToolStatus: "in_progress",
+		},
+	})
+	if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+		t.Fatal("late forced-cleanup frame recreated the retired activity record")
+	}
+}
+
+func TestClearTurnActivity_InvalidatesOutstandingTokensAndIsIdempotent(t *testing.T) {
+	const sessionID = "session-delete-activity"
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	svc.registerBackgroundWork(sessionID, "work", "execution", "work")
+	svc.markForegroundIdle(sessionID)
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("failed to create foreground claim")
+	}
+
+	svc.clearTurnActivity(sessionID)
+	svc.clearTurnActivity(sessionID)
+
+	if svc.releaseForegroundClaim(claim) {
+		t.Fatal("deleted activity record accepted a stale foreground claim")
+	}
+	if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+		t.Fatal("repeated activity deletion recreated the record")
+	}
+}
+
+func TestDeleteSession_StopsLiveExecutionAndDropsLateFrames(t *testing.T) {
+	const (
+		taskID      = "task-delete-live"
+		sessionID   = "session-delete-live"
+		executionID = "execution-delete-live"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return executionID, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.registerBackgroundWork(sessionID, "background-live", executionID, "work-live")
+
+	if err := svc.DeleteSession(t.Context(), sessionID); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+	manager.mu.Lock()
+	stopCalls := append([]stopAgentCall(nil), manager.stopAgentWithReasonArgs...)
+	manager.mu.Unlock()
+	if len(stopCalls) != 1 || stopCalls[0] != (stopAgentCall{
+		ExecutionID: executionID,
+		Reason:      "session deleted",
+		Force:       true,
+	}) {
+		t.Fatalf("session deletion stop calls = %#v", stopCalls)
+	}
+
+	svc.handleAgentStreamEvent(t.Context(), &lifecycle.AgentStreamEventPayload{
+		TaskID: taskID, SessionID: sessionID, ExecutionID: executionID,
+		Data: &lifecycle.AgentStreamEventData{
+			Type:       agentEventToolCall,
+			ToolCallID: "late-tool",
+			ToolStatus: "in_progress",
+		},
+	})
+	if _, ok := turnActivityRecord(t, svc, sessionID); ok {
+		t.Fatal("late deleted-session frame recreated activity")
+	}
+}
+
+func TestDeleteSession_StopFailurePreservesSessionAndActivity(t *testing.T) {
+	const (
+		taskID      = "task-delete-stop-failure"
+		sessionID   = "session-delete-stop-failure"
+		executionID = "execution-delete-stop-failure"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	manager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return executionID, nil
+		},
+		stopAgentWithReasonErr: errors.New("runtime still active"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+	svc.registerBackgroundWork(sessionID, "background-live", executionID, "work-live")
+
+	if err := svc.DeleteSession(t.Context(), sessionID); err == nil {
+		t.Fatal("DeleteSession succeeded while its live execution could not be stopped")
+	}
+	if _, err := repo.GetTaskSession(t.Context(), sessionID); err != nil {
+		t.Fatalf("session was deleted after stop failure: %v", err)
+	}
+	if !svc.hasBackgroundTask(sessionID, "background-live") {
+		t.Fatal("stop failure retired activity still owned by the live execution")
+	}
+	if svc.isExecutionCompleted(sessionID, executionID) {
+		t.Fatal("stop failure terminal-marked a still-live execution")
 	}
 }
 
@@ -916,7 +1358,7 @@ func TestBackgroundActivity_UnknownToolUpdatePreservesActivity(t *testing.T) {
 // initial tool_call is the only frame handleToolCallEvent sees before
 // hasBackgroundTask starts short-circuiting later updates, so it must carry
 // the launching execution ID itself. Without that, execution teardown
-// (clearExecutionBackgroundWorkSnapshot, keyed by executionID) can never
+// (retireExecutionActivitySnapshot, keyed by executionID) can never
 // match this registration, and the session reports background-running
 // forever even after its execution has died.
 func TestBackgroundWork_RegisteredFromInitialToolCallIsRetiredOnExecutionTeardown(t *testing.T) {

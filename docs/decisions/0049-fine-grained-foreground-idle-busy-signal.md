@@ -1,6 +1,6 @@
 # 0049: Fine-grained foreground-idle busy signal
 
-**Status:** accepted (amended 2026-07-25)
+**Status:** accepted (amended 2026-07-26)
 **Date:** 2026-07-11
 **Area:** backend, frontend, protocol
 **Related:** [Background work liveness spec](../specs/platform/background-work-liveness.md)
@@ -92,13 +92,34 @@ to the foreground only:
 - Tool activity marks the foreground as generating only from positive ownership
   evidence. The initial tool call records whether it is top-level foreground,
   recognized background work, or a child of background work; subsequent
-  updates inherit that ownership. Missing parent metadata and update-only tool
-  frames preserve the current activity rather than promoting unknown work to
-  foreground. This is required for incremental ACP streams such as Claude's,
-  which can temporarily omit `parentToolUseId` while the adapter still carries
-  the child tool's cached normalized payload. A known top-level non-background
-  tool still marks the foreground as generating, just like message and thinking
-  frames.
+  updates inherit that ownership only within the execution that established it.
+  Provider-local tool-call IDs may be reused after execution rotation; a stale
+  predecessor entry is never ownership evidence for the successor. Missing
+  parent metadata and update-only tool frames preserve the current activity
+  rather than promoting unknown work to foreground. This is required for
+  incremental ACP streams such as Claude's, which can temporarily omit
+  `parentToolUseId` while the adapter still carries the child tool's cached
+  normalized payload. A known top-level non-background tool still marks the
+  foreground as generating, just like message and thinking frames.
+- Activity records are execution-lifetime state. Each execution that dispatches
+  a prompt or records tool/background activity claims the mapped session record.
+  Terminal cleanup removes that execution's tool ownership, background work,
+  and record claim. It detaches the whole record only when no other execution
+  claim or in-flight prompt/dispatch token still uses it.
+- Record lookup and retirement use one lock-coupled identity protocol: lookup
+  locks the mapped record before releasing the map guard, while retirement
+  validates and detaches that same identity under the guard. A successor
+  therefore either mutates the retained record or creates a new record after
+  retirement; it cannot mutate a detached predecessor pointer. Delayed
+  publications validate both record identity and revision. Validation and
+  synchronous event delivery are serialized by a stable, reference-counted
+  per-session guard that survives record replacement; a predecessor cannot pass
+  validation and then deliver after its successor. Foreground activity and
+  active-subagent count are captured together under the record lock, so a
+  predecessor value cannot be paired with successor-owned count state. Session
+  deletion first quiesces any live lifecycle execution, marks its exact
+  execution ID terminal, then forcibly detaches the identity and invalidates
+  outstanding tokens.
 - All activity-bearing lifecycle and activity-refresh events use one FIFO per
   task; different tasks may publish concurrently. Same-task reentrant
   publication enqueues and returns. Repository reads and synchronous callbacks
@@ -131,6 +152,9 @@ restart. Connected executions retain background liveness and exact subagent
 registrations across foreground turns, but work that survives a restart cannot
 be reconstructed without an agent-side liveness API. Claude and Codex are the
 initial attested adapters; all others keep the conservative busy behavior.
+Terminal execution teardown releases orphaned tool ownership and background
+registrations, and releases the session activity record once no successor uses
+it, so completed session history does not retain live-memory bookkeeping.
 
 ## Alternatives Considered
 
@@ -153,3 +177,9 @@ initial attested adapters; all others keep the conservative busy behavior.
   it on the initial call. Reclassifying from each update makes missing metadata
   override known ownership and falsely closes the prompt gate. Unknown updates
   therefore preserve activity until positive foreground evidence arrives.
+- **Load, check, and delete the session record without a shared identity
+  protocol.** Rejected: a successor can load the predecessor's pointer before
+  cleanup deletes the map entry, then mutate detached state that serializers no
+  longer observe. Execution claims alone do not close that stale-pointer window;
+  lookup, token use, publication, and retirement must validate the same mapped
+  identity.

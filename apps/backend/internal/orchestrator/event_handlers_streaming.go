@@ -316,14 +316,19 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 	} else if normalizedIsBackgroundTask(payload.Data.Normalized) {
 		ownership = toolOwnershipBackground
 	}
-	s.recordToolOwnership(payload.SessionID, payload.Data.ToolCallID, ownership)
+	s.recordToolOwnership(
+		payload.SessionID,
+		payload.Data.ToolCallID,
+		payload.ExecutionID,
+		ownership,
+	)
 
 	// A top-level spawned background task (subagent / run-in-background shell)
 	// holds the turn open while the foreground goes idle. A tool_call that
 	// already arrives terminal is not outstanding work — clearing is driven by
 	// tool_update, so registering it would leak into the hold and never clear.
 	if isTerminalToolStatus(payload.Data.ToolStatus) {
-		s.clearToolOwnership(payload.SessionID, payload.Data.ToolCallID)
+		s.clearToolOwnership(payload.SessionID, payload.Data.ToolCallID, payload.ExecutionID)
 		return
 	}
 	switch ownership {
@@ -332,7 +337,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 		// later tool_update path to backfill them never happens, because
 		// hasBackgroundTask short-circuits registration once the tool_call_id is
 		// already tracked. Without the execution ID here,
-		// clearExecutionBackgroundWorkSnapshot can never match this entry on
+		// retireExecutionActivitySnapshot can never match this entry on
 		// execution teardown, orphaning it if the execution dies before a
 		// terminal tool frame arrives.
 		kind := backgroundWorkKind(payload.Data.Normalized)
@@ -346,7 +351,7 @@ func (s *Service) handleToolCallEvent(ctx context.Context, payload *lifecycle.Ag
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 		}
 	case toolOwnershipForeground:
-		if s.markForegroundGenerating(payload.SessionID) {
+		if s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 		}
 	}
@@ -455,7 +460,7 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 	// even if a background task is still outstanding — narrows the busy signal.
 	// Only genuine output flips the state: an empty/invalid frame is discarded by
 	// handleStreamingEventKind, so it must not spuriously reclose the prompt gate.
-	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID) {
+	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
 	s.handleStreamingEventKind(ctx, payload, "message",
@@ -469,7 +474,7 @@ func (s *Service) handleThinkingStreamingEvent(ctx context.Context, payload *lif
 	// Streamed foreground reasoning means the agent is actively generating again.
 	// Only genuine output flips the state — an empty/invalid frame is discarded
 	// downstream, so it must not spuriously reclose the prompt gate.
-	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID) {
+	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
 	s.handleStreamingEventKind(ctx, payload, "thinking message",
@@ -490,7 +495,11 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	}
 	ownership := s.resolveToolUpdateOwnership(payload)
 	if isTerminalToolStatus(payload.Data.ToolStatus) {
-		defer s.clearToolOwnership(payload.SessionID, payload.Data.ToolCallID)
+		defer s.clearToolOwnership(
+			payload.SessionID,
+			payload.Data.ToolCallID,
+			payload.ExecutionID,
+		)
 	}
 	// A terminal update from a foreground tool can be the last substantive frame
 	// after the provider has already announced foreground-idle. Its output still
@@ -501,7 +510,7 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 	if isTerminalToolStatus(payload.Data.ToolStatus) &&
 		len(payload.Data.ToolCallContents) > 0 &&
 		ownership == toolOwnershipForeground &&
-		s.markForegroundGenerating(payload.SessionID) {
+		s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
 
@@ -630,11 +639,15 @@ func (s *Service) trackBackgroundToolUpdate(
 		}
 		return
 	}
-	if s.hasBackgroundTask(payload.SessionID, payload.Data.ToolCallID) {
+	if s.hasBackgroundTask(
+		payload.SessionID,
+		payload.Data.ToolCallID,
+		payload.ExecutionID,
+	) {
 		return
 	}
 	if ownership == toolOwnershipForeground {
-		if s.markForegroundGenerating(payload.SessionID) {
+		if s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 			s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 		}
 		return
@@ -666,14 +679,24 @@ func (s *Service) trackBackgroundToolUpdate(
 // preserves the current activity.
 func (s *Service) resolveToolUpdateOwnership(payload *lifecycle.AgentStreamEventPayload) toolOwnership {
 	if payload.Data.ParentToolCallID != "" {
-		s.recordToolOwnership(payload.SessionID, payload.Data.ToolCallID, toolOwnershipChild)
+		s.recordToolOwnership(
+			payload.SessionID,
+			payload.Data.ToolCallID,
+			payload.ExecutionID,
+			toolOwnershipChild,
+		)
 		return toolOwnershipChild
 	}
 	if normalizedIsBackgroundTask(payload.Data.Normalized) {
-		s.recordToolOwnership(payload.SessionID, payload.Data.ToolCallID, toolOwnershipBackground)
+		s.recordToolOwnership(
+			payload.SessionID,
+			payload.Data.ToolCallID,
+			payload.ExecutionID,
+			toolOwnershipBackground,
+		)
 		return toolOwnershipBackground
 	}
-	return s.toolOwnership(payload.SessionID, payload.Data.ToolCallID)
+	return s.toolOwnership(payload.SessionID, payload.Data.ToolCallID, payload.ExecutionID)
 }
 
 func backgroundWorkID(payload *streams.NormalizedPayload) string {

@@ -1608,7 +1608,18 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 	if err := s.executor.StopExecution(ctx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
 		return err
 	}
+	s.markExecutionFailed(sessionID, executionID)
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
+	taskID := ""
+	if refreshed != nil {
+		taskID = refreshed.TaskID
+	}
+	s.retireExecutionActivityAndPublish(
+		context.WithoutCancel(ctx),
+		taskID,
+		sessionID,
+		executionID,
+	)
 	if err != nil {
 		return fmt.Errorf("reload session after prompt-readiness teardown: %w", err)
 	}
@@ -2202,6 +2213,10 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -2216,6 +2231,23 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 
 	taskID := session.TaskID
 	wasPrimary := session.IsPrimary
+
+	// A settled DB state can still own a workspace execution or detached
+	// background work. Quiesce the live lifecycle execution before removing the
+	// row, then tombstone its exact ID so buffered frames cannot recreate
+	// activity after deletion.
+	if s.agentManager != nil {
+		executionID, executionErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+		if executionErr == nil && executionID != "" {
+			if err := s.executor.StopExecution(ctx, executionID, "session deleted", true); err != nil {
+				return fmt.Errorf("failed to stop session execution before deletion: %w", err)
+			}
+			s.markExecutionFailed(sessionID, executionID)
+			s.retireExecutionActivityAndPublish(
+				context.WithoutCancel(ctx), taskID, sessionID, executionID,
+			)
+		}
+	}
 
 	s.logger.Info("deleting session",
 		zap.String("session_id", sessionID),
@@ -2235,10 +2267,10 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	// Same reasoning for the push-detection tracker. Multi-repo sessions
 	// accumulate one entry per repo; pushTrackerForget walks them all.
 	s.pushTrackerForget(sessionID)
-	// And the foreground/background turn-activity signal. It is normally cleared
-	// at turn close, but a trailing stream event can re-create the entry after
-	// the last turn completed; forget it here so a deleted session leaves no
-	// orphaned map slot.
+	// And the foreground/background turn-activity signal. Execution teardown
+	// normally retires it after the final owner exits; deletion forcibly
+	// invalidates any trailing token so the removed session cannot be recreated
+	// through a stale activity pointer.
 	s.clearTurnActivity(sessionID)
 
 	// Auto-promote another session if we deleted the primary
@@ -2704,7 +2736,12 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		// Re-apply transforms in case metadata changed during ensureSessionRunning.
 		effectivePrompt = s.effectivePromptForSession(sessionID, prompt, planMode, session)
 	}
-	foregroundDispatch := s.beginForegroundDispatch(sessionID, foregroundClaim)
+	activityExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	foregroundDispatch := s.beginForegroundDispatch(
+		sessionID,
+		foregroundClaim,
+		activityExecutionID,
+	)
 	if foregroundDispatch == nil {
 		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
 		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)

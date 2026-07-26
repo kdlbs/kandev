@@ -383,6 +383,13 @@ func TestRetryTransientPrompt_OwningStopSurvivesCoordinatorCancellation(t *testi
 	svc := newCoordinatorStopTestService(repo, taskRepo, agentManager)
 	retryCtx, cancelRetry := context.WithCancel(ctx)
 	svc.rememberTurnPrompt("session-retry-race", "retry me", "", false, nil)
+	svc.registerBackgroundWork(
+		"session-retry-race",
+		"orphaned-work",
+		"execution-retry-race",
+		"work",
+	)
+	svc.markForegroundIdle("session-retry-race")
 	svc.transientRetries.Store("session-retry-race", &transientRetryEntry{
 		attempt: 1,
 		cancel:  cancelRetry,
@@ -411,6 +418,8 @@ func TestRetryTransientPrompt_OwningStopSurvivesCoordinatorCancellation(t *testi
 	coordinatorStopAwaitSignal(t, retryDone, "transient retry completion")
 	require.Equal(t, int32(1), stopCalls.Load())
 	require.Empty(t, agentManager.capturedPromptCalls, "cancelled retry must not relaunch")
+	_, activityPresent := turnActivityRecord(t, svc, "session-retry-race")
+	require.False(t, activityPresent, "forced retry teardown retained predecessor activity")
 }
 
 func TestTransientRetryEntryClaimPreventsDoubleFire(t *testing.T) {

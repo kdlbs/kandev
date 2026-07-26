@@ -238,6 +238,13 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 				zap.String("session_id", sessionID),
 				zap.String("execution_id", execID),
 				zap.Error(err))
+		} else {
+			s.retireExecutionActivityAndPublish(
+				context.WithoutCancel(ctx),
+				taskID,
+				sessionID,
+				execID,
+			)
 		}
 	}
 	if ctx.Err() != nil {

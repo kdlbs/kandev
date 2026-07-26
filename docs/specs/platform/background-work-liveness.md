@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-07-21
-updated: 2026-07-25
+updated: 2026-07-26
 owner: kandev
 ---
 
@@ -43,6 +43,9 @@ and incorrectly prevents prompt delivery.
 - A terminal asynchronous launch result closes its tool card but does not end
   the launched workload. Work remains live until accountable completion or
   execution teardown.
+- Terminal execution teardown retires every tool-ownership and background-work
+  entry owned by that execution. It releases the whole session activity record
+  when no successor execution or in-flight prompt/dispatch token still owns it.
 - The delete confirmation warns when a task has foreground or recognized
   background work. Archive uses the same warning only when archive confirmation
   is enabled.
@@ -94,19 +97,27 @@ execution so each prompt owns its completion wait and response buffers.
   identity is the correlation key; interrupt, cancellation, failure, shutdown,
   and normal completion are terminal.
 - Tool-call ownership is established by the initial call and retained across
-  incremental updates. An update with unknown ownership preserves the current
-  activity; missing parent metadata is not evidence that background-child work
-  became foreground work.
+  incremental updates from the same execution. Ownership includes the execution
+  identity because provider-local tool-call IDs may be reused after rotation.
+  An update with unknown ownership preserves the current activity; missing
+  parent metadata is not evidence that background-child work became foreground
+  work.
 - A task aggregate that cannot be recomputed preserves its last-known value
   rather than publishing a spurious done reading.
 - When provider completion identifies a workload, only that registration is
   retired; duplicate completion is harmless. An uncorrelated completion retires
   only one outstanding registration and leaves an ambiguous remainder live.
-- Execution stop, failure, cancellation, session removal, and teardown retire
-  all registrations owned by that execution. Per-task publication is FIFO: a
-  newly computed activity value must not be published ahead of an earlier value
-  for the same task, and stale publication work must not overwrite a newer
-  aggregate.
+- Execution completion, stop, failure, cancellation, crash cleanup, forced
+  cleanup, and session removal retire all activity owned by that execution.
+  Cleanup is idempotent and must preserve activity already claimed by a
+  successor on the same session. Session removal quiesces any still-live
+  lifecycle execution and rejects deletion if that stop fails. Per-session
+  activity validation and delivery remain ordered across record replacement;
+  each publication snapshots its activity value and active-subagent count
+  together. Per-task publication is FIFO: a newly computed activity value must
+  not be published ahead of an earlier value for the same task, and a detached
+  predecessor record or stale publication must not overwrite a newer session or
+  task aggregate.
 
 ## Persistence guarantees
 
@@ -114,8 +125,9 @@ Fine-grained activity is in memory and is authoritative only while the owning
 agent execution remains connected. A backend or agent-execution restart does
 not reconstruct detached work or active subagent counts; it must not preserve a
 stale live reading. Counts are derived from the live registration map rather
-than persisted or incremented independently. Durable coarse state continues to
-survive as before.
+than persisted or incremented independently. Execution teardown releases the
+record when it has no successor owner; completed session history does not retain
+an empty activity record. Durable coarse state continues to survive as before.
 
 ## Scenarios
 
@@ -151,6 +163,18 @@ survive as before.
 - **GIVEN** an activity transition for a task, **WHEN** a later transition is
   computed before earlier publication completes, **THEN** observers never see
   the later value followed by the stale earlier value.
+- **GIVEN** an execution terminates with orphaned tool ownership and background
+  work and no successor exists, **WHEN** teardown runs, **THEN** all owned state
+  and the session activity record are released.
+- **GIVEN** execution B has claimed the same session before delayed teardown for
+  execution A, **WHEN** A is retired, **THEN** B's prompt claim, prompt
+  generation, foreground state, tools, and background work remain unchanged.
+- **GIVEN** execution B reuses a tool-call ID left nonterminal by execution A,
+  **WHEN** B emits an ownership-incomplete update, **THEN** A's classification
+  is not observable as ownership evidence for B.
+- **GIVEN** execution A's cleanup publication is delayed until after execution B
+  claims the session, **WHEN** the delayed publication resumes, **THEN** it
+  cannot recreate A's record or overwrite B's activity.
 - **GIVEN** a task with active foreground or recognized background work,
   **WHEN** the operator deletes it, **THEN** the confirmation warns that work is
   still in progress.
