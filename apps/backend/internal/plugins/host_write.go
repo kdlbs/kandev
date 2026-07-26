@@ -78,8 +78,11 @@ type taskMessenger interface {
 }
 
 // taskStarter is the narrow slice of the orchestrator the CreateTask RPC needs
-// to honor start_agent, adapted by backendapp. Best-effort: a launch failure
-// never fails task creation.
+// to honor start_agent, adapted by backendapp. Its StartTask returns promptly:
+// the adapter launches the agent asynchronously (fire-and-forget on a detached,
+// time-bounded context), so a plugin's CreateTask RPC never blocks on the
+// orchestrator's launch path. Best-effort — a launch failure never fails task
+// creation.
 type taskStarter interface {
 	StartTask(ctx context.Context, taskID string) error
 }
@@ -221,21 +224,18 @@ func (h *pluginHost) defaultWorkflowID(ctx context.Context, workspaceID string) 
 	return workflows[0].ID, nil
 }
 
-// startTaskBestEffort launches an agent on the freshly created task when the
-// plugin requested start_agent. Best-effort and non-fatal, matching the
-// REST/MCP path's asynchronous auto-start: a missing starter (orchestrator not
-// wired) or a launch error leaves the task on the board for a manual start.
-//
-// The context is detached (context.WithoutCancel) because the task row already
-// exists: the plugin's incoming gRPC call may carry a short deadline (e.g. a
-// webhook handler's), and letting that abort a launch we've already committed
-// to would silently drop the start_agent request with no observable signal.
+// startTaskBestEffort asks the wired starter to launch an agent on the freshly
+// created task when the plugin requested start_agent. Best-effort and
+// non-fatal, matching the REST/MCP path's asynchronous auto-start: the starter
+// returns promptly (it launches on a detached, time-bounded context — see the
+// taskStarter doc), and a missing starter or a launch error just leaves the
+// task on the board for a manual start.
 func (h *pluginHost) startTaskBestEffort(ctx context.Context, taskID string) {
 	_, starter := h.writeDependencies()
 	if starter == nil {
 		return
 	}
-	_ = starter.StartTask(context.WithoutCancel(ctx), taskID)
+	_ = starter.StartTask(ctx, taskID)
 }
 
 // ── Message send (api_write:messages) ───────────────────────────────────

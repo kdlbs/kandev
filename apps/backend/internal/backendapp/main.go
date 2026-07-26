@@ -1011,7 +1011,7 @@ func initOfficeServices(
 	// SetWriteDeps).
 	if services.Plugins != nil {
 		messenger := pluginsTaskMessengerAdapter{tasks: services.Task, orch: orchestratorSvc, log: log}
-		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc})
+		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc, log: log})
 	}
 
 	// Build feature-package services and wire all inter-service dependencies.
@@ -1556,21 +1556,6 @@ func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.T
 			return err
 		},
 	)
-}
-
-// pluginsTaskStarterAdapter adapts the orchestrator to the plugins package's
-// taskStarter interface (Host data API CreateTask start_agent flag, ADR 0043
-// phase 2). It launches with empty agent/executor ids so the orchestrator
-// resolves the workflow-step / workspace defaults itself — the same
-// default-resolving launch path the office scheduler uses. Best-effort: the
-// plugin host swallows the error, matching REST/MCP's asynchronous auto-start.
-type pluginsTaskStarterAdapter struct {
-	orch *orchestrator.Service
-}
-
-func (a pluginsTaskStarterAdapter) StartTask(ctx context.Context, taskID string) error {
-	_, err := a.orch.StartTask(ctx, taskID, "", "", "", "", "", "", false, false, nil)
-	return err
 }
 
 // newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when
