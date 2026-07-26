@@ -3,6 +3,7 @@ package backendapp
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,11 +62,19 @@ func TestPluginsStarter_LaunchesAsynchronously(t *testing.T) {
 // block the caller on the (potentially long) orchestrator launch path.
 func TestPluginsStarter_ReturnsBeforeLaunchCompletes(t *testing.T) {
 	block := make(chan struct{})
+	// Register the release before the goroutine can block on it (and before any
+	// t.Fatal path), so an early failure can't strand the launch goroutine
+	// until AgentLaunchTimeout. sync.Once makes the explicit release below and
+	// this cleanup safe to both run.
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(block) }) }
+	t.Cleanup(release)
+
 	orch := &fakePluginStarter{started: make(chan string, 1), blockUntil: block}
 	a := newStarterAdapter(t, orch)
 
 	require.NoError(t, a.StartTask(context.Background(), "task-1"), "must return immediately even while the launch is in flight")
-	close(block) // release the launch so the goroutine can finish
+	release() // release the launch so the goroutine can finish
 	select {
 	case <-orch.started:
 	case <-time.After(2 * time.Second):

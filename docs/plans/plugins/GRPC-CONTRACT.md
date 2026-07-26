@@ -192,6 +192,13 @@ conservative field mask — `title`, `description`, `state`, `workflow_step_id`
 (each optional/leave-unset). `start_agent` best-effort auto-launches an agent
 through the orchestrator; a launch failure does not fail the create.
 
+Write validation/error contract (so plugin authors can predict outcomes):
+`CreateTask` requires a non-empty `title` (`InvalidArgument` otherwise);
+`UpdateTask` requires `id` (`InvalidArgument`) and returns `NotFound` for a
+task that doesn't exist; an `UpdateTask` `state` outside the known task-state
+enum (or the orchestrator-owned `SCHEDULING`) is rejected with `InvalidArgument`
+before it reaches the service.
+
 `SendMessage` is gated by `api_write:messages` and delivers a prompt to a task
 session through the orchestrator's real delivery path (the same one
 `message_task` uses), so the message reaches the agent and drives a turn — not

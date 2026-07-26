@@ -426,7 +426,12 @@ task session through the orchestrator's real delivery path — the same one
 records a user message stamped with the plugin source, and dispatches by session
 state: a running session queues the prompt (`status: queued`); an idle/completed
 one is prompted, resuming the agent process if it has gone (`sent`); a
-never-started one is launched with the prompt as its first turn (`started`).
+never-started one is launched with the prompt as its first turn (`started`). If
+dispatch fails after the user message was recorded, the recorded message is
+deleted so a failed delivery leaves no durable user message (and a retry can't
+stack a duplicate prompt). `task_id` and `text` are required (`InvalidArgument`
+otherwise); a session that doesn't belong to the task, or a task with no active
+session, returns `NotFound`; a terminal (failed/cancelled) session is rejected.
 
 **Conventions.**
 
@@ -721,6 +726,11 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
   otherwise), records a user message with `source = "plugin:<id>"`, and returns
   the target session and a `queued`/`sent`/`started` status; a plugin lacking
   `api_write:messages` is denied.
+
+- **GIVEN** a `SendMessage` whose dispatch fails after the user message was
+  recorded, **THEN** kandev deletes the recorded message and returns an error, so
+  a failed delivery leaves no durable user message and a retry can't duplicate
+  the prompt.
 
 ## Out of scope
 
