@@ -1263,9 +1263,39 @@ test_comment_mode_rejects_incompatible_flags() {
   pass "--comment rejects incompatible flags"
 }
 
+join_line_continuations() {
+  local file=$1
+  local line buffer='' lineno=0 start=1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$((lineno + 1))
+    [[ -n "$buffer" ]] || start=$lineno
+    if [[ "$line" == *\\ ]]; then
+      buffer+="${line%\\} "
+      continue
+    fi
+    printf '%s:%s\n' "$start" "$buffer$line"
+    buffer=''
+  done <"$file"
+  [[ -z "$buffer" ]] || printf '%s:%s\n' "$start" "$buffer"
+}
+
 test_jq_file_args_avoid_process_substitution() {
+  local pattern='(--slurpfile|--rawfile|--argfile)[[:space:]]+[^[:space:]]+[[:space:]]+<\('
+  local tmp
+  make_tmp_dir tmp
+
+  printf '%s\n' "jq -cn --slurpfile page <(printf x) '.'" >"$tmp/same_line.sh"
+  if ! join_line_continuations "$tmp/same_line.sh" | grep -qE "$pattern"; then
+    fail "guard misses process substitution on a single line"
+  fi
+
+  printf '%s\n' 'jq -cn \' '  --slurpfile page \' '  <(printf x)' >"$tmp/continued.sh"
+  if ! join_line_continuations "$tmp/continued.sh" | grep -qE "$pattern"; then
+    fail "guard misses process substitution split across a line continuation"
+  fi
+
   local offenders
-  offenders="$(grep -nE '(--slurpfile|--rawfile|--argfile)[[:space:]]+[^[:space:]]+[[:space:]]+<\(' "$SCRIPT" || true)"
+  offenders="$(join_line_continuations "$SCRIPT" | grep -E "$pattern" || true)"
   if [[ -n "$offenders" ]]; then
     printf '%s\n' "$offenders" >&2
     fail "jq file arguments must not come from process substitution (native jq cannot open /proc/<pid>/fd/<n>)"
