@@ -129,7 +129,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	})
 }
 
-func TestBuildAgentCommand_PreservesPinnedACPBridgeSpecs(t *testing.T) {
+func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	mgr := newTestManager(t)
 	tests := []struct {
 		name  string
@@ -139,23 +139,33 @@ func TestBuildAgentCommand_PreservesPinnedACPBridgeSpecs(t *testing.T) {
 		{
 			name:  "claude",
 			agent: agents.NewClaudeACP(),
-			want:  "npx -y @agentclientprotocol/claude-agent-acp@0.62.0",
+			want:  "npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp",
 		},
 		{
 			name:  "codex",
 			agent: agents.NewCodexACP(),
-			want:  "npx -y @agentclientprotocol/codex-acp@1.1.7",
+			want:  "npx --yes --prefer-offline @agentclientprotocol/codex-acp",
 		},
 		{
 			name:  "opencode",
 			agent: agents.NewOpenCodeACP(),
-			want:  "opencode acp",
+			want:  "npx --yes --prefer-offline opencode-ai acp",
+		},
+		{
+			name:  "copilot",
+			agent: agents.NewCopilotACP(),
+			want:  "npx --yes --prefer-offline @github/copilot --acp",
+		},
+		{
+			name:  "gemini",
+			agent: agents.NewGemini(),
+			want:  "npx --yes --prefer-offline @google/gemini-cli --acp",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, tt.agent, false)
+			cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, tt.agent, true)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, cmds.initial)
 		})

@@ -49,6 +49,7 @@ func TestRegisterRoutesProtectsEveryStateChangingAgentSettingsRoute(t *testing.T
 		{method: http.MethodDelete, path: "/api/v1/agents/agent-1"},
 		{method: http.MethodPost, path: "/api/v1/agents/agent-1/profiles"},
 		{method: http.MethodPost, path: "/api/v1/agent-install/agent-1"},
+		{method: http.MethodPost, path: "/api/v1/agent-update/agent-1"},
 		{method: http.MethodPatch, path: "/api/v1/agent-profiles/profile-1"},
 		{method: http.MethodDelete, path: "/api/v1/agent-profiles/profile-1"},
 		{method: http.MethodPost, path: "/api/v1/agent-profiles/profile-1/mcp-config"},

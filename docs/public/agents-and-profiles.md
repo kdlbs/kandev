@@ -22,6 +22,34 @@ The production registry currently shows Auggie, Claude, Codex, Copilot, Gemini, 
 
 The status shown on this page is authoritative for the current host. A CLI that works in your interactive shell can still be absent from Kandev when the service has a different `PATH`, home directory, or operating-system user.
 
+### Update a managed agent runtime
+
+Installed Claude, Codex, OpenCode, Copilot, and Gemini cards provide an
+**Update agent** action. Kandev invokes these managed npm runtimes without an
+exact version or `latest` tag during ordinary launches, so npm can reuse its
+best-effort execution cache. The version reported by the agent is the
+authoritative current version; Kandev does not infer it from the application
+release.
+
+Select **Update agent** to deliberately check npm and refresh the managed
+runtime on the Kandev host. The card shows the current and upstream target
+versions, streams progress, and remains disabled until the update finishes.
+After the package update, Kandev automatically starts a fresh ACP capability
+probe. A successful probe replaces the advertised models, modes, configuration
+options, commands, and runtime version without a page reload.
+
+The action changes later host probes and sessions only. It does not restart an
+active session, update a separately configured passthrough or authentication
+helper, or update remote executors and running containers. Those environments
+resolve their own unversioned runtime when they launch.
+
+If registry lookup or package execution fails, Kandev keeps the previous
+capability catalogue and shows the captured failure. If the package updates but
+the follow-up probe requires authentication, the card reports the update plus
+the refresh error; authenticate the host agent and refresh again. Update job
+history is short-lived and does not survive a backend restart, and npm cache
+contents are not a durable Kandev installation record.
+
 ### Add a custom terminal agent
 
 Use **Settings > Agents > Add TUI Agent** for a CLI that Kandev does not register. Enter a display name, command, and optional model label. `{{model}}` in the command is replaced by the selected model value, then the entire command is split on whitespace with Go's `strings.Fields`.
@@ -45,7 +73,7 @@ Select an agent, create a profile, then open **Settings > Agents > _Agent_ > _Pr
 | Auto-approve all permissions | Answers automatically: the first `allow_once`/`allow_always` option, otherwise the first option supplied by the agent; no options cancels. It is off by default. |
 | MCP servers | Adds profile-specific external MCP servers when the agent supports MCP. |
 
-Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. Refresh the profile if an agent update changes them. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
+Model, mode, command, and configuration choices are probed from the locally installed CLI and cached. The managed **Update agent** action refreshes them automatically; after other CLI changes, refresh the profile manually. Probe status can report **auth required**, **not installed**, **not configured**, or **failed**; a saved model name does not prove that the current provider account can use it.
 
 ### Monitor capability and subscription status
 

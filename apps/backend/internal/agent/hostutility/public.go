@@ -55,6 +55,26 @@ func (m *Manager) Refresh(ctx context.Context, agentType string) (AgentCapabilit
 	return caps, nil
 }
 
+// RefreshWithCommand probes an agent with a trusted command override. Unlike
+// Refresh, it preserves the last successful capability record unless the
+// override probe succeeds. Runtime-update callers use this after priming npm's
+// cache so a failed new runtime cannot erase the model list currently shown.
+func (m *Manager) RefreshWithCommand(
+	ctx context.Context,
+	agentType string,
+	command agents.Command,
+) (AgentCapabilities, error) {
+	inst, ia, err := m.getInstance(ctx, agentType)
+	if err != nil {
+		return AgentCapabilities{}, err
+	}
+	caps := m.probeWithCommand(ctx, inst, ia, true, command)
+	if caps.Status == StatusOK {
+		m.cache.set(caps)
+	}
+	return caps, nil
+}
+
 // ExecutePrompt runs a sessionless utility prompt against the warm instance
 // for the given agent type. Convenience wrapper over ExecutePromptWithMCP
 // that opts the call out of MCP tool access — most callers (PR title, commit

@@ -1,45 +1,36 @@
-# Core agent versions
+# Managed npm ACP runtimes
 
-Kandev tests these core npm-provided ACP runtimes with the following exact
-package pins:
+Kandev invokes these managed npm-provided ACP runtimes by unversioned package
+name:
 
-| Agent | Package | Tested version | ACP runtime selection |
-| --- | --- | --- | --- |
-| Claude | `@agentclientprotocol/claude-agent-acp` | `0.62.0` | Exact package spec through `npx` |
-| Codex | `@agentclientprotocol/codex-acp` | `1.1.7` | Exact package spec through `npx` |
-| OpenCode | `opencode-ai` | `1.18.5` | Installed `opencode` binary |
-| Copilot | `@github/copilot` | `1.0.75` | Exact package spec through `npx` |
-| Gemini | `@google/gemini-cli` | `0.52.0` | Exact package spec through `npx` |
+| Agent | Package | ACP arguments |
+| --- | --- | --- |
+| Claude | `@agentclientprotocol/claude-agent-acp` | none |
+| Codex | `@agentclientprotocol/codex-acp` | none |
+| OpenCode | `opencode-ai` | `acp` |
+| Copilot | `@github/copilot` | `--acp` |
+| Gemini | `@google/gemini-cli` | `--acp` |
 
-Claude and Codex use their exact package specs for normal sessions, container
-commands, one-shot inference, and remote installation. The resolved spec is
-part of `AgentCommand`, which existing lifecycle diagnostics log as
-`agent_command`.
+Normal capability probes, sessions, container commands, and one-shot
+inference use `npx --yes --prefer-offline` with the package name and arguments
+above. This lets npm reuse its execution cache without making the cache a
+durable installed-version guarantee. Kandev records the version reported by
+the ACP initialize response instead of inferring it from source.
 
-OpenCode intentionally uses the direct `opencode acp` command for discovery,
-normal sessions, container commands, and one-shot inference. This keeps startup
-offline-compatible and ensures discovery validates the executable actually
-launched. Its installer remains pinned to `opencode-ai@1.18.5`, but discovery
-accepts any `opencode` executable found on `PATH`; the ACP probe surfaces auth
-or protocol-compatibility failures. The ACP initialize response separately
-records the runtime-reported agent name and version.
+The **Update agent** action in Settings is the explicit freshness boundary for
+the Kandev host. It resolves the upstream npm version, refreshes the
+unversioned execution-cache entry with online preference, and then launches a
+fresh ACP capability probe. Successful probes replace the advertised version,
+models, modes, commands, and configuration options used for later launches.
+Already-running sessions continue with their existing process.
 
-Copilot always uses its exact package spec for ACP launch, even when a global
-`copilot` binary is present on `PATH`, so sessions remain reproducible
-regardless of auto-updates. Its runtime, inference, passthrough, and install
-commands all use the same pinned spec. Gemini always uses its exact package
-spec.
+ACP protocol negotiation and advertised capabilities are the compatibility
+boundary. Kandev does not maintain an exact package-version allowlist or
+silently roll back a runtime whose initialization fails. Package selection and
+update commands come only from built-in agent metadata; callers cannot supply
+package names, versions, registry URLs, or shell text.
 
-Cursor is intentionally not listed as pinned. Its supported installer selects
-the current Cursor Agent build, and the CLI auto-updates by default without a
-supported immutable version selector or CLI auto-update opt-out. Kandev keeps
-using the official installer rather than claiming a version guarantee it
-cannot enforce.
-
-Update each agent independently inside the grouped version-update pull request:
-confirm that the exact version exists in the configured npm registry, capture
-only sanitized ACP wire fixtures when protocol evidence must change, and run
-the agent command-surface and ACP dialect tests before changing the documented
-tested version. For OpenCode, also install the candidate globally and confirm
-`opencode --version` before capturing fixtures. Do not add prompts, file
-contents, credentials, or other user data to protocol fixtures.
+Separately configured passthrough commands, native authentication helpers, and
+native-only agents such as Cursor are outside this managed update path. Remote
+executors and containers resolve their own unversioned runtime when they
+launch; the host Settings action does not update those environments.

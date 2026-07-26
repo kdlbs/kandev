@@ -134,6 +134,25 @@ export type AgentInstallOutputPayload = {
   chunk: string;
 };
 
+export type AgentUpdateJobPayload = {
+  job_id: string;
+  agent_name: string;
+  status: "queued" | "resolving" | "updating" | "refreshing" | "succeeded" | "failed";
+  current_version?: string;
+  target_version?: string;
+  output?: string;
+  error?: string;
+  refresh_error?: string;
+  started_at: string;
+  finished_at?: string;
+};
+
+export type AgentUpdateOutputPayload = {
+  job_id: string;
+  agent_name: string;
+  chunk: string;
+};
+
 export type TerminalOutputPayload = {
   terminalId: string;
   data: string;
@@ -510,6 +529,9 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "agent.install.started": BackendMessage<"agent.install.started", AgentInstallJobPayload>;
     "agent.install.output": BackendMessage<"agent.install.output", AgentInstallOutputPayload>;
     "agent.install.finished": BackendMessage<"agent.install.finished", AgentInstallJobPayload>;
+    "agent.update.started": BackendMessage<"agent.update.started", AgentUpdateJobPayload>;
+    "agent.update.output": BackendMessage<"agent.update.output", AgentUpdateOutputPayload>;
+    "agent.update.finished": BackendMessage<"agent.update.finished", AgentUpdateJobPayload>;
     "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
     "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;

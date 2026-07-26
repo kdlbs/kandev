@@ -633,10 +633,10 @@ func TestDetectAgents_E2EMockPropagatesSupportsMCP(t *testing.T) {
 	}
 }
 
-// TestController_PreviewAgentCommand_CopilotKeepsPinnedPackage verifies that
+// TestController_PreviewAgentCommand_CopilotKeepsManagedPackage verifies that
 // a globally installed Copilot CLI does not make the command preview bypass
-// the reviewed package pin.
-func TestController_PreviewAgentCommand_CopilotKeepsPinnedPackage(t *testing.T) {
+// the managed npm runtime.
+func TestController_PreviewAgentCommand_CopilotKeepsManagedPackage(t *testing.T) {
 	controller := newTestController(map[string]agents.Agent{
 		"copilot-acp": agents.NewCopilotACP(),
 	})
@@ -651,7 +651,7 @@ func TestController_PreviewAgentCommand_CopilotKeepsPinnedPackage(t *testing.T) 
 	if err != nil {
 		t.Fatalf("PreviewAgentCommand() error = %v", err)
 	}
-	want := []string{"npx", "-y", "@github/copilot@1.0.75", "--acp"}
+	want := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
 	if got := res.Command; !slices.Equal(got, want) {
 		t.Errorf("preview with copilot on PATH = %v, want %v", got, want)
 	}

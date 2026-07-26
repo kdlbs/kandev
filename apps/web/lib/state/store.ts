@@ -13,6 +13,7 @@ import type {
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { UISliceActions as UIA } from "./slices/ui/types";
 import type * as UISliceTypes from "./slices/ui/types";
+import type { AgentUpdateJob, InstallJob } from "./slices/settings/types";
 import { mergeInitialState } from "./default-state";
 import { buildStateOverrides } from "./store-overrides";
 import {
@@ -117,6 +118,7 @@ export type AppState = KanbanSlice & {
   availableAgents: (typeof defaultSettingsState)["availableAgents"];
   agentProfiles: (typeof defaultSettingsState)["agentProfiles"];
   installJobs: (typeof defaultSettingsState)["installJobs"];
+  updateJobs: (typeof defaultSettingsState)["updateJobs"];
   editors: (typeof defaultSettingsState)["editors"];
   prompts: (typeof defaultSettingsState)["prompts"];
   secrets: (typeof defaultSettingsState)["secrets"];
@@ -249,10 +251,14 @@ export type AppState = KanbanSlice & {
   ) => void;
   setAvailableAgentsLoading: (loading: boolean) => void;
   setAgentProfiles: (profiles: AgentProfilesState["items"]) => void;
-  setInstallJobs: (jobs: import("@/lib/state/slices/settings/types").InstallJob[]) => void;
-  upsertInstallJob: (job: import("@/lib/state/slices/settings/types").InstallJob) => void;
+  setInstallJobs: (jobs: InstallJob[]) => void;
+  upsertInstallJob: (job: InstallJob) => void;
   appendInstallOutput: (agentName: string, chunk: string) => void;
   clearInstallJob: (agentName: string) => void;
+  setAgentUpdateJobs: (jobs: AgentUpdateJob[]) => void;
+  upsertAgentUpdateJob: (job: AgentUpdateJob) => void;
+  appendAgentUpdateOutput: (agentName: string, jobId: string, chunk: string) => void;
+  clearAgentUpdateJob: (agentName: string) => void;
   setRepositories: (workspaceId: string, repositories: Repository[]) => void;
   upsertRepository: (workspaceId: string, repository: Repository) => void;
   setRepositoriesLoading: (workspaceId: string, loading: boolean) => void;

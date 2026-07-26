@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-func TestOpenCodeACPUsesInstalledBinaryAndPinnedInstaller(t *testing.T) {
+func TestOpenCodeACPUsesManagedRuntime(t *testing.T) {
 	a := NewOpenCodeACP()
-	want := []string{"opencode", "acp"}
+	want := []string{"npx", "--yes", "--prefer-offline", "opencode-ai", "acp"}
 
 	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
 		t.Fatalf("BuildCommand = %#v, want %#v", got, want)
@@ -21,12 +21,12 @@ func TestOpenCodeACPUsesInstalledBinaryAndPinnedInstaller(t *testing.T) {
 	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
 		t.Fatalf("Inference Command = %#v, want %#v", got, want)
 	}
-	if got, wantInstall := a.InstallScript(), "npm install -g opencode-ai@1.18.5"; got != wantInstall {
+	if got, wantInstall := a.InstallScript(), "npm install -g opencode-ai"; got != wantInstall {
 		t.Fatalf("InstallScript = %q, want %q", got, wantInstall)
 	}
 }
 
-func TestOpenCodeACPDiscoveryMatchesRuntimeExecutable(t *testing.T) {
+func TestOpenCodeACPDiscoveryRecognizesAuthenticationHelper(t *testing.T) {
 	binaryPath := writeOpenCodeTestBinary(t, "exit 7")
 
 	a := NewOpenCodeACP()
@@ -39,9 +39,6 @@ func TestOpenCodeACPDiscoveryMatchesRuntimeExecutable(t *testing.T) {
 	}
 	if result.MatchedPath != binaryPath {
 		t.Fatalf("IsInstalled() MatchedPath = %q, want %q", result.MatchedPath, binaryPath)
-	}
-	if got := a.BuildCommand(CommandOptions{}).Args()[0]; got != filepath.Base(binaryPath) {
-		t.Fatalf("runtime executable = %q, discovered executable = %q", got, filepath.Base(binaryPath))
 	}
 }
 

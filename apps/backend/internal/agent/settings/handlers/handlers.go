@@ -66,6 +66,9 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
+	api.POST("/agent-update/:agentName", h.interlock, h.httpUpdateAgentRuntime)
+	api.GET("/agent-update/jobs", h.httpListAgentUpdateJobs)
+	api.GET("/agent-update/jobs/:id", h.httpGetAgentUpdateJob)
 	api.PATCH("/agent-profiles/:id", h.interlock, h.httpUpdateProfile)
 	api.DELETE("/agent-profiles/:id", h.interlock, h.httpDeleteProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
@@ -101,27 +104,119 @@ func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
 // Idempotent: a second POST for the same agent while a job is running returns
 // the existing job_id rather than starting a duplicate.
 func (h *Handlers) httpInstallAgent(c *gin.Context) {
+	name, ok := requireAgentName(c)
+	if !ok {
+		return
+	}
+	h.enqueueMaintenance(c, name, "install", func() (any, error) {
+		return h.controller.EnqueueInstall(name)
+	}, classifyInstallError)
+}
+
+func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
+	name, ok := requireAgentName(c)
+	if !ok {
+		return
+	}
+	h.enqueueMaintenance(c, name, "update", func() (any, error) {
+		return h.controller.EnqueueAgentUpdate(name)
+	}, classifyUpdateError)
+}
+
+func requireAgentName(c *gin.Context) (string, bool) {
 	name := strings.TrimSpace(c.Param("agentName"))
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "agent name is required"})
+		return "", false
+	}
+	return name, true
+}
+
+func writeMaintenanceConflictIfPresent(c *gin.Context, err error) bool {
+	var conflict *controller.MaintenanceConflictError
+	if !errors.As(err, &conflict) {
+		return false
+	}
+	writeMaintenanceConflict(c, conflict)
+	return true
+}
+
+type maintenanceErrorClassifier func(error) (int, string, bool)
+
+func (h *Handlers) enqueueMaintenance(
+	c *gin.Context,
+	name string,
+	kind string,
+	enqueue func() (any, error),
+	classify maintenanceErrorClassifier,
+) {
+	job, err := enqueue()
+	if err == nil {
+		c.JSON(http.StatusAccepted, job)
 		return
 	}
-	job, err := h.controller.EnqueueInstall(name)
-	if err != nil {
-		switch {
-		case errors.Is(err, controller.ErrAgentNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
-		case errors.Is(err, controller.ErrInstallScriptEmpty):
-			c.JSON(http.StatusBadRequest, gin.H{"error": "agent has no install script"})
-		case errors.Is(err, controller.ErrJobStoreUnavailable):
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "install service not ready"})
-		default:
-			h.logger.Error("failed to enqueue install", zap.String("agent", name), zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue install"})
-		}
+	if writeMaintenanceConflictIfPresent(c, err) {
 		return
 	}
-	c.JSON(http.StatusAccepted, job)
+	if status, message, matched := classify(err); matched {
+		c.JSON(status, gin.H{"error": message})
+		return
+	}
+	h.logger.Error("failed to enqueue agent maintenance",
+		zap.String("agent", name), zap.String("kind", kind), zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue agent " + kind})
+}
+
+func classifyInstallError(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, controller.ErrAgentNotFound):
+		return http.StatusNotFound, "agent not found", true
+	case errors.Is(err, controller.ErrInstallScriptEmpty):
+		return http.StatusBadRequest, "agent has no install script", true
+	case errors.Is(err, controller.ErrJobStoreUnavailable):
+		return http.StatusServiceUnavailable, "install service not ready", true
+	default:
+		return 0, "", false
+	}
+}
+
+func classifyUpdateError(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, controller.ErrAgentNotFound):
+		return http.StatusNotFound, "agent not found", true
+	case errors.Is(err, controller.ErrRuntimeUpdateUnsupported):
+		return http.StatusBadRequest, "agent runtime update unsupported", true
+	case errors.Is(err, controller.ErrRuntimeUpdaterUnavailable):
+		return http.StatusServiceUnavailable, "agent update service not ready", true
+	default:
+		return 0, "", false
+	}
+}
+
+func (h *Handlers) httpListAgentUpdateJobs(c *gin.Context) {
+	c.JSON(http.StatusOK, dto.ListAgentUpdateJobsResponse{Jobs: h.controller.ListAgentUpdateJobs()})
+}
+
+func (h *Handlers) httpGetAgentUpdateJob(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "job id is required"})
+		return
+	}
+	job, ok := h.controller.GetAgentUpdateJob(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+	c.JSON(http.StatusOK, job)
+}
+
+func writeMaintenanceConflict(c *gin.Context, conflict *controller.MaintenanceConflictError) {
+	c.JSON(http.StatusConflict, gin.H{
+		"error":         conflict.Error(),
+		"active_job_id": conflict.Active.JobID,
+		"active_kind":   conflict.Active.Kind,
+	})
 }
 
 func (h *Handlers) httpListInstallJobs(c *gin.Context) {

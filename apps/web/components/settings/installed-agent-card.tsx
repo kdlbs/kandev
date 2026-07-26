@@ -9,8 +9,10 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AgentLogo } from "@/components/agent-logo";
 import { AgentLoginDialog } from "@/components/settings/agent-login-dialog";
+import { AgentRuntimeUpdateControl } from "@/components/settings/agent-runtime-update-control";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
-import type { Agent, AgentDiscovery } from "@/lib/types/http";
+import type { AgentUpdateJob, InstallJob } from "@/lib/api";
+import type { Agent, AgentDiscovery, RuntimeUpdate } from "@/lib/types/http";
 
 type Props = {
   agent: AgentDiscovery;
@@ -18,6 +20,10 @@ type Props = {
   displayName: string;
   /** Capability status from the host utility probe ("ok", "auth_required", etc.). */
   capabilityStatus?: string;
+  runtimeUpdate?: RuntimeUpdate;
+  updateJob?: AgentUpdateJob;
+  installJob?: InstallJob;
+  onUpdate?: (agentName: string) => void;
   /**
    * Called when the auth/shell dialog closes so the page can refresh
    * discovery + availability. Without this the yellow lock stays put even
@@ -25,6 +31,75 @@ type Props = {
    */
   onAuthComplete?: () => void;
 };
+
+function InstalledAgentIdentity({
+  agent,
+  displayName,
+  configured,
+  probing,
+  authRequired,
+  loginAvailable,
+  onAuthClick,
+}: {
+  agent: AgentDiscovery;
+  displayName: string;
+  configured: boolean;
+  probing: boolean;
+  authRequired: boolean;
+  loginAvailable: boolean;
+  onAuthClick: () => void;
+}) {
+  return (
+    <div className="space-y-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <AgentLogo agentName={agent.name} size={20} className="shrink-0" />
+        <h4 className="min-w-0 truncate font-medium">{displayName}</h4>
+        {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
+        {configured && <Badge variant="outline">Configured</Badge>}
+        {probing && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                data-testid={`probing-icon-${agent.name}`}
+                className="ml-auto flex items-center text-muted-foreground cursor-help"
+                aria-label="Checking authentication"
+              >
+                <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Checking agent capabilities and authentication...</TooltipContent>
+          </Tooltip>
+        )}
+        {authRequired && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={onAuthClick}
+                data-testid={`auth-icon-${agent.name}`}
+                className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-amber-500 cursor-pointer hover:bg-amber-500/10"
+                aria-label="Authentication required"
+              >
+                <IconLock className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>
+              {loginAvailable
+                ? "Authentication required - click to open login terminal"
+                : "Authentication required - click to open a shell and sign in"}
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+      <p
+        className="text-xs text-muted-foreground line-clamp-2 min-h-[2rem]"
+        title={agent.matched_path ?? undefined}
+      >
+        {agent.matched_path ? `Detected at ${agent.matched_path}` : ""}
+      </p>
+    </div>
+  );
+}
 
 /**
  * Card rendered under "Installed Agents" - links to the agent profile
@@ -37,6 +112,10 @@ export function InstalledAgentCard({
   savedAgent,
   displayName,
   capabilityStatus,
+  runtimeUpdate,
+  updateJob,
+  installJob,
+  onUpdate,
   onAuthComplete,
 }: Props) {
   const configured = Boolean(savedAgent && savedAgent.profiles.length > 0);
@@ -56,57 +135,26 @@ export function InstalledAgentCard({
   };
 
   return (
-    <Card className="flex flex-col">
-      <CardContent className="py-4 flex flex-col gap-3 flex-1">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <AgentLogo agentName={agent.name} size={20} className="shrink-0" />
-            <h4 className="font-medium">{displayName}</h4>
-            {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
-            {configured && <Badge variant="outline">Configured</Badge>}
-            {probing && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    data-testid={`probing-icon-${agent.name}`}
-                    className="ml-auto flex items-center text-muted-foreground cursor-help"
-                    aria-label="Checking authentication"
-                  >
-                    <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent>Checking agent capabilities and authentication...</TooltipContent>
-              </Tooltip>
-            )}
-            {authRequired && (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    onClick={handleAuthClick}
-                    data-testid={`auth-icon-${agent.name}`}
-                    className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-amber-500 cursor-pointer hover:bg-amber-500/10"
-                    aria-label="Authentication required"
-                  >
-                    <IconLock className="h-3.5 w-3.5" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>
-                  {loginAvailable
-                    ? "Authentication required - click to open login terminal"
-                    : "Authentication required - click to open a shell and sign in"}
-                </TooltipContent>
-              </Tooltip>
-            )}
-          </div>
-          {/* Reserve two lines so cards align regardless of path length. */}
-          <p
-            className="text-xs text-muted-foreground line-clamp-2 min-h-[2rem]"
-            title={agent.matched_path ?? undefined}
-          >
-            {agent.matched_path ? `Detected at ${agent.matched_path}` : ""}
-          </p>
-        </div>
+    <Card className="flex min-w-0 flex-col">
+      <CardContent className="py-4 flex min-w-0 flex-col gap-3 flex-1">
+        <InstalledAgentIdentity
+          agent={agent}
+          displayName={displayName}
+          configured={configured}
+          probing={probing}
+          authRequired={authRequired}
+          loginAvailable={loginAvailable}
+          onAuthClick={handleAuthClick}
+        />
+        {runtimeUpdate?.supported && onUpdate && (
+          <AgentRuntimeUpdateControl
+            agentName={agent.name}
+            runtimeUpdate={runtimeUpdate}
+            job={updateJob}
+            installJob={installJob}
+            onUpdate={onUpdate}
+          />
+        )}
         <Button size="sm" className="cursor-pointer mt-auto" asChild>
           <Link
             href={

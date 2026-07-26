@@ -9,6 +9,7 @@ export const defaultSettingsState: SettingsSliceState = {
   availableAgents: { items: [], tools: [], loading: false, loaded: false },
   agentProfiles: { items: [], version: 0 },
   installJobs: { byAgent: {} },
+  updateJobs: { byAgent: {} },
   editors: { items: [], loaded: false, loading: false },
   prompts: { items: [], loaded: false, loading: false },
   secrets: { items: [], loaded: false, loading: false },
@@ -76,6 +77,8 @@ type ImmerSet = Parameters<
   StateCreator<SettingsSlice, [["zustand/immer", never]], [], SettingsSlice>
 >[0];
 
+const JOB_OUTPUT_MAX = 64 * 1024;
+
 // installJobStartedAtMs parses started_at to epoch ms so we compare on time,
 // not lexicographically. RFC3339 strings with variable fractional seconds
 // would otherwise misorder ("2026-05-11T10:00:00Z" sorts after
@@ -123,12 +126,89 @@ function createInstallJobActions(
         if (!current) return;
         const next = (current.output ?? "") + chunk;
         // Cap at 64KB; drop oldest chars on overflow so the live tail stays current.
-        const max = 64 * 1024;
-        current.output = next.length > max ? next.slice(next.length - max) : next;
+        current.output =
+          next.length > JOB_OUTPUT_MAX ? next.slice(next.length - JOB_OUTPUT_MAX) : next;
       }),
     clearInstallJob: (agentName) =>
       set((draft) => {
         delete draft.installJobs.byAgent[agentName];
+      }),
+  };
+}
+
+function updateStatusRank(status: string): number {
+  switch (status) {
+    case "queued":
+      return 0;
+    case "resolving":
+      return 1;
+    case "updating":
+      return 2;
+    case "refreshing":
+      return 3;
+    case "succeeded":
+    case "failed":
+      return 4;
+    default:
+      return -1;
+  }
+}
+
+function mergeJobOutput(current: string | undefined, incoming: string | undefined) {
+  if (!current) return incoming;
+  if (!incoming || current === incoming || current.startsWith(incoming)) return current;
+  if (incoming.startsWith(current)) return incoming;
+  return incoming.length >= current.length ? incoming : current;
+}
+
+function createAgentUpdateJobActions(
+  set: ImmerSet,
+): Pick<
+  SettingsSlice,
+  "setAgentUpdateJobs" | "upsertAgentUpdateJob" | "appendAgentUpdateOutput" | "clearAgentUpdateJob"
+> {
+  return {
+    setAgentUpdateJobs: (jobs) =>
+      set((draft) => {
+        const byAgent: Record<string, (typeof jobs)[number]> = {};
+        for (const job of jobs) {
+          const current = byAgent[job.agent_name];
+          if (!current || installJobStartedAtMs(job) > installJobStartedAtMs(current)) {
+            byAgent[job.agent_name] = job;
+          }
+        }
+        draft.updateJobs.byAgent = byAgent;
+      }),
+    upsertAgentUpdateJob: (job) =>
+      set((draft) => {
+        const current = draft.updateJobs.byAgent[job.agent_name];
+        if (
+          current &&
+          current.job_id !== job.job_id &&
+          installJobStartedAtMs(current) > installJobStartedAtMs(job)
+        ) {
+          return;
+        }
+        if (!current || current.job_id !== job.job_id) {
+          draft.updateJobs.byAgent[job.agent_name] = job;
+          return;
+        }
+        const incomingIsNewer = updateStatusRank(job.status) >= updateStatusRank(current.status);
+        const merged = incomingIsNewer ? { ...current, ...job } : { ...job, ...current };
+        merged.output = mergeJobOutput(current.output, job.output);
+        draft.updateJobs.byAgent[job.agent_name] = merged;
+      }),
+    appendAgentUpdateOutput: (agentName, jobId, chunk) =>
+      set((draft) => {
+        const current = draft.updateJobs.byAgent[agentName];
+        if (!current || current.job_id !== jobId) return;
+        const next = (current.output ?? "") + chunk;
+        current.output =
+          next.length > JOB_OUTPUT_MAX ? next.slice(next.length - JOB_OUTPUT_MAX) : next;
+      }),
+    clearAgentUpdateJob: (agentName) =>
+      set((draft) => {
+        delete draft.updateJobs.byAgent[agentName];
       }),
   };
 }
@@ -303,5 +383,6 @@ export const createSettingsSlice: StateCreator<
   ...defaultSettingsState,
   ...createCoreActions(set),
   ...createInstallJobActions(set),
+  ...createAgentUpdateJobActions(set),
   ...createSecretAndSpriteActions(set),
 });

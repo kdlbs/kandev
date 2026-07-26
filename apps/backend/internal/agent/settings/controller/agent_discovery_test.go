@@ -1,11 +1,88 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/discovery"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 )
+
+type managedTestAgent struct {
+	testAgent
+	spec agents.ManagedNPMRuntimeSpec
+}
+
+func (a *managedTestAgent) ManagedNPMRuntime() agents.ManagedNPMRuntimeSpec {
+	return a.spec
+}
+
+func TestAvailableAgentIncludesManagedRuntimeMetadata(t *testing.T) {
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      agents.ManagedNPMRuntimeSpec{Package: "@example/managed-acp"},
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetRuntimeUpdater(&fakeRuntimeUpdater{
+		current:      hostutility.AgentCapabilities{AgentVersion: "1.2.3"},
+		currentFound: true,
+	})
+
+	item := ctrl.buildAvailableAgentDTO(context.Background(), ag, discovery.Availability{
+		Name:      ag.ID(),
+		Available: true,
+	}, time.Now())
+
+	raw, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("marshal available agent: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal available agent: %v", err)
+	}
+	runtimeUpdate, ok := payload["runtime_update"].(map[string]any)
+	if !ok {
+		t.Fatal("runtime_update missing, want managed runtime metadata")
+	}
+	if runtimeUpdate["package"] != "@example/managed-acp" {
+		t.Fatalf("package = %#v, want @example/managed-acp", runtimeUpdate["package"])
+	}
+	if runtimeUpdate["supported"] != true {
+		t.Fatalf("supported = %#v, want true", runtimeUpdate["supported"])
+	}
+	if runtimeUpdate["current_version"] != "1.2.3" {
+		t.Fatalf("current_version = %#v, want 1.2.3", runtimeUpdate["current_version"])
+	}
+}
+
+func TestUnavailableManagedAgentOmitsRuntimeMetadata(t *testing.T) {
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      agents.ManagedNPMRuntimeSpec{Package: "@example/managed-acp"},
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	item := ctrl.buildAvailableAgentDTO(
+		context.Background(),
+		ag,
+		discovery.Availability{Name: ag.ID(), Available: false},
+		time.Now(),
+	)
+	raw, err := json.Marshal(item)
+	if err != nil {
+		t.Fatalf("marshal available agent: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal available agent: %v", err)
+	}
+	if _, exists := payload["runtime_update"]; exists {
+		t.Fatal("runtime_update present for unavailable agent")
+	}
+}
 
 func TestConfigOptionDTOsPreserveDescriptions(t *testing.T) {
 	dtos := configOptionDTOs([]hostutility.ConfigOption{{

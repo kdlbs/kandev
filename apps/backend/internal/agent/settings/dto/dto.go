@@ -205,7 +205,16 @@ type AvailableAgentDTO struct {
 	PermissionSettings map[string]PermissionSettingDTO `json:"permission_settings,omitempty"`
 	PassthroughConfig  *PassthroughConfigDTO           `json:"passthrough_config,omitempty"`
 	LoginCommand       *LoginCommandDTO                `json:"login_command,omitempty"`
+	RuntimeUpdate      *RuntimeUpdateDTO               `json:"runtime_update,omitempty"`
 	UpdatedAt          time.Time                       `json:"updated_at"`
+}
+
+// RuntimeUpdateDTO describes a Kandev-managed npm runtime. Package is
+// informational; update requests select only the built-in agent name.
+type RuntimeUpdateDTO struct {
+	Supported      bool   `json:"supported"`
+	Package        string `json:"package"`
+	CurrentVersion string `json:"current_version,omitempty"`
 }
 
 type ListAvailableAgentsResponse struct {
@@ -247,6 +256,36 @@ type EnqueueInstallResponse struct {
 // ListInstallJobsResponse wraps the snapshot list for the jobs endpoint.
 type ListInstallJobsResponse struct {
 	Jobs []InstallJobDTO `json:"jobs"`
+}
+
+// AgentUpdateJobStatus represents one phase of a managed-runtime update.
+type AgentUpdateJobStatus string
+
+const (
+	AgentUpdateJobStatusQueued     AgentUpdateJobStatus = "queued"
+	AgentUpdateJobStatusResolving  AgentUpdateJobStatus = "resolving"
+	AgentUpdateJobStatusUpdating   AgentUpdateJobStatus = "updating"
+	AgentUpdateJobStatusRefreshing AgentUpdateJobStatus = "refreshing"
+	AgentUpdateJobStatusSucceeded  AgentUpdateJobStatus = "succeeded"
+	AgentUpdateJobStatusFailed     AgentUpdateJobStatus = "failed"
+)
+
+// AgentUpdateJobDTO is the retained HTTP and WebSocket update snapshot.
+type AgentUpdateJobDTO struct {
+	JobID          string               `json:"job_id"`
+	AgentName      string               `json:"agent_name"`
+	Status         AgentUpdateJobStatus `json:"status"`
+	CurrentVersion string               `json:"current_version,omitempty"`
+	TargetVersion  string               `json:"target_version,omitempty"`
+	Output         string               `json:"output,omitempty"`
+	Error          string               `json:"error,omitempty"`
+	RefreshError   string               `json:"refresh_error,omitempty"`
+	StartedAt      time.Time            `json:"started_at"`
+	FinishedAt     *time.Time           `json:"finished_at,omitempty"`
+}
+
+type ListAgentUpdateJobsResponse struct {
+	Jobs []AgentUpdateJobDTO `json:"jobs"`
 }
 
 type AgentProfileMcpConfigDTO struct {
