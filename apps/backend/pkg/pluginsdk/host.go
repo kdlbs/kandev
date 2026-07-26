@@ -110,6 +110,11 @@ type Host interface {
 	// conversation content; kandev-injected system blocks are stripped.
 	Messages() MessageReader
 
+	// Comments returns the writer for the Host data API's CreateComment RPC
+	// (capability api_write:comments per ADR 0043). Comments are read-less in
+	// v1, so this accessor is write-only.
+	Comments() CommentWriter
+
 	// InvokeUtilityAgent runs a one-shot, non-interactive completion using
 	// the operator-configured "utility agent" (Settings > System) and returns
 	// its text. Requires the `agent_invoke` capability. Returns a gRPC
@@ -118,16 +123,38 @@ type Host interface {
 	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
 }
 
-// TaskReader is the read-only accessor behind Host.Tasks(), mirroring the
-// Host data API's ListTasks/GetTask RPCs (ADR 0043). Write methods
-// (CreateTask/UpdateTask) are deferred to a later phase and intentionally
-// not part of this interface yet.
+// TaskReader is the accessor behind Host.Tasks(), mirroring the Host data
+// API's ListTasks/GetTask/CreateTask/UpdateTask RPCs (ADR 0043). Reads
+// (List/Get) require api_read:tasks; writes (Create/Update) require
+// api_write:tasks — the two capabilities gate independently, so a plugin may
+// declare one without the other. (The name is kept for source stability with
+// already-shipped read-only plugins; the interface now also writes.)
 type TaskReader interface {
 	// List returns tasks matching filter, newest page first per page.
 	List(ctx context.Context, filter TaskFilter, page Page) ([]Task, *PageInfo, error)
 
 	// Get returns a single task by id.
 	Get(ctx context.Context, id string) (*Task, error)
+
+	// Create creates a task through kandev's task service (so task.* events
+	// fire and WS clients update) and returns the created task. Requires
+	// api_write:tasks.
+	Create(ctx context.Context, in CreateTaskInput) (*Task, error)
+
+	// Update mutates a conservative field surface of an existing task
+	// (title/description/state/workflow_step_id) and returns the updated task.
+	// Requires api_write:tasks.
+	Update(ctx context.Context, in UpdateTaskInput) (*Task, error)
+}
+
+// CommentWriter is the write-only accessor behind Host.Comments(), mirroring
+// the Host data API's CreateComment RPC (ADR 0043). Requires
+// api_write:comments.
+type CommentWriter interface {
+	// Create posts a comment on a task through kandev's comment service (so
+	// the comment-created event fires) and returns the created comment with
+	// its server-assigned id, timestamp, and "plugin:<id>" source.
+	Create(ctx context.Context, taskID, body string) (*Comment, error)
 }
 
 // SessionReader is the read-only accessor behind Host.Sessions(), mirroring
@@ -297,6 +324,8 @@ func (h *grpcHostClient) Repositories() RepositoryReader {
 
 func (h *grpcHostClient) Messages() MessageReader { return grpcMessageReader{client: h.client} }
 
+func (h *grpcHostClient) Comments() CommentWriter { return grpcCommentWriter{client: h.client} }
+
 func (h *grpcHostClient) InvokeUtilityAgent(ctx context.Context, prompt string) (string, error) {
 	resp, err := h.client.InvokeUtilityAgent(ctx, &pluginv1.InvokeUtilityAgentRequest{Prompt: prompt})
 	if err != nil {
@@ -335,6 +364,43 @@ func (r grpcTaskReader) Get(ctx context.Context, id string) (*Task, error) {
 		return nil, err
 	}
 	return &task, nil
+}
+
+func (r grpcTaskReader) Create(ctx context.Context, in CreateTaskInput) (*Task, error) {
+	resp, err := r.client.CreateTask(ctx, in.toProto())
+	if err != nil {
+		return nil, err
+	}
+	task, err := taskFromProto(resp.GetTask())
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+func (r grpcTaskReader) Update(ctx context.Context, in UpdateTaskInput) (*Task, error) {
+	resp, err := r.client.UpdateTask(ctx, in.toProto())
+	if err != nil {
+		return nil, err
+	}
+	task, err := taskFromProto(resp.GetTask())
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+// grpcCommentWriter implements CommentWriter on the plugin side.
+type grpcCommentWriter struct {
+	client pluginv1.HostClient
+}
+
+func (w grpcCommentWriter) Create(ctx context.Context, taskID, body string) (*Comment, error) {
+	resp, err := w.client.CreateComment(ctx, &pluginv1.CreateCommentRequest{TaskId: taskID, Body: body})
+	if err != nil {
+		return nil, err
+	}
+	return commentFromProto(resp.GetComment()), nil
 }
 
 // grpcSessionReader implements SessionReader on the plugin side.
@@ -674,6 +740,46 @@ func (s *grpcHostServer) ListMessages(ctx context.Context, req *pluginv1.ListMes
 	return &pluginv1.ListMessagesResponse{Messages: messagesToProto(messages), PageInfo: pageInfo.toProto()}, nil
 }
 
+// ── Host data API writes (ADR 0043) ─────────────────────────────────────
+//
+// Each dispatches to the injected impl's writer accessor (impl.Tasks() for
+// Create/Update, impl.Comments() for CreateComment) and converts native<->proto
+// at the boundary. Capability gating (api_write:<resource>) and the real
+// service-layer calls live in the kandev-side impl, exactly like the reads
+// above.
+
+func (s *grpcHostServer) CreateTask(ctx context.Context, req *pluginv1.CreateTaskRequest) (*pluginv1.CreateTaskResponse, error) {
+	task, err := s.impl.Tasks().Create(ctx, createTaskInputFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	protoTask, err := task.toProto()
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.CreateTaskResponse{Task: protoTask}, nil
+}
+
+func (s *grpcHostServer) UpdateTask(ctx context.Context, req *pluginv1.UpdateTaskRequest) (*pluginv1.UpdateTaskResponse, error) {
+	task, err := s.impl.Tasks().Update(ctx, updateTaskInputFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	protoTask, err := task.toProto()
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.UpdateTaskResponse{Task: protoTask}, nil
+}
+
+func (s *grpcHostServer) CreateComment(ctx context.Context, req *pluginv1.CreateCommentRequest) (*pluginv1.CreateCommentResponse, error) {
+	comment, err := s.impl.Comments().Create(ctx, req.GetTaskId(), req.GetBody())
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.CreateCommentResponse{Comment: comment.toProto()}, nil
+}
+
 var _ pluginv1.HostServer = (*grpcHostServer)(nil)
 
 // UnimplementedHostData is an embeddable default for the Host data API
@@ -698,6 +804,7 @@ func (UnimplementedHostData) Repositories() RepositoryReader {
 	return unimplementedRepositoryReader{}
 }
 func (UnimplementedHostData) Messages() MessageReader { return unimplementedMessageReader{} }
+func (UnimplementedHostData) Comments() CommentWriter { return unimplementedCommentWriter{} }
 
 // InvokeUtilityAgent is the embeddable default for the agent_invoke Host
 // method (ADR 0048). It lives on UnimplementedHostData — the shared
@@ -719,6 +826,14 @@ func (unimplementedTaskReader) List(context.Context, TaskFilter, Page) ([]Task, 
 }
 
 func (unimplementedTaskReader) Get(context.Context, string) (*Task, error) {
+	return nil, errUnimplementedHostData("tasks")
+}
+
+func (unimplementedTaskReader) Create(context.Context, CreateTaskInput) (*Task, error) {
+	return nil, errUnimplementedHostData("tasks")
+}
+
+func (unimplementedTaskReader) Update(context.Context, UpdateTaskInput) (*Task, error) {
 	return nil, errUnimplementedHostData("tasks")
 }
 
@@ -764,4 +879,10 @@ type unimplementedMessageReader struct{}
 
 func (unimplementedMessageReader) List(context.Context, MessageFilter, Page) ([]Message, *PageInfo, error) {
 	return nil, nil, errUnimplementedHostData("messages")
+}
+
+type unimplementedCommentWriter struct{}
+
+func (unimplementedCommentWriter) Create(context.Context, string, string) (*Comment, error) {
+	return nil, errUnimplementedHostData("comments")
 }

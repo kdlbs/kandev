@@ -19,6 +19,12 @@ const (
 	webhooksFileName       = "webhooks.jsonl"
 	configSnapshotFileName = "config.json"
 	secretProbeFileName    = "secret-probe.json"
+	writeProbeFileName     = "write-probe.json"
+
+	// writeProbeWebhookKey triggers the Host data API write round-trip
+	// (CreateTask + CreateComment). Gated on this key so unrelated webhook
+	// deliveries don't attempt writes.
+	writeProbeWebhookKey = "write"
 )
 
 // deliveryRecord is one recorded OnEvent delivery, appended as a JSON line
@@ -126,7 +132,51 @@ func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.Webhoo
 	}
 	p.snapshotConfigBestEffort(ctx)
 	p.snapshotSecretProbeBestEffort(ctx)
+	if req.WebhookKey == writeProbeWebhookKey {
+		p.snapshotWriteProbeBestEffort(ctx)
+	}
 	return &pluginsdk.WebhookResponse{Status: 200, Body: []byte("ok")}, nil
+}
+
+// writeProbeRecord captures the outcome of the Host data API write round-trip
+// so tests can poll write-probe.json as evidence a plugin created a task and a
+// comment over the real gRPC transport (or was denied — the error is recorded).
+type writeProbeRecord struct {
+	TaskID    string `json:"task_id,omitempty"`
+	TaskError string `json:"task_error,omitempty"`
+	CommentID string `json:"comment_id,omitempty"`
+}
+
+// snapshotWriteProbeBestEffort exercises the write RPCs end to end: Host
+// CreateTask then, on success, Host CreateComment on the new task, writing the
+// result (ids, or the error) to write-probe.json. Best-effort — the Host may
+// deny the write when the fixture's manifest lacks api_write, which is itself
+// useful evidence.
+func (p *fixturePlugin) snapshotWriteProbeBestEffort(ctx context.Context) {
+	host := p.Host()
+	if host == nil {
+		return
+	}
+	rec := writeProbeRecord{}
+	task, err := host.Tasks().Create(ctx, pluginsdk.CreateTaskInput{
+		WorkspaceID: "ws-probe",
+		WorkflowID:  "wf-probe",
+		Title:       "fixture write probe",
+		Description: "created by plugin-fixture over the Host data API",
+	})
+	if err != nil {
+		rec.TaskError = err.Error()
+	} else if task != nil {
+		rec.TaskID = task.ID
+		if comment, cerr := host.Comments().Create(ctx, task.ID, "fixture probe comment"); cerr == nil && comment != nil {
+			rec.CommentID = comment.ID
+		}
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(p.dataDir, writeProbeFileName), data, 0o600)
 }
 
 // snapshotSecretProbeBestEffort exercises the plugin-scoped secret

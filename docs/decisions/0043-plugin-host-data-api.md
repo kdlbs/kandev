@@ -141,6 +141,43 @@ Concretely:
 - Write RPCs inherit kandev's event-publishing invariant for free by routing
   through service methods; no plugin can mutate a task without `task.*` firing.
 
+## Update — 2026-07-26: writes implemented
+
+The phase-2 write RPCs are now wired, following this ADR's decision points 3–5
+verbatim. Concretely:
+
+- **`CreateTask` / `UpdateTask`** (capability `api_write:tasks`) route through
+  `internal/task/service.Service.CreateTask` / `UpdateTask` — the same
+  event-publishing methods the REST/MCP API uses — via a backendapp adapter
+  (`pluginsTaskWriterAdapter`) that translates the SDK's plugins-local input
+  structs into `service.CreateTaskRequest` / `UpdateTaskRequest` (the service
+  types can't be referenced from `internal/plugins` without the import cycle
+  this ADR's `SetDataSources` note already calls out). `CreateTask` resolves
+  placement defaults (single workspace; that workspace's first workflow;
+  ambiguous → `InvalidArgument`) and honors an optional `start_agent` that
+  best-effort launches an agent through the orchestrator (a launch failure never
+  fails the create, matching REST/MCP's async auto-start). `UpdateTask` exposes
+  a **conservative field mask** — `title` / `description` / `state` /
+  `workflow_step_id`, each optional — deliberately smaller than the full REST
+  update surface.
+- **`CreateComment`** (capability `api_write:comments`) routes through
+  `internal/office/service.Service.CreateComment`, which publishes the
+  comment-created event; the plugins package reaches it (and the orchestrator
+  task-starter) via a late `SetWriteDeps` hook read live at call time, because
+  both services are constructed after boot-active plugins spawn — the same
+  live-read pattern the utility agent (ADR 0048) uses.
+- **Provenance.** The server stamps `source = "plugin:<id>"` — task metadata
+  `source` for created tasks (the Task model has no source column), and
+  `TaskComment.Source` for comments. A plugin cannot set it.
+- **Gating** is per-method on the shared `Tasks()` accessor: reads check
+  `api_read:tasks`, writes check `api_write:tasks`, independently — a plugin may
+  hold one without the other. `Comments()` is a write-only accessor gated on
+  `api_write:comments`. Undeclared → gRPC `PermissionDenied`, identical to reads.
+
+This closes the "writes deferred to phase 2" language in the Decision above.
+Broadening the write surface (delete/archive, sessions/workspaces, a wider
+update mask) remains future work.
+
 ## Alternatives considered
 
 - **Raw DB access (status quo).** What the agent-stats plugin does today.

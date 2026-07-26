@@ -13,20 +13,18 @@ service Plugin {
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).
-// Reads (§5) are capability-gated server-side by an inline per-resource
-// check at the start of each handler — there is no unary interceptor
-// enforcing this centrally. The deferred write RPCs below currently return
-// gRPC Unimplemented unconditionally, regardless of the caller's declared
-// capabilities, until their handlers land.
+// Reads (§5) and writes are capability-gated server-side by an inline
+// per-resource check at the start of each handler — there is no unary
+// interceptor enforcing this centrally.
 //
 // Host data API (ADR 0043): the read/write data RPCs below live on this same
 // `service Host` rather than a separate `service HostData`. They reuse the
 // single broker connection; splitting into a second service would only
 // duplicate that for no benefit. Reads require manifest capability
 // `api_read:<resource>`; writes require `api_write:<resource>` (e.g.
-// `api_read:tasks`, `api_write:comments`). An undeclared capability on a read
-// RPC returns gRPC PermissionDenied with `capability 'api_read:tasks' not
-// declared`.
+// `api_read:tasks`, `api_write:comments`). An undeclared capability returns
+// gRPC PermissionDenied with `capability 'api_read:tasks' not declared` (or
+// `api_write:tasks`, etc.).
 //
 // DTOs below are a HAND-DEFINED public contract: the backend maps internal
 // models → these messages explicitly, never generates them from domain
@@ -91,10 +89,12 @@ service Host {
   // its own API key. FailedPrecondition when no utility agent is configured.
   rpc InvokeUtilityAgent(InvokeUtilityAgentRequest) returns (InvokeUtilityAgentResponse);
 
-  // Writes — capability api_write:<resource>. Declared now for a stable
-  // contract; handlers land in a later phase (not implemented by this RPC
-  // addition). Route through service methods so the corresponding task.*
-  // events fire — the whole reason not to let plugins write the DB.
+  // Writes — capability api_write:<resource>. Route through the first-party
+  // service layer (internal/task/service, internal/office/service) so the
+  // corresponding task.* / comment-created events fire and WS clients update —
+  // the whole reason not to let plugins write the DB. CreateTask/UpdateTask
+  // require api_write:tasks; CreateComment requires api_write:comments. kandev
+  // stamps source = "plugin:<id>" on created rows; a plugin cannot set it.
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
   rpc CreateComment(CreateCommentRequest) returns (CreateCommentResponse);

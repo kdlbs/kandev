@@ -128,6 +128,38 @@ func TestHandleWebhook_AppendsJSONLineAndRespondsOK(t *testing.T) {
 	require.Equal(t, "test-hook", recs[0].WebhookKey)
 }
 
+// TestHandleWebhook_WriteKeyRoundTripsHostWrites proves the "write" webhook
+// drives the Host data API write RPCs (CreateTask then CreateComment on the
+// returned task) and records the outcome to write-probe.json.
+func TestHandleWebhook_WriteKeyRoundTripsHostWrites(t *testing.T) {
+	dir := t.TempDir()
+	p := &fixturePlugin{dataDir: dir}
+	host := &fakeHost{createdTaskID: "task-42", createdCommentID: "comment-7"}
+	p.SetHost(host)
+
+	resp, err := p.HandleWebhook(context.Background(), &pluginsdk.WebhookRequest{WebhookKey: "write"})
+	require.NoError(t, err)
+	require.Equal(t, "ok", string(resp.Body))
+
+	require.Equal(t, "fixture write probe", host.lastCreateInput.Title)
+	require.Equal(t, "task-42", host.lastCommentTask, "the comment must target the task the Host returned")
+
+	rec := readSingleJSON[writeProbeRecord](t, filepath.Join(dir, "write-probe.json"))
+	require.Equal(t, "task-42", rec.TaskID)
+	require.Equal(t, "comment-7", rec.CommentID)
+	require.Empty(t, rec.TaskError)
+}
+
+// readSingleJSON reads path and decodes its whole contents as a single T.
+func readSingleJSON[T any](t *testing.T, path string) T {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var v T
+	require.NoError(t, json.Unmarshal(data, &v))
+	return v
+}
+
 func TestResolveDataDir_UsesEnvWhenSet(t *testing.T) {
 	t.Setenv("KANDEV_PLUGIN_DATA_DIR", "/tmp/kandev-plugin-e2e-data")
 	require.Equal(t, "/tmp/kandev-plugin-e2e-data", resolveDataDir())
@@ -155,6 +187,37 @@ type fakeHost struct {
 
 	setStateCalls []setStateCall
 	setStateErr   error
+
+	// Host data API write recording (ADR 0043 phase 2).
+	createdTaskID    string
+	createdCommentID string
+	lastCreateInput  pluginsdk.CreateTaskInput
+	lastCommentTask  string
+}
+
+func (h *fakeHost) Tasks() pluginsdk.TaskReader       { return fakeHostTaskReader{h} }
+func (h *fakeHost) Comments() pluginsdk.CommentWriter { return fakeHostCommentWriter{h} }
+
+type fakeHostTaskReader struct{ h *fakeHost }
+
+func (fakeHostTaskReader) List(context.Context, pluginsdk.TaskFilter, pluginsdk.Page) ([]pluginsdk.Task, *pluginsdk.PageInfo, error) {
+	return nil, nil, nil
+}
+func (fakeHostTaskReader) Get(context.Context, string) (*pluginsdk.Task, error) { return nil, nil }
+func (fakeHostTaskReader) Update(context.Context, pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
+	return nil, nil
+}
+
+func (r fakeHostTaskReader) Create(_ context.Context, in pluginsdk.CreateTaskInput) (*pluginsdk.Task, error) {
+	r.h.lastCreateInput = in
+	return &pluginsdk.Task{ID: r.h.createdTaskID, Title: in.Title}, nil
+}
+
+type fakeHostCommentWriter struct{ h *fakeHost }
+
+func (w fakeHostCommentWriter) Create(_ context.Context, taskID, body string) (*pluginsdk.Comment, error) {
+	w.h.lastCommentTask = taskID
+	return &pluginsdk.Comment{ID: w.h.createdCommentID, TaskID: taskID, Body: body}, nil
 }
 
 func (h *fakeHost) GetState(context.Context, string, string, string) (map[string]any, bool, error) {

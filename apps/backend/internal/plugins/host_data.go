@@ -45,12 +45,19 @@ const (
 	resourceAgentProfiles = "agent_profiles"
 	resourceRepositories  = "repositories"
 	resourceMessages      = "messages"
+	resourceComments      = "comments"
 )
 
 // apiReadCapability formats resource as the api_read:<resource> capability
 // name permissionDenied expects.
 func apiReadCapability(resource string) string {
 	return "api_read:" + resource
+}
+
+// apiWriteCapability formats resource as the api_write:<resource> capability
+// name permissionDenied expects for the Host data API's write RPCs (ADR 0043).
+func apiWriteCapability(resource string) string {
+	return "api_write:" + resource
 }
 
 // Pagination: Page.Cursor is a decimal string offset into the server-side
@@ -182,13 +189,12 @@ type messageDataSource interface {
 // this falls back to the embedded Unimplemented reader rather than a nil
 // pointer dereference.
 
+// Tasks returns the task accessor. Unlike the read-only accessors below, it
+// mixes read (List/Get, api_read:tasks) and write (Create/Update,
+// api_write:tasks) methods whose capabilities gate independently, so the gate
+// cannot live at the accessor — each method checks its own capability (reads
+// here, writes in host_write.go).
 func (h *pluginHost) Tasks() pluginsdk.TaskReader {
-	if !h.capabilities.CanRead(resourceTasks) {
-		return deniedTaskReader{}
-	}
-	if h.taskData == nil {
-		return h.UnimplementedHostData.Tasks()
-	}
 	return taskReader{host: h}
 }
 
@@ -254,16 +260,6 @@ func (h *pluginHost) Messages() pluginsdk.MessageReader {
 
 // ── Denied readers ──────────────────────────────────────────────────────
 
-type deniedTaskReader struct{}
-
-func (deniedTaskReader) List(context.Context, pluginsdk.TaskFilter, pluginsdk.Page) ([]pluginsdk.Task, *pluginsdk.PageInfo, error) {
-	return nil, nil, permissionDenied(apiReadCapability(resourceTasks))
-}
-
-func (deniedTaskReader) Get(context.Context, string) (*pluginsdk.Task, error) {
-	return nil, permissionDenied(apiReadCapability(resourceTasks))
-}
-
 type deniedSessionReader struct{}
 
 func (deniedSessionReader) List(context.Context, pluginsdk.SessionFilter, pluginsdk.Page) ([]pluginsdk.Session, *pluginsdk.PageInfo, error) {
@@ -324,6 +320,12 @@ const taskFetchPageSize = 1000
 type taskReader struct{ host *pluginHost }
 
 func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page pluginsdk.Page) ([]pluginsdk.Task, *pluginsdk.PageInfo, error) {
+	if !r.host.capabilities.CanRead(resourceTasks) {
+		return nil, nil, permissionDenied(apiReadCapability(resourceTasks))
+	}
+	if r.host.taskData == nil {
+		return r.host.UnimplementedHostData.Tasks().List(ctx, filter, page)
+	}
 	workspaceIDs, err := r.host.resolveWorkspaceIDs(ctx, filter.WorkspaceIDs)
 	if err != nil {
 		return nil, nil, err
@@ -342,6 +344,12 @@ func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page 
 // doesn't resolve to a task, so the in-process contract matches exactly what
 // a real plugin observes over the wire via grpcHostServer.GetTask.
 func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error) {
+	if !r.host.capabilities.CanRead(resourceTasks) {
+		return nil, permissionDenied(apiReadCapability(resourceTasks))
+	}
+	if r.host.taskData == nil {
+		return r.host.UnimplementedHostData.Tasks().Get(ctx, id)
+	}
 	task, err := r.host.taskData.GetTask(ctx, id)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {

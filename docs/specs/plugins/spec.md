@@ -106,7 +106,7 @@ min_kandev_version: "0.78.0"                 # optional
 capabilities:
   events: ["task.created", "task.state_changed", "agent.completed"]
   api_read: ["tasks", "sessions"]             # Host data API reads (see below); live now
-  api_write: ["tasks", "comments"]            # Host data API writes; deferred, no effect yet
+  api_write: ["tasks", "comments"]            # Host data API writes (CreateTask/UpdateTask/CreateComment); live now
   state: true
   secrets: true
   auth: true                                  # establish a login session for an
@@ -138,11 +138,11 @@ restart_count: 0
 ```
 
 `capabilities.api_read` / `capabilities.api_write` gate the **Host data API** Host
-RPCs (read RPCs live now; write RPCs are deferred) — the vocabulary is a list of
+RPCs (both reads and writes live now) — the vocabulary is a list of
 resource names: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`,
-`agent_profiles`, `repositories` for `api_read`, plus `comments` for `api_write`
-only (there is no `ListComments` read RPC). They are unrelated to office. See
-"Host data API".
+`agent_profiles`, `repositories` for `api_read`, plus `tasks` (CreateTask/
+UpdateTask) and `comments` (CreateComment) for `api_write` (there is no
+`ListComments` read RPC). They are unrelated to office. See "Host data API".
 
 **Declaring data access.** Listing a resource under `api_read` grants the
 corresponding Host data reads for that resource only — e.g. `api_read:
@@ -151,8 +151,10 @@ corresponding Host data reads for that resource only — e.g. `api_read:
 `ListSessionCodeStats`) but not `Host.Tasks()`. A resource left off the list
 still resolves to a reader/accessor (no nil pointer), but every method on it
 returns gRPC `PermissionDenied` with message `capability 'api_read:<resource>'
-not declared`. `api_write` entries are accepted and stored but currently have no
-effect (see "Write phase (deferred)").
+not declared`. Writes work the same way under `api_write` (message
+`capability 'api_write:<resource>' not declared`), and reads and writes gate
+independently on the same resource — a plugin may declare `api_read:tasks`
+without `api_write:tasks`, or vice versa (see "Host data API writes").
 
 **External login (`auth`).** An `auth`-capable plugin can log a visitor in
 against an external IdP (OIDC/SAML): its webhook (the callback / SAML ACS)
@@ -351,16 +353,15 @@ service Host {
 Every Host RPC is capability-gated: `GetState`/`SetState`/`DeleteState`/`ListState`
 check `capabilities.state`, `RevealSecret` checks `capabilities.secrets`,
 `InvokeUtilityAgent` checks `capabilities.agent_invoke`, and each Host data API
-read RPC checks `capabilities.api_read` for its resource (see "Host data API"
+read RPC checks `capabilities.api_read` for its resource, and each Host data API
+write RPC checks `capabilities.api_write` for its resource (see "Host data API"
 below) — all before the handler runs, returning gRPC status `PermissionDenied`
 with message `capability '<name>' not declared` on a miss. `EmitEvent` is
-ungated (no boolean capability applies). The Host data API write
-RPCs are not implemented yet, so they return gRPC `Unimplemented` unconditionally
-and never reach an `api_write` capability check (see "Write phase (deferred)").
+ungated (no boolean capability applies).
 
 ### Host data API (plugin -> kandev, gRPC)
 
-Plugins read (and, in a later phase, write) kandev's own domain data — tasks,
+Plugins read and write kandev's own domain data — tasks,
 sessions, workspaces, workflows, agent profiles, repositories, comments — over the
 same capability-gated Host gRPC channel they use for state and secrets, instead of
 opening the kandev database file. The wire contract is the `kandev.plugin.v1`
@@ -403,13 +404,20 @@ system context is inline markup removed at read time. Reads route through the
 task service's `ListMessagesForPlugin` (a single filtered
 session/task/time/type query), never a repository or the DB file directly.
 
-**Write phase (deferred).** `CreateTask`, `UpdateTask`, and `CreateComment` are
-specified in the proto but not implemented in this phase. When added, each is
-gated by `api_write:<resource>` (`api_write:tasks`, `api_write:comments`), routes
-through the task service methods that publish `task.*` events (never a
-repository), and the server stamps `source = "plugin:<id>"` on the created
-row/comment — a plugin cannot set provenance itself. Declaring an `api_write`
-capability has no effect until the write RPCs ship.
+**Host data API writes.** `CreateTask`, `UpdateTask`, and `CreateComment` are
+implemented. Each is gated by `api_write:<resource>` — `api_write:tasks` for
+`Host.Tasks().Create`/`Update`, `api_write:comments` for
+`Host.Comments().Create` — and routes through the first-party service layer
+(`internal/task/service` for tasks, `internal/office/service` for comments),
+never a repository, so `task.*` / comment-created events fire and WS clients
+update. The server stamps `source = "plugin:<id>"` on the created row/comment
+(task metadata `source`; `TaskComment.Source`) — a plugin cannot set provenance
+itself. `CreateTask` fills sane placement defaults when the plugin omits them
+(single workspace; that workspace's first workflow — ambiguous → `InvalidArgument`),
+accepts an optional `start_agent` that best-effort auto-launches an agent, and
+requires a title. `UpdateTask` accepts a conservative field mask —
+`title` / `description` / `state` / `workflow_step_id`, each optional (a nil field
+is left unchanged). A missing task on update returns gRPC `NotFound`.
 
 **Conventions.**
 
@@ -692,9 +700,16 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
   plugin/slot/ordinal identity restores the saved position; the original slot
   remains its default side rather than overriding user order.
 
-- **GIVEN** a plugin whose manifest declares `api_write: ["tasks"]` in this phase,
-  **WHEN** it calls `CreateTask`, **THEN** kandev returns gRPC status `Unimplemented`
-  (write RPCs are deferred), and declaring the capability has no other effect.
+- **GIVEN** a plugin whose manifest declares `api_write: ["tasks"]`, **WHEN** it
+  calls `CreateTask`, **THEN** kandev creates the task through the task service
+  (firing `task.created`), stamps `source = "plugin:<id>"`, and returns the task;
+  **WHEN** a plugin without `api_write:tasks` calls `CreateTask`, **THEN** kandev
+  returns gRPC `PermissionDenied` with `capability 'api_write:tasks' not declared`.
+
+- **GIVEN** a plugin whose manifest declares `api_write: ["comments"]`, **WHEN**
+  it calls `CreateComment` on a task, **THEN** kandev creates the comment through
+  the office comment service (firing the comment-created event) with
+  `source = "plugin:<id>"`; a plugin lacking `api_write:comments` is denied.
 
 ## Out of scope
 
@@ -729,9 +744,10 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
 - **Multi-instance plugins.** Each plugin ID maps to exactly one supervised subprocess.
 - **Rate limiting.** No per-plugin rate limits in v1. Misbehaving plugins can be disabled manually.
 - **Plugin database namespaces.** Plugins do not get their own SQLite schemas. KV state is sufficient for v1.
-- **Host data API write RPCs.** `CreateTask`, `UpdateTask`, and `CreateComment` are
-  specified but deferred to a later phase; only the read RPCs ship in v1. See "Host
-  data API".
+- **Broader write surface.** The Host data API writes cover task create/update
+  (conservative field mask) and comment create. Deleting or archiving tasks,
+  writing sessions/workspaces/workflows/repositories, and a wider task-update mask
+  are out of scope for now. See "Host data API".
 - **Per-session code-stats precomputation.** `SessionCodeStats` is computed on
   demand per request in v1; a materialized or cached aggregation is future work.
 - **Workspace-scoped plugin data access.** v1 reads are global to the instance with

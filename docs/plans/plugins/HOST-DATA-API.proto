@@ -1,10 +1,13 @@
-// PROPOSED — kandev.plugin.v1 Host data API (draft for review, not wired yet).
+// kandev.plugin.v1 Host data API — folded into
+// apps/backend/proto/kandev/plugin/v1/plugin.proto and fully wired (reads and
+// writes both implemented). This file is the frozen design draft kept for
+// reference alongside the ADRs.
 //
-// Extends the existing capability-gated Host service so plugins read (and, in a
-// second phase, write) kandev data through a typed, versioned contract instead
-// of touching the SQLite file directly. These messages are a HAND-DEFINED public
-// contract: the backend maps internal models → these DTOs explicitly. Do NOT
-// generate them from domain structs — the mapping IS the decoupling.
+// Extends the existing capability-gated Host service so plugins read AND write
+// kandev data through a typed, versioned contract instead of touching the
+// SQLite file directly. These messages are a HAND-DEFINED public contract: the
+// backend maps internal models → these DTOs explicitly. Do NOT generate them
+// from domain structs — the mapping IS the decoupling.
 //
 // Enforcement (host side): each RPC checks the caller plugin's manifest
 // capabilities. Reads require `api_read: ["<resource>"]`; writes require

@@ -39,6 +39,14 @@ type dataRecordingHost struct {
 	lastWorkspaceID   string
 	lastWorkflowID    string
 	lastUtilityPrompt string
+
+	createdTask     Task
+	lastCreateInput CreateTaskInput
+	updatedTask     Task
+	lastUpdateInput UpdateTaskInput
+	createdComment  Comment
+	lastCommentTask string
+	lastCommentBody string
 }
 
 func (h *dataRecordingHost) GetState(context.Context, string, string, string) (map[string]any, bool, error) {
@@ -73,6 +81,7 @@ func (h *dataRecordingHost) Repositories() RepositoryReader {
 	return dataRecordingRepositoryReader{h}
 }
 func (h *dataRecordingHost) Messages() MessageReader { return dataRecordingMessageReader{h} }
+func (h *dataRecordingHost) Comments() CommentWriter { return dataRecordingCommentWriter{h} }
 func (h *dataRecordingHost) InvokeUtilityAgent(_ context.Context, prompt string) (string, error) {
 	h.lastUtilityPrompt = prompt
 	return h.utilityText, nil
@@ -91,6 +100,27 @@ func (r dataRecordingTaskReader) Get(_ context.Context, id string) (*Task, error
 		return nil, status.Errorf(codes.NotFound, "task %q not found", id)
 	}
 	return &task, nil
+}
+
+func (r dataRecordingTaskReader) Create(_ context.Context, in CreateTaskInput) (*Task, error) {
+	r.h.lastCreateInput = in
+	task := r.h.createdTask
+	return &task, nil
+}
+
+func (r dataRecordingTaskReader) Update(_ context.Context, in UpdateTaskInput) (*Task, error) {
+	r.h.lastUpdateInput = in
+	task := r.h.updatedTask
+	return &task, nil
+}
+
+type dataRecordingCommentWriter struct{ h *dataRecordingHost }
+
+func (w dataRecordingCommentWriter) Create(_ context.Context, taskID, body string) (*Comment, error) {
+	w.h.lastCommentTask = taskID
+	w.h.lastCommentBody = body
+	comment := w.h.createdComment
+	return &comment, nil
 }
 
 type dataRecordingSessionReader struct{ h *dataRecordingHost }
@@ -166,6 +196,48 @@ func TestHostData_TasksListAndGet(t *testing.T) {
 	_, err = host.Tasks().Get(context.Background(), "missing")
 	require.Error(t, err)
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestHostData_TaskWritesAndComment proves the write RPCs (CreateTask,
+// UpdateTask, CreateComment) round-trip inputs and results through
+// grpcHostClient -> proto -> grpcHostServer, including the optional-pointer
+// fields on the update mask.
+func TestHostData_TaskWritesAndComment(t *testing.T) {
+	impl := &dataRecordingHost{
+		createdTask:    Task{ID: "task-new", Title: "Investigate crash", State: "TODO"},
+		updatedTask:    Task{ID: "task-1", Title: "Renamed", State: "IN_PROGRESS"},
+		createdComment: Comment{ID: "c1", TaskID: "task-1", Body: "from the plugin", Source: "plugin:acme"},
+	}
+	host := dialHostOverBufconn(t, impl)
+
+	stepID := "step-2"
+	created, err := host.Tasks().Create(context.Background(), CreateTaskInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: &stepID,
+		Title: "Investigate crash", Description: "stack trace attached", StartAgent: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "task-new", created.ID)
+	require.Equal(t, "ws-1", impl.lastCreateInput.WorkspaceID)
+	require.NotNil(t, impl.lastCreateInput.WorkflowStepID)
+	require.Equal(t, "step-2", *impl.lastCreateInput.WorkflowStepID)
+	require.True(t, impl.lastCreateInput.StartAgent)
+
+	title := "Renamed"
+	state := "IN_PROGRESS"
+	updated, err := host.Tasks().Update(context.Background(), UpdateTaskInput{ID: "task-1", Title: &title, State: &state})
+	require.NoError(t, err)
+	require.Equal(t, "IN_PROGRESS", updated.State)
+	require.Equal(t, "task-1", impl.lastUpdateInput.ID)
+	require.NotNil(t, impl.lastUpdateInput.Title)
+	require.Equal(t, "Renamed", *impl.lastUpdateInput.Title)
+	require.Nil(t, impl.lastUpdateInput.Description, "an unset field must stay nil across the wire")
+
+	comment, err := host.Comments().Create(context.Background(), "task-1", "from the plugin")
+	require.NoError(t, err)
+	require.Equal(t, "c1", comment.ID)
+	require.Equal(t, "plugin:acme", comment.Source)
+	require.Equal(t, "task-1", impl.lastCommentTask)
+	require.Equal(t, "from the plugin", impl.lastCommentBody)
 }
 
 func TestHostData_SessionsListAndCodeStats(t *testing.T) {
@@ -282,6 +354,18 @@ func TestHostData_UnimplementedHostData_ReturnsUnimplemented(t *testing.T) {
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 
 	_, _, err = host.Sessions().CodeStats(context.Background(), SessionFilter{}, Page{})
+	require.Error(t, err)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+
+	_, err = host.Tasks().Create(context.Background(), CreateTaskInput{Title: "x"})
+	require.Error(t, err)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+
+	_, err = host.Tasks().Update(context.Background(), UpdateTaskInput{ID: "task-1"})
+	require.Error(t, err)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+
+	_, err = host.Comments().Create(context.Background(), "task-1", "body")
 	require.Error(t, err)
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 }

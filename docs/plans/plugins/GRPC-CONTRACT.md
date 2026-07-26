@@ -85,10 +85,10 @@ service Host {
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
   rpc ListSessionCodeStats(ListSessionCodeStatsRequest) returns (ListSessionCodeStatsResponse);
 
-  // Host data API — writes, capability api_write:<resource>. Declared in the
-  // proto for a stable contract; handlers are NOT wired yet (§3a "Deferred
-  // writes") — calling any of these three today returns gRPC Unimplemented
-  // regardless of capabilities.
+  // Host data API — writes, capability api_write:<resource>. Route through the
+  // first-party service layer so task.* / comment-created events fire (§3a
+  // "Writes"). api_write:tasks gates CreateTask/UpdateTask; api_write:comments
+  // gates CreateComment. Undeclared → gRPC PermissionDenied.
   rpc CreateTask(CreateTaskRequest) returns (Task);
   rpc UpdateTask(UpdateTaskRequest) returns (Task);
   rpc CreateComment(CreateCommentRequest) returns (Comment);
@@ -179,20 +179,26 @@ grants every RPC listed against it; there is no finer-grained gate within a
 resource (e.g. `api_read:workflows` covers both `ListWorkflows` and
 `ListWorkflowSteps`).
 
-**Deferred writes.** `CreateTask`, `UpdateTask`, and `CreateComment` are declared
-on `service Host` and in the proto (frozen shape for `api_write:tasks` /
-`api_write:comments`) but have no server-side handler yet — calling any of them
-returns gRPC `Unimplemented` today regardless of what `api_write` declares. When
-implemented, writes will route through the task service's `CreateTask`/
-`UpdateTask`/comment-create methods (never a repository) so the standard
-`task.*` events fire, and the server will stamp `source = "plugin:<id>"` on the
-created row — a plugin cannot set it itself.
+**Writes.** `CreateTask`, `UpdateTask`, and `CreateComment` are implemented and
+gated by `api_write:tasks` (create/update) / `api_write:comments`. Writes route
+through the first-party service layer — `internal/task/service` for tasks,
+`internal/office/service` for comments — never a repository, so the standard
+`task.*` / comment-created events fire and WS-driven UI stays in sync. The
+server stamps `source = "plugin:<id>"` on the created row/comment (task
+metadata `source` for tasks; `TaskComment.Source` for comments) — a plugin
+cannot set it itself. `CreateTask` resolves sane placement defaults when the
+plugin omits them: an empty `workspace_id` resolves to the single workspace
+(ambiguous otherwise → `InvalidArgument`), an empty `workflow_id` to that
+workspace's first workflow. `UpdateTask` accepts a conservative field mask —
+`title`, `description`, `state`, `workflow_step_id` (each optional/leave-unset).
+`start_agent` best-effort auto-launches an agent through the orchestrator; a
+launch failure does not fail the create.
 
-**Reads go through the service layer, never a repository.** Each read handler
-calls the relevant internal service (task service, workflow service, the
-analytics service for `ListSessionCodeStats`) so derived fields and future
-access rules stay centralized, exactly as writes will route through
-event-publishing service methods once implemented.
+**Reads and writes go through the service layer, never a repository.** Each read
+handler calls the relevant internal service (task service, workflow service, the
+analytics service for `ListSessionCodeStats`); each write handler calls the
+event-publishing service method — so derived fields, events, and future access
+rules stay centralized in one place.
 
 **DTOs are a hand-mapped, versioned contract — never internal structs.** The
 backend maps internal models to the proto messages above with explicit
@@ -361,11 +367,11 @@ the API, never the DB.
 - **Capability gating**: each Host RPC checks the plugin's manifest capabilities
   before doing any work — `state` for `GetState`/`SetState`/`DeleteState`/
   `ListState`, `secrets` for `RevealSecret`, `api_read:<resource>` for each Host
-  data API read RPC (§3a) — and returns PermissionDenied with
-  `capability '<name>' not declared` on a miss. `EmitEvent` is ungated.
-  `api_write:<resource>` is accepted in the manifest but the write RPCs
-  (`CreateTask`/`UpdateTask`/`CreateComment`) aren't implemented yet, so they
-  return gRPC `Unimplemented` regardless of capability.
+  data API read RPC (§3a), `api_write:tasks` for `CreateTask`/`UpdateTask` and
+  `api_write:comments` for `CreateComment` — and returns PermissionDenied with
+  `capability '<name>' not declared` on a miss. `EmitEvent` is ungated. Reads
+  and writes gate independently on the same resource, so a plugin can declare
+  `api_read:tasks` without `api_write:tasks` (or vice versa).
 
 ## 6. Package format (`<id>-<version>.tar.gz`)
 

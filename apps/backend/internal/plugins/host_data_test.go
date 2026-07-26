@@ -9,6 +9,7 @@ import (
 
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	analyticsmodels "github.com/kandev/kandev/internal/analytics/models"
+	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/plugins/manifest"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -155,6 +156,75 @@ func (f *fakeMessageDataSource) ListMessagesForPlugin(
 	return f.messages, nil
 }
 
+// fakeTaskWriter records CreateTask/UpdateTask inputs and returns canned
+// tasks, standing in for the backendapp adapter over internal/task/service.
+type fakeTaskWriter struct {
+	lastCreate  TaskCreateInput
+	lastUpdate  TaskUpdateInput
+	createCalls int
+	updateCalls int
+	created     *taskmodels.Task
+	updated     *taskmodels.Task
+	createErr   error
+	updateErr   error
+}
+
+func (f *fakeTaskWriter) CreateTask(_ context.Context, in TaskCreateInput) (*taskmodels.Task, error) {
+	f.createCalls++
+	f.lastCreate = in
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
+	if f.created != nil {
+		return f.created, nil
+	}
+	return &taskmodels.Task{ID: "task-created", WorkspaceID: in.WorkspaceID, WorkflowID: in.WorkflowID, Title: in.Title}, nil
+}
+
+func (f *fakeTaskWriter) UpdateTask(_ context.Context, in TaskUpdateInput) (*taskmodels.Task, error) {
+	f.updateCalls++
+	f.lastUpdate = in
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
+	if f.updated != nil {
+		return f.updated, nil
+	}
+	return &taskmodels.Task{ID: in.ID, Title: "updated"}, nil
+}
+
+// fakeCommentWriter records CreateComment calls and stamps an id/created_at
+// like the real office repository does.
+type fakeCommentWriter struct {
+	calls int
+	last  *orchmodels.TaskComment
+	err   error
+}
+
+func (f *fakeCommentWriter) CreateComment(_ context.Context, comment *orchmodels.TaskComment) error {
+	f.calls++
+	if f.err != nil {
+		return f.err
+	}
+	comment.ID = "comment-1"
+	comment.CreatedAt = time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	f.last = comment
+	return nil
+}
+
+// fakeTaskStarter records StartTask calls behind CreateTask's start_agent.
+type fakeTaskStarter struct {
+	calls  int
+	lastID string
+	err    error
+}
+
+func (f *fakeTaskStarter) StartTask(_ context.Context, taskID string) error {
+	f.calls++
+	f.lastID = taskID
+	return f.err
+}
+
 // testDataHost bundles a pluginHost with every fake it was wired from, so
 // tests can both drive Host calls and assert against the fakes' recorded
 // state.
@@ -168,6 +238,9 @@ type testDataHost struct {
 	messages   *fakeMessageDataSource
 	utilAgents *fakeUtilityAgentSource
 	utilRun    *fakeUtilityRunner
+	taskWriter *fakeTaskWriter
+	comments   *fakeCommentWriter
+	starter    *fakeTaskStarter
 }
 
 // newTestDataHost builds a fully-wired pluginHost (every Host data API
@@ -183,6 +256,9 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		messages:   &fakeMessageDataSource{},
 		utilAgents: &fakeUtilityAgentSource{},
 		utilRun:    &fakeUtilityRunner{text: "ok"},
+		taskWriter: &fakeTaskWriter{},
+		comments:   &fakeCommentWriter{},
+		starter:    &fakeTaskStarter{},
 	}
 	d.host = &pluginHost{
 		pluginID:         "p1",
@@ -193,9 +269,13 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		agentProfiles:    d.profiles,
 		sessionCodeStats: d.codeStats,
 		messageData:      d.messages,
+		taskWriter:       d.taskWriter,
 		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
 		utilityDeps: func() (utilityAgentSource, utilityRunner) {
 			return d.utilAgents, d.utilRun
+		},
+		writeDeps: func() (commentDataSource, taskStarter) {
+			return d.comments, d.starter
 		},
 	}
 	return d

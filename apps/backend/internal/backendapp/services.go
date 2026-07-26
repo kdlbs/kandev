@@ -41,6 +41,7 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/workflowsync"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories, dbPool *db.Pool, eventBus bus.EventBus, agentRegistry *registry.Registry, version string) (*Services, *agentsettingscontroller.Controller, error) {
@@ -126,7 +127,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
 	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if pluginsSvc != nil {
-		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc)
+		pluginsSvc.SetDataSources(taskSvc, taskSvc, workflowSvc, agentSettingsController, analyticsservice.New(repos.Analytics), taskSvc, pluginsTaskWriterAdapter{svc: taskSvc})
 	}
 	shareHTTP := initShareHandlers(dbPool, repos.Task, githubSvc, log, version)
 
@@ -702,6 +703,47 @@ func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string)
 		return nil, err
 	}
 	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, Enabled: agent.Enabled}, nil
+}
+
+// pluginsTaskWriterAdapter adapts the task service to the plugins package's
+// taskWriter interface (Host data API CreateTask/UpdateTask write RPCs, ADR
+// 0043 phase 2). It translates the plugins-local TaskCreateInput/TaskUpdateInput
+// — which internal/plugins can't express as service.CreateTaskRequest without
+// an import cycle — into the real service requests, so writes route through the
+// same task.*-event-publishing service methods the REST/MCP API uses. The
+// plugin's provenance is stamped into task metadata (`source`), since the Task
+// model has no dedicated source column.
+type pluginsTaskWriterAdapter struct {
+	svc *taskservice.Service
+}
+
+func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.TaskCreateInput) (*taskmodels.Task, error) {
+	var metadata map[string]interface{}
+	if in.Source != "" {
+		metadata = map[string]interface{}{"source": in.Source}
+	}
+	return a.svc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID:    in.WorkspaceID,
+		WorkflowID:     in.WorkflowID,
+		WorkflowStepID: in.WorkflowStepID,
+		Title:          in.Title,
+		Description:    in.Description,
+		ParentID:       in.ParentID,
+		Metadata:       metadata,
+	})
+}
+
+func (a pluginsTaskWriterAdapter) UpdateTask(ctx context.Context, in plugins.TaskUpdateInput) (*taskmodels.Task, error) {
+	req := &taskservice.UpdateTaskRequest{
+		Title:          in.Title,
+		Description:    in.Description,
+		WorkflowStepID: in.WorkflowStepID,
+	}
+	if in.State != nil {
+		state := v1.TaskState(*in.State)
+		req.State = &state
+	}
+	return a.svc.UpdateTask(ctx, in.ID, req)
 }
 
 // workflowProviderAdapter adapts task service to workflow service's WorkflowProvider interface.

@@ -1003,6 +1003,15 @@ func initOfficeServices(
 	services.Task.SetBlockerRepository(repos.Office)
 	services.Task.SetCommentRepository(repos.Office)
 
+	// Wire the Host data API's late write dependencies (ADR 0043 phase 2):
+	// the office comment service backs CreateComment (api_write:comments), and
+	// the orchestrator backs CreateTask's start_agent. Both are constructed
+	// after StartActivePlugins spawns boot-active plugins, so the plugins
+	// service reads them live rather than snapshotting (see SetWriteDeps).
+	if services.Plugins != nil {
+		services.Plugins.SetWriteDeps(services.Office, pluginsTaskStarterAdapter{orch: orchestratorSvc})
+	}
+
 	// Build feature-package services and wire all inter-service dependencies.
 	services.OfficeSvcs = buildOfficeFeatureServices(
 		repos.Office, repos.Task, repos.AgentSettings, cfgLoader, cfgWriter, configBasePath,
@@ -1545,6 +1554,21 @@ func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.T
 			return err
 		},
 	)
+}
+
+// pluginsTaskStarterAdapter adapts the orchestrator to the plugins package's
+// taskStarter interface (Host data API CreateTask start_agent flag, ADR 0043
+// phase 2). It launches with empty agent/executor ids so the orchestrator
+// resolves the workflow-step / workspace defaults itself — the same
+// default-resolving launch path the office scheduler uses. Best-effort: the
+// plugin host swallows the error, matching REST/MCP's asynchronous auto-start.
+type pluginsTaskStarterAdapter struct {
+	orch *orchestrator.Service
+}
+
+func (a pluginsTaskStarterAdapter) StartTask(ctx context.Context, taskID string) error {
+	_, err := a.orch.StartTask(ctx, taskID, "", "", "", "", "", "", false, false, nil)
+	return err
 }
 
 // newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when

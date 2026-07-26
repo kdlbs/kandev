@@ -30,10 +30,58 @@ type fakeHost struct {
 	mu     sync.Mutex
 	states map[string]map[string]any
 	setCh  chan struct{}
+
+	// Host data API write round-trip recording (ADR 0043 phase 2). writeCh
+	// signals a CreateTask arrived so tests can synchronize without a sleep;
+	// createdTitle/lastCommentBody capture what the plugin sent over the real
+	// subprocess transport.
+	writeCh         chan struct{}
+	createdTitle    string
+	lastCommentTask string
+	lastCommentBody string
 }
 
 func newFakeHost() *fakeHost {
-	return &fakeHost{states: map[string]map[string]any{}, setCh: make(chan struct{}, 16)}
+	return &fakeHost{states: map[string]map[string]any{}, setCh: make(chan struct{}, 16), writeCh: make(chan struct{}, 16)}
+}
+
+// Tasks/Comments override UnimplementedHostData so the fixture's write probe
+// (CreateTask + CreateComment) round-trips to this fake host over the real
+// subprocess gRPC transport. This fake does not enforce capabilities — that is
+// covered against a real *pluginHost in internal/plugins' wire tests; here we
+// only prove the write RPC reaches the host and its result returns.
+func (h *fakeHost) Tasks() pluginsdk.TaskReader       { return fakeHostTaskReader{h} }
+func (h *fakeHost) Comments() pluginsdk.CommentWriter { return fakeHostCommentWriter{h} }
+
+type fakeHostTaskReader struct{ h *fakeHost }
+
+func (fakeHostTaskReader) List(context.Context, pluginsdk.TaskFilter, pluginsdk.Page) ([]pluginsdk.Task, *pluginsdk.PageInfo, error) {
+	return nil, nil, nil
+}
+func (fakeHostTaskReader) Get(context.Context, string) (*pluginsdk.Task, error) { return nil, nil }
+func (fakeHostTaskReader) Update(context.Context, pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
+	return nil, nil
+}
+
+func (r fakeHostTaskReader) Create(_ context.Context, in pluginsdk.CreateTaskInput) (*pluginsdk.Task, error) {
+	r.h.mu.Lock()
+	r.h.createdTitle = in.Title
+	r.h.mu.Unlock()
+	select {
+	case r.h.writeCh <- struct{}{}:
+	default:
+	}
+	return &pluginsdk.Task{ID: "task-from-host", Title: in.Title, WorkspaceID: in.WorkspaceID, WorkflowID: in.WorkflowID}, nil
+}
+
+type fakeHostCommentWriter struct{ h *fakeHost }
+
+func (w fakeHostCommentWriter) Create(_ context.Context, taskID, body string) (*pluginsdk.Comment, error) {
+	w.h.mu.Lock()
+	w.h.lastCommentTask = taskID
+	w.h.lastCommentBody = body
+	w.h.mu.Unlock()
+	return &pluginsdk.Comment{ID: "comment-from-host", TaskID: taskID, Body: body, Source: "plugin:test"}, nil
 }
 
 func (h *fakeHost) GetState(context.Context, string, string, string) (map[string]any, bool, error) {
@@ -67,6 +115,12 @@ func (h *fakeHost) get(scope, scopeID, key string) (map[string]any, bool) {
 	defer h.mu.Unlock()
 	v, ok := h.states[scope+"|"+scopeID+"|"+key]
 	return v, ok
+}
+
+func (h *fakeHost) writeProbe() (title, commentTask, commentBody string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.createdTitle, h.lastCommentTask, h.lastCommentBody
 }
 
 // buildFixtureRecord copies the real fixture plugin binary into a fresh
@@ -166,6 +220,30 @@ func TestManager_StartDeliverEventWebhookStop(t *testing.T) {
 		}
 		if value["event_type"] != "task.created" {
 			t.Fatalf("recorded event_type = %v, want %q", value["event_type"], "task.created")
+		}
+	})
+
+	t.Run("HandleWebhook write probe round-trips CreateTask/CreateComment to Host", func(t *testing.T) {
+		resp, err := remote.HandleWebhook(ctx, &pluginsdk.WebhookRequest{WebhookKey: "write"})
+		if err != nil {
+			t.Fatalf("HandleWebhook(write) unexpected error: %v", err)
+		}
+		if string(resp.Body) != "ok" {
+			t.Fatalf("HandleWebhook(write).Body = %q, want ok", resp.Body)
+		}
+		select {
+		case <-host.writeCh:
+		case <-time.After(5 * time.Second):
+			t.Fatal("plugin never called Host.Tasks().Create over the subprocess transport")
+		}
+		title, commentTask, commentBody := host.writeProbe()
+		if title != "fixture write probe" {
+			t.Fatalf("recorded created task title = %q, want %q", title, "fixture write probe")
+		}
+		// The comment write targets the task id the host returned from Create,
+		// proving the two write RPCs chain over the real transport.
+		if commentTask != "task-from-host" || commentBody != "fixture probe comment" {
+			t.Fatalf("recorded comment = (task %q, body %q), want (task-from-host, fixture probe comment)", commentTask, commentBody)
 		}
 	})
 
