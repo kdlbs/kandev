@@ -642,7 +642,7 @@ func stampSubagentBackgroundWork(payload *streams.NormalizedPayload, agentID str
 	if payload == nil || payload.SubagentTask() == nil {
 		return
 	}
-	if agentID != claudeAgentID && agentID != codexAgentID && agentID != mockAgentID {
+	if agentID != claudeAgentID && agentID != mockAgentID {
 		return
 	}
 	subagent := payload.SubagentTask()

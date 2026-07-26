@@ -232,13 +232,12 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 		a.codexSubagentCorrelations = make(map[codexSubagentCorrelationKey]*codexSubagentCorrelation)
 	}
 	childSessionID := codexSubagentChildID(candidate)
-	if candidate != nil && candidate.BackgroundWork() != nil && !candidate.IsActiveBackgroundWork() {
+	if codexSubagentPayloadTerminal(candidate) {
 		correlation, found := a.findCodexSubagentByChildLocked(sessionID, childSessionID)
 		if !found {
 			return nil, false, false
 		}
 		mergeCodexSubagentPayload(correlation.payload, candidate)
-		stampSubagentBackgroundWork(correlation.payload, codexAgentID)
 		correlation.terminalSeen = true
 		a.touchCodexSubagentCorrelationLocked(correlation)
 		a.pruneCodexCompletedCorrelationsLocked()
@@ -247,7 +246,6 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 	key, correlation, found := a.findCodexSubagentCorrelationLocked(sessionID, toolCallID, childSessionID)
 	if found {
 		mergeCodexSubagentPayload(correlation.payload, candidate)
-		stampSubagentBackgroundWork(correlation.payload, codexAgentID)
 		a.touchCodexSubagentCorrelationLocked(correlation)
 		if childSessionID != "" && key.childSessionID == "" {
 			delete(a.codexSubagentCorrelations, key)
@@ -618,8 +616,14 @@ func codexSubagentStatusRank(status string) int {
 	}
 }
 
+func codexSubagentPayloadTerminal(payload *streams.NormalizedPayload) bool {
+	return payload != nil &&
+		payload.SubagentTask() != nil &&
+		codexSubagentStatusRank(payload.SubagentTask().Status) == 3
+}
+
 func codexActivityToolStatus(payload *streams.NormalizedPayload) string {
-	if payload != nil && payload.SubagentTask() != nil && codexSubagentStatusRank(payload.SubagentTask().Status) == 3 {
+	if codexSubagentPayloadTerminal(payload) {
 		return toolStatusComplete
 	}
 	return toolStatusInProgress
@@ -757,7 +761,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 		if payload.BackgroundWork() != nil {
 			stampSubagentBackgroundWork(payload, a.agentID)
 		}
-		if isTerminal && payload.BackgroundWork() != nil && !payload.IsActiveBackgroundWork() {
+		if isTerminal && a.agentID == codexAgentID && codexSubagentPayloadTerminal(payload) {
 			a.markCodexSubagentTerminalLocked(sessionID, emittedToolCallID)
 		}
 	}

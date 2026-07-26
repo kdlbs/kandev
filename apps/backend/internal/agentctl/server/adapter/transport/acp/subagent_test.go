@@ -360,7 +360,7 @@ func TestNormalizeSubagentBackgroundAttestationIsAdapterScoped(t *testing.T) {
 				"kind": "other",
 				"meta": codexCollaborationMeta(codexCollaborationSpawnAgent, []any{"thread-child"}),
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name:    "E2E mock Claude lifecycle metadata",
@@ -602,8 +602,8 @@ func TestCodexSubagentTerminalActivityCorrelatesAcrossToolCallIDs(t *testing.T) 
 			if got := terminal.NormalizedPayload.SubagentTask().Status; got != status {
 				t.Fatalf("terminal payload status = %q, want %q", got, status)
 			}
-			if terminal.NormalizedPayload.IsActiveBackgroundWork() {
-				t.Fatal("terminal child activity must mark adapter-attested work ended")
+			if background := terminal.NormalizedPayload.BackgroundWork(); background != nil {
+				t.Fatalf("Codex terminal activity must remain presentation-only, got attestation %+v", background)
 			}
 			if _, active := a.activeToolCalls[start.ToolCallID]; active {
 				t.Fatal("terminal child activity must remove the original active tool call")
@@ -770,9 +770,16 @@ func TestCodexCollaborationCompletionPreservesExplicitRunningChildStatus(t *test
 	if got := result.NormalizedPayload.SubagentTask().Status; got != "running" {
 		t.Fatalf("child status = %q, want running from agentsStates", got)
 	}
-	background := result.NormalizedPayload.BackgroundWork()
-	if background == nil || background.Ended {
-		t.Fatalf("running child background attestation = %+v, want active", background)
+	if background := result.NormalizedPayload.BackgroundWork(); background != nil {
+		t.Fatalf("Codex running child must remain presentation-only, got attestation %+v", background)
+	}
+	key := codexSubagentCorrelationKey{
+		sessionID:      "session-1",
+		toolCallID:     start.ToolCallID,
+		childSessionID: "child-a",
+	}
+	if correlation := a.codexSubagentCorrelations[key]; correlation == nil || correlation.terminalSeen {
+		t.Fatalf("running child presentation correlation = %+v, want live", correlation)
 	}
 	if got := start.NormalizedPayload.SubagentTask().Status; got != "running" {
 		t.Fatalf("persisted start snapshot mutated to %q", got)

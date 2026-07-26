@@ -66,18 +66,19 @@ to the foreground only:
   to stamp that provenance.
 - Initial capability support is deliberately narrow: Claude subagents,
   `run_in_background` shells, and Monitor watches retain their tested support;
-  Codex subagents opt in once child terminal activity is correlated; OpenCode,
-  Cursor, Auggie, Copilot, Amp, generic ACP, and future agents remain
-  foreground-busy until their full lifecycle is covered. This is a typed
-  adapter capability, not a central string whitelist of agent names.
+  Codex, OpenCode, Cursor, Auggie, Copilot, Amp, generic ACP, and future agents
+  remain foreground-busy until their full lifecycle is covered. In particular,
+  Codex does not opt in until accountable terminal child activity is reliably
+  emitted and fixture-tested. This is a typed adapter capability, not a central
+  string whitelist of agent names.
 - The mock provider is a dev/E2E-only exception that replays captured Claude
   lifecycle metadata through this trusted path; it does not expand production
   agent support.
 - Codex child activity may use a different ACP tool-call ID from the original
-  launch. Its child thread/session ID is therefore the workload correlation
-  identity. Completion, interruption, cancellation, error, shutdown, and
-  provider-reported disappearance retire the original registration exactly
-  once; generic collaboration control cards do not create new subagent
+  launch. Its child thread/session ID correlates launch and activity cards for
+  presentation, but this correlation does not attest background liveness.
+  Observed Codex ACP streams can omit accountable terminal child activity, so
+  neither launch nor collaboration control cards create background
   registrations.
 - Monitor remains the motivating trust example. It normalizes to a Generic
   payload whose `Output` is raw agent data, so the adapter-issued typed
@@ -178,8 +179,9 @@ Monitor burst or backgrounded shell keeps its existing behavior.
 The signal and count are best-effort across a backend or agent-execution
 restart. Connected executions retain background liveness and exact subagent
 registrations across foreground turns, but work that survives a restart cannot
-be reconstructed without an agent-side liveness API. Claude and Codex are the
-initial attested adapters; all others keep the conservative busy behavior.
+be reconstructed without an agent-side liveness API. Claude is the initial
+production adapter attested for subagent liveness; all others keep the
+conservative busy behavior.
 Terminal execution teardown releases orphaned tool ownership and background
 registrations, and releases the session activity record once no successor uses
 it, so completed session history does not retain live-memory bookkeeping.
@@ -196,7 +198,8 @@ it, so completed session history does not retain live-memory bookkeeping.
 - **Recognize background work by normalized payload shape.** Rejected: the shape
   is shared presentation data and proves neither provider capability nor
   terminal lifecycle support. It caused Codex starts to register globally even
-  though terminal child activities were not correlated.
+  though accountable terminal child activities were not reliably emitted in
+  observed streams.
 - **Maintain a central agent-name whitelist.** Rejected: an agent identity does
   not prove that the installed adapter/provider version emits the lifecycle
   frames Kandev expects. Capability is stamped at the adapter recognition point

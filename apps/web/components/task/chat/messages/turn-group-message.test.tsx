@@ -159,8 +159,8 @@ describe("TurnGroupMessage Codex subagent activity", () => {
     const settledHtml = renderCodexSubagentGroup(false);
 
     expect(activeHtml).toContain('aria-label="Loading"');
-    expect(activeHtml).toContain("Subagent working...");
+    expect(activeHtml).toContain("Working...");
     expect(settledHtml).not.toContain('aria-label="Loading"');
-    expect(settledHtml).not.toContain("Subagent working...");
+    expect(settledHtml).not.toContain("Working...");
   });
 });

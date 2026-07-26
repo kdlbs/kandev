@@ -28,9 +28,10 @@ and incorrectly prevents prompt delivery.
   not attest handoff keep the follow-up queued until they release ownership.
 - Only adapter-attested workloads relax prompt admission. An adapter opts in a
   workload only when Kandev has fixture-tested both its launch and accountable
-  terminal lifecycle. Claude subagents, background shells, and Monitor watches,
-  plus Codex subagents, are initially supported; other ACP agents remain
-  conservatively foreground-busy.
+  terminal lifecycle. Claude subagents, background shells, and Monitor watches
+  are initially supported. Codex and other ACP agents remain conservatively
+  foreground-busy until their providers reliably emit the terminal lifecycle
+  Kandev needs.
 - The runtime retains one registration per live subagent and derives an active
   subagent count from those registrations. Background shells and Monitor
   watches contribute to background liveness but not to the subagent count.
@@ -107,10 +108,10 @@ replacement still clear all ownership.
 - The development/E2E mock provider may replay captured Claude lifecycle
   metadata through the same attested path. This is a deterministic test seam,
   not an additional production-agent capability.
-- A supported adapter must retire the original registration when a terminal
-  child event arrives under a different tool-call ID. Codex child thread/session
-  identity is the correlation key; interrupt, cancellation, failure, shutdown,
-  and normal completion are terminal.
+- Codex child thread/session identity may correlate launch and activity cards
+  for presentation, but Codex subagents do not attest background liveness.
+  Observed Codex ACP streams can omit accountable terminal child activity, so a
+  started card must not create a live registration or nonzero subagent count.
 - Tool-call ownership is established by the initial call and retained across
   incremental updates from the same execution. Ownership includes the execution
   identity because provider-local tool-call IDs may be reused after rotation.
@@ -171,9 +172,10 @@ an empty activity record. Durable coarse state continues to survive as before.
 - **GIVEN** one generating session with one live subagent and another session
   with two live subagents, **WHEN** the task is serialized, **THEN** its
   `foreground_activity` is generating and its `active_subagent_count` is three.
-- **GIVEN** a Codex subagent launch and a later terminal child activity under a
-  different tool-call ID, **WHEN** both identify the same child thread, **THEN**
-  the original registration is retired and the count decreases exactly once.
+- **GIVEN** a Codex subagent launch card without an accountable terminal
+  lifecycle, **WHEN** its prompt remains in flight or later settles, **THEN**
+  Kandev may render the card but reports no recognized background work and the
+  active subagent count remains zero.
 - **GIVEN** an unsupported ACP adapter emits a normalized subagent-shaped tool
   card, **WHEN** its prompt remains in flight, **THEN** Kandev reports the
   foreground as generating and the active subagent count remains zero.
