@@ -41,7 +41,8 @@ func TestGitHubWebhookPushPublishesPushReceived(t *testing.T) {
 	payload := []byte(`{
 		"ref":"refs/heads/main","after":"abc1234",
 		"repository":{"name":"repo","owner":{"login":"acme"}},
-		"installation":{"id":42},"pusher":{"name":"alice"}
+		"installation":{"id":42},"pusher":{"name":"alice"},
+		"head_commit":{"message":"feat: add widget"}
 	}`)
 	request := signedWebhookRequest("work-secret", "delivery-push-1", "push", payload)
 
@@ -56,7 +57,8 @@ func TestGitHubWebhookPushPublishesPushReceived(t *testing.T) {
 		t.Fatal("expected push event to be published")
 	}
 	if received.WorkspaceIDs[0] != "workspace-1" || received.Owner != "acme" || received.Name != "repo" ||
-		received.Branch != "main" || received.SHA != "abc1234" || received.PusherLogin != "alice" {
+		received.Branch != "main" || received.SHA != "abc1234" || received.PusherLogin != "alice" ||
+		received.HeadCommitMsg != "feat: add widget" {
 		t.Fatalf("received = %+v", received)
 	}
 }
@@ -153,6 +155,7 @@ func TestGitHubWebhookCheckRunPublishesCompletedEvent(t *testing.T) {
 		"action":"completed",
 		"check_run":{
 			"id":555,"name":"build","head_sha":"abc1234","conclusion":"failure",
+			"html_url":"https://github.com/acme/repo/runs/555",
 			"check_suite":{"head_branch":"main"}
 		},
 		"repository":{"name":"repo","owner":{"login":"acme"}},
@@ -172,7 +175,8 @@ func TestGitHubWebhookCheckRunPublishesCompletedEvent(t *testing.T) {
 	}
 	if received.WorkspaceIDs[0] != "workspace-1" || received.Owner != "acme" || received.Name != "repo" ||
 		received.Branch != "main" || received.SHA != "abc1234" || received.CheckName != "build" ||
-		received.Conclusion != "failure" || received.CheckRunID != 555 {
+		received.Conclusion != "failure" || received.CheckRunID != 555 ||
+		received.HTMLURL != "https://github.com/acme/repo/runs/555" {
 		t.Fatalf("received = %+v", received)
 	}
 }

@@ -1,7 +1,6 @@
 package automation
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -200,5 +199,4 @@ func TestCronScheduler_PinnedExpression_FiresWhenDueThenWaits(t *testing.T) {
 	if !cs.shouldFire(trig, time.Date(2026, time.July, 23, 9, 0, 5, 0, time.UTC)) {
 		t.Fatal("pinned 09:00 trigger should be due again the next day at 09:00")
 	}
-	_ = context.Background()
 }

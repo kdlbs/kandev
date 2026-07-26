@@ -93,6 +93,7 @@ func TestGitHubWebhookSubscriberFiresCheckRunTrigger(t *testing.T) {
 			CheckName:    "build",
 			Conclusion:   "failure",
 			CheckRunID:   555,
+			HTMLURL:      "https://github.com/acme/repo/runs/555",
 		},
 	)); err != nil {
 		t.Fatal(err)
@@ -105,6 +106,15 @@ func TestGitHubWebhookSubscriberFiresCheckRunTrigger(t *testing.T) {
 		}
 		if evt.DedupKey != "ci:acme/repo#555" {
 			t.Fatalf("dedup key = %q", evt.DedupKey)
+		}
+		// The {{ci.url}} placeholder resolves from data["html_url"]; assert the
+		// subscriber populated it so the default CI prompt doesn't render empty.
+		var data map[string]interface{}
+		if err := json.Unmarshal(evt.TriggerData, &data); err != nil {
+			t.Fatal(err)
+		}
+		if data["html_url"] != "https://github.com/acme/repo/runs/555" {
+			t.Fatalf("expected html_url in trigger data, got %+v", data)
 		}
 	default:
 		t.Fatal("expected AutomationTriggered to fire")
@@ -180,12 +190,13 @@ func TestGitHubWebhookSubscriberPushTriggerBranchMatch(t *testing.T) {
 	publishPush := func(branch, sha string) {
 		if err := svc.eventBus.Publish(context.Background(), events.GitHubPushReceived, bus.NewEvent(
 			events.GitHubPushReceived, "test", &github.GitHubPushEventPayload{
-				WorkspaceIDs: []string{"ws-1"},
-				Owner:        "acme",
-				Name:         "repo",
-				Branch:       branch,
-				SHA:          sha,
-				PusherLogin:  "alice",
+				WorkspaceIDs:  []string{"ws-1"},
+				Owner:         "acme",
+				Name:          "repo",
+				Branch:        branch,
+				SHA:           sha,
+				PusherLogin:   "alice",
+				HeadCommitMsg: "fix: bug",
 			},
 		)); err != nil {
 			t.Fatal(err)
@@ -210,6 +221,14 @@ func TestGitHubWebhookSubscriberPushTriggerBranchMatch(t *testing.T) {
 		}
 		if evt.DedupKey != "push:acme/repo@sha-2" {
 			t.Fatalf("dedup key = %q", evt.DedupKey)
+		}
+		// {{push.message}} resolves from data["message"]; assert it's populated.
+		var data map[string]interface{}
+		if err := json.Unmarshal(evt.TriggerData, &data); err != nil {
+			t.Fatal(err)
+		}
+		if data["message"] != "fix: bug" {
+			t.Fatalf("expected message in trigger data, got %+v", data)
 		}
 		dedupKey = evt.DedupKey
 	default:

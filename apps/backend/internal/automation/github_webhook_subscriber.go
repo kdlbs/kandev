@@ -108,6 +108,7 @@ func (s *GitHubWebhookSubscriber) checkPushTrigger(
 		"branch":       payload.Branch,
 		"sha":          payload.SHA,
 		"pusher_login": payload.PusherLogin,
+		"message":      payload.HeadCommitMsg,
 	})
 	if err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubPush, data, dedupKey); err != nil {
 		s.logger.Error("failed to fire push trigger", zap.String("trigger_id", t.ID), zap.Error(err))
@@ -141,7 +142,8 @@ func (s *GitHubWebhookSubscriber) checkCITrigger(
 	if !s.triggerMatchesWorkspaceAndRepo(ctx, t, payload.WorkspaceIDs, payload.Owner, payload.Name, cfg.Repos) {
 		return
 	}
-	if !matchesAuthors(payload.Conclusion, cfg.Conclusions) || !matchesAuthors(payload.CheckName, cfg.CheckNames) {
+	if !matchesFilterValue(payload.Conclusion, cfg.Conclusions) ||
+		!matchesFilterValue(payload.CheckName, cfg.CheckNames) {
 		return
 	}
 
@@ -153,6 +155,7 @@ func (s *GitHubWebhookSubscriber) checkCITrigger(
 		"check_name":   payload.CheckName,
 		"conclusion":   payload.Conclusion,
 		"check_run_id": payload.CheckRunID,
+		"html_url":     payload.HTMLURL,
 	})
 	if err := s.svc.FireTrigger(ctx, t.AutomationID, t.ID, TriggerTypeGitHubCI, data, dedupKey); err != nil {
 		s.logger.Error("failed to fire CI trigger", zap.String("trigger_id", t.ID), zap.Error(err))

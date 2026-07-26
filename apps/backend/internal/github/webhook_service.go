@@ -477,6 +477,9 @@ type pushWebhookEvent struct {
 	Pusher struct {
 		Name string `json:"name"`
 	} `json:"pusher"`
+	HeadCommit struct {
+		Message string `json:"message"`
+	} `json:"head_commit"`
 }
 
 const gitBranchRefPrefix = "refs/heads/"
@@ -512,12 +515,13 @@ func (s *GitHubWebhookService) processPush(ctx context.Context, payload []byte) 
 		return 0, "push ignored", nil
 	}
 	s.publishEvent(ctx, events.GitHubPushReceived, &GitHubPushEventPayload{
-		WorkspaceIDs: workspaceIDs,
-		Owner:        event.Repository.Owner.Login,
-		Name:         event.Repository.Name,
-		Branch:       strings.TrimPrefix(event.Ref, gitBranchRefPrefix),
-		SHA:          event.After,
-		PusherLogin:  event.Pusher.Name,
+		WorkspaceIDs:  workspaceIDs,
+		Owner:         event.Repository.Owner.Login,
+		Name:          event.Repository.Name,
+		Branch:        strings.TrimPrefix(event.Ref, gitBranchRefPrefix),
+		SHA:           event.After,
+		PusherLogin:   event.Pusher.Name,
+		HeadCommitMsg: event.HeadCommit.Message,
 	})
 	return len(workspaceIDs), fmt.Sprintf("push published: %d workspace(s)", len(workspaceIDs)), nil
 }
@@ -529,6 +533,7 @@ type checkRunWebhookEvent struct {
 		Name       string `json:"name"`
 		HeadSHA    string `json:"head_sha"`
 		Conclusion string `json:"conclusion"`
+		HTMLURL    string `json:"html_url"`
 		CheckSuite struct {
 			HeadBranch string `json:"head_branch"`
 		} `json:"check_suite"`
@@ -571,6 +576,7 @@ func (s *GitHubWebhookService) processCheckRun(ctx context.Context, payload []by
 		CheckName:    event.CheckRun.Name,
 		Conclusion:   event.CheckRun.Conclusion,
 		CheckRunID:   event.CheckRun.ID,
+		HTMLURL:      event.CheckRun.HTMLURL,
 	})
 	return len(workspaceIDs), fmt.Sprintf("check_run published: %d workspace(s)", len(workspaceIDs)), nil
 }

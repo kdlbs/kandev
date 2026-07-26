@@ -197,11 +197,18 @@ func matchesRepo(owner, name string, repos []github.RepoFilter) bool {
 // matchesAuthors checks if an author matches the filter list.
 // Empty filter means match all.
 func matchesAuthors(author string, filters []string) bool {
+	return matchesFilterValue(author, filters)
+}
+
+// matchesFilterValue reports whether value equals one of the filters, treating
+// an empty filter list as "match all". Used for exact-string filters such as
+// PR authors, CI conclusions, and CI check names.
+func matchesFilterValue(value string, filters []string) bool {
 	if len(filters) == 0 {
 		return true
 	}
 	for _, f := range filters {
-		if f == author {
+		if f == value {
 			return true
 		}
 	}
