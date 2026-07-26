@@ -20,10 +20,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Checkbox } from "@kandev/ui/checkbox";
 import type { DiffComment } from "@/lib/diff/types";
 import { useAppStore } from "@/components/state-provider";
+import { useTaskReview } from "@/hooks/domains/review/use-task-review";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { updateUserSettings } from "@/lib/api";
 import { VcsSplitButton } from "@/components/vcs-split-button";
 import { FixCommentsButton } from "./review-fix-comments-button";
+import { ReviewRunButton } from "./review-run-button";
 import { ReviewPRSelector } from "./review-pr-selector";
 import type { TaskPR } from "@/lib/types/github";
 
@@ -209,6 +211,8 @@ export const ReviewTopBar = memo(function ReviewTopBar({
   onSelectPR,
   prDiffLoading,
 }: ReviewTopBarProps) {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const { activeRun, openCount } = useTaskReview(activeTaskId);
   const reviewAutoMarkOnScroll = useAppStore((state) => state.userSettings.reviewAutoMarkOnScroll);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const userSettings = useAppStore((state) => state.userSettings);
@@ -257,6 +261,12 @@ export const ReviewTopBar = memo(function ReviewTopBar({
           onFixComments={handleFixComments}
         />
       )}
+      <ReviewRunButton
+        taskId={activeTaskId}
+        sessionId={sessionId}
+        activeRun={activeRun}
+        openCount={openCount}
+      />
       <ReviewWalkthroughButton
         onRequestWalkthrough={onRequestWalkthrough}
         disabled={requestWalkthroughDisabled}

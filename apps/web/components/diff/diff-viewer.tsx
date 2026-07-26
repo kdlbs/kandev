@@ -9,6 +9,7 @@ import { useAnnotationRenderer } from "./use-diff-annotation-renderer";
 import { DEFAULT_DIFF_WORD_WRAP } from "./diff-defaults";
 import { useDiffOptions } from "./use-diff-options";
 import { useDiffViewerState } from "./use-diff-viewer-state";
+import { UnanchoredFindingsBanner } from "./unanchored-findings-banner";
 
 export type RevertBlockInfo = {
   /** 1-based line number in the new file where additions start */
@@ -341,6 +342,7 @@ export const DiffViewer = memo(function DiffViewer(props: DiffViewerProps) {
       className={cn("diff-viewer", className)}
       data-walkthrough-active={state.walkthroughSelectedLines ? "true" : undefined}
     >
+      <UnanchoredFindingsBanner findings={state.unanchoredFindings} />
       <FileDiff
         fileDiff={state.fileDiffMetadata}
         options={options}

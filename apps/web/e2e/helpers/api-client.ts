@@ -811,6 +811,17 @@ export class ApiClient {
     return this.request("GET", "/api/v1/executors");
   }
 
+  /**
+   * Inference-capable agents as the utility/review paths see them. The `id` here
+   * is the registered agent-type id (e.g. "claude-acp"), which is what
+   * `default_utility_agent_id` and a review run expect — not an agent row UUID.
+   */
+  async listInferenceAgents(): Promise<{
+    agents: Array<{ id: string; name: string; models: Array<{ id: string }>; status: string }>;
+  }> {
+    return this.request("GET", "/api/v1/utility/inference-agents");
+  }
+
   async getUserSettings(): Promise<{
     settings: {
       terminal_link_behavior?: string;

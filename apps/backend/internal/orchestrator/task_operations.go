@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -1608,7 +1609,18 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 	if err := s.executor.StopExecution(ctx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
 		return err
 	}
+	s.markExecutionFailed(sessionID, executionID)
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
+	taskID := ""
+	if refreshed != nil {
+		taskID = refreshed.TaskID
+	}
+	s.retireExecutionActivityAndPublish(
+		context.WithoutCancel(ctx),
+		taskID,
+		sessionID,
+		executionID,
+	)
 	if err != nil {
 		return fmt.Errorf("reload session after prompt-readiness teardown: %w", err)
 	}
@@ -2202,6 +2214,10 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -2216,6 +2232,12 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 
 	taskID := session.TaskID
 	wasPrimary := session.IsPrimary
+
+	// A settled DB state can still own a workspace execution or detached
+	// background work. Quiesce that runtime boundary before removing the row.
+	if err := s.quiesceSessionExecutionBeforeDeletion(ctx, taskID, sessionID); err != nil {
+		return err
+	}
 
 	s.logger.Info("deleting session",
 		zap.String("session_id", sessionID),
@@ -2235,10 +2257,10 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	// Same reasoning for the push-detection tracker. Multi-repo sessions
 	// accumulate one entry per repo; pushTrackerForget walks them all.
 	s.pushTrackerForget(sessionID)
-	// And the foreground/background turn-activity signal. It is normally cleared
-	// at turn close, but a trailing stream event can re-create the entry after
-	// the last turn completed; forget it here so a deleted session leaves no
-	// orphaned map slot.
+	// And the foreground/background turn-activity signal. Execution teardown
+	// normally retires it after the final owner exits; deletion forcibly
+	// invalidates any trailing token so the removed session cannot be recreated
+	// through a stale activity pointer.
 	s.clearTurnActivity(sessionID)
 
 	// Auto-promote another session if we deleted the primary
@@ -2246,6 +2268,39 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		s.promoteNextPrimaryAfterRemoval(ctx, taskID, sessionID)
 	}
 
+	return nil
+}
+
+// quiesceSessionExecutionBeforeDeletion stops the in-memory lifecycle
+// execution, if one exists, before a session row is removed. A runtime that
+// explicitly reports the exact execution as absent is already quiesced; other
+// stop failures preserve the row because detaching a possibly-live execution
+// would let trailing frames recreate activity after deletion.
+func (s *Service) quiesceSessionExecutionBeforeDeletion(
+	ctx context.Context,
+	taskID, sessionID string,
+) error {
+	if s.agentManager == nil {
+		return nil
+	}
+	executionID, executionErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if executionErr != nil || executionID == "" {
+		return nil
+	}
+	stopErr := s.executor.StopExecution(ctx, executionID, "session deleted", true)
+	if stopErr != nil && !errors.Is(stopErr, agentruntime.ErrNotFound) {
+		return fmt.Errorf("failed to stop session execution before deletion: %w", stopErr)
+	}
+	if stopErr != nil {
+		s.logger.Debug("session execution already absent during deletion",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID),
+			zap.Error(stopErr))
+	}
+	s.markExecutionFailed(sessionID, executionID)
+	s.retireExecutionActivityAndPublish(
+		context.WithoutCancel(ctx), taskID, sessionID, executionID,
+	)
 	return nil
 }
 
@@ -2704,7 +2759,12 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		// Re-apply transforms in case metadata changed during ensureSessionRunning.
 		effectivePrompt = s.effectivePromptForSession(sessionID, prompt, planMode, session)
 	}
-	foregroundDispatch := s.beginForegroundDispatch(sessionID, foregroundClaim)
+	activityExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	foregroundDispatch := s.beginForegroundDispatch(
+		sessionID,
+		foregroundClaim,
+		activityExecutionID,
+	)
 	if foregroundDispatch == nil {
 		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
 		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)

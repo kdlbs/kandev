@@ -23,6 +23,7 @@ func (r *Repository) initSchema() error {
 		r.initTaskResourceCleanupSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
+		r.initTaskReviewSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,
@@ -757,5 +758,64 @@ func (r *Repository) initReviewSchema() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_session_file_reviews_session ON session_file_reviews(session_id);
 	`)
+	return err
+}
+
+// taskReviewSchemaDDL creates the native code-review tables: one row per
+// review pass and one row per anchored finding. Indexes live in
+// runMigrations (see AGENTS.md "Schema & migrations") so an existing DB that
+// skips this no-op CREATE still gets them.
+const taskReviewSchemaDDL = `
+	CREATE TABLE IF NOT EXISTS task_review_runs (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		session_id TEXT NOT NULL DEFAULT '',
+		trigger TEXT NOT NULL DEFAULT 'manual',
+		workflow_step_id TEXT NOT NULL DEFAULT '',
+		agent_id TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'pending',
+		error_code TEXT NOT NULL DEFAULT '',
+		error_message TEXT NOT NULL DEFAULT '',
+		summary TEXT NOT NULL DEFAULT '',
+		finding_count INTEGER NOT NULL DEFAULT 0,
+		file_count INTEGER NOT NULL DEFAULT 0,
+		repository_count INTEGER NOT NULL DEFAULT 0,
+		prompt_tokens INTEGER NOT NULL DEFAULT 0,
+		response_tokens INTEGER NOT NULL DEFAULT 0,
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		completed_at TIMESTAMP,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS task_review_findings (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		task_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
+		repository_name TEXT NOT NULL DEFAULT '',
+		file_path TEXT NOT NULL,
+		start_line INTEGER NOT NULL,
+		end_line INTEGER NOT NULL,
+		side TEXT NOT NULL DEFAULT 'additions',
+		severity TEXT NOT NULL DEFAULT 'minor',
+		category TEXT NOT NULL DEFAULT '',
+		title TEXT NOT NULL,
+		body TEXT NOT NULL DEFAULT '',
+		suggestion TEXT NOT NULL DEFAULT '',
+		anchor_text TEXT NOT NULL DEFAULT '',
+		file_diff_hash TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'open',
+		resolved_at TIMESTAMP,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (run_id) REFERENCES task_review_runs(id) ON DELETE CASCADE,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+`
+
+func (r *Repository) initTaskReviewSchema() error {
+	_, err := r.db.Exec(taskReviewSchemaDDL)
 	return err
 }

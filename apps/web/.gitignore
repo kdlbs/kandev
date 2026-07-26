@@ -13,6 +13,7 @@
 # testing
 /coverage
 test-results/
+e2e-artifacts/
 playwright-report/
 blob-report/
 .pr-assets/

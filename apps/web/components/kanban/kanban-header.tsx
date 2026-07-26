@@ -20,6 +20,7 @@ import { TaskSearchInput } from "./task-search-input";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
+import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
 import { linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
@@ -37,6 +38,7 @@ type KanbanHeaderProps = {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
+  tasksListOptions?: TasksListDisplayOptions;
 };
 
 type ViewToggleItem = {
@@ -325,6 +327,7 @@ export function KanbanHeader({
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
+  tasksListOptions,
 }: KanbanHeaderProps) {
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
@@ -354,6 +357,7 @@ export function KanbanHeader({
           workspaceLabel={workspaceLabel}
           hideTitle={hideTitle}
           {...sharedSearch}
+          tasksListOptions={tasksListOptions}
           {...healthProps}
         />
       );
@@ -379,6 +383,7 @@ export function KanbanHeader({
             workspaceId={workspaceId}
             currentPage={currentPage}
             {...sharedSearch}
+            tasksListOptions={tasksListOptions}
             {...healthProps}
           />
         </>

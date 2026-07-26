@@ -487,7 +487,8 @@ export type QueueStatusChangedPayload = {
 };
 
 export type BackendMessageMap = OfficeBackendMessageMap &
-  import("@/lib/types/http").WalkthroughBackendMessageMap & {
+  import("@/lib/types/http").WalkthroughBackendMessageMap &
+  import("@/lib/types/review").ReviewBackendMessageMap & {
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
     "task.created": BackendMessage<"task.created", TaskEventPayload>;
     "task.updated": BackendMessage<"task.updated", TaskEventPayload>;

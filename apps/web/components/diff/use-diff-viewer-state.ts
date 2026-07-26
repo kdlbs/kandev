@@ -13,6 +13,7 @@ import { useDiffMetadata } from "./use-diff-metadata";
 import { useExpandableDiff } from "./use-expandable-diff";
 import type { RevertBlockInfo } from "./diff-viewer";
 import type { AnnotationMetadata } from "./use-diff-annotation-renderer";
+import { useReviewFindingAnnotations } from "./use-review-finding-annotations";
 import { useOptionalAppStore } from "@/components/state-provider";
 import {
   walkthroughStepMatchesFile,
@@ -215,11 +216,13 @@ function useDiffViewerAnnotations({
   fileDiffMetadata,
   filePath,
   repo,
+  diff,
   changeLineMapRef,
   revertInfoRef,
 }: BuildAnnotationsOpts & {
   filePath: string;
   repo?: string;
+  diff?: string;
   changeLineMapRef: RefObject<Map<string, string>>;
   revertInfoRef: RefObject<Map<string, RevertBlockInfo>>;
 }) {
@@ -244,17 +247,22 @@ function useDiffViewerAnnotations({
   );
 
   const walkthrough = useWalkthroughSelection(filePath, repo);
-  const withWalkthrough = useMemo(
-    () => (walkthrough.annotation ? [...annotations, walkthrough.annotation] : annotations),
-    [annotations, walkthrough.annotation],
-  );
+  const reviewFindings = useReviewFindingAnnotations({ filePath, repo, diff });
+  const withWalkthrough = useMemo(() => {
+    const combined = [...annotations, ...reviewFindings.annotations];
+    return walkthrough.annotation ? [...combined, walkthrough.annotation] : combined;
+  }, [annotations, reviewFindings.annotations, walkthrough.annotation]);
 
   useEffect(() => {
     changeLineMapRef.current = lineMap;
     revertInfoRef.current = revertMap;
   }, [lineMap, revertMap, changeLineMapRef, revertInfoRef]);
 
-  return { annotations: withWalkthrough, walkthroughSelectedLines: walkthrough.selectedLines };
+  return {
+    annotations: withWalkthrough,
+    walkthroughSelectedLines: walkthrough.selectedLines,
+    unanchoredFindings: reviewFindings.unanchored,
+  };
 }
 
 type CommentHandlerOpts = {
@@ -388,6 +396,20 @@ function useRevertBlock(
   return { revertInfoRef, handleRevertBlock };
 }
 
+/**
+ * The session-scoped comment store for one file. Extracted from
+ * useDiffViewerState to keep that hook under the function line cap.
+ */
+function useInternalDiffComments(data: FileDiffData, sessionId?: string) {
+  return useDiffComments({
+    sessionId: sessionId || "",
+    filePath: data.filePath,
+    diff: data.diff,
+    newContent: data.newContent,
+    oldContent: data.oldContent,
+  });
+}
+
 export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
   const {
     data,
@@ -415,13 +437,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     updateComment,
     editingCommentId,
     setEditingComment,
-  } = useDiffComments({
-    sessionId: sessionId || "",
-    filePath: data.filePath,
-    diff: data.diff,
-    newContent: data.newContent,
-    oldContent: data.oldContent,
-  });
+  } = useInternalDiffComments(data, sessionId);
 
   const comments = externalComments || internalComments;
   const baseDiffMetadata = useDiffMetadata(data);
@@ -439,7 +455,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
   const changeLineMapRef = useRef<Map<string, string>>(new Map());
   const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { annotations, walkthroughSelectedLines } = useDiffViewerAnnotations({
+  const { annotations, walkthroughSelectedLines, unanchoredFindings } = useDiffViewerAnnotations({
     comments,
     editingCommentId,
     showCommentForm,
@@ -448,6 +464,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     fileDiffMetadata: expansion.metadata,
     filePath: data.filePath,
     repo,
+    diff: data.diff,
     changeLineMapRef,
     revertInfoRef,
   });
@@ -475,6 +492,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     fileDiffMetadata: expansion.metadata,
     annotations,
     walkthroughSelectedLines,
+    unanchoredFindings,
     selectedLines,
     showCommentForm,
     setShowCommentForm,

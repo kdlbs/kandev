@@ -636,10 +636,9 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 		zap.String("agent_execution_id", data.AgentExecutionID))
 
 	s.markExecutionCompleted(data.SessionID, data.AgentExecutionID)
-	// agent.completed is terminal for this lifecycle execution. Any detached
-	// registrations it still owns can no longer produce a trustworthy completion
-	// frame, so reconcile them before evaluating successor workflow state.
-	s.clearExecutionBackgroundWorkAndPublish(
+	// agent.completed is terminal for this lifecycle execution. Retire its
+	// activity ownership before evaluating successor workflow state.
+	s.retireExecutionActivityAndPublish(
 		context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
 	)
 
@@ -761,16 +760,16 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		zap.String("agent_execution_id", data.AgentExecutionID),
 		zap.String("error_message", data.ErrorMessage))
 
+	s.markExecutionFailed(data.SessionID, data.AgentExecutionID)
 	if drop, _ := s.shouldDropSessionFailure(ctx, data, "agent.failed", true); drop {
 		// A dropped failure is still terminal for the execution named by the
-		// lifecycle event (commonly a rotated predecessor). Clear only that
-		// execution's detached registrations; successor work remains untouched.
-		s.clearExecutionBackgroundWorkAndPublish(
+		// lifecycle event (commonly a rotated predecessor). Retire only that
+		// execution's activity; successor ownership remains untouched.
+		s.retireExecutionActivityAndPublish(
 			context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
 		)
 		return
 	}
-	s.markExecutionFailed(data.SessionID, data.AgentExecutionID)
 
 	// Transient provider errors (529 Overloaded) get a paced, visible
 	// retry-with-backoff before any red banner. This is the ONLY non-terminal
@@ -784,9 +783,9 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	}
 
 	// All paths below are terminal for this execution (resume recovery included).
-	// A transient retry returned above and retains its registrations until its
-	// execution is actually stopped.
-	s.clearExecutionBackgroundWorkAndPublish(
+	// A transient retry returned above and retains activity until its execution
+	// is actually stopped.
+	s.retireExecutionActivityAndPublish(
 		context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
 	)
 
@@ -1342,10 +1341,14 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 		zap.String("session_id", data.SessionID),
 		zap.String("agent_execution_id", data.AgentExecutionID))
 
+	// Stopped executions never own a valid trailing stream completion. Mark the
+	// exact lifecycle terminal before detaching activity so buffered frames
+	// cannot recreate ownership after teardown.
+	s.markExecutionFailed(data.SessionID, data.AgentExecutionID)
 	// Reconcile before the rotated-execution guard: a late stop from an old
-	// execution must clear only that execution's registrations while preserving
-	// background work already registered by its successor.
-	s.clearExecutionBackgroundWorkAndPublish(
+	// execution must retire only that execution's activity while preserving
+	// ownership already claimed by its successor.
+	s.retireExecutionActivityAndPublish(
 		context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
 	)
 
@@ -1420,9 +1423,15 @@ func (s *Service) cleanupAgentExecution(executionID, taskID, sessionID string) {
 		return
 	}
 	ctx := context.Background()
-	// Defensive terminal-boundary reconciliation. Normal lifecycle events clear
-	// first; this covers direct forced cleanup paths and is idempotent.
-	s.clearExecutionBackgroundWorkAndPublish(ctx, taskID, sessionID, executionID)
+	if !s.isExecutionCompleted(sessionID, executionID) {
+		// Direct crash/forced-cleanup callers may reach this boundary without a
+		// preceding lifecycle event. Preserve an existing completed marker (and
+		// its allowed terminal stream), otherwise tombstone trailing frames.
+		s.markExecutionFailed(sessionID, executionID)
+	}
+	// Defensive terminal-boundary retirement. Normal lifecycle events run this
+	// first; the repeated forced-cleanup call is idempotent.
+	s.retireExecutionActivityAndPublish(ctx, taskID, sessionID, executionID)
 	if err := s.executor.StopExecution(ctx, executionID, "agent completed", true); err != nil {
 		s.logger.Debug("agent execution cleanup after terminal state",
 			zap.String("execution_id", executionID),

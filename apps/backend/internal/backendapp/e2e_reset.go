@@ -168,6 +168,15 @@ func handleE2EReset(
 			gitLabReset = resetResult
 		}
 
+		// Clear native code-review runs and findings before deleting the tasks
+		// that own them. A review pass left in flight by an earlier spec would
+		// otherwise publish findings mid-reset and leak them into a later test.
+		if err := repo.DeleteTaskReviewByWorkspace(ctx, workspaceID); err != nil {
+			log.Error("e2e reset: task review cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+
 		// Route through the task service (rather than a raw SQL DELETE) so
 		// each delete spawns the async cleanup goroutine that stops the
 		// agentctl instance and releases its port. Without this, instances

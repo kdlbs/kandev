@@ -21,6 +21,12 @@ var ErrTaskSessionNotFound = errors.New("task session not found")
 // ErrTaskWalkthroughNotFound is returned when no walkthrough record exists.
 var ErrTaskWalkthroughNotFound = errors.New("task walkthrough not found")
 
+// ErrTaskReviewRunNotFound is returned when no code-review run record exists.
+var ErrTaskReviewRunNotFound = errors.New("task review run not found")
+
+// ErrTaskReviewFindingNotFound is returned when no code-review finding record exists.
+var ErrTaskReviewFindingNotFound = errors.New("task review finding not found")
+
 // ErrExecutorNotFound is returned by the executor repository when no
 // executor row exists for the given ID. Callers should use errors.Is to
 // distinguish "row doesn't exist" (404 semantically) from transport-level
@@ -1371,6 +1377,157 @@ type WalkthroughStep struct {
 	Line    int    `json:"line"`
 	LineEnd int    `json:"line_end,omitempty"`
 	Text    string `json:"text"`
+}
+
+// ReviewRunStatus is the lifecycle state of a native code-review pass.
+type ReviewRunStatus string
+
+// Review run statuses. A run only leaves pending/running once, and every
+// terminal state is final — an interrupted run is cancelled, never resumed.
+const (
+	ReviewRunPending   ReviewRunStatus = "pending"
+	ReviewRunRunning   ReviewRunStatus = "running"
+	ReviewRunCompleted ReviewRunStatus = "completed"
+	ReviewRunFailed    ReviewRunStatus = "failed"
+	ReviewRunCancelled ReviewRunStatus = "cancelled"
+)
+
+// IsTerminal reports whether the run has finished and cannot change again.
+func (s ReviewRunStatus) IsTerminal() bool {
+	return s == ReviewRunCompleted || s == ReviewRunFailed || s == ReviewRunCancelled
+}
+
+// ReviewRunTrigger records what started a review pass.
+type ReviewRunTrigger string
+
+// Review run triggers.
+const (
+	ReviewTriggerManual       ReviewRunTrigger = "manual"
+	ReviewTriggerWorkflowStep ReviewRunTrigger = "workflow_step"
+	ReviewTriggerAgent        ReviewRunTrigger = "agent"
+)
+
+// ReviewSeverity ranks how much a finding should worry the reader.
+type ReviewSeverity string
+
+// Review severities, most severe first.
+const (
+	ReviewSeverityBlocker ReviewSeverity = "blocker"
+	ReviewSeverityMajor   ReviewSeverity = "major"
+	ReviewSeverityMinor   ReviewSeverity = "minor"
+	ReviewSeverityNit     ReviewSeverity = "nit"
+)
+
+// ValidReviewSeverity reports whether s is a known severity.
+func ValidReviewSeverity(s ReviewSeverity) bool {
+	switch s {
+	case ReviewSeverityBlocker, ReviewSeverityMajor, ReviewSeverityMinor, ReviewSeverityNit:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReviewFindingStatus is the human disposition of a finding. Findings are
+// advisory: the human resolves or dismisses, kandev never does it for them.
+type ReviewFindingStatus string
+
+// Review finding statuses.
+const (
+	ReviewFindingOpen      ReviewFindingStatus = "open"
+	ReviewFindingResolved  ReviewFindingStatus = "resolved"
+	ReviewFindingDismissed ReviewFindingStatus = "dismissed"
+)
+
+// ValidReviewFindingStatus reports whether s is a known finding status.
+func ValidReviewFindingStatus(s ReviewFindingStatus) bool {
+	switch s {
+	case ReviewFindingOpen, ReviewFindingResolved, ReviewFindingDismissed:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReviewAnnotationSide selects which side of the diff a finding anchors to,
+// matching the frontend annotation sides.
+const (
+	ReviewSideAdditions = "additions"
+	ReviewSideDeletions = "deletions"
+)
+
+// TaskReviewRun is one native code-review pass over a task's changed files.
+// A task keeps a bounded history of runs; findings reference the run that
+// produced them so the UI can attribute and supersede them.
+type TaskReviewRun struct {
+	ID              string           `json:"id"`
+	TaskID          string           `json:"task_id"`
+	SessionID       string           `json:"session_id"`
+	Trigger         ReviewRunTrigger `json:"trigger"`
+	WorkflowStepID  string           `json:"workflow_step_id"`
+	AgentID         string           `json:"agent_id"`
+	Model           string           `json:"model"`
+	Status          ReviewRunStatus  `json:"status"`
+	ErrorCode       string           `json:"error_code"`
+	ErrorMessage    string           `json:"error_message"`
+	Summary         string           `json:"summary"`
+	FindingCount    int              `json:"finding_count"`
+	FileCount       int              `json:"file_count"`
+	RepositoryCount int              `json:"repository_count"`
+	PromptTokens    int              `json:"prompt_tokens"`
+	ResponseTokens  int              `json:"response_tokens"`
+	DurationMs      int              `json:"duration_ms"`
+	CreatedAt       time.Time        `json:"created_at"`
+	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
+}
+
+// TaskReviewFinding is one anchored, advisory review comment produced by a
+// review run. It renders in the Changes/Review diff at File/StartLine..EndLine
+// of Repository, and carries FileDiffHash so a client can tell whether the
+// diff has moved under it (see ../../../../docs/specs/native-code-review/spec.md).
+type TaskReviewFinding struct {
+	ID             string              `json:"id"`
+	RunID          string              `json:"run_id"`
+	TaskID         string              `json:"task_id"`
+	RepositoryID   string              `json:"repository_id"`
+	RepositoryName string              `json:"repository_name"`
+	FilePath       string              `json:"file_path"`
+	StartLine      int                 `json:"start_line"`
+	EndLine        int                 `json:"end_line"`
+	Side           string              `json:"side"`
+	Severity       ReviewSeverity      `json:"severity"`
+	Category       string              `json:"category"`
+	Title          string              `json:"title"`
+	Body           string              `json:"body"`
+	Suggestion     string              `json:"suggestion"`
+	AnchorText     string              `json:"anchor_text"`
+	FileDiffHash   string              `json:"file_diff_hash"`
+	Status         ReviewFindingStatus `json:"status"`
+	ResolvedAt     *time.Time          `json:"resolved_at,omitempty"`
+	CreatedAt      time.Time           `json:"created_at"`
+	UpdatedAt      time.Time           `json:"updated_at"`
+}
+
+// ReviewFindingKey identifies a finding's anchor for supersede matching: a new
+// run that reports the same issue at the same place replaces the older row
+// instead of listing it twice.
+type ReviewFindingKey struct {
+	RepositoryName string
+	FilePath       string
+	StartLine      int
+	EndLine        int
+	Title          string
+}
+
+// SupersedeKey returns the finding's supersede identity.
+func (f *TaskReviewFinding) SupersedeKey() ReviewFindingKey {
+	return ReviewFindingKey{
+		RepositoryName: f.RepositoryName,
+		FilePath:       f.FilePath,
+		StartLine:      f.StartLine,
+		EndLine:        f.EndLine,
+		Title:          f.Title,
+	}
 }
 
 // TaskDocument represents a named document (plan, spec, notes, etc.) associated with a task.

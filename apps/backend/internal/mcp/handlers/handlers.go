@@ -212,6 +212,12 @@ type Handlers struct {
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
 	taskPRLister TaskPRLister
+
+	// Native code review (optional, set via SetReviewService /
+	// SetReviewRunner). Without them the review actions are simply not
+	// registered — see registerReviewHandlers.
+	reviewService *service.ReviewService
+	reviewRunner  ReviewRunner
 }
 
 // NewHandlers creates new MCP handlers.
@@ -319,6 +325,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
 	count := 25
+	count += h.registerReviewHandlers(d)
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {

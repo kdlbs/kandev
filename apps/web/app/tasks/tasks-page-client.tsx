@@ -520,6 +520,14 @@ export function TasksPageClient(props: TasksPageClientProps) {
         searchQuery={s.searchQuery}
         onSearchChange={s.setSearchQuery}
         isSearchLoading={s.isLoading && !!s.debouncedQuery}
+        tasksListOptions={{
+          showArchived: s.showArchived,
+          onShowArchivedChange: s.setShowArchived,
+          sort: s.tasksListSort,
+          onSortChange: handleSortChange,
+          group: s.tasksListGroup,
+          onGroupChange: handleGroupChange,
+        }}
       />
       {isMobile && isMobileSearchOpen && (
         <MobileSearchBar searchQuery={s.searchQuery} onSearchChange={s.setSearchQuery} />

@@ -239,6 +239,16 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 				zap.String("execution_id", execID),
 				zap.Error(err))
 		}
+		// handleAgentFailed terminal-marked this exact execution before the
+		// retry was scheduled, so no later frame may reclaim activity even when
+		// runtime teardown times out. Retirement is safe and idempotent on both
+		// stop outcomes.
+		s.retireExecutionActivityAndPublish(
+			context.WithoutCancel(ctx),
+			taskID,
+			sessionID,
+			execID,
+		)
 	}
 	if ctx.Err() != nil {
 		return
