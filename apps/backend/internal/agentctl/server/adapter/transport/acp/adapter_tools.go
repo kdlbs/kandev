@@ -202,7 +202,6 @@ func (a *Adapter) trackToolCallPayload(
 		sessionID,
 		toolCallID,
 		payload,
-		signal,
 		codexSenderThreadID(meta),
 	)
 	if !correlated {
@@ -226,7 +225,6 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 	sessionID string,
 	toolCallID string,
 	candidate *streams.NormalizedPayload,
-	signal codexSubagentSignal,
 	parentThreadID string,
 ) (*codexSubagentCorrelation, bool, bool) {
 	if a.codexSubagentCorrelations == nil {
