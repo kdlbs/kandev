@@ -31,7 +31,7 @@ describe("resolveSessionTabTitle", () => {
     expect(resolveSessionTabTitle({ ...baseArgs, customName: null })).toBe(PROFILE_LABEL);
   });
 
-  it("uses the live model over the saved profile label", () => {
+  it("uses an explicitly selected model over the saved profile label", () => {
     expect(
       resolveSessionTabTitle({
         ...baseArgs,
@@ -39,6 +39,16 @@ describe("resolveSessionTabTitle", () => {
         modelOptions: [{ id: SPARK_MODEL_ID, name: SPARK_MODEL_NAME }],
       }),
     ).toBe(SPARK_MODEL_NAME);
+  });
+
+  it("keeps the saved profile label when ACP reports its baseline model", () => {
+    expect(
+      resolveSessionTabTitle({
+        ...baseArgs,
+        currentModelId: SPARK_MODEL_ID,
+        modelOptions: [{ id: SPARK_MODEL_ID, name: SPARK_MODEL_NAME }],
+      }),
+    ).toBe(PROFILE_LABEL);
   });
 
   it("includes non-model config selections in the title", () => {
