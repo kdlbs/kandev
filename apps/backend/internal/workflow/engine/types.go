@@ -150,8 +150,7 @@ type RunCodeReviewAction struct {
 }
 
 // QueueRunAction represents the Phase 2 "queue a run on a target task/agent"
-// action. The action is declared but its callback is not yet wired into the
-// engine; see PlaceholderQueueRunCallback.
+// action. The callback is QueueRunCallback.
 //
 // Targets: "primary" | "participant_role:<role>" | "agent_profile_id:<id>" |
 // "workspace.ceo_agent" (resolved at engine evaluation time, post-wire-up).

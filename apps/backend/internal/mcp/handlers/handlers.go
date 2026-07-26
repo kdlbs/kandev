@@ -1023,11 +1023,6 @@ func (h *Handlers) mcpTaskAgentProfileDefault(ctx context.Context, explicitAgent
 	return usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault), nil
 }
 
-func (h *Handlers) resolveWorkflowAgentProfile(ctx context.Context, workflowStepID, workflowID string) string {
-	profileID, _ := h.resolveWorkflowAgentProfileWithError(ctx, workflowStepID, workflowID)
-	return profileID
-}
-
 func (h *Handlers) resolveWorkflowAgentProfileWithError(ctx context.Context, workflowStepID, workflowID string) (string, error) {
 	profileID, resolvedWorkflowID := h.resolveWorkflowControllerAgentProfile(ctx, workflowStepID, workflowID)
 	if profileID != "" {
@@ -1073,11 +1068,6 @@ func (h *Handlers) resolveWorkflowStartStepAgentProfile(ctx context.Context, wor
 		return ""
 	}
 	return startStepAgentProfile(resp.Steps)
-}
-
-func (h *Handlers) workflowDefaultAgentProfile(ctx context.Context, workflowID string) string {
-	profileID, _ := h.workflowDefaultAgentProfileWithError(ctx, workflowID)
-	return profileID
 }
 
 func (h *Handlers) workflowDefaultAgentProfileWithError(ctx context.Context, workflowID string) (string, error) {

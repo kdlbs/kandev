@@ -466,31 +466,6 @@ func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models
 	return nil
 }
 
-func (s *Service) syncTaskStateForBulkWorkflowMove(ctx context.Context, task *models.Task, oldStepID, targetStepID string, targetIsTerminal, sourceIsTerminal, sourceTerminalKnown bool) error {
-	if targetIsTerminal {
-		if !models.IsTerminalTaskState(task.State) {
-			task.State = v1.TaskStateCompleted
-		}
-		return nil
-	}
-	if oldStepID == targetStepID || task.State != v1.TaskStateCompleted {
-		return nil
-	}
-
-	oldTerminal := sourceIsTerminal
-	if !sourceTerminalKnown {
-		var err error
-		oldTerminal, err = s.terminalWorkflowStep(ctx, oldStepID)
-		if err != nil {
-			return err
-		}
-	}
-	if oldTerminal {
-		task.State = v1.TaskStateTODO
-	}
-	return nil
-}
-
 func (s *Service) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {
 	vacatedStep := s.pullEnabledStep(ctx, vacatedStepID)
 	if vacatedStep == nil {

@@ -966,20 +966,6 @@ func (s *Service) probeProviderDefaultBranchIfMissing(
 	return probed
 }
 
-// parseGitHubRepoURL parses a GitHub repository URL into owner and name.
-// Supports: https://github.com/owner/repo, github.com/owner/repo,
-// https://github.com/owner/repo.git, with optional trailing slashes.
-func parseGitHubRepoURL(rawURL string) (owner, name string, err error) {
-	provider, owner, name, _, parseErr := parseRemoteRepositoryURL(rawURL, "")
-	if parseErr != nil {
-		return "", "", parseErr
-	}
-	if provider != providerGitHub {
-		return "", "", fmt.Errorf("not a GitHub URL")
-	}
-	return owner, name, nil
-}
-
 // resolvePRNumber returns the GitHub PR number for a repository input. Prefers
 // the explicit PRNumber field; falls back to parsing a /pull/<N> path out of
 // GitHubURL when present. Returns 0 when no PR is identified.
