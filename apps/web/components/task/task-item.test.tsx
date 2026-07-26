@@ -190,6 +190,8 @@ describe("TaskItem background-running indicator", () => {
     const icon = screen.getByTestId(BACKGROUND_ICON_TEST_ID);
     expect(icon.classList.contains(VIOLET_SPINNER_CLASS)).toBe(true);
     expect(icon.classList.contains(SPIN_CLASS)).toBe(true);
+    expect(icon.parentElement?.getAttribute("tabindex")).toBe("0");
+    expect(icon.parentElement?.classList.contains("focus-visible:ring-2")).toBe(true);
     expect(screen.getByLabelText("Background work is running")).not.toBeNull();
     expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();

@@ -525,7 +525,17 @@ func (m *mockRepository) GetPrimarySessionInfoByTaskIDs(ctx context.Context, tas
 	return make(map[string]*models.TaskSession), nil
 }
 func (m *mockRepository) BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskSession, error) {
-	return make(map[string][]*models.TaskSession), nil
+	result := make(map[string][]*models.TaskSession)
+	wanted := make(map[string]struct{}, len(taskIDs))
+	for _, taskID := range taskIDs {
+		wanted[taskID] = struct{}{}
+	}
+	for _, session := range m.sessions {
+		if _, ok := wanted[session.TaskID]; ok {
+			result[session.TaskID] = append(result[session.TaskID], session)
+		}
+	}
+	return result, nil
 }
 func (m *mockRepository) SetSessionPrimary(ctx context.Context, sessionID string) error {
 	return nil

@@ -52,8 +52,9 @@ and incorrectly prevents prompt delivery.
 - Session records and boot payloads expose `foreground_activity` as
   `generating`, `background`, or absent when no fine-grained activity is known.
   `background` can be present after the coarse session state settles.
-- Session records and boot payloads expose `active_subagent_count`. It is zero
-  or absent when no adapter-attested subagent is live and may be positive while
+- Session records, boot payloads, activity/state notifications, task records,
+  and `task.updated` always expose `active_subagent_count` as an integer. It is
+  zero when no adapter-attested subagent is live and may be positive while
   `foreground_activity` is either `generating` or `background`.
 - `session.activity_changed` publishes the changed fine-grained session value
   and active subagent count; a count-only transition is publishable even when

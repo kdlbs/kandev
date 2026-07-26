@@ -750,6 +750,35 @@ func TestCodexCorrelationSameToolIDDifferentChildCreatesNewCard(t *testing.T) {
 	}
 }
 
+func TestCodexCollaborationCompletionPreservesExplicitRunningChildStatus(t *testing.T) {
+	a := newCodexCorrelationTestAdapter()
+	start := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("spawn", "child-a", "running"))
+	completed := acp.ToolCallStatus(toolStatusCompleted)
+	result := a.convertToolCallResultUpdate("session-1", &acp.SessionToolCallUpdate{
+		ToolCallId: acp.ToolCallId("spawn"),
+		Status:     &completed,
+		RawInput: map[string]any{
+			"agentsStates": map[string]any{
+				"child-a": map[string]any{"status": "running"},
+			},
+		},
+		Meta: codexCollaborationMeta(codexCollaborationSpawnAgent, []any{"child-a"}),
+	})
+	if result == nil {
+		t.Fatal("expected collaboration result update")
+	}
+	if got := result.NormalizedPayload.SubagentTask().Status; got != "running" {
+		t.Fatalf("child status = %q, want running from agentsStates", got)
+	}
+	background := result.NormalizedPayload.BackgroundWork()
+	if background == nil || background.Ended {
+		t.Fatalf("running child background attestation = %+v, want active", background)
+	}
+	if got := start.NormalizedPayload.SubagentTask().Status; got != "running" {
+		t.Fatalf("persisted start snapshot mutated to %q", got)
+	}
+}
+
 func TestCodexAmbiguousChildlessResultsAreSuppressed(t *testing.T) {
 	a := newCodexCorrelationTestAdapter()
 	first := a.convertToolCallUpdate("session-1", codexCollaborationToolCall("reused", "child-a", "running"))

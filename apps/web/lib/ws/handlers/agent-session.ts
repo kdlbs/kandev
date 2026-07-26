@@ -514,7 +514,10 @@ function applyForegroundActivity(
     started_at: existing.started_at ?? "",
     updated_at: existing.updated_at ?? "",
     foreground_activity: payload.foreground_activity ?? null,
-    active_subagent_count: payload.active_subagent_count ?? 0,
+    active_subagent_count:
+      payload.active_subagent_count !== undefined
+        ? payload.active_subagent_count
+        : (existing.active_subagent_count ?? 0),
   });
 }
 

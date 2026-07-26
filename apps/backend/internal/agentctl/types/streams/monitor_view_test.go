@@ -94,3 +94,22 @@ func TestIsActiveMonitor_AttestationSurvivesJSONRoundTrip(t *testing.T) {
 		t.Fatalf("attested task ID must survive the round-trip, got %+v", got.Monitor())
 	}
 }
+
+func TestSetMonitorIdentityPropagatesBackgroundWork(t *testing.T) {
+	p := NewGeneric("other", map[string]any{})
+	p.SetMonitorIdentity("task-42", true)
+
+	background := p.BackgroundWork()
+	if background == nil {
+		t.Fatal("SetMonitorIdentity must stamp background-work provenance")
+	}
+	if background.Kind != BackgroundWorkKindMonitor {
+		t.Fatalf("background kind = %q, want %q", background.Kind, BackgroundWorkKindMonitor)
+	}
+	if background.WorkID != "task-42" {
+		t.Fatalf("background work ID = %q, want task-42", background.WorkID)
+	}
+	if !background.Ended {
+		t.Fatal("terminal monitor state must propagate to background-work provenance")
+	}
+}

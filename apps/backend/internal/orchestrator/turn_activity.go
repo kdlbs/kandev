@@ -464,7 +464,11 @@ func (s *Service) completeBackgroundWorkSnapshot(
 	if !visibleChanged && removed.kind != streams.BackgroundWorkKindSubagent {
 		return activityPublication{}, false
 	}
-	return activityPublication{activity: ta, revision: ta.revision, value: value}, true
+	publicationValue := value
+	if !visibleChanged && ta.yielded {
+		publicationValue = string(v1.ForegroundActivityBackground)
+	}
+	return activityPublication{activity: ta, revision: ta.revision, value: publicationValue}, true
 }
 
 // clearExecutionBackgroundWork removes every registration owned by one

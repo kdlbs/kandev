@@ -59,6 +59,19 @@ describe("snapshotToState", () => {
     expect(state.kanban?.tasks[0]?.primarySessionPendingAction).toBeUndefined();
   });
 
+  it.each([
+    [0, 0],
+    [3, 3],
+    [undefined, undefined],
+  ])("maps active subagent count %s", (wireValue, expected) => {
+    const snapshot = snapshotWithPendingAction(undefined);
+    snapshot.tasks[0].active_subagent_count = wireValue;
+
+    const state = snapshotToState(snapshot);
+
+    expect(state.kanban?.tasks[0]?.activeSubagentCount).toBe(expected);
+  });
+
   it("preserves workflow step WIP fields", () => {
     const state = snapshotToState({
       workflow: {

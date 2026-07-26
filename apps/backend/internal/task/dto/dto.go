@@ -164,7 +164,7 @@ type TaskDTO struct {
 	// Computed on the backend and carried on the task record so every task-level
 	// surface reads one authoritative value; stamped by EnrichTaskForegroundActivity.
 	ForegroundActivity  v1.ForegroundActivity  `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
+	ActiveSubagentCount int                    `json:"active_subagent_count"`
 	IsRemoteExecutor    bool                   `json:"is_remote_executor,omitempty"`
 	ParentID            string                 `json:"parent_id,omitempty"`
 	ArchivedAt          *time.Time             `json:"archived_at,omitempty"`
@@ -260,7 +260,7 @@ type TaskSessionDTO struct {
 	// Not persisted — populated at the serialization boundary by
 	// EnrichForegroundActivity, never by FromTaskSession.
 	ForegroundActivity  v1.ForegroundActivity `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                   `json:"active_subagent_count,omitempty"`
+	ActiveSubagentCount int                   `json:"active_subagent_count"`
 }
 
 // TaskSessionSummaryDTO is a lightweight version of TaskSessionDTO without snapshot fields.
@@ -300,7 +300,7 @@ type TaskSessionSummaryDTO struct {
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate
 	// (ADR-0049); see TaskSessionDTO.
 	ForegroundActivity  v1.ForegroundActivity `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                   `json:"active_subagent_count,omitempty"`
+	ActiveSubagentCount int                   `json:"active_subagent_count"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't

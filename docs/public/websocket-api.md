@@ -704,8 +704,9 @@ Current lifecycle code broadcasts `session.turn.started` and `session.turn.compl
 
 `session.activity_changed` carries `task_id`, `session_id`, `foreground_activity`,
 and `active_subagent_count`. The activity is `generating`, `background`, or
-`null`; the count is the number of live adapter-attested subagents for that
-session. Task lifecycle notifications expose the same count aggregated across
+`null`; the count is always an integer and is zero when no adapter-attested
+subagent is live for that session. Task lifecycle notifications expose the same count
+aggregated across
 the task's sessions as `active_subagent_count`. Count-only changes may emit
 `session.activity_changed` and `task.updated` even when the foreground activity
 and coarse lifecycle state do not change.

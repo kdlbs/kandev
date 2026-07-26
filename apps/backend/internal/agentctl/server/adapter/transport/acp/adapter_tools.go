@@ -3,6 +3,7 @@ package acp
 import (
 	"encoding/base64"
 	"strconv"
+	"strings"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -430,6 +431,8 @@ func (a *Adapter) oldestCodexSubagentCorrelationLocked() (codexSubagentCorrelati
 }
 
 func (a *Adapter) pruneCodexCompletedCorrelationsLocked() {
+	// Completed correlations are capped at 256, so this simple scan remains
+	// bounded while keeping the correlation bookkeeping easy to audit.
 	for a.codexCompletedCorrelationCountLocked() > maxCodexCompletedSubagentCorrelations {
 		a.evictCodexSubagentCorrelationLocked()
 	}
@@ -760,7 +763,7 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	if payload != nil && payload.Kind() == streams.ToolKindSubagentTask {
 		a.normalizer.EnrichSubagentResult(payload, tcu.Meta, tcu.RawOutput)
 		if isTerminal && a.agentID == codexAgentID &&
-			codexSubagentStatusRank(payload.SubagentTask().Status) < 3 {
+			strings.TrimSpace(payload.SubagentTask().Status) == "" {
 			fillCodexStatus(payload.SubagentTask(), status)
 		}
 		if payload.BackgroundWork() != nil {
@@ -778,6 +781,9 @@ func (a *Adapter) convertToolCallResultUpdate(sessionID string, tcu *acp.Session
 	// tool_call instead.
 	if isMonitorRegistration && payload != nil {
 		seedMonitorView(payload, monitorTaskID, monitorCommand)
+		if a.agentID == claudeAgentID || a.agentID == mockAgentID {
+			payload.SetMonitorIdentity(monitorTaskID, false)
+		}
 	}
 
 	// Preserve and mark-ended the Monitor view on tracked-Monitor terminal

@@ -21,10 +21,15 @@ import (
 // tracker in handler tests.
 type fakeForegroundActivityProvider struct {
 	value v1.ForegroundActivity
+	count int
 }
 
 func (f fakeForegroundActivityProvider) ForegroundActivity(string) v1.ForegroundActivity {
 	return f.value
+}
+
+func (f fakeForegroundActivityProvider) ActiveSubagentCount(string) int {
+	return f.count
 }
 
 // orchestratorWithActivity satisfies BOTH OrchestratorStarter and
@@ -101,6 +106,17 @@ func TestHTTPGetTaskSession_PreservesBackgroundActivityWhenNotRunning(t *testing
 	// Confirm the fresh-load wire carries the live background value.
 	rec := getTaskSessionRecorder(t, h, "sess-wait")
 	assert.Contains(t, rec.Body.String(), `"foreground_activity":"background"`)
+}
+
+func TestTaskDTOBuilderStampsForegroundActivityAndSubagentCount(t *testing.T) {
+	svc, _ := newSessionHandlerService(t, &models.TaskSession{ID: "sess-run", TaskID: "task-1", State: models.TaskSessionStateRunning})
+	h := &TaskHandlers{service: svc, foregroundActivity: fakeForegroundActivityProvider{value: v1.ForegroundActivityBackground, count: 2}, logger: newTestLogger(t)}
+
+	result, err := h.toTaskDTOsWithSessionInfo(context.Background(), []*models.Task{{ID: "task-1"}})
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	assert.Equal(t, v1.ForegroundActivityBackground, result[0].ForegroundActivity)
+	assert.Equal(t, 2, result[0].ActiveSubagentCount)
 }
 
 func doGetTaskSession(t *testing.T, h *TaskHandlers, id string) dto.GetTaskSessionResponse {

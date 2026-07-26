@@ -166,6 +166,27 @@ function taskItemRowClick(
   return (e) => (onSelect ? onSelect(e) : onClick?.());
 }
 
+function BackgroundWorkTaskIcon() {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span
+          aria-label="Background work is running"
+          tabIndex={0}
+          className="mt-[1px] flex shrink-0 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500 focus-visible:ring-offset-1"
+        >
+          <IconCircleDashed
+            aria-hidden="true"
+            data-testid="task-state-background-running"
+            className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500"
+          />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="right">Background work is running</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function TaskStateIcon({
   sessionState,
   state,
@@ -207,20 +228,7 @@ function TaskStateIcon({
     );
   }
   if (foregroundActivity === "background") {
-    return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span aria-label="Background work is running" className="mt-[1px] flex shrink-0">
-            <IconCircleDashed
-              aria-hidden="true"
-              data-testid="task-state-background-running"
-              className="h-3.5 w-3.5 shrink-0 animate-spin text-violet-500"
-            />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent side="right">Background work is running</TooltipContent>
-      </Tooltip>
-    );
+    return <BackgroundWorkTaskIcon />;
   }
   if (shouldUseQuestionTaskIcon(state)) {
     return (
