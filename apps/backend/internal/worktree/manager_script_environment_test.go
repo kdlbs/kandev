@@ -120,4 +120,14 @@ func TestMergeScriptEnv(t *testing.T) {
 	if merged["GOCACHE"] != "/managed/cache" {
 		t.Fatalf("merged GOCACHE = %q, want managed value to win", merged["GOCACHE"])
 	}
+
+	// Profile-only: managed nil, profile entries survive.
+	if got := mergeScriptEnv(map[string]string{"TOKEN": "secret"}, nil); got["TOKEN"] != "secret" {
+		t.Fatalf("mergeScriptEnv(profile, nil)[TOKEN] = %q, want profile value", got["TOKEN"])
+	}
+
+	// Managed-only: profile nil, managed entries survive.
+	if got := mergeScriptEnv(nil, map[string]string{"GOCACHE": "/managed/cache"}); got["GOCACHE"] != "/managed/cache" {
+		t.Fatalf("mergeScriptEnv(nil, managed)[GOCACHE] = %q, want managed value", got["GOCACHE"])
+	}
 }
