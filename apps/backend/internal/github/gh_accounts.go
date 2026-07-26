@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 
 	"github.com/kandev/kandev/internal/common/subproc"
 )
@@ -70,6 +71,16 @@ type ghAuthStatus struct {
 		State  string `json:"state"`
 	} `json:"hosts"`
 }
+
+var cachedGHTokenUserSupport = sync.OnceValues(func() (bool, error) {
+	help, err := (systemGHAccountRunner{}).Run(
+		context.Background(), "auth", "token", "--help",
+	)
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(help, "--user"), nil
+})
 
 // ListGHAccounts returns every account known to gh without changing its
 // active account. Ambient token variables are stripped so they cannot hide
@@ -180,16 +191,17 @@ func resolveGHAccountToken(ctx context.Context, runner ghAccountCommandRunner, h
 	if login == "" {
 		return "", fmt.Errorf("GitHub login is required")
 	}
-	tokenArgs := []string{"auth", "token", "--hostname", host, "--user", login}
-	help, helpErr := runner.Run(ctx, "auth", "token", "--help")
+	supportsUser, helpErr := ghTokenUserSelectionSupported(ctx, runner)
 	if helpErr != nil {
 		return "", fmt.Errorf("inspect gh account-token support: %w", helpErr)
 	}
-	if !strings.Contains(help, "--user") {
+	tokenArgs := []string{"auth", "token", "--hostname", host}
+	if supportsUser {
+		tokenArgs = append(tokenArgs, "--user", login)
+	} else {
 		if err := requireActiveLegacyGHAccount(ctx, runner, host, login); err != nil {
 			return "", err
 		}
-		tokenArgs = []string{"auth", "token", "--hostname", host}
 	}
 	raw, err := runner.Run(ctx, tokenArgs...)
 	if err != nil {
@@ -200,6 +212,17 @@ func resolveGHAccountToken(ctx context.Context, runner ghAccountCommandRunner, h
 		return "", fmt.Errorf("resolve gh account %s@%s: empty token", login, host)
 	}
 	return token, nil
+}
+
+func ghTokenUserSelectionSupported(ctx context.Context, runner ghAccountCommandRunner) (bool, error) {
+	if _, ok := runner.(systemGHAccountRunner); ok {
+		return cachedGHTokenUserSupport()
+	}
+	help, err := runner.Run(ctx, "auth", "token", "--help")
+	if err != nil {
+		return false, err
+	}
+	return strings.Contains(help, "--user"), nil
 }
 
 func requireActiveLegacyGHAccount(

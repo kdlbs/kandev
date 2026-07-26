@@ -62,6 +62,7 @@ func newLegacyCredential(
 	// gh inherits GH_TOKEN/GITHUB_TOKEN for API calls, while exact-account
 	// token resolution deliberately strips them. For Git transport, resolve
 	// an ambient token directly so the API and clone identities cannot diverge.
+	// GH_TOKEN follows gh's documented precedence over GITHUB_TOKEN.
 	if includeTransportCredential {
 		if token := legacyEnvironmentToken(); token != "" {
 			log.Info("using environment PAT for legacy GitHub Git transport")

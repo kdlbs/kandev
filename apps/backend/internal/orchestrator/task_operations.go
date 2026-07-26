@@ -528,7 +528,6 @@ func (s *Service) handleSessionLaunchFailure(
 // attaches missing-branch guidance only after that CAS succeeds, and updates
 // the task only while the same failed session still owns it.
 func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) {
-	launchErr = routingerr.SanitizeError(launchErr)
 	_, changed := s.updateTaskSessionStateWithHook(
 		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
 		func() { s.handleSessionLaunchFailed(ctx, taskID, sessionID, "", launchErr) }, preloadedSession...,

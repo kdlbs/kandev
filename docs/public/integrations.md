@@ -63,7 +63,8 @@ A workspace has one active automation connection at a time. Replacing it changes
 Workspaces migrated from an older Kandev release may temporarily use a compatibility connection
 named `legacy_shared`. It continues using the deployment's existing authenticated `gh` account,
 `GITHUB_TOKEN`/`GH_TOKEN`, or legacy stored PAT for both GitHub API calls and workspace-isolated
-managed repository clones. Its token remains in memory during use. Choosing a new workspace
+managed repository clones. When both environment variables are set, `GH_TOKEN` takes precedence,
+matching GitHub CLI behavior. Its token remains in memory during use. Choosing a new workspace
 connection leaves compatibility mode permanently.
 
 The status panel identifies the selected source, verified actor, connection state, rate limits, and any missing App capabilities. A failed PAT or CLI validation leaves the previous connection intact. An unknown CLI login, revoked PAT, suspended/deleted installation, or missing App permission affects only the bound workspace and displays a reconnect or capability-specific error.

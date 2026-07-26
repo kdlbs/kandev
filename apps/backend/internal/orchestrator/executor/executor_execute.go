@@ -1032,9 +1032,17 @@ func (e *Executor) handleEarlyLaunchFailure(
 	}
 	updater, ok := e.repo.(primarySessionTaskStateStore)
 	if !ok {
-		e.logger.Warn("failed to mark task after early launch error: primary-session update unsupported",
-			zap.String("task_id", taskID),
-			zap.String("session_id", sessionID))
+		// Older repository adapters may not expose the primary-aware extension.
+		// Preserve terminal failure behavior while those adapters migrate; the
+		// production adapter takes the guarded path above.
+		if _, _, err := e.repo.UpdateTaskStateIfNotArchived(
+			failCtx, taskID, v1.TaskStateFailed,
+		); err != nil {
+			e.logger.Warn("failed to mark task after early launch error",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 		return safeErr
 	}
 	if _, _, err := updater.UpdateTaskStateIfPrimarySessionState(
