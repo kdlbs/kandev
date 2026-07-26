@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1261,6 +1262,95 @@ func TestExecuteWithProfile_UsesPrepareThenLaunch(t *testing.T) {
 
 	if execution.TaskID != task.ID {
 		t.Errorf("Expected task ID %s, got %s", task.ID, execution.TaskID)
+	}
+}
+
+func TestExecuteWithProfile_PersistsEarlyLaunchFailure(t *testing.T) {
+	repo := newMockRepository()
+	sentinel := errors.New("GitHub is not configured")
+	const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890AB"
+	repo.getTaskEnvironmentByTaskIDFunc = func(
+		context.Context,
+		string,
+	) (*models.TaskEnvironment, error) {
+		return nil, fmt.Errorf("resolve workspace Git credential: token=%s: %w", secret, sentinel)
+	}
+	agentManager := &mockAgentManager{}
+	executor := newTestExecutor(t, agentManager, repo)
+	task := &v1.Task{
+		ID: "task-early-failure", WorkspaceID: "workspace-123",
+		Title: "Test Task", Description: "Test description",
+	}
+	repo.tasks[task.ID] = &models.Task{
+		ID: task.ID, WorkspaceID: task.WorkspaceID, State: v1.TaskStateScheduling,
+	}
+
+	_, err := executor.ExecuteWithProfile(
+		context.Background(), task, "profile-123", "", "test prompt", "",
+	)
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("ExecuteWithProfile() error = %v, want GitHub credential failure", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("ExecuteWithProfile() returned raw credential: %v", err)
+	}
+	if len(repo.createTaskSessionCalls) != 1 {
+		t.Fatalf("created sessions = %d, want 1", len(repo.createTaskSessionCalls))
+	}
+	sessionID := repo.createTaskSessionCalls[0].ID
+	session := repo.sessions[sessionID]
+	if session.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", session.State)
+	}
+	if strings.Contains(session.ErrorMessage, secret) {
+		t.Fatalf("persisted session error contains raw credential: %q", session.ErrorMessage)
+	}
+	if repo.tasks[task.ID].State != v1.TaskStateFailed {
+		t.Fatalf("task state = %s, want FAILED", repo.tasks[task.ID].State)
+	}
+}
+
+func TestExecuteWithProfile_EarlyFailureDoesNotFailSupersededPrimary(t *testing.T) {
+	repo := newMockRepository()
+	repo.getTaskEnvironmentByTaskIDFunc = func(
+		context.Context,
+		string,
+	) (*models.TaskEnvironment, error) {
+		repo.mu.Lock()
+		repo.sessions["session-new"] = &models.TaskSession{
+			ID: "session-new", TaskID: "task-superseded",
+			State: models.TaskSessionStateRunning,
+		}
+		repo.mu.Unlock()
+		if err := repo.SetSessionPrimary(context.Background(), "session-new"); err != nil {
+			t.Fatalf("SetSessionPrimary: %v", err)
+		}
+		return nil, errors.New("resolve workspace Git credential: GitHub is not configured")
+	}
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{
+		ID: "task-superseded", WorkspaceID: "workspace-123",
+		Title: "Test Task", Description: "Test description",
+	}
+	repo.tasks[task.ID] = &models.Task{
+		ID: task.ID, WorkspaceID: task.WorkspaceID, State: v1.TaskStateScheduling,
+	}
+
+	_, err := executor.ExecuteWithProfile(
+		context.Background(), task, "profile-123", "", "test prompt", "",
+	)
+	if err == nil {
+		t.Fatal("ExecuteWithProfile() succeeded, want early launch failure")
+	}
+	oldSessionID := repo.createTaskSessionCalls[0].ID
+	if repo.sessions[oldSessionID].State != models.TaskSessionStateFailed {
+		t.Fatalf("old session state = %s, want FAILED", repo.sessions[oldSessionID].State)
+	}
+	if repo.sessions["session-new"].State != models.TaskSessionStateRunning {
+		t.Fatalf("new primary state = %s, want RUNNING", repo.sessions["session-new"].State)
+	}
+	if repo.tasks[task.ID].State != v1.TaskStateScheduling {
+		t.Fatalf("task state = %s, want SCHEDULING", repo.tasks[task.ID].State)
 	}
 }
 

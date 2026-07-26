@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -582,14 +583,22 @@ func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, ag
 		return nil, err
 	}
 
-	// Launch the agent for the prepared session
-	return e.LaunchPreparedSession(ctx, task, sessionID, LaunchOptions{
+	// Launch the agent for the prepared session.
+	execution, err := e.LaunchPreparedSession(ctx, task, sessionID, LaunchOptions{
 		AgentProfileID: agentProfileID,
 		ExecutorID:     executorID,
 		Prompt:         prompt,
 		WorkflowStepID: workflowStepID,
 		StartAgent:     true,
 	})
+	if err != nil {
+		// LaunchAgent errors are already persisted by LaunchPreparedSession.
+		// Calling the session-aware recorder again is a no-op for those errors
+		// and covers failures from earlier environment preparation without
+		// letting a superseded session fail the task.
+		return nil, e.handleEarlyLaunchFailure(ctx, task.ID, sessionID, "", err)
+	}
+	return execution, nil
 }
 
 // PrepareSession creates a session entry in the database without launching the agent.
@@ -979,28 +988,15 @@ func resumeTokenForExecutionProfile(running *models.ExecutorRunning, profileID s
 	return running.ResumeToken
 }
 
-// handleLaunchFailure marks the session and task as FAILED and returns the original error.
+// handleLaunchFailure marks the session and task as FAILED and returns a
+// sanitized error that preserves the original cause for errors.Is/errors.As.
 func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID, repositoryID string, launchErr error) error {
 	// Detach from caller context so failure bookkeeping completes even if the
 	// original request context was cancelled.
 	failCtx := context.WithoutCancel(ctx)
-	e.logger.Error("failed to launch agent",
-		zap.String("task_id", taskID),
-		zap.Error(launchErr))
-	var onChanged func()
-	if e.onLaunchFailed != nil {
-		onChanged = func() {
-			e.onLaunchFailed(failCtx, taskID, sessionID, repositoryID, launchErr)
-		}
-	}
-	changed, _, updateErr := e.transitionSessionStateWithHook(
-		failCtx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), onChanged,
+	safeErr, changed := e.transitionLaunchFailure(
+		failCtx, taskID, sessionID, repositoryID, launchErr,
 	)
-	if updateErr != nil {
-		e.logger.Warn("failed to mark session as failed after launch error",
-			zap.String("session_id", sessionID),
-			zap.Error(updateErr))
-	}
 	if changed {
 		if updateErr := e.updateTaskState(failCtx, taskID, v1.TaskStateFailed); updateErr != nil {
 			e.logger.Warn("failed to mark task as failed after launch error",
@@ -1008,7 +1004,78 @@ func (e *Executor) handleLaunchFailure(ctx context.Context, taskID, sessionID, r
 				zap.Error(updateErr))
 		}
 	}
-	return launchErr
+	return safeErr
+}
+
+func (e *Executor) handleEarlyLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID, repositoryID string,
+	launchErr error,
+) error {
+	failCtx := context.WithoutCancel(ctx)
+	safeErr, changed := e.transitionLaunchFailure(
+		failCtx, taskID, sessionID, repositoryID, launchErr,
+	)
+	if !changed {
+		return safeErr
+	}
+	if e.onEarlyLaunchTaskStateReconcile != nil {
+		if err := e.onEarlyLaunchTaskStateReconcile(
+			failCtx, taskID, sessionID, v1.TaskStateFailed,
+		); err != nil {
+			e.logger.Warn("failed to reconcile task after early launch error",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return safeErr
+	}
+	updater, ok := e.repo.(primarySessionTaskStateStore)
+	if !ok {
+		e.logger.Warn("failed to mark task after early launch error: primary-session update unsupported",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return safeErr
+	}
+	if _, _, err := updater.UpdateTaskStateIfPrimarySessionState(
+		failCtx,
+		taskID,
+		sessionID,
+		models.TaskSessionStateFailed,
+		v1.TaskStateFailed,
+	); err != nil {
+		e.logger.Warn("failed to mark task as failed after early launch error",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+	return safeErr
+}
+
+func (e *Executor) transitionLaunchFailure(
+	failCtx context.Context,
+	taskID, sessionID, repositoryID string,
+	launchErr error,
+) (error, bool) {
+	safeErr := routingerr.SanitizeError(launchErr)
+	e.logger.Error("failed to launch agent",
+		zap.String("task_id", taskID),
+		zap.Error(safeErr))
+	var onChanged func()
+	if e.onLaunchFailed != nil {
+		onChanged = func() {
+			e.onLaunchFailed(failCtx, taskID, sessionID, repositoryID, safeErr)
+		}
+	}
+	changed, _, updateErr := e.transitionSessionStateWithHook(
+		failCtx, taskID, sessionID, models.TaskSessionStateFailed, safeErr.Error(), onChanged,
+	)
+	if updateErr != nil {
+		e.logger.Warn("failed to mark session as failed after launch error",
+			zap.String("session_id", sessionID),
+			zap.Error(updateErr))
+	}
+	return safeErr, changed
 }
 
 // finalizeLaunch persists launch state and returns the resulting TaskExecution.

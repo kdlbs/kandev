@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -19,6 +20,16 @@ type ApproveSessionResult struct {
 	Session      *models.TaskSession
 	Task         *models.Task
 	WorkflowStep *wfmodels.WorkflowStep
+}
+
+type primarySessionTaskStateRepository interface {
+	UpdateTaskStateIfPrimarySessionState(
+		context.Context,
+		string,
+		string,
+		models.TaskSessionState,
+		v1.TaskState,
+	) (v1.TaskState, bool, error)
 }
 
 // ApproveSession approves a session's current step and moves it to the next step.
@@ -272,9 +283,49 @@ func (s *Service) UpdateTaskStateIfSessionState(
 	expectedSessionState models.TaskSessionState,
 	state v1.TaskState,
 ) (bool, error) {
-	oldState, updated, err := s.tasks.UpdateTaskStateIfSessionState(
-		ctx, taskID, sessionID, expectedSessionState, state,
+	return s.updateTaskStateIfSessionState(
+		ctx, taskID, sessionID, expectedSessionState, state, false,
 	)
+}
+
+// UpdateTaskStateIfPrimarySessionState also requires the named session to
+// remain primary.
+func (s *Service) UpdateTaskStateIfPrimarySessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	return s.updateTaskStateIfSessionState(
+		ctx, taskID, sessionID, expectedSessionState, state, true,
+	)
+}
+
+func (s *Service) updateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+	requirePrimary bool,
+) (bool, error) {
+	var (
+		oldState v1.TaskState
+		updated  bool
+		err      error
+	)
+	if requirePrimary {
+		updater, ok := s.tasks.(primarySessionTaskStateRepository)
+		if !ok {
+			return false, errors.New("primary-session task state update is not supported")
+		}
+		oldState, updated, err = updater.UpdateTaskStateIfPrimarySessionState(
+			ctx, taskID, sessionID, expectedSessionState, state,
+		)
+	} else {
+		oldState, updated, err = s.tasks.UpdateTaskStateIfSessionState(
+			ctx, taskID, sessionID, expectedSessionState, state,
+		)
+	}
 	if err != nil || !updated {
 		return false, err
 	}

@@ -624,6 +624,7 @@ func NewService(
 		return nil
 	})
 	exec.SetOnTaskRuntimeStateReconcile(s.reconcileTaskStateForRuntime)
+	exec.SetOnEarlyLaunchTaskStateReconcile(s.reconcileTaskStateForEarlyLaunchFailure)
 	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil

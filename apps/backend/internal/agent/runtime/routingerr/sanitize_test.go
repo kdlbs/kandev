@@ -1,6 +1,8 @@
 package routingerr
 
 import (
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -100,6 +102,23 @@ func TestSanitize_Idempotent(t *testing.T) {
 		if first != second {
 			t.Fatalf("sanitize not idempotent for %q: first=%q second=%q", in, first, second)
 		}
+	}
+}
+
+func TestSanitizeErrorRedactsMessageAndPreservesCause(t *testing.T) {
+	sentinel := errors.New("credential rejected")
+	raw := fmt.Errorf("token=ghp_abcdefghijklmnopqrstuvwxyz1234567890AB: %w", sentinel)
+
+	got := SanitizeError(raw)
+
+	if strings.Contains(got.Error(), "abcdefghijklmnopqrstuvwxyz") {
+		t.Fatalf("SanitizeError() exposed credential: %q", got)
+	}
+	if !errors.Is(got, sentinel) {
+		t.Fatal("SanitizeError() did not preserve wrapped cause")
+	}
+	if SanitizeError(got) != got {
+		t.Fatal("SanitizeError() is not idempotent")
 	}
 }
 

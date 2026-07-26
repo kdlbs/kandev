@@ -56,7 +56,10 @@ automation under different GitHub Apps without operating separate Kandev deploym
   flow for an App they already own.
 - Existing released workspaces migrate to `legacy_shared`; new workspaces start disconnected.
   Once a workspace leaves legacy mode it cannot return. The unpublished singleton registration
-  schema on this branch is rewritten directly and receives no compatibility migration.
+  schema on this branch is rewritten directly and receives no compatibility migration. A valid
+  legacy connection supplies both the existing API client abstraction and an in-memory Git
+  transport credential so provider-backed repositories can be rematerialized from legacy shared
+  managed paths into workspace-isolated clone roots.
 - Copying a workspace copies repository preferences but never copies a PAT, CLI account selection,
   App installation binding, registration secret, or personal identity.
 
@@ -292,6 +295,10 @@ post-signature processing failures produce `failing`; a later valid successful d
 - An invalid webhook signature performs no delivery claim, health update, or connection mutation.
 - Missing App permissions produce capability-specific diagnostics; unrelated capabilities continue
   to work.
+- GitHub CLI account discovery and token resolution tolerate host CLI releases both before and
+  after structured status and multi-account flags. Genuine discovery failures are shown as errors,
+  not as an empty account list. A CLI without named-token support may resolve only the active
+  account; selecting another stored login fails with guidance to activate it or upgrade the CLI.
 - Deleting a registration with any workspace or personal reference returns
   `github_app_registration_in_use` with a non-secret binding count.
 - Changing workspace auth while a flow is open makes the stale callback fail without reverting the
@@ -349,6 +356,13 @@ registration and never creates a global default.
 - **GIVEN** a PAT or named CLI workspace, **WHEN** an agent uses the managed credential helper,
   **THEN** it receives that workspace's automation token and the UI does not promise provider-side
   repository narrowing.
+- **GIVEN** an authenticated host GitHub CLI without structured status or named-token flags,
+  **WHEN** an operator selects its sole account, **THEN** Kandev discovers and validates that
+  account without requiring a CLI upgrade.
+- **GIVEN** a valid migrated `legacy_shared` connection and a legacy shared managed checkout,
+  **WHEN** a task needs a workspace-isolated checkout, **THEN** Kandev resolves the same automation
+  identity's Git credential and clones into that workspace's managed root without persisting or
+  exposing the token.
 - **GIVEN** desktop and mobile viewports, **WHEN** users complete every App flow, **THEN** actions and
   disclosures remain usable without clipping, overlap, or desktop-only capability.
 

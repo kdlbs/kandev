@@ -85,6 +85,16 @@ type executorStore interface {
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
+type primarySessionTaskStateStore interface {
+	UpdateTaskStateIfPrimarySessionState(
+		context.Context,
+		string,
+		string,
+		models.TaskSessionState,
+		v1.TaskState,
+	) (v1.TaskState, bool, error)
+}
+
 // Common errors
 const defaultBaseBranch = "main"
 
@@ -641,6 +651,9 @@ type Executor struct {
 
 	// Session-aware task state callback used after agent-process start settles.
 	onTaskRuntimeStateReconcile TaskRuntimeStateReconcileFunc
+	// Primary-session-aware task state callback used for failures before
+	// AgentManager.LaunchAgent owns failure bookkeeping.
+	onEarlyLaunchTaskStateReconcile TaskRuntimeStateReconcileFunc
 
 	// Callback for session state changes that need event publishing.
 	// Set by the orchestrator to route through updateTaskSessionState which
@@ -797,6 +810,12 @@ func (e *Executor) SetOnTaskStateChange(fn TaskStateChangeFunc) {
 // SetOnTaskRuntimeStateReconcile sets the session-aware runtime task-state callback.
 func (e *Executor) SetOnTaskRuntimeStateReconcile(fn TaskRuntimeStateReconcileFunc) {
 	e.onTaskRuntimeStateReconcile = fn
+}
+
+// SetOnEarlyLaunchTaskStateReconcile sets the primary-session-aware task-state
+// callback for environment-preparation failures.
+func (e *Executor) SetOnEarlyLaunchTaskStateReconcile(fn TaskRuntimeStateReconcileFunc) {
+	e.onEarlyLaunchTaskStateReconcile = fn
 }
 
 // SetOnSessionStateChange sets a callback for session state changes.

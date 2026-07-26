@@ -62,6 +62,15 @@ var ErrAgentPromptInProgress = errors.New("agent is currently processing a promp
 var ErrAgentNotReadyForPrompt = errors.New("agent not ready for prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
 
+type primarySessionTaskStateUpdater interface {
+	UpdateTaskStateIfPrimarySessionState(
+		ctx context.Context,
+		taskID, sessionID string,
+		expectedSessionState models.TaskSessionState,
+		state v1.TaskState,
+	) (bool, error)
+}
+
 // ErrSessionNotPromptable is returned when a session cannot accept a prompt
 // because of its lifecycle state (STARTING, CREATED, FAILED, CANCELLED).
 // Distinct from ErrAgentPromptInProgress, which is RUNNING-only — confusing
@@ -260,7 +269,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				// LaunchAgent failures persist FAILED in the executor. Earlier
 				// workspace failures return here and are recorded through the same
 				// session-level recovery claim.
-				s.handleEarlyMissingPRBranchLaunchFailure(bgCtx, taskID, sessionID, launchErr)
+				launchErr = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, launchErr)
 				s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
@@ -482,8 +491,7 @@ func (s *Service) StartCreatedSession(
 	if err != nil {
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
-		s.handleEarlyMissingPRBranchLaunchFailure(ctx, taskID, sessionID, err)
-		return nil, err
+		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
 
 	// Record the initial user message and set plan mode metadata after launch.
@@ -499,25 +507,28 @@ func (s *Service) StartCreatedSession(
 	return execution, nil
 }
 
-// handleEarlyMissingPRBranchLaunchFailure covers failures that occur before
-// Executor reaches AgentManager.LaunchAgent. Those failures do not run the
-// executor's launch-failure bookkeeping, so this fallback owns the terminal
-// transition and lets the shared persisted claim create guidance once.
-func (s *Service) handleEarlyMissingPRBranchLaunchFailure(
+// handleSessionLaunchFailure covers launch and resume failures that have not
+// already won terminal bookkeeping. The state CAS makes it safe as an
+// idempotent fallback when executor bookkeeping did run.
+func (s *Service) handleSessionLaunchFailure(
 	ctx context.Context,
 	taskID, sessionID string,
 	launchErr error,
-) {
-	if !isMissingBranchError(launchErr) {
-		return
-	}
-	s.recordSessionLaunchFailure(ctx, taskID, sessionID, launchErr)
+	preloadedSession ...*models.TaskSession,
+) error {
+	failureCtx := context.WithoutCancel(ctx)
+	safeErr := routingerr.SanitizeError(launchErr)
+	s.recordSessionLaunchFailure(
+		failureCtx, taskID, sessionID, safeErr, preloadedSession...,
+	)
+	return safeErr
 }
 
 // recordSessionLaunchFailure transitions a still-active session to FAILED,
 // attaches missing-branch guidance only after that CAS succeeds, and updates
 // the task only while the same failed session still owns it.
 func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) {
+	launchErr = routingerr.SanitizeError(launchErr)
 	_, changed := s.updateTaskSessionStateWithHook(
 		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
 		func() { s.handleSessionLaunchFailed(ctx, taskID, sessionID, "", launchErr) }, preloadedSession...,
@@ -533,9 +544,7 @@ func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessio
 		}
 		return
 	}
-	updated, err := s.taskRepo.UpdateTaskStateIfSessionState(
-		ctx, taskID, sessionID, models.TaskSessionStateFailed, v1.TaskStateFailed,
-	)
+	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to update task state to FAILED after early launch error",
 			zap.String("task_id", taskID),
@@ -547,6 +556,37 @@ func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessio
 		return
 	}
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateFailed)
+}
+
+func (s *Service) updateTaskStateForEarlyLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+) (bool, error) {
+	if updater, ok := s.taskRepo.(primarySessionTaskStateUpdater); ok {
+		return updater.UpdateTaskStateIfPrimarySessionState(
+			ctx, taskID, sessionID, models.TaskSessionStateFailed, v1.TaskStateFailed,
+		)
+	}
+	// Lightweight test repositories predate the primary-aware extension.
+	return s.taskRepo.UpdateTaskStateIfSessionState(
+		ctx, taskID, sessionID, models.TaskSessionStateFailed, v1.TaskStateFailed,
+	)
+}
+
+func (s *Service) reconcileTaskStateForEarlyLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	state v1.TaskState,
+) error {
+	if state != v1.TaskStateFailed {
+		return fmt.Errorf("unsupported early launch task state %q", state)
+	}
+	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
+	if err != nil || !updated {
+		return err
+	}
+	s.processParentChildrenCompletedForTaskState(ctx, taskID, state)
+	return nil
 }
 
 func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID string) error {
@@ -837,7 +877,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		RouteOverride:        route,
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
 
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
@@ -1265,8 +1305,9 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 			// ResumeSession launches the workspace directly rather than through
 			// LaunchPreparedSession. Record this failure with the same state CAS,
 			// persisted recovery claim, and archive-safe task CAS as early launch.
-			s.recordSessionLaunchFailure(resumeCtx, taskID, sessionID, err, session)
-			return nil, err
+			return nil, s.handleSessionLaunchFailure(
+				resumeCtx, taskID, sessionID, err, session,
+			)
 		}
 	}
 	if readySession == nil {
@@ -1528,16 +1569,13 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 			}
 			return nil
 		}
-		s.updateTaskSessionState(resumeCtx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
-		if stateErr := s.taskRepo.UpdateTaskState(resumeCtx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
-			s.logger.Warn("failed to update task state to FAILED after session ensure resume error",
-				zap.String("task_id", session.TaskID),
-				zap.String("session_id", sessionID),
-				zap.Error(stateErr))
-		} else {
-			s.processParentChildrenCompletedForTaskState(resumeCtx, session.TaskID, v1.TaskStateFailed)
-		}
-		return fmt.Errorf("failed to resume session: %w", err)
+		return s.handleSessionLaunchFailure(
+			resumeCtx,
+			session.TaskID,
+			sessionID,
+			fmt.Errorf("failed to resume session: %w", err),
+			session,
+		)
 	}
 
 	// ResumeSession launches the agent asynchronously. Wait for it to finish
@@ -1673,7 +1711,8 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 		ExecutorID:     session.ExecutorID,
 		StartAgent:     true,
 	}); err != nil {
-		return fmt.Errorf("failed to start agent on prepared workspace: %w", err)
+		launchErr := fmt.Errorf("failed to start agent on prepared workspace: %w", err)
+		return s.handleSessionLaunchFailure(launchCtx, session.TaskID, sessionID, launchErr)
 	}
 
 	// Same reasoning as ensureSessionRunning's resume path: use launchCtx

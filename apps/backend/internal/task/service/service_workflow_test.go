@@ -87,6 +87,32 @@ func TestService_SetWorkflowHidden_HealsStaleRecord(t *testing.T) {
 	}
 }
 
+func TestService_UpdateTaskStateIfPrimarySessionStatePublishesLifecycleEvent(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	createTaskWithoutRepositories(t, ctx, repo)
+	createRunningSession(t, ctx, repo, "session-1", "task-1", models.TaskSessionStateFailed)
+	if err := svc.SetPrimarySession(ctx, "session-1"); err != nil {
+		t.Fatalf("SetPrimarySession: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	updated, err := svc.UpdateTaskStateIfPrimarySessionState(
+		ctx,
+		"task-1",
+		"session-1",
+		models.TaskSessionStateFailed,
+		v1.TaskStateFailed,
+	)
+	if err != nil {
+		t.Fatalf("UpdateTaskStateIfSessionState: %v", err)
+	}
+	if !updated {
+		t.Fatal("expected task state transition")
+	}
+	findPublishedEvent(t, eventBus.GetPublishedEvents(), events.TaskStateChanged)
+}
+
 func TestService_MoveTaskRejectsInvalidWorkflowTargets(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

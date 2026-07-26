@@ -41,3 +41,24 @@ func Sanitize(s string) string {
 	}
 	return s
 }
+
+type sanitizedError struct {
+	cause   error
+	message string
+}
+
+func (e *sanitizedError) Error() string { return e.message }
+func (e *sanitizedError) Unwrap() error { return e.cause }
+
+// SanitizeError redacts an error message while preserving errors.Is/errors.As
+// access to the original cause for control flow.
+func SanitizeError(err error) error {
+	if err == nil {
+		return nil
+	}
+	message := Sanitize(err.Error())
+	if message == err.Error() {
+		return err
+	}
+	return &sanitizedError{cause: err, message: message}
+}

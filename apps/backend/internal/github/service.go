@@ -209,6 +209,9 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		service.resolver.SetLegacyFactory(func(ctx context.Context) (Client, string, error) {
 			return NewClient(ctx, secrets, log)
 		})
+		service.resolver.SetLegacyTransportFactory(func(ctx context.Context) (Client, string, string, error) {
+			return newLegacyGitTransportCredential(ctx, secrets, log)
+		})
 	}
 	return service
 }

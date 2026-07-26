@@ -52,6 +52,7 @@ type automationCredentialProvider interface {
 }
 
 type legacyCredentialFactory func(ctx context.Context) (Client, string, error)
+type legacyTransportCredentialFactory func(ctx context.Context) (Client, string, string, error)
 type ghAccountTokenResolver func(ctx context.Context, host, login string) (string, error)
 
 type credentialCacheKey struct {
@@ -80,6 +81,7 @@ type CredentialResolver struct {
 	users       userCredentialProvider
 	automation  automationCredentialProvider
 	legacy      legacyCredentialFactory
+	legacyGit   legacyTransportCredentialFactory
 	ghToken     ghAccountTokenResolver
 	now         func() time.Time
 
@@ -96,6 +98,9 @@ func NewCredentialResolver(connections workspaceConnectionReader, secrets authSe
 		legacy: func(ctx context.Context) (Client, string, error) {
 			return nil, AuthMethodNone, ErrGitHubNotConfigured
 		},
+		legacyGit: func(ctx context.Context) (Client, string, string, error) {
+			return nil, AuthMethodNone, "", ErrGitHubNotConfigured
+		},
 		ghToken:         ResolveGHAccountToken,
 		now:             time.Now,
 		cache:           make(map[credentialCacheKey]*ResolvedCredential),
@@ -106,6 +111,12 @@ func NewCredentialResolver(connections workspaceConnectionReader, secrets authSe
 func (r *CredentialResolver) SetLegacyFactory(factory legacyCredentialFactory) {
 	if factory != nil {
 		r.legacy = factory
+	}
+}
+
+func (r *CredentialResolver) SetLegacyTransportFactory(factory legacyTransportCredentialFactory) {
+	if factory != nil {
+		r.legacyGit = factory
 	}
 }
 
@@ -335,7 +346,7 @@ func (r *CredentialResolver) resolveAutomationSource(
 		}
 		return r.app.ResolveInstallation(ctx, connection, req)
 	case ConnectionSourceLegacyShared:
-		return r.resolveLegacy(ctx, connection)
+		return r.resolveLegacy(ctx, connection, req.Purpose)
 	default:
 		return nil, fmt.Errorf("unsupported GitHub connection source %q", connection.Source)
 	}
@@ -392,18 +403,34 @@ func (r *CredentialResolver) resolveGHCLI(ctx context.Context, connection *Works
 	}, nil
 }
 
-func (r *CredentialResolver) resolveLegacy(ctx context.Context, connection *WorkspaceConnection) (*ResolvedCredential, error) {
-	client, method, err := r.legacy(ctx)
+func (r *CredentialResolver) resolveLegacy(
+	ctx context.Context,
+	connection *WorkspaceConnection,
+	purpose CredentialPurpose,
+) (*ResolvedCredential, error) {
+	var (
+		client     Client
+		method     string
+		credential string
+		err        error
+	)
+	if purpose == CredentialPurposeGitTransport {
+		client, method, credential, err = r.legacyGit(ctx)
+	} else {
+		client, method, err = r.legacy(ctx)
+	}
 	if err != nil {
 		return nil, err
 	}
-	if client == nil || method == AuthMethodNone {
+	if client == nil || method == AuthMethodNone ||
+		(purpose == CredentialPurposeGitTransport && strings.TrimSpace(credential) == "") {
 		return nil, ErrGitHubNotConfigured
 	}
 	login, _ := client.GetAuthenticatedUser(ctx)
 	return &ResolvedCredential{
 		Client:       client,
 		Capabilities: allTokenCapabilities(),
+		credential:   credential,
 		Principal: AuthPrincipal{
 			Kind:   AuthPrincipalHuman,
 			Source: ConnectionSourceLegacyShared,

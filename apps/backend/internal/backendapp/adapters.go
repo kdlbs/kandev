@@ -76,6 +76,17 @@ func (a *taskRepositoryAdapter) UpdateTaskStateIfSessionState(
 	return a.svc.UpdateTaskStateIfSessionState(ctx, taskID, sessionID, expectedSessionState, state)
 }
 
+func (a *taskRepositoryAdapter) UpdateTaskStateIfPrimarySessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	return a.svc.UpdateTaskStateIfPrimarySessionState(
+		ctx, taskID, sessionID, expectedSessionState, state,
+	)
+}
+
 // lifecycleAdapter adapts the lifecycle manager as an AgentManagerClient
 type lifecycleAdapter struct {
 	mgr      *lifecycle.Manager
