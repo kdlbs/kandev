@@ -113,7 +113,9 @@ endif
 ifeq ($(OS)$(MSYSTEM),Windows_NT)
   NULL_REDIR := 2>NUL
   # `Get-Date -Format` renders *local* time with a literal Z; UtcNow is real UTC.
-  BUILD_TIME := $(shell powershell -NoProfile -Command "[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ')")
+  # InvariantCulture is not optional: ToString uses the current culture's
+  # calendar, so a th-TH host stamps year 2569 and ar-SA stamps 1448.
+  BUILD_TIME := $(shell powershell -NoProfile -Command "[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)" $(NULL_REDIR) || echo unknown)
 else
   NULL_REDIR := 2>/dev/null
   BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' $(NULL_REDIR) || echo unknown)

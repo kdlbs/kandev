@@ -75,9 +75,15 @@ expect git-bash Windows_NT MINGW64 start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true 
 # every POSIX host looks fine. Use $(NULL_REDIR), which carries the right token
 # per shell. This runs on the Linux CI, where the Windows branch is otherwise
 # never exercised.
+# Fail closed: grep exits 1 for "no matches" but >1 for a real scan error, and
+# swallowing the difference would let an unreadable or moved Makefile report ok.
+grep_status=0
 devnull_hits=$(grep -nE '^[[:space:]]*[^#].*\$\(shell.*/dev/null' \
-	"$backend_dir/../../Makefile" "$backend_dir/Makefile" || true)
-if [ -n "$devnull_hits" ]; then
+	"$backend_dir/../../Makefile" "$backend_dir/Makefile") || grep_status=$?
+if [ "$grep_status" -gt 1 ]; then
+	printf 'FAIL  %-16s unable to scan Makefiles (grep exit %s)\n' "static" "$grep_status"
+	status=1
+elif [ -n "$devnull_hits" ]; then
 	printf 'FAIL  %-16s literal /dev/null inside $(shell ...) — use $(NULL_REDIR)\n' "static"
 	printf '        %s\n' "$devnull_hits"
 	status=1
