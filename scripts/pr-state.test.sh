@@ -1263,6 +1263,17 @@ test_comment_mode_rejects_incompatible_flags() {
   pass "--comment rejects incompatible flags"
 }
 
+test_jq_file_args_avoid_process_substitution() {
+  local offenders
+  offenders="$(grep -nE '(--slurpfile|--rawfile|--argfile)[[:space:]]+[^[:space:]]+[[:space:]]+<\(' "$SCRIPT" || true)"
+  if [[ -n "$offenders" ]]; then
+    printf '%s\n' "$offenders" >&2
+    fail "jq file arguments must not come from process substitution (native jq cannot open /proc/<pid>/fd/<n>)"
+  fi
+  pass "jq file arguments avoid process substitution"
+}
+
+test_jq_file_args_avoid_process_substitution
 test_snapshot_happy_path
 test_old_head_review_does_not_qualify
 test_exact_head_selected_review_qualifies
