@@ -649,6 +649,7 @@ func TestExecutionCleanup_PublicationDeliveryIsOrderedAcrossRecordGenerations(t 
 	// a different turnActivity record.
 	select {
 	case <-successorDone:
+		t.Fatal("successor publication completed before predecessor delivery was released — publication guard is not serializing")
 	case <-time.After(100 * time.Millisecond):
 	}
 	close(blocking.releaseRetirement)
