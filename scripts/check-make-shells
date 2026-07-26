@@ -78,7 +78,10 @@ expect git-bash Windows_NT MINGW64 start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true 
 # Fail closed: grep exits 1 for "no matches" but >1 for a real scan error, and
 # swallowing the difference would let an unreadable or moved Makefile report ok.
 grep_status=0
-devnull_hits=$(grep -nE '^[[:space:]]*[^#].*\$\(shell.*/dev/null' \
+# `#` starts a comment anywhere in a Makefile line, so the match must not span
+# one: [^#]* keeps a prose mention like `FOO = bar # $(shell x 2>/dev/null)`
+# from failing CI, while the leading [^#] drops whole-line comments.
+devnull_hits=$(grep -nE '^[[:space:]]*[^#][^#]*\$\(shell[^#]*/dev/null' \
 	"$backend_dir/../../Makefile" "$backend_dir/Makefile") || grep_status=$?
 if [ "$grep_status" -gt 1 ]; then
 	printf 'FAIL  %-16s unable to scan Makefiles (grep exit %s)\n' "static" "$grep_status"
