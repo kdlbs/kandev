@@ -429,7 +429,12 @@ func (c *Controller) writeWebhookResponse(ctx *gin.Context, record *store.Record
 		})
 		return
 	}
-	if raw, present := takeAuthLoginDirective(resp.Headers); present {
+	if raw, present, ambiguous := takeAuthLoginDirective(resp.Headers); present {
+		if ambiguous {
+			c.log.Warn("plugin sent multiple auth login directives", zap.String("plugin", record.ID))
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "auth login rejected"})
+			return
+		}
 		if err := c.applyAuthLogin(ctx, record, raw); err != nil {
 			// The webhook endpoint is public; keep the response body generic so
 			// a raw store/auth error can't be disclosed to an anonymous caller.

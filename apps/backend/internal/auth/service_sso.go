@@ -148,10 +148,15 @@ func (s *Service) linkExternalIdentity(ctx context.Context, userID, provider, su
 }
 
 // provisionExternalUser creates a new member account and its external identity
-// for a first-time SSO visitor. Concurrent first-logins of the same brand-new
-// email can race here; the loser's CreateUser fails on the unique email and it
-// returns an error, so the visitor simply retries and takes the link-by-email
-// branch. New accounts are always members.
+// for a first-time SSO visitor. New accounts are always members.
+//
+// If the identity insert fails — a transient error, or a lost race on
+// UNIQUE(provider, subject) when two callbacks for the same subject arrive
+// concurrently — the just-created user is rolled back so no account is left
+// without a login identity (and its email is not permanently reserved by an
+// unusable row). On a lost race the winning identity now exists, so we
+// authenticate as its user instead of erroring. (These two stores don't share a
+// transaction; compensating cleanup is the pragmatic equivalent here.)
 func (s *Service) provisionExternalUser(ctx context.Context, provider, subject, email, displayName string) (*usermodels.User, error) {
 	user := &usermodels.User{
 		ID:          uuid.New().String(),
@@ -164,6 +169,10 @@ func (s *Service) provisionExternalUser(ctx context.Context, provider, subject, 
 		return nil, err
 	}
 	if err := s.linkExternalIdentity(ctx, user.ID, provider, subject); err != nil {
+		_ = s.users.DeleteUser(ctx, user.ID)
+		if winner, lookupErr := s.store.GetIdentityByProviderSubject(ctx, provider, subject); lookupErr == nil {
+			return s.activeUser(ctx, winner.UserID)
+		}
 		return nil, err
 	}
 	return user, nil

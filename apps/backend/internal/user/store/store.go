@@ -26,6 +26,11 @@ type AccountRepository interface {
 	CreateUser(ctx context.Context, user *models.User) error
 	UpdateUserProfile(ctx context.Context, id, email, displayName, role string) (*models.User, error)
 	UpdateUserRoleStatus(ctx context.Context, id, role, status string) (*models.User, error)
+	// DeleteUser removes a user row by id. Used to roll back a just-created
+	// account when a follow-up step (e.g. linking its login identity) fails, so
+	// no account is left without a usable login. Deleting a missing id is not an
+	// error.
+	DeleteUser(ctx context.Context, id string) error
 }
 
 var _ AccountRepository = (*sqliteRepository)(nil)

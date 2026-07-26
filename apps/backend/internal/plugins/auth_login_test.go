@@ -61,15 +61,34 @@ func TestTakeAuthLoginDirective(t *testing.T) {
 		"Location":            "/",
 		"x-kandev-auth-login": "payload", // case-insensitive match
 	}
-	raw, present := takeAuthLoginDirective(headers)
-	if !present || raw != "payload" {
-		t.Fatalf("directive = %q present=%v", raw, present)
+	raw, present, ambiguous := takeAuthLoginDirective(headers)
+	if !present || ambiguous || raw != "payload" {
+		t.Fatalf("directive = %q present=%v ambiguous=%v", raw, present, ambiguous)
 	}
 	if _, stillThere := headers["x-kandev-auth-login"]; stillThere {
 		t.Fatal("directive header was not stripped")
 	}
-	if _, present := takeAuthLoginDirective(map[string]string{"Location": "/"}); present {
+	if _, present, _ := takeAuthLoginDirective(map[string]string{"Location": "/"}); present {
 		t.Fatal("no directive should report absent")
+	}
+}
+
+func TestTakeAuthLoginDirectiveMultipleVariantsAmbiguous(t *testing.T) {
+	// Two case variants are distinct Go map keys; picking one is nondeterministic
+	// and would leak/relay the other. Must be reported ambiguous with BOTH stripped.
+	headers := map[string]string{
+		"X-Kandev-Auth-Login": "a",
+		"x-kandev-auth-login": "b",
+		"Location":            "/",
+	}
+	_, present, ambiguous := takeAuthLoginDirective(headers)
+	if !present || !ambiguous {
+		t.Fatalf("present=%v ambiguous=%v, want both true", present, ambiguous)
+	}
+	for k := range headers {
+		if k != "Location" {
+			t.Fatalf("directive variant %q not stripped", k)
+		}
 	}
 }
 
@@ -110,6 +129,33 @@ func TestWriteWebhookResponseAuthLoginSuccess(t *testing.T) {
 	}
 	if strings.Contains(setCookies, "evil=1") {
 		t.Fatalf("plugin-set cookie was relayed: %q", setCookies)
+	}
+}
+
+func TestWriteWebhookResponseAmbiguousDirectiveRejected(t *testing.T) {
+	bridge := &fakeBridge{}
+	svc := &Service{}
+	svc.SetAuthLoginBridge(bridge)
+	ctrl := &Controller{svc: svc, log: testLogger(t)}
+
+	c, rec := newTestContext(t)
+	resp := &pluginsdk.WebhookResponse{
+		Status: 302,
+		Headers: map[string]string{
+			"X-Kandev-Auth-Login": authAssertionHeader(),
+			"x-kandev-auth-login": `{"provider":"evil","subject":"x","email":"e@x.dev"}`,
+		},
+	}
+	ctrl.writeWebhookResponse(c, authCapableRecord(), resp)
+
+	if rec.Code != 403 {
+		t.Fatalf("status = %d, want 403 for ambiguous directive", rec.Code)
+	}
+	if bridge.called {
+		t.Fatal("bridge must not be called on an ambiguous directive")
+	}
+	if rec.Header().Get(authLoginHeader) != "" {
+		t.Fatal("a directive variant leaked to the browser")
 	}
 }
 

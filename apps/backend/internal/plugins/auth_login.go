@@ -41,16 +41,31 @@ type AuthLoginBridge interface {
 	LoginExternal(c *gin.Context, provider, subject, email, displayName string) error
 }
 
-// takeAuthLoginDirective removes and returns the reserved SSO login directive
-// header from a plugin webhook response's headers, if present. It is always
-// stripped (regardless of whether the plugin holds the `auth` capability) so
-// the plugin-controlled value can never be relayed to the browser.
-func takeAuthLoginDirective(headers map[string]string) (raw string, present bool) {
-	for k, v := range headers {
+// takeAuthLoginDirective removes the reserved SSO login directive header from a
+// plugin webhook response's headers and returns its value. It strips *every*
+// case variant (e.g. both `X-Kandev-Auth-Login` and `x-kandev-auth-login`,
+// which are distinct Go map keys) so no variant can be relayed to the browser,
+// regardless of whether the plugin holds the `auth` capability. If a plugin
+// sends more than one variant, ambiguous is true and the caller must reject:
+// map iteration order is nondeterministic, so we must never pick one arbitrarily
+// and authenticate a possibly-different asserted identity.
+func takeAuthLoginDirective(headers map[string]string) (raw string, present, ambiguous bool) {
+	var matched []string
+	for k := range headers {
 		if strings.EqualFold(k, authLoginHeader) {
-			delete(headers, k)
-			return v, true
+			matched = append(matched, k)
 		}
 	}
-	return "", false
+	for _, k := range matched {
+		raw = headers[k]
+		delete(headers, k)
+	}
+	switch len(matched) {
+	case 0:
+		return "", false, false
+	case 1:
+		return raw, true, false
+	default:
+		return "", true, true
+	}
 }

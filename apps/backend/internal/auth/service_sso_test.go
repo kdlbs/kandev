@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/auth/store"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
@@ -118,6 +119,38 @@ func TestAuthenticateExternalLinksExistingMemberByEmail(t *testing.T) {
 	stored, err := f.svc.store.GetIdentityByProviderSubject(ctx, testOIDCProvider, "sub-mem")
 	if err != nil || stored.UserID != user.ID {
 		t.Fatalf("identity not linked: %+v err=%v", stored, err)
+	}
+}
+
+func TestProvisionExternalUserRollsBackOnIdentityConflict(t *testing.T) {
+	f := newServiceFixture(t, false)
+	setupEnabled(t, f)
+	ctx := context.Background()
+
+	// A "winner" already owns the (provider, subject) identity — simulating a
+	// concurrent callback that committed first.
+	winner, err := f.svc.AdminCreateUser(ctx, "winner@x.dev", "winnerpass123", "Winner", usermodels.RoleMember)
+	if err != nil {
+		t.Fatalf("create winner: %v", err)
+	}
+	if err := f.svc.store.CreateIdentity(ctx, &store.LoginIdentity{
+		UserID: winner.ID, Provider: testOIDCProvider, Subject: "shared-sub",
+	}); err != nil {
+		t.Fatalf("seed winner identity: %v", err)
+	}
+
+	// Provisioning the same subject with a different email must fail to link,
+	// roll back the new user, and resolve to the winner instead.
+	got, err := f.svc.provisionExternalUser(ctx, testOIDCProvider, "shared-sub", "loser@x.dev", "Loser")
+	if err != nil {
+		t.Fatalf("provision: %v", err)
+	}
+	if got.ID != winner.ID {
+		t.Fatalf("resolved user = %s, want winner %s", got.ID, winner.ID)
+	}
+	// The rolled-back account must not linger reserving loser@x.dev.
+	if _, err := f.svc.users.GetUserByEmail(ctx, "loser@x.dev"); err == nil {
+		t.Fatal("orphan user was not rolled back")
 	}
 }
 

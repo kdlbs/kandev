@@ -147,6 +147,11 @@ func (r *sqliteRepository) ListUsers(ctx context.Context) ([]*models.User, error
 	return users, rows.Err()
 }
 
+func (r *sqliteRepository) DeleteUser(ctx context.Context, id string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM users WHERE id = ?`), id)
+	return err
+}
+
 func (r *sqliteRepository) CreateUser(ctx context.Context, user *models.User) error {
 	now := time.Now().UTC()
 	user.CreatedAt = now

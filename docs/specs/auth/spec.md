@@ -93,11 +93,13 @@ the local single-user install with a login screen it never asked for.
   kandev instances per user or use per-user OS accounts / sandboxed executors
   (future work).
 - No workspace sharing/membership — one owner per workspace.
-- No first-party OIDC/SSO. The host now supports **plugin-provided** external
-  login (an `auth`-capable plugin asserts a validated OIDC/SAML identity and the
-  host mints the session — see ADR 0050), but the pre-auth login-page SSO
-  buttons, anonymous provider discovery, and a shipped IdP plugin are still
-  pending, so there is no end-to-end SSO login for users yet.
+- No first-party OIDC/SSO. The host supports **plugin-provided** external login
+  (an `auth`-capable plugin asserts a validated OIDC/SAML identity and the host
+  mints the session — see ADR 0050); the pre-auth login-page SSO buttons and
+  anonymous provider discovery (`auth.ssoProviders` in the boot payload) ship
+  here too. What remains is a published IdP plugin (e.g. Google OIDC, developed
+  in its own repo) and setup-mode first-admin bootstrap via SSO (SSO requires
+  enforced auth today).
 - Office workspace-scoped HTTP routes (those carrying a `:wsId`) are
   ownership-checked when auth is enabled; office run *subscriptions* are not
   yet ownership-checked (run events carry no workspace context at the
