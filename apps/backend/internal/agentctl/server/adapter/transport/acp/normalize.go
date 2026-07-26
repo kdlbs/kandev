@@ -128,9 +128,7 @@ func (n *Normalizer) NormalizeToolCall(toolName string, args map[string]any) *st
 		payload = n.normalizeGeneric(toolName, args)
 	}
 	applyAgentEnrichment(n.agentID, payload, enrichFrameFromArgs(args))
-	if n.agentID == claudeAgentID && payload.ShellExec() != nil && payload.ShellExec().Background {
-		payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
-	}
+	stampBackgroundShellWork(n.agentID, payload)
 	return payload
 }
 
@@ -242,9 +240,7 @@ func (n *Normalizer) UpdatePayloadInput(payload *streams.NormalizedPayload, rawI
 
 	if se := payload.ShellExec(); se != nil {
 		updateShellExecInput(se, inputMap)
-		if n.agentID == claudeAgentID && se.Background {
-			payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
-		}
+		stampBackgroundShellWork(n.agentID, payload)
 	}
 	if gen := payload.Generic(); gen != nil {
 		updateGenericInput(gen, inputMap, supplemental)
@@ -302,6 +298,12 @@ func isEmptyGenericInputValue(v any) bool {
 		return x == ""
 	default:
 		return false
+	}
+}
+
+func stampBackgroundShellWork(agentID string, payload *streams.NormalizedPayload) {
+	if agentID == claudeAgentID && payload != nil && payload.ShellExec() != nil && payload.ShellExec().Background {
+		payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
 	}
 }
 

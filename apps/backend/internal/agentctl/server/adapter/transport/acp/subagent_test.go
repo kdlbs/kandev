@@ -652,8 +652,8 @@ func TestCodexSubagentCorrelationPressureRetainsDelayedMatch(t *testing.T) {
 		childSessionID: "delayed-child",
 	}
 	correlation := a.codexSubagentCorrelations[key]
-	if correlation == nil || !correlation.collaborationSeen || !correlation.activitySeen {
-		t.Fatalf("delayed correlation signal state = %+v", correlation)
+	if correlation == nil || correlation.terminalSeen {
+		t.Fatalf("delayed live correlation state = %+v", correlation)
 	}
 }
 

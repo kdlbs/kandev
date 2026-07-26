@@ -27,8 +27,6 @@ type codexSubagentCorrelation struct {
 	emittedToolCallID string
 	parentToolCallID  string
 	payload           *streams.NormalizedPayload
-	collaborationSeen bool
-	activitySeen      bool
 	terminalSeen      bool
 	lastSeen          uint64
 }
@@ -243,7 +241,7 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 		mergeCodexSubagentPayload(correlation.payload, candidate)
 		stampSubagentBackgroundWork(correlation.payload, codexAgentID)
 		correlation.terminalSeen = true
-		a.touchCodexSubagentCorrelationLocked(correlation, signal)
+		a.touchCodexSubagentCorrelationLocked(correlation)
 		a.pruneCodexCompletedCorrelationsLocked()
 		return correlation, true, true
 	}
@@ -251,7 +249,7 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 	if found {
 		mergeCodexSubagentPayload(correlation.payload, candidate)
 		stampSubagentBackgroundWork(correlation.payload, codexAgentID)
-		a.touchCodexSubagentCorrelationLocked(correlation, signal)
+		a.touchCodexSubagentCorrelationLocked(correlation)
 		if childSessionID != "" && key.childSessionID == "" {
 			delete(a.codexSubagentCorrelations, key)
 			key.childSessionID = childSessionID
@@ -280,7 +278,7 @@ func (a *Adapter) correlateCodexSubagentToolCallLocked(
 		correlation,
 	)
 	correlation.parentToolCallID = a.codexParentToolCallIDLocked(sessionID, parentThreadID)
-	a.touchCodexSubagentCorrelationLocked(correlation, signal)
+	a.touchCodexSubagentCorrelationLocked(correlation)
 	a.codexSubagentCorrelations[key] = correlation
 	a.pruneCodexCompletedCorrelationsLocked()
 	return correlation, false, true
@@ -392,18 +390,9 @@ func sameCodexSubagentChild(left, right *streams.NormalizedPayload) bool {
 	return left != nil && right != nil && leftID == rightID
 }
 
-func (a *Adapter) touchCodexSubagentCorrelationLocked(
-	correlation *codexSubagentCorrelation,
-	signal codexSubagentSignal,
-) {
+func (a *Adapter) touchCodexSubagentCorrelationLocked(correlation *codexSubagentCorrelation) {
 	a.codexSubagentSequence++
 	correlation.lastSeen = a.codexSubagentSequence
-	switch signal {
-	case codexSubagentSignalCollaboration:
-		correlation.collaborationSeen = true
-	case codexSubagentSignalActivity:
-		correlation.activitySeen = true
-	}
 }
 
 func (a *Adapter) evictCodexSubagentCorrelationLocked() {
@@ -539,7 +528,7 @@ func (a *Adapter) codexSubagentUpdateTargetLocked(
 		// until it can be correlated coherently.
 		return nil, "", "", true
 	}
-	a.touchCodexSubagentCorrelationLocked(correlation, signal)
+	a.touchCodexSubagentCorrelationLocked(correlation)
 	a.pruneCodexCompletedCorrelationsLocked()
 	return correlation.payload, correlation.emittedToolCallID, correlation.parentToolCallID, false
 }
