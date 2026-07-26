@@ -62,9 +62,6 @@ PINS = (
                 LIFECYCLE_TEST, 1, "@agentclientprotocol/claude-agent-acp@{version}"
             ),
             Target(
-                "README.md", 1, "@agentclientprotocol/claude-agent-acp@{version}"
-            ),
-            Target(
                 VERSION_DOC,
                 1,
                 "| Claude | `@agentclientprotocol/claude-agent-acp` | `{version}` |",
@@ -80,7 +77,6 @@ PINS = (
             Target(f"{AGENT_DIR}/codex_acp.go", 1),
             Target(f"{AGENT_DIR}/codex_acp_test.go", 2),
             Target(LIFECYCLE_TEST, 1, "@agentclientprotocol/codex-acp@{version}"),
-            Target("README.md", 1, "@agentclientprotocol/codex-acp@{version}"),
             Target(
                 VERSION_DOC,
                 1,
@@ -110,7 +106,6 @@ PINS = (
         (
             Target(f"{AGENT_DIR}/copilot_acp.go", 1),
             Target(f"{AGENT_DIR}/copilot_acp_test.go", 5),
-            Target("README.md", 1, "@github/copilot@{version}"),
             Target(
                 VERSION_DOC,
                 1,
@@ -126,7 +121,6 @@ PINS = (
         (
             Target(f"{AGENT_DIR}/gemini.go", 1),
             Target(f"{AGENT_DIR}/gemini_test.go", 3),
-            Target("README.md", 1, "@google/gemini-cli@{version}"),
             Target(
                 VERSION_DOC,
                 1,

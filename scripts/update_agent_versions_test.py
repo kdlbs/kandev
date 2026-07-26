@@ -220,6 +220,11 @@ class UpdateAgentVersionsTest(unittest.TestCase):
         self.assertEqual(content.count("1.3.0"), 2)
         self.assertIn("@example/agent@1.2.30", content)
 
+    def test_core_pins_do_not_target_readme(self) -> None:
+        targets = [target.path for pin in self.updater.PINS for target in pin.targets]
+
+        self.assertNotIn("README.md", targets)
+
     def test_registry_lookup_parses_json_without_executing_package(self) -> None:
         completed = subprocess.CompletedProcess(
             args=[],
