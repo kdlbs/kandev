@@ -16,11 +16,23 @@ export type AuthUser = {
 
 export type AuthMode = "disabled" | "setup" | "enabled";
 
+// SsoProvider is one external-login button on the pre-auth login screen,
+// contributed by an auth-capable plugin. Mirrors apps/backend/internal/auth
+// state.go SSOProvider. Present only in the anonymous boot payload.
+export type SsoProvider = {
+  id: string;
+  displayName: string;
+  initiateUrl: string;
+};
+
 export type AuthSliceState = {
   auth: {
     mode: AuthMode;
     authenticated: boolean;
     user: AuthUser | null;
+    // External-login options for the login screen. Optional: GET
+    // /api/v1/auth/me omits it, only the anonymous boot payload carries it.
+    ssoProviders?: SsoProvider[];
   };
 };
 

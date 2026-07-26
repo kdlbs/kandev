@@ -99,6 +99,13 @@ type Service struct {
 	utilityAgents utilityAgentSource
 	utilityRunner utilityRunner
 
+	// authLogin establishes an authenticated browser session for an external
+	// identity an auth-capable plugin asserts via its webhook response
+	// (OIDC/SAML SSO), wired via SetAuthLoginBridge. nil until backendapp
+	// wires it (only when the auth service exists); a nil bridge means the SSO
+	// login directive is rejected.
+	authLogin AuthLoginBridge
+
 	// kandevVersion is the currently running kandev build version, used to
 	// enforce a package's manifest.min_kandev_version at Install (see
 	// SetKandevVersion / checkMinKandevVersion). Empty (the default) means
@@ -248,6 +255,24 @@ func (s *Service) utilityAgentDeps() (utilityAgentSource, utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.utilityAgents, s.utilityRunner
+}
+
+// SetAuthLoginBridge wires the SSO login bridge auth-capable plugins use to
+// establish a browser session from a validated external identity (see
+// auth_login.go). Called once during startup wiring, only when the auth
+// service exists.
+func (s *Service) SetAuthLoginBridge(b AuthLoginBridge) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authLogin = b
+}
+
+// authLoginBridge returns the wired SSO login bridge, or nil when auth is not
+// available. Read under s.mu against the SetAuthLoginBridge write.
+func (s *Service) authLoginBridge() AuthLoginBridge {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.authLogin
 }
 
 // SetKandevVersion wires the currently running kandev build version,

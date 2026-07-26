@@ -27,6 +27,32 @@ const (
 	quickChatSessionKindConfig  = "config"
 )
 
+// ssoProvidersForBoot lists the plugin-contributed external-login options for
+// the pre-auth login screen. Empty unless auth is enabled and the plugins
+// feature is on with at least one active auth-capable plugin declaring
+// auth_providers.
+func ssoProvidersForBoot(p routeParams) []auth.SSOProvider {
+	if p.authSvc == nil || p.authSvc.Mode() == auth.ModeDisabled {
+		return nil
+	}
+	if !p.features.Plugins || p.services == nil || p.services.Plugins == nil {
+		return nil
+	}
+	providers := p.services.Plugins.SSOProviders()
+	if len(providers) == 0 {
+		return nil
+	}
+	out := make([]auth.SSOProvider, 0, len(providers))
+	for _, prov := range providers {
+		out = append(out, auth.SSOProvider{
+			ID:          prov.ID,
+			DisplayName: prov.DisplayName,
+			InitiateURL: prov.InitiateURL,
+		})
+	}
+	return out
+}
+
 func bootInitialState(
 	ctx context.Context,
 	req *http.Request,
@@ -46,7 +72,9 @@ func bootInitialState(
 		if identity, ok := authn.IdentityFromContext(req.Context()); ok {
 			identityPtr = &identity
 		}
-		state["auth"] = p.authSvc.StateFor(ctx, identityPtr)
+		authState := p.authSvc.StateFor(ctx, identityPtr)
+		authState.SSOProviders = ssoProvidersForBoot(p)
+		state["auth"] = authState
 		if p.authSvc.Mode() != auth.ModeDisabled && identityPtr == nil {
 			return state
 		}

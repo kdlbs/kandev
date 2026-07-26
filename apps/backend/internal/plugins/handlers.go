@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -390,7 +391,7 @@ func (c *Controller) webhook(ctx *gin.Context) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
-	writeWebhookResponse(ctx, resp)
+	c.writeWebhookResponse(ctx, record, resp)
 }
 
 // webhookStatusForResponse validates a plugin-supplied WebhookResponse.Status
@@ -410,9 +411,17 @@ func webhookStatusForResponse(status int32) (int, bool) {
 
 // writeWebhookResponse turns a plugin's WebhookResponse into the outbound
 // HTTP response: an out-of-range Status is rejected as 502 (see
-// webhookStatusForResponse) before ever reaching ctx.Writer.WriteHeader;
-// otherwise headers, status, and body are relayed verbatim.
-func writeWebhookResponse(ctx *gin.Context, resp *pluginsdk.WebhookResponse) {
+// webhookStatusForResponse) before ever reaching ctx.Writer.WriteHeader.
+//
+// Before relaying, it consumes the reserved SSO login directive (an
+// auth-capable plugin asserting a validated external identity — OIDC/SAML)
+// and, when accepted, mints and sets the session cookie host-side so the
+// plugin never handles the raw token. Plugin-supplied Set-Cookie headers are
+// dropped: a relayed webhook has no legitimate reason to set browser cookies,
+// and dropping them stops a plugin from overwriting the session cookie the
+// host just minted or fixating any other. Remaining headers, status, and body
+// are relayed verbatim.
+func (c *Controller) writeWebhookResponse(ctx *gin.Context, record *store.Record, resp *pluginsdk.WebhookResponse) {
 	status, ok := webhookStatusForResponse(resp.Status)
 	if !ok {
 		ctx.JSON(http.StatusBadGateway, gin.H{
@@ -420,11 +429,43 @@ func writeWebhookResponse(ctx *gin.Context, resp *pluginsdk.WebhookResponse) {
 		})
 		return
 	}
+	if raw, present := takeAuthLoginDirective(resp.Headers); present {
+		if err := c.applyAuthLogin(ctx, record, raw); err != nil {
+			// The webhook endpoint is public; keep the response body generic so
+			// a raw store/auth error can't be disclosed to an anonymous caller.
+			// The real cause is logged for the operator.
+			c.log.Warn("plugin auth login rejected", zap.String("plugin", record.ID), zap.Error(err))
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "auth login rejected"})
+			return
+		}
+	}
 	for k, v := range resp.Headers {
+		if http.CanonicalHeaderKey(k) == "Set-Cookie" {
+			continue
+		}
 		ctx.Writer.Header().Set(k, v)
 	}
 	ctx.Writer.WriteHeader(status)
 	_, _ = ctx.Writer.Write(resp.Body)
+}
+
+// applyAuthLogin establishes a browser session from a plugin's external-identity
+// assertion. It requires the plugin to declare the `auth` capability and the
+// SSO login bridge to be wired (auth enabled); a plugin that emits the directive
+// without the capability is rejected rather than silently ignored.
+func (c *Controller) applyAuthLogin(ctx *gin.Context, record *store.Record, raw string) error {
+	if !record.Capabilities.Auth {
+		return fmt.Errorf("plugin %q used the auth login directive without the 'auth' capability", record.ID)
+	}
+	bridge := c.svc.authLoginBridge()
+	if bridge == nil {
+		return errors.New("authentication is not enabled")
+	}
+	var a externalLoginAssertion
+	if err := json.Unmarshal([]byte(raw), &a); err != nil {
+		return errors.New("invalid auth login assertion")
+	}
+	return bridge.LoginExternal(ctx, a.Provider, a.Subject, a.Email, a.DisplayName)
 }
 
 // manifestDeclaresWebhookKey reports whether record's manifest declares a

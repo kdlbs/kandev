@@ -58,6 +58,21 @@ func (s *Store) GetLocalIdentity(ctx context.Context, userID string) (*LoginIden
 	return &identity, err
 }
 
+// GetIdentityByProviderSubject returns the identity for an external provider's
+// subject claim (an OIDC issuer / SAML entity as provider, the IdP subject as
+// subject). ErrNotFound when no row matches. The (provider, subject) pair is
+// unique, so this resolves at most one identity.
+func (s *Store) GetIdentityByProviderSubject(ctx context.Context, provider, subject string) (*LoginIdentity, error) {
+	var identity LoginIdentity
+	err := s.ro.GetContext(ctx, &identity, s.ro.Rebind(`
+		SELECT * FROM auth_identities WHERE provider = ? AND subject = ?
+	`), provider, subject)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, ErrNotFound
+	}
+	return &identity, err
+}
+
 // UpdatePasswordHash replaces the password hash of a user's local identity.
 func (s *Store) UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error {
 	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
