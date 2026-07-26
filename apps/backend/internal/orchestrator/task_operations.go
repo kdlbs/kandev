@@ -2234,26 +2234,9 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	wasPrimary := session.IsPrimary
 
 	// A settled DB state can still own a workspace execution or detached
-	// background work. Quiesce the live lifecycle execution before removing the
-	// row, then tombstone its exact ID so buffered frames cannot recreate
-	// activity after deletion.
-	if s.agentManager != nil {
-		executionID, executionErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
-		if executionErr == nil && executionID != "" {
-			if err := s.executor.StopExecution(ctx, executionID, "session deleted", true); err != nil {
-				if !errors.Is(err, agentruntime.ErrNotFound) {
-					return fmt.Errorf("failed to stop session execution before deletion: %w", err)
-				}
-				s.logger.Debug("session execution already absent during deletion",
-					zap.String("session_id", sessionID),
-					zap.String("agent_execution_id", executionID),
-					zap.Error(err))
-			}
-			s.markExecutionFailed(sessionID, executionID)
-			s.retireExecutionActivityAndPublish(
-				context.WithoutCancel(ctx), taskID, sessionID, executionID,
-			)
-		}
+	// background work. Quiesce that runtime boundary before removing the row.
+	if err := s.quiesceSessionExecutionBeforeDeletion(ctx, taskID, sessionID); err != nil {
+		return err
 	}
 
 	s.logger.Info("deleting session",
@@ -2285,6 +2268,39 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 		s.promoteNextPrimaryAfterRemoval(ctx, taskID, sessionID)
 	}
 
+	return nil
+}
+
+// quiesceSessionExecutionBeforeDeletion stops the in-memory lifecycle
+// execution, if one exists, before a session row is removed. A runtime that
+// explicitly reports the exact execution as absent is already quiesced; other
+// stop failures preserve the row because detaching a possibly-live execution
+// would let trailing frames recreate activity after deletion.
+func (s *Service) quiesceSessionExecutionBeforeDeletion(
+	ctx context.Context,
+	taskID, sessionID string,
+) error {
+	if s.agentManager == nil {
+		return nil
+	}
+	executionID, executionErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if executionErr != nil || executionID == "" {
+		return nil
+	}
+	stopErr := s.executor.StopExecution(ctx, executionID, "session deleted", true)
+	if stopErr != nil && !errors.Is(stopErr, agentruntime.ErrNotFound) {
+		return fmt.Errorf("failed to stop session execution before deletion: %w", stopErr)
+	}
+	if stopErr != nil {
+		s.logger.Debug("session execution already absent during deletion",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID),
+			zap.Error(stopErr))
+	}
+	s.markExecutionFailed(sessionID, executionID)
+	s.retireExecutionActivityAndPublish(
+		context.WithoutCancel(ctx), taskID, sessionID, executionID,
+	)
 	return nil
 }
 
