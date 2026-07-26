@@ -25,10 +25,11 @@ malformed, failing, or mismatched version output reports the agent as unavailabl
 with the pinned install command as remediation. The ACP initialize response
 separately records the runtime-reported agent name and version.
 
-Copilot prefers a globally installed `copilot` binary after the pinned package
-has been installed, avoiding an npm registry lookup on every launch. Its
-fallback, runtime, inference, passthrough, and install commands all use the same
-exact package spec. Gemini always uses its exact package spec.
+Copilot always uses its exact package spec for ACP launch, even when a global
+`copilot` binary is present on `PATH`, so sessions remain reproducible
+regardless of auto-updates. Its runtime, inference, passthrough, and install
+commands all use the same pinned spec. Gemini always uses its exact package
+spec.
 
 Cursor is intentionally not listed as pinned. Its supported installer selects
 the current Cursor Agent build, and the CLI auto-updates by default without a

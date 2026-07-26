@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: main
-          fetch-depth: 0
+          fetch-depth: 1
           persist-credentials: false
 
       - name: Install Node.js
@@ -91,7 +91,6 @@ jobs:
           remote_sha="$(git ls-remote --heads origin "refs/heads/$BRANCH" | cut -f1)"
           git switch -C "$BRANCH"
           git add \
-            README.md \
             apps/backend/internal/agent/agents \
             apps/backend/internal/agent/runtime/lifecycle/manager_launch_test.go
           git commit -m "$TITLE"

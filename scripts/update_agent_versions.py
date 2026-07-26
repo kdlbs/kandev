@@ -278,7 +278,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument(
         "--check",
         action="store_true",
-        help="report available updates without changing files",
+        help=(
+            "report available updates without changing files "
+            "(exits 1 if updates are available, 0 if pins are current)"
+        ),
     )
     parser.add_argument("--json-report", help="write the update report as JSON")
     parser.add_argument("--markdown-report", help="write the update report as Markdown")
