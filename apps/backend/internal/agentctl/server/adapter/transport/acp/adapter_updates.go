@@ -178,9 +178,14 @@ func (a *Adapter) handleACPUpdate(
 				n.Update.UsageUpdate.Meta,
 				promptGeneration,
 			)
+			// Generation zero identifies synthetic/legacy turns such as
+			// ScheduleWakeup. They cannot transfer human prompt ownership, but
+			// their foreground-idle activity event must still close the wakeup
+			// cycle as it did before handoff support.
 			if lifecycleEvent != nil &&
 				lifecycleEvent.Type == streams.EventTypeForegroundIdle &&
-				(!a.supportsPromptHandoff() || promptGeneration == 0) {
+				promptGeneration != 0 &&
+				!a.supportsPromptHandoff() {
 				lifecycleEvent = nil
 			}
 			if lifecycleEvent != nil {

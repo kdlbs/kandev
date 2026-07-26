@@ -84,7 +84,7 @@ func TestHandleACPUpdate_HumanOriginDeliversLeadingContextWindowThenForegroundId
 	}
 }
 
-func TestHandleACPUpdate_HumanOriginWithoutAttestedGenerationStaysForegroundOwned(t *testing.T) {
+func TestHandleACPUpdate_HumanOriginOnlySuppressesUnsupportedHumanTurnHandoff(t *testing.T) {
 	var notification sdk.SessionNotification
 	raw := []byte(`{"sessionId":"s1","update":{"sessionUpdate":"usage_update","size":1000000,"used":23638,"_meta":{"_claude/origin":{"kind":"human"}}}}`)
 	if err := json.Unmarshal(raw, &notification); err != nil {
@@ -95,9 +95,10 @@ func TestHandleACPUpdate_HumanOriginWithoutAttestedGenerationStaysForegroundOwne
 		name             string
 		agentID          string
 		promptGeneration uint64
+		wantIdle         bool
 	}{
 		{name: "unsupported adapter", agentID: "other-acp", promptGeneration: 42},
-		{name: "missing generation", agentID: claudeAgentID, promptGeneration: 0},
+		{name: "synthetic generation zero", agentID: claudeAgentID, promptGeneration: 0, wantIdle: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			a := newTestAdapter()
@@ -107,8 +108,19 @@ func TestHandleACPUpdate_HumanOriginWithoutAttestedGenerationStaysForegroundOwne
 			a.handleACPUpdate(notification, test.promptGeneration)
 
 			events := drainEvents(a)
-			if len(events) != 1 || events[0].Type != streams.EventTypeContextWindow {
+			if !test.wantIdle && (len(events) != 1 || events[0].Type != streams.EventTypeContextWindow) {
 				t.Fatalf("events = %+v, want context-window only", events)
+			}
+			if test.wantIdle {
+				if len(events) != 2 || events[1].Type != streams.EventTypeForegroundIdle {
+					t.Fatalf("events = %+v, want context-window then foreground-idle", events)
+				}
+				if events[1].PromptGeneration != 0 {
+					t.Fatalf("synthetic idle generation = %d, want 0", events[1].PromptGeneration)
+				}
+				if handoff, _ := events[1].Data[streams.AgentEventDataPromptHandoff].(bool); handoff {
+					t.Fatal("generation-zero idle incorrectly attested human prompt handoff")
+				}
 			}
 		})
 	}
