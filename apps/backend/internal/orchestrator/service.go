@@ -15,12 +15,14 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -1683,10 +1685,16 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 }
 
 func isMissingBranchError(err error) bool {
-	if err == nil {
-		return false
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		if isMissingBranchMessage(current.Error()) {
+			return true
+		}
 	}
-	msg := strings.ToLower(err.Error())
+	return false
+}
+
+func isMissingBranchMessage(message string) bool {
+	msg := strings.ToLower(message)
 	if strings.Contains(msg, "couldn't find remote ref") {
 		return true
 	}
@@ -1716,20 +1724,22 @@ var (
 const launchFailurePRLookupTimeout = time.Second
 
 func extractMissingBranchName(err error) string {
-	if err == nil {
-		return ""
+	branch := ""
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		msg := current.Error()
+		if match := quotedBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
+			branch = strings.TrimSpace(match[1])
+			continue
+		}
+		if match := remoteRefPattern.FindStringSubmatch(msg); len(match) == 2 {
+			branch = strings.TrimSpace(match[1])
+			continue
+		}
+		if match := pathspecBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
+			branch = strings.TrimSpace(match[1])
+		}
 	}
-	msg := err.Error()
-	if match := quotedBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
-		return strings.TrimSpace(match[1])
-	}
-	if match := remoteRefPattern.FindStringSubmatch(msg); len(match) == 2 {
-		return strings.TrimSpace(match[1])
-	}
-	if match := pathspecBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
-		return strings.TrimSpace(match[1])
-	}
-	return ""
+	return branch
 }
 
 const missingPRBranchRecoveryClaimKey = "missing_pr_branch_recovery_claimed"
@@ -1813,6 +1823,85 @@ func (s *Service) hasOnlyTaskRepository(ctx context.Context, taskID, repositoryI
 		strings.TrimSpace(repositories[0].RepositoryID) == repositoryID
 }
 
+// repositoryForMissingBranchFailure derives the failed repository from the
+// task's checkout configuration when environment preparation failed before the
+// executor constructed its repository-scoped launch request. It deliberately
+// returns no match for an empty or ambiguous branch so destructive recovery
+// actions remain scoped to the repository that actually failed.
+func (s *Service) repositoryForMissingBranchFailure(ctx context.Context, taskID, branch string) (string, string) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "", branch
+	}
+	store, ok := s.repo.(interface {
+		ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
+	})
+	if !ok {
+		return "", branch
+	}
+	repositories, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		s.logger.Debug("failed to load task repositories for missing-branch guidance",
+			zap.String("task_id", taskID), zap.Error(err))
+		return "", branch
+	}
+
+	prNumber := missingBranchPRNumber(branch)
+	var repositoryID string
+	resolvedBranch := branch
+	for _, repository := range repositories {
+		if repository == nil || !taskRepositoryMatchesMissingBranch(repository, branch, prNumber) {
+			continue
+		}
+		if repositoryID != "" {
+			return "", branch
+		}
+		repositoryID = strings.TrimSpace(repository.RepositoryID)
+		if checkoutBranch := strings.TrimSpace(repository.CheckoutBranch); checkoutBranch != "" {
+			resolvedBranch = checkoutBranch
+		}
+	}
+	return repositoryID, resolvedBranch
+}
+
+var missingBranchPRRefPattern = regexp.MustCompile(`^pull/(\d+)/head$`)
+
+func missingBranchPRNumber(branch string) int {
+	match := missingBranchPRRefPattern.FindStringSubmatch(strings.TrimSpace(branch))
+	if len(match) != 2 {
+		return 0
+	}
+	number, err := strconv.Atoi(match[1])
+	if err != nil || number <= 0 {
+		return 0
+	}
+	return number
+}
+
+func taskRepositoryMatchesMissingBranch(repository *models.TaskRepository, branch string, prNumber int) bool {
+	if strings.TrimSpace(repository.CheckoutBranch) == branch {
+		return true
+	}
+	return prNumber > 0 && taskRepositoryPRNumber(repository.Metadata) == prNumber
+}
+
+func taskRepositoryPRNumber(metadata map[string]interface{}) int {
+	if metadata == nil {
+		return 0
+	}
+	switch value := metadata["pr_number"].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		if value > 0 && value == float64(int(value)) {
+			return int(value)
+		}
+	}
+	return 0
+}
+
 // handleSessionLaunchFailed creates branch guidance only after the caller has
 // persisted FAILED. The claim is stored on the session because prepare, start,
 // and resume may race.
@@ -1821,8 +1910,17 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 		return
 	}
 	recoveryCtx := context.WithoutCancel(ctx)
-	branch := extractMissingBranchName(launchErr)
-	prState := s.matchingTaskPRState(recoveryCtx, taskID, repositoryID, branch)
+	rawBranch := extractMissingBranchName(launchErr)
+	displayBranch := routingerr.Sanitize(rawBranch)
+	resolvedRepositoryID, resolvedBranch := s.repositoryForMissingBranchFailure(recoveryCtx, taskID, rawBranch)
+	if repositoryID == "" {
+		repositoryID = resolvedRepositoryID
+	}
+	if repositoryID != "" && repositoryID == resolvedRepositoryID {
+		rawBranch = resolvedBranch
+		displayBranch = routingerr.Sanitize(resolvedBranch)
+	}
+	prState := s.matchingTaskPRState(recoveryCtx, taskID, repositoryID, rawBranch)
 	if prState == githubPRStateOpen {
 		return
 	}
@@ -1843,7 +1941,9 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 	if !claimed {
 		return
 	}
-	if err := s.createMissingPRBranchRecoveryMessage(recoveryCtx, taskID, sessionID, branch, prState); err != nil {
+	if err := s.createMissingPRBranchRecoveryMessage(
+		recoveryCtx, taskID, sessionID, displayBranch, prState,
+	); err != nil {
 		releaser, ok := s.repo.(failedSessionMetadataClaimReleaser)
 		if !ok {
 			s.logger.Warn("session repository cannot release missing-branch recovery claim after message failure",

@@ -98,7 +98,8 @@ test.describe("PR watcher missing branch", () => {
     await expect(
       recovery.getByRole("heading", { name: "Branch is no longer available" }),
     ).toBeVisible();
-    await expect(recovery).toContainText(prBranch);
+    await expect(recovery).toContainText("***");
+    await expect(recovery).not.toContainText(prBranch);
     await expect(recovery).toContainText("merged or deleted");
 
     // The actionable recovery panel replaces the generic failed-agent banner.
@@ -141,6 +142,7 @@ test.describe("PR watcher missing branch", () => {
         (m.metadata as Record<string, unknown>)?.failure_kind === "missing_pr_branch",
     );
     expect(guidanceMsg).toBeTruthy();
-    expect((guidanceMsg as Record<string, unknown>).content).toContain(prBranch);
+    expect((guidanceMsg as Record<string, unknown>).content).toContain("***");
+    expect((guidanceMsg as Record<string, unknown>).content).not.toContain(prBranch);
   });
 });

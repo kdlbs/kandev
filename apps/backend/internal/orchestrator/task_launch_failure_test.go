@@ -315,6 +315,62 @@ func TestHandleSessionLaunchFailed_ClosedOrMergedMatchingPRCreatesMissingBranchG
 	}
 }
 
+func TestHandleSessionLaunchFailure_ResolvesRepositoryForEarlyMissingBranchFailure(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-a", WorkspaceID: "ws1", Name: "repo-a", SourceType: "local",
+	}); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID:             "task-repo-a",
+		TaskID:         "task1",
+		RepositoryID:   "repo-a",
+		CheckoutBranch: "feature/already-merged-and-deleted",
+		Position:       0,
+		Metadata:       map[string]interface{}{"pr_number": 999},
+	}); err != nil {
+		t.Fatalf("create task repository: %v", err)
+	}
+
+	messages := &mockMessageCreator{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = messages
+	svc.SetGitHubService(&mockGitHubService{taskPRs: []*github.TaskPR{
+		{TaskID: "task1", RepositoryID: "repo-a", HeadBranch: "feature/already-merged-and-deleted", State: githubPRStateClosed},
+	}})
+
+	_ = svc.handleSessionLaunchFailure(
+		ctx,
+		"task1",
+		"session1",
+		errors.New("environment preparation failed: branch \"feature/already-merged-and-deleted\" not found locally or on remote: fatal: couldn't find remote ref pull/999/head"),
+	)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get failed session: %v", err)
+	}
+	if session.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %q, want FAILED", session.State)
+	}
+	if strings.Contains(session.ErrorMessage, "feature/already-merged-and-deleted") {
+		t.Fatalf("persisted error exposed the raw branch: %q", session.ErrorMessage)
+	}
+
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("expected one missing-branch recovery message, got %d", len(messages.sessionMessages))
+	}
+	if kind := messages.sessionMessages[0].metadata["failure_kind"]; kind != "missing_pr_branch" {
+		t.Fatalf("failure_kind = %#v, want missing_pr_branch", kind)
+	}
+	if branch := messages.sessionMessages[0].metadata["missing_branch"]; branch != "***" {
+		t.Fatalf("missing_branch = %#v, want sanitized branch", branch)
+	}
+}
+
 func TestHandleSessionLaunchFailed_UnrelatedOpenPRDoesNotSuppressNeutralGuidance(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
