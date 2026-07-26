@@ -118,9 +118,15 @@ describe("PRCIPopover CI automation controls", () => {
     expect(screen.getByLabelText("Explain CI automation options")).not.toBeNull();
     fireEvent.click(screen.getByLabelText("Auto-fix CI and address comments"));
     fireEvent.click(screen.getByLabelText("Auto-merge when ready"));
+    fireEvent.click(screen.getByLabelText("Prompt agent when review is requested"));
+    fireEvent.click(screen.getByLabelText("Prompt agent when PR is merged"));
+    fireEvent.click(screen.getByLabelText("Prompt agent when PR is closed"));
 
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ auto_fix_enabled: true });
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ auto_merge_enabled: true });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_review_requested: true });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_merged: true });
+    expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_closed: true });
   });
 
   it("uses the PR title in the header and omits the redundant detail link", () => {

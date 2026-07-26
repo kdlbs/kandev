@@ -85,3 +85,56 @@ func TestServiceTaskCIPRStatesMergesStoredAndCurrentPRs(t *testing.T) {
 		t.Fatalf("orphan state=%+v, want retained stored state", got)
 	}
 }
+
+func TestServiceTaskPRAgentAutomationHelpers(t *testing.T) {
+	store := newTestStore(t)
+	client := NewMockClient()
+	client.SetUser("reviewer")
+	client.AddPR(&PR{
+		RepoOwner: "acme", RepoName: "widget", Number: 42, State: "open",
+		RequestedReviewers: []RequestedReviewer{{Login: "reviewer", Type: "user"}},
+	})
+	svc := NewService(client, "mock", nil, store, nil, testLogger(t))
+	api, ok := any(svc).(interface {
+		IsReviewRequestedForLogin(context.Context, string, string, int, string) (bool, error)
+		HasEnabledTaskPRAgentPrompts(context.Context, string) (bool, error)
+	})
+	if !ok {
+		t.Fatal("Service does not implement task PR agent automation helpers")
+	}
+
+	requested, err := api.IsReviewRequestedForLogin(
+		context.Background(), "acme", "widget", 42, "reviewer",
+	)
+	if err != nil || !requested {
+		t.Fatalf("requested = %v, err = %v", requested, err)
+	}
+	enabled := true
+	if _, err := svc.UpdateTaskCIOptions(context.Background(), "task-1", TaskCIOptionsPatch{
+		PromptOnMerged: &enabled,
+	}); err != nil {
+		t.Fatalf("enable merged prompt: %v", err)
+	}
+	retain, err := api.HasEnabledTaskPRAgentPrompts(context.Background(), "task-1")
+	if err != nil || !retain {
+		t.Fatalf("retain = %v, err = %v", retain, err)
+	}
+	hold, err := svc.ShouldHoldTerminalPRWatch(
+		context.Background(), "task-1", "repo-1", 42, prStateMerged,
+	)
+	if err != nil || !hold {
+		t.Fatalf("hold before prompt = %v, err = %v", hold, err)
+	}
+	if err := svc.RecordTaskPRLifecyclePrompt(context.Background(), TaskPRLifecyclePrompt{
+		TaskID: "task-1", RepositoryID: "repo-1", PRNumber: 42,
+		Event: "merged", ObservedState: prStateMerged,
+	}); err != nil {
+		t.Fatalf("record merged prompt: %v", err)
+	}
+	hold, err = svc.ShouldHoldTerminalPRWatch(
+		context.Background(), "task-1", "repo-1", 42, prStateMerged,
+	)
+	if err != nil || hold {
+		t.Fatalf("hold after prompt = %v, err = %v", hold, err)
+	}
+}

@@ -64,11 +64,21 @@ test.describe("mobile PR CI automation options", () => {
       drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
+    await expect(
+      drawer.getByRole("switch", { name: "Prompt agent when review is requested" }),
+    ).toBeVisible();
+    await expect(
+      drawer.getByRole("switch", { name: "Prompt agent when PR is merged" }),
+    ).toBeVisible();
+    await expect(
+      drawer.getByRole("switch", { name: "Prompt agent when PR is closed" }),
+    ).toBeVisible();
 
     await drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }).tap();
+    await drawer.getByRole("switch", { name: "Prompt agent when PR is closed" }).tap();
     await expect
       .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
-      .toMatchObject({ auto_fix_enabled: true });
+      .toMatchObject({ auto_fix_enabled: true, prompt_on_closed: true });
 
     await drawer.getByLabel("Edit auto-fix prompt for this task").tap();
     const promptDialog = testPage.getByRole("dialog", { name: "Auto-fix prompt" });

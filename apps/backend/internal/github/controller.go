@@ -408,9 +408,47 @@ func parseTaskCIOptionsPatch(ctx *gin.Context) (TaskCIOptionsPatch, error) {
 				return TaskCIOptionsPatch{}, err
 			}
 			patch.AutoFixPromptOverride = &prompt
+		case "prompt_on_review_requested":
+			if err := json.Unmarshal(value, &patch.PromptOnReviewRequested); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+		case "prompt_on_merged":
+			if err := json.Unmarshal(value, &patch.PromptOnMerged); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+		case "prompt_on_closed":
+			if err := json.Unmarshal(value, &patch.PromptOnClosed); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+		case "review_prompt_override":
+			if err := unmarshalNullablePrompt(value, &patch.ReviewPromptOverride); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+		case "merged_prompt_override":
+			if err := unmarshalNullablePrompt(value, &patch.MergedPromptOverride); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+		case "closed_prompt_override":
+			if err := unmarshalNullablePrompt(value, &patch.ClosedPromptOverride); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
 		}
 	}
 	return patch, nil
+}
+
+func unmarshalNullablePrompt(raw json.RawMessage, target **string) error {
+	if string(raw) == jsonNullLiteral {
+		empty := ""
+		*target = &empty
+		return nil
+	}
+	var prompt string
+	if err := json.Unmarshal(raw, &prompt); err != nil {
+		return err
+	}
+	*target = &prompt
+	return nil
 }
 
 func (c *Controller) publishTaskCIOptionsUpdated(ctx context.Context, resp *TaskCIOptionsResponse) {

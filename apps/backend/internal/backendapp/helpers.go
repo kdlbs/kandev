@@ -1391,6 +1391,7 @@ func registerMCPAndDebugRoutes(
 	// number, state) when the github service is available.
 	if p.services.GitHub != nil {
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
+		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
 	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —

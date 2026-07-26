@@ -20,7 +20,12 @@ import { useToast } from "@/components/toast-provider";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { autoFixRoundForState, findCIAutomationStateForPR } from "@/lib/github/ci-automation";
-import type { TaskCIAutomationPatch, TaskCIPRAutomationState, TaskPR } from "@/lib/types/github";
+import type {
+  TaskCIAutomationOptions,
+  TaskCIAutomationPatch,
+  TaskCIPRAutomationState,
+  TaskPR,
+} from "@/lib/types/github";
 
 const PR_FEEDBACK_PLACEHOLDER = "{{pr.feedback}}";
 
@@ -40,9 +45,9 @@ function CIAutomationInfoButton() {
       </TooltipTrigger>
       <TooltipContent side="top" align="end" className="max-w-[280px] text-xs leading-relaxed">
         Watches this task's linked pull request during the 1 minute PR refresh loop. Auto-fix queues
-        a task prompt for new failed checks and unresolved review comments when the prompt includes
-        the PR feedback placeholder, then snapshots what was handled so the next round only sends
-        newly observed issues. Auto-merge runs only after CI, review, and mergeability are ready.
+        task prompts for newly observed feedback, auto-merge waits for the PR to be ready, and the
+        notification switches prompt the task's agent when review is requested again or the PR
+        reaches a terminal state.
       </TooltipContent>
     </Tooltip>
   );
@@ -273,6 +278,72 @@ function CIAutoFixRoundHelpButton({
   );
 }
 
+function PRAgentPromptRows({
+  taskId,
+  options,
+  disabled,
+  patchOption,
+}: {
+  taskId: string;
+  options: TaskCIAutomationOptions | null;
+  disabled: boolean;
+  patchOption: (patch: TaskCIAutomationPatch) => void;
+}) {
+  return (
+    <>
+      <CIAutomationRow
+        id={`task-pr-review-requested-prompt-${taskId}`}
+        label="Prompt agent when review is requested"
+        checked={Boolean(options?.prompt_on_review_requested)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ prompt_on_review_requested: checked })}
+      />
+      <CIAutomationRow
+        id={`task-pr-merged-prompt-${taskId}`}
+        label="Prompt agent when PR is merged"
+        checked={Boolean(options?.prompt_on_merged)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ prompt_on_merged: checked })}
+      />
+      <CIAutomationRow
+        id={`task-pr-closed-prompt-${taskId}`}
+        label="Prompt agent when PR is closed"
+        checked={Boolean(options?.prompt_on_closed)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ prompt_on_closed: checked })}
+      />
+    </>
+  );
+}
+
+function CIAutomationHeader({
+  disabled,
+  onEditPrompt,
+}: {
+  disabled: boolean;
+  onEditPrompt: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2 px-1">
+      <div className="text-xs font-medium text-foreground">Automation</div>
+      <div className="flex items-center gap-1">
+        <CIAutomationInfoButton />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="h-6 w-6 cursor-pointer text-muted-foreground hover:text-foreground"
+          aria-label="Edit auto-fix prompt for this task"
+          disabled={disabled}
+          onClick={onEditPrompt}
+        >
+          <IconEdit className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
   const { options, loading, saving, error, refresh, update, resetPrompt } =
     useTaskCIAutomationOptions(pr.task_id);
@@ -324,23 +395,7 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
       data-testid="pr-ci-automation-controls"
       className="flex flex-col gap-1 border-t border-border/50 pt-2"
     >
-      <div className="flex items-center justify-between gap-2 px-1">
-        <div className="text-xs font-medium text-foreground">Automation</div>
-        <div className="flex items-center gap-1">
-          <CIAutomationInfoButton />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 cursor-pointer text-muted-foreground hover:text-foreground"
-            aria-label="Edit auto-fix prompt for this task"
-            disabled={!options}
-            onClick={openPromptEditor}
-          >
-            <IconEdit className="h-3.5 w-3.5" />
-          </Button>
-        </div>
-      </div>
+      <CIAutomationHeader disabled={!options} onEditPrompt={openPromptEditor} />
       <CIAutomationRow
         id={`task-ci-auto-fix-${pr.task_id}`}
         label="Auto-fix CI and address comments"
@@ -362,6 +417,12 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
         checked={Boolean(options?.auto_merge_enabled)}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ auto_merge_enabled: checked })}
+      />
+      <PRAgentPromptRows
+        taskId={pr.task_id}
+        options={options}
+        disabled={disabled}
+        patchOption={patchOption}
       />
       {error && <CIAutomationErrorRow error={error} loading={loading} onRetry={retryLoad} />}
       <CIAutomationPromptDialog

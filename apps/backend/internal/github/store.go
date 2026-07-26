@@ -356,6 +356,13 @@ const createTablesSQL = `
 		auto_fix_enabled BOOLEAN NOT NULL DEFAULT 0,
 		auto_merge_enabled BOOLEAN NOT NULL DEFAULT 0,
 		auto_fix_prompt_override TEXT,
+		prompt_on_review_requested BOOLEAN NOT NULL DEFAULT 0,
+		prompt_on_merged BOOLEAN NOT NULL DEFAULT 0,
+		prompt_on_closed BOOLEAN NOT NULL DEFAULT 0,
+		review_reviewer_login TEXT NOT NULL DEFAULT '',
+		review_prompt_override TEXT,
+		merged_prompt_override TEXT,
+		closed_prompt_override TEXT,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
@@ -372,6 +379,12 @@ const createTablesSQL = `
 		auto_fix_exhausted_at DATETIME,
 		last_merge_signature TEXT NOT NULL DEFAULT '',
 		last_merge_attempt_at DATETIME,
+		review_request_initialized BOOLEAN NOT NULL DEFAULT 0,
+		last_review_requested BOOLEAN NOT NULL DEFAULT 0,
+		last_observed_pr_state TEXT NOT NULL DEFAULT '',
+		last_lifecycle_event TEXT NOT NULL DEFAULT '',
+		last_lifecycle_prompt_at DATETIME,
+		last_lifecycle_session_id TEXT,
 		last_error TEXT,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
@@ -503,6 +516,9 @@ func (s *Store) initSchemaUpgrades() error {
 		return err
 	}
 	if err := s.addTaskCIRoundColumns(); err != nil {
+		return err
+	}
+	if err := s.addTaskPRAgentAutomationColumns(); err != nil {
 		return err
 	}
 	if err := s.addGitHubAuthFlowExpectationColumns(); err != nil {
@@ -784,6 +800,46 @@ func (s *Store) seedLegacyWorkspaceConnections() error {
 		ON CONFLICT(workspace_id) DO NOTHING`)
 	if err != nil {
 		return fmt.Errorf("seed legacy github workspace connections: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) addTaskPRAgentAutomationColumns() error {
+	migrations := map[string][]struct {
+		name string
+		sql  string
+	}{
+		"github_task_ci_options": {
+			{"prompt_on_review_requested", "ALTER TABLE github_task_ci_options ADD COLUMN prompt_on_review_requested BOOLEAN NOT NULL DEFAULT 0"},
+			{"prompt_on_merged", "ALTER TABLE github_task_ci_options ADD COLUMN prompt_on_merged BOOLEAN NOT NULL DEFAULT 0"},
+			{"prompt_on_closed", "ALTER TABLE github_task_ci_options ADD COLUMN prompt_on_closed BOOLEAN NOT NULL DEFAULT 0"},
+			{"review_reviewer_login", "ALTER TABLE github_task_ci_options ADD COLUMN review_reviewer_login TEXT NOT NULL DEFAULT ''"},
+			{"review_prompt_override", "ALTER TABLE github_task_ci_options ADD COLUMN review_prompt_override TEXT"},
+			{"merged_prompt_override", "ALTER TABLE github_task_ci_options ADD COLUMN merged_prompt_override TEXT"},
+			{"closed_prompt_override", "ALTER TABLE github_task_ci_options ADD COLUMN closed_prompt_override TEXT"},
+		},
+		"github_task_ci_pr_state": {
+			{"review_request_initialized", "ALTER TABLE github_task_ci_pr_state ADD COLUMN review_request_initialized BOOLEAN NOT NULL DEFAULT 0"},
+			{"last_review_requested", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_review_requested BOOLEAN NOT NULL DEFAULT 0"},
+			{"last_observed_pr_state", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_observed_pr_state TEXT NOT NULL DEFAULT ''"},
+			{"last_lifecycle_event", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_lifecycle_event TEXT NOT NULL DEFAULT ''"},
+			{"last_lifecycle_prompt_at", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_lifecycle_prompt_at DATETIME"},
+			{"last_lifecycle_session_id", "ALTER TABLE github_task_ci_pr_state ADD COLUMN last_lifecycle_session_id TEXT"},
+		},
+	}
+	for table, fields := range migrations {
+		columns, err := s.tableColumns(table)
+		if err != nil {
+			return fmt.Errorf("read %s columns: %w", table, err)
+		}
+		for _, field := range fields {
+			if _, exists := columns[field.name]; exists {
+				continue
+			}
+			if _, err := s.db.Exec(field.sql); err != nil {
+				return fmt.Errorf("add %s.%s: %w", table, field.name, err)
+			}
+		}
 	}
 	return nil
 }
@@ -1640,22 +1696,36 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 	}
 	autoFixSet, autoFixValue := boolPatchValue(patch.AutoFixEnabled)
 	autoMergeSet, autoMergeValue := boolPatchValue(patch.AutoMergeEnabled)
+	reviewSet, reviewValue := boolPatchValue(patch.PromptOnReviewRequested)
+	mergedSet, mergedValue := boolPatchValue(patch.PromptOnMerged)
+	closedSet, closedValue := boolPatchValue(patch.PromptOnClosed)
 	promptSet := patch.AutoFixPromptOverride != nil
-	var promptValue *string
-	if promptSet {
-		trimmed := strings.TrimSpace(*patch.AutoFixPromptOverride)
-		if trimmed != "" {
-			promptValue = &trimmed
-		}
-	}
+	promptValue := normalizedPromptOverride(patch.AutoFixPromptOverride)
+	reviewPromptSet := patch.ReviewPromptOverride != nil
+	mergedPromptSet := patch.MergedPromptOverride != nil
+	closedPromptSet := patch.ClosedPromptOverride != nil
+	reviewerLoginSet := patch.ReviewReviewerLogin != nil
 	if _, err := tx.ExecContext(writeCtx, `
 		UPDATE github_task_ci_options SET
 			auto_fix_enabled = CASE WHEN ? THEN ? ELSE auto_fix_enabled END,
 			auto_merge_enabled = CASE WHEN ? THEN ? ELSE auto_merge_enabled END,
 			auto_fix_prompt_override = CASE WHEN ? THEN ? ELSE auto_fix_prompt_override END,
+			prompt_on_review_requested = CASE WHEN ? THEN ? ELSE prompt_on_review_requested END,
+			prompt_on_merged = CASE WHEN ? THEN ? ELSE prompt_on_merged END,
+			prompt_on_closed = CASE WHEN ? THEN ? ELSE prompt_on_closed END,
+			review_reviewer_login = CASE WHEN ? THEN ? ELSE review_reviewer_login END,
+			review_prompt_override = CASE WHEN ? THEN ? ELSE review_prompt_override END,
+			merged_prompt_override = CASE WHEN ? THEN ? ELSE merged_prompt_override END,
+			closed_prompt_override = CASE WHEN ? THEN ? ELSE closed_prompt_override END,
 			updated_at = ?
 		WHERE task_id = ?`,
-		autoFixSet, autoFixValue, autoMergeSet, autoMergeValue, promptSet, promptValue, now, taskID); err != nil {
+		autoFixSet, autoFixValue, autoMergeSet, autoMergeValue, promptSet, promptValue,
+		reviewSet, reviewValue, mergedSet, mergedValue, closedSet, closedValue,
+		reviewerLoginSet, normalizedString(patch.ReviewReviewerLogin),
+		reviewPromptSet, normalizedPromptOverride(patch.ReviewPromptOverride),
+		mergedPromptSet, normalizedPromptOverride(patch.MergedPromptOverride),
+		closedPromptSet, normalizedPromptOverride(patch.ClosedPromptOverride),
+		now, taskID); err != nil {
 		return nil, err
 	}
 	if autoFixSet && autoFixValue && !previous.AutoFixEnabled {
@@ -1669,6 +1739,23 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 			    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
 			    auto_fix_exhausted_at = NULL,
 			    updated_at = ?
+			WHERE task_id = ?`, now, taskID); err != nil {
+			return nil, err
+		}
+	}
+	if reviewSet && reviewValue && !previous.PromptOnReviewRequested {
+		if _, err := tx.ExecContext(writeCtx, `
+			UPDATE github_task_ci_pr_state
+			SET review_request_initialized = 0, updated_at = ?
+			WHERE task_id = ?`, now, taskID); err != nil {
+			return nil, err
+		}
+	}
+	if (mergedSet && mergedValue && !previous.PromptOnMerged) ||
+		(closedSet && closedValue && !previous.PromptOnClosed) {
+		if _, err := tx.ExecContext(writeCtx, `
+			UPDATE github_task_ci_pr_state
+			SET last_observed_pr_state = '', updated_at = ?
 			WHERE task_id = ?`, now, taskID); err != nil {
 			return nil, err
 		}
@@ -1819,6 +1906,81 @@ func (s *Store) ClearTaskCIError(ctx context.Context, taskID, repositoryID strin
 	return err
 }
 
+// SetTaskPRReviewRequestState records a complete reviewer-request observation.
+func (s *Store) SetTaskPRReviewRequestState(
+	ctx context.Context, taskID, repositoryID string, prNumber int, requested bool,
+) error {
+	ctx = context.WithoutCancel(ctx)
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO github_task_ci_pr_state (
+			task_id, repository_id, pr_number, review_request_initialized,
+			last_review_requested, created_at, updated_at
+		) VALUES (?, ?, ?, 1, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+			review_request_initialized = 1,
+			last_review_requested = excluded.last_review_requested,
+			updated_at = excluded.updated_at`,
+		taskID, repositoryID, prNumber, requested, now, now)
+	return err
+}
+
+// SetTaskPRObservedState records the current PR state used to detect terminal entry.
+func (s *Store) SetTaskPRObservedState(
+	ctx context.Context, taskID, repositoryID string, prNumber int, state string,
+) error {
+	ctx = context.WithoutCancel(ctx)
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO github_task_ci_pr_state (
+			task_id, repository_id, pr_number, last_observed_pr_state, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+			last_observed_pr_state = excluded.last_observed_pr_state,
+			last_lifecycle_event = CASE
+				WHEN excluded.last_observed_pr_state IN ('merged', 'closed')
+				THEN github_task_ci_pr_state.last_lifecycle_event
+				ELSE '' END,
+			updated_at = excluded.updated_at`,
+		taskID, repositoryID, prNumber, state, now, now)
+	return err
+}
+
+// RecordTaskPRLifecyclePrompt stamps an accepted or durably queued lifecycle prompt.
+func (s *Store) RecordTaskPRLifecyclePrompt(ctx context.Context, prompt TaskPRLifecyclePrompt) error {
+	ctx = context.WithoutCancel(ctx)
+	when := prompt.PromptedAt
+	if when.IsZero() {
+		when = time.Now().UTC()
+	}
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO github_task_ci_pr_state (
+			task_id, repository_id, pr_number, review_request_initialized,
+			last_review_requested, last_observed_pr_state, last_lifecycle_event,
+			last_lifecycle_prompt_at, last_lifecycle_session_id, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, pr_number) DO UPDATE SET
+			review_request_initialized = CASE
+				WHEN excluded.last_lifecycle_event = 'review_requested' THEN 1
+				ELSE github_task_ci_pr_state.review_request_initialized END,
+			last_review_requested = CASE
+				WHEN excluded.last_lifecycle_event = 'review_requested' THEN excluded.last_review_requested
+				ELSE github_task_ci_pr_state.last_review_requested END,
+			last_observed_pr_state = CASE
+				WHEN excluded.last_observed_pr_state <> '' THEN excluded.last_observed_pr_state
+				ELSE github_task_ci_pr_state.last_observed_pr_state END,
+			last_lifecycle_event = excluded.last_lifecycle_event,
+			last_lifecycle_prompt_at = excluded.last_lifecycle_prompt_at,
+			last_lifecycle_session_id = excluded.last_lifecycle_session_id,
+			last_error = NULL,
+			updated_at = excluded.updated_at`,
+		prompt.TaskID, prompt.RepositoryID, prompt.PRNumber,
+		prompt.Event == "review_requested", prompt.ReviewRequested,
+		prompt.ObservedState, prompt.Event, when, nullableString(prompt.SessionID), now, now)
+	return err
+}
+
 func nullableString(value string) *string {
 	if value == "" {
 		return nil
@@ -1831,6 +1993,24 @@ func boolPatchValue(value *bool) (bool, bool) {
 		return false, false
 	}
 	return true, *value
+}
+
+func normalizedPromptOverride(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil
+	}
+	return &trimmed
+}
+
+func normalizedString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
 }
 
 // --- Review Watch operations ---

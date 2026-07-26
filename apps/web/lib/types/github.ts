@@ -268,6 +268,12 @@ export type TaskCIPRAutomationState = {
   auto_fix_exhausted_at: string | null;
   last_merge_signature: string;
   last_merge_attempt_at: string | null;
+  review_request_initialized?: boolean;
+  last_review_requested?: boolean;
+  last_observed_pr_state?: string;
+  last_lifecycle_event?: string;
+  last_lifecycle_prompt_at?: string | null;
+  last_lifecycle_session_id?: string | null;
   last_error: string | null;
   created_at: string;
   updated_at: string;
@@ -281,6 +287,16 @@ export type TaskCIAutomationOptions = {
   auto_fix_max_rounds?: number;
   effective_auto_fix_prompt: string;
   using_default_prompt: boolean;
+  prompt_on_review_requested?: boolean;
+  prompt_on_merged?: boolean;
+  prompt_on_closed?: boolean;
+  review_reviewer_login?: string;
+  review_prompt_override?: string | null;
+  merged_prompt_override?: string | null;
+  closed_prompt_override?: string | null;
+  effective_review_prompt?: string;
+  effective_merged_prompt?: string;
+  effective_closed_prompt?: string;
   updated_at: string;
   pr_states: TaskCIPRAutomationState[];
 };
@@ -289,6 +305,12 @@ export type TaskCIAutomationPatch = {
   auto_fix_enabled?: boolean;
   auto_merge_enabled?: boolean;
   auto_fix_prompt_override?: string | null;
+  prompt_on_review_requested?: boolean;
+  prompt_on_merged?: boolean;
+  prompt_on_closed?: boolean;
+  review_prompt_override?: string | null;
+  merged_prompt_override?: string | null;
+  closed_prompt_override?: string | null;
 };
 
 export type PRWatch = {

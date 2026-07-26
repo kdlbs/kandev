@@ -362,7 +362,7 @@ func (s *Server) registerTools() {
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 15
+		count += 17
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -532,6 +532,28 @@ If the child has no live execution, the call succeeds idempotently with status="
 			mcp.WithArray("message_types", mcp.Description("Optional message type filters (e.g. message, tool_call, error)"), mcp.Items(map[string]any{"type": "string"})),
 		),
 		s.wrapHandler("get_task_conversation_kandev", s.getTaskConversationHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema("get_task_pr_automation_kandev",
+			"Get the current task's GitHub PR automation settings, including agent prompts for re-review requests, merge, and close.",
+			json.RawMessage(`{"type":"object","properties":{}}`),
+		),
+		s.wrapHandler("get_task_pr_automation_kandev", s.getTaskPRAutomationHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_task_pr_automation_kandev",
+			mcp.WithDescription("Update this task's PR automation options (auto-fix, auto-merge, and lifecycle notifications)."),
+			mcp.WithBoolean("auto_fix_enabled", mcp.Description("Enable or disable auto-fix when CI checks fail")),
+			mcp.WithBoolean("auto_merge_enabled", mcp.Description("Enable or disable auto-merge when PR passes all checks")),
+			mcp.WithString("auto_fix_prompt_override", mcp.Description("Custom prompt for auto-fix (empty string clears the override)")),
+			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
+			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked PR becomes merged")),
+			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked PR becomes closed without merge")),
+			mcp.WithString("review_prompt_override", mcp.Description("Custom prompt for review-requested event (empty string clears the override)")),
+			mcp.WithString("merged_prompt_override", mcp.Description("Custom prompt for merged event (empty string clears the override)")),
+			mcp.WithString("closed_prompt_override", mcp.Description("Custom prompt for closed event (empty string clears the override)")),
+		),
+		s.wrapHandler("update_task_pr_automation_kandev", s.updateTaskPRAutomationHandler()),
 	)
 }
 

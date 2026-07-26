@@ -78,17 +78,31 @@ test.describe("PR CI automation options", () => {
       popover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
     await expect(popover.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
+    await expect(
+      popover.getByRole("switch", { name: "Prompt agent when review is requested" }),
+    ).toBeVisible();
+    await expect(
+      popover.getByRole("switch", { name: "Prompt agent when PR is merged" }),
+    ).toBeVisible();
+    await expect(
+      popover.getByRole("switch", { name: "Prompt agent when PR is closed" }),
+    ).toBeVisible();
 
     await popover.getByRole("switch", { name: "Auto-fix CI and address comments" }).click();
     await popover.getByRole("switch", { name: "Auto-merge when ready" }).click();
+    await popover.getByRole("switch", { name: "Prompt agent when PR is merged" }).click();
 
     await expect
       .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
-      .toMatchObject({ auto_fix_enabled: true, auto_merge_enabled: true });
+      .toMatchObject({
+        auto_fix_enabled: true,
+        auto_merge_enabled: true,
+        prompt_on_merged: true,
+      });
 
     await popover.getByLabel("Explain CI automation options").hover();
     await expect(testPage.getByText(/1 minute PR refresh loop/)).toBeVisible();
-    await expect(testPage.getByText(/snapshots what was handled/)).toBeVisible();
+    await expect(testPage.getByText(/notification switches prompt the task's agent/)).toBeVisible();
 
     await openPromptDialog(session);
     const promptDialog = testPage.getByRole("dialog", { name: "Auto-fix prompt" });

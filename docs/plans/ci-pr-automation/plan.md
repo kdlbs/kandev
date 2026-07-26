@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/ci-pr-automation.md
 created: 2026-06-18
-status: draft
+status: building
 ---
 
 # Implementation Plan: CI PR Automation Controls
@@ -9,6 +9,11 @@ status: draft
 ## Overview
 
 Add task-level PR automation options to the existing GitHub PR CI popover. The backend owns durable options, per-PR dedupe/checkpoints, default prompt resolution, and automation execution from existing PR watch events. The frontend adds API/state/hooks and renders controls plus a task-specific prompt editor in the existing desktop popover and mobile drawer. E2E verifies the visible controls and the automation behavior against mocked PR states.
+
+The 2026-07-23 extension adds agent prompts for re-review requested, merged,
+and closed transitions. Per ADR-0049, it expands this subsystem and its
+existing menu/MCP boundaries rather than introducing generic task-bound GitHub
+query automations.
 
 ---
 
@@ -293,6 +298,10 @@ Wave 4 (end-to-end and final validation):
 
 - [x] [task-06-e2e-ci-automation](task-06-e2e-ci-automation.md)
 - [ ] [task-07-qa-verify-and-docs](task-07-qa-verify-and-docs.md)
+
+Wave 5 (PR lifecycle agent prompts):
+
+- [x] [task-08-pr-lifecycle-agent-prompts](task-08-pr-lifecycle-agent-prompts.md)
 
 ---
 

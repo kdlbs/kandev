@@ -685,6 +685,32 @@ func TestStopTask_BackendErrorReturnsToolError(t *testing.T) {
 	assert.Contains(t, text.Text, "stop refused")
 }
 
+func TestTaskPRAutomationToolsBindCurrentTask(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "get_task_pr_automation_kandev", map[string]interface{}{})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPGetTaskPRAutomation, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"])
+
+	result = callTool(t, s, "update_task_pr_automation_kandev", map[string]interface{}{
+		"auto_fix_enabled":           true,
+		"prompt_on_review_requested": true,
+		"prompt_on_merged":           false,
+	})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPUpdateTaskPRAutomation, backend.lastAction)
+	payload, ok = backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"])
+	assert.Equal(t, true, payload["auto_fix_enabled"])
+	assert.Equal(t, true, payload["prompt_on_review_requested"])
+	assert.Equal(t, false, payload["prompt_on_merged"])
+}
+
 func TestGetTaskConversation_ForwardsToBackend(t *testing.T) {
 	backend := &testBackend{
 		response: map[string]interface{}{

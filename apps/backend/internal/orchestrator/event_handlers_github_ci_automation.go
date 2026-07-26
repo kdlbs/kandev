@@ -111,7 +111,61 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 		}
 		s.handleTaskPRCIAutoMerge(ctx, pr)
 	}
+	s.handleTaskPRLifecycleAutomation(ctx, pr, options)
 	return nil
+}
+
+func (s *Service) handleTaskPRLifecycleAutomation(ctx context.Context, pr *github.TaskPR, options *github.TaskCIOptionsResponse) {
+	if !options.PromptOnReviewRequested && !options.PromptOnMerged && !options.PromptOnClosed {
+		return
+	}
+	automation, ok := s.githubService.(taskPRAgentAutomationService)
+	if !ok {
+		return
+	}
+	if err := s.evalTaskPRLifecycle(ctx, pr, options, automation); err != nil {
+		s.logger.Debug("task PR lifecycle automation failed",
+			zap.String("task_id", pr.TaskID),
+			zap.String("repository_id", pr.RepositoryID),
+			zap.Int("pr_number", pr.PRNumber),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) evalTaskPRLifecycle(
+	ctx context.Context,
+	pr *github.TaskPR,
+	options *github.TaskCIOptionsResponse,
+	automation taskPRAgentAutomationService,
+) error {
+	checkpoint, err := automation.GetTaskCIPRState(ctx, pr.TaskID, pr.RepositoryID, pr.PRNumber)
+	if err != nil {
+		return err
+	}
+	reviewRequested, err := currentTaskPRReviewRequest(ctx, automation, pr, options)
+	if err != nil {
+		return err
+	}
+	decision := decideTaskPRAgentPrompt(pr.State, options, checkpoint, reviewRequested)
+	if decision.Event == "" {
+		return stampTaskPRAgentObservations(ctx, automation, pr, decision)
+	}
+	sessionID, err := s.dispatchTaskPRAgentPrompt(
+		ctx, pr, renderTaskPRAgentPrompt(decision.Prompt, pr), decision.Event,
+	)
+	if err != nil {
+		return fmt.Errorf("dispatch %s prompt: %w", decision.Event, err)
+	}
+	return automation.RecordTaskPRLifecyclePrompt(ctx, github.TaskPRLifecyclePrompt{
+		TaskID:          pr.TaskID,
+		RepositoryID:    pr.RepositoryID,
+		PRNumber:        pr.PRNumber,
+		Event:           decision.Event,
+		SessionID:       sessionID,
+		PromptedAt:      time.Now().UTC(),
+		ReviewRequested: decision.ReviewRequested != nil && *decision.ReviewRequested,
+		ObservedState:   decision.ObservedState,
+	})
 }
 
 func (s *Service) refreshTaskPRForCIAutomation(ctx context.Context, pr *github.TaskPR) (*github.TaskPR, bool, error) {

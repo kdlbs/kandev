@@ -25,11 +25,34 @@ func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch 
 	if s.store == nil {
 		return nil, errStoreUnavailable
 	}
+	if err := s.populateReviewReviewer(ctx, &patch); err != nil {
+		return nil, err
+	}
 	opts, err := s.store.UpdateTaskCIOptions(ctx, taskID, patch)
 	if err != nil {
 		return nil, err
 	}
 	return s.buildTaskCIOptionsResponse(ctx, opts)
+}
+
+func (s *Service) populateReviewReviewer(ctx context.Context, patch *TaskCIOptionsPatch) error {
+	if patch.PromptOnReviewRequested == nil {
+		return nil
+	}
+	if !*patch.PromptOnReviewRequested {
+		empty := ""
+		patch.ReviewReviewerLogin = &empty
+		return nil
+	}
+	if s.client == nil {
+		return fmt.Errorf("GitHub client is not available")
+	}
+	login, err := s.client.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return fmt.Errorf("resolve authenticated reviewer: %w", err)
+	}
+	patch.ReviewReviewerLogin = &login
+	return nil
 }
 
 // GetTaskCIPRState returns per-PR CI automation state, or nil.
@@ -38,6 +61,12 @@ func (s *Service) GetTaskCIPRState(ctx context.Context, taskID, repositoryID str
 		return nil, errStoreUnavailable
 	}
 	return s.store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
+}
+
+func (s *Service) GetTaskPRByRepoAndNumber(
+	ctx context.Context, taskID, repositoryID string, prNumber int,
+) (*TaskPR, error) {
+	return s.store.GetTaskPRByRepoAndNumber(ctx, taskID, repositoryID, prNumber)
 }
 
 // RecordTaskCIFixAttempt records an auto-fix attempt.
@@ -88,23 +117,112 @@ func (s *Service) ClearTaskCIError(ctx context.Context, taskID, repositoryID str
 	return s.store.ClearTaskCIError(ctx, taskID, repositoryID, prNumber)
 }
 
+func (s *Service) IsReviewRequestedForLogin(
+	ctx context.Context, owner, repo string, prNumber int, login string,
+) (bool, error) {
+	if s.client == nil {
+		return false, fmt.Errorf("GitHub client is not available")
+	}
+	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
+	if err != nil {
+		return false, err
+	}
+	for _, reviewer := range pr.RequestedReviewers {
+		if reviewer.Type == reviewerTypeUser && strings.EqualFold(reviewer.Login, login) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (s *Service) HasEnabledTaskPRAgentPrompts(ctx context.Context, taskID string) (bool, error) {
+	opts, err := s.store.GetTaskCIOptions(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	return opts.PromptOnReviewRequested || opts.PromptOnMerged || opts.PromptOnClosed, nil
+}
+
+func (s *Service) SetTaskPRReviewRequestState(
+	ctx context.Context, taskID, repositoryID string, prNumber int, requested bool,
+) error {
+	return s.store.SetTaskPRReviewRequestState(ctx, taskID, repositoryID, prNumber, requested)
+}
+
+func (s *Service) SetTaskPRObservedState(
+	ctx context.Context, taskID, repositoryID string, prNumber int, state string,
+) error {
+	return s.store.SetTaskPRObservedState(ctx, taskID, repositoryID, prNumber, state)
+}
+
+func (s *Service) RecordTaskPRLifecyclePrompt(ctx context.Context, prompt TaskPRLifecyclePrompt) error {
+	return s.store.RecordTaskPRLifecyclePrompt(ctx, prompt)
+}
+
+// ShouldHoldTerminalPRWatch keeps a terminal PR attached until its subscribed
+// lifecycle prompt has been accepted or durably queued.
+func (s *Service) ShouldHoldTerminalPRWatch(
+	ctx context.Context, taskID, repositoryID string, prNumber int, state string,
+) (bool, error) {
+	opts, err := s.store.GetTaskCIOptions(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	subscribed := (state == prStateMerged && opts.PromptOnMerged) ||
+		(state == prStateClosed && opts.PromptOnClosed)
+	if !subscribed {
+		return false, nil
+	}
+	checkpoint, err := s.store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
+	if err != nil {
+		return false, err
+	}
+	return checkpoint == nil || checkpoint.LastObservedPRState != state, nil
+}
+
 func (s *Service) buildTaskCIOptionsResponse(ctx context.Context, opts *TaskCIOptions) (*TaskCIOptionsResponse, error) {
 	prStates, err := s.taskCIPRStates(ctx, opts.TaskID)
 	if err != nil {
 		return nil, err
 	}
 	effectivePrompt, usingDefault := s.effectiveCIAutoFixPrompt(ctx, opts)
+	reviewPrompt := s.effectiveTaskPRPrompt(ctx, opts.ReviewPromptOverride, "pr-review-requested")
+	mergedPrompt := s.effectiveTaskPRPrompt(ctx, opts.MergedPromptOverride, "pr-merged-final")
+	closedPrompt := s.effectiveTaskPRPrompt(ctx, opts.ClosedPromptOverride, "pr-closed-final")
 	return &TaskCIOptionsResponse{
-		TaskID:                 opts.TaskID,
-		AutoFixEnabled:         opts.AutoFixEnabled,
-		AutoMergeEnabled:       opts.AutoMergeEnabled,
-		AutoFixPromptOverride:  opts.AutoFixPromptOverride,
-		AutoFixMaxRounds:       TaskCIAutoFixMaxRounds,
-		EffectiveAutoFixPrompt: effectivePrompt,
-		UsingDefaultPrompt:     usingDefault,
-		UpdatedAt:              opts.UpdatedAt,
-		PRStates:               prStates,
+		TaskID:                  opts.TaskID,
+		AutoFixEnabled:          opts.AutoFixEnabled,
+		AutoMergeEnabled:        opts.AutoMergeEnabled,
+		AutoFixPromptOverride:   opts.AutoFixPromptOverride,
+		AutoFixMaxRounds:        TaskCIAutoFixMaxRounds,
+		EffectiveAutoFixPrompt:  effectivePrompt,
+		UsingDefaultPrompt:      usingDefault,
+		PromptOnReviewRequested: opts.PromptOnReviewRequested,
+		PromptOnMerged:          opts.PromptOnMerged,
+		PromptOnClosed:          opts.PromptOnClosed,
+		ReviewReviewerLogin:     opts.ReviewReviewerLogin,
+		ReviewPromptOverride:    opts.ReviewPromptOverride,
+		MergedPromptOverride:    opts.MergedPromptOverride,
+		ClosedPromptOverride:    opts.ClosedPromptOverride,
+		EffectiveReviewPrompt:   reviewPrompt,
+		EffectiveMergedPrompt:   mergedPrompt,
+		EffectiveClosedPrompt:   closedPrompt,
+		UpdatedAt:               opts.UpdatedAt,
+		PRStates:                prStates,
 	}, nil
+}
+
+func (s *Service) effectiveTaskPRPrompt(ctx context.Context, override *string, name string) string {
+	if override != nil {
+		if trimmed := strings.TrimSpace(*override); trimmed != "" {
+			return trimmed
+		}
+	}
+	fallback := promptcfg.Get(name)
+	if resolver := s.getPromptResolver(); resolver != nil {
+		return resolver.ResolvePromptContent(ctx, name, fallback)
+	}
+	return fallback
 }
 
 func (s *Service) effectiveCIAutoFixPrompt(ctx context.Context, opts *TaskCIOptions) (string, bool) {

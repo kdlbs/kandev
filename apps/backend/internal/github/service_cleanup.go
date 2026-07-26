@@ -306,6 +306,17 @@ func (s *Service) shouldDeleteReviewTaskWithClient(
 	if policy == CleanupPolicyAlways || rpt.TaskID == "" || s.taskSessionChecker == nil {
 		return true, reason
 	}
+	if s.store != nil {
+		enabled, err := s.HasEnabledTaskPRAgentPrompts(ctx, rpt.TaskID)
+		if err != nil {
+			s.logger.Debug("failed to check task PR agent prompt options",
+				zap.String("task_id", rpt.TaskID), zap.Error(err))
+			return false, ""
+		}
+		if enabled {
+			return false, ""
+		}
+	}
 	hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, rpt.TaskID)
 	if err != nil {
 		s.logger.Debug("failed to check task user messages",

@@ -1,24 +1,44 @@
 ---
-status: draft
+status: building
 created: 2026-06-18
 owner: tbd
 ---
 
-# CI PR Automation Controls
+# Task PR Automation Controls
 
 ## Why
 
-Users can already see pull request CI/review status above the task chat input, but acting on a red PR still requires repeatedly noticing the failure, prompting the agent, and deciding when it is safe to merge. Users need per-task controls that let Kandev keep a watched PR moving: ask the agent to fix new CI/review feedback, and merge only when the PR is ready.
+Users can already see pull request CI/review status above the task chat input,
+but acting on a red PR still requires repeatedly noticing the failure, prompting
+the agent, and deciding when it is safe to merge. A review task can also go
+idle after submitting a review and miss a later re-review request, merge, or
+close. Users and task agents need one task-level control plane that keeps a
+linked PR moving throughout its lifecycle.
+
+Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-automation.md).
 
 ## What
 
-- The PR CI popover above the chat input shows two task-level automation controls:
+- The PR CI popover above the chat input shows five task-level automation controls:
   - `Auto-fix CI & address comments`
   - `Auto-merge when ready`
+  - `Prompt agent when review is requested`
+  - `Prompt agent when PR is merged`
+  - `Prompt agent when PR is closed`
 - The automation section includes an info icon or equivalent help affordance that explains what each control watches, how often Kandev checks watched PRs, how feedback snapshots prevent duplicate prompts, and how auto-merge decides readiness.
 - The same controls are available anywhere the task PR CI popover is rendered, including the normal chat input status bar and passthrough toolbar surfaces.
 - `Auto-fix CI & address comments` causes Kandev to send or queue an agent prompt when a linked PR gets actionable CI or review feedback.
 - `Auto-merge when ready` causes Kandev to merge a linked PR only when the PR is open and not a draft, checks are passing, review requirements are satisfied, unresolved review threads are cleared, and the PR is cleanly mergeable.
+- `Prompt agent when review is requested` silently baselines the authenticated
+  GitHub user's current request state, then sends or queues a task prompt on
+  each later false-to-true request transition. Observing the request clear
+  rearms the next transition.
+- `Prompt agent when PR is merged` and `Prompt agent when PR is closed` send or
+  queue one prompt when the linked PR enters that terminal state. An observed
+  open state rearms a later close.
+- The three lifecycle prompts have built-in defaults and optional task-level
+  overrides. They tell the agent to fetch authoritative GitHub state rather
+  than trust a possibly stale or deleted local branch.
 - The auto-fix prompt is customizable per task from the PR CI popover.
 - The per-task prompt editor is opened from an edit button in the automation section.
 - The per-task prompt editor links to Settings > Prompts so the user can edit the default `ci-auto-fix` prompt.
@@ -27,9 +47,13 @@ Users can already see pull request CI/review status above the task chat input, b
 - If a task has no custom auto-fix prompt, Kandev uses a built-in default prompt named `ci-auto-fix`.
 - The default `ci-auto-fix` prompt is editable from Settings > Prompts like other built-in prompts.
 - Emptying or resetting the task prompt override returns the task to the default `ci-auto-fix` prompt.
-- For tasks with multiple linked PRs, the controls are task-level and apply to every open linked PR. Dedupe, last-attempt, and error state are tracked per linked PR.
+- For tasks with multiple linked PRs, the controls are task-level and apply to
+  every linked PR. Dedupe, last-attempt, review-request, and terminal state are
+  tracked per linked PR.
 - Kandev checks watched PRs through the existing lightweight PR watch poller, which runs once per minute. Automation wakeups sync the latest lightweight PR state before evaluating gates. When auto-fix is enabled, Kandev fetches full PR feedback so failing checks, requested changes, unresolved threads, and human PR conversation comments can trigger deduped prompts even when the persisted lightweight row was stale. Auto-fix waits until all PR checks have finished before sending or queueing a prompt, so the agent receives the final check set and current comments in one pass. Bot-authored PR conversation comments without failed checks or unresolved review threads are treated as non-actionable status chatter and do not send an agent prompt.
-- Saving CI automation options while `Auto-fix CI & address comments` or `Auto-merge when ready` is enabled immediately evaluates the task's current linked PRs instead of waiting for the next PR watch poll. This includes prompt edits made while automation is already enabled; unchanged feedback is still deduped by the per-PR checkpoint.
+- Saving PR automation options while any option is enabled immediately
+  evaluates the task's current linked PRs instead of waiting for the next PR
+  watch poll. Prompt edits do not reset unchanged checkpoints.
 - Every auto-fix attempt records the latest actionable feedback snapshot it used. Later fix rounds include only new or materially changed CI/review feedback since the last recorded round, with enough summary context for the agent to understand the PR. If a previously recorded feedback snapshot becomes non-actionable after checks pass or review threads are cleared, Kandev can refresh the checkpoint without sending a prompt or counting another round.
 - The first auto-fix round targets the task's active primary session when one exists. Once a PR has an accepted auto-fix round, later auto-fix prompts for that task/repository/PR continue targeting the recorded `last_fix_session_id`. A newer active agent session for the same task must not steal auto-fix messages. Disabling and re-enabling auto-fix resets this binding with the rest of the per-PR auto-fix state.
 - Automation must not repeatedly prompt for the same failure/comment snapshot or repeatedly retry the same failed merge attempt on every poll.
@@ -48,6 +72,14 @@ Users can already see pull request CI/review status above the task chat input, b
 - `auto_fix_enabled` boolean, default `false`.
 - `auto_merge_enabled` boolean, default `false`.
 - `auto_fix_prompt_override` string nullable. `NULL` or empty means use the default `ci-auto-fix` prompt.
+- `prompt_on_review_requested` boolean, default `false`.
+- `prompt_on_merged` boolean, default `false`.
+- `prompt_on_closed` boolean, default `false`.
+- `review_reviewer_login` string, default `""`. Set from the authenticated
+  GitHub user when review-requested prompting is enabled.
+- `review_prompt_override`, `merged_prompt_override`, and
+  `closed_prompt_override` strings nullable. Empty means use the corresponding
+  built-in prompt.
 - `created_at` timestamp.
 - `updated_at` timestamp.
 
@@ -66,6 +98,14 @@ Users can already see pull request CI/review status above the task chat input, b
 - `last_merge_signature` string nullable. Deterministic hash of the last readiness state used for a merge attempt.
 - `last_merge_attempt_at` timestamp nullable.
 - `last_error` string nullable. Latest user-visible automation error for this task/PR pair.
+- `review_request_initialized` boolean, default `false`.
+- `last_review_requested` boolean, default `false`.
+- `last_observed_pr_state` string, default `""`. Records the open/closed/merged
+  observation used to detect terminal entry and rearm close.
+- `last_lifecycle_event` string, default `""`. The latest accepted lifecycle
+  prompt (`review_requested`, `merged`, or `closed`).
+- `last_lifecycle_prompt_at` timestamp nullable.
+- `last_lifecycle_session_id` string nullable.
 - `created_at` timestamp.
 - `updated_at` timestamp.
 
@@ -93,7 +133,14 @@ Response:
   "task_id": "task-123",
   "auto_fix_enabled": false,
   "auto_merge_enabled": false,
+  "prompt_on_review_requested": false,
+  "prompt_on_merged": false,
+  "prompt_on_closed": false,
+  "review_reviewer_login": "",
   "auto_fix_prompt_override": null,
+  "review_prompt_override": null,
+  "merged_prompt_override": null,
+  "closed_prompt_override": null,
   "auto_fix_max_rounds": 10,
   "effective_auto_fix_prompt": "Fix the PR feedback...",
   "using_default_prompt": true,
@@ -122,11 +169,25 @@ Request fields are partial:
 {
   "auto_fix_enabled": true,
   "auto_merge_enabled": false,
+  "prompt_on_review_requested": true,
+  "prompt_on_merged": true,
+  "prompt_on_closed": true,
   "auto_fix_prompt_override": "Use this task-specific prompt..."
 }
 ```
 
 `auto_fix_prompt_override: null` or an empty string clears the task override. The response shape matches `GET`.
+
+Lifecycle prompt override fields follow the same clear/reset semantics.
+
+Task-mode MCP exposes current-task-only tools:
+
+- `get_task_pr_automation_kandev`
+- `update_task_pr_automation_kandev`
+
+The MCP connection supplies the task ID. Update is partial and accepts all PR
+automation options including auto-fix, auto-merge, lifecycle booleans, and
+prompt overrides; it cannot target another task.
 
 Optional websocket notification:
 
@@ -142,6 +203,27 @@ Task CI automation options:
 - `auto_fix_enabled`: Kandev evaluates actionable PR feedback immediately when enabled, when CI automation options are saved while it remains enabled, and on later PR watch events.
 - `auto_merge_enabled`: Kandev evaluates PR merge readiness immediately when enabled, when CI automation options are saved while it remains enabled, and on later PR watch events.
 - `both_enabled`: Kandev evaluates both paths. Auto-fix does not merge; auto-merge merges only after readiness conditions are satisfied.
+- `review_requested_prompt_enabled`: the first complete observation is a quiet
+  baseline; later false-to-true transitions for `review_reviewer_login`
+  prompt once, and a false observation rearms.
+- `terminal_prompt_enabled`: merged or closed entry prompts once after the
+  prompt is accepted or durably queued. Stable terminal state is quiet.
+- Enabling a lifecycle option resets only the checkpoint needed to establish
+  that option's documented baseline/entry semantics.
+
+Lifecycle prompt cycle for one task/PR:
+
+1. The existing PR watch poll synchronizes the linked PR and emits a lightweight
+   lifecycle evaluation tick for tasks with lifecycle prompt options.
+2. Re-review evaluation verifies the authenticated login only when GitHub
+   reports a pending review request and the stored boolean cannot short-circuit.
+3. Kandev compares the current fact with the per-PR checkpoint.
+4. A qualifying edge renders the task override or built-in prompt and calls the
+   shared task prompt dispatcher with a task/repository/PR/event coalesce key.
+5. Kandev stamps the checkpoint only after the prompt is accepted or durably
+   queued. A failed attempt remains eligible on a later poll.
+6. A subscribed terminal watch remains attached to the PR until the terminal
+   prompt is accepted; legacy reset-to-search behavior resumes afterward.
 
 Auto-fix cycle for one task/PR:
 
@@ -194,6 +276,9 @@ Auto-merge cycle for one task/PR:
 | GitHub merge fails                                                     | Auto-merge records the error and does not retry until the readiness signature changes.                                                                                                                                                                          |
 | Default prompt row is missing                                          | Backend falls back to the embedded `ci-auto-fix.md` content.                                                                                                                                                                                                    |
 | Kandev restarts while an automation prompt is queued                   | Queued message and automation options/checkpoints persist according to the existing message queue and new CI automation tables.                                                                                                                                 |
+| Re-review identity lookup fails                                        | Preserve the prior request checkpoint, record the error, and retry on a later PR lifecycle tick. |
+| Lifecycle prompt delivery fails                                        | Do not stamp the edge; retry on a later lifecycle tick. |
+| PR is merged/closed before the next cleanup cycle                       | Enabled lifecycle prompt options retain `cleanup_policy=auto` review tasks; `always` remains an explicit deletion override. |
 
 ## Persistence guarantees
 
@@ -205,7 +290,7 @@ Auto-merge cycle for one task/PR:
 
 ## Scenarios
 
-- **GIVEN** a task with one open linked PR, **WHEN** the user opens the CI popover above the chat input, **THEN** the popover shows the current CI/review summary and the two automation controls.
+- **GIVEN** a task with one open linked PR, **WHEN** the user opens the CI popover above the chat input, **THEN** the popover shows the current CI/review summary and all five automation controls.
 - **GIVEN** a user is viewing the CI popover automation controls, **WHEN** they activate the info icon, **THEN** they see help text explaining that Kandev uses the existing 1-minute PR watch checks, fetches full feedback only for candidate PRs, snapshots each auto-fix round, and merges only when readiness gates pass.
 - **GIVEN** a task with one open linked PR, **WHEN** the user enables `Auto-fix CI & address comments`, **THEN** the setting persists and remains enabled after page reload.
 - **GIVEN** a task with one open linked PR, **WHEN** the user enables `Auto-merge when ready`, **THEN** the setting persists and remains enabled after page reload.
@@ -231,6 +316,20 @@ Auto-merge cycle for one task/PR:
 - **GIVEN** auto-merge is enabled but the PR is a draft or has requested changes, pending required review, failing checks, unresolved threads, or dirty mergeability, **WHEN** the PR watch poll observes the state, **THEN** Kandev does not merge.
 - **GIVEN** auto-merge attempted a ready-state merge and GitHub rejected it, **WHEN** the same ready state is observed again, **THEN** Kandev does not retry until the readiness signature changes.
 - **GIVEN** a task has two open linked PRs, **WHEN** the user enables either automation control, **THEN** both PRs are eligible for automation and each PR records its own last-fix and last-merge state.
+- **GIVEN** re-review prompting is enabled while the authenticated reviewer is
+  already requested, **WHEN** Kandev first evaluates the PR, **THEN** it records
+  a quiet baseline and does not prompt.
+- **GIVEN** that request later clears and is requested again, **WHEN** the PR
+  watch observes false then true, **THEN** Kandev sends or queues exactly one
+  re-review prompt.
+- **GIVEN** a merged or closed prompt is enabled, **WHEN** the linked PR enters
+  that state, **THEN** Kandev sends or queues one terminal prompt and does not
+  repeat it while the state remains stable.
+- **GIVEN** a closed PR reopens and closes again, **WHEN** both transitions are
+  observed, **THEN** the second close produces a new prompt.
+- **GIVEN** a task agent calls `update_task_pr_automation_kandev`, **WHEN** it
+  enables the three lifecycle options, **THEN** the same options appear enabled
+  in the related-PR Automation menu.
 - **GIVEN** the user is on mobile, **WHEN** they open the PR CI drawer, **THEN** the automation controls and prompt editor are usable without text overflow or overlapping controls.
 - **GIVEN** the task is shown in a passthrough toolbar surface, **WHEN** the user opens the PR CI popover/drawer, **THEN** the same automation controls are available.
 
@@ -241,7 +340,8 @@ Auto-merge cycle for one task/PR:
 - Per-PR automation toggles in the first version.
 - Per-user automation preferences.
 - Merge-method selection UI. Auto-merge uses the existing backend default merge-method selection.
-- Creating a new task or new task session when no promptable session exists.
+- Team-level review-request matching. The first version tracks the
+  authenticated user-level request.
 - Streaming CI logs into the chat or popover.
 - Editing GitHub branch protection, review rules, or workflow files directly from the automation controls.
 - GitLab merge request automation.
