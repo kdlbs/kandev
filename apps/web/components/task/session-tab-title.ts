@@ -44,8 +44,8 @@ export function resolveSessionTabTitle(args: ResolveSessionTabTitleArgs): string
   if (args.customName) return args.customName;
   const liveModelId = args.activeModelId || args.currentModelId;
   return (
-    args.agentLabel ??
     resolveModelTitle(args, liveModelId) ??
+    args.agentLabel ??
     resolveModelTitle(args, args.snapshotModel)
   );
 }
