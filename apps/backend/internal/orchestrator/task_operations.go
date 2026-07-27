@@ -1793,11 +1793,11 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 	// WAITING_FOR_INPUT — that's what waitForSessionReady polls for. No flag
 	// tracking required here.
 	launchCtx := context.WithoutCancel(ctx)
-	dbTask, err := s.repo.GetTask(launchCtx, session.TaskID)
+	isOfficeTask, err := s.lookupOfficeTask(launchCtx, session.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to determine office task status: %w", err)
 	}
-	if dbTask != nil && dbTask.IsFromOffice {
+	if isOfficeTask {
 		return errOfficePreparedResumeRequiresScheduler
 	}
 	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
