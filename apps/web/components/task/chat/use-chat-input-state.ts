@@ -248,16 +248,21 @@ function useAttachments(sessionId: string | null) {
         console.warn(`Maximum ${MAX_FILES} files allowed`);
         return;
       }
-      const currentTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
+      let acceptedCount = attachments.length;
+      let acceptedTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
       for (const file of files) {
-        if (attachments.length >= MAX_FILES) break;
+        if (acceptedCount >= MAX_FILES) break;
         if (rejectOversizedFile(file)) continue;
-        if (currentTotalSize + file.size > MAX_TOTAL_SIZE) {
+        if (acceptedTotalSize + file.size > MAX_TOTAL_SIZE) {
           console.warn("Total attachment size limit exceeded");
           break;
         }
         const attachment = await processFile(file);
-        if (attachment) setAttachments((prev) => [...prev, attachment]);
+        if (attachment) {
+          acceptedCount += 1;
+          acceptedTotalSize += attachment.size;
+          setAttachments((prev) => [...prev, attachment]);
+        }
       }
     },
     [attachments, rejectOversizedFile, warnUnreadablePastedImage],

@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { ToastProvider } from "@/components/toast-provider";
 import { useChatInputState } from "./use-chat-input-state";
-import { MAX_FILE_SIZE } from "./file-attachment";
+import { MAX_FILES, MAX_FILE_SIZE, MAX_TOTAL_SIZE } from "./file-attachment";
 import type { TipTapInputHandle } from "./tiptap-input";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
@@ -56,6 +56,12 @@ function deferred<T>() {
     resolve = res;
   });
   return { promise, resolve };
+}
+
+function fileWithSize(name: string, size: number) {
+  const file = new File(["attachment"], name, { type: "text/plain" });
+  Object.defineProperty(file, "size", { value: size });
+  return file;
 }
 
 beforeEach(() => {
@@ -173,6 +179,35 @@ describe("useChatInputState", () => {
 });
 
 describe("useChatInputState attachment feedback", () => {
+  it("accepts no more than the maximum number of files from one batch", async () => {
+    const { result } = renderInputState(vi.fn());
+    const files = Array.from({ length: MAX_FILES + 1 }, (_, index) =>
+      fileWithSize(`attachment-${index}.txt`, 1),
+    );
+
+    await act(async () => {
+      await result.current.addFiles(files);
+    });
+
+    expect(result.current.attachments).toHaveLength(MAX_FILES);
+  });
+
+  it("accepts only files that fit within the total size limit from one batch", async () => {
+    const { result } = renderInputState(vi.fn());
+    const fileSize = MAX_TOTAL_SIZE / 3 + 1;
+    const files = [
+      fileWithSize("first.txt", fileSize),
+      fileWithSize("second.txt", fileSize),
+      fileWithSize("third.txt", fileSize),
+    ];
+
+    await act(async () => {
+      await result.current.addFiles(files);
+    });
+
+    expect(result.current.attachments).toHaveLength(2);
+  });
+
   it("warns when a pasted attachment exceeds the file size limit", async () => {
     const { result } = renderInputState(vi.fn());
     const oversizedFile = new File(["video"], "recording.mov", { type: "video/quicktime" });

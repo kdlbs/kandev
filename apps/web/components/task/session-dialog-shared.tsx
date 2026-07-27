@@ -22,7 +22,10 @@ import {
   type FileAttachment,
 } from "./chat/file-attachment";
 import { readClipboardAttachments } from "./chat/clipboard-attachments";
-import { useAttachmentFileFeedback } from "./chat/use-attachment-file-feedback";
+import {
+  useAttachmentFileFeedback,
+  useUnreadablePastedImageFeedback,
+} from "./chat/use-attachment-file-feedback";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 
 export function EnvironmentBadges({
@@ -153,6 +156,7 @@ export function useDialogAttachments(disabled: boolean) {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const rejectOversizedFile = useAttachmentFileFeedback();
+  const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const addFiles = useCallback(
@@ -176,13 +180,16 @@ export function useDialogAttachments(disabled: boolean) {
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (disabled) return;
-      const { files } = readClipboardAttachments(e.clipboardData);
+      const { files, issue } = readClipboardAttachments(e.clipboardData);
       if (files.length > 0) {
         e.preventDefault();
         void addFiles(files);
+      } else if (issue === "unreadable-image") {
+        e.preventDefault();
+        warnUnreadablePastedImage();
       }
     },
-    [disabled, addFiles],
+    [disabled, addFiles, warnUnreadablePastedImage],
   );
 
   const handleDragOver = useCallback(
