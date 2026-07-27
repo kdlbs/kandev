@@ -159,19 +159,28 @@ func TestExecuteQueuedMessage_RequeuesUsageLimitForManualResume(t *testing.T) {
 		Content:   "continue the interrupted task",
 		QueuedBy:  messagequeue.QueuedByUser,
 	}
+	if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "later prompt", "", messagequeue.QueuedByUser, false, nil); err != nil {
+		t.Fatalf("queue later prompt: %v", err)
+	}
 
 	svc.markQueuedDispatchInFlight("s1", queuedMsg.ID)
 	svc.executeQueuedMessage("s1", queuedMsg)
 
 	select {
 	case <-firstPromptDone:
-	case <-time.After(3 * time.Second):
-		t.Fatal("first prompt did not reach the agent")
+	default:
+		t.Fatal("first prompt did not reach the agent synchronously")
 	}
 
 	queued := svc.messageQueue.GetStatus(ctx, "s1")
-	if queued.Count != 1 {
-		t.Fatalf("expected the usage-limited prompt to wait for manual resume, got %d queued messages", queued.Count)
+	if queued.Count != 2 {
+		t.Fatalf("expected the usage-limited prompt and later prompt to remain queued, got %d messages", queued.Count)
+	}
+	if queued.Entries[0].Content != queuedMsg.Content {
+		t.Fatalf("expected the usage-limited prompt to retain FIFO priority, got %+v", queued.Entries)
+	}
+	if queued.Entries[0].QueuedBy != messagequeue.QueuedByUser {
+		t.Fatalf("expected the usage-limited prompt to retain its queued_by identity, got %q", queued.Entries[0].QueuedBy)
 	}
 	if queued.Entries[0].Metadata[metaKeyUserMessageRecorded] != true {
 		t.Fatalf("expected retried prompt to skip creating a duplicate user message, metadata=%+v", queued.Entries[0].Metadata)
@@ -195,8 +204,9 @@ func TestExecuteQueuedMessage_RequeuesUsageLimitForManualResume(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("manual resume did not dispatch the preserved prompt")
 	}
-	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
-		t.Fatalf("expected preserved prompt to drain after manual resume, got %d queued messages", got)
+	queued = svc.messageQueue.GetStatus(ctx, "s1")
+	if queued.Count != 1 || queued.Entries[0].Content != "later prompt" {
+		t.Fatalf("expected only the later prompt to remain after manual resume, got %+v", queued.Entries)
 	}
 	if len(messages.userMessages) != 1 {
 		t.Fatalf("expected manual resume to reuse the existing user message, got %d", len(messages.userMessages))

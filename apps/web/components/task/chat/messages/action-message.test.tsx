@@ -24,6 +24,8 @@ afterEach(() => {
 
 const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
+const RECOVERY_MESSAGE = "Agent encountered an error";
+const RESUME_TEST_ID = "recovery-resume-button";
 
 function retryMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -57,6 +59,31 @@ function retryMessage(overrides: Partial<Message> = {}): Message {
     },
     ...overrides,
   } as Message;
+}
+
+function recoveryMessage(withParams = false): Message {
+  return retryMessage({
+    content: RECOVERY_MESSAGE,
+    metadata: {
+      variant: "error",
+      recovery_actions: true,
+      actions: [
+        {
+          type: "ws_request",
+          label: "Resume session",
+          test_id: RESUME_TEST_ID,
+          ...(withParams
+            ? {
+                params: {
+                  method: "session.recover",
+                  payload: { task_id: "task-1", session_id: "sess-1" },
+                },
+              }
+            : {}),
+        },
+      ],
+    },
+  } as Partial<Message>);
 }
 
 /** ActionMessage reads session state from the store (keyed by comment.session_id),
@@ -108,36 +135,26 @@ describe("ActionMessage — transient retry (warning variant)", () => {
   });
 
   it("renders the red variant for a non-warning recovery banner", () => {
-    const errorMsg = retryMessage({
-      content: "Agent encountered an error",
-      metadata: {
-        variant: "error",
-        recovery_actions: true,
-        actions: [
-          { type: "ws_request", label: "Resume session", test_id: "recovery-resume-button" },
-        ],
-      },
-    } as Partial<Message>);
+    const errorMsg = recoveryMessage();
     renderAction(errorMsg, "WAITING_FOR_INPUT", "agent process exited unexpectedly");
     const text = screen.getByText(/Agent encountered an error/i);
     expect(text.className).toContain("text-red-600");
     expect(text.className).not.toContain("text-amber-600");
   });
 
-  it("hides a completed recovery card after resume clears the session error", () => {
-    const errorMsg = retryMessage({
-      content: "Agent encountered an error",
-      metadata: {
-        variant: "error",
-        recovery_actions: true,
-        actions: [
-          { type: "ws_request", label: "Resume session", test_id: "recovery-resume-button" },
-        ],
-      },
-    } as Partial<Message>);
+  it("keeps a recovery card visible while the session is waiting, even without an error_message", () => {
+    const errorMsg = recoveryMessage();
 
-    const { container } = renderAction(errorMsg, "WAITING_FOR_INPUT", "");
-    expect(container.firstChild).toBeNull();
+    renderAction(errorMsg, "WAITING_FOR_INPUT", "");
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
+  it("hides a recovery card after its Resume request succeeds", async () => {
+    const errorMsg = recoveryMessage(true);
+
+    renderAction(errorMsg, "WAITING_FOR_INPUT", "");
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+    await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
   });
 });
 

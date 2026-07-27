@@ -47,17 +47,8 @@ type ActionMeta = {
   missing_branch?: string;
 };
 
-function isRecoveryResolved(
-  state: TaskSessionState | undefined,
-  sessionError: string | undefined,
-  hasRecoveryActions: boolean,
-) {
-  return (
-    state === "RUNNING" ||
-    state === "STARTING" ||
-    state === "COMPLETED" ||
-    (hasRecoveryActions && state === "WAITING_FOR_INPUT" && !sessionError)
-  );
+function isSessionActive(state?: TaskSessionState) {
+  return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
 }
 
 export const ActionMessage = memo(function ActionMessage({ comment }: { comment: Message }) {
@@ -74,14 +65,14 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       ? (state.taskSessions.items[comment.session_id]?.error_message as string | undefined)
       : undefined,
   );
+  const [recoveryRequested, setRecoveryRequested] = useState(false);
   const metadata = comment.metadata as ActionMeta | undefined;
   const isWarning = metadata?.variant === "warning";
   const message = comment.content || "An error occurred";
 
-  // Hide once recovery has succeeded. A resumed session settles in
-  // WAITING_FOR_INPUT, so use its cleared error_message as the completion
-  // signal instead of leaving the persisted recovery card on screen.
-  if (isRecoveryResolved(sessionState, sessionError, metadata?.recovery_actions === true))
+  // A waiting session can still need recovery, so only hide this persisted
+  // card after its own Resume request is acknowledged (or the session starts).
+  if (isSessionActive(sessionState) || (metadata?.recovery_actions && recoveryRequested))
     return null;
 
   if (metadata?.failure_kind === "missing_pr_branch") {
@@ -110,7 +101,13 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
           <div className={cn("text-xs break-words", textClass)}>{message}</div>
           <ActionMessageDetails metadata={metadata} />
           {metadata?.actions && metadata.actions.length > 0 && (
-            <ActionButtons actions={metadata.actions} taskId={comment.task_id} />
+            <ActionButtons
+              actions={metadata.actions}
+              taskId={comment.task_id}
+              onRecoveryRequested={
+                metadata.recovery_actions ? () => setRecoveryRequested(true) : undefined
+              }
+            />
           )}
         </div>
       </div>
@@ -226,11 +223,24 @@ function ActionMessageDetails({
   );
 }
 
-function ActionButtons({ actions, taskId }: { actions: MessageAction[]; taskId?: string }) {
+function ActionButtons({
+  actions,
+  taskId,
+  onRecoveryRequested,
+}: {
+  actions: MessageAction[];
+  taskId?: string;
+  onRecoveryRequested?: () => void;
+}) {
   return (
     <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
       {actions.map((action, i) => (
-        <ActionButton key={action.test_id ?? i} action={action} messageTaskId={taskId} />
+        <ActionButton
+          key={action.test_id ?? i}
+          action={action}
+          messageTaskId={taskId}
+          onCompleted={onRecoveryRequested}
+        />
       ))}
     </div>
   );
@@ -239,9 +249,11 @@ function ActionButtons({ actions, taskId }: { actions: MessageAction[]; taskId?:
 function ActionButton({
   action,
   messageTaskId,
+  onCompleted,
 }: {
   action: MessageAction;
   messageTaskId?: string;
+  onCompleted?: () => void;
 }): ReactElement | null {
   const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
@@ -280,6 +292,7 @@ function ActionButton({
         }
       }
       setState("done");
+      if (action.type === "ws_request") onCompleted?.();
     } catch {
       setState("error");
       setTimeout(() => setState("idle"), 3000);
