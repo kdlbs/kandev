@@ -60,6 +60,16 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  // The "Add folder" control is gated on the task's executor type. Wait for the
+  // backend to publish it so the store-hydrated executor is present before the
+  // drawer opens — otherwise the folder button never renders for a worktree
+  // executor and the test stalls until the suite timeout.
+  await expect
+    .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.executor_type ?? "", {
+      timeout: 30_000,
+      message: "Waiting for the task environment executor type to be published",
+    })
+    .toBe("worktree");
   await testPage.getByRole("button", { name: "Files" }).tap();
   const entryPoint = testPage.getByTestId("files-workspace-actions");
   await expect(entryPoint).toBeVisible();
@@ -147,6 +157,12 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   const addRepository = drawer.getByRole("button", { name: "Add repository" });
   const addFolder = drawer.getByRole("button", { name: "Add folder" });
   const submit = drawer.getByTestId("add-workspace-sources-submit");
+  // The "Add folder" control is gated on the task's executor type, which can
+  // still be hydrating when the drawer first mounts. Wait for the reactive
+  // re-render instead of measuring a not-yet-rendered button (a null box that
+  // otherwise stalls the whole test until the suite timeout).
+  await expect(addRepository).toBeVisible();
+  await expect(addFolder).toBeVisible();
   const [addRepositoryBox, addFolderBox] = await Promise.all([
     addRepository.boundingBox(),
     addFolder.boundingBox(),
