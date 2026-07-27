@@ -166,8 +166,9 @@ test.describe("Sentry settings — issue watchers", () => {
     await expect(comboboxByLabel(dialog, "Organization slug")).toContainText("acme");
 
     await comboboxByLabel(dialog, "Project slug").click();
-    await dialog.getByRole("option", { name: "Frontend (frontend)" }).click();
-    await dialog.getByRole("option", { name: "Backend (backend)" }).click();
+    const projectListbox = testPage.getByRole("listbox");
+    await projectListbox.getByRole("option", { name: "Frontend (frontend)" }).click();
+    await projectListbox.getByRole("option", { name: "Backend (backend)" }).click();
     await expect(comboboxByLabel(dialog, "Project slug")).toContainText("2 projects selected");
     await prCapture.screenshot("watcher-project-multiselect-open", {
       caption: "Selecting multiple Sentry projects for one issue watcher",

@@ -88,4 +88,11 @@ describe("SentryIssueWatchTable", () => {
       "false",
     );
   });
+
+  it("renders a comma-joined project list in the filter summary for a multi-project watch", () => {
+    renderTable([
+      watch({ id: "w1", filter: { orgSlug: "acme", projectSlugs: ["frontend", "backend"] } }),
+    ]);
+    expect(screen.getByText("org:acme · project:frontend,backend")).toBeTruthy();
+  });
 });
