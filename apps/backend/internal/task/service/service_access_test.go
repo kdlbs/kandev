@@ -259,14 +259,22 @@ func TestPlanAndWalkthroughScoping(t *testing.T) {
 	}); !errors.Is(err, repoerrors.ErrTaskNotFound) {
 		t.Fatalf("foreign review publish: %v", err)
 	}
-	// Owner passes the gate and the findings are actually stored.
+	// Owner passes the gate and the finding is actually persisted.
 	if _, findings, err := review.PublishFindings(ctxAs("user-b"), PublishFindingsRequest{
 		TaskID:   "task-b",
 		Findings: []ReviewFindingInput{validFindingInput()},
 	}); err != nil {
 		t.Fatalf("owner review publish must pass the auth gate: %v", err)
 	} else if len(findings) != 1 {
-		t.Fatalf("owner review publish should store the finding, got %d", len(findings))
+		t.Fatalf("owner review publish should return the stored finding, got %d", len(findings))
+	}
+	// Confirm the write landed in the repository, not just the returned slice.
+	persisted, err := repo.ListTaskReviewFindings(context.Background(), "task-b")
+	if err != nil {
+		t.Fatalf("list persisted review findings: %v", err)
+	}
+	if len(persisted) != 1 {
+		t.Fatalf("owner review publish should persist exactly one finding, got %d", len(persisted))
 	}
 }
 
