@@ -584,7 +584,7 @@ func TestLegacyRouteComposesIndexedGitConfig(t *testing.T) {
 		},
 		RouteOverride: &RouteOverride{Env: map[string]string{
 			"GIT_CONFIG_COUNT":   "1",
-			"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+			"GIT_CONFIG_KEY_0":   gitHubCredentialHelperConfigKey,
 			"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
 		}},
 	}
@@ -602,7 +602,7 @@ func TestLegacyRouteComposesIndexedGitConfig(t *testing.T) {
 	if got := req.Env["GIT_CONFIG_VALUE_0"]; got != "/opt/locstat/hooks" {
 		t.Fatalf("GIT_CONFIG_VALUE_0 = %q, want base value", got)
 	}
-	if got := req.Env["GIT_CONFIG_KEY_1"]; got != "credential.https://github.com.helper" {
+	if got := req.Env["GIT_CONFIG_KEY_1"]; got != gitHubCredentialHelperConfigKey {
 		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want route entry", got)
 	}
 	if got := req.Env["GIT_CONFIG_VALUE_1"]; got != "!agentctl git-credential" {
