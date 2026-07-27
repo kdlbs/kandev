@@ -151,7 +151,11 @@ export function InstalledAgentCard({
           onAuthClick={handleAuthClick}
         />
         <div className="mt-auto flex items-center gap-2">
-          <Button size="sm" className="min-h-11 flex-1 cursor-pointer" asChild>
+          <Button
+            size="sm"
+            className="h-11 min-h-11 flex-1 cursor-pointer sm:h-9 sm:min-h-9"
+            asChild
+          >
             <Link
               href={
                 hasAgentRecord

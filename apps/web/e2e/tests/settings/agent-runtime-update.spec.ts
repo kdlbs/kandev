@@ -26,6 +26,8 @@ test.describe("managed agent runtime updates", () => {
     expect(triggerBox).not.toBeNull();
     expect(Math.abs(profileActionBox!.y - triggerBox!.y)).toBeLessThanOrEqual(8);
     expect(triggerBox!.x).toBeGreaterThan(profileActionBox!.x);
+    expect(profileActionBox!.height).toBe(36);
+    expect(triggerBox!.height).toBe(profileActionBox!.height);
 
     await trigger.click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
