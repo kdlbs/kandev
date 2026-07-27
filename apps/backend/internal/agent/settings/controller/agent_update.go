@@ -17,9 +17,51 @@ import (
 )
 
 var (
-	ErrRuntimeUpdateUnsupported  = errors.New("agent runtime update unsupported")
-	ErrRuntimeUpdaterUnavailable = errors.New("agent runtime updater unavailable")
+	ErrRuntimeUpdateUnsupported   = errors.New("agent runtime update unsupported")
+	ErrRuntimeUpdaterUnavailable  = errors.New("agent runtime updater unavailable")
+	ErrRuntimeUpdatePreviewFailed = errors.New("agent runtime update preview failed")
 )
+
+// PreviewAgentUpdate resolves the trusted built-in update recipe without
+// claiming maintenance state, creating a job, or running the command.
+func (c *Controller) PreviewAgentUpdate(
+	ctx context.Context,
+	name string,
+) (*dto.AgentUpdatePreviewDTO, error) {
+	if c.runtimeUpdater == nil {
+		return nil, ErrRuntimeUpdaterUnavailable
+	}
+	ag, ok := c.agentRegistry.Get(name)
+	if !ok {
+		return nil, ErrAgentNotFound
+	}
+	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return nil, ErrRuntimeUpdateUnsupported
+	}
+	spec := managed.ManagedNPMRuntime()
+	if strings.TrimSpace(spec.Package) == "" {
+		return nil, ErrRuntimeUpdateUnsupported
+	}
+
+	current := ""
+	if caps, found := c.runtimeUpdater.CurrentCapabilities(name); found {
+		current = caps.AgentVersion
+	}
+	target, err := c.runtimeUpdater.ResolveTarget(ctx, spec.Package)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrRuntimeUpdatePreviewFailed, err)
+	}
+	command := spec.CacheUpdateCommand().Args()
+	return &dto.AgentUpdatePreviewDTO{
+		AgentName:      name,
+		Package:        spec.Package,
+		CurrentVersion: current,
+		TargetVersion:  target,
+		Command:        command,
+		CommandString:  buildCommandString(command),
+	}, nil
+}
 
 // RuntimeUpdater is the external-process and host-probe boundary used by
 // managed runtime jobs. Implementations must execute commands as direct argv.

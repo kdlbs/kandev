@@ -459,6 +459,11 @@ func TestBuildCommandString(t *testing.T) {
 			cmd:      []string{},
 			expected: "",
 		},
+		{
+			name:     "empty argument",
+			cmd:      []string{"node", "-e", ""},
+			expected: `node -e ""`,
+		},
 	}
 
 	for _, tt := range tests {

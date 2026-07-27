@@ -64,6 +64,7 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
 	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
+	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
 	api.POST("/agent-update/:agentName", h.interlock, h.httpUpdateAgentRuntime)
@@ -121,6 +122,24 @@ func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
 	h.enqueueMaintenance(c, name, "update", func() (any, error) {
 		return h.controller.EnqueueAgentUpdate(name)
 	}, classifyUpdateError)
+}
+
+func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
+	name, ok := requireAgentName(c)
+	if !ok {
+		return
+	}
+	preview, err := h.controller.PreviewAgentUpdate(c.Request.Context(), name)
+	if err == nil {
+		c.JSON(http.StatusOK, preview)
+		return
+	}
+	if status, message, matched := classifyUpdatePreviewError(err); matched {
+		c.JSON(status, gin.H{"error": message})
+		return
+	}
+	h.logger.Error("failed to preview agent runtime update", zap.String("agent", name), zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to preview agent update"})
 }
 
 func requireAgentName(c *gin.Context) (string, bool) {
@@ -191,6 +210,16 @@ func classifyUpdateError(err error) (int, string, bool) {
 	default:
 		return 0, "", false
 	}
+}
+
+func classifyUpdatePreviewError(err error) (int, string, bool) {
+	if status, message, matched := classifyUpdateError(err); matched {
+		return status, message, true
+	}
+	if errors.Is(err, controller.ErrRuntimeUpdatePreviewFailed) {
+		return http.StatusBadGateway, "unable to resolve latest runtime version", true
+	}
+	return 0, "", false
 }
 
 func (h *Handlers) httpListAgentUpdateJobs(c *gin.Context) {

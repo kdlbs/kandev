@@ -20,10 +20,16 @@ cache is already present.
   tag.
 - Normal launches may reuse npm's execution cache. Cache reuse is best-effort;
   Kandev does not present it as a durable installed-version guarantee.
-- Each supported installed agent has a visible **Update agent** action on the
-  Settings > Agents page on desktop and mobile.
-- Starting an update shows the current runtime version, the upstream target
-  version, live progress, and the terminal success or failure state.
+- Each supported installed agent has a compact, accessible update icon action
+  on its Settings > Agents card on desktop and mobile. Update versions,
+  command details, progress, output, and results are not rendered in the card.
+- Opening the update action is read-only. It opens an update dialog that
+  resolves and shows the current runtime version, upstream target version,
+  exact built-in command, host-only scope, capability refresh, and active
+  session behavior before an update can start.
+- The update starts only after the operator approves it in the dialog. The
+  dialog then shows live stdout/stderr, progress, and the terminal success or
+  failure state.
 - A successful package update automatically starts a fresh host capability
   probe. The returned runtime version, models, modes, configuration options,
   commands, and capability status replace the previous cached values.
@@ -74,6 +80,9 @@ runtime version. Unmanaged agents omit `runtime_update`.
 
 ### Update jobs
 
+- `GET /api/v1/agent-update/:agentName/preview` resolves the current and
+  upstream target versions and returns the exact trusted built-in update
+  command without starting an update.
 - `POST /api/v1/agent-update/:agentName` starts or returns the active update
   job for a built-in managed agent.
 - `GET /api/v1/agent-update/jobs` returns active and recently completed update
@@ -105,6 +114,32 @@ An update job contains:
 notifications with the same job identity and state. Output notifications carry
 only the appended output chunk.
 
+An update preview contains:
+
+```json
+{
+  "agent_name": "claude-acp",
+  "package": "@agentclientprotocol/claude-agent-acp",
+  "current_version": "0.62.0",
+  "target_version": "0.63.0",
+  "command": [
+    "npm",
+    "exec",
+    "--yes",
+    "--prefer-online",
+    "--package=@agentclientprotocol/claude-agent-acp",
+    "--",
+    "node",
+    "-e",
+    ""
+  ],
+  "command_string": "npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp -- node -e \"\""
+}
+```
+
+The preview endpoint accepts only the built-in agent name. Package names,
+versions, registry URLs, and command arguments are not caller-controlled.
+
 ## State machine
 
 | State | Trigger | Observable behavior |
@@ -122,6 +157,8 @@ Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
 
 - If npm registry metadata cannot be resolved, the job fails before changing
   the runtime and retains the prior capability data.
+- If preview version resolution fails, the dialog shows the error and keeps
+  approval disabled. No update job or package command starts.
 - If the package update command fails or times out, the job fails and retains
   the prior capability data.
 - If the package update succeeds but the capability probe fails because
@@ -142,6 +179,9 @@ Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
 - Update jobs and capability data are process-local and do not survive a Kandev
   backend restart.
 - Completed jobs remain queryable for the existing short job-retention window.
+- Settings does not rehydrate retained update jobs after a browser page
+  restart. Update dialog state, output, and results are intentionally
+  page-local and disappear when the page is restarted.
 - npm's host cache may survive Kandev restarts, but Kandev does not own or
   guarantee that cache.
 - After a backend restart, normal host capability probing reports whichever
@@ -153,8 +193,12 @@ Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
   without an explicit update, **THEN** Kandev invokes the unversioned package
   spec and does not require a repository-maintained version pin.
 - **GIVEN** Claude reports runtime version `0.62.0` and npm reports `0.63.0`,
-  **WHEN** the operator selects **Update agent**, **THEN** the card shows
-  `0.62.0 → 0.63.0` and streams progress until the job is terminal.
+  **WHEN** the operator opens its update action, **THEN** the dialog shows
+  `0.62.0 → 0.63.0`, the exact built-in command, and how the host update
+  affects capabilities and active sessions without starting the command.
+- **GIVEN** the update dialog has a resolved preview, **WHEN** the operator
+  approves the update, **THEN** Kandev starts exactly one update and the dialog
+  streams stdout/stderr until the job is terminal.
 - **GIVEN** an update succeeds and the new runtime advertises an additional
   model, **WHEN** the automatic capability probe completes, **THEN** the new
   model appears without a page reload or manual Rescan.
@@ -164,16 +208,25 @@ Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
 - **GIVEN** an install is active for an agent, **WHEN** an update is requested
   for that agent, **THEN** Kandev returns the active maintenance job rather
   than running install and update concurrently.
-- **GIVEN** npm registry lookup fails, **WHEN** an update is requested,
-  **THEN** the card shows a retryable failure and retains the previous models.
+- **GIVEN** npm registry lookup fails while preparing the dialog, **WHEN** the
+  update action is opened, **THEN** the dialog shows a retryable preview failure,
+  keeps approval disabled, and starts no update job.
+- **GIVEN** npm registry lookup succeeds for the preview but fails after
+  approval because the registry changed, **WHEN** the update job resolves its
+  target again, **THEN** the dialog shows a retryable update failure and retains
+  the previous models.
 - **GIVEN** the package update succeeds but the fresh probe requires
-  authentication, **WHEN** the job finishes, **THEN** the card reports the new
-  package version, shows the refresh error, retains the previous models, and
-  keeps the existing authentication recovery action available.
+  authentication, **WHEN** the job finishes, **THEN** the dialog reports the new
+  package version and refresh error, the previous models remain available, and
+  the card keeps its existing authentication recovery action.
 - **GIVEN** an agent is unmanaged or native-only, **WHEN** Settings renders its
   installed card, **THEN** no update action is shown.
+- **GIVEN** an update dialog has shown progress or a terminal result, **WHEN**
+  the operator restarts the page, **THEN** the dialog is closed and no prior
+  update details, output, or result appear on the agent card or in a newly
+  opened dialog.
 - **GIVEN** an update is running on a phone viewport, **WHEN** the operator
-  views the installed-agent card, **THEN** current and target versions,
+  views the update surface, **THEN** current and target versions, the command,
   progress, output, and retry state are reachable by touch without horizontal
   page scrolling.
 - **GIVEN** an agent session is already running, **WHEN** its host runtime is
@@ -191,3 +244,4 @@ Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
 - Managing native-only update channels such as Cursor.
 - Updating separately distributed passthrough or authentication helper
   packages when they are not the managed ACP runtime.
+- Resuming or recovering update dialog state after a browser page restart.

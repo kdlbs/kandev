@@ -18,6 +18,15 @@ type UpdateJob = {
   finished_at?: string;
 };
 
+type UpdatePreview = {
+  agent_name: string;
+  package: string;
+  current_version: string;
+  target_version: string;
+  command: string[];
+  command_string: string;
+};
+
 function catalogue(models: Array<{ id: string; name: string }>, displayName = "Claude") {
   return {
     agents: [
@@ -93,6 +102,7 @@ function event(action: string, payload: unknown) {
 export type RuntimeUpdateFixtureOptions = {
   retainedJobs?: UpdateJob[];
   postResponse?: UpdateJob;
+  previewResponse?: UpdatePreview;
 };
 
 export async function installRuntimeUpdateFixture(
@@ -111,6 +121,28 @@ export async function installRuntimeUpdateFixture(
       started_at: NOW,
     } satisfies UpdateJob);
   let postCount = 0;
+  let previewCount = 0;
+  let previewResponse: UpdatePreview =
+    options.previewResponse ??
+    ({
+      agent_name: AGENT_NAME,
+      package: "@agentclientprotocol/claude-agent-acp",
+      current_version: "0.62.0",
+      target_version: "0.63.0",
+      command: [
+        "npm",
+        "exec",
+        "--yes",
+        "--prefer-online",
+        "--package=@agentclientprotocol/claude-agent-acp",
+        "--",
+        "node",
+        "-e",
+        "",
+      ],
+      command_string:
+        'npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp -- node -e ""',
+    } satisfies UpdatePreview);
   let socket: WebSocketRoute | undefined;
   let clientReady = false;
 
@@ -138,6 +170,17 @@ export async function installRuntimeUpdateFixture(
   await page.route("**/api/v1/agent-update/**", (route) => {
     const request = route.request();
     const url = new URL(request.url());
+    if (
+      request.method() === "GET" &&
+      url.pathname.endsWith(`/agent-update/${AGENT_NAME}/preview`)
+    ) {
+      previewCount += 1;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(previewResponse),
+      });
+    }
     if (request.method() === "GET" && url.pathname.endsWith("/agent-update/jobs")) {
       return route.fulfill({
         status: 200,
@@ -193,7 +236,11 @@ export async function installRuntimeUpdateFixture(
     setPostResponse(job: UpdateJob) {
       postResponse = job;
     },
+    setPreviewResponse(preview: UpdatePreview) {
+      previewResponse = preview;
+    },
     postCount: () => postCount,
+    previewCount: () => previewCount,
     async emit(action: string, payload: unknown) {
       await expect.poll(() => Boolean(socket)).toBe(true);
       await expect.poll(() => clientReady).toBe(true);

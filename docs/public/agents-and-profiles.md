@@ -24,19 +24,22 @@ The status shown on this page is authoritative for the current host. A CLI that 
 
 ### Update a managed agent runtime
 
-Installed Claude, Codex, OpenCode, Copilot, and Gemini cards provide an
-**Update agent** action. Kandev invokes these managed npm runtimes without an
+Installed Claude, Codex, OpenCode, Copilot, and Gemini cards provide an update
+icon. Kandev invokes these managed npm runtimes without an
 exact version or `latest` tag during ordinary launches, so npm can reuse its
 best-effort execution cache. The version reported by the agent is the
 authoritative current version; Kandev does not infer it from the application
 release.
 
-Select **Update agent** to deliberately check npm and refresh the managed
-runtime on the Kandev host. The card shows the current and upstream target
-versions, streams progress, and remains disabled until the update finishes.
-After the package update, Kandev automatically starts a fresh ACP capability
-probe. A successful probe replaces the advertised models, modes, configuration
-options, commands, and runtime version without a page reload.
+Select the update icon to deliberately check npm and refresh the managed
+runtime on the Kandev host. Before anything changes, the update dialog shows
+the current and upstream target versions, the exact command Kandev will run,
+and how the update affects sessions. Select **Approve update** to start it.
+The dialog streams progress and stdout/stderr until the update finishes; those
+details do not appear on the agent card and are cleared when you restart the
+page. After the package update, Kandev automatically starts a fresh ACP
+capability probe. A successful probe replaces the advertised models, modes,
+configuration options, commands, and runtime version without a page reload.
 
 The action changes later host probes and sessions only. It does not restart an
 active session, update a separately configured passthrough or authentication
@@ -44,11 +47,11 @@ helper, or update remote executors and running containers. Those environments
 resolve their own unversioned runtime when they launch.
 
 If registry lookup or package execution fails, Kandev keeps the previous
-capability catalogue and shows the captured failure. If the package updates but
-the follow-up probe requires authentication, the card reports the update plus
-the refresh error; authenticate the host agent and refresh again. Update job
-history is short-lived and does not survive a backend restart, and npm cache
-contents are not a durable Kandev installation record.
+capability catalogue and shows the captured failure in the dialog. If the
+package updates but the follow-up probe requires authentication, the dialog
+reports the update plus the refresh error; authenticate the host agent and
+refresh again. Update job history is short-lived and does not survive a backend
+restart, and npm cache contents are not a durable Kandev installation record.
 
 ### Add a custom terminal agent
 

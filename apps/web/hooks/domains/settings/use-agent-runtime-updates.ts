@@ -1,9 +1,15 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback } from "react";
 
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { getAgentUpdateJob, getInstallJob, listAgentUpdateJobs, updateAgent } from "@/lib/api";
+import {
+  getAgentUpdateJob,
+  getInstallJob,
+  previewAgentUpdate,
+  updateAgent,
+  type AgentUpdateJob,
+} from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 
 type MaintenanceConflict = {
@@ -27,64 +33,41 @@ export function useAgentRuntimeUpdates() {
   const store = useAppStoreApi();
   const updateJobs = useAppStore((state) => state.updateJobs.byAgent);
 
-  useEffect(() => {
-    let cancelled = false;
-    listAgentUpdateJobs({ cache: "no-store" })
-      .then((response) => {
-        if (cancelled) return;
-        for (const job of response.jobs) {
-          store.getState().upsertAgentUpdateJob(job);
-        }
-      })
-      .catch(() => {
-        // Retained jobs are an enhancement; live WebSocket events still populate state.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [store]);
-
   const hydrateConflict = useCallback(
-    async (agentName: string, conflict: MaintenanceConflict) => {
+    async (agentName: string, conflict: MaintenanceConflict): Promise<AgentUpdateJob> => {
       if (conflict.active_kind === "update") {
         const job = await getAgentUpdateJob(conflict.active_job_id, { cache: "no-store" });
         store.getState().upsertAgentUpdateJob(job);
-        return;
+        return job;
       }
       const job = await getInstallJob(conflict.active_job_id, { cache: "no-store" });
       store.getState().upsertInstallJob(job.agent_name ? job : { ...job, agent_name: agentName });
+      throw new Error("Agent installation is already in progress.");
     },
     [store],
   );
 
-  const handleUpdate = useCallback(
+  const startUpdate = useCallback(
     async (agentName: string) => {
       try {
         const job = await updateAgent(agentName);
         store.getState().upsertAgentUpdateJob(job);
+        return job;
       } catch (error) {
         const conflict = maintenanceConflict(error);
         if (conflict) {
-          try {
-            await hydrateConflict(agentName, conflict);
-            return;
-          } catch {
-            // Surface a retryable error below if the retained conflict job vanished.
-          }
+          return hydrateConflict(agentName, conflict);
         }
-        const current = store.getState().updateJobs.byAgent[agentName];
-        if (current && !["succeeded", "failed"].includes(current.status)) return;
-        store.getState().upsertAgentUpdateJob({
-          job_id: `local-error-${agentName}-${Date.now()}`,
-          agent_name: agentName,
-          status: "failed",
-          error: error instanceof Error ? error.message : String(error),
-          started_at: new Date().toISOString(),
-        });
+        throw error;
       }
     },
     [hydrateConflict, store],
   );
 
-  return { updateJobs, handleUpdate };
+  const previewUpdate = useCallback(
+    (agentName: string) => previewAgentUpdate(agentName, { cache: "no-store" }),
+    [],
+  );
+
+  return { updateJobs, previewUpdate, startUpdate };
 }

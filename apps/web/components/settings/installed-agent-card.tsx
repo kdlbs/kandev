@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import Link from "@/components/routing/app-link";
 import { IconLoader2, IconLock, IconSettings } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -11,7 +11,7 @@ import { AgentLogo } from "@/components/agent-logo";
 import { AgentLoginDialog } from "@/components/settings/agent-login-dialog";
 import { AgentRuntimeUpdateControl } from "@/components/settings/agent-runtime-update-control";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
-import type { AgentUpdateJob, InstallJob } from "@/lib/api";
+import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
 import type { Agent, AgentDiscovery, RuntimeUpdate } from "@/lib/types/http";
 
 type Props = {
@@ -23,7 +23,8 @@ type Props = {
   runtimeUpdate?: RuntimeUpdate;
   updateJob?: AgentUpdateJob;
   installJob?: InstallJob;
-  onUpdate?: (agentName: string) => void;
+  onPreview?: (agentName: string) => Promise<AgentUpdatePreview>;
+  onUpdate?: (agentName: string) => Promise<AgentUpdateJob>;
   /**
    * Called when the auth/shell dialog closes so the page can refresh
    * discovery + availability. Without this the yellow lock stays put even
@@ -40,6 +41,7 @@ function InstalledAgentIdentity({
   authRequired,
   loginAvailable,
   onAuthClick,
+  updateAction,
 }: {
   agent: AgentDiscovery;
   displayName: string;
@@ -48,6 +50,7 @@ function InstalledAgentIdentity({
   authRequired: boolean;
   loginAvailable: boolean;
   onAuthClick: () => void;
+  updateAction?: ReactNode;
 }) {
   return (
     <div className="space-y-1">
@@ -56,40 +59,43 @@ function InstalledAgentIdentity({
         <h4 className="min-w-0 truncate font-medium">{displayName}</h4>
         {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
         {configured && <Badge variant="outline">Configured</Badge>}
-        {probing && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span
-                data-testid={`probing-icon-${agent.name}`}
-                className="ml-auto flex items-center text-muted-foreground cursor-help"
-                aria-label="Checking authentication"
-              >
-                <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
-              </span>
-            </TooltipTrigger>
-            <TooltipContent>Checking agent capabilities and authentication...</TooltipContent>
-          </Tooltip>
-        )}
-        {authRequired && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                type="button"
-                onClick={onAuthClick}
-                data-testid={`auth-icon-${agent.name}`}
-                className="ml-auto flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-amber-500 cursor-pointer hover:bg-amber-500/10"
-                aria-label="Authentication required"
-              >
-                <IconLock className="h-3.5 w-3.5" />
-              </button>
-            </TooltipTrigger>
-            <TooltipContent>
-              {loginAvailable
-                ? "Authentication required - click to open login terminal"
-                : "Authentication required - click to open a shell and sign in"}
-            </TooltipContent>
-          </Tooltip>
-        )}
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {probing && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  data-testid={`probing-icon-${agent.name}`}
+                  className="flex items-center text-muted-foreground cursor-help"
+                  aria-label="Checking authentication"
+                >
+                  <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Checking agent capabilities and authentication...</TooltipContent>
+            </Tooltip>
+          )}
+          {authRequired && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={onAuthClick}
+                  data-testid={`auth-icon-${agent.name}`}
+                  className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-amber-500 cursor-pointer hover:bg-amber-500/10"
+                  aria-label="Authentication required"
+                >
+                  <IconLock className="h-3.5 w-3.5" />
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>
+                {loginAvailable
+                  ? "Authentication required - click to open login terminal"
+                  : "Authentication required - click to open a shell and sign in"}
+              </TooltipContent>
+            </Tooltip>
+          )}
+          {updateAction}
+        </div>
       </div>
       <p
         className="text-xs text-muted-foreground line-clamp-2 min-h-[2rem]"
@@ -115,6 +121,7 @@ export function InstalledAgentCard({
   runtimeUpdate,
   updateJob,
   installJob,
+  onPreview,
   onUpdate,
   onAuthComplete,
 }: Props) {
@@ -145,16 +152,20 @@ export function InstalledAgentCard({
           authRequired={authRequired}
           loginAvailable={loginAvailable}
           onAuthClick={handleAuthClick}
+          updateAction={
+            runtimeUpdate?.supported && onPreview && onUpdate ? (
+              <AgentRuntimeUpdateControl
+                agentName={agent.name}
+                displayName={displayName}
+                runtimeUpdate={runtimeUpdate}
+                job={updateJob}
+                installJob={installJob}
+                onPreview={onPreview}
+                onUpdate={onUpdate}
+              />
+            ) : null
+          }
         />
-        {runtimeUpdate?.supported && onUpdate && (
-          <AgentRuntimeUpdateControl
-            agentName={agent.name}
-            runtimeUpdate={runtimeUpdate}
-            job={updateJob}
-            installJob={installJob}
-            onUpdate={onUpdate}
-          />
-        )}
         <Button size="sm" className="cursor-pointer mt-auto" asChild>
           <Link
             href={

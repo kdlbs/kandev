@@ -190,6 +190,86 @@ func managedRuntimeSpec() agents.ManagedNPMRuntimeSpec {
 	}
 }
 
+func TestAgentUpdatePreviewResolvesTrustedCommandWithoutStartingAJob(t *testing.T) {
+	updater := &fakeRuntimeUpdater{
+		current:      hostutility.AgentCapabilities{AgentVersion: "1.0.0"},
+		currentFound: true,
+		target:       "1.1.0",
+	}
+	ag := &managedTestAgent{
+		testAgent: testAgent{id: "managed-acp", name: "Managed", enabled: true},
+		spec:      managedRuntimeSpec(),
+	}
+	ctrl := newTestController(map[string]agents.Agent{ag.ID(): ag})
+	ctrl.SetRuntimeUpdater(updater)
+
+	preview, err := ctrl.PreviewAgentUpdate(context.Background(), ag.ID())
+	if err != nil {
+		t.Fatalf("PreviewAgentUpdate: %v", err)
+	}
+	if preview.CurrentVersion != "1.0.0" || preview.TargetVersion != "1.1.0" {
+		t.Fatalf("versions = %q -> %q", preview.CurrentVersion, preview.TargetVersion)
+	}
+	wantCommand := []string{
+		"npm", "exec", "--yes", "--prefer-online", "--package=@example/managed-acp", "--", "node", "-e", "",
+	}
+	if got := strings.Join(preview.Command, "\x00"); got != strings.Join(wantCommand, "\x00") {
+		t.Fatalf("command = %q, want %q", got, strings.Join(wantCommand, "\x00"))
+	}
+	if preview.CommandString != `npm exec --yes --prefer-online --package=@example/managed-acp -- node -e ""` {
+		t.Fatalf("command string = %q", preview.CommandString)
+	}
+
+	updater.mu.Lock()
+	defer updater.mu.Unlock()
+	if updater.resolvedPackage != "@example/managed-acp" {
+		t.Fatalf("resolved package = %q", updater.resolvedPackage)
+	}
+	if updater.runCalls != 0 || updater.refreshCalls != 0 {
+		t.Fatalf("preview mutated runtime: update=%d refresh=%d", updater.runCalls, updater.refreshCalls)
+	}
+}
+
+func TestAgentUpdatePreviewRejectsUnsupportedAndResolutionFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		agent   agents.Agent
+		updater *fakeRuntimeUpdater
+		wantErr error
+	}{
+		{
+			name:    "unmanaged",
+			agent:   &testAgent{id: "native", name: "Native", enabled: true},
+			updater: &fakeRuntimeUpdater{},
+			wantErr: ErrRuntimeUpdateUnsupported,
+		},
+		{
+			name: "registry failure",
+			agent: &managedTestAgent{
+				testAgent: testAgent{id: "managed", name: "Managed", enabled: true},
+				spec:      managedRuntimeSpec(),
+			},
+			updater: &fakeRuntimeUpdater{resolveErr: errors.New("registry unavailable")},
+			wantErr: ErrRuntimeUpdatePreviewFailed,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := newTestController(map[string]agents.Agent{test.agent.ID(): test.agent})
+			ctrl.SetRuntimeUpdater(test.updater)
+			_, err := ctrl.PreviewAgentUpdate(context.Background(), test.agent.ID())
+			if !errors.Is(err, test.wantErr) {
+				t.Fatalf("PreviewAgentUpdate error = %v, want %v", err, test.wantErr)
+			}
+			test.updater.mu.Lock()
+			defer test.updater.mu.Unlock()
+			if test.updater.runCalls != 0 || test.updater.refreshCalls != 0 {
+				t.Fatalf("failed preview mutated runtime: update=%d refresh=%d", test.updater.runCalls, test.updater.refreshCalls)
+			}
+		})
+	}
+}
+
 func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {
 	updater := &fakeRuntimeUpdater{
 		current:      hostutility.AgentCapabilities{AgentVersion: "1.0.0"},

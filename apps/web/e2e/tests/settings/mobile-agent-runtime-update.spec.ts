@@ -2,55 +2,51 @@ import { test, expect } from "../../fixtures/test-base";
 import { installRuntimeUpdateFixture, updateJob } from "./agent-runtime-update-helpers";
 
 test.describe("managed agent runtime updates on mobile", () => {
-  test("keeps progress, bounded output, and retry touch-reachable without horizontal overflow", async ({
+  test("uses a touch-safe drawer to preview and stream an update without horizontal overflow", async ({
     testPage,
+    prCapture,
   }) => {
-    const runtime = await installRuntimeUpdateFixture(testPage, {
-      retainedJobs: [
-        updateJob({
-          output: Array.from(
-            { length: 60 },
-            (_, index) => `Downloading runtime chunk ${index + 1} for the latest agent package`,
-          ).join("\n"),
-        }),
-      ],
-    });
+    const runtime = await installRuntimeUpdateFixture(testPage);
 
     await testPage.goto("/settings/agents");
-    const control = testPage.getByTestId(`agent-update-control-${runtime.agentName}`);
-    const log = testPage.getByTestId(`agent-update-log-${runtime.agentName}`);
-    const button = testPage.getByTestId(`agent-update-button-${runtime.agentName}`);
+    const trigger = testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`);
+    await trigger.scrollIntoViewIfNeeded();
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+    expect(triggerBox!.width).toBeGreaterThanOrEqual(44);
+    await trigger.tap();
 
-    await control.scrollIntoViewIfNeeded();
-    await expect(control).toContainText("0.62.0 → 0.63.0");
-    await expect(testPage.getByTestId(`agent-update-phase-${runtime.agentName}`)).toContainText(
+    const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
+    await expect(drawer).toBeVisible();
+    await expect(drawer).toContainText("0.62.0 → 0.63.0");
+    expect(runtime.postCount()).toBe(0);
+    await prCapture.screenshot("mobile-update-preview", {
+      caption: "Mobile update preview before approval",
+    });
+    await testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`).tap();
+    expect(runtime.postCount()).toBe(1);
+
+    await runtime.emitUpdate(
+      updateJob({
+        output: Array.from(
+          { length: 60 },
+          (_, index) => `Downloading runtime chunk ${index + 1} for the latest agent package`,
+        ).join("\n"),
+      }),
+    );
+
+    await expect(drawer.getByTestId(`agent-update-phase-${runtime.agentName}`)).toContainText(
       "Updating runtime",
     );
-    await expect(log).toBeInViewport({ ratio: 1 });
+    const body = drawer.getByTestId(`agent-update-dialog-body-${runtime.agentName}`);
+    await body.scrollIntoViewIfNeeded();
     await expect(
-      log.evaluate((element) => element.scrollHeight > element.clientHeight),
+      body.evaluate((element) => element.scrollHeight > element.clientHeight),
     ).resolves.toBe(true);
-    await expect(button).toBeInViewport({ ratio: 1 });
-    const runningButtonBox = await button.boundingBox();
-    expect(runningButtonBox).not.toBeNull();
-    expect(runningButtonBox!.height).toBeGreaterThanOrEqual(44);
     await expect(testPage.locator("html")).toHaveJSProperty(
       "scrollWidth",
       await testPage.locator("html").evaluate((element) => element.clientWidth),
     );
-
-    await runtime.emitUpdate(
-      updateJob({
-        status: "failed",
-        error: "Registry lookup failed",
-        finished_at: "2026-07-26T12:01:00.000Z",
-      }),
-    );
-    const result = testPage.getByTestId(`agent-update-result-${runtime.agentName}`);
-    await result.scrollIntoViewIfNeeded();
-    await expect(result).toContainText("Registry lookup failed");
-    await expect(button).toHaveText("Retry update");
-    await button.tap();
-    expect(runtime.postCount()).toBe(1);
   });
 });

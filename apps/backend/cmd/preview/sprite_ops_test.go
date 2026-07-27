@@ -14,8 +14,11 @@ func TestBuildExtractScript(t *testing.T) {
 	if !strings.Contains(script, "rm -rf /data") {
 		t.Errorf("expected rm -rf /data in script")
 	}
-	if !strings.Contains(script, "KANDEV_MOCK_AGENT=only") {
-		t.Errorf("expected KANDEV_MOCK_AGENT=only in script")
+	if !strings.Contains(script, "KANDEV_MOCK_AGENT=true") {
+		t.Errorf("expected KANDEV_MOCK_AGENT=true in script")
+	}
+	if strings.Contains(script, "KANDEV_MOCK_AGENT=only") {
+		t.Errorf("preview must retain the built-in agent catalogue")
 	}
 	if !strings.Contains(script, "KANDEV_WEB_DIST_DIR=/app/apps/web/dist") {
 		t.Errorf("expected KANDEV_WEB_DIST_DIR to point at packaged Vite dist")
