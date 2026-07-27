@@ -66,10 +66,6 @@ func (u *handlerRuntimeUpdater) Refresh(
 	}, nil
 }
 
-type discardBroadcaster struct{}
-
-func (discardBroadcaster) Broadcast(*ws.Message) {}
-
 type updateTerminalBroadcaster struct {
 	completed chan dto.AgentUpdateJobDTO
 }
