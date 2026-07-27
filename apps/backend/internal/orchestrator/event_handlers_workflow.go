@@ -255,36 +255,28 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
 	}
-	if err := s.validateTransitionWIPLimit(ctx, task, targetStep); err != nil {
-		s.logger.Warn("workflow transition rejected by WIP limit",
-			zap.String("task_id", taskID),
-			zap.String("to_step_id", toStepID),
-			zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return
-	}
-
-	// Process on_exit actions for the step we're leaving (before the step change).
-	// Freshly load the session since the caller may not have it (legacy path).
-	exitSession, exitErr := s.repo.GetTaskSession(ctx, sessionID)
-	if exitErr != nil {
-		s.logger.Warn("failed to load session for on_exit",
-			zap.String("session_id", sessionID), zap.Error(exitErr))
-	} else {
-		s.processOnExit(ctx, taskID, exitSession, fromStep)
-	}
-
-	// Update the task's workflow step
+	// Atomically admit the target step before exit side effects. A capacity
+	// rejection must leave both the task and its source-step session state intact.
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.updateTransitionTaskWithCapacity(ctx, task, targetStep); err != nil {
-		s.logger.Error("failed to move task to next workflow step",
+		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
 			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
+	}
+
+	// Process on_exit only after the transition is durably admitted. Freshly
+	// load the session since the caller may not have it (legacy path).
+	exitSession, exitErr := s.repo.GetTaskSession(ctx, sessionID)
+	if exitErr != nil {
+		s.logger.Warn("failed to load session for on_exit",
+			zap.String("session_id", sessionID), zap.Error(exitErr))
+	} else {
+		s.processOnExit(ctx, taskID, exitSession, fromStep)
 	}
 
 	// Publish task updated event via the task service so the payload carries
@@ -365,24 +357,6 @@ func (s *Service) updateTransitionTaskWithCapacity(
 		task.ID,
 		targetStep.WIPLimit,
 	)
-}
-
-func (s *Service) validateTransitionWIPLimit(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
-	if targetStep == nil || targetStep.WIPLimit <= 0 || task.WorkflowStepID == targetStep.ID {
-		return nil
-	}
-	limitsRepo, ok := s.repo.(workflowMoveLimitsRepository)
-	if !ok {
-		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
-	}
-	occupants, err := limitsRepo.CountTasksByWorkflowStepExcludingTask(ctx, targetStep.ID, task.ID)
-	if err != nil {
-		return fmt.Errorf("count target workflow step tasks: %w", err)
-	}
-	if occupants >= targetStep.WIPLimit {
-		return wfmodels.NewWIPLimitError(targetStep.ID, targetStep.WIPLimit, occupants)
-	}
-	return nil
 }
 
 // handleTaskMoved handles manual task step changes (drag-and-drop, stepper "Move here").

@@ -172,7 +172,7 @@ func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task)
 		return s.tasks.CreateTask(ctx, task)
 	}
 	if s.workflowStepGetter == nil {
-		return fmt.Errorf("workflow step %s has no capacity checker", task.WorkflowStepID)
+		return s.tasks.CreateTask(ctx, task)
 	}
 	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
 	if err != nil {
