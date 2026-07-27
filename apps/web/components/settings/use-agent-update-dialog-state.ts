@@ -23,6 +23,7 @@ export function useAgentUpdateDialogState({
   const [open, setOpen] = useState(false);
   const [preview, setPreview] = useState<AgentUpdatePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [approveError, setApproveError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [activeJobID, setActiveJobID] = useState<string | null>(null);
@@ -33,6 +34,7 @@ export function useAgentUpdateDialogState({
     previewRequestID.current += 1;
     setPreview(null);
     setPreviewError(null);
+    setApproveError(null);
     setLoading(false);
     setStarting(false);
     setActiveJobID(null);
@@ -43,6 +45,7 @@ export function useAgentUpdateDialogState({
     setLoading(true);
     setPreview(null);
     setPreviewError(null);
+    setApproveError(null);
     try {
       const nextPreview = await onPreview(agentName);
       if (requestID === previewRequestID.current) setPreview(nextPreview);
@@ -63,20 +66,23 @@ export function useAgentUpdateDialogState({
   };
 
   const approve = async () => {
+    const requestID = previewRequestID.current;
     setStarting(true);
+    setApproveError(null);
     try {
       const nextJob = await onUpdate(agentName);
-      setActiveJobID(nextJob.job_id);
+      if (requestID === previewRequestID.current) setActiveJobID(nextJob.job_id);
     } catch (error) {
-      setPreviewError(errorMessage(error));
+      if (requestID === previewRequestID.current) setApproveError(errorMessage(error));
     } finally {
-      setStarting(false);
+      if (requestID === previewRequestID.current) setStarting(false);
     }
   };
 
   return {
     activeJob,
     approve,
+    approveError,
     handleOpenChange,
     loading,
     loadPreview,

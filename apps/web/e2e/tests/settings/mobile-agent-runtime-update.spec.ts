@@ -49,4 +49,26 @@ test.describe("managed agent runtime updates on mobile", () => {
       await testPage.locator("html").evaluate((element) => element.clientWidth),
     );
   });
+
+  test("keeps retry available after an update job fails", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage);
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
+    const retryUpdate = testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`);
+    await retryUpdate.tap();
+    expect(runtime.postCount()).toBe(1);
+
+    await runtime.emitUpdate(
+      updateJob({
+        status: "failed",
+        error: "The package registry is unavailable",
+        finished_at: "2026-07-26T12:01:00.000Z",
+      }),
+    );
+
+    await expect(retryUpdate).toHaveText("Retry update");
+    await retryUpdate.tap();
+    expect(runtime.postCount()).toBe(2);
+  });
 });

@@ -1,14 +1,16 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { AgentUpdatePreview } from "@/lib/api";
+import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
 import { useAgentUpdateDialogState } from "./use-agent-update-dialog-state";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((complete) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((complete, fail) => {
     resolve = complete;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 const FIRST_PREVIEW: AgentUpdatePreview = {
@@ -19,6 +21,8 @@ const FIRST_PREVIEW: AgentUpdatePreview = {
   command: ["npm", "exec"],
   command_string: "npm exec",
 };
+const AGENT_NAME = FIRST_PREVIEW.agent_name;
+const UPDATE_ALREADY_RUNNING = "Update is already running";
 
 describe("useAgentUpdateDialogState", () => {
   it("ignores a preview that resolves after close and reopen", async () => {
@@ -30,7 +34,7 @@ describe("useAgentUpdateDialogState", () => {
       .mockReturnValueOnce(secondRequest.promise);
     const { result } = renderHook(() =>
       useAgentUpdateDialogState({
-        agentName: "claude-acp",
+        agentName: AGENT_NAME,
         onPreview,
         onUpdate: vi.fn(),
       }),
@@ -56,5 +60,50 @@ describe("useAgentUpdateDialogState", () => {
     });
 
     await waitFor(() => expect(result.current.preview?.target_version).toBe("0.64.0"));
+  });
+
+  it("ignores an approval failure after the dialog closes", async () => {
+    const updateRequest = deferred<AgentUpdateJob>();
+    const onUpdate = vi
+      .fn<(agentName: string) => Promise<AgentUpdateJob>>()
+      .mockReturnValue(updateRequest.promise);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview: vi.fn().mockResolvedValue(FIRST_PREVIEW),
+        onUpdate,
+      }),
+    );
+
+    act(() => {
+      void result.current.approve();
+    });
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+    act(() => result.current.handleOpenChange(false));
+
+    await act(async () => {
+      updateRequest.reject(new Error(UPDATE_ALREADY_RUNNING));
+      await updateRequest.promise.catch(() => undefined);
+    });
+
+    expect(result.current.previewError).toBeNull();
+    expect(result.current.starting).toBe(false);
+  });
+
+  it("keeps a start failure separate from the update preview", async () => {
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview: vi.fn().mockResolvedValue(FIRST_PREVIEW),
+        onUpdate: vi.fn().mockRejectedValue(new Error(UPDATE_ALREADY_RUNNING)),
+      }),
+    );
+
+    await act(async () => {
+      await result.current.approve();
+    });
+
+    expect(result.current.previewError).toBeNull();
+    expect(result.current.approveError).toBe(UPDATE_ALREADY_RUNNING);
   });
 });

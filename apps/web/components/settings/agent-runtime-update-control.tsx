@@ -89,6 +89,7 @@ type UpdateBodyProps = {
   preview: AgentUpdatePreview | null;
   loading: boolean;
   previewError: string | null;
+  approveError: string | null;
   job?: AgentUpdateJob;
   onRetryPreview: () => void;
 };
@@ -98,6 +99,7 @@ function UpdateBody({
   preview,
   loading,
   previewError,
+  approveError,
   job,
   onRetryPreview,
 }: UpdateBodyProps) {
@@ -125,6 +127,18 @@ function UpdateBody({
           <Button type="button" variant="outline" size="sm" onClick={onRetryPreview}>
             Retry version check
           </Button>
+        </div>
+      )}
+      {approveError && (
+        <div
+          className="rounded-md border border-destructive/30 bg-destructive/5 p-3"
+          role="alert"
+          data-testid={`agent-update-approve-error-${agentName}`}
+        >
+          <p className="flex items-start gap-2 text-destructive">
+            <IconAlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>Unable to start update: {approveError}</span>
+          </p>
         </div>
       )}
       {preview && (
@@ -324,6 +338,7 @@ export function AgentRuntimeUpdateControl({
   const {
     activeJob,
     approve,
+    approveError,
     handleOpenChange,
     loading,
     loadPreview,
@@ -342,6 +357,7 @@ export function AgentRuntimeUpdateControl({
       preview={preview}
       loading={loading}
       previewError={previewError}
+      approveError={approveError}
       job={activeJob}
       onRetryPreview={() => void loadPreview()}
     />

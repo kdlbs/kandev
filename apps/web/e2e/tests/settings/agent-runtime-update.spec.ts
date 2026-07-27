@@ -101,4 +101,27 @@ test.describe("managed agent runtime updates", () => {
     await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toBeDisabled();
     expect(runtime.postCount()).toBe(0);
   });
+
+  test("retries an update after its job fails", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage);
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const retryUpdate = testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`);
+    await retryUpdate.click();
+    expect(runtime.postCount()).toBe(1);
+
+    await runtime.emitUpdate(
+      updateJob({
+        status: "failed",
+        error: "The package registry is unavailable",
+        finished_at: "2026-07-26T12:01:00.000Z",
+      }),
+    );
+
+    await expect(retryUpdate).toHaveText("Retry update");
+    await expect(retryUpdate).toBeEnabled();
+    await retryUpdate.click();
+    expect(runtime.postCount()).toBe(2);
+  });
 });
