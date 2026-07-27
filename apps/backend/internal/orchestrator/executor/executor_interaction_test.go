@@ -420,12 +420,13 @@ func TestLaunchModelSwitchAgent_CleansStartedExecutionAfterTerminalRace(t *testi
 		return sessionID == session.ID && executionID == "execution-model-race"
 	})
 
+	callerSession := *session
 	err := exec.launchModelSwitchAgent(
 		ctx,
 		session.TaskID,
 		session.ID,
 		"new-model",
-		session,
+		&callerSession,
 		&LaunchAgentRequest{},
 		nil,
 	)
@@ -437,6 +438,55 @@ func TestLaunchModelSwitchAgent_CleansStartedExecutionAfterTerminalRace(t *testi
 	case <-stopCalls:
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for model-switch race cleanup")
+	}
+}
+
+func TestPersistModelSwitchState_CancellationAfterSnapshotWins(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepository()
+	stored := &models.TaskSession{
+		ID:                   "session-model-persist-race",
+		TaskID:               "task-model-persist-race",
+		State:                models.TaskSessionStateRunning,
+		AgentProfileSnapshot: map[string]interface{}{"model": "old-model"},
+	}
+	repo.sessions[stored.ID] = stored
+	stale := *stored
+	stale.AgentProfileSnapshot = map[string]interface{}{"model": "old-model"}
+	if err := repo.UpdateTaskSessionState(
+		ctx, stored.ID, models.TaskSessionStateCancelled, "stopped via API",
+	); err != nil {
+		t.Fatalf("cancel session: %v", err)
+	}
+
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	var gotExpectedState models.TaskSessionState
+	exec.SetOnSessionStarting(func(
+		ctx context.Context,
+		_ string,
+		next *models.TaskSession,
+		expectedState models.TaskSessionState,
+		_ bool,
+	) error {
+		gotExpectedState = expectedState
+		return exec.persistSessionFullRowIfCurrentState(ctx, next, expectedState)
+	})
+
+	err := exec.persistModelSwitchState(
+		ctx, stale.TaskID, stale.ID, &stale, "new-model",
+	)
+	if !errors.Is(err, ErrSessionStateSuperseded) {
+		t.Fatalf("persistModelSwitchState error = %v, want ErrSessionStateSuperseded", err)
+	}
+	if gotExpectedState != models.TaskSessionStateRunning {
+		t.Fatalf("expected state = %q, want RUNNING", gotExpectedState)
+	}
+	persisted := repo.sessions[stored.ID]
+	if persisted.State != models.TaskSessionStateCancelled {
+		t.Fatalf("stored state = %q, want CANCELLED", persisted.State)
+	}
+	if got, _ := persisted.AgentProfileSnapshot["model"].(string); got != "old-model" {
+		t.Fatalf("stored model = %q, want old-model", got)
 	}
 }
 

@@ -870,6 +870,66 @@ func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 	}
 }
 
+func TestStartAgentOnExistingWorkspace_CancellationAfterSnapshotWins(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepository()
+	stored := &models.TaskSession{
+		ID:             "session-existing-race",
+		TaskID:         "task-existing-race",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+	}
+	repo.sessions[stored.ID] = stored
+	callerSession := *stored
+
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "exec-existing-race", nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			t.Fatal("agent process must not start after cancellation")
+			return nil
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+
+	var gotExpectedState models.TaskSessionState
+	executor.SetOnSessionStarting(func(
+		ctx context.Context,
+		_ string,
+		next *models.TaskSession,
+		expectedState models.TaskSessionState,
+		_ bool,
+	) error {
+		gotExpectedState = expectedState
+		if err := repo.UpdateTaskSessionState(
+			ctx, stored.ID, models.TaskSessionStateCancelled, "stopped via API",
+		); err != nil {
+			return err
+		}
+		return executor.persistSessionFullRowIfCurrentState(ctx, next, expectedState)
+	})
+
+	_, err := executor.startAgentOnExistingWorkspace(
+		ctx,
+		&v1.Task{ID: stored.TaskID},
+		&callerSession,
+		"",
+		true,
+		"",
+		nil,
+	)
+	if !errors.Is(err, ErrSessionStateSuperseded) {
+		t.Fatalf("startAgentOnExistingWorkspace error = %v, want ErrSessionStateSuperseded", err)
+	}
+	if gotExpectedState != models.TaskSessionStateCreated {
+		t.Fatalf("expected state = %q, want CREATED", gotExpectedState)
+	}
+	if got := repo.sessions[stored.ID].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("stored state = %q, want CANCELLED", got)
+	}
+}
+
 // Regression: a workspace-only execution can be created by lazy workspace
 // restoration before workflow auto-start reaches LaunchPreparedSession. That
 // execution has no agent command, so it must go through LaunchAgent's promotion

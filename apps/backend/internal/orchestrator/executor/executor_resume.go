@@ -386,6 +386,10 @@ func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string
 // ResumeSession restarts an existing task session using its stored worktree.
 // When startAgent is false, only the executor runtime is started (agent process is not launched).
 func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSession, startAgent bool) (*TaskExecution, error) {
+	if session != nil {
+		resumeSnapshot := *session
+		session = &resumeSnapshot
+	}
 	task, unlock, err := e.validateAndLockResume(ctx, session)
 	if err != nil {
 		return nil, err
@@ -502,6 +506,7 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 	if session == nil {
 		return nil, func() {}, ErrExecutionNotFound
 	}
+	requestedState := session.State
 
 	// Acquire per-session lock to prevent concurrent resume/launch operations.
 	// This is critical after backend restart when multiple resume requests may arrive
@@ -554,6 +559,13 @@ func (e *Executor) validateAndLockResume(ctx context.Context, session *models.Ta
 		return nil, func() {}, fetchErr
 	}
 	if fresh != nil {
+		if isTerminalSessionState(fresh.State) && fresh.State != requestedState {
+			unlock()
+			return nil, func() {}, &SessionStateSupersededError{
+				SessionID: session.ID,
+				State:     fresh.State,
+			}
+		}
 		session.State = fresh.State
 	}
 

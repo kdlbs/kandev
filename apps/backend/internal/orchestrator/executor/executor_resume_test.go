@@ -487,6 +487,41 @@ func TestResumeSession_ConcurrentResumeReReadsFreshState(t *testing.T) {
 	}
 }
 
+// TestResumeSession_CancellationBeforeResumeLockWins exercises the stop/resume
+// race before validateAndLockResume acquires the per-session lock. The resume
+// request observed WAITING_FOR_INPUT, then stop committed CANCELLED before the
+// in-lock re-read. That cancellation must abort the resume before any runtime
+// cleanup or replacement agent launch.
+func TestResumeSession_CancellationBeforeResumeLockWins(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+
+	callerSession := *repo.sessions["sess-1"]
+	repo.sessions["sess-1"].State = models.TaskSessionStateCancelled
+	repo.sessions["sess-1"].ErrorMessage = "stopped via API"
+
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			t.Fatal("LaunchAgent must not be called after a concurrent cancellation")
+			return nil, nil
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	_, err := exec.ResumeSession(context.Background(), &callerSession, true)
+	if !errors.Is(err, ErrSessionStateSuperseded) {
+		t.Fatalf("expected ErrSessionStateSuperseded, got: %v", err)
+	}
+	if agentMgr.cleanupStaleExecutionCallCount != 0 {
+		t.Errorf("cleanup must not run after cancellation, got %d calls",
+			agentMgr.cleanupStaleExecutionCallCount)
+	}
+	if agentMgr.launchAgentCallCount != 0 {
+		t.Errorf("LaunchAgent must not run after cancellation, got %d calls",
+			agentMgr.launchAgentCallCount)
+	}
+}
+
 // TestResumeSession_AbortsIfSessionReReadFails locks down the abort-on-error
 // behavior of the in-lock session re-read. If GetTaskSession fails transiently,
 // silently falling back to the caller's (potentially stale) session.State would
