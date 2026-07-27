@@ -28,6 +28,27 @@ export type FileSearchResponse = {
   error?: string;
 };
 
+export type ContentSearchMatchRange = {
+  /** Inclusive UTF-16 offset into `preview`. */
+  start: number;
+  /** Exclusive UTF-16 offset into `preview`. */
+  end: number;
+};
+
+export type WorkspaceContentSearchResult = {
+  repository_name: string;
+  path: string;
+  line: number;
+  column: number;
+  preview: string;
+  match_ranges: ContentSearchMatchRange[];
+};
+
+export type WorkspaceContentSearchResponse = {
+  results: WorkspaceContentSearchResult[];
+  error?: string;
+};
+
 export type FileChangeEvent = {
   timestamp: string;
   path: string;

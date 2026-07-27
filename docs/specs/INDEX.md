@@ -134,6 +134,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
+| [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

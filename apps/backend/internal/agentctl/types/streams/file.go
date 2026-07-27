@@ -168,6 +168,44 @@ type FileSearchResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+// WorkspaceContentSearchMaxQueryRunes is the largest accepted content query.
+const WorkspaceContentSearchMaxQueryRunes = 200
+
+// WorkspaceContentSearchRequest searches file contents in every repository in
+// the active task workspace.
+//
+// HTTP endpoint: GET /api/v1/workspace/content-search
+type WorkspaceContentSearchRequest struct {
+	// Query is matched case-insensitively against individual text lines.
+	Query string `json:"query"`
+
+	// LimitPerRepo is the maximum number of results returned per repository.
+	LimitPerRepo int `json:"limit_per_repo"`
+}
+
+// WorkspaceContentMatchRange is a half-open UTF-16 range in a result preview.
+type WorkspaceContentMatchRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
+// WorkspaceContentSearchResult identifies one matching line in a repository.
+type WorkspaceContentSearchResult struct {
+	RepositoryName string                       `json:"repository_name"`
+	Path           string                       `json:"path"`
+	Line           int                          `json:"line"`
+	Column         int                          `json:"column"`
+	Preview        string                       `json:"preview"`
+	MatchRanges    []WorkspaceContentMatchRange `json:"match_ranges"`
+}
+
+// WorkspaceContentSearchResponse contains content matches grouped in
+// deterministic repository order.
+type WorkspaceContentSearchResponse struct {
+	Results []WorkspaceContentSearchResult `json:"results"`
+	Error   string                         `json:"error,omitempty"`
+}
+
 // FileUpdateRequest represents a request to update file content using a diff.
 //
 // HTTP endpoint: POST /api/v1/workspace/file/content

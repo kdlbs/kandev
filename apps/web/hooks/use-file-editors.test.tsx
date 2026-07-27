@@ -77,6 +77,21 @@ describe("scrollEditorIfMounted", () => {
     expect(consumePendingCursorPosition(APP_PATH, REPO)).toBeUndefined();
   });
 
+  it("uses repo-scoped matching when a worktree path is also available", () => {
+    const wrongRepoEditor = createEditor("/worktree/backend/src/app.ts");
+    const repoEditor = createEditor("/worktree/frontend/src/app.ts");
+    getMonacoInstance.mockReturnValue({
+      editor: { getEditors: () => [wrongRepoEditor, repoEditor] },
+    });
+    setPendingCursorPosition(APP_PATH, 12, 1, REPO);
+
+    expect(scrollEditorIfMounted(APP_PATH, WORKTREE_PATH, 42, 3, REPO)).toBe(true);
+
+    expect(wrongRepoEditor.setPosition).not.toHaveBeenCalled();
+    expect(repoEditor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
+    expect(consumePendingCursorPosition(APP_PATH, REPO)).toBeUndefined();
+  });
+
   it("does not suffix-scroll a repo-scoped request into an unscoped model path", () => {
     const editor = createEditor(WORKTREE_APP_PATH);
     getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });

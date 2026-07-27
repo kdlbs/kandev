@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import type { CommandItem } from "./types";
+import type { CommandPanelMode } from "./types";
 
 type CommandRegistryContextValue = {
   register: (sourceId: string, commands: CommandItem[]) => void;
@@ -18,6 +19,10 @@ type CommandRegistryContextValue = {
   getSnapshot: () => CommandItem[];
   open: boolean;
   setOpen: (open: boolean) => void;
+  mode: CommandPanelMode;
+  setMode: (mode: CommandPanelMode) => void;
+  openMode: (mode: CommandPanelMode) => void;
+  modeRequestVersion: number;
 };
 
 const CommandRegistryContext = createContext<CommandRegistryContextValue | null>(null);
@@ -27,6 +32,14 @@ export function CommandRegistryProvider({ children }: { children: ReactNode }) {
   const listenersRef = useRef(new Set<() => void>());
   const snapshotRef = useRef<CommandItem[]>([]);
   const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<CommandPanelMode>("commands");
+  const [modeRequestVersion, setModeRequestVersion] = useState(0);
+
+  const openMode = useCallback((nextMode: CommandPanelMode) => {
+    setMode(nextMode);
+    setOpen(true);
+    setModeRequestVersion((version) => version + 1);
+  }, []);
 
   const notify = useCallback(() => {
     // Rebuild snapshot
@@ -67,7 +80,18 @@ export function CommandRegistryProvider({ children }: { children: ReactNode }) {
 
   return (
     <CommandRegistryContext.Provider
-      value={{ register, unregister, subscribe, getSnapshot, open, setOpen }}
+      value={{
+        register,
+        unregister,
+        subscribe,
+        getSnapshot,
+        open,
+        setOpen,
+        mode,
+        setMode,
+        openMode,
+        modeRequestVersion,
+      }}
     >
       {children}
     </CommandRegistryContext.Provider>
@@ -86,6 +110,6 @@ export function useCommands(): CommandItem[] {
 }
 
 export function useCommandPanelOpen() {
-  const { open, setOpen } = useCommandRegistry();
-  return { open, setOpen };
+  const { open, setOpen, mode, setMode, openMode, modeRequestVersion } = useCommandRegistry();
+  return { open, setOpen, mode, setMode, openMode, modeRequestVersion };
 }

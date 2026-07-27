@@ -26,10 +26,14 @@ import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { useAppStore } from "@/components/state-provider";
 import type { Task } from "@/lib/types/http";
 import { FileIcon } from "@/components/ui/file-icon";
+import { WorkspaceContentSearch } from "@/components/workspace-content-search";
+import type { WorkspaceContentSearchError } from "@/hooks/domains/session/use-workspace-content-search";
+import type { WorkspaceContentSearchResult } from "@/lib/types/backend";
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 export const MODE_COMMANDS: CommandPanelMode = "commands";
 export const MODE_SEARCH_FILES: CommandPanelMode = "search-files";
+export const MODE_SEARCH_CONTENT: CommandPanelMode = "search-content";
 
 const STEP_COLOR_MAP: Record<string, string> = {
   "bg-slate-500": "#64748b",
@@ -247,12 +251,15 @@ function getInputPlaceholder(mode: CommandPanelMode, inputCommand: CommandItemTy
   if (mode === "input") return inputCommand?.inputPlaceholder ?? "Enter value...";
   if (mode === "search-tasks") return "Search for tasks...";
   if (mode === MODE_SEARCH_FILES) return "Search for files...";
+  if (mode === MODE_SEARCH_CONTENT) return "Search task contents…";
   return "Type a command...";
 }
 
 function getEnterLabel(mode: CommandPanelMode) {
   if (mode === "input") return "Confirm";
-  if (mode === "search-tasks" || mode === MODE_SEARCH_FILES) return "Open";
+  if (mode === "search-tasks" || mode === MODE_SEARCH_FILES || mode === MODE_SEARCH_CONTENT) {
+    return "Open";
+  }
   return "Select";
 }
 
@@ -260,6 +267,7 @@ function getModeLabel(mode: CommandPanelMode, inputCommand: CommandItemType | nu
   if (mode === "input") return inputCommand?.label;
   if (mode === "search-tasks") return "Tasks";
   if (mode === MODE_SEARCH_FILES) return "Files";
+  if (mode === MODE_SEARCH_CONTENT) return "Contents";
   return null;
 }
 
@@ -312,6 +320,11 @@ export type CommandPanelViewProps = {
   fileResults: string[];
   isSearchingFiles: boolean;
   handleFileSelect: (filePath: string) => void;
+  contentResults: WorkspaceContentSearchResult[];
+  isSearchingContent: boolean;
+  contentSearchError: WorkspaceContentSearchError | null;
+  activeSessionId: string | null;
+  handleContentSelect: (result: WorkspaceContentSearchResult) => void;
   commands: CommandItemType[];
   grouped: Array<[string, CommandItemType[]]>;
   handleSelect: (cmd: CommandItemType) => void;
@@ -322,30 +335,105 @@ export type CommandPanelViewProps = {
   handleTaskSelect: (task: Task) => void;
 };
 
-export function CommandPanelView({
-  open,
-  setOpen,
+function CommandPanelInputHeader({
   mode,
   inputCommand,
-  selectedValue,
-  setSelectedValue,
   search,
   setSearch,
   handleKeyDown,
   goBack,
-  fileResults,
-  isSearchingFiles,
-  handleFileSelect,
-  commands,
-  grouped,
-  handleSelect,
-  isSearching,
-  taskResults,
-  stepMap,
-  repoMap,
-  handleTaskSelect,
 }: CommandPanelViewProps) {
   const modeLabel = getModeLabel(mode, inputCommand);
+  return (
+    <div className="flex items-center border-b border-border [&>[data-slot=command-input-wrapper]]:flex-1">
+      {mode !== MODE_COMMANDS && (
+        <button
+          onClick={goBack}
+          tabIndex={-1}
+          className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+        >
+          <span>←</span>
+          <span>{modeLabel}</span>
+          <span className="text-muted-foreground/50">›</span>
+        </button>
+      )}
+      <CommandInput
+        placeholder={getInputPlaceholder(mode, inputCommand)}
+        value={search}
+        onValueChange={setSearch}
+        onKeyDown={handleKeyDown}
+      />
+    </div>
+  );
+}
+
+function CommandPanelResultList(props: CommandPanelViewProps) {
+  const {
+    mode,
+    inputCommand,
+    search,
+    fileResults,
+    isSearchingFiles,
+    handleFileSelect,
+    contentResults,
+    isSearchingContent,
+    contentSearchError,
+    activeSessionId,
+    handleContentSelect,
+    commands,
+    grouped,
+    handleSelect,
+    isSearching,
+    taskResults,
+    stepMap,
+    repoMap,
+    handleTaskSelect,
+  } = props;
+  return (
+    <CommandList>
+      {mode === MODE_COMMANDS && (
+        <CommandsListContent
+          commands={commands}
+          grouped={grouped}
+          search={search}
+          onSelect={handleSelect}
+          taskResults={taskResults}
+          isSearching={isSearching}
+          stepMap={stepMap}
+          repoMap={repoMap}
+          onTaskSelect={handleTaskSelect}
+        />
+      )}
+      {mode === MODE_SEARCH_FILES && (
+        <FileSearchContent
+          files={fileResults}
+          isSearching={isSearchingFiles}
+          search={search}
+          onSelect={handleFileSelect}
+        />
+      )}
+      {mode === MODE_SEARCH_CONTENT && (
+        <WorkspaceContentSearch
+          results={contentResults}
+          isSearching={isSearchingContent}
+          error={contentSearchError}
+          search={search}
+          sessionId={activeSessionId}
+          onSelect={handleContentSelect}
+        />
+      )}
+      {mode === "input" &&
+        (!search.trim() ? (
+          <CommandEmpty>{inputCommand?.inputPlaceholder ?? "Enter a value..."}</CommandEmpty>
+        ) : (
+          <CommandEmpty>Press Enter to confirm</CommandEmpty>
+        ))}
+    </CommandList>
+  );
+}
+
+export function CommandPanelView(props: CommandPanelViewProps) {
+  const { open, setOpen, mode, selectedValue, setSelectedValue } = props;
   return (
     <CommandDialog
       open={open}
@@ -371,54 +459,8 @@ export function CommandPanelView({
         value={selectedValue}
         onValueChange={setSelectedValue}
       >
-        <div className="flex items-center border-b border-border [&>[data-slot=command-input-wrapper]]:flex-1">
-          {mode !== MODE_COMMANDS && (
-            <button
-              onClick={goBack}
-              tabIndex={-1}
-              className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-            >
-              <span>←</span>
-              <span>{modeLabel}</span>
-              <span className="text-muted-foreground/50">›</span>
-            </button>
-          )}
-          <CommandInput
-            placeholder={getInputPlaceholder(mode, inputCommand)}
-            value={search}
-            onValueChange={setSearch}
-            onKeyDown={handleKeyDown}
-          />
-        </div>
-        <CommandList>
-          {mode === MODE_COMMANDS && (
-            <CommandsListContent
-              commands={commands}
-              grouped={grouped}
-              search={search}
-              onSelect={handleSelect}
-              taskResults={taskResults}
-              isSearching={isSearching}
-              stepMap={stepMap}
-              repoMap={repoMap}
-              onTaskSelect={handleTaskSelect}
-            />
-          )}
-          {mode === MODE_SEARCH_FILES && (
-            <FileSearchContent
-              files={fileResults}
-              isSearching={isSearchingFiles}
-              search={search}
-              onSelect={handleFileSelect}
-            />
-          )}
-          {mode === "input" &&
-            (!search.trim() ? (
-              <CommandEmpty>{inputCommand?.inputPlaceholder ?? "Enter a value..."}</CommandEmpty>
-            ) : (
-              <CommandEmpty>Press Enter to confirm</CommandEmpty>
-            ))}
-        </CommandList>
+        <CommandPanelInputHeader {...props} />
+        <CommandPanelResultList {...props} />
         <CommandPanelFooter mode={mode} />
       </Command>
     </CommandDialog>

@@ -86,6 +86,13 @@ Messages show peer attribution, and Kandev gives the receiving agent hidden repl
 
 Desktop panel groups can host agent chat, files, terminals, Changes, the task plan, previews, and GitHub pull-request detail. Use **+** to add a panel. Mobile exposes sessions, files, terminal, and changes through task navigation and sheets. Its task switcher opens as an inset bottom card, and the current-session control shows the active agent's icon and name.
 
+Press **Cmd+Shift+F** on macOS or **Ctrl+Shift+F** elsewhere to search the
+contents of every file in the active task workspace. Results are grouped by
+repository and show the repository-relative path, line number, and matching
+line; selecting one opens that repository's file at the match. Content search
+includes tracked files and untracked files that are not ignored. Use
+**Cmd/Ctrl+Shift+K** when you want to search only file names and paths.
+
 Open **Settings > General > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell. Changing the default does not replace a layout already saved for a task; choose **Reset Layout** from the workbench layout menu when you want that task to adopt the latest default.
 
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
