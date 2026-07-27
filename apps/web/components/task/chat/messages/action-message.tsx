@@ -287,7 +287,8 @@ function ActionButton({
           const params = action.params as
             | { method: string; payload: Record<string, unknown> }
             | undefined;
-          if (client && params) await client.request(params.method, params.payload);
+          if (!client || !params) throw new Error("WebSocket recovery request is unavailable");
+          await client.request(params.method, params.payload);
           break;
         }
       }

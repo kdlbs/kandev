@@ -12,14 +12,18 @@ import {
 import type { AppState } from "@/lib/state/store";
 
 const requestMock = vi.fn().mockResolvedValue({});
+const getWebSocketClientMock = vi.fn<() => { request: typeof requestMock } | null>(() => ({
+  request: requestMock,
+}));
 
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: requestMock }),
+  getWebSocketClient: () => getWebSocketClientMock(),
 }));
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  getWebSocketClientMock.mockReturnValue({ request: requestMock });
 });
 
 const CANCEL_TEST_ID = "recovery-cancel-retry-button";
@@ -155,6 +159,16 @@ describe("ActionMessage — transient retry (warning variant)", () => {
     renderAction(errorMsg, "WAITING_FOR_INPUT", "");
     fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
     await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+  });
+
+  it("keeps a recovery card visible when the WebSocket client is unavailable", () => {
+    getWebSocketClientMock.mockReturnValue(null);
+    renderAction(recoveryMessage(true), "WAITING_FOR_INPUT", "");
+
+    fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
+
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+    expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
   });
 });
 
