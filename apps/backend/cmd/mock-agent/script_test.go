@@ -544,6 +544,9 @@ func TestExecuteScriptShellResultWithoutCwdOmitsCwdKey(t *testing.T) {
 	executeScript(e, "", `e2e:shell_result("cat file.txt", "cat file.txt=== marker ===\n")`)
 
 	updates := mock.getUpdates()
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 updates, got %d", len(updates))
+	}
 	tc := updates[0].notification.Update.ToolCall
 	input, ok := tc.RawInput.(map[string]any)
 	if !ok {
