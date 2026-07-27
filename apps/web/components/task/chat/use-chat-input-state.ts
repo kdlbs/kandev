@@ -28,6 +28,7 @@ import {
 import {
   useAttachmentCountFeedback,
   useAttachmentFileFeedback,
+  useAttachmentTotalSizeFeedback,
   useUnreadablePastedImageFeedback,
 } from "./use-attachment-file-feedback";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
@@ -211,6 +212,7 @@ function useAttachments(sessionId: string | null) {
   );
   const warnAttachmentCountLimit = useAttachmentCountFeedback();
   const rejectOversizedFile = useAttachmentFileFeedback();
+  const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
   const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
   const attachmentsRef = useRef(attachments);
   const prevSessionIdRef = useRef(sessionId);
@@ -259,7 +261,7 @@ function useAttachments(sessionId: string | null) {
         }
         if (rejectOversizedFile(file)) continue;
         if (acceptedTotalSize + file.size > MAX_TOTAL_SIZE) {
-          console.warn("Total attachment size limit exceeded");
+          warnAttachmentTotalSizeLimit();
           break;
         }
         const attachment = await processFile(file);
@@ -270,7 +272,13 @@ function useAttachments(sessionId: string | null) {
         }
       }
     },
-    [attachments, rejectOversizedFile, warnAttachmentCountLimit, warnUnreadablePastedImage],
+    [
+      attachments,
+      rejectOversizedFile,
+      warnAttachmentCountLimit,
+      warnAttachmentTotalSizeLimit,
+      warnUnreadablePastedImage,
+    ],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {

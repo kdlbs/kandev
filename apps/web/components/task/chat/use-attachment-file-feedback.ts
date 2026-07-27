@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useToast } from "@/components/toast-provider";
-import { formatBytes, MAX_FILES, MAX_FILE_SIZE } from "./file-attachment";
+import { formatBytes, MAX_FILES, MAX_FILE_SIZE, MAX_TOTAL_SIZE } from "./file-attachment";
 
 export function useAttachmentCountFeedback() {
   const { toast } = useToast();
@@ -9,6 +9,18 @@ export function useAttachmentCountFeedback() {
     toast({
       title: "Attachment limit reached",
       description: `You can attach up to ${MAX_FILES} files.`,
+      variant: "error",
+    });
+  }, [toast]);
+}
+
+export function useAttachmentTotalSizeFeedback() {
+  const { toast } = useToast();
+
+  return useCallback(() => {
+    toast({
+      title: "Attachment limit reached",
+      description: `Attachments can total up to ${formatBytes(MAX_TOTAL_SIZE)}.`,
       variant: "error",
     });
   }, [toast]);

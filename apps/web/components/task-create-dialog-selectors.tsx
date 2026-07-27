@@ -16,7 +16,9 @@ import {
   type FileAttachment,
 } from "@/components/task/chat/file-attachment";
 import {
+  useAttachmentCountFeedback,
   useAttachmentFileFeedback,
+  useAttachmentTotalSizeFeedback,
   useUnreadablePastedImageFeedback,
 } from "@/components/task/chat/use-attachment-file-feedback";
 import {
@@ -351,7 +353,9 @@ function useFileAttachments() {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const attachmentsRef = useRef<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const warnAttachmentCountLimit = useAttachmentCountFeedback();
   const rejectOversizedFile = useAttachmentFileFeedback();
+  const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
   const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
 
   const addFiles = useCallback(
@@ -373,9 +377,9 @@ function useFileAttachments() {
         processed,
       );
       if (rejection === "count") {
-        console.warn(`Maximum ${MAX_FILES} files allowed`);
+        warnAttachmentCountLimit();
       } else if (rejection === "total-size") {
-        console.warn(`Total attachment size limit exceeded (max: ${formatBytes(MAX_TOTAL_SIZE)})`);
+        warnAttachmentTotalSizeLimit();
       }
       if (accepted.length === 0) return;
 
@@ -383,7 +387,12 @@ function useFileAttachments() {
       attachmentsRef.current = next;
       setAttachments(next);
     },
-    [rejectOversizedFile, warnUnreadablePastedImage],
+    [
+      rejectOversizedFile,
+      warnAttachmentCountLimit,
+      warnAttachmentTotalSizeLimit,
+      warnUnreadablePastedImage,
+    ],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {

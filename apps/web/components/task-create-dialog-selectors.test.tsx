@@ -3,9 +3,11 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ToastProvider } from "@/components/toast-provider";
-import { MAX_FILES, processFile } from "@/components/task/chat/file-attachment";
+import { MAX_FILES, MAX_TOTAL_SIZE, processFile } from "@/components/task/chat/file-attachment";
 import { TaskFormInputs } from "./task-create-dialog-selectors";
 import type { TaskFormInputsHandle } from "./task-create-dialog-types";
+
+const TOAST_MESSAGE_TEST_ID = "toast-message";
 
 vi.mock("@/components/task/chat/file-attachment", async () => {
   const actual = await vi.importActual<typeof import("@/components/task/chat/file-attachment")>(
@@ -229,7 +231,7 @@ describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
 });
 
 describe("TaskFormInputs attachment feedback", () => {
-  it("warns once when Strict Mode replays an attachment-limit update", async () => {
+  it("shows one count-limit toast when Strict Mode replays an attachment-limit update", async () => {
     vi.mocked(processFile).mockImplementation(async (file) => ({
       id: file.name,
       data: "",
@@ -254,7 +256,44 @@ describe("TaskFormInputs attachment feedback", () => {
       },
     });
 
-    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+    const warning = await screen.findByTestId(TOAST_MESSAGE_TEST_ID);
+    expect(warning.textContent).toContain("Attachment limit reached");
+    expect(warning.textContent).toContain(`You can attach up to ${MAX_FILES} files.`);
+    expect(screen.getAllByTestId(TOAST_MESSAGE_TEST_ID)).toHaveLength(1);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  it("shows a total-size toast when pasted attachments exceed the aggregate limit", async () => {
+    vi.mocked(processFile).mockImplementation(async (file) => ({
+      id: file.name,
+      data: "",
+      mimeType: file.type,
+      fileName: file.name,
+      size: file.size,
+      isImage: false,
+      deliveryMode: "path",
+    }));
+    const { textarea } = renderTaskFormInputs("");
+    const fileSize = MAX_TOTAL_SIZE / 3 + 1;
+    const files = Array.from({ length: 3 }, (_, index) => {
+      const file = new File(["attachment"], `attachment-${index}.txt`, { type: "text/plain" });
+      Object.defineProperty(file, "size", { value: fileSize });
+      return file;
+    });
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files,
+        items: files.map((file) => ({ kind: "file", type: file.type, getAsFile: () => file })),
+        getData: () => "",
+      },
+    });
+
+    const warning = await screen.findByTestId(TOAST_MESSAGE_TEST_ID);
+    expect(warning.textContent).toContain("Attachment limit reached");
+    expect(warning.textContent).toContain(
+      `Attachments can total up to ${MAX_TOTAL_SIZE / 1024 / 1024} MB.`,
+    );
   });
 
   it("warns when a pasted image exceeds the attachment limit", async () => {
@@ -270,7 +309,7 @@ describe("TaskFormInputs attachment feedback", () => {
       },
     });
 
-    const warning = await screen.findByTestId("toast-message");
+    const warning = await screen.findByTestId(TOAST_MESSAGE_TEST_ID);
     expect(warning.textContent).toContain("Attachment is too large");
     expect(warning.textContent).toContain(
       "copied-image.png is 14 MB. The maximum file size is 10 MB.",
@@ -291,7 +330,7 @@ describe("TaskFormInputs attachment feedback", () => {
       },
     });
 
-    const warning = await screen.findByTestId("toast-message");
+    const warning = await screen.findByTestId(TOAST_MESSAGE_TEST_ID);
     expect(warning.textContent).toContain("Pasted image couldn’t be attached");
     expect(warning.textContent).toContain(
       "The browser didn’t provide image data. Save the image, then attach the file instead.",

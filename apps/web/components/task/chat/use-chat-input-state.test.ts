@@ -218,7 +218,7 @@ describe("useChatInputState attachment feedback", () => {
     expect(toastMessage()).toContain(attachmentCountLimitMessage);
   });
 
-  it("accepts only files that fit within the total size limit from one batch", async () => {
+  it("accepts only files that fit within the total size limit and warns once", async () => {
     const { result } = renderInputState(vi.fn());
     const fileSize = MAX_TOTAL_SIZE / 3 + 1;
     const files = [
@@ -232,6 +232,11 @@ describe("useChatInputState attachment feedback", () => {
     });
 
     expect(result.current.attachments).toHaveLength(2);
+    expect(screen.getAllByTestId("toast-message")).toHaveLength(1);
+    expect(toastMessage()).toContain("Attachment limit reached");
+    expect(toastMessage()).toContain(
+      `Attachments can total up to ${MAX_TOTAL_SIZE / 1024 / 1024} MB.`,
+    );
   });
 
   it("warns when a pasted attachment exceeds the file size limit", async () => {

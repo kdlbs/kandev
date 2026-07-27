@@ -23,7 +23,9 @@ import {
 } from "./chat/file-attachment";
 import { readClipboardAttachments } from "./chat/clipboard-attachments";
 import {
+  useAttachmentCountFeedback,
   useAttachmentFileFeedback,
+  useAttachmentTotalSizeFeedback,
   useUnreadablePastedImageFeedback,
 } from "./chat/use-attachment-file-feedback";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
@@ -59,20 +61,42 @@ export function EnvironmentBadges({
 
 export type SessionOption = { id: string; label: string; index?: number; agentName?: string };
 
+type AttachmentLimitRejection = "count" | "total-size" | null;
+
 function appendAttachmentsWithinLimits(
   current: FileAttachment[],
   processed: FileAttachment[],
-): FileAttachment[] {
+): { attachments: FileAttachment[]; rejection: AttachmentLimitRejection } {
   let count = current.length;
   let totalSize = current.reduce((sum, attachment) => sum + attachment.size, 0);
   const accepted: FileAttachment[] = [];
   for (const attachment of processed) {
-    if (count >= MAX_FILES || totalSize + attachment.size > MAX_TOTAL_SIZE) break;
+    if (count >= MAX_FILES) return { attachments: [...current, ...accepted], rejection: "count" };
+    if (totalSize + attachment.size > MAX_TOTAL_SIZE) {
+      return { attachments: [...current, ...accepted], rejection: "total-size" };
+    }
     accepted.push(attachment);
     count += 1;
     totalSize += attachment.size;
   }
-  return accepted.length > 0 ? [...current, ...accepted] : current;
+  return {
+    attachments: accepted.length > 0 ? [...current, ...accepted] : current,
+    rejection: null,
+  };
+}
+
+function useDialogFileInput(addFiles: (files: File[]) => Promise<void>) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const handleAttachClick = useCallback(() => fileInputRef.current?.click(), []);
+  const handleFileInputChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const files = event.target.files;
+      if (files && files.length > 0) void addFiles(Array.from(files));
+      event.target.value = "";
+    },
+    [addFiles],
+  );
+  return { fileInputRef, handleAttachClick, handleFileInputChange };
 }
 
 /** Unified context selector: Blank, Copy prompt, and per-session summarize options. */
@@ -155,9 +179,11 @@ export function ContextSelect({
 export function useDialogAttachments(disabled: boolean) {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
+  const warnAttachmentCountLimit = useAttachmentCountFeedback();
   const rejectOversizedFile = useAttachmentFileFeedback();
+  const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
   const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachmentsRef = useRef<FileAttachment[]>([]);
 
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -168,13 +194,23 @@ export function useDialogAttachments(disabled: boolean) {
         if (attachment) processed.push(attachment);
       }
       if (processed.length === 0) return;
-      setAttachments((current) => appendAttachmentsWithinLimits(current, processed));
+      const { attachments: next, rejection } = appendAttachmentsWithinLimits(
+        attachmentsRef.current,
+        processed,
+      );
+      attachmentsRef.current = next;
+      setAttachments(next);
+      if (rejection === "count") warnAttachmentCountLimit();
+      if (rejection === "total-size") warnAttachmentTotalSizeLimit();
     },
-    [rejectOversizedFile],
+    [rejectOversizedFile, warnAttachmentCountLimit, warnAttachmentTotalSizeLimit],
   );
+  const { fileInputRef, handleAttachClick, handleFileInputChange } = useDialogFileInput(addFiles);
 
   const handleRemoveAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    const next = attachmentsRef.current.filter((attachment) => attachment.id !== id);
+    attachmentsRef.current = next;
+    setAttachments(next);
   }, []);
 
   const handlePaste = useCallback(
@@ -227,17 +263,6 @@ export function useDialogAttachments(disabled: boolean) {
       if (files.length > 0) void addFiles(files);
     },
     [disabled, addFiles],
-  );
-
-  const handleAttachClick = useCallback(() => fileInputRef.current?.click(), []);
-
-  const handleFileInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = e.target.files;
-      if (files && files.length > 0) void addFiles(Array.from(files));
-      e.target.value = "";
-    },
-    [addFiles],
   );
 
   return {
