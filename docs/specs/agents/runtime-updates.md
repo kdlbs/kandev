@@ -164,8 +164,8 @@ Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
   data.
 - If preview version resolution fails, the dialog shows the error and keeps
   approval disabled. No update job or package command starts.
-- If the package update command fails or times out, the job fails and retains
-  the prior capability data.
+- If the targeted repair or its single retry fails or times out, the job fails
+  and retains the prior capability data.
 - If the package update succeeds but the capability probe fails because
   authentication is required or another recoverable probe error occurs, the
   job reports package-update success plus `refresh_error`; the previous model
