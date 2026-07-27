@@ -397,7 +397,9 @@ func TestCreateTask_LocalPath_AllowedForSubtasks(t *testing.T) {
 // can resolve through the same code path.
 func TestAddBranchToTask_ForwardsRepositoryURL(t *testing.T) {
 	backend := &testBackend{
-		response: map[string]interface{}{"id": "tr-1", "task_id": "task-current"},
+		response: map[string]interface{}{
+			"id": "tr-1", "task_id": "task-current", "worktree_path": "/task/kandev-feature-x", "task_workspace_path": "/task", "agent_cwd_changed": false,
+		},
 	}
 	s := newTaskModeServer(t, backend, "task-current")
 
@@ -417,6 +419,11 @@ func TestAddBranchToTask_ForwardsRepositoryURL(t *testing.T) {
 		"repository_url should be forwarded as github_url to match create_task wire format")
 	assert.Equal(t, "feature/x", payload["checkout_branch"])
 	assert.Equal(t, "", payload["repository_id"])
+	text, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, `"worktree_path": "/task/kandev-feature-x"`)
+	assert.Contains(t, text.Text, `"task_workspace_path": "/task"`)
+	assert.Contains(t, text.Text, `"agent_cwd_changed": false`)
 }
 
 func TestAddBranchToTask_RejectsAnotherTask(t *testing.T) {

@@ -221,6 +221,41 @@ func TestHandleAddBranchToTask_RejectsMultipleLocators(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
+type pathBranchMaterializer struct{}
+
+func (pathBranchMaterializer) MaterializeBranch(context.Context, string, string) (*service.BranchMaterializationResult, error) {
+	return &service.BranchMaterializationResult{WorktreePath: "/task/kandev-feature-source", TaskWorkspacePath: "/task"}, nil
+}
+
+func TestHandleAddBranchToTask_ReturnsMaterializedPaths(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	svc.SetWorkflowStepGetter(&staticWorkflowStepGetter{steps: map[string]*workflowmodels.WorkflowStep{
+		"step": {ID: "step", WorkflowID: "wf-branch-path", Name: "Step"},
+	}})
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-branch-path", Name: "Workspace"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-branch-path", WorkspaceID: "ws-branch-path", Name: "Workflow"}))
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{ID: "repo-branch-path", WorkspaceID: "ws-branch-path", Name: "app", DefaultBranch: "main"}))
+	task, err := svc.CreateTask(ctx, &service.CreateTaskRequest{WorkspaceID: "ws-branch-path", WorkflowID: "wf-branch-path", WorkflowStepID: "step", Title: "Task", Repositories: []service.TaskRepositoryInput{{RepositoryID: "repo-branch-path", BaseBranch: "main"}}})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-branch-path", TaskID: task.ID}))
+	_, err = svc.StartTurn(ctx, "session-branch-path")
+	require.NoError(t, err)
+	svc.SetBranchMaterializer(pathBranchMaterializer{})
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+
+	resp, err := h.handleAddBranchToTask(ctx, makeWSMessage(t, ws.ActionMCPAddBranchToTask, map[string]interface{}{
+		"task_id": task.ID, "repository_id": "repo-branch-path", "base_branch": "main", "checkout_branch": "feature/source",
+	}))
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, "/task/kandev-feature-source", payload["worktree_path"])
+	assert.Equal(t, "/task", payload["task_workspace_path"])
+	assert.Equal(t, false, payload["agent_cwd_changed"])
+}
+
 func TestHandleAddWorkspaceSourcesRejectsUnknownKind(t *testing.T) {
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{

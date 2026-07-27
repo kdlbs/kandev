@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -669,13 +668,14 @@ func (p *stubProber) ProbeDefaultBranch(_ context.Context, provider, owner, name
 // stubMaterializer implements BranchMaterializer for tests; the err field
 // controls whether the materialize step succeeds.
 type stubMaterializer struct {
-	err   error
-	calls int
+	err    error
+	result *BranchMaterializationResult
+	calls  int
 }
 
-func (m *stubMaterializer) MaterializeBranch(_ context.Context, _ string, _ string) error {
+func (m *stubMaterializer) MaterializeBranch(_ context.Context, _ string, _ string) (*BranchMaterializationResult, error) {
 	m.calls++
-	return m.err
+	return m.result, m.err
 }
 
 // seedWorktreeTaskEnv attaches a worktree-executor task_environments row so
@@ -930,7 +930,7 @@ func TestAddBranchToTask_MaterializeSkippedPreLaunchStillSucceeds(t *testing.T) 
 	}
 }
 
-func TestAddBranchToTask_RejectsActiveTaskBeforePersisting(t *testing.T) {
+func TestAddBranchToTask_ActiveTurnUsesLegacyMaterializer(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-add-idle", Name: "WS"}); err != nil {
@@ -952,16 +952,38 @@ func TestAddBranchToTask_RejectsActiveTaskBeforePersisting(t *testing.T) {
 	if _, err := svc.StartTurn(ctx, "session-add-idle"); err != nil {
 		t.Fatal(err)
 	}
+	legacy := &stubMaterializer{result: &BranchMaterializationResult{
+		WorktreePath:      "/task/kandev-feature-source",
+		TaskWorkspacePath: "/task",
+	}}
+	svc.SetBranchMaterializer(legacy)
+	batch := &recordingWorkspaceSourceMaterializer{}
+	svc.SetWorkspaceSourceMaterializer(batch)
 
-	_, err = svc.AddBranchToTask(ctx, AddBranchToTaskRequest{TaskID: task.ID, RepositoryID: "repo-add-idle", BaseBranch: "main", CheckoutBranch: "feature/source"})
-	if !errors.Is(err, ErrWorkspaceSourceActive) {
-		t.Fatalf("error = %v, want active-task rejection", err)
+	added, err := svc.AddBranchToTask(ctx, AddBranchToTaskRequest{TaskID: task.ID, RepositoryID: "repo-add-idle", BaseBranch: "main", CheckoutBranch: "feature/source"})
+	if err != nil {
+		t.Fatalf("AddBranchToTask: %v", err)
+	}
+	if added.CheckoutBranch != "feature/source" {
+		t.Fatalf("checkout branch = %q, want feature/source", added.CheckoutBranch)
+	}
+	if added.WorktreePath != "/task/kandev-feature-source" || added.TaskWorkspacePath != "/task" {
+		t.Fatalf("materialized paths = (%q, %q), want worktree and task root", added.WorktreePath, added.TaskWorkspacePath)
+	}
+	if added.AgentCWDChanged {
+		t.Fatal("agent CWD must remain unchanged")
+	}
+	if legacy.calls != 1 {
+		t.Fatalf("legacy materializer calls = %d, want 1", legacy.calls)
+	}
+	if batch.called {
+		t.Fatal("workspace-source materializer was called")
 	}
 	rows, err := repo.ListTaskRepositories(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("task repositories = %#v, want no added branch", rows)
+	if len(rows) != 2 {
+		t.Fatalf("task repositories = %#v, want added branch", rows)
 	}
 }

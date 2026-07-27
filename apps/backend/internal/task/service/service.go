@@ -100,7 +100,15 @@ type BranchMaterializer interface {
 	// task_repositories row. Best-effort: when no active session exists yet
 	// the implementation may choose to no-op and let the next session launch
 	// create the worktree via the standard multi-repo prepare path.
-	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) error
+	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*BranchMaterializationResult, error)
+}
+
+// BranchMaterializationResult describes the live worktree created for a
+// branch attachment. Empty paths mean materialization was intentionally
+// deferred until the next session launch.
+type BranchMaterializationResult struct {
+	WorktreePath      string
+	TaskWorkspacePath string
 }
 
 // GitArchiveCapture captures git state (commits, cumulative diff) when a task is archived.

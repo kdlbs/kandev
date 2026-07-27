@@ -1343,14 +1343,22 @@ func (h *Handlers) handleAddBranchToTask(ctx context.Context, msg *ws.Message) (
 		code := classifyAddBranchError(err)
 		return ws.NewError(msg.ID, msg.Action, code, "Failed to add branch: "+err.Error(), nil)
 	}
-	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
-		"id":              taskRepo.ID,
-		keyTaskID:         taskRepo.TaskID,
-		keyRepositoryID:   taskRepo.RepositoryID,
-		keyBaseBranch:     taskRepo.BaseBranch,
-		keyCheckoutBranch: taskRepo.CheckoutBranch,
-		keyPosition:       taskRepo.Position,
-	})
+	response := map[string]interface{}{
+		"id":                taskRepo.ID,
+		keyTaskID:           taskRepo.TaskID,
+		keyRepositoryID:     taskRepo.RepositoryID,
+		keyBaseBranch:       taskRepo.BaseBranch,
+		keyCheckoutBranch:   taskRepo.CheckoutBranch,
+		keyPosition:         taskRepo.Position,
+		"agent_cwd_changed": taskRepo.AgentCWDChanged,
+	}
+	if taskRepo.WorktreePath != "" {
+		response["worktree_path"] = taskRepo.WorktreePath
+	}
+	if taskRepo.TaskWorkspacePath != "" {
+		response["task_workspace_path"] = taskRepo.TaskWorkspacePath
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
 }
 
 // handleAddWorkspaceSources forwards the documented discriminated source

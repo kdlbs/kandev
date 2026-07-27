@@ -75,9 +75,10 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-20-repository-provider-origin-identity | [Persist Provider Origin In Repository Identity](2026-07-20-repository-provider-origin-identity.md) | accepted | backend, frontend | 2026-07-20 |
 | 2026-07-21-portable-status-bar-order | [Portable Status Bar Order](2026-07-21-portable-status-bar-order.md) | accepted | backend, frontend, protocol | 2026-07-21 |
 | 2026-07-21-work-item-reference-search | [Backend-normalized work-item references](2026-07-21-work-item-reference-search.md) | accepted | backend, frontend, protocol | 2026-07-21 |
-| 2026-07-22-runtime-mutable-task-workspace-sources | [Runtime-Mutable Task Workspace Sources](2026-07-22-runtime-mutable-task-workspace-sources.md) | accepted | backend, frontend, protocol | 2026-07-22 |
+| 2026-07-22-runtime-mutable-task-workspace-sources | [Runtime-Mutable Task Workspace Sources](2026-07-22-runtime-mutable-task-workspace-sources.md) | accepted (amended by 2026-07-27) | backend, frontend, protocol | 2026-07-22 |
 | 2026-07-24-opt-in-authentication | [Opt-in Authentication and Per-User Workspace Scoping](2026-07-24-opt-in-authentication.md) | accepted | backend, frontend, protocol, security | 2026-07-24 |
 | 2026-07-24-semantic-notification-events | [Semantic notification events come from domain occurrences](2026-07-24-semantic-notification-events.md) | accepted | backend, frontend, desktop | 2026-07-24 |
 | 2026-07-26-user-managed-agent-runtime-updates | [User-Managed Agent Runtime Updates](2026-07-26-user-managed-agent-runtime-updates.md) | accepted | backend, frontend, protocol | 2026-07-26 |
 | 2026-07-26-single-session-model-switching | [Single-Session Model Switching](2026-07-26-single-session-model-switching.md) | accepted (amended 2026-07-27) | workflow, infra | 2026-07-26 |
 | 2026-07-27-task-git-credential-policy | [Separate GitHub Automation From Task Git Credential Policy](2026-07-27-task-git-credential-policy.md) | accepted | backend, frontend, security | 2026-07-27 |
+| 2026-07-27-legacy-add-branch-live-rescan | [Preserve Live Rescan for Legacy Add Branch](2026-07-27-legacy-add-branch-live-rescan.md) | accepted | backend, protocol | 2026-07-27 |

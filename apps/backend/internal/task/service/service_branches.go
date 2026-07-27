@@ -31,12 +31,23 @@ type AddBranchToTaskRequest struct {
 	CheckoutBranch string
 }
 
+// AddBranchToTaskResult contains the persisted branch attachment plus the
+// paths created by an immediate live materialization. The embedded row keeps
+// the legacy service fields available to existing callers.
+type AddBranchToTaskResult struct {
+	*models.TaskRepository
+	WorktreePath      string
+	TaskWorkspacePath string
+	AgentCWDChanged   bool
+}
+
 // AddBranchToTask appends a new task_repositories row to an existing task,
 // effectively adding a branch (or a second branch of an already-attached repo)
 // without recreating the task. The row's position is set to the next free
 // slot after the highest existing position.
 //
-// Returns the persisted TaskRepository on success.
+// Returns the persisted TaskRepository and any immediate materialization
+// paths on success. The agent process CWD is never changed.
 //
 // Constraints:
 //   - TaskID is required.
@@ -54,14 +65,11 @@ type AddBranchToTaskRequest struct {
 //     path (ResolveRepositoryRef → resolveRepoInput) enforces this for the
 //     LocalPath / GitHubURL flows; for the RepositoryID fast path the
 //     workspace-membership check happens in resolveBranchRepo below.
-func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskRequest) (*models.TaskRepository, error) {
+func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskRequest) (*AddBranchToTaskResult, error) {
 	unlock := s.lockWorkspaceSources(req.TaskID)
 	defer unlock()
 	task, existing, cleanupOrphanRepo, err := s.prepareBranchAdd(ctx, &req)
 	if err != nil {
-		return nil, err
-	}
-	if err := s.workspaceSourcesIdle(ctx, task.ID); err != nil {
 		return nil, err
 	}
 	repo, err := s.resolveBranchRepo(ctx, task, req.RepositoryID)
@@ -105,15 +113,16 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 		cleanupOrphanRepo()
 		return nil, err
 	}
-	materialize := s.materializeLegacyBranch
-	if s.workspaceSourceMaterializer != nil {
-		materialize = s.materializeWorkspaceSources
-	}
-	_, err = s.commitWorkspaceSourceBatch(ctx, task, batch, func(context.Context) { cleanupOrphanRepo() }, materialize)
+	result, err := s.commitWorkspaceSourceBatch(ctx, task, batch, func(context.Context) { cleanupOrphanRepo() }, s.materializeLegacyBranch)
 	if err != nil {
 		return nil, err
 	}
-	return taskRepo, nil
+	return &AddBranchToTaskResult{
+		TaskRepository:    taskRepo,
+		WorktreePath:      result.WorktreePath,
+		TaskWorkspacePath: result.WorkspacePath,
+		AgentCWDChanged:   false,
+	}, nil
 }
 
 // materializeLegacyBranch adapts the legacy one-row worktree capability to
@@ -122,8 +131,12 @@ func (s *Service) AddBranchToTask(ctx context.Context, req AddBranchToTaskReques
 func (s *Service) materializeLegacyBranch(ctx context.Context, taskID string, batch *models.WorkspaceSourceBatch) (*WorkspaceSourceMaterializationResult, error) {
 	for _, source := range batch.Sources {
 		if source.Repository != nil {
-			if err := s.materializeBranch(ctx, taskID, source.Repository.ID); err != nil {
+			materialization, err := s.materializeBranch(ctx, taskID, source.Repository.ID)
+			if err != nil {
 				return nil, err
+			}
+			if materialization != nil {
+				return &WorkspaceSourceMaterializationResult{WorkspacePath: materialization.TaskWorkspacePath, WorktreePath: materialization.WorktreePath}, nil
 			}
 		}
 	}
@@ -293,9 +306,9 @@ func branchAddDuplicateError(
 // failure to the caller so AddBranchToTask can roll back the dangling
 // task_repositories row — leaving it in place produced the silent-success
 // orphan that the original bug report describes.
-func (s *Service) materializeBranch(ctx context.Context, taskID, taskRepositoryID string) error {
+func (s *Service) materializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*BranchMaterializationResult, error) {
 	if s.branchMaterializer == nil {
-		return nil
+		return nil, nil
 	}
 	// Snapshot launch state BEFORE MaterializeBranch so a caller-side cancel
 	// during materialize can't poison the post-failure check: launch state
@@ -305,21 +318,22 @@ func (s *Service) materializeBranch(ctx context.Context, taskID, taskRepositoryI
 	// rollback to a best-effort no-op, leaving the orphan row the PR exists
 	// to prevent.
 	alreadyLaunched := s.taskAlreadyLaunched(ctx, taskID)
-	if err := s.branchMaterializer.MaterializeBranch(ctx, taskID, taskRepositoryID); err != nil {
+	result, err := s.branchMaterializer.MaterializeBranch(ctx, taskID, taskRepositoryID)
+	if err != nil {
 		if !alreadyLaunched {
 			s.logger.Warn("branch materialization failed; worktree will be created on next session launch",
 				zap.String("task_id", taskID),
 				zap.String("task_repository_id", taskRepositoryID),
 				zap.Error(err))
-			return nil
+			return nil, nil
 		}
 		s.logger.Error("branch materialization failed on a live task; rolling back",
 			zap.String("task_id", taskID),
 			zap.String("task_repository_id", taskRepositoryID),
 			zap.Error(err))
-		return fmt.Errorf("materialize branch: %w", err)
+		return nil, fmt.Errorf("materialize branch: %w", err)
 	}
-	return nil
+	return result, nil
 }
 
 // taskAlreadyLaunched reports whether the task already has a task_environments
