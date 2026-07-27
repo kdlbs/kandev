@@ -672,13 +672,36 @@ func (s *Server) notifyClarificationTimeout() {
 	}
 }
 
-// resolveTaskID returns the server-injected taskID if available, otherwise falls back
-// to the agent-provided value. This prevents LLM hallucination of task IDs.
+// resolveTaskID resolves the task a plan/walkthrough/review tool call targets.
+//
+// An explicitly provided task_id argument wins; the session-bound task is only a
+// fallback for when the argument is absent (or the server is not session-bound,
+// e.g. external mode). The tool schemas advertise task_id as a first-class
+// parameter, so a caller that names another task — a parent reading its child's
+// plan, say — must reach that task, exactly like message_task_kandev /
+// stop_task_kandev already address tasks other than the caller's own.
+//
+// Honoring the explicit value is safe because cross-task access is authorized on
+// the backend against the *stream owner's* identity: internal/mcp/scope attaches
+// that identity from the agent's own execution (task → workspace → owner), never
+// from the request payload, and the plan/walkthrough/review services then gate
+// the target task_id through the same workspace-ownership check every other
+// cross-task surface uses. A task outside the caller's reach is rejected there,
+// not served.
+//
+// This replaces the earlier behavior, which silently discarded the argument and
+// always used the bound task — turning a cross-task read into a wrong-task read
+// (and a cross-task write into a wrong-task write) with no error. The pin was a
+// blunt guard against LLM-hallucinated task IDs; the backend authorization above
+// is the precise one, so the silent misdirection is no longer worth its cost.
 func (s *Server) resolveTaskID(req mcp.CallToolRequest) (string, error) {
+	if explicit := req.GetString(mcpKeyTaskID, ""); explicit != "" {
+		return explicit, nil
+	}
 	if s.taskID != "" {
 		return s.taskID, nil
 	}
-	return req.RequireString("task_id")
+	return "", fmt.Errorf("task_id is required")
 }
 
 func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {

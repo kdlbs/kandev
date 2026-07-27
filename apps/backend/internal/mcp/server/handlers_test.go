@@ -719,3 +719,118 @@ func TestGetTaskConversation_MissingTaskID_ReturnsError(t *testing.T) {
 
 	assert.True(t, result.IsError)
 }
+
+// --- resolveTaskID precedence (fix for silent cross-task misdirection) ---
+
+// makeTaskIDReq builds a CallToolRequest carrying the given arguments, for
+// exercising resolveTaskID directly.
+func makeTaskIDReq(args map[string]interface{}) mcp.CallToolRequest {
+	req := mcp.CallToolRequest{}
+	req.Params.Arguments = args
+	return req
+}
+
+// TestResolveTaskID_ExplicitWinsOverBound is the core regression: a session
+// bound to task A that is handed an explicit task_id B must resolve to B, not
+// silently substitute its own A. This is the misdirection the fix removes.
+func TestResolveTaskID_ExplicitWinsOverBound(t *testing.T) {
+	s := newTaskModeServer(t, &testBackend{}, "task-A")
+
+	got, err := s.resolveTaskID(makeTaskIDReq(map[string]interface{}{"task_id": "task-B"}))
+	require.NoError(t, err)
+	assert.Equal(t, "task-B", got, "explicit task_id must win over the session-bound task")
+}
+
+// TestResolveTaskID_FallsBackToBoundWhenAbsent confirms the ergonomic fallback:
+// with no task_id argument, the session-bound task is used.
+func TestResolveTaskID_FallsBackToBoundWhenAbsent(t *testing.T) {
+	s := newTaskModeServer(t, &testBackend{}, "task-A")
+
+	got, err := s.resolveTaskID(makeTaskIDReq(map[string]interface{}{}))
+	require.NoError(t, err)
+	assert.Equal(t, "task-A", got, "absent task_id must fall back to the session-bound task")
+}
+
+// TestResolveTaskID_ErrorsWhenNeither covers the unbound server (e.g. external
+// mode) with no task_id argument: there is nothing to resolve, so it errors
+// rather than returning an empty task ID.
+func TestResolveTaskID_ErrorsWhenNeither(t *testing.T) {
+	s := newTaskModeServer(t, &testBackend{}, "")
+
+	got, err := s.resolveTaskID(makeTaskIDReq(map[string]interface{}{}))
+	require.Error(t, err)
+	assert.Empty(t, got)
+}
+
+// TestGetTaskPlan_ExplicitTaskIDForwardedNotBound is the handler-level
+// regression for the reported bug: a session bound to task A reading task B's
+// plan must forward task B to the backend, not A.
+func TestGetTaskPlan_ExplicitTaskIDForwardedNotBound(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"content": "B's plan"}}
+	s := newTaskModeServer(t, backend, "task-A")
+
+	result := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{
+		"task_id": "task-B",
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPGetTaskPlan, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]string)
+	require.True(t, ok)
+	assert.Equal(t, "task-B", payload["task_id"], "explicit task_id must reach the backend, not the bound task")
+}
+
+// TestCreateTaskPlan_ExplicitTaskIDForwardedNotBound guards the more dangerous
+// write case: a cross-task create must target the named task, never the
+// caller's own (which the old code did silently).
+func TestCreateTaskPlan_ExplicitTaskIDForwardedNotBound(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"id": "plan-1"}}
+	s := newTaskModeServer(t, backend, "task-A")
+
+	result := callTool(t, s, "create_task_plan_kandev", map[string]interface{}{
+		"task_id": "task-B",
+		"content": "the plan",
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPCreateTaskPlan, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-B", payload["task_id"], "cross-task create must write to the named task, not the caller's own")
+	assert.Equal(t, "the plan", payload["content"])
+}
+
+// TestGetTaskPlan_FallsBackToBoundTask confirms the common case still works:
+// omitting task_id targets the caller's own task.
+func TestGetTaskPlan_FallsBackToBoundTask(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"content": "A's plan"}}
+	s := newTaskModeServer(t, backend, "task-A")
+
+	result := callTool(t, s, "get_task_plan_kandev", map[string]interface{}{})
+
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]string)
+	require.True(t, ok)
+	assert.Equal(t, "task-A", payload["task_id"])
+}
+
+// TestPlanTools_DescriptionsDocumentCrossTaskBehavior keeps the advertised
+// behavior in the tool schemas honest — the descriptions must state that
+// task_id can name another task and is rejected (not redirected) when out of
+// reach, so callers aren't surprised by the resolution precedence.
+func TestPlanTools_DescriptionsDocumentCrossTaskBehavior(t *testing.T) {
+	s := newTaskModeServer(t, &testBackend{}, "task-A")
+	tools := s.mcpServer.ListTools()
+
+	for _, name := range []string{
+		"create_task_plan_kandev",
+		"get_task_plan_kandev",
+		"update_task_plan_kandev",
+		"delete_task_plan_kandev",
+	} {
+		tool, ok := tools[name]
+		require.True(t, ok, "tool %q must be registered", name)
+		assert.Contains(t, tool.Tool.Description, "within your reach",
+			"%q description must document cross-task reach limits", name)
+	}
+}

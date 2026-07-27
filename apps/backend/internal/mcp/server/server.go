@@ -944,8 +944,8 @@ Example rejection:
 func (s *Server) registerPlanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task_plan_kandev",
-			mcp.WithDescription("Create or save a task plan. Use this to save your implementation plan for the current task."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to create a plan for")),
+			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("The plan content in markdown format")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
 		),
@@ -953,15 +953,15 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_plan_kandev",
-			mcp.WithDescription("Get the current plan for a task. Use this to retrieve an existing plan, including any user edits."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the plan for")),
+			mcp.WithDescription("Get the current plan for a task, including any user edits. task_id selects the task: pass your own task ID for your current task, or another task's ID to read that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the plan for. Defaults to your current task when omitted; pass another task's ID to read it directly.")),
 		),
 		s.wrapHandler("get_task_plan_kandev", s.getTaskPlanHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_plan_kandev",
-			mcp.WithDescription("Update an existing task plan. Use this to modify the plan during implementation."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to update the plan for")),
+			mcp.WithDescription("Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("The updated plan content in markdown format")),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 		),
@@ -969,8 +969,8 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_task_plan_kandev",
-			mcp.WithDescription("Delete a task plan."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the plan for")),
+			mcp.WithDescription("Delete a task plan. task_id selects the task whose plan to delete: your own task by default, or another task's ID to delete that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 		),
 		s.wrapHandler("delete_task_plan_kandev", s.deleteTaskPlanHandler()),
 	)
@@ -995,7 +995,7 @@ func (s *Server) registerWalkthroughTools() {
 					"or to explain how a part of the codebase works. Order steps to follow the reader's "+
 					"natural path through the code (entry point first, then the call chain). Keep text "+
 					"concise and do not add a 'Justification:' preamble."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to attach the walkthrough to")),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to attach the walkthrough to. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
 			mcp.WithString("title", mcp.Description("Optional title for the walkthrough (default: 'Walkthrough')")),
 			mcp.WithArray("steps", mcp.Required(),
 				mcp.Description("Ordered list of walkthrough steps, each anchored to a file line or range."),
@@ -1007,14 +1007,14 @@ func (s *Server) registerWalkthroughTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_walkthrough_kandev",
 			mcp.WithDescription("Get the current code walkthrough for a task, including any steps."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the walkthrough for")),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the walkthrough for. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to read it directly.")),
 		),
 		s.wrapHandler("get_walkthrough_kandev", s.getWalkthroughHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_walkthrough_kandev",
 			mcp.WithDescription("Delete the code walkthrough for a task."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the walkthrough for")),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the walkthrough for. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
 		),
 		s.wrapHandler("delete_walkthrough_kandev", s.deleteWalkthroughHandler()),
 	)
@@ -1038,7 +1038,7 @@ func (s *Server) registerReviewTools() {
 					"Be honest with severity; marking everything a blocker makes the review useless. "+
 					"Publishing adds to the task's findings; it does not replace earlier ones, except "+
 					"that an unresolved finding with the same file, line range, and title is refreshed."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to attach the findings to")),
+			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to attach the findings to. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
 			mcp.WithString("summary", mcp.Description("Optional one-paragraph summary of the review")),
 			mcp.WithArray("findings", mcp.Required(),
 				mcp.Description("Findings to publish, each anchored to a file and line range."),
