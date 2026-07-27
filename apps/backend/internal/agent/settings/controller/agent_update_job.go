@@ -164,6 +164,9 @@ func (s *AgentUpdateJobStore) setStatus(job *AgentUpdateJob, status dto.AgentUpd
 	job.Status = status
 	snapshot := job.snapshot()
 	s.mu.Unlock()
+	// A single in-progress action carries every queued-to-active transition so
+	// clients can upsert one job snapshot without subscribing to phase-specific
+	// actions. Terminal states use ActionAgentUpdateFinished below.
 	s.broadcast(ws.ActionAgentUpdateStarted, snapshot)
 }
 

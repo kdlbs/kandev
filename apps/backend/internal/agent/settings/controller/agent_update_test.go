@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"sync"
@@ -11,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
 
@@ -125,26 +127,59 @@ func (f *fakeRuntimeUpdater) Refresh(
 	return f.refreshCaps, f.refreshErr
 }
 
+type updateTerminalBroadcaster struct {
+	completed chan dto.AgentUpdateJobDTO
+}
+
+func newUpdateTerminalBroadcaster() *updateTerminalBroadcaster {
+	return &updateTerminalBroadcaster{completed: make(chan dto.AgentUpdateJobDTO, 2)}
+}
+
+func (b *updateTerminalBroadcaster) Broadcast(message *ws.Message) {
+	if message.Action != ws.ActionAgentUpdateFinished {
+		return
+	}
+	var job dto.AgentUpdateJobDTO
+	if json.Unmarshal(message.Payload, &job) != nil {
+		return
+	}
+	select {
+	case b.completed <- job:
+	default:
+	}
+}
+
+func newUpdateTestStore(
+	updater RuntimeUpdater,
+	maintenance *maintenanceCoordinator,
+	onRefresh func(),
+) (*AgentUpdateJobStore, <-chan dto.AgentUpdateJobDTO) {
+	hub := newUpdateTerminalBroadcaster()
+	return NewAgentUpdateJobStore(hub, zap.NewNop(), updater, maintenance, onRefresh), hub.completed
+}
+
 func waitForUpdateStatus(
 	t *testing.T,
-	store *AgentUpdateJobStore,
+	completed <-chan dto.AgentUpdateJobDTO,
 	jobID string,
 	statuses ...dto.AgentUpdateJobStatus,
 ) *dto.AgentUpdateJobDTO {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		snapshot, ok := store.Get(jobID)
-		if ok {
-			for _, status := range statuses {
-				if snapshot.Status == status {
-					return snapshot
-				}
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
+	var snapshot dto.AgentUpdateJobDTO
+	select {
+	case snapshot = <-completed:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("job %s did not finish in time", jobID)
 	}
-	t.Fatalf("job %s did not reach status %v", jobID, statuses)
+	if snapshot.JobID != jobID {
+		t.Fatalf("finished job = %s, want %s", snapshot.JobID, jobID)
+	}
+	for _, status := range statuses {
+		if snapshot.Status == status {
+			return &snapshot
+		}
+	}
+	t.Fatalf("job %s finished with status %s, want %v", jobID, snapshot.Status, statuses)
 	return nil
 }
 
@@ -166,21 +201,16 @@ func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {
 		},
 		updateOutput: "npm prepared runtime\n",
 	}
-	hub := &captureBroadcaster{}
 	refreshed := make(chan struct{}, 1)
-	store := NewAgentUpdateJobStore(
-		hub,
-		zap.NewNop(),
-		updater,
-		newMaintenanceCoordinator(),
-		func() { refreshed <- struct{}{} },
+	store, completed := newUpdateTestStore(
+		updater, newMaintenanceCoordinator(), func() { refreshed <- struct{}{} },
 	)
 
 	job, err := store.Enqueue("managed-acp", managedRuntimeSpec())
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	final := waitForUpdateStatus(t, store, job.ID, dto.AgentUpdateJobStatusSucceeded)
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
 	if final.CurrentVersion != "1.0.0" || final.TargetVersion != "1.1.0" {
 		t.Fatalf("versions = %q -> %q, want 1.0.0 -> 1.1.0", final.CurrentVersion, final.TargetVersion)
 	}
@@ -217,19 +247,15 @@ func TestAgentUpdateAuthRequiredIsPackageSuccessWithRefreshError(t *testing.T) {
 		},
 	}
 	refreshed := false
-	store := NewAgentUpdateJobStore(
-		&captureBroadcaster{},
-		zap.NewNop(),
-		updater,
-		newMaintenanceCoordinator(),
-		func() { refreshed = true },
+	store, completed := newUpdateTestStore(
+		updater, newMaintenanceCoordinator(), func() { refreshed = true },
 	)
 
 	job, err := store.Enqueue("managed-acp", managedRuntimeSpec())
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	final := waitForUpdateStatus(t, store, job.ID, dto.AgentUpdateJobStatusSucceeded)
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
 	if final.RefreshError != "login required" {
 		t.Fatalf("RefreshError = %q, want login required", final.RefreshError)
 	}
@@ -243,18 +269,12 @@ func TestAgentUpdateAuthRequiredIsPackageSuccessWithRefreshError(t *testing.T) {
 
 func TestAgentUpdateRegistryFailureStopsBeforeMutation(t *testing.T) {
 	updater := &fakeRuntimeUpdater{resolveErr: errors.New("registry unavailable")}
-	store := NewAgentUpdateJobStore(
-		&captureBroadcaster{},
-		zap.NewNop(),
-		updater,
-		newMaintenanceCoordinator(),
-		nil,
-	)
+	store, completed := newUpdateTestStore(updater, newMaintenanceCoordinator(), nil)
 	job, err := store.Enqueue("managed-acp", managedRuntimeSpec())
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	final := waitForUpdateStatus(t, store, job.ID, dto.AgentUpdateJobStatusFailed)
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusFailed)
 	if !strings.Contains(final.Error, "registry unavailable") {
 		t.Fatalf("Error = %q", final.Error)
 	}
@@ -294,18 +314,14 @@ func TestAgentUpdateHardFailuresRemainFailed(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			refreshed := false
-			store := NewAgentUpdateJobStore(
-				&captureBroadcaster{},
-				zap.NewNop(),
-				test.updater,
-				newMaintenanceCoordinator(),
-				func() { refreshed = true },
+			store, completed := newUpdateTestStore(
+				test.updater, newMaintenanceCoordinator(), func() { refreshed = true },
 			)
 			job, err := store.Enqueue("managed-acp", managedRuntimeSpec())
 			if err != nil {
 				t.Fatalf("Enqueue: %v", err)
 			}
-			final := waitForUpdateStatus(t, store, job.ID, dto.AgentUpdateJobStatusFailed)
+			final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusFailed)
 			if !strings.Contains(final.Error, test.wantMessage) {
 				t.Fatalf("Error = %q, want %q", final.Error, test.wantMessage)
 			}
@@ -324,13 +340,7 @@ func TestAgentUpdateDeduplicatesAndConflictsWithInstall(t *testing.T) {
 		runStarted:  make(chan struct{}),
 		releaseRun:  make(chan struct{}),
 	}
-	store := NewAgentUpdateJobStore(
-		&captureBroadcaster{},
-		zap.NewNop(),
-		updater,
-		coordinator,
-		nil,
-	)
+	store, completed := newUpdateTestStore(updater, coordinator, nil)
 	t.Cleanup(func() {
 		select {
 		case <-updater.releaseRun:
@@ -363,7 +373,7 @@ func TestAgentUpdateDeduplicatesAndConflictsWithInstall(t *testing.T) {
 	}
 
 	close(updater.releaseRun)
-	waitForUpdateStatus(t, store, first.ID, dto.AgentUpdateJobStatusSucceeded)
+	waitForUpdateStatus(t, completed, first.ID, dto.AgentUpdateJobStatusSucceeded)
 
 	retry, err := store.Enqueue("managed-acp", managedRuntimeSpec())
 	if err != nil {
@@ -372,7 +382,7 @@ func TestAgentUpdateDeduplicatesAndConflictsWithInstall(t *testing.T) {
 	if retry.ID == first.ID {
 		t.Fatal("retry reused a completed update job")
 	}
-	waitForUpdateStatus(t, store, retry.ID, dto.AgentUpdateJobStatusSucceeded)
+	waitForUpdateStatus(t, completed, retry.ID, dto.AgentUpdateJobStatusSucceeded)
 }
 
 func TestAgentUpdateOutputIsBounded(t *testing.T) {
@@ -381,19 +391,13 @@ func TestAgentUpdateOutputIsBounded(t *testing.T) {
 		refreshCaps:  hostutility.AgentCapabilities{Status: hostutility.StatusOK},
 		updateOutput: strings.Repeat("line contents\n", 7000),
 	}
-	store := NewAgentUpdateJobStore(
-		&captureBroadcaster{},
-		zap.NewNop(),
-		updater,
-		newMaintenanceCoordinator(),
-		nil,
-	)
+	store, completed := newUpdateTestStore(updater, newMaintenanceCoordinator(), nil)
 
 	job, err := store.Enqueue("managed-acp", managedRuntimeSpec())
 	if err != nil {
 		t.Fatalf("Enqueue: %v", err)
 	}
-	final := waitForUpdateStatus(t, store, job.ID, dto.AgentUpdateJobStatusSucceeded)
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
 	if len(final.Output) > jobOutputRingSize {
 		t.Fatalf("output bytes = %d, limit = %d", len(final.Output), jobOutputRingSize)
 	}

@@ -70,10 +70,50 @@ type discardBroadcaster struct{}
 
 func (discardBroadcaster) Broadcast(*ws.Message) {}
 
+type updateTerminalBroadcaster struct {
+	completed chan dto.AgentUpdateJobDTO
+}
+
+func newUpdateTerminalBroadcaster() *updateTerminalBroadcaster {
+	return &updateTerminalBroadcaster{completed: make(chan dto.AgentUpdateJobDTO, 2)}
+}
+
+func (b *updateTerminalBroadcaster) Broadcast(message *ws.Message) {
+	if message.Action != ws.ActionAgentUpdateFinished {
+		return
+	}
+	var job dto.AgentUpdateJobDTO
+	if json.Unmarshal(message.Payload, &job) != nil {
+		return
+	}
+	select {
+	case b.completed <- job:
+	default:
+	}
+}
+
+func waitForTerminalUpdate(
+	t *testing.T,
+	completed <-chan dto.AgentUpdateJobDTO,
+	jobID string,
+) dto.AgentUpdateJobDTO {
+	t.Helper()
+	select {
+	case job := <-completed:
+		if job.JobID != jobID {
+			t.Fatalf("finished job = %s, want %s", job.JobID, jobID)
+		}
+		return job
+	case <-time.After(2 * time.Second):
+		t.Fatalf("job %s did not finish in time", jobID)
+		return dto.AgentUpdateJobDTO{}
+	}
+}
+
 func newAgentUpdateRouter(
 	t *testing.T,
 	updater controller.RuntimeUpdater,
-) (*gin.Engine, *controller.Controller) {
+) (*gin.Engine, *controller.Controller, <-chan dto.AgentUpdateJobDTO) {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
@@ -89,8 +129,9 @@ func newAgentUpdateRouter(
 	ctrl := controller.NewController(nil, discoveryRegistry, reg, nil, log)
 	ctrl.SetRuntimeUpdater(updater)
 	router := gin.New()
-	RegisterRoutes(router, ctrl, discardBroadcaster{}, log, "test-interlock")
-	return router, ctrl
+	broadcaster := newUpdateTerminalBroadcaster()
+	RegisterRoutes(router, ctrl, broadcaster, log, "test-interlock")
+	return router, ctrl, broadcaster.completed
 }
 
 func updateRequest(method, path string) *http.Request {
@@ -100,7 +141,7 @@ func updateRequest(method, path string) *http.Request {
 }
 
 func TestAgentUpdateEndpointsAcceptAndRetainJobs(t *testing.T) {
-	router, ctrl := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
+	router, _, completed := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, updateRequest(http.MethodPost, "/api/v1/agent-update/claude-acp"))
 	if response.Code != http.StatusAccepted {
@@ -111,13 +152,9 @@ func TestAgentUpdateEndpointsAcceptAndRetainJobs(t *testing.T) {
 		t.Fatalf("decode accepted job: %v", err)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if job, ok := ctrl.GetAgentUpdateJob(accepted.JobID); ok &&
-			job.Status == dto.AgentUpdateJobStatusSucceeded {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
+	finished := waitForTerminalUpdate(t, completed, accepted.JobID)
+	if finished.Status != dto.AgentUpdateJobStatusSucceeded {
+		t.Fatalf("finished status = %q, want succeeded", finished.Status)
 	}
 
 	getResponse := httptest.NewRecorder()
@@ -149,7 +186,7 @@ func TestAgentUpdateEndpointReturnsMaintenanceConflict(t *testing.T) {
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
-	router, ctrl := newAgentUpdateRouter(t, updater)
+	router, _, completed := newAgentUpdateRouter(t, updater)
 	t.Cleanup(func() {
 		select {
 		case <-updater.release:
@@ -184,19 +221,14 @@ func TestAgentUpdateEndpointReturnsMaintenanceConflict(t *testing.T) {
 	if err := json.Unmarshal(updateResponse.Body.Bytes(), &accepted); err != nil {
 		t.Fatalf("decode accepted update: %v", err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if job, ok := ctrl.GetAgentUpdateJob(accepted.JobID); ok &&
-			job.Status == dto.AgentUpdateJobStatusSucceeded {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	finished := waitForTerminalUpdate(t, completed, accepted.JobID)
+	if finished.Status != dto.AgentUpdateJobStatusSucceeded {
+		t.Fatalf("finished status = %q, want succeeded", finished.Status)
 	}
-	t.Fatal("update did not finish after releasing conflict fixture")
 }
 
 func TestAgentUpdateEndpointRejectsUnmanagedAgentAndMissingJob(t *testing.T) {
-	router, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
+	router, _, _ := newAgentUpdateRouter(t, &handlerRuntimeUpdater{})
 
 	unsupported := httptest.NewRecorder()
 	router.ServeHTTP(unsupported, updateRequest(
