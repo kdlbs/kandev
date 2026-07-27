@@ -293,6 +293,35 @@ func TestBuildIssueQueryString(t *testing.T) {
 	}
 }
 
+// TestBuildIssueQueryString_StatsPeriodBecomesAgeFilter locks in the fix for
+// the "older issues get processed by a watch configured for the last 24h"
+// bug: Sentry's statsPeriod query param does NOT filter which issues a
+// search returns (it only sizes the per-issue stats window — see
+// https://github.com/getsentry/sentry/issues/36375). The only way to
+// actually restrict results to recently-first-seen issues is the `age:`
+// search token, so StatsPeriod must be translated into one.
+func TestBuildIssueQueryString_StatsPeriodBecomesAgeFilter(t *testing.T) {
+	if got := buildIssueQueryString(SearchFilter{StatsPeriod: "24h"}); got != "age:-24h" {
+		t.Errorf("expected age:-24h, got %q", got)
+	}
+
+	got := buildIssueQueryString(SearchFilter{Levels: []string{"error"}, StatsPeriod: "7d"})
+	if !strings.Contains(got, "level:error") || !strings.Contains(got, "age:-7d") {
+		t.Errorf("expected level and age tokens combined, got %q", got)
+	}
+
+	// An unrecognized period is dropped rather than injected verbatim into
+	// the Sentry search-bar query string.
+	if got := buildIssueQueryString(SearchFilter{StatsPeriod: "not-a-period"}); got != "" {
+		t.Errorf("expected malformed statsPeriod to be ignored, got %q", got)
+	}
+
+	// No StatsPeriod configured -> no age token (unchanged behaviour).
+	if got := buildIssueQueryString(SearchFilter{Query: "boom"}); got != "boom" {
+		t.Errorf("expected no age token without statsPeriod, got %q", got)
+	}
+}
+
 // TestNewRESTClient_BuildsEndpointFromConfigURL locks in that a self-hosted
 // instance URL becomes the API base with the /api/0 suffix appended, that a
 // trailing slash and missing scheme are normalized, and that an empty URL
