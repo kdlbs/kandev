@@ -673,6 +673,7 @@ func (e *Executor) applyWorktreeToSwitchRequest(req *LaunchAgentRequest, session
 // container_id / status are written by the lifecycle manager during the launch
 // itself (lifecycle.persistExecutorRunning) and not touched here.
 func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, newModel string) error {
+	expectedState := session.State
 	session.State = models.TaskSessionStateStarting
 	session.UpdatedAt = time.Now().UTC()
 
@@ -681,7 +682,7 @@ func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionI
 	}
 	session.AgentProfileSnapshot["model"] = newModel
 
-	if err := e.updateSessionStarting(ctx, taskID, session, true); err != nil {
+	if err := e.updateSessionStarting(ctx, taskID, session, expectedState, true); err != nil {
 		e.logger.Error("failed to update session after model switch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),

@@ -1858,7 +1858,9 @@ func TestSetSessionStartingWritesTaskInProgress(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.NoError(t, svc.setSessionStarting(ctx, "t1", session, true))
+	require.NoError(t, svc.setSessionStarting(
+		ctx, "t1", session, models.TaskSessionStateRunning, true,
+	))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
@@ -1881,7 +1883,9 @@ func TestSetSessionStartingCanDeferTaskInProgress(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.NoError(t, svc.setSessionStarting(ctx, "t1", session, false))
+	require.NoError(t, svc.setSessionStarting(
+		ctx, "t1", session, models.TaskSessionStateRunning, false,
+	))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
@@ -1907,7 +1911,9 @@ func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.Error(t, svc.setSessionStarting(ctx, "t1", &next, true))
+	require.Error(t, svc.setSessionStarting(
+		ctx, "t1", &next, models.TaskSessionStateCancelled, true,
+	))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
@@ -1915,7 +1921,7 @@ func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	require.Empty(t, taskRepo.stateWrites)
 }
 
-func TestSetSessionStartingRejectsCancelledTerminalResumeWithoutPromotion(t *testing.T) {
+func TestSetSessionStartingAllowsExplicitlyCancelledResumeWithoutPromotion(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -1923,6 +1929,7 @@ func TestSetSessionStartingRejectsCancelledTerminalResumeWithoutPromotion(t *tes
 	current, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
 	current.State = models.TaskSessionStateCancelled
+	current.ErrorMessage = "stopped via API"
 	require.NoError(t, repo.UpdateTaskSession(ctx, current))
 
 	next := *current
@@ -1933,7 +1940,37 @@ func TestSetSessionStartingRejectsCancelledTerminalResumeWithoutPromotion(t *tes
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.Error(t, svc.setSessionStarting(ctx, "t1", &next, false))
+	require.NoError(t, svc.setSessionStarting(
+		ctx, "t1", &next, models.TaskSessionStateCancelled, false,
+	))
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, updated.State)
+	require.Empty(t, taskRepo.stateWrites)
+}
+
+func TestSetSessionStartingRejectsCancellationAfterResumeSnapshot(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stale, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	stale.State = models.TaskSessionStateStarting
+
+	current, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	current.State = models.TaskSessionStateCancelled
+	current.ErrorMessage = "stopped via API"
+	require.NoError(t, repo.UpdateTaskSession(ctx, current))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	require.Error(t, svc.setSessionStarting(
+		ctx, "t1", stale, models.TaskSessionStateRunning, false,
+	))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
@@ -1963,7 +2000,9 @@ func TestSetSessionStartingAllowsTerminalResumeWithoutTaskPromotion(t *testing.T
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.NoError(t, svc.setSessionStarting(ctx, "t1", &next, false))
+	require.NoError(t, svc.setSessionStarting(
+		ctx, "t1", &next, models.TaskSessionStateFailed, false,
+	))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
@@ -1999,7 +2038,9 @@ func TestSetSessionStartingAllowsArchiveCancelledResumeWithoutPromotion(t *testi
 			taskRepo := newMockTaskRepo()
 			svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-			require.NoError(t, svc.setSessionStarting(ctx, "t1", &next, false))
+			require.NoError(t, svc.setSessionStarting(
+				ctx, "t1", &next, models.TaskSessionStateCancelled, false,
+			))
 
 			updated, err := repo.GetTaskSession(ctx, "s1")
 			require.NoError(t, err)

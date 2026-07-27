@@ -547,7 +547,9 @@ func TestSetSessionStarting_CoordinatorCancellationWinsAfterCurrentStateRead(t *
 	}
 	svc := newCoordinatorStopTestService(repo, newMockTaskRepo(), &mockAgentManager{})
 
-	err = svc.setSessionStarting(ctx, stale.TaskID, stale, true)
+	err = svc.setSessionStarting(
+		ctx, stale.TaskID, stale, models.TaskSessionStateRunning, true,
+	)
 	require.Error(t, err)
 	stored, getErr := baseRepo.GetTaskSession(ctx, stale.ID)
 	require.NoError(t, getErr)

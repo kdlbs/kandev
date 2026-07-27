@@ -1287,7 +1287,24 @@ func (s *Service) deleteCompletedExecutionIfExpired(key string, expiresAt time.T
 	}
 }
 
-func (s *Service) setSessionStarting(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+func allowsSessionStartingRecovery(
+	nextState, expectedState, currentState models.TaskSessionState,
+	promoteTask bool,
+) bool {
+	return !promoteTask &&
+		nextState == models.TaskSessionStateStarting &&
+		currentState == expectedState &&
+		(expectedState == models.TaskSessionStateFailed ||
+			expectedState == models.TaskSessionStateCancelled)
+}
+
+func (s *Service) setSessionStarting(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	expectedState models.TaskSessionState,
+	promoteTask bool,
+) error {
 	if session == nil {
 		return nil
 	}
@@ -1303,17 +1320,15 @@ func (s *Service) setSessionStarting(ctx context.Context, taskID string, session
 		if err != nil {
 			return err
 		}
-		allowedTerminalRecovery := !promoteTask &&
-			session.State == models.TaskSessionStateStarting &&
-			(current.State == models.TaskSessionStateFailed ||
-				(current.State == models.TaskSessionStateCancelled &&
-					models.IsArchiveCancelReason(current.ErrorMessage)))
+		allowedTerminalRecovery := allowsSessionStartingRecovery(
+			session.State, expectedState, current.State, promoteTask,
+		)
 		if isTerminalSessionState(current.State) && !allowedTerminalRecovery {
 			return &executor.SessionStateSupersededError{SessionID: session.ID, State: current.State}
 		}
 
 		oldState = current.State
-		if err := s.persistFullTaskSessionIfCurrent(ctx, session, current.State); err != nil {
+		if err := s.persistFullTaskSessionIfCurrent(ctx, session, expectedState); err != nil {
 			return err
 		}
 

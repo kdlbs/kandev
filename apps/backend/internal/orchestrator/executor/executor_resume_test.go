@@ -299,7 +299,8 @@ func TestResumeSession_CancelledStateForceCleansUpStaleState(t *testing.T) {
 	}
 	exec := newTestExecutor(t, agentMgr, repo)
 
-	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+	callerSession := *repo.sessions["sess-1"]
+	if _, err := exec.ResumeSession(context.Background(), &callerSession, true); err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
 	if agentMgr.cleanupStaleExecutionCallCount != 1 {

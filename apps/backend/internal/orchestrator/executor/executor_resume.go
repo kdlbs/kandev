@@ -304,7 +304,7 @@ func (e *Executor) persistLaunchState(ctx context.Context, taskID, sessionID str
 
 	var updateErr error
 	if startAgent {
-		updateErr = e.updateSessionStarting(ctx, taskID, session, true)
+		updateErr = e.updateSessionStarting(ctx, taskID, session, expectedState, true)
 	} else {
 		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}
@@ -935,7 +935,7 @@ func (e *Executor) persistResumeState(ctx context.Context, taskID string, sessio
 
 	var updateErr error
 	if startAgent {
-		updateErr = e.updateSessionStarting(ctx, taskID, session, false)
+		updateErr = e.updateSessionStarting(ctx, taskID, session, expectedState, false)
 	} else {
 		updateErr = e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 	}

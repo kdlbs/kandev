@@ -578,9 +578,17 @@ type SessionStateTransitionFunc func(
 
 // SessionStartingFunc is called when the executor has prepared/resumed an
 // execution and needs to mark the session STARTING while preserving other
-// session-row updates such as metadata. promoteTask controls whether the
-// callback should also move the parent task to IN_PROGRESS immediately.
-type SessionStartingFunc func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error
+// session-row updates such as metadata. expectedState is the state observed
+// before runtime launch, so a prior CANCELLED state can resume without
+// overwriting a cancellation that raced the launch. promoteTask controls
+// whether the callback should also move the parent task to IN_PROGRESS.
+type SessionStartingFunc func(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	expectedState models.TaskSessionState,
+	promoteTask bool,
+) error
 
 // ExecutionCleanupClaimFunc atomically claims forced cleanup for one exact
 // session execution. It returns true when the executor owns cleanup and false
