@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -261,13 +262,21 @@ func TestManager_BeginStopWaitsForInFlightAdmission(t *testing.T) {
 
 func TestManager_StopForTeardownCancelsAndDrainsOwnedOperation(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{WorkDir: t.TempDir()}, newTestLogger(t))
+	allowRelease := make(chan struct{})
+	var allowReleaseOnce sync.Once
+	signalRelease := func() {
+		allowReleaseOnce.Do(func() { close(allowRelease) })
+	}
 	operationCtx, release, err := mgr.BeginOwnedOperation(context.Background())
 	if err != nil {
 		t.Fatalf("BeginOwnedOperation() error = %v", err)
 	}
+	t.Cleanup(func() {
+		signalRelease()
+		release()
+	})
 
 	canceled := make(chan struct{})
-	allowRelease := make(chan struct{})
 	go func() {
 		<-operationCtx.Done()
 		close(canceled)
@@ -283,7 +292,7 @@ func TestManager_StopForTeardownCancelsAndDrainsOwnedOperation(t *testing.T) {
 		t.Fatalf("StopForTeardown() returned before the owned operation released: %v", err)
 	default:
 	}
-	close(allowRelease)
+	signalRelease()
 	if err := <-stopDone; err != nil {
 		t.Fatalf("StopForTeardown() error = %v", err)
 	}
