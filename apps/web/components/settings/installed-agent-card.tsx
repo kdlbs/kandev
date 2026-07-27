@@ -153,7 +153,7 @@ export function InstalledAgentCard({
         <div className="mt-auto flex items-center gap-2">
           <Button
             size="sm"
-            className="h-11 min-h-11 flex-1 cursor-pointer sm:h-[30px] sm:min-h-[30px]"
+            className="h-11 min-h-11 flex-1 cursor-pointer sm:h-7 sm:min-h-7"
             asChild
           >
             <Link

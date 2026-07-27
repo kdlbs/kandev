@@ -300,7 +300,7 @@ function UpdateTrigger({
             type="button"
             variant="ghost"
             size="icon"
-            className="h-11 w-11 cursor-pointer active:scale-95 sm:h-[30px] sm:w-[30px]"
+            className="h-11 w-11 cursor-pointer active:scale-95 sm:h-7 sm:w-7"
             aria-label={`Update ${displayName}`}
             disabled={installInFlight}
             onClick={onOpen}
