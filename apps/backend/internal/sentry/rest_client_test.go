@@ -322,6 +322,31 @@ func TestBuildIssueQueryString_StatsPeriodBecomesAgeFilter(t *testing.T) {
 	}
 }
 
+// TestBuildIssueQueryString_ParenthesizesQueryWithOrOperator locks in the fix
+// for a Codex review finding on this PR: Sentry's search grammar ANDs
+// implicitly-adjacent terms tighter than an explicit `OR`, so appending a
+// level/status/age token directly after a free-text query containing `OR`
+// silently scoped that token to only the last OR-branch (`foo OR bar
+// age:-24h` parsed as `foo OR (bar age:-24h)`, letting an old "foo" issue
+// bypass the age filter). The query must be parenthesized before combining.
+func TestBuildIssueQueryString_ParenthesizesQueryWithOrOperator(t *testing.T) {
+	if got := buildIssueQueryString(SearchFilter{Query: "foo OR bar", StatsPeriod: "24h"}); got != "(foo OR bar) age:-24h" {
+		t.Errorf("expected OR query parenthesized before the age token, got %q", got)
+	}
+
+	if got := buildIssueQueryString(SearchFilter{Levels: []string{"error"}, Query: "foo OR bar"}); got != "level:error (foo OR bar)" {
+		t.Errorf("expected OR query parenthesized after the level token, got %q", got)
+	}
+
+	// A standalone query (nothing else to AND against) is left unwrapped —
+	// parenthesizing it would be a no-op, and this locks in that the literal
+	// query string a user typed is left untouched when there's nothing to
+	// combine it with.
+	if got := buildIssueQueryString(SearchFilter{Query: "foo OR bar"}); got != "foo OR bar" {
+		t.Errorf("expected standalone OR query left unwrapped, got %q", got)
+	}
+}
+
 // TestNewRESTClient_BuildsEndpointFromConfigURL locks in that a self-hosted
 // instance URL becomes the API base with the /api/0 suffix appended, that a
 // trailing slash and missing scheme are normalized, and that an empty URL

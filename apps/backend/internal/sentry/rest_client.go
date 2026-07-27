@@ -449,6 +449,16 @@ func issuesSearchPath(orgSlug, projectSlug string) string {
 // statsPeriodAgeToken's doc comment for why that translation, not the
 // `statsPeriod` query param set separately in searchIssues, is what actually
 // restricts which issues come back.
+//
+// The free-text Query is parenthesized whenever it is combined with another
+// token below. Sentry's search grammar ANDs implicitly-adjacent terms tighter
+// than an explicit `OR`, so an unparenthesized query containing `OR` (e.g.
+// `foo OR bar`) would bind the level/status/age tokens to only the adjacent
+// branch — `foo OR bar age:-24h` parses as `foo OR (bar age:-24h)`, so an old
+// `foo` issue still matches despite the configured age window. Wrapping in
+// parens groups the whole user query before it is ANDed against the
+// structured filters. A standalone query (nothing else to combine with) is
+// left unwrapped since parenthesizing it would be a no-op.
 func buildIssueQueryString(f SearchFilter) string {
 	parts := make([]string, 0, 5)
 	levels := make([]string, 0, len(f.Levels))
@@ -475,10 +485,14 @@ func buildIssueQueryString(f SearchFilter) string {
 		}
 		parts = append(parts, "is:"+st)
 	}
+	age := statsPeriodAgeToken(f.StatsPeriod)
 	if q := strings.TrimSpace(f.Query); q != "" {
+		if len(parts) > 0 || age != "" {
+			q = "(" + q + ")"
+		}
 		parts = append(parts, q)
 	}
-	if age := statsPeriodAgeToken(f.StatsPeriod); age != "" {
+	if age != "" {
 		parts = append(parts, age)
 	}
 	return strings.Join(parts, " ")
