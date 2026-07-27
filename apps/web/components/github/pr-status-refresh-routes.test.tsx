@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
+import { getPRFeedback } from "@/lib/api/domains/github-api";
 import { PRStatusChip } from "./pr-status-chip";
 import { PRTopbarButton } from "./pr-topbar-button";
 import type { AppState } from "@/lib/state/store";
@@ -107,6 +108,7 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
 
 function taskState(prs: TaskPR[], activeTask = false): Partial<AppState> {
   return {
+    workspaces: { items: [], activeId: "ws-1" },
     taskPRs: { byTaskId: { "task-1": prs } },
     ...(activeTask
       ? {
@@ -137,7 +139,8 @@ async function expectRefresh(request: ReturnType<typeof vi.fn>, testId: string) 
   await waitFor(() =>
     expect(screen.getByTestId(testId).getAttribute("data-status")).toBe("in_progress"),
   );
-  expect(request).toHaveBeenCalledTimes(2);
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  await expectFeedbackRefresh();
 }
 
 function expectTopbarStatusIcon(colorClass: string) {
@@ -146,8 +149,17 @@ function expectTopbarStatusIcon(colorClass: string) {
   ).not.toBeNull();
 }
 
+async function expectFeedbackRefresh() {
+  await waitFor(() =>
+    expect(getPRFeedback).toHaveBeenCalledWith("ws-1", "acme", "demo", 42, {
+      cache: "no-store",
+    }),
+  );
+}
+
 async function expectTopbarRefresh(request: ReturnType<typeof vi.fn>) {
   await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+  await expectFeedbackRefresh();
   await waitFor(() => expectTopbarStatusIcon("text-yellow-500"));
 }
 
@@ -155,6 +167,7 @@ beforeEach(() => {
   responsiveMock.breakpoint = "desktop";
   responsiveMock.isFinePointer = true;
   wsMock.client = null;
+  vi.mocked(getPRFeedback).mockClear();
 });
 
 afterEach(() => {
