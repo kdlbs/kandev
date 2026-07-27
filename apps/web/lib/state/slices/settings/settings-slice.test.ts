@@ -6,7 +6,7 @@ import { createSettingsSlice } from "./settings-slice";
 import type { SettingsSlice } from "./types";
 
 function makeStore() {
-  return create<SettingsSlice>()(immer((set) => createSettingsSlice(set)));
+  return create<SettingsSlice>()(immer((set, get, store) => createSettingsSlice(set, get, store)));
 }
 
 function updateJob(overrides: Record<string, unknown> = {}) {
