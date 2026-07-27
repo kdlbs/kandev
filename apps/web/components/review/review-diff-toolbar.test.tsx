@@ -118,7 +118,13 @@ describe("FileDiffToolbar", () => {
     expect(screen.getByTestId("external-vcs-file-menu-item-props")).toBeTruthy();
     expect(screen.getByTestId("file-actions-menu-items")).toBeTruthy();
 
-    fireEvent.click(expand);
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    expect(screen.queryByTestId("review-file-actions-menu")).toBeNull();
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Expand unchanged lines" }));
     expect(onToggleExpandUnchanged).toHaveBeenCalledOnce();
   });
 });

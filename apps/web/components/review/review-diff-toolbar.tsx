@@ -221,7 +221,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
           title={`More actions for ${filePath}`}
           className="size-11 shrink-0 cursor-pointer text-muted-foreground transition-[scale,color,background-color] duration-150 ease-out active:scale-[0.96]"
           onPointerDown={(event) => event.preventDefault()}
-          onClick={() => setOpen(true)}
+          onClick={() => setOpen((previous) => !previous)}
         >
           <IconDots className="size-4" />
         </Button>
