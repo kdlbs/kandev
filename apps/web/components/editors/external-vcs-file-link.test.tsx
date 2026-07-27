@@ -23,6 +23,8 @@ vi.mock("@/hooks/domains/session/use-session-git-status", () => ({
 
 import { ExternalVcsFileLink, useExternalVcsFileStatus } from "./external-vcs-file-link";
 
+const testFilePath = "src/app.ts";
+
 function renderLink(size: "xs" | "sm" | "touch" = "xs") {
   return render(
     <TooltipProvider>
@@ -39,7 +41,7 @@ afterEach(() => {
 describe("ExternalVcsFileLink", () => {
   it("selects file status from the exact repository", () => {
     const { result } = renderHook(() =>
-      useExternalVcsFileStatus("src/app.ts", "session-1", "frontend"),
+      useExternalVcsFileStatus(testFilePath, "session-1", "frontend"),
     );
 
     expect(result.current).toEqual({ status: "renamed", old_path: "src/old.ts" });
@@ -54,7 +56,7 @@ describe("ExternalVcsFileLink", () => {
       provider,
       url: `https://example.com/${provider}/file`,
       revision: "main",
-      path: "src/app.ts",
+      path: testFilePath,
     };
 
     renderLink();
@@ -76,13 +78,34 @@ describe("ExternalVcsFileLink", () => {
       provider: "github",
       url: "https://github.com/acme/web/blob/main/src/app.ts",
       revision: "main",
-      path: "src/app.ts",
+      path: testFilePath,
     };
 
     renderLink(size);
 
     expect(screen.getByRole("link").classList.contains(expectedClass)).toBe(true);
   });
+
+  it.each([
+    ["xs", true],
+    ["touch", true],
+    ["sm", false],
+  ] as const)(
+    "dims the button via opacity-60 for size %s (sm opts into foreground)",
+    (size, expectDimmed) => {
+      mocks.link = {
+        provider: "github",
+        url: "https://github.com/acme/web/blob/main/src/app.ts",
+        revision: "main",
+        path: testFilePath,
+      };
+
+      renderLink(size);
+
+      const linkClass = screen.getByRole("link").className;
+      expect(linkClass.includes("opacity-60")).toBe(expectDimmed);
+    },
+  );
 
   it("renders nothing when no safe external URL resolves", () => {
     renderLink();
