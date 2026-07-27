@@ -21,7 +21,7 @@
 #       current_head_sha, evidence_head_sha, exact_current_head_reviews,
 #       trusted_default_producer_exact_current_head_reviews,
 #       blocked_exact_current_head_reviews, blocked_exact_current_head_review_count,
-#       active_changes_requested, active_changes_requested_count }
+#       active_changes_requested, active_changes_requested_count, trusted_producer }
 #   - issue_comments: [{ author, body, created_at, url }]
 #   - errors: [{ source, message }]
 #
@@ -43,7 +43,8 @@
 #       current_head_sha, evidence_head_sha, exact_current_head_reviews,
 #       trusted_default_producer_exact_current_head_reviews,
 #       blocked_exact_current_head_reviews, blocked_exact_current_head_review_count,
-#       active_changes_requested, active_changes_requested_count }
+#       active_changes_requested, active_changes_requested_count, trusted_producer }
+#   - actionable_issue_comment_count: <N>
 #   - summary_notes: [<short human-readable notes>]
 #   - errors: [{ source, message }]
 #
@@ -193,7 +194,7 @@ fi
 
 extract_checks_json() {
   local status_json=$1
-  jq -cn --slurpfile checks_in <(printf '%s\n' "$status_json") '
+  printf '%s\n' "$status_json" | jq -c '
     def lower_or_null:
       if . == null or . == "" then null else ascii_downcase end;
     def extract($re; $field):
@@ -205,8 +206,7 @@ extract_checks_json() {
         ((.state // "") | lower_or_null) as $state
         | if $state == "pending" or $state == "expected" then null else $state end
       end;
-    $checks_in[0]
-    | to_entries
+    to_entries
     | map(.value + {_index: .key} | {
       type: (.["__typename"] // null),
       name: (.name // .context // "unknown"),
@@ -242,9 +242,8 @@ extract_checks_json() {
 extract_issue_comments_json() {
   local comments_json=$1
   local since=$2
-  jq -cn --slurpfile comments <(printf '%s\n' "$comments_json") --arg since "$since" '
-    $comments[0]
-    | map(select($since == "" or ((.createdAt // .created_at // "") > $since)))
+  printf '%s\n' "$comments_json" | jq -c --arg since "$since" '
+    map(select($since == "" or ((.createdAt // .created_at // "") > $since)))
     | map({
       author: (.author.login // "unknown"),
       body: (.body // ""),
@@ -265,9 +264,8 @@ extract_issue_comments_json() {
 extract_reviews_json() {
   local reviews_api_json=$1
   local since=$2
-  jq -cn --slurpfile reviews <(printf '%s\n' "$reviews_api_json") --arg since "$since" '
-    $reviews[0]
-    | map(select($since == "" or ((.submitted_at // "") > $since)))
+  printf '%s\n' "$reviews_api_json" | jq -c --arg since "$since" '
+    map(select($since == "" or ((.submitted_at // "") > $since)))
     | map({
       author: (.user.login // "unknown"),
       state: ((.state // "unknown") | ascii_downcase),
@@ -287,10 +285,10 @@ review_evidence_json() {
   local reviews_api_json=$5
   local is_cross_repository=$6
   local trusted_workflow_json=$7
-  jq -cn --arg opening_head_oid "$opening_head_oid" --arg closing_head_oid "$closing_head_oid" --arg checks_head_oid "$checks_head_oid" --arg trusted_reviewer "$TRUSTED_REVIEWER" --argjson is_cross_repository "$is_cross_repository" --argjson reviews_known "$reviews_known" --argjson trusted_workflow "$trusted_workflow_json" \
-    --slurpfile reviews <(printf '%s\n' "$reviews_api_json") '
+  printf '%s\n' "$reviews_api_json" |
+    jq -c --arg opening_head_oid "$opening_head_oid" --arg closing_head_oid "$closing_head_oid" --arg checks_head_oid "$checks_head_oid" --arg trusted_reviewer "$TRUSTED_REVIEWER" --argjson is_cross_repository "$is_cross_repository" --argjson reviews_known "$reviews_known" --argjson trusted_workflow "$trusted_workflow_json" '
       def normalized_reviews:
-        $reviews[0] | map({
+        map({
           author: (.user.login // "unknown"),
           state: ((.state // "unknown") | ascii_downcase),
           commit_id: (.commit_id // null),
@@ -438,15 +436,14 @@ fetch_trusted_workflow_json() {
 extract_review_threads_json() {
   local threads_nodes_json=$1
   local since=$2
-  jq -cn --slurpfile threads <(printf '%s\n' "$threads_nodes_json") --arg since "$since" '
+  printf '%s\n' "$threads_nodes_json" | jq -c --arg since "$since" '
     def relevant_comments:
       if $since == "" then
         (.comments.nodes // [])
       else
         [(.comments.nodes // [])[] | select((.createdAt // "") > $since)]
       end;
-    $threads[0]
-    | map(. as $thread | (relevant_comments) as $comments | select($comments | length > 0) | {
+    map(. as $thread | (relevant_comments) as $comments | select($comments | length > 0) | {
       thread_id: .id,
       is_resolved: (.isResolved // false),
       path: (.path // ""),
@@ -622,10 +619,9 @@ fetch_review_threads_nodes_json() {
     page_nodes="$(jq -c '.data.repository.pullRequest.reviewThreads.nodes // []' <<<"$page_json")"
     local next_nodes_file
     next_nodes_file="$(mktemp)"
-    if ! jq -cn \
+    if ! printf '%s\n' "$page_nodes" | jq -cn \
       --slurpfile prev "$nodes_file" \
-      --slurpfile page <(printf '%s\n' "$page_nodes") \
-      '$prev[0] + $page[0]' >"$next_nodes_file"; then
+      '$prev[0] + input' >"$next_nodes_file"; then
       add_error "review_threads" "failed to merge paginated review threads"
       rm -f "$next_nodes_file" "$nodes_file"
       return 1
@@ -717,12 +713,11 @@ if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
   if threads_nodes_json="$(fetch_review_threads_nodes_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
     review_threads_json="$(extract_review_threads_json "$threads_nodes_json" "$since")"
     all_review_threads_json="$(extract_review_threads_json "$threads_nodes_json" "")"
-    hidden_unresolved_threads_json="$(jq -cn \
-      --slurpfile all <(printf '%s\n' "$all_review_threads_json") \
-      --slurpfile filtered <(printf '%s\n' "$review_threads_json") \
-      '
-        ($filtered[0] | map(.thread_id)) as $filtered_ids
-        | $all[0]
+    hidden_unresolved_threads_json="$(printf '%s\n%s\n' "$all_review_threads_json" "$review_threads_json" |
+      jq -cn '
+        [inputs] as [$all, $filtered]
+        | ($filtered | map(.thread_id)) as $filtered_ids
+        | $all
         | map(select(.is_resolved == false and (.thread_id as $id | $filtered_ids | index($id) | not)))
         | map({thread_id, comment_id, author, path, body_preview})
       ')"

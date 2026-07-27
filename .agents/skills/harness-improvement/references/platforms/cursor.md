@@ -61,22 +61,21 @@ readonly: false
 Implement only the assigned scope and report verification.
 ```
 
-Important fields used by this repository:
+Important fields:
 
 - `name`: stable role name matching the filename.
 - `description`: routing trigger for automatic or explicit delegation.
-- `model`: concrete Cursor model slug. Use `composer-2.5` for normal workers
-  and `grok-4.5` for frontier architecture, security, and deep review roles.
-- `readonly`: `true` for architecture, QA, review, security, and polling;
-  `false` for implementation, tests, simplification, and verification.
+- `model`: optional concrete Cursor model slug.
+- `readonly`: whether the worker may modify the workspace.
 
 Custom subagents receive their own context and can use custom prompts, tool
 access, and models. Keep worker bodies explicit that they do not spawn further
 subagents. Cursor writes remain subject to the user's normal permission policy.
 
 Cursor has no verified per-agent effort or reasoning-effort frontmatter field
-as of 2026-07-20. Kandev `.cursor/agents/` mirrors encode model tier only; role
-effort mapping lives in `.agents/agents/` and Codex mirrors.
+as of 2026-07-20. Kandev does not maintain `.cursor/agents/` mirrors; create a
+project agent only when the user explicitly authorizes its added cost and
+context isolation.
 
 ## Rules
 

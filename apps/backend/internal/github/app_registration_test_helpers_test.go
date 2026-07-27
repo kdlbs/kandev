@@ -25,6 +25,8 @@ func testManifestConversion(t *testing.T, ownerLogin, ownerType string) Manifest
 			"metadata": "read", "pull_requests": "write", "statuses": "read",
 			"workflows": "write",
 		},
-		Events: []string{"installation", "installation_repositories", "github_app_authorization"},
+		Events: []string{
+			"installation", "installation_repositories", "github_app_authorization", "push", "check_run",
+		},
 	}
 }

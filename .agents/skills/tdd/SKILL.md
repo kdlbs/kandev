@@ -7,19 +7,19 @@ description: Implement changes using Test-Driven Development (Red-Green-Refactor
 
 ## Execution Context
 
-The planner may apply TDD directly for small scoped work; delegate substantial,
-cross-component, or independently test-heavy work. A worker follows this
-procedure for its one packet and does not spawn workers.
+Use this procedure directly in the primary conversation for every code change,
+regardless of size. The user may switch that conversation to the lower-cost
+implementation model before beginning the Red-Green-Refactor cycle.
 
 Implement code changes using strict Red-Green-Refactor. Iron law: **no production code without a failing test first.**
 
 Wrote code before a test? Delete it. Start over from a failing test.
 
-## Available skills and subagents
+## Related skills
 
-- **`/e2e`** — Follow this procedure when the assigned packet explicitly owns Playwright E2E coverage.
-- **`/verify`** — After targeted checks pass, the planner commits through hooks
-  and launches this as a separate post-commit assignment before push.
+- **`/e2e`** — Follow this procedure when the current task needs Playwright E2E coverage.
+- **`/pr-fixup`** — After the task-defined checks pass and the PR opens, use it
+  only for CI or actionable reviewer findings.
 
 ## When to use
 
@@ -41,7 +41,7 @@ For UI rendering bugs, prefer extracting or using a pure helper and testing that
   ```bash
   cd apps && pnpm --filter @kandev/web test -- --run path/to/file.test.ts
   ```
-- **Web E2E** (`apps/web/e2e/`): follow `/e2e` only when the work packet owns Playwright tests; otherwise report the need to the planner.
+- **Web E2E** (`apps/web/e2e/`): follow `/e2e` when the current task needs Playwright tests.
 
 Choose the right level:
 - **Unit:** pure logic or isolated service behavior.
@@ -95,9 +95,9 @@ Return to step 1 for the next behavior or edge case. Continue until the feature 
 
 ### 5. Final verification
 
-Run the targeted tests named in the work packet and report their results. The
-planner commits the accepted result, then launches a separate hook-aware
-`verify` assignment before push.
+Run the targeted tests named in the task file and report their results. Commit
+and open the PR after all affected task checks pass; do not add broad local
+verification by default.
 
 ## Testing anti-patterns
 

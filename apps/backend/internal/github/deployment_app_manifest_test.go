@@ -77,7 +77,9 @@ func TestDeploymentAppManifestExactPolicyAndURLs(t *testing.T) {
 	if !reflect.DeepEqual(manifest.DefaultPermissions, wantPermissions) {
 		t.Fatalf("DefaultPermissions = %#v, want %#v", manifest.DefaultPermissions, wantPermissions)
 	}
-	wantEvents := []string{"installation", "installation_repositories", "github_app_authorization"}
+	wantEvents := []string{
+		"installation", "installation_repositories", "github_app_authorization", "push", "check_run",
+	}
 	if !reflect.DeepEqual(manifest.DefaultEvents, wantEvents) {
 		t.Fatalf("DefaultEvents = %#v, want %#v", manifest.DefaultEvents, wantEvents)
 	}

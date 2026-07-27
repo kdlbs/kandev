@@ -75,10 +75,9 @@ Every code change must include tests for new or changed logic. Backend: `*_test.
 - **Plans:** Implementation plans are generated from specs via `/plan` and committed under `docs/plans/<slug>/plan.md`, with individual sibling task files named `docs/plans/<slug>/task-<NN>-<short-slug>.md`. Specs are the living requirements; plans and task files are implementation records for the current buildout.
 
 ### Plan Implementation
-- After implementing a substantial plan, commit through active hooks, then
-  delegate `verify` with `mode=full` before push. Full mode ignores hook
-  omissions and runs `make fmt` before `make typecheck test lint`; formatting
-  comes first because it may split lines and expose complexity-linter failures.
+- Specs, plans, and task files are the durable source of implementation scope,
+  dependency order, and task-level validation. Keep their statuses and recorded
+  command results accurate. The feature and fix skills define the workflow.
 
 ### Observability
 - In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
@@ -94,36 +93,28 @@ For PR review/fixup workflows, prefer the repo helpers before manually querying 
 
 When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
 
-### Planner and Worker Execution
+### Single-Session Model Workflow
 
-The user-started primary session is the planner and default architect: it owns
-clarification, first-pass investigation, architecture, specs, plans, task
-decomposition, integration judgment, and user communication. It may directly perform small scoped work
-when one clear concern touches a few localized files, has no useful isolation or
-parallelism benefit, and has quick bounded verification. Follow the applicable
-skill, protect unrelated dirty changes, and obtain delegated Spark `verify`
-after commit and before push when code, tests, or config changed. Pass the
-successful non-bypassed hook receipt so changed-scope verification skips only
-equivalent hook-covered checks; PR CI remains the authoritative full matrix.
+The user-started primary session owns durable artifacts, integration judgment,
+and user communication. Platform-provided investigation and explorer agents
+remain available. Launch planned native implementation subagents only after the
+user explicitly authorizes them; this repository does not prescribe their roles
+or model tiers.
+The read-only `pr-poller` is the sole repository-defined exception: use it only
+after the user explicitly asks to wait for or monitor PR updates.
 
-Delegate only when it has positive ROI or independent evidence is essential:
-broad/unknown exploration, substantial plan tasks, large/cross-component work,
-parallel packets, long/noisy E2E or debugging, exceptional specialist review,
-and final change-aware `verify`. Keep long PR monitoring on cheap `pr-poller`.
-Delegation is not default ceremony: weigh context reload and coordination cost.
-Do not delegate routine log/session inspection, call-path mapping, reproduction,
-waiting, or status reporting; investigate and report those directly first.
-Each delegated worker executes one bounded packet and does not spawn agents.
-The architect agent is only for a user-requested independent architecture
-second opinion. Detailed routing lives in `planner-orchestration`.
+Use the user's strong model for specs, plans, task files, and high-risk design.
+At the completed-plan checkpoint, ask the user to manually switch the main
+session to a lower-cost implementation model. Detailed feature, fix,
+validation, and delegation routing lives in the relevant skills, especially
+`planner-orchestration`.
 
 ### Kandev Task Creation
 
 Use Kandev task/session MCP APIs only when the user explicitly asks to create or
-manage persistent Kandev platform tasks or sessions. Planner-to-worker
-delegation must use the active coding harness's native subagent tools; never use
+manage persistent Kandev platform tasks or sessions. Never use
 `create_task_kandev`, `spawn_session_kandev`, or `message_task_kandev` as a
-worker mechanism or fallback.
+repository-work mechanism or fallback.
 
 When the user explicitly requests related Kandev follow-up work, use
 `create_task_kandev` with `parent_id: "self"`. That preserves workspace,

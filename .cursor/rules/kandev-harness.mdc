@@ -1,5 +1,5 @@
 ---
-description: Kandev harness routing for skills, agents, platform mirrors, and spec-driven work.
+description: Kandev harness routing for skills, the single-session model workflow, and spec-driven work.
 globs: ".agents/**, .claude/**, .codex/**, .cursor/**, .opencode/**, AGENTS.md, CLAUDE.md, docs/specs/**"
 alwaysApply: false
 ---
@@ -9,12 +9,13 @@ alwaysApply: false
 Use the shared Kandev harness as the source of truth:
 
 - Skills live under `.agents/skills/<name>/SKILL.md`.
-- Source agent roles live under `.agents/agents/<name>.md`.
-- Claude mirrors live under `.claude/agents/<name>.md`.
-- Codex mirrors live under `.codex/agents/<name>.toml`.
-- Cursor mirrors live under `.cursor/agents/<name>.md`.
-- OpenCode mirrors live under `.opencode/agents/<name>.md`.
+- Repository work stays in the user-started primary conversation; custom-agent
+  files are intentionally absent.
 
 For harness edits, load `.agents/skills/harness-improvement/SKILL.md` and the relevant bundled references under `.agents/skills/harness-improvement/references/`. Use `references/platforms/` before external docs.
 
-When updating a subagent role, update all requested project-local mirrors across `.agents/agents`, `.claude/agents`, `.codex/agents`, `.cursor/agents`, and `.opencode/agents` unless the user scopes the request to one platform.
+Use strong models for specs/plans and pause for the user's manual switch to a
+lower-cost model before implementation. Plans may mark parallel-safe waves; the
+feature and fix skills define task validation and any user-authorized
+implementation delegation. Do not create project custom-agent files merely to
+route model tiers. Platform-provided explorers remain available.
