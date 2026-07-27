@@ -28,20 +28,27 @@ Create a visible checklist:
 
 ## 1. Gather PR State
 
-Run `scripts/pr-state --summary <PR>` once. Include mergeability, current head,
-CI state, unresolved review threads, and bot comments. If a named reviewer is
-the semantic evidence source, pass it through the helper's supported
-`--trusted-reviewer` route only when its emitted evidence says
-`trusted_producer=true`; never use that shortcut for forks, security, or
-architecture.
+Before the first GitHub helper call, request any runtime network approval that
+the environment requires. If access is denied, cancelled, or interrupted, stop
+the workflow permanently; retry only transient fetch failures after access is
+approved.
+
+Run `scripts/pr-state --summary <PR>` once. Record `checks_head_sha`,
+`checks_snapshot_complete`, `failed_checks`, `pending_checks`,
+`unresolved_review_thread_count`, `hidden_unresolved_threads`, and
+`actionable_issue_comment_count`. Inspect mergeability separately through
+`references/merge-conflicts.md`; it is not a `pr-state --summary` field. If a
+named reviewer is the semantic evidence source, use `--trusted-reviewer` only
+when `review_evidence.trusted_producer` is `"true"`; never use that shortcut
+for forks, security, or architecture.
+Treat `trusted_producer=true` as qualifying provenance only for the dedicated OpenCode App, never merely because a reviewer name matches.
 
 For pending CI, do not run a rapid parent polling loop. Wait at a reasonable
 interval, then run the same summary again. Stop after about 20 minutes and
-report the exact pending checks as "CI in progress." An access-approval denial,
-cancellation, or interruption is a terminal user-action gate, not a retry.
+report the exact pending checks as "CI in progress."
 
 Treat the state as clean only when the current head has no failed or pending
-checks, no merge conflict, no actionable review thread or bot comment, and
+checks, no merge conflict, no actionable review thread or issue comment, and
 qualifying exact-head semantic evidence where PR delivery requires it.
 
 ## 2. Fix CI Failures

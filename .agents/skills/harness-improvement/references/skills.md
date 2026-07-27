@@ -69,5 +69,6 @@ Run:
 
 ```bash
 git diff --check -- .agents/skills/<skill-name>
-rg -n "<old-name>|<stale-reference>" .agents/skills AGENTS.md CLAUDE.md
+rg -n "<old-name>|<stale-reference>" \
+  .agents .codex .cursor .opencode .claude AGENTS.md CLAUDE.md
 ```

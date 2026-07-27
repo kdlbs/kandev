@@ -4,10 +4,6 @@ Load this reference when `scripts/pr-state --summary` is incomplete or
 contradictory, or when the primary conversation needs to interpret raw
 `scripts/pr-state` output while resolving a PR-state incident.
 
-Request runtime network approval before the first GitHub helper call; denial,
-cancellation, or interruption stops the workflow. Retry transient failures from
-approved commands only within the bounded polling cadence.
-
 Use `scripts/pr-state --summary <PR>` for CI/review state and
 `scripts/pr-resolve list <PR>` for review-thread state. `scripts/pr-state`
 accepts flags before or after the PR; when parsing with `jq`, save JSON to a

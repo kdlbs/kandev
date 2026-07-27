@@ -1,7 +1,7 @@
 ---
 description: Drive Kandev feature work through spec, plan, independent tasks, implementation, QA, and verification.
 argument-hint: "[feature or fix goal]"
-allowed-tools: Bash Read Edit Write Grep Glob
+allowed-tools: Bash Read Edit Write Grep Glob Agent
 model: inherit
 effort: high
 ---

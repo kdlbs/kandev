@@ -96,8 +96,10 @@ When a Kandev system message references an MCP tool that is not visible in the a
 ### Single-Session Model Workflow
 
 The user-started primary session owns durable artifacts, integration judgment,
-and user communication. Platform-provided explorers and other predefined
-subagents remain available; this repository does not prescribe or prohibit them.
+and user communication. Platform-provided investigation and explorer agents
+remain available. Launch planned native implementation subagents only after the
+user explicitly authorizes them; this repository does not prescribe their roles
+or model tiers.
 
 Use the user's strong model for specs, plans, task files, and high-risk design.
 At the completed-plan checkpoint, ask the user to manually switch the main

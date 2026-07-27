@@ -22,9 +22,9 @@ Run `git diff --name-only` (or `git diff origin/<base>...HEAD --name-only` for a
 
 ### 2. Apply simplifications
 
-Work through each changed file. Preserve behavior by inspection; do not run
-tests, lint, typecheck, or full verification during this pass. Report any
-verification concerns or focused checks to run next.
+Work through each changed file. Preserve behavior by inspection; defer broad
+test suites, lint, typecheck, and full verification until after this pass.
+Report any verification concerns and the focused task check to run next.
 
 **Inline one-off abstractions:**
 - Helper functions with a single call site — inline them
@@ -55,8 +55,10 @@ verification concerns or focused checks to run next.
 
 ### 3. Validate
 
-Run the focused task check affected by the simplification. If anything breaks,
-the simplification changed behavior and must be corrected before continuing.
+After the simplification pass, run the focused task check affected by the
+change. If anything breaks, the simplification changed behavior and must be
+corrected before continuing. Broad suites remain deferred unless the task or
+user explicitly requires them.
 
 ### 4. Summary
 

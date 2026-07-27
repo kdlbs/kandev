@@ -97,6 +97,7 @@ After the PR opens, the two configured AI reviewers are the semantic-review
 gate. Use `/pr-fixup` only to address a CI failure or actionable reviewer
 finding. A remediation reruns its relevant task-defined checks, not a broad
 local suite unless explicitly requested.
+Treat the OpenCode App as trusted semantic evidence only when `trusted_producer=true` confirms its dedicated producer provenance.
 
 ## Guardrails
 

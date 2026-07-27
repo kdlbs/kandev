@@ -1,6 +1,6 @@
 ---
 name: debug
-description: Diagnose Kandev bugs, running-instance issues, UI/browser failures, and runtime behavior. Use when the user reports unexpected behavior, asks to investigate, asks to add logs/instrumentation, or when a fix needs root-cause evidence before implementing. Triage first, gather evidence safely, then hand off to /fix or /tdd for code changes.
+description: Diagnose Kandev bugs, running-instance issues, UI/browser failures, and runtime behavior. Use when the user reports unexpected behavior, asks to investigate, asks to add logs/instrumentation, or when a fix needs root-cause evidence before implementing. Triage first, gather evidence safely, then hand off to /fix for code changes.
 allowed-tools: Bash(curl:*) Bash(jq:*) Bash(npx:*) Bash(scripts/kandev-instances:*) Bash(scripts/kandev-logs:*) Bash(scripts/dev-isolated:*) Bash(scripts/kandev-kill:*) Bash(go:*) Bash(rg:*) Bash(grep:*)
 ---
 
@@ -11,8 +11,8 @@ Diagnose efficiently and safely. Debugging produces evidence and a root-cause hy
 ## Planner Entry
 
 Perform triage, evidence gathering, and diagnosis directly in the primary
-conversation. Keep production edits out of the diagnostic phase, then decide
-whether `/fix` or `/tdd` is needed.
+conversation. Keep production edits out of the diagnostic phase, then proceed
+through `/fix` when code changes are needed.
 
 ## First: Create The Pipeline
 
@@ -21,7 +21,7 @@ Create a visible task list:
 1. **Triage** - classify the bug and choose the cheapest faithful path
 2. **Gather evidence** - targeted test, debug export/logs, browser state, or instrumentation
 3. **Diagnose** - trace the failure to root cause
-4. **Report** - summarize evidence and choose `/fix` or `/tdd` when code changes are needed
+4. **Report** - summarize evidence and choose `/fix` when code changes are needed
 5. **Clean up** - remove temporary logs, throwaway repro tests, isolated instances, and browser sessions
 
 ## Triage Gate
@@ -45,7 +45,7 @@ Rules:
 
 Start with the cheapest faithful reproduction:
 
-1. Backend logic: write a throwaway focused Go repro test against the real service path. If it reproduces, convert it via `/fix` or `/tdd`.
+1. Backend logic: write a throwaway focused Go repro test against the real service path. If it reproduces, convert it via `/fix`.
 2. Live instance: use `scripts/kandev-logs <port> --export` or `--level error`; do not relaunch.
 3. UI/browser: launch `scripts/dev-isolated --web`, drive `npx playwright-cli`, and correlate console/network state with backend logs.
 4. Unknown: trace from the symptom backward through code and add temporary instrumentation only where it will split the search space.
@@ -77,8 +77,7 @@ When you can state:
 - why it fails,
 - how to reproduce it,
 
-then stop debugging and proceed through `/fix` or `/tdd` in the same primary
-conversation.
+then stop debugging and proceed through `/fix` in the same primary conversation.
 
 ## Final Report
 

@@ -25,6 +25,9 @@ Plans may label parallel-safe waves; native subagents are launched only after
 the user explicitly authorizes them, with the selected active model and no
 full-history context fork.
 
+This decision supersedes [Planner Direct Small Work](2026-07-23-planner-direct-small-work.md)
+and [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md).
+
 Bug fixes use the same artifact checkpoint: root-cause evidence, a behavioral
 repair-spec amendment or concise repair spec, a fix plan, and task files are
 created before implementation. The user reviews those artifacts before choosing
