@@ -51,3 +51,8 @@ None.
 
 Report acceptance status, changed request/response shapes, focused test results, risks, and update
 this task plus `plan.md` to `done` in the same conversation.
+
+## Validation Results
+
+- `go test ./internal/agent/runtime/activity ./internal/system/storage ./internal/system -count=1 -race`: passed.
+- `go test ./internal/backendapp ./internal/system/storage ./internal/system -count=1`: passed.

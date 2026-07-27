@@ -77,7 +77,9 @@ The supported SQLite layout for the System database and restore pages is the der
 
 Open **Settings > System > Storage** to inspect Kandev-managed disk usage and configure cleanup.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
-while task resources are active or another maintenance run owns the cleanup gate.
+while another maintenance run owns the cleanup gate. If task resources are active, the page names
+the active work and offers **Run anyway** after an explicit disruption warning. Use that override
+only when the active task work can tolerate cleanup running alongside it.
 
 Storage analysis results are cached in the running backend for 15 minutes, so page reloads and
 policy saves reuse the displayed snapshot instead of scanning disk again. The page shows when that

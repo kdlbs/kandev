@@ -53,3 +53,8 @@ Task 01 defines the typed 409 response and the `force` request field.
 
 Report acceptance status, UI/API contract changes, focused test results, mobile evidence or blocker,
 risks, and update this task plus `plan.md` to `done` in the same conversation.
+
+## Validation Results
+
+- Focused web tests for the hook, Storage settings, and system API: passed (57 tests).
+- `cd apps/web && pnpm run typecheck`: passed.

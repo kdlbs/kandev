@@ -35,6 +35,9 @@ test.describe("Mobile storage maintenance", () => {
     await testPage.getByTestId("storage-run-now").tap();
     await expect(testPage.getByTestId("storage-busy")).toContainText("A test command is running");
     await expect(testPage.getByTestId("storage-run-anyway")).toBeVisible();
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
     await prCapture.screenshot("busy-feedback", {
       caption: "Mobile storage cleanup keeps the warning and Run anyway action in one column",
       fullPage: true,
@@ -47,9 +50,6 @@ test.describe("Mobile storage maintenance", () => {
     );
     await testPage.getByTestId("storage-run-anyway").tap();
     expect((await forceRequest).postDataJSON()).toEqual({ force: true });
-    expect(
-      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-    ).toBe(true);
   });
 
   test("opens Storage from mobile navigation and analyzes without horizontal overflow", async ({

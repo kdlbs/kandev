@@ -123,29 +123,6 @@ describe("StorageMaintenanceSettings", () => {
     expect(screen.queryByTestId("storage-analysis-job")).toBeNull();
   });
 
-  it("explains busy activity and exposes the direct Run anyway action", () => {
-    const runAnyway = vi.fn();
-    mocks.useStorageMaintenance.mockReturnValue({
-      ...controller(overview),
-      busy: {
-        resources: [
-          { kind: "execution_running", label: "An agent execution is running" },
-          { kind: "test_command", label: "A test command is running" },
-        ],
-        forceAvailable: true,
-      },
-      runAnyway,
-    });
-
-    render(<StorageMaintenanceSettings />, { wrapper: Providers });
-
-    expect(screen.getByText("An agent execution is running")).toBeTruthy();
-    expect(screen.getByText("A test command is running")).toBeTruthy();
-    expect(screen.getByText(/may disrupt this active work/i)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Run anyway" }));
-    expect(runAnyway).toHaveBeenCalledTimes(1);
-  });
-
   it("keeps the Analyze button disabled while its job is active", () => {
     const analysisJob = {
       id: "analysis-1",
@@ -233,6 +210,37 @@ describe("StorageMaintenanceSettings", () => {
     rerender(<StorageMaintenanceSettings />);
 
     expect((screen.getByTestId(IDLE_PERIOD_TEST_ID) as HTMLInputElement).value).toBe("31");
+  });
+});
+
+describe("StorageMaintenanceSettings busy feedback", () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    mocks.useSystemJob.mockReturnValue(undefined);
+  });
+
+  it("explains busy activity and exposes the direct Run anyway action", () => {
+    const runAnyway = vi.fn();
+    mocks.useStorageMaintenance.mockReturnValue({
+      ...controller(overview),
+      busy: {
+        resources: [
+          { kind: "execution_running", label: "An agent execution is running" },
+          { kind: "test_command", label: "A test command is running" },
+        ],
+        forceAvailable: true,
+      },
+      runAnyway,
+    });
+
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    expect(screen.getByText("An agent execution is running")).toBeTruthy();
+    expect(screen.getByText("A test command is running")).toBeTruthy();
+    expect(screen.getByText(/may disrupt this active work/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Run anyway" }));
+    expect(runAnyway).toHaveBeenCalledTimes(1);
   });
 });
 

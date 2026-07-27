@@ -113,3 +113,12 @@ Wave 3:
 - The activity coordinator currently knows categories rather than user/task identity. The API must
   stay at that privacy-safe category granularity unless a later, separately designed feature adds
   activity identity.
+
+## Validation Results
+
+- Backend activity/storage/system race tests: passed (107 tests).
+- Backend backendapp/storage/system integration tests: passed (312 tests).
+- Web Storage unit tests: passed (57 tests).
+- Web typecheck: passed.
+- Managed desktop/mobile Storage E2E: passed (7 tests).
+- Commit hooks and GitHub PR checks: passed.

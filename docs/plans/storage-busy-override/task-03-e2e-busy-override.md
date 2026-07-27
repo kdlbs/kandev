@@ -46,3 +46,8 @@ Tasks 01 and 02.
 
 Report acceptance status, exact E2E command results, screenshots/traces on failure, risks, and
 update this task plus `plan.md` to `done` in the same conversation.
+
+## Validation Results
+
+- Desktop Storage E2E: passed (4 tests in the focused suite).
+- Pixel 5 Storage E2E: passed (3 tests in the focused suite).

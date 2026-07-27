@@ -297,6 +297,9 @@ func TestQuarantineControllerRetainsGoCacheWhileTaskActivityIsRunning(t *testing
 	if !errors.As(err, &busy) {
 		t.Fatalf("Restore error = %v, want BusyError", err)
 	}
+	if busy.ForceAvailable || len(busy.Resources) != 1 || busy.Resources[0].Label == "" {
+		t.Fatalf("busy response = %#v, want labeled non-overridable resource", busy)
+	}
 	if _, err := os.Stat(artifact); err != nil {
 		t.Fatalf("quarantined cache changed while task active: %v", err)
 	}

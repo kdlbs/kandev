@@ -92,6 +92,8 @@ const cleanupJob = {
   state: "running",
   started_at: "2026-07-15T00:00:00Z",
 };
+const STORAGE_BUSY_ERROR_MESSAGE = "storage cleanup is blocked by active Kandev work";
+const TEST_COMMAND_BUSY_LABEL = "A test command is running";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -182,11 +184,13 @@ describe("useStorageMaintenance", () => {
     expect(result.current.cleanupJob).toBeUndefined();
     expect(result.current.error).toBe("storage maintenance is busy");
   });
+});
 
+describe("useStorageMaintenance busy feedback", () => {
   it("retains labeled busy feedback and reruns the same resources with force", async () => {
     mocks.run.mockRejectedValueOnce(
-      new ApiError("storage cleanup is blocked by active Kandev work", 409, {
-        busy_resources: [{ kind: "test_command", label: "A test command is running" }],
+      new ApiError(STORAGE_BUSY_ERROR_MESSAGE, 409, {
+        busy_resources: [{ kind: "test_command", label: TEST_COMMAND_BUSY_LABEL }],
         force_available: true,
       }),
     );
@@ -197,7 +201,7 @@ describe("useStorageMaintenance", () => {
       await result.current.runNow(["go_cache"]);
     });
     expect(result.current.busy).toEqual({
-      resources: [{ kind: "test_command", label: "A test command is running" }],
+      resources: [{ kind: "test_command", label: TEST_COMMAND_BUSY_LABEL }],
       forceAvailable: true,
       resourceSelection: ["go_cache"],
     });
@@ -206,6 +210,57 @@ describe("useStorageMaintenance", () => {
       await result.current.runAnyway();
     });
     expect(mocks.run).toHaveBeenNthCalledWith(2, ["go_cache"], true);
+  });
+
+  it("restores busy feedback when the forced retry is rejected", async () => {
+    const initialBusyError = new ApiError(STORAGE_BUSY_ERROR_MESSAGE, 409, {
+      busy_resources: [{ kind: "test_command", label: TEST_COMMAND_BUSY_LABEL }],
+      force_available: true,
+    });
+    const forcedBusyError = new ApiError(STORAGE_BUSY_ERROR_MESSAGE, 409, {
+      busy_resources: [{ kind: "maintenance_running", label: "Storage maintenance is running" }],
+      force_available: false,
+    });
+    mocks.run.mockRejectedValueOnce(initialBusyError).mockRejectedValueOnce(forcedBusyError);
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+
+    await act(async () => {
+      await result.current.runNow(["go_cache"]);
+    });
+    await act(async () => {
+      await result.current.runAnyway();
+    });
+
+    expect(result.current.busy).toEqual({
+      resources: [{ kind: "maintenance_running", label: "Storage maintenance is running" }],
+      forceAvailable: false,
+      resourceSelection: ["go_cache"],
+    });
+    expect(mocks.toast).not.toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Storage action failed" }),
+    );
+  });
+
+  it("clears stale busy feedback when another storage action starts", async () => {
+    mocks.run.mockRejectedValueOnce(
+      new ApiError(STORAGE_BUSY_ERROR_MESSAGE, 409, {
+        busy_resources: [{ kind: "test_command", label: TEST_COMMAND_BUSY_LABEL }],
+        force_available: true,
+      }),
+    );
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+
+    await act(async () => {
+      await result.current.runNow();
+    });
+    expect(result.current.busy).not.toBeNull();
+
+    await act(async () => {
+      await result.current.save(settings);
+    });
+    expect(result.current.busy).toBeNull();
   });
 });
 

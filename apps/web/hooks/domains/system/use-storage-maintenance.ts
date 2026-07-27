@@ -137,10 +137,12 @@ function useStoragePolicyActions(
   perform: ReturnType<typeof useStorageActionRunner>["perform"],
   reload: Reload,
   toast: ReturnType<typeof useToast>["toast"],
+  clearBusy: () => void,
 ) {
   const save = useCallback(
-    async (settings: StorageMaintenanceSettings, confirmation?: "DEDICATED") =>
-      perform(
+    async (settings: StorageMaintenanceSettings, confirmation?: "DEDICATED") => {
+      clearBusy();
+      return perform(
         "save",
         async () => {
           await saveStorageSettings(settings, confirmation);
@@ -148,21 +150,43 @@ function useStoragePolicyActions(
           toast({ title: "Storage policy saved", variant: "success" });
         },
         true,
-      ),
-    [perform, reload, toast],
+      );
+    },
+    [clearBusy, perform, reload, toast],
   );
 
   const adopt = useCallback(
-    async (path: string) =>
-      perform("adopt", async () => {
+    async (path: string) => {
+      clearBusy();
+      return perform("adopt", async () => {
         await adoptStorageGoCache(path);
         await reload();
         toast({ title: "Go build cache adopted", variant: "success" });
-      }),
-    [perform, reload, toast],
+      });
+    },
+    [clearBusy, perform, reload, toast],
   );
 
   return { save, adopt };
+}
+
+function useStorageDeleteAction(
+  perform: ReturnType<typeof useStorageActionRunner>["perform"],
+  toast: ReturnType<typeof useToast>["toast"],
+  clearBusy: () => void,
+  setDeleteJobId: Dispatch<SetStateAction<string | null>>,
+) {
+  return useCallback(
+    async (id: string) => {
+      clearBusy();
+      return perform("delete", async () => {
+        const accepted = await deleteStorageQuarantine(id);
+        setDeleteJobId(accepted.job_id);
+        toast({ title: "Permanent deletion started", variant: "success" });
+      });
+    },
+    [clearBusy, perform, setDeleteJobId, toast],
+  );
 }
 
 function useStorageActions(reload: Reload) {
@@ -175,22 +199,22 @@ function useStorageActions(reload: Reload) {
   const analysisJob = useSystemJob(analysisJobId);
   const cleanupJob = useSystemJob(cleanupJobId);
   const deleteJob = useSystemJob(deleteJobId);
-  const { save, adopt } = useStoragePolicyActions(perform, reload, toast);
+  const clearBusy = useCallback(() => setBusy(null), []);
+  const { save, adopt } = useStoragePolicyActions(perform, reload, toast, clearBusy);
 
-  const analyze = useCallback(
-    async () =>
-      perform("analyze", async () => {
-        const accepted = await analyzeStorage();
-        setAnalysisJobId(accepted.job_id);
-        toast({ title: "Storage analysis started", variant: "success" });
-      }),
-    [perform, toast],
-  );
+  const analyze = useCallback(async () => {
+    clearBusy();
+    return perform("analyze", async () => {
+      const accepted = await analyzeStorage();
+      setAnalysisJobId(accepted.job_id);
+      toast({ title: "Storage analysis started", variant: "success" });
+    });
+  }, [clearBusy, perform, toast]);
 
   const runNow = useCallback(
     async (resources?: string[]) => {
       setCleanupJobId(null);
-      setBusy(null);
+      clearBusy();
       return perform("run", async () => {
         try {
           const accepted = await runStorageMaintenance(resources);
@@ -198,45 +222,49 @@ function useStorageActions(reload: Reload) {
           toast({ title: "Storage maintenance started", variant: "success" });
         } catch (error) {
           const nextBusy = busyStateFromError(error, resources);
-          if (nextBusy) setBusy(nextBusy);
+          if (nextBusy) {
+            setBusy(nextBusy);
+            return;
+          }
           throw error;
         }
       });
     },
-    [perform, toast],
+    [clearBusy, perform, toast],
   );
-
   const runAnyway = useCallback(async () => {
     if (!busy?.forceAvailable) return;
     const resources = busy.resourceSelection;
-    setBusy(null);
+    clearBusy();
     setCleanupJobId(null);
     return perform("run", async () => {
-      const accepted = await runStorageMaintenance(resources, true);
-      setCleanupJobId(accepted.job_id);
-      toast({ title: "Storage maintenance started", variant: "success" });
+      try {
+        const accepted = await runStorageMaintenance(resources, true);
+        setCleanupJobId(accepted.job_id);
+        toast({ title: "Storage maintenance started", variant: "success" });
+      } catch (error) {
+        const nextBusy = busyStateFromError(error, resources);
+        if (nextBusy) {
+          setBusy(nextBusy);
+          return;
+        }
+        throw error;
+      }
     });
-  }, [busy, perform, toast]);
+  }, [busy, clearBusy, perform, toast]);
 
   const restore = useCallback(
-    async (id: string) =>
-      perform("restore", async () => {
+    async (id: string) => {
+      clearBusy();
+      return perform("restore", async () => {
         await restoreStorageQuarantine(id);
         await reload();
         toast({ title: "Quarantined resource restored", variant: "success" });
-      }),
-    [perform, reload, toast],
+      });
+    },
+    [clearBusy, perform, reload, toast],
   );
-
-  const permanentlyDelete = useCallback(
-    async (id: string) =>
-      perform("delete", async () => {
-        const accepted = await deleteStorageQuarantine(id);
-        setDeleteJobId(accepted.job_id);
-        toast({ title: "Permanent deletion started", variant: "success" });
-      }),
-    [perform, toast],
-  );
+  const permanentlyDelete = useStorageDeleteAction(perform, toast, clearBusy, setDeleteJobId);
 
   return {
     pendingAction,
