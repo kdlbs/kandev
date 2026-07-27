@@ -39,6 +39,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
 type ActionMeta = {
   actions?: MessageAction[];
   variant?: string;
+  recovery_actions?: boolean;
   is_auth_error?: boolean;
   auth_methods?: RecoveryAuthMethod[];
   error_output?: string;
@@ -46,8 +47,17 @@ type ActionMeta = {
   missing_branch?: string;
 };
 
-function isSessionActive(state?: TaskSessionState) {
-  return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
+function isRecoveryResolved(
+  state: TaskSessionState | undefined,
+  sessionError: string | undefined,
+  hasRecoveryActions: boolean,
+) {
+  return (
+    state === "RUNNING" ||
+    state === "STARTING" ||
+    state === "COMPLETED" ||
+    (hasRecoveryActions && state === "WAITING_FOR_INPUT" && !sessionError)
+  );
 }
 
 export const ActionMessage = memo(function ActionMessage({ comment }: { comment: Message }) {
@@ -68,8 +78,11 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   const isWarning = metadata?.variant === "warning";
   const message = comment.content || "An error occurred";
 
-  // Hide once session is active again (recovery succeeded)
-  if (isSessionActive(sessionState)) return null;
+  // Hide once recovery has succeeded. A resumed session settles in
+  // WAITING_FOR_INPUT, so use its cleared error_message as the completion
+  // signal instead of leaving the persisted recovery card on screen.
+  if (isRecoveryResolved(sessionState, sessionError, metadata?.recovery_actions === true))
+    return null;
 
   if (metadata?.failure_kind === "missing_pr_branch") {
     return (

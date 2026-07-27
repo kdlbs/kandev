@@ -19,7 +19,7 @@ var providerRules = map[string][]rule{
 		mustRule("claude.stderr.notinstalled.v1", `(?i)command not found|no such file`, CodeProviderNotConfigured, ConfMedium),
 	},
 	"codex-acp": {
-		mustRule("codex.stderr.quota.v1", `(?i)insufficient_quota|quota_exceeded`, CodeQuotaLimited, ConfHigh),
+		mustRule("codex.stderr.quota.v1", `(?i)insufficient_quota|quota_exceeded|usagelimitexceeded`, CodeQuotaLimited, ConfHigh),
 		mustRule("codex.stderr.rate.v1", `(?i)rate_limit_exceeded|too many requests`, CodeRateLimited, ConfHigh),
 		mustRule("codex.stderr.auth.v1", `(?i)invalid api key|incorrect api key|missing api key`, CodeMissingCredentials, ConfHigh),
 		mustRule("codex.stderr.model.v1", `(?i)model_not_found`, CodeModelUnavailable, ConfHigh),

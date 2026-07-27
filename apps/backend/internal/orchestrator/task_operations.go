@@ -141,6 +141,20 @@ func isTransientPromptError(err error) bool {
 		strings.Contains(msg, "use of closed network connection")
 }
 
+// isManualRecoveryPromptError identifies a provider error that should retain
+// the queued prompt until the user explicitly resumes the session. It is
+// intentionally separate from isTransientPromptError: exhausted usage does
+// not become available on a short automatic retry, and repeatedly attempting
+// it would consume the queue's retry budget without making progress.
+func isManualRecoveryPromptError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "usagelimitexceeded") ||
+		strings.Contains(message, "you've hit your usage limit")
+}
+
 func isAgentAlreadyRunningError(err error) bool {
 	return err != nil && errors.Is(err, lifecycle.ErrAgentAlreadyRunning)
 }

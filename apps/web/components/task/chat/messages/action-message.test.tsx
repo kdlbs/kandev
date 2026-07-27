@@ -118,10 +118,26 @@ describe("ActionMessage — transient retry (warning variant)", () => {
         ],
       },
     } as Partial<Message>);
-    renderAction(errorMsg, "WAITING_FOR_INPUT");
+    renderAction(errorMsg, "WAITING_FOR_INPUT", "agent process exited unexpectedly");
     const text = screen.getByText(/Agent encountered an error/i);
     expect(text.className).toContain("text-red-600");
     expect(text.className).not.toContain("text-amber-600");
+  });
+
+  it("hides a completed recovery card after resume clears the session error", () => {
+    const errorMsg = retryMessage({
+      content: "Agent encountered an error",
+      metadata: {
+        variant: "error",
+        recovery_actions: true,
+        actions: [
+          { type: "ws_request", label: "Resume session", test_id: "recovery-resume-button" },
+        ],
+      },
+    } as Partial<Message>);
+
+    const { container } = renderAction(errorMsg, "WAITING_FOR_INPUT", "");
+    expect(container.firstChild).toBeNull();
   });
 });
 
