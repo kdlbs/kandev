@@ -424,7 +424,7 @@ func TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithWorkDirResolvedPath
 
 // TestNormalizeShellToolResultWorkDirFallbackNeverCorruptsNearMissOutput is a
 // safety regression for the workDir-collapse fallback added alongside the
-// above test: ReplaceAll(firstLine, workDir+"/", "") strips every
+// above test: ReplaceAll(firstLine, workDirPrefix, "") strips every
 // occurrence of that prefix from the echoed line, including one embedded in
 // a quoted argument that isn't a resolved file path (e.g. a grep pattern
 // that happens to contain workDir-looking text). If the collapsed line
@@ -454,6 +454,52 @@ func TestNormalizeShellToolResultWorkDirFallbackNeverCorruptsNearMissOutput(t *t
 	normalizer.NormalizeToolResult(payload, stdout)
 
 	require.Equal(t, stdout, payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolResultStripsLeadingCommandEchoWithTrailingSlashWorkDir
+// is a regression for a Codex review finding on this PR: a provider can
+// report "cwd" already "/"-terminated (e.g. "/repo/"). Appending "/"
+// unconditionally would then search for "/repo//" - a doubled separator
+// the actually-joined path ("/repo/notes.txt") never contains - silently
+// declining to strip a real echo.
+func TestNormalizeShellToolResultStripsLeadingCommandEchoWithTrailingSlashWorkDir(t *testing.T) {
+	t.Parallel()
+
+	command := "cat notes.txt"
+	workDir := "/repo/"
+	resolvedCommand := "cat /repo/notes.txt"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeToolResult(payload, "$ "+resolvedCommand+"\nhello\n")
+
+	require.Equal(t, "hello\n", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolResultStripsLeadingCommandEchoWithRootWorkDir covers
+// the same Codex finding's other reported case: the root directory "/" is
+// itself already "/"-terminated, so the joined path is single- not
+// double-slashed ("/notes.txt", not "//notes.txt").
+func TestNormalizeShellToolResultStripsLeadingCommandEchoWithRootWorkDir(t *testing.T) {
+	t.Parallel()
+
+	command := "cat notes.txt"
+	workDir := "/"
+	resolvedCommand := "cat /notes.txt"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeToolResult(payload, "$ "+resolvedCommand+"\nhello\n")
+
+	require.Equal(t, "hello\n", payload.ShellExec().Output.Stdout)
 }
 
 func TestNormalizeShellToolUpdateStripsLeadingCommandEchoFromLiveOutput(t *testing.T) {

@@ -89,8 +89,16 @@ func stripCommandEcho(command, workDir, stdout string, commitExactMatch bool) st
 	// just the first echoed line with the workDir prefix collapsed back
 	// out, so real output later in stdout (which may legitimately contain
 	// workDir-prefixed paths of its own) is never touched.
+	//
+	// workDir's trailing slashes are collapsed to exactly one first: a
+	// provider can report cwd already "/"-terminated (e.g. "/repo/"), and
+	// the root directory "/" is inherently "/"-terminated. Appending "/"
+	// unconditionally would search for a doubled separator ("/repo//" or
+	// "//") that the actually-joined path never contains, silently
+	// declining to strip a real echo.
 	firstLine, remainder, hasMore := cutFirstLine(stdout)
-	if strings.ReplaceAll(firstLine, workDir+"/", "") != "$ "+command {
+	workDirPrefix := strings.TrimRight(workDir, "/") + "/"
+	if strings.ReplaceAll(firstLine, workDirPrefix, "") != "$ "+command {
 		return stdout
 	}
 	if !hasMore {
