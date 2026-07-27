@@ -20,7 +20,9 @@ import type { ImproveKandevBootstrapResponse } from "@/lib/api/domains/improve-k
 import { cn } from "@/lib/utils";
 import type { Task, WorkflowStep } from "@/lib/types/http";
 import {
+  contributorAccessMessage,
   getImproveKandevForkBlockedReason,
+  getImproveKandevStepDescription,
   resolveImproveKandevWorkflow,
   type ImproveKandevKind,
 } from "./improve-kandev-dialog-model";
@@ -132,15 +134,6 @@ function CreateModeBottomSlot({ kind, steps }: { kind: ImproveKind; steps: Workf
   );
 }
 
-const STEP_DESCRIPTIONS: Record<string, string> = {
-  improve:
-    "Agent reads the report, explores the codebase, and implements the change with TDD. Runs make fmt, typecheck, test, lint, then commits.",
-  test: "Agent boots a secondary kandev instance with make dev and tells you what to verify. You confirm the change works in the running app.",
-  pr: "Agent runs the pr skill: pushes the branch and opens a pull request to kdlbs/kandev for the maintainers to review.",
-  "open issue":
-    "Agent gathers every required field from the repository template, confirms the public draft with you, and publishes the GitHub issue.",
-};
-
 function WorkflowStepsPreview({ steps }: { steps: WorkflowStep[] }) {
   if (steps.length === 0) return null;
   const ordered = [...steps].sort((a, b) => a.position - b.position);
@@ -167,7 +160,7 @@ function WorkflowStepsPreview({ steps }: { steps: WorkflowStep[] }) {
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-xs text-xs leading-relaxed">
-                  {STEP_DESCRIPTIONS[s.name.toLowerCase()] ?? s.name}
+                  {getImproveKandevStepDescription(s)}
                 </TooltipContent>
               </Tooltip>
             </Fragment>
@@ -371,12 +364,4 @@ function ContributorBanner({
       </span>
     </div>
   );
-}
-
-function contributorAccessMessage(kind: ImproveKind, hasWrite: boolean): string {
-  if (kind === "issue") return "Opening an issue does not require a fork or push access.";
-  if (hasWrite) {
-    return "You have write access to kdlbs/kandev, so the agent will push directly to a branch on the upstream repo.";
-  }
-  return "The agent will fork kdlbs/kandev to your account during the PR step and open a pull request from your fork.";
 }

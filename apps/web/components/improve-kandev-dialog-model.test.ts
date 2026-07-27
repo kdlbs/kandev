@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  getImproveKandevStepDescription,
+  getImproveKandevBrowserStorage,
   getImproveKandevForkBlockedReason,
   initialImproveKandevMode,
   readImproveKandevSkipIntro,
+  contributorAccessMessage,
   resolveImproveKandevWorkflow,
   writeImproveKandevSkipIntro,
 } from "./improve-kandev-dialog-model";
@@ -54,6 +57,22 @@ describe("improve kandev dialog model", () => {
     expect(() => writeImproveKandevSkipIntro(storage, true)).not.toThrow();
   });
 
+  it("falls back safely when the browser localStorage property throws", () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      get() {
+        throw new Error("blocked");
+      },
+    });
+    try {
+      expect(getImproveKandevBrowserStorage()).toBeUndefined();
+    } finally {
+      if (original) Object.defineProperty(globalThis, "localStorage", original);
+      else delete (globalThis as { localStorage?: unknown }).localStorage;
+    }
+  });
+
   it("chooses create mode only after the intro has been dismissed", () => {
     expect(initialImproveKandevMode(false)).toBe("intro");
     expect(initialImproveKandevMode(true)).toBe("create");
@@ -102,5 +121,17 @@ describe("improve kandev dialog model", () => {
     expect(getImproveKandevForkBlockedReason("feature", "blocked_emu", message)).toBe(message);
     expect(getImproveKandevForkBlockedReason("issue", "blocked_emu", message)).toBeNull();
     expect(getImproveKandevForkBlockedReason("bug", "unknown", null)).toBeNull();
+  });
+
+  it("describes contributor access for each workflow kind", () => {
+    expect(contributorAccessMessage("issue", false)).toContain("does not require");
+    expect(contributorAccessMessage("bug", true)).toContain("write access");
+    expect(contributorAccessMessage("feature", false)).toContain("fork");
+  });
+
+  it("prefers stable workflow step ids for descriptions", () => {
+    expect(
+      getImproveKandevStepDescription({ id: "improve", name: "Renamed phase" } as WorkflowStep),
+    ).toContain("implements the change");
   });
 });

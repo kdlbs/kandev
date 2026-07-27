@@ -8,6 +8,17 @@ export type ImproveKandevMode = "intro" | "create";
 
 type StorageLike = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 
+const STEP_DESCRIPTIONS: Record<string, string> = {
+  improve:
+    "Agent reads the report, explores the codebase, and implements the change with TDD. Runs make fmt, typecheck, test, lint, then commits.",
+  test: "Agent boots a secondary kandev instance with make dev and tells you what to verify. You confirm the change works in the running app.",
+  pr: "Agent runs the pr skill: pushes the branch and opens a pull request to kdlbs/kandev for the maintainers to review.",
+  "open-issue":
+    "Agent gathers every required field from the repository template, confirms the public draft with you, and publishes the GitHub issue.",
+  "open issue":
+    "Agent gathers every required field from the repository template, confirms the public draft with you, and publishes the GitHub issue.",
+};
+
 export type ImproveKandevReadyState = {
   data: Pick<
     ImproveKandevBootstrapResponse,
@@ -23,6 +34,26 @@ export function readImproveKandevSkipIntro(storage: StorageLike | null | undefin
   } catch {
     return false;
   }
+}
+
+export function getImproveKandevBrowserStorage(): StorageLike | undefined {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return undefined;
+  }
+}
+
+export function contributorAccessMessage(kind: ImproveKandevKind, hasWrite: boolean): string {
+  if (kind === "issue") return "Opening an issue does not require a fork or push access.";
+  if (hasWrite) {
+    return "You have write access to kdlbs/kandev, so the agent will push directly to a branch on the upstream repo.";
+  }
+  return "The agent will fork kdlbs/kandev to your account during the PR step and open a pull request from your fork.";
+}
+
+export function getImproveKandevStepDescription(step: Pick<WorkflowStep, "id" | "name">): string {
+  return STEP_DESCRIPTIONS[step.id] ?? STEP_DESCRIPTIONS[step.name.toLowerCase()] ?? step.name;
 }
 
 export function writeImproveKandevSkipIntro(

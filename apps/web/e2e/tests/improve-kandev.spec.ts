@@ -109,10 +109,10 @@ test.describe("Improve Kandev dialog", () => {
 
     await testPage.keyboard.press("Escape");
     await expect(testPage.getByTestId("create-task-dialog")).toBeHidden();
-    await testPage.reload();
     await testPage.getByTestId("sidebar-improve-kandev-button").click();
 
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByText("Preparing kandev repository…")).toHaveCount(0);
     await expect(testPage.getByText(/Kandev is open source/)).toHaveCount(0);
   });
 

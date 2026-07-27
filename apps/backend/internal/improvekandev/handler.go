@@ -147,9 +147,16 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		return
 	}
 
+	workflows, err := h.taskSvc.ListWorkflows(ctx, workspaceID, true)
+	if err != nil {
+		h.log.Error("improve-kandev: workflow list failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list improve-kandev workflows"})
+		return
+	}
 	workflow, err := h.ensureWorkflow(
 		ctx,
 		workspaceID,
+		workflows,
 		improveTemplateID,
 		improveWorkflowName,
 		improveWorkflowDesc,
@@ -162,6 +169,7 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 	issueWorkflow, err := h.ensureWorkflow(
 		ctx,
 		workspaceID,
+		workflows,
 		issueTemplateID,
 		issueWorkflowName,
 		issueWorkflowDesc,
@@ -374,14 +382,11 @@ func (h *Handler) resolveGitHubAccess(ctx context.Context) githubAccess {
 func (h *Handler) ensureWorkflow(
 	ctx context.Context,
 	workspaceID string,
+	existing []*taskmodels.Workflow,
 	templateID string,
 	name string,
 	description string,
 ) (*taskmodels.Workflow, error) {
-	existing, err := h.taskSvc.ListWorkflows(ctx, workspaceID, true)
-	if err != nil {
-		return nil, err
-	}
 	for _, w := range existing {
 		if w.WorkflowTemplateID != nil && *w.WorkflowTemplateID == templateID {
 			// Heal records created before the workflow honored Hidden on insert.

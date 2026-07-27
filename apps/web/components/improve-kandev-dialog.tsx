@@ -18,6 +18,7 @@ import { buildImproveKandevDescription } from "./improve-kandev-dialog-helpers";
 import { CreateModeView, type BootstrapState } from "./improve-kandev-dialog-create";
 import {
   initialImproveKandevMode,
+  getImproveKandevBrowserStorage,
   readImproveKandevSkipIntro,
   writeImproveKandevSkipIntro,
 } from "./improve-kandev-dialog-model";
@@ -59,7 +60,7 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
   }, [open]);
 
   useGitHubAuthCheck(open, workspaceId, setAuth);
-  useBootstrapKandev(mode, workspaceId, setBootstrap);
+  useBootstrapKandev(open, mode, workspaceId, setBootstrap);
   useEffect(() => {
     if (!open || mode !== "create" || auth.kind !== "missing") return;
     // A saved intro preference must not bypass the GitHub-auth recovery UI.
@@ -113,7 +114,7 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
           skipIntro={skipIntro}
           onSkipIntroChange={(checked) => {
             setSkipIntro(checked);
-            writeImproveKandevSkipIntro(globalThis.localStorage, checked);
+            writeImproveKandevSkipIntro(getImproveKandevBrowserStorage(), checked);
           }}
           onCancel={() => onOpenChange(false)}
           onProceed={() => setMode("create")}
@@ -157,6 +158,7 @@ function useGitHubAuthCheck(
 }
 
 function useBootstrapKandev(
+  open: boolean,
   mode: Mode,
   workspaceId: string | null,
   setBootstrap: (s: BootstrapState) => void,
@@ -164,7 +166,7 @@ function useBootstrapKandev(
   const { toast } = useToast();
   const setRepositories = useAppStore((state) => state.setRepositories);
   useEffect(() => {
-    if (mode !== "create" || !workspaceId) return;
+    if (!open || mode !== "create" || !workspaceId) return;
     let cancelled = false;
     setBootstrap({ kind: "loading" });
     (async () => {
@@ -200,7 +202,7 @@ function useBootstrapKandev(
     return () => {
       cancelled = true;
     };
-  }, [mode, workspaceId, setBootstrap, setRepositories, toast]);
+  }, [open, mode, workspaceId, setBootstrap, setRepositories, toast]);
 }
 
 function IntroBody({
