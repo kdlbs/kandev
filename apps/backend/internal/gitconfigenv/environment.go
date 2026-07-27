@@ -32,7 +32,7 @@ func Merge(base, overlay map[string]string) (map[string]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("overlay Git config: %w", err)
 	}
-	result := make(map[string]string, len(base)+len(overlay))
+	result := make(map[string]string)
 	for key, value := range base {
 		if !isIndexedKey(key) {
 			result[key] = value

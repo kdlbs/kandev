@@ -543,7 +543,9 @@ func TestConcreteExecutionProfileIgnoresLegacyRouteFlagsAndEnv(t *testing.T) {
 	if len(flags) != 1 || flags[0] != "--profile-flag" {
 		t.Fatalf("flags = %v, want execution profile flags only", flags)
 	}
-	mergeRouteOverrideEnv(req)
+	if err := mergeRouteOverrideEnv(req); err != nil {
+		t.Fatalf("mergeRouteOverrideEnv() error = %v", err)
+	}
 	if req.Env["PROFILE_ENV"] != "profile" {
 		t.Fatalf("PROFILE_ENV = %q, want execution profile value", req.Env["PROFILE_ENV"])
 	}
@@ -565,7 +567,9 @@ func TestLegacyRouteStillAppliesFlagsAndEnv(t *testing.T) {
 	if len(flags) != 2 || flags[1] != "--legacy-route-flag" {
 		t.Fatalf("flags = %v, want legacy route flag appended", flags)
 	}
-	mergeRouteOverrideEnv(req)
+	if err := mergeRouteOverrideEnv(req); err != nil {
+		t.Fatalf("mergeRouteOverrideEnv() error = %v", err)
+	}
 	if req.Env["ROUTE_ONLY"] != "value" {
 		t.Fatalf("legacy route env missing: %v", req.Env)
 	}
@@ -585,7 +589,9 @@ func TestLegacyRouteComposesIndexedGitConfig(t *testing.T) {
 		}},
 	}
 
-	mergeRouteOverrideEnv(req)
+	if err := mergeRouteOverrideEnv(req); err != nil {
+		t.Fatalf("mergeRouteOverrideEnv() error = %v", err)
+	}
 
 	if got := req.Env["GIT_CONFIG_COUNT"]; got != "2" {
 		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got)
@@ -595,6 +601,17 @@ func TestLegacyRouteComposesIndexedGitConfig(t *testing.T) {
 	}
 	if got := req.Env["GIT_CONFIG_KEY_1"]; got != "credential.https://github.com.helper" {
 		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want route entry", got)
+	}
+}
+
+func TestLegacyRouteRejectsMalformedIndexedGitConfig(t *testing.T) {
+	req := &LaunchRequest{RouteOverride: &RouteOverride{Env: map[string]string{
+		"GIT_CONFIG_COUNT": "1",
+		"GIT_CONFIG_KEY_0": "core.hooksPath",
+	}}}
+
+	if err := mergeRouteOverrideEnv(req); err == nil {
+		t.Fatal("mergeRouteOverrideEnv() error = nil, want malformed Git config error")
 	}
 }
 

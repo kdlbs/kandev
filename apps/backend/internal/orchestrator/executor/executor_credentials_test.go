@@ -125,6 +125,22 @@ func TestConfigureGitHubCredentialBroker(t *testing.T) {
 	}
 }
 
+func TestApplyGitCredentialSnapshotOmitsManagedSourceWithoutBroker(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: "managed", WorkspaceMethod: "gh_cli"},
+	})
+	session := &models.TaskSession{ID: "session-1"}
+	req := &LaunchAgentRequest{WorkspaceID: "workspace-1", Env: map[string]string{}}
+
+	if err := exec.applyGitCredentialSnapshot(context.Background(), req, session); err != nil {
+		t.Fatalf("applyGitCredentialSnapshot() error = %v", err)
+	}
+	if _, ok := session.Metadata[models.SessionMetaKeyGitCredentialSnapshot]; ok {
+		t.Fatalf("snapshot = %#v, want no managed snapshot without broker", session.Metadata)
+	}
+}
+
 func TestConfigureGitHubCredentialBrokerIssuesOneLeasePerRepository(t *testing.T) {
 	issuer := &fakeGitHubCredentialLeaseIssuer{}
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())

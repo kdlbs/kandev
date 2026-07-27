@@ -118,6 +118,9 @@ func (e *Executor) applyGitCredentialSnapshot(
 		snapshot.Source = "executor"
 		snapshot.Transport = "executor_selected"
 	default:
+		if req.Env[githubauth.CredentialBrokerURLEnv] == "" {
+			return nil
+		}
 		snapshot.Source = "workspace"
 		snapshot.WorkspaceMethod = policy.WorkspaceMethod
 		snapshot.Actor = policy.WorkspaceActor
