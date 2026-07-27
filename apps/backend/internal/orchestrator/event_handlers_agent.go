@@ -1024,6 +1024,18 @@ func (s *Service) deleteExecutionTeardownClaimIfExpired(key string, expiresAt ti
 	}
 }
 
+func (s *Service) hasExecutionTeardownOwner(sessionID, executionID string) bool {
+	if sessionID == "" || executionID == "" {
+		return false
+	}
+	value, ok := s.executionTeardownClaims.Load(terminalExecutionKey(sessionID, executionID))
+	if !ok {
+		return false
+	}
+	claim, ok := value.(executionTeardownClaim)
+	return ok && time.Now().Before(claim.expiresAt)
+}
+
 // wasResumeAttempt checks whether the session's last execution used a resume token.
 // If the token is still present in the DB, the agent was started with --resume.
 func (s *Service) wasResumeAttempt(ctx context.Context, sessionID string) bool {
@@ -1336,6 +1348,19 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 	// own re-drive, which surfaces as an agent.stopped event; clearing the loop
 	// on that self-inflicted stop would abort the retry. The loop is freed on
 	// ready/completed (success), cancel, and exhaustion instead.
+
+	// An explicit teardown owner already decided and persisted the session
+	// state before stopping this exact execution. Treat the resulting stopped
+	// event as an acknowledgement, not a new state decision. Recovery may have
+	// advanced the row to STARTING before the predecessor's delayed stop event
+	// arrives, while the replacement is not yet visible in the runtime store.
+	if s.hasExecutionTeardownOwner(data.SessionID, data.AgentExecutionID) {
+		s.logger.Info("ignoring agent.stopped for explicitly owned teardown",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		return
+	}
 
 	// Drop stopped events that belong to a previous (rotated) execution. The
 	// session might already be running a fresh resume cycle; flipping its state

@@ -77,7 +77,10 @@ func TestResumeSession_PersistsStartingBeforeLaunch(t *testing.T) {
 	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
 
 	agentMgr := &mockAgentManager{
-		launchAgentFunc: func(ctx context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			if !req.StartAgent {
+				return nil, errors.New("resume launch did not retain startup ownership")
+			}
 			current, err := repo.GetTaskSession(ctx, "sess-1")
 			if err != nil {
 				return nil, err

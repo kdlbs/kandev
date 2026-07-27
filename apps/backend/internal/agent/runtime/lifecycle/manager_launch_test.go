@@ -29,6 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // resumeTestAgent is a minimal agent with a BuildCommand that respects the
@@ -1014,6 +1015,9 @@ func TestLaunchKeepsInitialExecutionActivityAfterReturning(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
+	}
+	if execution.Status != v1.AgentStatusStarting {
+		t.Fatalf("execution status after start-owning Launch = %s, want %s", execution.Status, v1.AgentStatusStarting)
 	}
 	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
 	if maintenance != nil {

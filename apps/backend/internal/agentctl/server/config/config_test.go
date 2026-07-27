@@ -19,6 +19,7 @@ func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
 }
 
 func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
+	clearParentIndexedGitConfig(t)
 	t.Setenv("GIT_CONFIG_COUNT", "2")
 	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
 	t.Setenv("GIT_CONFIG_VALUE_0", "/opt/locstat/hooks")
@@ -45,6 +46,7 @@ func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
 }
 
 func TestCollectAgentEnvPreservesParentGitConfigHook(t *testing.T) {
+	clearParentIndexedGitConfig(t)
 	repository := t.TempDir()
 	hooks := t.TempDir()
 	marker := filepath.Join(t.TempDir(), "hook-ran")
@@ -73,6 +75,30 @@ func TestCollectAgentEnvPreservesParentGitConfigHook(t *testing.T) {
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("inherited pre-commit hook did not run: %v", err)
 	}
+}
+
+func clearParentIndexedGitConfig(t *testing.T) {
+	t.Helper()
+	original := make(map[string]string)
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || (key != "GIT_CONFIG_COUNT" &&
+			!strings.HasPrefix(key, "GIT_CONFIG_KEY_") &&
+			!strings.HasPrefix(key, "GIT_CONFIG_VALUE_")) {
+			continue
+		}
+		original[key] = value
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatalf("unset inherited %s: %v", key, err)
+		}
+	}
+	t.Cleanup(func() {
+		for key, value := range original {
+			if err := os.Setenv(key, value); err != nil {
+				t.Errorf("restore inherited %s: %v", key, err)
+			}
+		}
+	})
 }
 
 func runGit(t *testing.T, env []string, args ...string) {

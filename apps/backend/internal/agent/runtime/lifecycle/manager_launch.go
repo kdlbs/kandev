@@ -23,6 +23,7 @@ import (
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const legacyExecutorTypeLocalPC = "local_pc"
@@ -902,6 +903,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		activityLease.SetKind(activity.KindExecutionPreparing)
 		execution, launchErr := m.launchInternal(ctx, req)
 		if launchErr == nil && req.StartAgent {
+			m.markAgentStartPending(execution)
 			m.trackActivity(executionActivityKey(execution.ID), activityLease)
 			transferredActivity = true
 		}
@@ -936,9 +938,24 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		if err != nil {
 			return nil, err
 		}
+		m.markAgentStartPending(execution)
 		m.trackActivity(executionActivityKey(execution.ID), activityLease)
 	}
 	return execution, nil
+}
+
+// markAgentStartPending distinguishes a launch that owns an imminent agent
+// start from a workspace-only execution. It happens synchronously before
+// Launch returns so a concurrent resume cannot mistake the registered runtime
+// for stale state while StartAgentProcess is waiting for agentctl readiness.
+func (m *Manager) markAgentStartPending(execution *AgentExecution) {
+	if execution == nil {
+		return
+	}
+	_ = m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		current.Status = v1.AgentStatusStarting
+		current.StartedAt = time.Now()
+	})
 }
 
 // promoteWorkspaceExecution populates the agent command fields on a

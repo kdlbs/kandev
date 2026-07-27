@@ -8,6 +8,7 @@ import (
 	"time"
 
 	orchestratorexec "github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
@@ -51,6 +52,30 @@ func TestRegisterExecutionStopOwner_SuppressesOrphanCleanupAndRecordsForceEscala
 	claim, ok := value.(executionTeardownClaim)
 	require.True(t, ok)
 	require.Equal(t, executionTeardownIntentForce, claim.intent)
+}
+
+func TestHandleAgentStopped_OwnedPredecessorDoesNotCancelStartingReplacement(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const (
+		taskID         = "task-stale-stop"
+		sessionID      = "session-stale-stop"
+		oldExecutionID = "execution-stale-stop"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+
+	svc := newCoordinatorStopTestService(repo, newMockTaskRepo(), &mockAgentManager{})
+	svc.RegisterExecutionStopOwner(sessionID, oldExecutionID, true)
+
+	svc.handleAgentStopped(ctx, watcher.AgentEventData{
+		TaskID:           taskID,
+		SessionID:        sessionID,
+		AgentExecutionID: oldExecutionID,
+	})
+
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, session.State)
 }
 
 func TestCleanupAgentExecution_CancelledSessionUsesExactExecutionOwnership(t *testing.T) {

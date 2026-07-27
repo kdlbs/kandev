@@ -664,6 +664,7 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 		TaskTitle:            task.Title,
 		AgentProfileID:       executionProfileID,
 		OfficeAgentProfileID: session.AgentProfileID,
+		StartAgent:           startAgent,
 		TaskDescription:      task.Description,
 		Priority:             task.Priority,
 		IsEphemeral:          task.IsEphemeral,

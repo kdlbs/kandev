@@ -963,6 +963,8 @@ func (m *Manager) ListExecutions() []*AgentExecution {
 	return m.executionStore.List()
 }
 
+const agentStartupLivenessGrace = 75 * time.Second
+
 // IsAgentRunningForSession checks if an agent process is running or starting for a session.
 //
 // For passthrough sessions (direct PTY mode), it checks whether the PTY process is alive
@@ -984,6 +986,18 @@ func (m *Manager) IsAgentRunningForSession(ctx context.Context, sessionID string
 	execution, exists := m.GetExecutionBySessionID(sessionID)
 	if !exists {
 		return false
+	}
+
+	// Launch registers the execution before agentctl is guaranteed to answer
+	// status requests. During that bounded boot window, a failed status probe
+	// means "not ready yet", not "stale". Treat the execution-store STARTING
+	// state as live long enough to cover StartAgentProcess's 60-second agentctl
+	// readiness deadline; after the grace expires, normal probing allows stale
+	// starting entries to be reaped.
+	if execution.Status == v1.AgentStatusStarting &&
+		!execution.StartedAt.IsZero() &&
+		time.Since(execution.StartedAt) <= agentStartupLivenessGrace {
+		return true
 	}
 
 	// Passthrough sessions run as direct PTY processes via InteractiveRunner,
