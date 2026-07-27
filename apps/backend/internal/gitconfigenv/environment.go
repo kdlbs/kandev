@@ -111,6 +111,12 @@ func isIndexedKey(key string) bool {
 	return key == countKey || strings.HasPrefix(key, keyPrefix) || strings.HasPrefix(key, valuePrefix)
 }
 
+// IsIndexedKey reports whether key belongs to Git's indexed environment
+// configuration block.
+func IsIndexedKey(key string) bool {
+	return isIndexedKey(key)
+}
+
 func entriesFrom(env map[string]string) ([]Entry, error) {
 	if len(env) == 0 {
 		return nil, nil

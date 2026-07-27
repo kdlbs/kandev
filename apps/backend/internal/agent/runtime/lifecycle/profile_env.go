@@ -63,7 +63,7 @@ func mergeEnvFillMissing(dst, src map[string]string) {
 		return
 	}
 	for k, v := range src {
-		if v == "" {
+		if v == "" || gitconfigenv.IsIndexedKey(k) {
 			continue
 		}
 		if _, exists := dst[k]; !exists {
