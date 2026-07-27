@@ -37,6 +37,17 @@ steps:
       Re-read the title and description carefully. If anything is unclear
       or ambiguous, use the ask_user_question_kandev tool before coding.
 
+      PLANNING GATE
+      If this request adds a feature or changes product behavior and does not
+      reference an approved spec, plan, and current task file, follow the
+      `spec-driven-development` skill through spec, plan, and task creation.
+      Record any partial implementation as continuation context, then stop at
+      the model-switch checkpoint before changing more production or permanent
+      test files. The [IMPROVE PHASE] label and implementation checklist below
+      are Phase 5 guidance; they do not opt the task out of planning. Continue
+      directly only when approved task artifacts already exist or the user
+      explicitly says to skip planning.
+
       STEP 2: EXPLORE THE CODEBASE
       - Find similar features and understand how they are implemented.
       - Identify the architecture and patterns in the relevant area.

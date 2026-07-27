@@ -28,9 +28,13 @@ const (
 	repoProvider  = "github"
 	defaultBranch = "main"
 
-	templateID   = "improve-kandev"
-	workflowName = "Improve Kandev"
-	workflowDesc = "Hidden workflow for filing improvements via the in-app entry point."
+	improveTemplateID   = "improve-kandev"
+	improveWorkflowName = "Improve Kandev"
+	improveWorkflowDesc = "Hidden workflow for filing improvements via the in-app entry point."
+
+	issueTemplateID   = "report-kandev-issue"
+	issueWorkflowName = "Report Kandev Issue"
+	issueWorkflowDesc = "Hidden workflow for publishing a kdlbs/kandev issue without changing code."
 )
 
 // Cloner is the minimal subset of repoclone.Cloner the bootstrap endpoint uses.
@@ -111,15 +115,16 @@ const (
 
 // BootstrapResponse describes the artifacts the dialog needs to submit a task.
 type BootstrapResponse struct {
-	RepositoryID   string            `json:"repository_id"`
-	WorkflowID     string            `json:"workflow_id"`
-	Branch         string            `json:"branch"`
-	BundleDir      string            `json:"bundle_dir"`
-	BundleFiles    map[string]string `json:"bundle_files"`
-	GitHubLogin    string            `json:"github_login"`
-	HasWriteAccess bool              `json:"has_write_access"`
-	ForkStatus     ForkStatus        `json:"fork_status"`
-	ForkMessage    string            `json:"fork_message,omitempty"`
+	RepositoryID    string            `json:"repository_id"`
+	WorkflowID      string            `json:"workflow_id"`
+	IssueWorkflowID string            `json:"issue_workflow_id"`
+	Branch          string            `json:"branch"`
+	BundleDir       string            `json:"bundle_dir"`
+	BundleFiles     map[string]string `json:"bundle_files"`
+	GitHubLogin     string            `json:"github_login"`
+	HasWriteAccess  bool              `json:"has_write_access"`
+	ForkStatus      ForkStatus        `json:"fork_status"`
+	ForkMessage     string            `json:"fork_message,omitempty"`
 }
 
 func (h *Handler) httpBootstrap(c *gin.Context) {
@@ -142,10 +147,28 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 		return
 	}
 
-	workflow, err := h.ensureWorkflow(ctx, workspaceID)
+	workflow, err := h.ensureWorkflow(
+		ctx,
+		workspaceID,
+		improveTemplateID,
+		improveWorkflowName,
+		improveWorkflowDesc,
+	)
 	if err != nil {
 		h.log.Error("improve-kandev: workflow upsert failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to ensure improve-kandev workflow"})
+		return
+	}
+	issueWorkflow, err := h.ensureWorkflow(
+		ctx,
+		workspaceID,
+		issueTemplateID,
+		issueWorkflowName,
+		issueWorkflowDesc,
+	)
+	if err != nil {
+		h.log.Error("improve-kandev: issue workflow upsert failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to ensure report-kandev-issue workflow"})
 		return
 	}
 
@@ -169,10 +192,11 @@ func (h *Handler) httpBootstrap(c *gin.Context) {
 	access := h.resolveGitHubAccess(ctx)
 
 	c.JSON(http.StatusOK, BootstrapResponse{
-		RepositoryID: repo.ID,
-		WorkflowID:   workflow.ID,
-		Branch:       defaultBranch,
-		BundleDir:    dir,
+		RepositoryID:    repo.ID,
+		WorkflowID:      workflow.ID,
+		IssueWorkflowID: issueWorkflow.ID,
+		Branch:          defaultBranch,
+		BundleDir:       dir,
 		BundleFiles: map[string]string{
 			"metadata":     filepath.Join(dir, "metadata.json"),
 			"backend_log":  filepath.Join(dir, "backend.log"),
@@ -345,9 +369,15 @@ func (h *Handler) resolveGitHubAccess(ctx context.Context) githubAccess {
 	return out
 }
 
-// ensureWorkflow finds or creates the hidden improve-kandev workflow in the
-// given workspace. Idempotent: matches by WorkflowTemplateID == templateID.
-func (h *Handler) ensureWorkflow(ctx context.Context, workspaceID string) (*taskmodels.Workflow, error) {
+// ensureWorkflow finds or creates a hidden Improve Kandev workflow in the
+// given workspace. Idempotent: matches by WorkflowTemplateID.
+func (h *Handler) ensureWorkflow(
+	ctx context.Context,
+	workspaceID string,
+	templateID string,
+	name string,
+	description string,
+) (*taskmodels.Workflow, error) {
 	existing, err := h.taskSvc.ListWorkflows(ctx, workspaceID, true)
 	if err != nil {
 		return nil, err
@@ -371,8 +401,8 @@ func (h *Handler) ensureWorkflow(ctx context.Context, workspaceID string) (*task
 	tmplID := templateID
 	return h.taskSvc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
 		WorkspaceID:        workspaceID,
-		Name:               workflowName,
-		Description:        workflowDesc,
+		Name:               name,
+		Description:        description,
 		WorkflowTemplateID: &tmplID,
 		Hidden:             true,
 	})

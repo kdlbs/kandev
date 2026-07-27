@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, type RefObject, useRef } from "react";
+import { type ReactNode, type RefObject, useRef, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import Link from "@/components/routing/app-link";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
@@ -15,6 +15,7 @@ import {
   IconLayoutKanban,
   IconList,
   IconSettings,
+  IconStethoscope,
   IconTimeline,
 } from "@tabler/icons-react";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
@@ -25,12 +26,13 @@ import {
   type TasksListDisplayOptions,
 } from "./mobile-menu-task-list-options";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { linkToTasks } from "@/lib/links";
+import { linkToTask, linkToTasks } from "@/lib/links";
 import { cn } from "@/lib/utils";
-import type { Repository } from "@/lib/types/http";
+import type { Repository, Task } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
+import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 
 type MobileMenuSheetProps = {
   open: boolean;
@@ -281,10 +283,12 @@ function MobileViewSection({
 function MobileUtilityActions({
   showHealthIndicator,
   onOpenHealthDialog,
+  onOpenImproveKandev,
   onOpenChange,
 }: {
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
+  onOpenImproveKandev: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const { enabled: statusDrawerEnabled, openStatusDrawer } = useAppStatusDrawer();
@@ -322,6 +326,16 @@ function MobileUtilityActions({
           <IconSettings className={mobileControlIconClass} />
           Settings
         </Link>
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        className="h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm"
+        onClick={onOpenImproveKandev}
+        data-testid="mobile-improve-kandev-button"
+      >
+        <IconStethoscope className={mobileControlIconClass} />
+        Improve Kandev
       </Button>
       {showHealthIndicator && (
         <Button
@@ -407,6 +421,7 @@ function MobileMenuContent({
   displayOptions,
   showHealthIndicator,
   onOpenHealthDialog,
+  onOpenImproveKandev,
 }: Pick<
   MobileMenuSheetProps,
   | "searchQuery"
@@ -420,6 +435,7 @@ function MobileMenuContent({
   onViewChange: (value: string) => void;
   showPipeline: boolean;
   displayOptions: MobileDisplayOptionsProps;
+  onOpenImproveKandev: () => void;
 }) {
   return (
     <div className="flex min-h-full flex-col gap-6 p-4">
@@ -439,6 +455,7 @@ function MobileMenuContent({
       <MobileUtilityActions
         showHealthIndicator={showHealthIndicator}
         onOpenHealthDialog={onOpenHealthDialog}
+        onOpenImproveKandev={onOpenImproveKandev}
         onOpenChange={onOpenChange}
       />
     </div>
@@ -459,6 +476,7 @@ export function MobileMenuSheet({
 }: MobileMenuSheetProps) {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const router = useRouter();
+  const [improveOpen, setImproveOpen] = useState(false);
   const { isMobile } = useResponsiveBreakpoint();
   const {
     workflows,
@@ -514,27 +532,71 @@ export function MobileMenuSheet({
     event.preventDefault();
     contentRef.current?.focus({ preventScroll: true });
   };
+  const openImproveKandev = () => {
+    onOpenChange(false);
+    requestAnimationFrame(() => setImproveOpen(true));
+  };
 
   return (
-    <ResponsiveMenuSurface
+    <MobileMenuRender
       isMobile={isMobile}
       open={open}
       onOpenChange={onOpenChange}
       contentRef={contentRef}
       onOpenAutoFocus={focusMenu}
-    >
-      <MobileMenuContent
-        searchQuery={searchQuery}
-        onSearchChange={onSearchChange}
-        isSearchLoading={isSearchLoading}
-        onOpenChange={onOpenChange}
-        viewValue={viewValue}
-        onViewChange={handleViewChange}
-        showPipeline={!isMobile}
-        displayOptions={displayOptions}
-        showHealthIndicator={showHealthIndicator}
-        onOpenHealthDialog={onOpenHealthDialog}
+      searchQuery={searchQuery}
+      onSearchChange={onSearchChange}
+      isSearchLoading={isSearchLoading}
+      viewValue={viewValue}
+      onViewChange={handleViewChange}
+      displayOptions={displayOptions}
+      showHealthIndicator={showHealthIndicator}
+      onOpenHealthDialog={onOpenHealthDialog}
+      onOpenImproveKandev={openImproveKandev}
+      improveOpen={improveOpen}
+      onImproveOpenChange={setImproveOpen}
+      workspaceId={workspaceId ?? null}
+      onTaskCreated={(task) => router.push(linkToTask(task.id))}
+    />
+  );
+}
+
+type MobileMenuRenderProps = Pick<
+  MobileMenuSheetProps,
+  | "open"
+  | "onOpenChange"
+  | "searchQuery"
+  | "onSearchChange"
+  | "isSearchLoading"
+  | "showHealthIndicator"
+  | "onOpenHealthDialog"
+> & {
+  isMobile: boolean;
+  contentRef: RefObject<HTMLDivElement | null>;
+  onOpenAutoFocus: (event: Event) => void;
+  viewValue: string;
+  onViewChange: (value: string) => void;
+  displayOptions: MobileDisplayOptionsProps;
+  onOpenImproveKandev: () => void;
+  improveOpen: boolean;
+  onImproveOpenChange: (open: boolean) => void;
+  workspaceId: string | null;
+  onTaskCreated: (task: Task) => void;
+};
+
+function MobileMenuRender(props: MobileMenuRenderProps) {
+  const { isMobile, improveOpen, onImproveOpenChange, workspaceId, onTaskCreated } = props;
+  return (
+    <>
+      <ResponsiveMenuSurface {...props} isMobile={isMobile}>
+        <MobileMenuContent {...props} showPipeline={!isMobile} />
+      </ResponsiveMenuSurface>
+      <ImproveKandevDialog
+        open={improveOpen}
+        onOpenChange={onImproveOpenChange}
+        workspaceId={workspaceId}
+        onSuccess={onTaskCreated}
       />
-    </ResponsiveMenuSurface>
+    </>
   );
 }
