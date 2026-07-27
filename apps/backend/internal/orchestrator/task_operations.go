@@ -329,6 +329,16 @@ func (s *Service) StartCreatedSession(
 		return nil, fmt.Errorf("session is not in CREATED or WAITING_FOR_INPUT state (current: %s)", session.State)
 	}
 
+	// Office-owned sessions must be started by the scheduler. Reject before
+	// resolving profiles or persisting any caller-derived session metadata.
+	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine office task status: %w", err)
+	}
+	if isOfficeTask {
+		return nil, errOfficeTaskStartRequiresScheduler
+	}
+
 	// Use agent profile from request, fall back to session's stored value.
 	effectiveProfileID := agentProfileID
 	if effectiveProfileID == "" {
@@ -384,14 +394,7 @@ func (s *Service) StartCreatedSession(
 	}
 
 	// Transition task state: CREATED → SCHEDULING → (IN_PROGRESS via executor).
-	// Office tasks keep their workflow-owned status across run launches.
-	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to determine office task status: %w", err)
-	}
-	if isOfficeTask {
-		return nil, errOfficeTaskStartRequiresScheduler
-	} else if err := s.scheduleTaskForSession(ctx, taskID, sessionID); err != nil {
+	if err := s.scheduleTaskForSession(ctx, taskID, sessionID); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
 			zap.String("task_id", taskID),
 			zap.Error(err))

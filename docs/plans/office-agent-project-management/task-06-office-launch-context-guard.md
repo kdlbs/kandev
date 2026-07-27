@@ -62,4 +62,29 @@ verification passes.
   the guard and exposed the existing direct-guard wording assertions.
 - The green focused run passed six Office launch and recovery scenarios,
   including a complete context map bound to a different task.
+
+Files changed:
+
+- `apps/backend/internal/orchestrator/task_operations.go`
+- `apps/backend/internal/orchestrator/task_operations_test.go`
+- `apps/backend/internal/orchestrator/event_handlers_workflow_profile_test.go`
+- `apps/backend/cmd/agentctl/kandev_test.go`
+- `docs/specs/office/agents.md`
+- `docs/public/automation-and-mcp.md`
+- This plan and its task records.
+
+Risks:
+
+- Generic manual, workflow, resume, and prepared-workspace paths now reject
+  Office-owned work until the Office scheduler supplies a fresh context. This
+  is intentional fail-closed behavior and may surface a clearer error where a
+  previously unsafe launch was attempted.
+- The task binding prevents context reuse across tasks; JWT signature and
+  expiry validation remains owned by the Office runtime API middleware.
+
+Remaining ModeOffice paths:
+
+- None in the orchestrator launch and recovery paths. Scheduler launches use
+  `StartTaskWithEnv` with the task-bound context; direct executor unit tests do
+  not select `ModeOffice` through production task operations.
 - `cd apps/backend && rtk go test ./internal/orchestrator -count=1` passed.

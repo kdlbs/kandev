@@ -3064,6 +3064,9 @@ func TestStartCreatedSession_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "office tasks must be started through Office")
 	assert.Contains(t, err.Error(), "StartTaskWithEnv")
 	require.Empty(t, messages.userMessages)
+	unchanged, loadErr := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, loadErr)
+	assert.Empty(t, unchanged.AgentProfileID, "rejected Office start must not persist caller profile")
 
 	if writes := taskRepo.stateWrites["task1"]; writes != 0 {
 		t.Fatalf("office task should not write SCHEDULING, got %d state writes", writes)
