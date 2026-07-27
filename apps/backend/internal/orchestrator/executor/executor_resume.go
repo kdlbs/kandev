@@ -447,6 +447,9 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 			e.logger.Info("resume race: agent already running for session, returning ErrExecutionAlreadyRunning",
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
+			if startAgent {
+				e.rollbackResumeStateAfterLaunchFailure(ctx, task.ID, session.ID, resumeInitialState, err)
+			}
 			return nil, ErrExecutionAlreadyRunning
 		}
 		e.logger.Info("cleaning up stale execution and retrying launch",

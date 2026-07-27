@@ -127,6 +127,30 @@ func TestResumeSession_RollsBackStartingWhenLaunchFails(t *testing.T) {
 	}
 }
 
+func TestResumeSession_RollsBackStartingOnLiveAlreadyRunningRace(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	var runningChecks int
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, fmt.Errorf("%w: session %q", lifecycle.ErrAgentAlreadyRunning, req.SessionID)
+		},
+		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
+			runningChecks++
+			return runningChecks > 1
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if !errors.Is(err, ErrExecutionAlreadyRunning) {
+		t.Fatalf("ResumeSession error = %v, want ErrExecutionAlreadyRunning", err)
+	}
+	if repo.sessions["sess-1"].State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after live race = %s, want %s", repo.sessions["sess-1"].State, models.TaskSessionStateWaitingForInput)
+	}
+}
+
 func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing.T) {
 	tests := []struct {
 		name         string

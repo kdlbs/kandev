@@ -131,12 +131,12 @@ agent UI contracts do not change; backend tests exercise the repaired behavior.
 
 Wave 1:
 
-- [~] [Task 01: Preserve resume tokens on startup failure](task-01-preserve-resume-token.md)
-- [ ] [Task 03: Repair corrupt managed npm execution caches](task-03-managed-npm-cache-repair.md) (`parallel-safe`; disjoint agent-settings/runtime files)
+- [x] [Task 01: Preserve resume tokens on startup failure](task-01-preserve-resume-token.md)
+- [x] [Task 03: Repair corrupt managed npm execution caches](task-03-managed-npm-cache-repair.md) (`parallel-safe`; disjoint agent-settings/runtime files)
 
 Wave 2:
 
-- [ ] [Task 02: Transition resume state before credential issuance](task-02-resume-state-before-credentials.md)
+- [x] [Task 02: Transition resume state before credential issuance](task-02-resume-state-before-credentials.md)
 
 Execution remains sequential in the primary conversation by default. The
 parallel-safe label does not authorize delegation.

@@ -827,9 +827,9 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	)
 
 	// Terminal from here. Finalize run-mode automation runs — every branch
-	// below returns early (resume failure, session-backed recoverable failure,
-	// no-session retry), and run-mode automations need their AutomationRun
-	// flipped + worktree reaped on *every* terminal failure path.
+	// below returns early (session-backed recoverable failure, no-session retry),
+	// and run-mode automations need their AutomationRun flipped + worktree reaped
+	// on *every* terminal failure path.
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
 		errMsg = "agent failed"
