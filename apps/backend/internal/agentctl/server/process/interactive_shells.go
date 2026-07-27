@@ -222,8 +222,11 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 }
 
 // StartEnvForTesting returns the environment recorded for a process's deferred
-// PTY start. Exposed so callers that only wire the env (the terminal gateway)
-// can assert on it without spawning a shell.
+// PTY start. It is exported (rather than living in a _test.go file) only because
+// its consumer is cross-package: TestStartUserShellProcessExportsExecutorProfileEnv
+// in internal/gateway/websocket asserts the terminal handler wires profile env
+// into the shell without spawning one. Same-package tests reach r.processes
+// directly and do not need this.
 func (r *InteractiveRunner) StartEnvForTesting(processID string) (map[string]string, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

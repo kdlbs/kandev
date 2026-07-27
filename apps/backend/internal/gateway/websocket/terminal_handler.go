@@ -419,7 +419,7 @@ func (h *TerminalHandler) startUserShellProcess(
 	// Export the executor profile's env vars (secrets revealed) so the terminal
 	// sees the same variables the agent subprocess and the repository setup
 	// script get. Best-effort: an unresolvable profile just yields no extras.
-	profileEnv := h.lifecycleMgr.ExecutorProfileEnvForEnvironment(c.Request.Context(), scopeID)
+	profileEnv := h.lifecycleMgr.ExecutorProfileEnvForSession(c.Request.Context(), sessionID, scopeID)
 
 	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand, Env: profileEnv}
 

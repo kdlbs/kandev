@@ -260,8 +260,13 @@ func testTerminalLogger(t *testing.T) *logger.Logger {
 }
 
 type stubExecutorProfileReader struct {
+	session *taskmodels.TaskSession
 	env     *taskmodels.TaskEnvironment
 	profile *taskmodels.ExecutorProfile
+}
+
+func (s *stubExecutorProfileReader) GetTaskSession(_ context.Context, _ string) (*taskmodels.TaskSession, error) {
+	return s.session, nil
 }
 
 func (s *stubExecutorProfileReader) GetTaskEnvironment(_ context.Context, _ string) (*taskmodels.TaskEnvironment, error) {
@@ -289,7 +294,8 @@ func TestStartUserShellProcessExportsExecutorProfileEnv(t *testing.T) {
 		log,
 	)
 	manager.SetExecutorProfileReader(&stubExecutorProfileReader{
-		env: &taskmodels.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
+		session: &taskmodels.TaskSession{ID: "session-1", ExecutorProfileID: "prof-1"},
+		env:     &taskmodels.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
 		profile: &taskmodels.ExecutorProfile{
 			ID:      "prof-1",
 			EnvVars: []taskmodels.ProfileEnvVar{{Key: "FONTAWESOME_NPM_AUTH_TOKEN", Value: "fa-secret-value"}},

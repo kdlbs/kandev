@@ -11,11 +11,17 @@ import (
 )
 
 type fakeExecutorProfileReader struct {
+	session     *models.TaskSession
+	sessionErr  error
 	env         *models.TaskEnvironment
 	envErr      error
-	profile     *models.ExecutorProfile
+	profiles    map[string]*models.ExecutorProfile
 	profileErr  error
 	profileArgs []string
+}
+
+func (f *fakeExecutorProfileReader) GetTaskSession(_ context.Context, _ string) (*models.TaskSession, error) {
+	return f.session, f.sessionErr
 }
 
 func (f *fakeExecutorProfileReader) GetTaskEnvironment(_ context.Context, _ string) (*models.TaskEnvironment, error) {
@@ -24,7 +30,10 @@ func (f *fakeExecutorProfileReader) GetTaskEnvironment(_ context.Context, _ stri
 
 func (f *fakeExecutorProfileReader) GetExecutorProfile(_ context.Context, id string) (*models.ExecutorProfile, error) {
 	f.profileArgs = append(f.profileArgs, id)
-	return f.profile, f.profileErr
+	if f.profileErr != nil {
+		return nil, f.profileErr
+	}
+	return f.profiles[id], nil
 }
 
 func newExecutorProfileEnvManager(t *testing.T, reader ExecutorProfileReader) *Manager {
@@ -47,20 +56,23 @@ func newExecutorProfileEnvManager(t *testing.T, reader ExecutorProfileReader) *M
 
 // The terminal must see the same executor-profile env vars the agent subprocess
 // and the repository setup script get (PR #1971 covered the setup script only).
-func TestExecutorProfileEnvForEnvironment_ResolvesValuesAndSecrets(t *testing.T) {
+func TestExecutorProfileEnvForSession_ResolvesValuesAndSecrets(t *testing.T) {
 	reader := &fakeExecutorProfileReader{
-		env: &models.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
-		profile: &models.ExecutorProfile{
-			ID: "prof-1",
-			EnvVars: []models.ProfileEnvVar{
-				{Key: "PLAIN", Value: "plain-value"},
-				{Key: "FONTAWESOME_NPM_AUTH_TOKEN", SecretID: "sec-npm"},
+		session: &models.TaskSession{ID: "session-1", ExecutorProfileID: "prof-1"},
+		env:     &models.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
+		profiles: map[string]*models.ExecutorProfile{
+			"prof-1": {
+				ID: "prof-1",
+				EnvVars: []models.ProfileEnvVar{
+					{Key: "PLAIN", Value: "plain-value"},
+					{Key: "FONTAWESOME_NPM_AUTH_TOKEN", SecretID: "sec-npm"},
+				},
 			},
 		},
 	}
 	m := newExecutorProfileEnvManager(t, reader)
 
-	got := m.ExecutorProfileEnvForEnvironment(context.Background(), "env-1")
+	got := m.ExecutorProfileEnvForSession(context.Background(), "session-1", "env-1")
 
 	if got["PLAIN"] != "plain-value" {
 		t.Fatalf("PLAIN = %q, want literal profile value", got["PLAIN"])
@@ -68,18 +80,79 @@ func TestExecutorProfileEnvForEnvironment_ResolvesValuesAndSecrets(t *testing.T)
 	if got["FONTAWESOME_NPM_AUTH_TOKEN"] != "fa-secret-value" {
 		t.Fatalf("FONTAWESOME_NPM_AUTH_TOKEN = %q, want revealed secret", got["FONTAWESOME_NPM_AUTH_TOKEN"])
 	}
-	if len(reader.profileArgs) != 1 || reader.profileArgs[0] != "prof-1" {
-		t.Fatalf("profile lookups = %v, want [prof-1]", reader.profileArgs)
+}
+
+// persistTaskEnvironment's reuse branch never refreshes executor_profile_id, so
+// the environment row keeps the first session's profile. A later session that
+// picked a different profile must still get *its* env in the terminal, matching
+// what buildLaunchAgentRequest gave the agent.
+func TestExecutorProfileEnvForSession_PrefersSessionProfileOverStaleEnvironmentRow(t *testing.T) {
+	reader := &fakeExecutorProfileReader{
+		session: &models.TaskSession{ID: "session-2", ExecutorProfileID: "prof-current"},
+		env:     &models.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-stale"},
+		profiles: map[string]*models.ExecutorProfile{
+			"prof-current": {ID: "prof-current", EnvVars: []models.ProfileEnvVar{{Key: "TOKEN", Value: "current"}}},
+			"prof-stale":   {ID: "prof-stale", EnvVars: []models.ProfileEnvVar{{Key: "TOKEN", Value: "stale"}}},
+		},
+	}
+	m := newExecutorProfileEnvManager(t, reader)
+
+	got := m.ExecutorProfileEnvForSession(context.Background(), "session-2", "env-1")
+
+	if got["TOKEN"] != "current" {
+		t.Fatalf("TOKEN = %q, want the session's profile value, not the stale environment row", got["TOKEN"])
+	}
+	if len(reader.profileArgs) != 1 || reader.profileArgs[0] != "prof-current" {
+		t.Fatalf("profile lookups = %v, want [prof-current]", reader.profileArgs)
 	}
 }
 
-func TestExecutorProfileEnvForEnvironment_EmptyCases(t *testing.T) {
+// Sessions predating the executor_profile_id column (or launched without one)
+// still resolve through the environment row.
+func TestExecutorProfileEnvForSession_FallsBackToEnvironmentRow(t *testing.T) {
+	tests := []struct {
+		name   string
+		reader *fakeExecutorProfileReader
+	}{
+		{
+			name: "session has no executor profile",
+			reader: &fakeExecutorProfileReader{
+				session: &models.TaskSession{ID: "session-3"},
+				env:     &models.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-env"},
+			},
+		},
+		{
+			name: "session lookup fails",
+			reader: &fakeExecutorProfileReader{
+				sessionErr: errors.New("boom"),
+				env:        &models.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-env"},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.reader.profiles = map[string]*models.ExecutorProfile{
+				"prof-env": {ID: "prof-env", EnvVars: []models.ProfileEnvVar{{Key: "TOKEN", Value: "from-env-row"}}},
+			}
+			m := newExecutorProfileEnvManager(t, tt.reader)
+
+			got := m.ExecutorProfileEnvForSession(context.Background(), "session-3", "env-1")
+
+			if got["TOKEN"] != "from-env-row" {
+				t.Fatalf("TOKEN = %q, want environment-row fallback", got["TOKEN"])
+			}
+		})
+	}
+}
+
+func TestExecutorProfileEnvForSession_EmptyCases(t *testing.T) {
 	tests := []struct {
 		name   string
 		envID  string
 		reader ExecutorProfileReader
 	}{
-		{name: "no environment id", envID: "", reader: &fakeExecutorProfileReader{}},
+		{name: "no session or environment id", envID: "", reader: &fakeExecutorProfileReader{}},
 		{name: "no reader wired", envID: "env-1", reader: nil},
 		{
 			name:   "environment lookup fails",
@@ -87,7 +160,7 @@ func TestExecutorProfileEnvForEnvironment_EmptyCases(t *testing.T) {
 			reader: &fakeExecutorProfileReader{envErr: errors.New("boom")},
 		},
 		{
-			name:   "environment has no executor profile",
+			name:   "neither session nor environment has a profile",
 			envID:  "env-1",
 			reader: &fakeExecutorProfileReader{env: &models.TaskEnvironment{ID: "env-1"}},
 		},
@@ -103,8 +176,8 @@ func TestExecutorProfileEnvForEnvironment_EmptyCases(t *testing.T) {
 			name:  "profile has no env vars",
 			envID: "env-1",
 			reader: &fakeExecutorProfileReader{
-				env:     &models.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
-				profile: &models.ExecutorProfile{ID: "prof-1"},
+				env:      &models.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
+				profiles: map[string]*models.ExecutorProfile{"prof-1": {ID: "prof-1"}},
 			},
 		},
 	}
@@ -112,7 +185,7 @@ func TestExecutorProfileEnvForEnvironment_EmptyCases(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newExecutorProfileEnvManager(t, tt.reader)
-			if got := m.ExecutorProfileEnvForEnvironment(context.Background(), tt.envID); len(got) != 0 {
+			if got := m.ExecutorProfileEnvForSession(context.Background(), "", tt.envID); len(got) != 0 {
 				t.Fatalf("got %#v, want empty", got)
 			}
 		})
