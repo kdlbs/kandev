@@ -104,8 +104,9 @@ type BranchMaterializer interface {
 }
 
 // BranchMaterializationResult describes the live worktree created for a
-// branch attachment. Empty paths mean materialization was intentionally
-// deferred until the next session launch.
+// branch attachment. A nil result with a nil error means materialization was
+// intentionally deferred until the next session launch; callers must check
+// for a nil result rather than empty path fields.
 type BranchMaterializationResult struct {
 	WorktreePath      string
 	TaskWorkspacePath string

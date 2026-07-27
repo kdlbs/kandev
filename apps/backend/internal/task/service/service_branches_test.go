@@ -949,6 +949,7 @@ func TestAddBranchToTask_ActiveTurnUsesLegacyMaterializer(t *testing.T) {
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-add-idle", TaskID: task.ID}); err != nil {
 		t.Fatal(err)
 	}
+	seedWorktreeTaskEnv(t, repo, task.ID, "env-add-idle")
 	if _, err := svc.StartTurn(ctx, "session-add-idle"); err != nil {
 		t.Fatal(err)
 	}
