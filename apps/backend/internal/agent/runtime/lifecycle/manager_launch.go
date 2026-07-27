@@ -1077,6 +1077,7 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	// 5 & 6. Prepare the request copy with metadata and profile env
 	reqWithWorktree, executionID, err := m.launchPrepareRequest(req, profileInfo, workspacePath)
 	if err != nil {
+		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}
 

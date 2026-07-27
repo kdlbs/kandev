@@ -1081,6 +1081,35 @@ func TestLaunch_PublishesPrepareCompletedAfterRuntimeProgress(t *testing.T) {
 	requirePrepareStep(t, final.Steps, "Waiting for Docker container")
 }
 
+func TestLaunch_PublishesPrepareCompletionOnLegacyRouteEnvError(t *testing.T) {
+	log := newTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	mgr := NewManager(
+		newTestRegistry(), eventBus, nil,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-route-env-error",
+		SessionID:      "session-route-env-error",
+		AgentProfileID: "profile-1",
+		ExecutorType:   string(models.ExecutorTypeLocal),
+		IsEphemeral:    true,
+		RouteOverride: &RouteOverride{Env: map[string]string{
+			"GIT_CONFIG_COUNT": "1",
+			"GIT_CONFIG_KEY_0": "core.hooksPath",
+		}},
+	})
+	require.ErrorContains(t, err, "compose legacy route environment")
+
+	completed := prepareCompletedPayloads(eventBus)
+	require.Len(t, completed, 1)
+	require.False(t, completed[0].Success)
+	require.Contains(t, completed[0].ErrorMessage, "compose legacy route environment")
+}
+
 func prepareCompletedPayloads(eventBus *MockEventBusWithTracking) []*PrepareCompletedEventPayload {
 	eventBus.mu.Lock()
 	defer eventBus.mu.Unlock()
