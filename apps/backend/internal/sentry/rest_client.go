@@ -503,10 +503,40 @@ func buildIssueQueryString(f SearchFilter) string {
 // token and this integration's StatsPeriod values (1h, 24h, 7d, 14d, 30d) use.
 var statsPeriodPattern = regexp.MustCompile(`^[1-9]\d*[hdw]$`)
 
+// maxStatsPeriodUnits bounds the numeric component parseStatsPeriodUnits
+// accepts. 3650 weeks is ~2.2e18 ns, comfortably under the ~9.2e18 ns
+// ceiling time.Duration's int64 nanoseconds can hold even for the largest
+// unit (weeks) — see mock_client.go's parseStatsPeriod, which multiplies
+// this out into a duration and would otherwise silently wrap on overflow.
+// The bound comfortably covers every real value (the UI offers at most 30)
+// while keeping the REST `age:` token and the mock's duration math
+// rejecting the exact same out-of-range input, so a StatsPeriod that's
+// nonsensical in one path can't still pass as a valid filter in the other.
+const maxStatsPeriodUnits = 3650
+
+// parseStatsPeriodUnits validates period against Sentry's relative-duration
+// syntax and the shared accepted range, returning the numeric component and
+// unit byte ('h'/'d'/'w') on success. statsPeriodAgeToken below and
+// mock_client.go's parseStatsPeriod both build on this so the real REST
+// client and the mock that backs E2E tests accept or reject the exact same
+// input.
+func parseStatsPeriodUnits(period string) (n int, unit byte, ok bool) {
+	period = strings.TrimSpace(period)
+	if !statsPeriodPattern.MatchString(period) {
+		return 0, 0, false
+	}
+	n, err := strconv.Atoi(period[:len(period)-1])
+	if err != nil || n <= 0 || n > maxStatsPeriodUnits {
+		return 0, 0, false
+	}
+	return n, period[len(period)-1], true
+}
+
 // statsPeriodAgeToken translates a StatsPeriod value into Sentry's
 // `age:-<period>` search token, which restricts results to issues first seen
-// within that window. Returns "" for empty or unrecognized input, leaving the
-// query unfiltered by age exactly as before this translation existed.
+// within that window. Returns "" for empty, unrecognized, or out-of-range
+// input, leaving the query unfiltered by age exactly as before this
+// translation existed.
 //
 // This exists because Sentry's `statsPeriod` query param (set separately in
 // searchIssues) does NOT filter which issues an issue search returns — it
@@ -517,7 +547,7 @@ var statsPeriodPattern = regexp.MustCompile(`^[1-9]\d*[hdw]$`)
 // last 24h silently matches (and creates tasks for) issues of any age.
 func statsPeriodAgeToken(period string) string {
 	period = strings.TrimSpace(period)
-	if !statsPeriodPattern.MatchString(period) {
+	if _, _, ok := parseStatsPeriodUnits(period); !ok {
 		return ""
 	}
 	return "age:-" + period

@@ -322,6 +322,24 @@ func TestBuildIssueQueryString_StatsPeriodBecomesAgeFilter(t *testing.T) {
 	}
 }
 
+// TestStatsPeriodAgeToken_RejectsSameOutOfRangeValuesAsMock locks in a
+// CodeRabbit review finding on this PR: statsPeriodAgeToken (REST) and
+// parseStatsPeriod (mock_client.go) must accept/reject the exact same
+// StatsPeriod values via the shared parseStatsPeriodUnits, or a value like
+// "3651w" would filter live Sentry queries while a mock-backed test silently
+// treated it as unfiltered (or vice versa). Mirrors
+// TestParseStatsPeriod_RejectsOverflowRisk in mock_client_test.go.
+func TestStatsPeriodAgeToken_RejectsSameOutOfRangeValuesAsMock(t *testing.T) {
+	for _, period := range []string{"999999999999w", "999999999999d", "0h", "3651w"} {
+		if got := statsPeriodAgeToken(period); got != "" {
+			t.Errorf("statsPeriodAgeToken(%q) should be rejected, got %q", period, got)
+		}
+	}
+	if got := statsPeriodAgeToken("3650w"); got != "age:-3650w" {
+		t.Errorf("statsPeriodAgeToken(%q) at the bound should be accepted, got %q", "3650w", got)
+	}
+}
+
 // TestBuildIssueQueryString_ParenthesizesQueryWithOrOperator locks in the fix
 // for a Codex review finding on this PR: Sentry's search grammar ANDs
 // implicitly-adjacent terms tighter than an explicit `OR`, so appending a

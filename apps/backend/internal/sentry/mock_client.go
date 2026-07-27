@@ -3,7 +3,6 @@ package sentry
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -237,25 +236,18 @@ func mockMatchesFilter(issue *SentryIssue, f SearchFilter) bool {
 }
 
 // parseStatsPeriod converts a StatsPeriod string ("24h", "7d", "2w") into a
-// time.Duration. ok is false for empty or unrecognized input — mirrors
-// statsPeriodPattern in rest_client.go, which the real REST client uses to
-// build the equivalent `age:` search token.
+// time.Duration. ok is false for empty, unrecognized, or out-of-range input —
+// it shares parseStatsPeriodUnits (rest_client.go) with statsPeriodAgeToken,
+// which the real REST client uses to build the equivalent `age:` search
+// token, so the mock and the real client accept or reject the exact same
+// input.
 func parseStatsPeriod(period string) (time.Duration, bool) {
-	period = strings.TrimSpace(period)
-	if !statsPeriodPattern.MatchString(period) {
-		return 0, false
-	}
-	n, err := strconv.Atoi(period[:len(period)-1])
-	// maxStatsPeriodUnits bounds n well below the point where n * unit could
-	// overflow time.Duration's int64 nanoseconds even for the largest unit
-	// (weeks): 3650 weeks is ~2.2e18 ns, comfortably under the ~9.2e18 ns
-	// ceiling, while covering every real value (the UI offers at most 30).
-	const maxStatsPeriodUnits = 3650
-	if err != nil || n <= 0 || n > maxStatsPeriodUnits {
+	n, unit, ok := parseStatsPeriodUnits(period)
+	if !ok {
 		return 0, false
 	}
 	units := map[byte]time.Duration{'h': time.Hour, 'd': 24 * time.Hour, 'w': 7 * 24 * time.Hour}
-	return time.Duration(n) * units[period[len(period)-1]], true
+	return time.Duration(n) * units[unit], true
 }
 
 func containsFold(xs []string, target string) bool {
