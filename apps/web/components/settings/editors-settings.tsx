@@ -25,7 +25,7 @@ import {
   formStateFromEditor,
   getCustomEditorSummary,
 } from "@/components/settings/editor-form";
-import { LSP_DEFAULT_CONFIGS } from "@/lib/lsp/lsp-client-manager";
+import { LSP_DEFAULT_CONFIGS } from "@/lib/lsp/lsp-client-config";
 import type { EditorOption } from "@/lib/types/http";
 import type { RequestStatus } from "@/lib/http/use-request";
 import {

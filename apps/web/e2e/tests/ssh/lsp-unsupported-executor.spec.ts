@@ -1,5 +1,10 @@
 import { test, expect } from "../../fixtures/ssh-test-base";
-import { createKotlinTask, openDesktopFile } from "../lsp/lsp-e2e-helpers";
+import {
+  createKotlinTask,
+  openDesktopFile,
+  openLspStatus,
+  performLspAction,
+} from "../lsp/lsp-e2e-helpers";
 
 test.describe("SSH LSP boundary", () => {
   test.describe.configure({ timeout: 180_000 });
@@ -29,12 +34,11 @@ test.describe("SSH LSP boundary", () => {
     await openDesktopFile(testPage, task.session, task.filePaths[0]);
 
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "unavailable", {
       timeout: 15_000,
     });
-    await expect(statusButton).toHaveAttribute(
-      "aria-label",
+    await expect(await openLspStatus(testPage)).toContainText(
       /only supported for local_pc and local_docker tasks/i,
     );
     await expect(testPage.getByText(/Install kotlin-lsp on the task host/)).toHaveCount(0);

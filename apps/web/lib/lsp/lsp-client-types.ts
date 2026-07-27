@@ -1,4 +1,9 @@
 import type { LSPConnection, LspRange } from "./lsp-json-rpc";
+import {
+  EMPTY_LSP_PROGRESS,
+  type LspProgressSnapshot,
+  type LspProgressToken,
+} from "./lsp-progress";
 
 export type PublishDiagnosticsParams = {
   uri: string;
@@ -16,6 +21,8 @@ export type ManagedLspConnection = LSPConnection & {
   sessionId: string;
   ownerId: string;
   diagnosticsByUri: Map<string, PublishDiagnosticsParams>;
+  progress: LspProgressSnapshot;
+  registeredProgressTokens: Set<LspProgressToken>;
 };
 
 export type OpenDocumentParams = {
@@ -48,6 +55,8 @@ export function createManagedLspConnection(
     idleTimer: null,
     openDocuments: new Map(),
     diagnosticsByUri: new Map(),
+    progress: EMPTY_LSP_PROGRESS,
+    registeredProgressTokens: new Set(),
     providerDisposables: [],
     serverCapabilities: null,
     workspaceUri: null,

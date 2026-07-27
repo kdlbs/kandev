@@ -2,10 +2,21 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => {
-  const disabledStatus = { state: "disabled" };
+  const disabledStatus = { state: "disabled" } as { state: string; reason?: string };
+  const emptyProgress = {
+    initializingSince: null as number | null,
+    active: [],
+    completed: null,
+    hasReportedProgress: false,
+  };
   const enabledKeys = new Set<string>();
   const changeListeners = new Set<(key: string) => void>();
   const connect = vi.fn(() => vi.fn());
+  const state = { status: disabledStatus, progress: emptyProgress };
+  const userSettings = {
+    lspAutoStartLanguages: [],
+    lspServerConfigs: {},
+  };
 
   return {
     clearEnabledState: vi.fn((sessionId: string, language: string) => {
@@ -15,7 +26,10 @@ const mocks = vi.hoisted(() => {
     }),
     connect,
     disabledStatus,
+    emptyProgress,
     enabledKeys,
+    getProgress: vi.fn(() => state.progress),
+    getStatus: vi.fn(() => state.status),
     isEnabledInStorage: vi.fn((sessionId: string, language: string) =>
       enabledKeys.has(`kandev-lsp:${sessionId}:${language}`),
     ),
@@ -28,26 +42,24 @@ const mocks = vi.hoisted(() => {
       enabledKeys.add(key);
       for (const listener of changeListeners) listener(`${sessionId}:${language}`);
     }),
+    state,
     changeListeners,
     stop: vi.fn(),
+    userSettings,
   };
 });
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: { userSettings: Record<string, unknown> }) => unknown) =>
-    selector({
-      userSettings: {
-        lspAutoStartLanguages: [],
-        lspServerConfigs: {},
-      },
-    }),
+    selector({ userSettings: mocks.userSettings }),
 }));
 
 vi.mock("@/lib/lsp/lsp-client-manager", () => ({
   lspClientManager: {
     clearEnabledState: mocks.clearEnabledState,
     connect: mocks.connect,
-    getStatus: () => mocks.disabledStatus,
+    getProgress: mocks.getProgress,
+    getStatus: mocks.getStatus,
     isEnabledInStorage: mocks.isEnabledInStorage,
     onChange: mocks.onChange,
     saveEnabledState: mocks.saveEnabledState,
@@ -65,10 +77,14 @@ beforeEach(() => {
   mocks.connect.mockClear();
   mocks.clearEnabledState.mockClear();
   mocks.isEnabledInStorage.mockClear();
+  mocks.getProgress.mockClear();
+  mocks.getStatus.mockClear();
   mocks.onChange.mockClear();
   mocks.saveEnabledState.mockClear();
   mocks.stop.mockClear();
   mocks.enabledKeys.clear();
+  mocks.state.status = mocks.disabledStatus;
+  mocks.state.progress = mocks.emptyProgress;
 });
 
 afterEach(() => {
@@ -111,5 +127,42 @@ describe("useLsp manual policy leases", () => {
 
     second.unmount();
     expect(secondRelease).toHaveBeenCalledOnce();
+  });
+
+  it("retries a failed manually enabled connection in the mounted editor", async () => {
+    const hook = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
+
+    act(() => hook.result.current.toggle());
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
+
+    act(() => {
+      mocks.state.status = {
+        state: "error",
+        reason: "server crashed",
+      } as typeof mocks.disabledStatus;
+      for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
+    });
+    act(() => hook.result.current.toggle());
+
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
+  });
+
+  it("subscribes to the current connection progress snapshot", () => {
+    const hook = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
+    const progress = {
+      initializingSince: 100,
+      active: [],
+      completed: null,
+      hasReportedProgress: false,
+    };
+
+    act(() => {
+      mocks.state.progress = progress;
+      for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
+    });
+
+    expect((hook.result.current as unknown as { progress?: typeof progress }).progress).toBe(
+      progress,
+    );
   });
 });

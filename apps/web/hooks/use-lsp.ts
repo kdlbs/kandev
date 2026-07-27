@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { lspClientManager, toLspLanguage, type LspStatus } from "@/lib/lsp/lsp-client-manager";
+import { EMPTY_LSP_PROGRESS, type LspProgressSnapshot } from "@/lib/lsp/lsp-progress";
 
 const DISABLED: LspStatus = { state: "disabled" };
 
@@ -9,6 +10,7 @@ export function useLsp(
   monacoLanguage: string,
 ): {
   status: LspStatus;
+  progress: LspProgressSnapshot;
   lspLanguage: string | null;
   toggle: () => void;
 } {
@@ -16,6 +18,7 @@ export function useLsp(
   const lspServerConfigs = useAppStore((s) => s.userSettings.lspServerConfigs);
   const lspLanguage = toLspLanguage(monacoLanguage);
   const shouldAutoStart = lspLanguage ? lspAutoStartLanguages.includes(lspLanguage) : false;
+  const [retryGeneration, setRetryGeneration] = useState(0);
   const isManuallyEnabled = useSyncExternalStore(
     (cb) =>
       lspClientManager.onChange((key) => {
@@ -36,13 +39,31 @@ export function useLsp(
       sessionId && lspLanguage ? lspClientManager.getStatus(sessionId, lspLanguage) : DISABLED,
   );
 
+  const progress = useSyncExternalStore(
+    (cb) =>
+      lspClientManager.onChange((key) => {
+        if (key === `${sessionId}:${lspLanguage}`) cb();
+      }),
+    () =>
+      sessionId && lspLanguage
+        ? lspClientManager.getProgress(sessionId, lspLanguage)
+        : EMPTY_LSP_PROGRESS,
+  );
+
   // Each mounted matching editor owns one connection lease. Manual policy and
   // auto-start only decide whether the editor should acquire that lease.
   useEffect(() => {
     if ((!shouldAutoStart && !isManuallyEnabled) || !sessionId || !lspLanguage) return;
     const disconnect = lspClientManager.connect(sessionId, lspLanguage, lspServerConfigs);
     return disconnect;
-  }, [isManuallyEnabled, shouldAutoStart, sessionId, lspLanguage, lspServerConfigs]);
+  }, [
+    isManuallyEnabled,
+    shouldAutoStart,
+    sessionId,
+    lspLanguage,
+    lspServerConfigs,
+    retryGeneration,
+  ]);
 
   // Manual toggle
   const toggle = useCallback(() => {
@@ -54,9 +75,11 @@ export function useLsp(
       current.state === "unavailable"
     ) {
       lspClientManager.saveEnabledState(sessionId, lspLanguage);
+      setRetryGeneration((generation) => generation + 1);
     } else if (
       current.state === "ready" ||
       current.state === "connecting" ||
+      current.state === "installing" ||
       current.state === "starting"
     ) {
       lspClientManager.stop(sessionId, lspLanguage);
@@ -64,5 +87,5 @@ export function useLsp(
     }
   }, [sessionId, lspLanguage]);
 
-  return { status, lspLanguage, toggle };
+  return { status, progress, lspLanguage, toggle };
 }

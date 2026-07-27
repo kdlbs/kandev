@@ -6,6 +6,8 @@ import path from "node:path";
 
 const logPath = process.env.KANDEV_LSP_E2E_LOG ?? path.join(os.homedir(), "lsp-e2e-events.jsonl");
 const crashOnOpenPath = path.join(os.homedir(), "lsp-e2e-crash-on-open");
+const initializeModePath = path.join(os.homedir(), "lsp-e2e-initialize-mode.json");
+const initializeReleasePath = path.join(os.homedir(), "lsp-e2e-initialize-release");
 let input = Buffer.alloc(0);
 let nextServerRequestId = 10_000;
 const openDocumentUris = new Set();
@@ -71,27 +73,95 @@ function requestDocumentUri(message) {
   return openDocumentUris.values().next().value ?? null;
 }
 
+function initializeResult(id) {
+  return {
+    id,
+    result: {
+      capabilities: {
+        textDocumentSync: { openClose: true, change: 1 },
+        completionProvider: { triggerCharacters: ["."] },
+        hoverProvider: true,
+        definitionProvider: true,
+        referencesProvider: true,
+        signatureHelpProvider: { triggerCharacters: ["(", ","] },
+        semanticTokensProvider: {
+          legend: { tokenTypes: ["function", "variable"], tokenModifiers: [] },
+          full: true,
+        },
+      },
+    },
+  };
+}
+
+function progressToken(message) {
+  const token = message.params?.workDoneToken;
+  return typeof token === "string" || typeof token === "number" ? token : null;
+}
+
+function sendInitializeProgress(message, progress) {
+  const token = progressToken(message);
+  if (token === null || !progress) return token;
+  send({
+    method: "$/progress",
+    params: {
+      token,
+      value: {
+        kind: "begin",
+        title: progress.title,
+        percentage: progress.beginPercentage,
+      },
+    },
+  });
+  send({
+    method: "$/progress",
+    params: {
+      token,
+      value: {
+        kind: "report",
+        message: progress.message,
+        percentage: progress.percentage,
+      },
+    },
+  });
+  log("initialize progress reported", { token, progress });
+  return token;
+}
+
+function handleInitialize(message) {
+  if (!fs.existsSync(initializeModePath)) {
+    send(initializeResult(message.id));
+    return;
+  }
+
+  const mode = JSON.parse(fs.readFileSync(initializeModePath, "utf8"));
+  const token = sendInitializeProgress(message, mode.progress);
+  log("initialize held", { id: message.id, token });
+  const finish = () => {
+    if (!fs.existsSync(initializeReleasePath)) return false;
+    if (token !== null && mode.progress) {
+      send({
+        method: "$/progress",
+        params: {
+          token,
+          value: { kind: "end", message: mode.progress.endMessage },
+        },
+      });
+    }
+    send(initializeResult(message.id));
+    log("initialize released", { id: message.id, token });
+    return true;
+  };
+  if (finish()) return;
+  const timer = setInterval(() => {
+    if (finish()) clearInterval(timer);
+  }, 25);
+}
+
 function handleRequest(message) {
   const uri = requestDocumentUri(message);
   switch (message.method) {
     case "initialize":
-      send({
-        id: message.id,
-        result: {
-          capabilities: {
-            textDocumentSync: { openClose: true, change: 1 },
-            completionProvider: { triggerCharacters: ["."] },
-            hoverProvider: true,
-            definitionProvider: true,
-            referencesProvider: true,
-            signatureHelpProvider: { triggerCharacters: ["(", ","] },
-            semanticTokensProvider: {
-              legend: { tokenTypes: ["function", "variable"], tokenModifiers: [] },
-              full: true,
-            },
-          },
-        },
-      });
+      handleInitialize(message);
       return;
     case "textDocument/completion":
       send({

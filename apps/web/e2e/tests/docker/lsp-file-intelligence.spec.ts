@@ -5,6 +5,7 @@ import {
   expectedMonacoModelUri,
   expectFakeLspMarkerCount,
   openDesktopFile,
+  performLspAction,
   readSessionModelSnapshots,
   removeFakeKotlinLsp,
 } from "../lsp/lsp-e2e-helpers";
@@ -29,7 +30,7 @@ test.describe("Docker task-host LSP", () => {
 
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
     await expect(statusButton).toHaveAttribute("data-lsp-language", "kotlin");
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 30_000 });
     await expectFakeLspMarkerCount(testPage, 1, 30_000);
 
@@ -40,7 +41,7 @@ test.describe("Docker task-host LSP", () => {
       timeout: 15_000,
     });
     await testPage.keyboard.press("Escape");
-    await statusButton.click();
+    await performLspAction(testPage, "stop");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
   });
 
@@ -75,7 +76,7 @@ test.describe("Docker task-host LSP", () => {
     });
     await openDesktopFile(testPage, first.session, filePath);
     let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 30_000 });
     await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
       "FIRST_CONTAINER_CONTENT",
@@ -107,7 +108,7 @@ test.describe("Docker task-host LSP", () => {
     await second.session.waitForChatIdle({ timeout: 45_000 });
     await openDesktopFile(testPage, second.session, filePath);
     statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 30_000 });
     await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
       "SECOND_CONTAINER_CONTENT",
@@ -201,7 +202,7 @@ test.describe("Docker task-host LSP", () => {
           ?.uri.toString();
       });
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 30_000 });
 
     const authoritativeModelUri = expectedMonacoModelUri(
@@ -216,7 +217,7 @@ test.describe("Docker task-host LSP", () => {
     await testPage.keyboard.insertText(`\n// ${editMarker}`);
     await expect(editorContent).toContainText(editMarker);
 
-    await statusButton.click();
+    await performLspAction(testPage, "stop");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
     await expect(editorContent).toContainText(editMarker);
     await expect.poll(activeModelUri).toBe(authoritativeModelUri);

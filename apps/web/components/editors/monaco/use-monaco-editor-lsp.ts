@@ -187,7 +187,12 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const lspSessionId = sessionId ?? activeSessionId ?? null;
-  const { status: lspStatus, lspLanguage, toggle: toggleLsp } = useLsp(lspSessionId, language);
+  const {
+    status: lspStatus,
+    progress: lspProgress,
+    lspLanguage,
+    toggle: toggleLsp,
+  } = useLsp(lspSessionId, language);
   const hasLspActive = lspStatus.state === "ready";
   const lspWorkspaceUri = lspSessionId
     ? lspClientManager.getWorkspaceUriForSession(lspSessionId)
@@ -276,7 +281,7 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
     }
   }, [lspStateForToast, lspReasonForToast, lspSetupHintForToast, toast]);
 
-  return { lspStatus, lspLanguage, toggleLsp, monacoPath };
+  return { lspStatus, lspProgress, lspLanguage, toggleLsp, monacoPath };
 }
 
 // ---------------------------------------------------------------------------

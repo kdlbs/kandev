@@ -1,0 +1,212 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createLspManagerHarness, FakeWebSocket } from "./lsp-client-manager.test-harness";
+import type { LspProgressToken } from "./lsp-progress";
+
+const mocks = vi.hoisted(() => ({
+  getMonacoInstance: vi.fn(),
+  waitForMonacoInstance: vi.fn(),
+  registerLspProviders: vi.fn(),
+  setBuiltinTsSuppressed: vi.fn(),
+}));
+
+vi.mock("@/components/editors/monaco/monaco-init", () => ({
+  getMonacoInstance: mocks.getMonacoInstance,
+  waitForMonacoInstance: mocks.waitForMonacoInstance,
+}));
+
+vi.mock("@/components/editors/monaco/builtin-providers", () => ({
+  setBuiltinTsSuppressed: mocks.setBuiltinTsSuppressed,
+}));
+
+vi.mock("./lsp-providers", () => ({
+  registerLspProviders: mocks.registerLspProviders,
+}));
+
+import { lspClientManager } from "./lsp-client-manager";
+
+const { createMonacoHarness } = createLspManagerHarness(lspClientManager, mocks);
+const SESSION_ID = "progress-session";
+const REPLACEMENT_SESSION_ID = "progress-replacement-session";
+const LANGUAGE = "typescript";
+const WORKSPACE_PATH = "/workspace";
+const PROGRESS_METHOD = "$/progress";
+const EXPECTED_SOCKET_ERROR = "expected an LSP WebSocket";
+
+type InitializeRequest = {
+  id: number;
+  params: {
+    capabilities: { window?: { workDoneProgress?: boolean } };
+    workDoneToken: LspProgressToken;
+  };
+};
+
+function beginInitialization(
+  sessionId = SESSION_ID,
+  workspacePath = WORKSPACE_PATH,
+): { initialize: InitializeRequest; socket: FakeWebSocket } {
+  lspClientManager.connect(sessionId, LANGUAGE);
+  const socket = FakeWebSocket.instances.at(-1);
+  if (!socket) throw new Error(EXPECTED_SOCKET_ERROR);
+  socket.open();
+  socket.emitMessage(JSON.stringify({ status: "ready", workspacePath }));
+  return {
+    initialize: JSON.parse(socket.sent[0]) as InitializeRequest,
+    socket,
+  };
+}
+
+function completeInitialization(socket: FakeWebSocket, id: number): void {
+  socket.emitMessage(JSON.stringify({ jsonrpc: "2.0", id, result: { capabilities: {} } }));
+}
+
+function emitProgress(socket: FakeWebSocket, token: LspProgressToken, value: unknown): void {
+  socket.emitMessage(
+    JSON.stringify({
+      jsonrpc: "2.0",
+      method: PROGRESS_METHOD,
+      params: { token, value },
+    }),
+  );
+}
+
+beforeEach(() => {
+  lspClientManager.disconnectAll();
+  FakeWebSocket.instances = [];
+  vi.resetAllMocks();
+  vi.stubGlobal("WebSocket", FakeWebSocket);
+  const { monaco } = createMonacoHarness([]);
+  mocks.waitForMonacoInstance.mockResolvedValue(monaco);
+  mocks.registerLspProviders.mockReturnValue([]);
+});
+
+afterEach(() => {
+  lspClientManager.disconnectAll();
+  vi.unstubAllGlobals();
+});
+
+describe("LSP progress handshake and initialization", () => {
+  it("advertises work-done support and tracks initialize until the response", async () => {
+    const { initialize, socket } = beginInitialization();
+
+    expect(initialize.params.capabilities.window?.workDoneProgress).toBe(true);
+    expect(initialize.params.workDoneToken).toEqual(expect.any(String));
+    expect(lspClientManager.getProgress(SESSION_ID, LANGUAGE)).toEqual({
+      initializingSince: expect.any(Number),
+      active: [],
+      completed: null,
+      hasReportedProgress: false,
+    });
+
+    completeInitialization(socket, initialize.id);
+    await Promise.resolve();
+
+    expect(lspClientManager.getProgress(SESSION_ID, LANGUAGE).initializingSince).toBeNull();
+  });
+
+  it("accepts initialize-token progress before initialize completes and notifies subscribers", () => {
+    const listener = vi.fn();
+    const unsubscribe = lspClientManager.onChange(listener);
+    const { initialize, socket } = beginInitialization();
+    listener.mockClear();
+
+    emitProgress(socket, initialize.params.workDoneToken, {
+      kind: "begin",
+      title: "Importing Kotlin project",
+      message: "Resolving Gradle modules",
+      percentage: 35,
+    });
+
+    expect(lspClientManager.getProgress(SESSION_ID, LANGUAGE).active).toEqual([
+      {
+        token: initialize.params.workDoneToken,
+        title: "Importing Kotlin project",
+        message: "Resolving Gradle modules",
+        percentage: 35,
+        startedAt: expect.any(Number),
+      },
+    ]);
+    expect(listener).toHaveBeenCalledWith(`${SESSION_ID}:${LANGUAGE}`);
+    unsubscribe();
+  });
+});
+
+describe("LSP progress token and generation ownership", () => {
+  it("registers numeric server-created tokens and records their completion", () => {
+    const { socket } = beginInitialization();
+
+    socket.emitMessage(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 91,
+        method: "window/workDoneProgress/create",
+        params: { token: 7 },
+      }),
+    );
+    emitProgress(socket, 7, { kind: "begin", title: "Analyzing dependencies" });
+    emitProgress(socket, 7, {
+      kind: "end",
+      message: "Dependency analysis finished",
+    });
+
+    expect(
+      socket.sent.map((message) => JSON.parse(message) as Record<string, unknown>),
+    ).toContainEqual({ jsonrpc: "2.0", id: 91, result: null });
+    expect(lspClientManager.getProgress(SESSION_ID, LANGUAGE)).toEqual({
+      initializingSince: expect.any(Number),
+      active: [],
+      completed: {
+        token: 7,
+        title: "Analyzing dependencies",
+        message: "Dependency analysis finished",
+        startedAt: expect.any(Number),
+        completedAt: expect.any(Number),
+      },
+      hasReportedProgress: true,
+    });
+  });
+
+  it("ignores late progress from a replaced connection generation", () => {
+    const { socket: oldSocket, initialize: oldInitialize } = beginInitialization(
+      REPLACEMENT_SESSION_ID,
+      "/old",
+    );
+    oldSocket.readyState = FakeWebSocket.CLOSING;
+
+    const { socket: currentSocket, initialize: currentInitialize } = beginInitialization(
+      REPLACEMENT_SESSION_ID,
+      "/replacement",
+    );
+    emitProgress(currentSocket, currentInitialize.params.workDoneToken, {
+      kind: "begin",
+      title: "Current generation",
+    });
+    const currentProgress = lspClientManager.getProgress(REPLACEMENT_SESSION_ID, LANGUAGE);
+
+    emitProgress(oldSocket, oldInitialize.params.workDoneToken, {
+      kind: "begin",
+      title: "Stale generation",
+    });
+
+    expect(lspClientManager.getProgress(REPLACEMENT_SESSION_ID, LANGUAGE)).toBe(currentProgress);
+    expect(currentProgress.active.map((item) => item.title)).toEqual(["Current generation"]);
+  });
+
+  it("clears connection-owned progress when the server stops", () => {
+    const { socket, initialize } = beginInitialization();
+    emitProgress(socket, initialize.params.workDoneToken, {
+      kind: "begin",
+      title: "Temporary work",
+    });
+
+    lspClientManager.stop(SESSION_ID, LANGUAGE);
+
+    const progress = lspClientManager.getProgress(SESSION_ID, LANGUAGE);
+    expect(progress).toEqual({
+      initializingSince: null,
+      active: [],
+      completed: null,
+      hasReportedProgress: false,
+    });
+    expect(progress).toBe(lspClientManager.getProgress(SESSION_ID, LANGUAGE));
+  });
+});

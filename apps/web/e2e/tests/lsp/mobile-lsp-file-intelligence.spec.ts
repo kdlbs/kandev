@@ -1,6 +1,13 @@
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { createKotlinTask, installFakeKotlinLsp, readFakeLspEvents } from "./lsp-e2e-helpers";
+import {
+  createKotlinTask,
+  installFakeKotlinLsp,
+  openLspStatus,
+  performLspAction,
+  readFakeLspEvents,
+  releaseFakeLspInitialization,
+} from "./lsp-e2e-helpers";
 
 test.describe("Mobile LSP boundaries", () => {
   test.describe.configure({ timeout: 90_000 });
@@ -36,6 +43,67 @@ test.describe("Mobile LSP boundaries", () => {
     await testPage.waitForTimeout(1_000);
     expect(lspSockets).toEqual([]);
     expect(readFakeLspEvents(backend)).toEqual([]);
+  });
+
+  test("shows the same project progress in a contained tablet drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await testPage.setViewportSize({ width: 820, height: 900 });
+    installFakeKotlinLsp(backend, {
+      progress: {
+        title: "Importing Kotlin project",
+        message: "Resolving tablet modules",
+        percentage: 42,
+        endMessage: "Tablet project model loaded",
+      },
+    });
+    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+      title: "Tablet Kotlin LSP Progress",
+    });
+    await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
+    const fileNode = testPage.locator(
+      `[data-testid="file-tree-node"][data-path="${task.filePaths[0]}"]`,
+    );
+    await expect(fileNode).toBeVisible({ timeout: 15_000 });
+    await fileNode.tap();
+    await expect(testPage.locator(".monaco-editor:visible")).toBeVisible({ timeout: 15_000 });
+
+    const statusButton = testPage.getByTestId("lsp-status-button");
+    const triggerBox = await statusButton.boundingBox();
+    expect(triggerBox?.width).toBeGreaterThanOrEqual(44);
+    expect(triggerBox?.height).toBeGreaterThanOrEqual(44);
+    await performLspAction(testPage, "start");
+
+    const drawer = await openLspStatus(testPage);
+    await expect(drawer).toHaveAttribute("data-testid", "lsp-status-drawer");
+    await expect(testPage.getByTestId("lsp-status-popover")).toHaveCount(0);
+    const projectProgress = drawer.getByTestId("lsp-project-progress");
+    await expect(projectProgress).toHaveAttribute("data-lsp-progress-kind", "active", {
+      timeout: 15_000,
+    });
+    await expect(projectProgress).toContainText("Importing Kotlin project");
+    await expect(projectProgress).toContainText("Resolving tablet modules");
+    await expect(projectProgress).toContainText("42%");
+
+    const drawerBox = await drawer.boundingBox();
+    expect(drawerBox).not.toBeNull();
+    expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
+    expect(drawerBox!.y).toBeGreaterThanOrEqual(0);
+    expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(820);
+    expect(drawerBox!.y + drawerBox!.height).toBeLessThanOrEqual(900);
+    const actionBox = await drawer.getByTestId("lsp-lifecycle-action").boundingBox();
+    expect(actionBox?.height).toBeGreaterThanOrEqual(44);
+    await assertNoDocumentHorizontalOverflow(testPage, "tablet LSP progress drawer");
+
+    releaseFakeLspInitialization(backend);
+    await expect(projectProgress).toHaveAttribute("data-lsp-progress-kind", "completed", {
+      timeout: 15_000,
+    });
+    await expect(projectProgress).toContainText("Tablet project model loaded");
+    await performLspAction(testPage, "stop");
   });
 
   test("persists Kotlin settings with usable mobile guidance", async ({ testPage, apiClient }) => {

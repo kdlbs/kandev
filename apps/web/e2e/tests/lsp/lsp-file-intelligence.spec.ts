@@ -14,7 +14,10 @@ import {
   installAdditionalFakeLspBinary,
   installFakeKotlinLsp,
   openDesktopFile,
+  openLspStatus,
+  performLspAction,
   readFakeLspEvents,
+  releaseFakeLspInitialization,
   removeFakeKotlinLsp,
 } from "./lsp-e2e-helpers";
 
@@ -101,14 +104,103 @@ test.describe("LSP file intelligence", () => {
 
     const statusButton = testPage.getByTestId("lsp-status-button");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
-    await statusButton.click();
+    await performLspAction(testPage, "start");
 
     await expect(statusButton).toHaveAttribute("data-lsp-state", "unavailable", {
       timeout: 15_000,
     });
     await expect(testPage.getByText("Language server unavailable", { exact: true })).toBeVisible();
-    await expect(testPage.getByText(/Install kotlin-lsp on the task host/)).toBeVisible();
+    await expect(await openLspStatus(testPage)).toContainText(
+      "Install kotlin-lsp on the task host",
+    );
     await expect(testPage.getByText(/Enable auto-install/)).toHaveCount(0);
+  });
+
+  test("shows server-reported project work without claiming full indexing", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    installFakeKotlinLsp(backend, {
+      progress: {
+        title: "Importing Kotlin project",
+        beginPercentage: 5,
+        message: "Resolving Gradle modules",
+        percentage: 42,
+        endMessage: "Project model loaded",
+      },
+    });
+    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+      title: "Kotlin LSP Project Progress",
+    });
+    await openDesktopFile(testPage, task.session, task.filePaths[0]);
+
+    const statusButton = testPage.getByTestId("lsp-status-button");
+    await performLspAction(testPage, "start");
+    const surface = await openLspStatus(testPage);
+    const projectProgress = surface.getByTestId("lsp-project-progress");
+    await expect(projectProgress).toHaveAttribute("data-lsp-progress-kind", "active", {
+      timeout: 15_000,
+    });
+    await expect(statusButton).toHaveAttribute("data-lsp-state", "starting");
+    await expect(projectProgress).toContainText("Importing Kotlin project");
+    await expect(projectProgress).toContainText("Resolving Gradle modules");
+    await expect(projectProgress).toContainText("Cross-file definitions and references");
+    await expect(projectProgress.getByTestId("lsp-work-progress-bar")).toHaveAttribute(
+      "aria-valuenow",
+      "42",
+    );
+    await expect(projectProgress).toContainText(/Elapsed \d+s/);
+    await expect(surface.getByTestId("lsp-lifecycle-action")).toHaveAttribute(
+      "data-lsp-action",
+      "stop",
+    );
+
+    releaseFakeLspInitialization(backend);
+    await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+    await expect(projectProgress).toHaveAttribute("data-lsp-progress-kind", "completed");
+    await expect(projectProgress).toContainText("Server-reported work finished");
+    await expect(projectProgress).toContainText("Project model loaded");
+    await expect(projectProgress).toContainText("not full project indexing");
+    await expect(projectProgress).not.toContainText(/fully indexed/i);
+
+    await performLspAction(testPage, "stop");
+    await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
+  });
+
+  test("shows initialization timing and an honest no-report fallback", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    installFakeKotlinLsp(backend, { holdInitialize: true });
+    const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+      title: "Kotlin LSP Initialization Progress",
+    });
+    await openDesktopFile(testPage, task.session, task.filePaths[0]);
+
+    const statusButton = testPage.getByTestId("lsp-status-button");
+    await performLspAction(testPage, "start");
+    const surface = await openLspStatus(testPage);
+    const projectProgress = surface.getByTestId("lsp-project-progress");
+    await expect(projectProgress).toHaveAttribute("data-lsp-progress-kind", "initializing", {
+      timeout: 15_000,
+    });
+    await expect(projectProgress).toContainText("Preparing project…");
+    await expect(projectProgress).toContainText(/Elapsed \d+s/);
+    await expect(projectProgress.getByTestId("lsp-work-progress-bar")).toHaveCount(0);
+    await expect(projectProgress).not.toContainText(/ETA|time remaining/i);
+
+    releaseFakeLspInitialization(backend);
+    await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+    await expect(projectProgress).toHaveAttribute("data-lsp-progress-kind", "idle");
+    await expect(projectProgress).toContainText("No background work reported");
+    await expect(projectProgress).toContainText("Cross-file results may still warm up");
+    await expect(projectProgress.getByTestId("lsp-work-progress-bar")).toHaveCount(0);
+
+    await performLspAction(testPage, "stop");
   });
 
   test("runs Kotlin intelligence through the task host", async ({
@@ -130,7 +222,7 @@ test.describe("LSP file intelligence", () => {
     await openDesktopFile(testPage, task.session, task.filePaths[0]);
     const statusButton = testPage.getByTestId("lsp-status-button");
     await expect(statusButton).toHaveAttribute("data-lsp-language", "kotlin");
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
 
     const started = await expectFakeLspEvent(
@@ -299,7 +391,7 @@ test.describe("LSP file intelligence", () => {
     );
     await expectFakeLspMarkerCount(testPage, 1);
 
-    await statusButton.click();
+    await performLspAction(testPage, "stop");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
     await expectFakeLspMarkerCount(testPage, 0);
     await expectFakeLspEvent(
@@ -427,7 +519,7 @@ test.describe("LSP file intelligence", () => {
     await expectFakeLspMarkerMessages(testPage, firstModelUri, ["Fake Kotlin diagnostic"]);
 
     const activeStatus = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await activeStatus.click();
+    await performLspAction(testPage, "stop");
     await expect(activeStatus).toHaveAttribute("data-lsp-state", "disabled");
   });
 
@@ -494,7 +586,7 @@ test.describe("LSP file intelligence", () => {
     const definitionTaskRelativePath = `${repositoryName}/${secondaryDefinitionPath}`;
     await openDesktopFile(testPage, task.session, taskRelativePath);
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
 
     const started = await expectFakeLspEvent(
@@ -564,7 +656,7 @@ test.describe("LSP file intelligence", () => {
     await expect(definitionTarget).toBeVisible();
     await expect(definitionTarget).toHaveAttribute("data-active", "true");
 
-    await statusButton.click();
+    await performLspAction(testPage, "stop");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
   });
 
@@ -580,7 +672,7 @@ test.describe("LSP file intelligence", () => {
     });
     await openDesktopFile(testPage, task.session, task.filePaths[0]);
     let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
     const storageKey = `kandev-lsp:${task.sessionId}:kotlin`;
     expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBe("1");
@@ -593,7 +685,7 @@ test.describe("LSP file intelligence", () => {
       .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started").length)
       .toBeGreaterThanOrEqual(2);
 
-    await statusButton.click();
+    await performLspAction(testPage, "stop");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");
     expect(await testPage.evaluate((key) => localStorage.getItem(key), storageKey)).toBeNull();
   });
@@ -610,7 +702,7 @@ test.describe("LSP file intelligence", () => {
     });
     await openDesktopFile(testPage, task.session, task.filePaths[0]);
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expectFakeLspEvent(
       backend,
       (event) => event.event === "crashing" && event.reason === "didOpen",
@@ -622,11 +714,11 @@ test.describe("LSP file intelligence", () => {
     await expectFakeLspMarkerCount(testPage, 0);
 
     clearFakeKotlinLspModes(backend);
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
     await expectFakeLspMarkerCount(testPage, 1);
     expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(2);
-    await statusButton.click();
+    await performLspAction(testPage, "stop");
   });
 
   test("keeps TypeScript intelligence active when the Kotlin connection crashes", async ({
@@ -644,7 +736,7 @@ test.describe("LSP file intelligence", () => {
 
     await openDesktopFile(testPage, task.session, task.filePaths[0]);
     let statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
     const kotlinOpen = await expectFakeLspEvent(
       backend,
@@ -661,7 +753,7 @@ test.describe("LSP file intelligence", () => {
     await openDesktopFile(testPage, task.session, task.filePaths[1]);
     statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
     await expect(statusButton).toHaveAttribute("data-lsp-language", "typescript");
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
     const typescriptOpen = await expectFakeLspEvent(
       backend,
@@ -697,7 +789,7 @@ test.describe("LSP file intelligence", () => {
     );
     await expect(testPage.locator(".suggest-widget")).toContainText("fakeGreeting");
     await testPage.keyboard.press("Escape");
-    await typescriptStatus.click();
+    await performLspAction(testPage, "stop");
     await expectFakeLspMarkerCount(testPage, 0);
   });
 
@@ -713,7 +805,7 @@ test.describe("LSP file intelligence", () => {
     });
     await openDesktopFile(testPage, task.session, task.filePaths[0]);
     const statusButton = testPage.locator('[data-testid="lsp-status-button"]:visible');
-    await statusButton.click();
+    await performLspAction(testPage, "start");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
     const started = await expectFakeLspEvent(
       backend,
@@ -755,7 +847,7 @@ test.describe("LSP file intelligence", () => {
       });
       await openDesktopFile(testPage, first.session, first.filePaths[0]);
       const firstStatus = testPage.locator('[data-testid="lsp-status-button"]:visible');
-      await firstStatus.click();
+      await performLspAction(testPage, "start");
       await expect(firstStatus).toHaveAttribute("data-lsp-state", "ready", {
         timeout: 15_000,
       });
@@ -770,14 +862,18 @@ test.describe("LSP file intelligence", () => {
       });
       await openDesktopFile(secondPage, second.session, second.filePaths[0]);
       const secondStatus = secondPage.locator('[data-testid="lsp-status-button"]:visible');
-      await secondStatus.click();
+      await performLspAction(secondPage, "start");
       await expect(secondStatus).toHaveAttribute("data-lsp-state", "unavailable", {
         timeout: 15_000,
       });
-      await expect(secondPage.getByText(/active LSP connection cap exceeded/)).toBeVisible();
+      await expect(
+        secondPage
+          .getByTestId("lsp-progress-details")
+          .getByText(/active LSP connection cap exceeded/),
+      ).toBeVisible();
       await expect(secondPage.getByText(/Enable auto-install/)).toHaveCount(0);
 
-      await firstStatus.click();
+      await performLspAction(testPage, "stop");
       await expect(firstStatus).toHaveAttribute("data-lsp-state", "disabled");
       await expect.poll(() => firstLspSocketObserved && firstLspSocketClosed).toBe(true);
       await expectFakeLspEvent(
@@ -793,7 +889,9 @@ test.describe("LSP file intelligence", () => {
         .poll(
           async () => {
             const state = await secondStatus.getAttribute("data-lsp-state");
-            if (state === "disabled" || state === "unavailable") await secondStatus.click();
+            if (state === "disabled" || state === "unavailable") {
+              await performLspAction(secondPage, state === "unavailable" ? "retry" : "start");
+            }
             return secondStatus.getAttribute("data-lsp-state");
           },
           { timeout: 15_000, message: "waiting for the released LSP slot to become available" },

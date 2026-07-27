@@ -37,6 +37,12 @@ describe("MonacoEditorToolbar external file action", () => {
           sessionId="session-1"
           commentCount={0}
           lspStatus={{ state: "disabled" }}
+          lspProgress={{
+            initializingSince: null,
+            active: [],
+            completed: null,
+            hasReportedProgress: false,
+          }}
           lspLanguage={null}
           onToggleLsp={vi.fn()}
           onToggleWrap={vi.fn()}

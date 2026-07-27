@@ -32,8 +32,23 @@ import {
 import {
   configureLspWorkspace,
   lspWorkspaceFolders,
+  repositorySubpathsForSession,
+  workspaceUriForSession,
   type WorkspaceMetadata,
 } from "./lsp-workspace";
+import {
+  EMPTY_LSP_PROGRESS,
+  finishLspInitialization,
+  type LspProgressSnapshot,
+} from "./lsp-progress";
+import { beginLspProgressTracking } from "./lsp-client-progress";
+import {
+  clearLspEnabledState,
+  isLspEnabledInStorage,
+  saveLspEnabledState,
+} from "./lsp-client-storage";
+import { DISABLED_LSP_STATUS, LSP_IDLE_TIMEOUT } from "./lsp-client-config";
+import { LSP_DEFAULT_CONFIGS } from "./lsp-client-config";
 
 export type { LspStatus } from "./lsp-json-rpc";
 export { toLspLanguage } from "./lsp-json-rpc";
@@ -41,13 +56,6 @@ export { toLspLanguage } from "./lsp-json-rpc";
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
-
-export const LSP_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
-  go: { "ui.semanticTokens": true },
-};
-
-const DISABLED_STATUS = { state: "disabled" } as const;
-const LSP_IDLE_TIMEOUT = 2 * 60 * 1000; // 2 minutes
 
 type ChangeListener = (key: string) => void;
 class LSPClientManager {
@@ -73,61 +81,43 @@ class LSPClientManager {
 
   // ---- localStorage persistence for manual LSP toggle ----
 
-  private lspStorageKey(sessionId: string, language: string): string {
-    return `kandev-lsp:${sessionId}:${language}`;
-  }
-
   /** Save that LSP was manually enabled for this session+language. */
   saveEnabledState(sessionId: string, language: string): void {
-    try {
-      localStorage.setItem(this.lspStorageKey(sessionId, language), "1");
-    } catch {}
+    saveLspEnabledState(sessionId, language);
     this.notifyChange(`${sessionId}:${language}`);
   }
 
   /** Clear the saved LSP state (manual stop). */
   clearEnabledState(sessionId: string, language: string): void {
-    try {
-      localStorage.removeItem(this.lspStorageKey(sessionId, language));
-    } catch {}
+    clearLspEnabledState(sessionId, language);
     this.notifyChange(`${sessionId}:${language}`);
   }
 
   /** Check if LSP was previously enabled for this session+language. */
   isEnabledInStorage(sessionId: string, language: string): boolean {
-    try {
-      return localStorage.getItem(this.lspStorageKey(sessionId, language)) === "1";
-    } catch {
-      return false;
-    }
+    return isLspEnabledInStorage(sessionId, language);
   }
 
   getStatus(sessionId: string, lspLanguage: string): LspStatus {
     const key = `${sessionId}:${lspLanguage}`;
-    return this.statuses.get(key) ?? DISABLED_STATUS;
+    return this.statuses.get(key) ?? DISABLED_LSP_STATUS;
+  }
+
+  getProgress(sessionId: string, lspLanguage: string): LspProgressSnapshot {
+    const key = `${sessionId}:${lspLanguage}`;
+    return this.connections.get(key)?.progress ?? EMPTY_LSP_PROGRESS;
   }
 
   getWorkspaceUriForSession(sessionId: string): string | null {
-    for (const conn of this.connections.values()) {
-      if (conn.key.startsWith(`${sessionId}:`) && conn.workspaceUri) return conn.workspaceUri;
-    }
-    for (const [key, workspace] of this.workspaceMetadata) {
-      if (key.startsWith(`${sessionId}:`)) return workspace.uri;
-    }
-    return null;
+    return workspaceUriForSession(this.connections.values(), this.workspaceMetadata, sessionId);
   }
 
   getRepositorySubpaths(sessionId: string): string[] {
-    const repositories = new Set<string>();
-    for (const conn of this.connections.values()) {
-      if (!conn.key.startsWith(`${sessionId}:`)) continue;
-      for (const repo of conn.repositorySubpaths) repositories.add(repo);
-    }
-    for (const [key, workspace] of this.workspaceMetadata) {
-      if (!key.startsWith(`${sessionId}:`)) continue;
-      for (const repo of workspace.repositorySubpaths) repositories.add(repo);
-    }
-    return [...repositories];
+    return repositorySubpathsForSession(
+      this.connections.values(),
+      this.workspaceMetadata,
+      sessionId,
+    );
   }
 
   onChange(listener: ChangeListener): () => void {
@@ -276,6 +266,12 @@ class LSPClientManager {
       const rpc = new JsonRpcConnection(ws);
       rpc.listen();
       conn.rpc = rpc;
+      beginLspProgressTracking(
+        conn,
+        rpc,
+        () => this.isCurrentConnection(conn),
+        () => this.notifyChange(key),
+      );
 
       // Handle server requests
       rpc.onRequest("workspace/configuration", (params: unknown) => {
@@ -284,11 +280,11 @@ class LSPClientManager {
         return items.map(() => mergedConfig);
       });
       rpc.onRequest("client/registerCapability", () => null);
-      rpc.onRequest("window/workDoneProgress/create", () => null);
 
       const initResult = (await rpc.sendRequest("initialize", {
         processId: null,
         capabilities: LSP_CLIENT_CAPABILITIES,
+        workDoneToken: conn.ownerId,
         rootUri: conn.workspaceUri,
         workspaceFolders: lspWorkspaceFolders(conn.workspaceUri, workspace.path),
         initializationOptions: {},
@@ -299,6 +295,11 @@ class LSPClientManager {
         return;
       }
 
+      const progress = finishLspInitialization(conn.progress);
+      if (progress !== conn.progress) {
+        conn.progress = progress;
+        this.notifyChange(key);
+      }
       conn.serverCapabilities = initResult?.capabilities ?? null;
       rpc.sendNotification("initialized", {});
 
@@ -664,6 +665,8 @@ class LSPClientManager {
     conn.initialized = false;
     conn.openDocuments.clear();
     conn.diagnosticsByUri.clear();
+    conn.progress = EMPTY_LSP_PROGRESS;
+    conn.registeredProgressTokens.clear();
     try {
       if (conn.ws.readyState <= WebSocket.OPEN) {
         conn.ws.close();

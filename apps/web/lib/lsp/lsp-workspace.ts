@@ -43,3 +43,36 @@ export function lspWorkspaceFolders(
     },
   ];
 }
+
+export function workspaceUriForSession(
+  connections: Iterable<ManagedLspConnection>,
+  workspaceMetadata: ReadonlyMap<string, WorkspaceMetadata>,
+  sessionId: string,
+): string | null {
+  for (const connection of connections) {
+    if (connection.key.startsWith(`${sessionId}:`) && connection.workspaceUri) {
+      return connection.workspaceUri;
+    }
+  }
+  for (const [key, workspace] of workspaceMetadata) {
+    if (key.startsWith(`${sessionId}:`)) return workspace.uri;
+  }
+  return null;
+}
+
+export function repositorySubpathsForSession(
+  connections: Iterable<ManagedLspConnection>,
+  workspaceMetadata: ReadonlyMap<string, WorkspaceMetadata>,
+  sessionId: string,
+): string[] {
+  const repositories = new Set<string>();
+  for (const connection of connections) {
+    if (!connection.key.startsWith(`${sessionId}:`)) continue;
+    for (const repository of connection.repositorySubpaths) repositories.add(repository);
+  }
+  for (const [key, workspace] of workspaceMetadata) {
+    if (!key.startsWith(`${sessionId}:`)) continue;
+    for (const repository of workspace.repositorySubpaths) repositories.add(repository);
+  }
+  return [...repositories];
+}

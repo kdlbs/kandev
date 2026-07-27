@@ -194,7 +194,7 @@ Language-server settings are part of **Settings > General > Editors**. Kandev cu
 - Python;
 - Kotlin through the official `kotlin-lsp`. Kotlin support is experimental because the upstream server is still alpha.
 
-Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. A file toolbar can start or stop a server manually; browser-local storage remembers manual enablement for that session and language. Kandev disconnects an unused server connection after two minutes.
+Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. Open the language-server control in a file toolbar to inspect its status and use the explicit **Start**, **Stop**, or **Retry** action. Browser-local storage remembers manual enablement for that session and language. Kandev disconnects an unused server connection after two minutes.
 
 Language servers run beside the project on the **task host**, with the task workspace as their working directory. V1 supports Local PC and Local Docker tasks. SSH, Sprites, and remote-Docker tasks show an unsupported-executor state instead of starting a server. The desktop Monaco editor wires diagnostics, completion, hover, definition, references, signature help, and semantic tokens. The mobile file viewer does not start language servers in the background.
 
@@ -210,6 +210,8 @@ Server lookup checks the task host's `PATH` and its `~/.kandev/lsp-servers` dire
 For a Local PC task, start Kandev from an environment whose `PATH` includes the server executable. For a Local Docker task, the host installation is not visible: add the executable and its runtime requirements to the executor image or prepare script, then recreate the task container. A Kotlin server in a Local Docker task must therefore be resolvable by `command -v kotlin-lsp` inside that container.
 
 The default Go server configuration enables semantic tokens. A custom language-server configuration must be a JSON object; Kandev sends it through the language-server workspace configuration request. Installing a language server does not install project dependencies or make an unsupported language available. If startup fails, check the backend log/status, executable `PATH`, supported host platform, toolchain/network access, project dependencies, and that the file belongs to the active task worktree.
+
+The status surface separates the server connection from background project analysis. During initialization it shows elapsed time. When a server reports standard LSP work-done progress, it also shows the server's title, message, percentage, and concurrent work-item count when available. These values come from the server: many servers provide no percentage or universal indexing ETA, and a completed work item does not guarantee that every cross-file definition or reference is ready. If cross-file navigation is still incomplete, leave the server running while its project model warms up.
 
 Each browser connection owns a language-server process; editors in one browser window share the connection for the same session and language. Kandev allows eight active connections by default; operators can change that startup limit with `KANDEV_LSP_MAX_CONNECTIONS`. Stopping a server, closing its connection, or stopping the task reaps the task-host process tree. If the toolbar says the server is unavailable, distinguish a missing task-host binary from an unsupported executor or the active-connection limit before retrying.
 

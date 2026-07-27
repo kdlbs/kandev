@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import fs from "node:fs";
 import path from "node:path";
 import type { BackendContext } from "../../fixtures/backend";
@@ -60,6 +60,14 @@ function fakeServerLogPath(backend: BackendContext): string {
 
 function crashModePath(backend: BackendContext): string {
   return path.join(backend.tmpDir, "lsp-e2e-crash-on-open");
+}
+
+function initializeModePath(backend: BackendContext): string {
+  return path.join(backend.tmpDir, "lsp-e2e-initialize-mode.json");
+}
+
+function initializeReleasePath(backend: BackendContext): string {
+  return path.join(backend.tmpDir, "lsp-e2e-initialize-release");
 }
 
 export async function createKotlinTask(
@@ -266,6 +274,33 @@ export async function openDesktopFile(
   await expect(page.locator(".monaco-editor:visible")).toBeVisible({ timeout: 15_000 });
 }
 
+export async function openLspStatus(page: Page): Promise<Locator> {
+  const trigger = page.locator('[data-testid="lsp-status-button"]:visible');
+  if ((await trigger.getAttribute("aria-expanded")) !== "true") {
+    await trigger.click();
+  }
+  await expect(trigger).toHaveAttribute("aria-expanded", "true");
+
+  const surface = page.locator(
+    '[data-testid="lsp-status-popover"]:visible, [data-testid="lsp-status-drawer"]:visible',
+  );
+  await expect(surface).toBeVisible();
+  return surface;
+}
+
+export async function performLspAction(
+  page: Page,
+  action: "start" | "stop" | "retry",
+): Promise<void> {
+  const surface = await openLspStatus(page);
+  const actionButton = surface.locator(
+    `[data-testid="lsp-lifecycle-action"][data-lsp-action="${action}"]`,
+  );
+  await expect(actionButton).toBeVisible();
+  await expect(actionButton).toBeEnabled();
+  await actionButton.click();
+}
+
 export function removeFakeKotlinLsp(backend: BackendContext): void {
   const binary = fakeServerPath(backend);
   try {
@@ -278,14 +313,32 @@ export function removeFakeKotlinLsp(backend: BackendContext): void {
 
 export function installFakeKotlinLsp(
   backend: BackendContext,
-  options: { crashOnOpen?: boolean } = {},
+  options: {
+    crashOnOpen?: boolean;
+    holdInitialize?: boolean;
+    progress?: {
+      title: string;
+      beginPercentage?: number;
+      message?: string;
+      percentage?: number;
+      endMessage?: string;
+    };
+  } = {},
 ): void {
   fs.mkdirSync(path.dirname(fakeServerPath(backend)), { recursive: true });
   fs.copyFileSync(FAKE_SERVER_SOURCE, fakeServerPath(backend));
   fs.chmodSync(fakeServerPath(backend), 0o755);
   fs.rmSync(fakeServerLogPath(backend), { force: true });
   fs.rmSync(crashModePath(backend), { force: true });
+  fs.rmSync(initializeModePath(backend), { force: true });
+  fs.rmSync(initializeReleasePath(backend), { force: true });
   if (options.crashOnOpen) fs.writeFileSync(crashModePath(backend), "1\n");
+  if (options.holdInitialize || options.progress) {
+    fs.writeFileSync(
+      initializeModePath(backend),
+      JSON.stringify({ progress: options.progress ?? null }),
+    );
+  }
 }
 
 export function installAdditionalFakeLspBinary(backend: BackendContext, binaryName: string): void {
@@ -296,6 +349,12 @@ export function installAdditionalFakeLspBinary(backend: BackendContext, binaryNa
 
 export function clearFakeKotlinLspModes(backend: BackendContext): void {
   fs.rmSync(crashModePath(backend), { force: true });
+  fs.rmSync(initializeModePath(backend), { force: true });
+  fs.rmSync(initializeReleasePath(backend), { force: true });
+}
+
+export function releaseFakeLspInitialization(backend: BackendContext): void {
+  fs.writeFileSync(initializeReleasePath(backend), "release\n");
 }
 
 export function readFakeLspEvents(backend: BackendContext): FakeLspEvent[] {

@@ -235,6 +235,9 @@ export function getLspUnavailableSetupHint(
 
 /** LSP client capabilities sent during initialization. */
 export const LSP_CLIENT_CAPABILITIES = {
+  window: {
+    workDoneProgress: true,
+  },
   textDocument: {
     synchronization: {
       dynamicRegistration: false,

@@ -21,6 +21,16 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
 - Wired editor capabilities are diagnostics, completions, hover, go to definition, references, signature help, and semantic tokens.
 - Global editor settings select languages that auto-start, languages Kandev may auto-install, and per-language configuration returned through `workspace/configuration`.
 - A user can manually start or stop the current file's server from the file toolbar. Manual state is remembered in browser local storage for that session and language.
+- The current editor's LSP status surface distinguishes connection readiness from server-reported project work:
+  - while initialization is pending, it shows an indeterminate “Preparing project…” state and locally measured elapsed time;
+  - when the server reports standard LSP work-done progress, it shows the server title, optional message, optional percentage, elapsed time, and the number of concurrent work items;
+  - when the server reports no work progress, it says so instead of inventing an indexing state, percentage, or time remaining.
+- The existing toolbar status control is disclosure-first:
+  - fine-pointer layouts open an anchored progress popover;
+  - coarse-pointer Monaco layouts open an inset bottom drawer with the same status, progress, and Start, Stop, or Retry action;
+  - phone file viewing remains LSP-free and does not render the control.
+- A connected server remains connected while project work is active. Progress never replaces the ready connection state or disables document synchronization and editor providers.
+- Progress copy warns that cross-file results may be incomplete while server-reported analysis is active. Completion means only that the reported work item ended; it does not guarantee that every reference, dependency, or project module is resolved.
 - Kotlin supports auto-start but not auto-install. `kotlin-lsp` must already be available on the task host's `PATH`.
 - Language servers run through the task's `agentctl`, with the task workspace as their working directory. This keeps project files, dependencies, and server execution in the same environment.
 - V1 task-host support is limited to Local PC and local Docker executors. Remote Docker, SSH, and Sprites report an unsupported-executor state.
@@ -76,6 +86,34 @@ Application close codes are:
 | `4004` | Executor unsupported in V1.                                        |
 | `4005` | Active LSP connection cap reached.                                 |
 
+### Browser LSP progress contract
+
+The browser advertises standard LSP `window.workDoneProgress` support and includes a client-generated `workDoneToken` in `initialize`. This lets servers such as JetBrains Kotlin LSP report project-import phases before the initialize response.
+
+The browser accepts both server-created progress tokens through `window/workDoneProgress/create` and `$/progress` notifications for the initialize token. Tokens can be strings or numbers and are scoped to one browser-owned session, language, and connection generation.
+
+Supported work-done payloads are:
+
+| Kind     | Observable behavior                                                                              |
+| -------- | ------------------------------------------------------------------------------------------------ |
+| `begin`  | Adds or replaces the token with its title, message, optional percentage, and local start time.   |
+| `report` | Updates only the matching active token; an omitted percentage preserves its last reported value. |
+| `end`    | Removes only the matching active token and records the server's optional completion message.     |
+
+Percentages are clamped to 0–100 for presentation. Unknown tokens, malformed payloads, and late notifications from a replaced connection are ignored.
+
+No backend or task-host payload transforms are required: both WebSocket proxy hops transport the JSON-RPC body unchanged.
+
+## Readiness and progress state
+
+- Connection readiness remains the existing lifecycle (`connecting`, `installing`, `starting`, `ready`, `stopping`, `unavailable`, or `error`).
+- Initialization is locally observable from the initialize request until its response. The UI shows elapsed time even when the server sends no progress payload.
+- Work-done progress is runtime-only activity attached to a live connection. Multiple active tokens are a flat list because LSP defines no parent/child relationship.
+- The oldest active work item is the primary summary; additional active items are shown as a count. Percentages from unrelated work items are never averaged.
+- The most recently ended item can remain visible as “server-reported work finished” for the lifetime of that connection. It is not described as project-wide success.
+- Stop, idle disconnect, crash, socket close, connection replacement, and retry clear all active and completed progress. A replacement generation starts with no inherited work state.
+- Progress activity is scoped to the current editor's session and language. It is not a global task-wide language-server dashboard.
+
 ## State and persistence
 
 - User settings persist in the existing user-settings store.
@@ -91,6 +129,10 @@ Application close codes are:
 - **Missing auto-installable server:** the UI reports the missing binary or shows install progress when auto-install is enabled.
 - **Capacity exceeded:** the UI reports that too many language servers are active.
 - **Server crash:** the connection closes, Monaco providers and markers are cleaned up, and the user can retry.
+- **No progress support or reports:** initialization still shows an indeterminate state and elapsed time; after initialize succeeds, the status surface says the server has not reported background analysis progress.
+- **Indeterminate progress:** the UI shows the server title/message and elapsed time without a percentage or ETA.
+- **Malformed or stale progress:** the client ignores the payload and preserves the current connection and valid work items.
+- **Cross-file intelligence remains incomplete after ready:** the UI does not claim that the server is still indexing unless a work item is active; the status surface explains that project import, dependencies, or module resolution may require investigation.
 - **Task stop:** agentctl closes process admission and reaps the language-server process tree before releasing task resources.
 - **Instance teardown during auto-install:** agentctl cancels the install, removes an unpublished partial release download, drains the shared cache mutation, and reaps npm/Go descendants before releasing task resources.
 - **Unknown language:** no LSP control is shown.
@@ -107,6 +149,15 @@ Application close codes are:
 - **GIVEN** a connection is replaced for the same session and language, **WHEN** callbacks from the old connection arrive late, **THEN** they cannot close, initialize, or clean up the replacement generation.
 - **GIVEN** session workspace metadata hydrates after the LSP connection, **WHEN** the client opens or navigates to a document, **THEN** it uses the canonical workspace URI and repository subpaths from the task-host ready handshake, including after that LSP connection stops.
 - **GIVEN** a definition or reference target is nested beneath unloaded folders, **WHEN** Monaco navigates to that file, **THEN** the Files tree loads and expands every ancestor and marks the target as active.
+- **GIVEN** a language server is waiting to complete `initialize`, **WHEN** it has not emitted work-done progress, **THEN** the current editor's status surface shows “Preparing project…” with increasing elapsed time and no ETA.
+- **GIVEN** Kotlin LSP reports initialize work with a title, message, and percentage, **WHEN** `begin` and `report` notifications arrive, **THEN** the current editor shows the latest server text, the clamped percentage, and elapsed time while its connection continues initializing or remains ready.
+- **GIVEN** a server reports an indeterminate work item, **WHEN** it omits percentage, **THEN** the UI shows activity and elapsed time without fabricating percentage or time remaining.
+- **GIVEN** two work-done tokens are active, **WHEN** either token reports or ends, **THEN** only that token changes and the UI continues to show the oldest active item plus the remaining active count.
+- **GIVEN** the final active token ends, **WHEN** the connection remains open, **THEN** the UI records that server-reported work finished without claiming all project references are complete.
+- **GIVEN** a connection has active or completed work progress, **WHEN** it stops, crashes, retries, or is replaced, **THEN** the replacement connection starts without stale progress from the old generation.
+- **GIVEN** initialize has completed and no work item is active, **WHEN** cross-file references are still missing, **THEN** the UI says the server has not reported ongoing analysis rather than labeling the condition as indexing.
+- **GIVEN** a fine-pointer Monaco editor, **WHEN** the user opens the LSP status control, **THEN** an anchored popover presents connection readiness, project progress, and the available lifecycle action.
+- **GIVEN** a coarse-pointer tablet Monaco editor, **WHEN** the user taps the LSP status control, **THEN** an inset bottom drawer presents the same progress and lifecycle action with a touch-sized trigger and no document-level horizontal overflow.
 - **GIVEN** an LSP server has spawned descendants, **WHEN** the task stops, **THEN** agentctl reaps the full process tree.
 - **GIVEN** auto-install is downloading or running npm/Go, **WHEN** the agentctl instance is torn down, **THEN** the install is canceled and drained without publishing a partial binary or leaving descendants.
 - **GIVEN** a repository contains `.kandev/lsp-servers/kotlin-lsp`, **WHEN** Kotlin LSP starts, **THEN** Kandev ignores that project-controlled executable.
@@ -119,6 +170,10 @@ Application close codes are:
 - Sharing one server process across browser windows.
 - Rename, code actions, document symbols, formatting, and workspace-edit application.
 - CodeMirror/mobile LSP parity.
+- A global dashboard across every session/language connection.
+- Estimated time remaining, predicted completion, or any guarantee that a percentage maps linearly to project readiness.
+- Inferring indexing state from `window/logMessage`, `window/showMessage`, process output, elapsed-time thresholds, or language-specific text heuristics.
+- Request-scoped partial-result streaming, `partialResultToken`, `$/cancelRequest`, and progress cancellation.
 - Bootstrapping project dependencies such as Gradle import, `npm install`, `go mod download`, or Python virtual environments.
 - Replacing external editors or embedded VS Code.
 

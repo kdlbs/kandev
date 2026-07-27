@@ -211,6 +211,7 @@ export function MonacoCodeEditor(props: MonacoCodeEditorProps) {
         hasRemoteUpdate={hasRemoteUpdate}
         hasVcsDiff={Boolean(vcsDiff)}
         lspStatus={lsp.lspStatus}
+        lspProgress={lsp.lspProgress}
         lspLanguage={lsp.lspLanguage}
         onToggleLsp={lsp.toggleLsp}
         onToggleWrap={() => state.setWrapEnabled(!state.wrapEnabled)}
