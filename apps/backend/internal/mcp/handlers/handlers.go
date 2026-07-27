@@ -651,14 +651,12 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
-		// Defense-in-depth: resolveTaskRepositories already catches this for the
-		// MCP path, but non-MCP callers (UI, internal engine) reach here directly.
-		if errors.Is(err, service.ErrSubtaskDepthExceeded) ||
-			errors.Is(err, service.ErrInvalidTaskWorkflow) ||
-			isMCPWorkflowNotFoundError(err) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		code := classifyCreateTaskError(err)
+		message := "Failed to create task"
+		if code != ws.ErrorCodeInternalError {
+			message = err.Error()
 		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
+		return ws.NewError(msg.ID, msg.Action, code, message, nil)
 	}
 
 	if h.handoffSvc != nil && workspacePolicy.NeedsAttachment() {
@@ -679,6 +677,19 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+func classifyCreateTaskError(err error) string {
+	switch {
+	case errors.Is(err, service.ErrWIPLimitExceeded):
+		return ws.ErrorCodeConflict
+	case errors.Is(err, service.ErrSubtaskDepthExceeded),
+		errors.Is(err, service.ErrInvalidTaskWorkflow),
+		isMCPWorkflowNotFoundError(err):
+		return ws.ErrorCodeValidation
+	default:
+		return ws.ErrorCodeInternalError
+	}
 }
 
 // taskRepoResult holds the output of resolveTaskRepositories.

@@ -145,6 +145,7 @@ type StartStepResolver interface {
 
 var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
+	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
 	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
 	ErrInvalidExecutorConfig     = errors.New("invalid executor config")
 	// Workspace-source sentinels are the service boundary consumed by the HTTP

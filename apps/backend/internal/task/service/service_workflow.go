@@ -677,7 +677,7 @@ func (s *Service) validateMoveWIPLimit(ctx context.Context, task *models.Task, t
 		return fmt.Errorf("failed to count target workflow step tasks: %w", err)
 	}
 	if occupants >= targetStep.WIPLimit {
-		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d already occupied", targetStep.ID, targetStep.WIPLimit)
+		return wfmodels.NewWIPLimitError(targetStep.ID, targetStep.WIPLimit, occupants)
 	}
 	return nil
 }
@@ -839,8 +839,7 @@ func (s *Service) validateBulkMoveWIPCapacity(ctx context.Context, tasks []*mode
 		return fmt.Errorf("failed to count target workflow step tasks: %w", err)
 	}
 	if occupants+incoming > targetStep.WIPLimit {
-		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d, occupied %d, moving %d",
-			targetStep.ID, targetStep.WIPLimit, occupants, incoming)
+		return fmt.Errorf("%w: moving %d task(s)", wfmodels.NewWIPLimitError(targetStep.ID, targetStep.WIPLimit, occupants), incoming)
 	}
 	return nil
 }

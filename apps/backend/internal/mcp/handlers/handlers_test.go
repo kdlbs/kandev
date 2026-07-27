@@ -196,6 +196,13 @@ func TestClassifyAddBranchError_UnresolvedBaseBranchIsValidation(t *testing.T) {
 	}
 }
 
+func TestClassifyCreateTaskErrorMapsWIPLimitToConflict(t *testing.T) {
+	err := fmt.Errorf("create task failed: %w", workflowmodels.NewWIPLimitError("review", 2, 2))
+	if got := classifyCreateTaskError(err); got != ws.ErrorCodeConflict {
+		t.Fatalf("expected ErrorCodeConflict, got %q", got)
+	}
+}
+
 // TestHandleAddBranchToTask_RejectsMultipleLocators pins the mutual-exclusion
 // check at the WS handler tier: supplying two of repository_id /
 // repository_url / local_path is an agent mistake that previously got

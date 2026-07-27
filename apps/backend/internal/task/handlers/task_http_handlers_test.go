@@ -320,6 +320,14 @@ type missingWorkflowCreateTaskRepo struct {
 	captureCreateTaskRepo
 }
 
+type wipCreateTaskRepo struct {
+	captureCreateTaskRepo
+}
+
+func (*wipCreateTaskRepo) CreateTask(_ context.Context, _ *models.Task) error {
+	return wfmodels.NewWIPLimitError("review", 2, 2)
+}
+
 func (*missingWorkflowCreateTaskRepo) GetWorkflow(_ context.Context, id string) (*models.Workflow, error) {
 	return nil, fmt.Errorf("workflow not found: %s", id)
 }
@@ -701,6 +709,34 @@ func TestWSCreateTaskReturnsValidationErrorForMissingWorkflow(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
 	assert.Equal(t, ws.ErrorCodeValidation, payload.Code)
 	assert.Contains(t, payload.Message, "workflow not found")
+}
+
+func TestWSCreateTaskReturnsConflictForWIPLimit(t *testing.T) {
+	log := newTestLogger(t)
+	repo := &wipCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+		"title":        "Full review step",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	assert.Contains(t, payload.Message, "WIP limit")
 }
 
 func TestWSCreateTaskReturnsValidationErrorForStepOutsideWorkflow(t *testing.T) {

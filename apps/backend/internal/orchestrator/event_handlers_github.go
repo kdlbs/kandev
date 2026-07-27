@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -18,6 +19,10 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
+
+func isWatcherCapacityRejection(err error) bool {
+	return errors.Is(err, wfmodels.ErrWIPLimitExceeded)
+}
 
 const (
 	issueWatchIDKey             = "issue_watch_id"
@@ -329,10 +334,18 @@ func (s *Service) createReviewTask(ctx context.Context, evt *github.NewReviewPRE
 	repositories := s.resolveReviewRepository(ctx, evt.WorkspaceID, pr)
 	task, err := s.reviewTaskCreator.CreateReviewTask(ctx, buildReviewTaskRequest(evt, repositories, repoSlug))
 	if err != nil {
-		s.logger.Error("failed to create review task",
-			zap.String("review_watch_id", evt.ReviewWatchID),
-			zap.Int("pr_number", pr.Number),
-			zap.Error(err))
+		if isWatcherCapacityRejection(err) {
+			s.logger.Info("review workflow step at capacity; deferring review task",
+				zap.String("review_watch_id", evt.ReviewWatchID),
+				zap.Int("pr_number", pr.Number),
+				zap.String("workflow_step_id", evt.WorkflowStepID),
+				zap.Error(err))
+		} else {
+			s.logger.Error("failed to create review task",
+				zap.String("review_watch_id", evt.ReviewWatchID),
+				zap.Int("pr_number", pr.Number),
+				zap.Error(err))
+		}
 		s.releaseReviewPR(ctx, evt)
 		return
 	}
@@ -1343,10 +1356,18 @@ func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent
 
 	task, err := s.issueTaskCreator.CreateIssueTask(ctx, req)
 	if err != nil {
-		s.logger.Error("failed to create issue task",
-			zap.String(issueWatchIDKey, evt.IssueWatchID),
-			zap.Int(issueNumberKey, issue.Number),
-			zap.Error(err))
+		if isWatcherCapacityRejection(err) {
+			s.logger.Info("issue workflow step at capacity; deferring issue task",
+				zap.String(issueWatchIDKey, evt.IssueWatchID),
+				zap.Int(issueNumberKey, issue.Number),
+				zap.String("workflow_step_id", evt.WorkflowStepID),
+				zap.Error(err))
+		} else {
+			s.logger.Error("failed to create issue task",
+				zap.String(issueWatchIDKey, evt.IssueWatchID),
+				zap.Int(issueNumberKey, issue.Number),
+				zap.Error(err))
+		}
 		s.releaseIssueWatch(ctx, evt)
 		return
 	}

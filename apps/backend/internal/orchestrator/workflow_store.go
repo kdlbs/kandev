@@ -193,7 +193,7 @@ func (s *workflowStore) validateWIPLimit(ctx context.Context, task *models.Task,
 		return fmt.Errorf("count target workflow step tasks: %w", err)
 	}
 	if occupants >= targetStep.WIPLimit {
-		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d already occupied", targetStep.ID, targetStep.WIPLimit)
+		return wfmodels.NewWIPLimitError(targetStep.ID, targetStep.WIPLimit, occupants)
 	}
 	return nil
 }

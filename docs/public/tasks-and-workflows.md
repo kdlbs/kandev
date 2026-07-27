@@ -182,6 +182,19 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | **WIP limit**             | Maximum active, non-archived, non-ephemeral tasks accepted by the step. `0` means unlimited. A move into a full step is rejected; reordering within the same step does not consume another slot. |
 | **Pull from**             | Optional feeder step. When capacity opens, Kandev pulls eligible work from that step. It requires a nonzero WIP limit.                                                                           |
 
+The WIP check also applies when a task is created. It runs for an explicit
+`workflow_step_id` and for the workflow's resolved start step, and the
+admission check is atomic so concurrent creates cannot collectively exceed the
+limit. A full step returns a conflict that includes the step and limit; the
+rejected task, session, and task-created event are not persisted. Ephemeral
+tasks are not counted.
+
+Integration watchers use the same admission rule. For example, a GitHub review
+watch targeting a `Review` step with a limit of two admits at most two newly
+observed pull requests at a time. Pull requests that lose the capacity race
+remain eligible for a later poll; Kandev releases their temporary watch
+reservation and does not start an agent for them.
+
 Auto-archive is checked on a five-minute background interval and uses the task's last update time. Any task update postpones eligibility, so the archive is not guaranteed at the exact configured minute. Auto-archive affects the task itself, not its children.
 
 Pull configuration rejects self-references, cycles, and cross-workflow feeders. Pulling runs when a task vacates the limited step and fills each newly open slot. Candidates are ordered by board position, then priority (`critical`, `high`, `medium`, `low`, `none`), creation time, and ID. A candidate whose move fails—for example because its session is running or starting—is skipped for that pull pass.
@@ -199,6 +212,12 @@ The child-completion event ignores archived and ephemeral children, does not ins
 Generic comment, blocker-resolution, approval, heartbeat, budget, and error triggers, plus participant quorum, belong to the in-progress Office workflow surface. They are not configurable regular-Kanban step events.
 
 When **On Turn Complete** moves a task, **Wait for agent completion signal** is available. With it enabled, a bare turn end leaves the task waiting; the agent must call `step_complete_kandev`. The call requires a summary and can include a handoff or blockers. It is idempotent within the step, runs asynchronously, and a user message sent before the transition is applied cancels that pending signal. Without the option, turn end counts as completion.
+
+An auto-started task stays in its current step while the agent session boots and
+while its first turn is running. A boot-ready event is not a turn completion.
+For example, a review step with `on_enter: auto_start_agent` and
+`on_turn_complete: move_to_next` moves to the next step only after the genuine
+review turn completes, not during startup.
 
 Plan mode can be disabled when the turn completes and/or when the task exits the step. A step prompt is Markdown and can include `{{task_prompt}}` to insert the original task description.
 

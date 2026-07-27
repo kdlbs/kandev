@@ -79,6 +79,10 @@ type taskEnvironmentOwnerTransferer interface {
 	TransferTaskEnvironmentToTask(ctx context.Context, envID, taskID string) error
 }
 
+type workflowStepCapacityTaskCreator interface {
+	CreateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID string, limit int) error
+}
+
 // Task operations
 
 // isOfficeRequest returns true if the request should create an office task.
@@ -133,7 +137,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		}
 	}
 
-	if err := s.tasks.CreateTask(ctx, task); err != nil {
+	if err := s.createTaskWithCapacity(ctx, task); err != nil {
 		s.logger.Error("failed to create task", zap.Error(err))
 		return nil, err
 	}
@@ -161,6 +165,30 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return task, nil
+}
+
+func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task) error {
+	if task.IsEphemeral || task.WorkflowStepID == "" {
+		return s.tasks.CreateTask(ctx, task)
+	}
+	if s.workflowStepGetter == nil {
+		return fmt.Errorf("workflow step %s has no capacity checker", task.WorkflowStepID)
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+	if err != nil {
+		return fmt.Errorf("load workflow step %s for task creation: %w", task.WorkflowStepID, err)
+	}
+	if step == nil {
+		return fmt.Errorf("%w: workflow step not found: %s", ErrInvalidTaskWorkflow, task.WorkflowStepID)
+	}
+	if step.WIPLimit <= 0 {
+		return s.tasks.CreateTask(ctx, task)
+	}
+	creator, ok := s.tasks.(workflowStepCapacityTaskCreator)
+	if !ok {
+		return fmt.Errorf("workflow step %s has WIP limit %d but capacity-aware task persistence is unavailable", step.ID, step.WIPLimit)
+	}
+	return creator.CreateTaskIfWorkflowStepHasCapacity(ctx, task, step.ID, step.WIPLimit)
 }
 
 // inheritParentRepositories fills req.Repositories from the parent task when a

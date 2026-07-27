@@ -70,6 +70,20 @@ Choose this for a deliberate multi-pass delivery process. It is excessive for sm
 
 Choose this for a local first-pass review. For repository-provider watch automation, use the relevant integration instead.
 
+### GitHub review watches and WIP limits
+
+A GitHub Review Watch creates each matching pull request in its configured
+workflow step. If that step has a WIP limit, admission is atomic: only tasks
+that obtain a slot are created and auto-started. A pull request rejected because
+the step is full is deferred for a later poll; its temporary watch reservation
+is released, so it is not lost or permanently marked as handled.
+
+If the target step has `auto_start_agent` on entry and `move_to_next` on turn
+completion, the task remains in the target step during agent startup and active
+review. `agent.boot_ready` only makes the session ready; the first real turn
+completion performs the configured move once. Use a human-gate transition when
+reviews must wait for approval instead of advancing automatically.
+
 ## Build a custom workflow
 
 Choose **Add Workflow**, give it a name, select **Custom**, and save it. Expand each step to edit its behavior. Reorder steps by dragging them; transition actions that say “next” or “previous” follow the saved position order.
