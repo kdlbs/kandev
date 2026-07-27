@@ -1395,11 +1395,35 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 	return err
 }
 
+// taskPRColumns is the explicit column list for every github_task_prs read.
+// Using `SELECT *` here is unsafe: sqlx's StructScan errors out
+// ("missing destination name X in *github.TaskPR") the moment the table has
+// a column the current TaskPR struct doesn't declare a field for. That drift
+// is not hypothetical — a self-update that applies a newer release's
+// migration (adding a column) followed by a rollback to an older binary
+// leaves exactly this mismatch permanently on disk, since SQLite migrations
+// are additive and never reverted. Projecting the known columns keeps every
+// read working regardless of what the table has picked up beyond them.
+const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url,
+	pr_title, head_branch, base_branch, author_login, state, review_state, checks_state,
+	mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
+	unresolved_review_threads, checks_total, checks_passing, additions, deletions,
+	created_at, merged_at, closed_at, last_synced_at, updated_at`
+
+// taskPRColumnsQualified is taskPRColumns with each column qualified by the
+// `gtp` alias, for queries that join github_task_prs against another table.
+const taskPRColumnsQualified = `gtp.id, gtp.workspace_id, gtp.task_id, gtp.repository_id, gtp.owner, gtp.repo,
+	gtp.pr_number, gtp.pr_url, gtp.pr_title, gtp.head_branch, gtp.base_branch, gtp.author_login,
+	gtp.state, gtp.review_state, gtp.checks_state, gtp.mergeable_state, gtp.review_count,
+	gtp.pending_review_count, gtp.required_reviews, gtp.comment_count, gtp.unresolved_review_threads,
+	gtp.checks_total, gtp.checks_passing, gtp.additions, gtp.deletions,
+	gtp.created_at, gtp.merged_at, gtp.closed_at, gtp.last_synced_at, gtp.updated_at`
+
 // GetTaskPR returns the first PR association for a task. For multi-repo tasks
 // the result is non-deterministic across repos — use ListTaskPRsByTask instead.
 func (s *Store) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error) {
 	var tp TaskPR
-	err := s.ro.GetContext(ctx, &tp, `SELECT * FROM github_task_prs WHERE task_id = ? LIMIT 1`, taskID)
+	err := s.ro.GetContext(ctx, &tp, `SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? LIMIT 1`, taskID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1416,7 +1440,7 @@ func (s *Store) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error) {
 func (s *Store) GetTaskPRByRepository(ctx context.Context, taskID, repositoryID string) (*TaskPR, error) {
 	var tp TaskPR
 	err := s.ro.GetContext(ctx, &tp,
-		`SELECT * FROM github_task_prs WHERE task_id = ? AND repository_id = ?
+		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? AND repository_id = ?
 		 ORDER BY updated_at DESC LIMIT 1`,
 		taskID, repositoryID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1433,7 +1457,7 @@ func (s *Store) GetTaskPRByRepository(ctx context.Context, taskID, repositoryID 
 func (s *Store) GetTaskPRByRepoAndNumber(ctx context.Context, taskID, repositoryID string, prNumber int) (*TaskPR, error) {
 	var tp TaskPR
 	err := s.ro.GetContext(ctx, &tp,
-		`SELECT * FROM github_task_prs
+		`SELECT `+taskPRColumns+` FROM github_task_prs
 		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? LIMIT 1`,
 		taskID, repositoryID, prNumber)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1447,7 +1471,7 @@ func (s *Store) GetTaskPRByRepoAndNumber(ctx context.Context, taskID, repository
 func (s *Store) ListTaskPRsByTask(ctx context.Context, taskID string) ([]*TaskPR, error) {
 	var prs []TaskPR
 	if err := s.ro.SelectContext(ctx, &prs,
-		`SELECT * FROM github_task_prs WHERE task_id = ? ORDER BY created_at ASC`, taskID); err != nil {
+		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? ORDER BY created_at ASC`, taskID); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskPR, 0, len(prs))
@@ -1465,7 +1489,7 @@ func (s *Store) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map
 		return make(map[string][]*TaskPR), nil
 	}
 	query, args, err := sqlx.In(
-		`SELECT * FROM github_task_prs WHERE task_id IN (?) ORDER BY created_at ASC`,
+		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id IN (?) ORDER BY created_at ASC`,
 		taskIDs,
 	)
 	if err != nil {
@@ -1485,7 +1509,7 @@ func (s *Store) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map
 func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string) (map[string][]*TaskPR, error) {
 	var prs []TaskPR
 	if err := s.ro.SelectContext(ctx, &prs,
-		`SELECT gtp.* FROM github_task_prs gtp
+		`SELECT `+taskPRColumnsQualified+` FROM github_task_prs gtp
 		 INNER JOIN tasks t ON gtp.task_id = t.id
 		 WHERE t.workspace_id = ?
 		 ORDER BY gtp.created_at ASC`, workspaceID); err != nil {
