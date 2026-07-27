@@ -47,7 +47,7 @@ test.describe("compact desktop responsive layout", () => {
     await expect(tabs.filter({ hasText: "Terminal" })).toBeVisible();
   });
 
-  test("kanban keeps desktop controls and usable columns at half-screen width", async ({
+  test("kanban windows readable desktop lanes without leaking subtask hierarchy", async ({
     testPage,
     apiClient,
     seedData,
@@ -60,6 +60,19 @@ test.describe("compact desktop responsive layout", () => {
         workflow_step_id: step.id,
       });
     }
+    const parent = await apiClient.createTask(
+      seedData.workspaceId,
+      "A deliberately long parent task title that must remain inside the compact kanban card",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+    const child = await apiClient.createTask(seedData.workspaceId, "Compact child", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      parent_id: parent.id,
+    });
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
@@ -67,7 +80,8 @@ test.describe("compact desktop responsive layout", () => {
     const desktopLayout = testPage.getByTestId("desktop-kanban-layout");
     await expect(desktopLayout).toHaveCount(1);
     await expect(desktopLayout).toBeVisible();
-    await expect(desktopLayout).toHaveAttribute("style", /minmax\(260px, 1fr\)/);
+    const stageNavigator = testPage.getByTestId("desktop-kanban-stage-navigator");
+    await expect(stageNavigator).toBeVisible();
     await expect(testPage.getByTestId("tablet-kanban-layout")).toHaveCount(0);
     await expect(testPage.getByTestId("mobile-kanban-layout")).toHaveCount(0);
     await expect(testPage.getByRole("button", { name: "Open menu" })).toHaveCount(0);
@@ -80,5 +94,36 @@ test.describe("compact desktop responsive layout", () => {
     for (const step of seedData.steps) {
       await expect(kanban.columnByStepId(step.id)).toBeAttached();
     }
+    const firstColumnBox = await kanban.columnByStepId(seedData.steps[0].id).boundingBox();
+    expect(firstColumnBox).not.toBeNull();
+    expect(firstColumnBox!.width).toBeGreaterThanOrEqual(280);
+
+    const lastStep = seedData.steps.at(-1);
+    expect(lastStep).toBeDefined();
+    await testPage.getByTestId(`desktop-kanban-stage-${lastStep!.id}`).click();
+    await expect(kanban.columnByStepId(lastStep!.id)).toBeInViewport();
+
+    const relationship = kanban.taskCard(child.id).getByTestId("task-parent-relationship");
+    const [cardBox, relationshipBox] = await Promise.all([
+      kanban.taskCard(child.id).boundingBox(),
+      relationship.boundingBox(),
+    ]);
+    expect(cardBox).not.toBeNull();
+    expect(relationshipBox).not.toBeNull();
+    expect(relationshipBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
+    expect(relationshipBox!.x + relationshipBox!.width).toBeLessThanOrEqual(
+      cardBox!.x + cardBox!.width,
+    );
+    await expect(relationship).toHaveAttribute("title", /deliberately long parent task title/);
+    await expect
+      .poll(() => testPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true);
+
+    await testPage.setViewportSize({ width: 1600, height: 800 });
+    await expect(stageNavigator).toBeHidden();
+
+    await testPage.setViewportSize({ width: 700, height: 800 });
+    await expect(testPage.getByTestId("tablet-kanban-layout")).toBeVisible();
+    await expect(stageNavigator).toHaveCount(0);
   });
 });

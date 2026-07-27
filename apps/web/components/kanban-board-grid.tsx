@@ -223,12 +223,10 @@ function DesktopLayout({
   archivingTaskId,
   showLoading,
   activeTask,
-  isCompactDesktop,
   externalLinkAvailability,
 }: ColumnGridProps & {
   showLoading: boolean;
   activeTask: Task | null;
-  isCompactDesktop: boolean;
 }) {
   return (
     <>
@@ -240,7 +238,7 @@ function DesktopLayout({
             data-testid="desktop-kanban-layout"
             className="grid h-full min-w-full gap-2 rounded-lg"
             style={{
-              gridTemplateColumns: getKanbanColumnGridTemplate(steps.length, isCompactDesktop),
+              gridTemplateColumns: getKanbanColumnGridTemplate(steps.length),
             }}
           >
             {steps.map((step) => (
@@ -317,7 +315,7 @@ export function KanbanBoardGrid({
   onCreateTask,
   isLoading,
 }: KanbanBoardGridProps) {
-  const { isMobile, isTablet, isCompactDesktop } = useResponsiveBreakpoint();
+  const { isMobile, isTablet } = useResponsiveBreakpoint();
   const activeColumnIndex = useAppStore((state) => state.mobileKanban.activeColumnIndex);
   const setActiveColumnIndex = useAppStore((state) => state.setMobileKanbanColumnIndex);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
@@ -386,12 +384,7 @@ export function KanbanBoardGrid({
     );
   } else {
     layoutContent = (
-      <DesktopLayout
-        {...columnProps}
-        showLoading={!!showLoading}
-        activeTask={activeTask}
-        isCompactDesktop={isCompactDesktop}
-      />
+      <DesktopLayout {...columnProps} showLoading={!!showLoading} activeTask={activeTask} />
     );
   }
 

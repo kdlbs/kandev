@@ -162,17 +162,35 @@ export function KanbanCardBody({
           {task.description}
         </p>
       )}
+      <KanbanCardRelationship task={task} />
       <KanbanCardBadges task={task} />
     </>
   );
 }
 
-function KanbanCardBadges({ task }: { task: Task }) {
+function KanbanCardRelationship({ task }: { task: Task }) {
   const parentTitle = useAppStore((s) => {
     if (!task.parentTaskId) return null;
     return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
   });
 
+  if (!task.parentTaskId) return null;
+  const relationshipTitle = parentTitle ?? "Subtask";
+
+  return (
+    <div
+      data-testid="task-parent-relationship"
+      title={relationshipTitle}
+      className="mt-1 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
+    >
+      <IconSubtask className="h-3 w-3 shrink-0" />
+      <span className="shrink-0 font-medium">Subtask of</span>
+      <span className="min-w-0 truncate">{relationshipTitle}</span>
+    </div>
+  );
+}
+
+function KanbanCardBadges({ task }: { task: Task }) {
   const showRow = hasCardBadges(task);
 
   if (!showRow) return null;
@@ -186,12 +204,6 @@ function KanbanCardBadges({ task }: { task: Task }) {
           title={`Queued for ${task.queuedForStepTitle ?? `workflow step ${task.queuedForStepId}`}`}
         >
           Queued for {task.queuedForStepTitle ?? "next capacity"}
-        </Badge>
-      )}
-      {task.parentTaskId && (
-        <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px] min-w-0">
-          <IconSubtask className="h-3 w-3 shrink-0" />
-          <span className="truncate">{parentTitle ?? "Subtask"}</span>
         </Badge>
       )}
       {task.sessionCount && task.sessionCount > 1 && (
