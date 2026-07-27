@@ -1,18 +1,15 @@
 ---
 name: pr
-description: Create a PR from a committed, post-commit-verified, and pushed branch. Ready PRs return to the planner for delegated fixup.
+description: Create a PR from a committed, post-commit-verified, and pushed branch. Ready PRs continue to fixup in the primary conversation.
 ---
 
 # PR
 
 ## Planner Entry
 
-The planner may create a routine PR directly after commit, post-commit
-verification, and push. It delegates only substantial delivery work; ready PR monitoring remains
-with `pr-poller`/`pr-fixup` when long-running.
-
-An explicitly assigned PR worker creates the PR only after receiving the
-verified, committed, and pushed branch state. It does not spawn other workers.
+Create the PR directly in the primary conversation after commit, task-defined
+checks, and push. Ready PR monitoring and remediation continue through
+`/pr-fixup` in the same conversation.
 
 > **Host detection:** This skill works on GitHub, GitLab, and Azure Repos. Detect the host before step 4 by inspecting `git remote get-url origin`:
 > - URL contains `dev.azure.com`, `visualstudio.com`, or `ssh.dev.azure.com` → use the **Azure Repos flow** below.
@@ -26,14 +23,13 @@ verified, committed, and pushed branch state. It does not spawn other workers.
 
 ## Available skills
 
-- **`/commit`** — Creates the artifact and hook receipt before verification.
-- **`/verify`** — Mandatory post-commit gate before push and PR creation.
+- **`/commit`** — Creates the artifact after task-defined checks pass.
 - **`/pr-fixup`** — Wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push.
 
 ## Options
 
 - `--draft` — create the PR as draft and skip the fixup step. Use when the work is not ready for review.
-- Default (no flag) — create as ready-for-review and return its URL/state to the planner for `/pr-fixup` delegation.
+- Default (no flag) — create as ready-for-review and continue with `/pr-fixup` in the same conversation.
 
 ## Steps
 
@@ -41,16 +37,14 @@ Track these steps with an internal todo/checklist and mark them complete as you 
 Do not create, update, or delete Kandev subtasks for this workflow unless the user
 explicitly requests task tracking.
 
-1. **Uncommitted changes:** If there are dirty or staged changes, stop and tell
-   the planner that commit and post-commit verification are required first.
+1. **Uncommitted changes:** If there are dirty or staged changes, stop: commit
+   and the affected task checks are required first.
 
-2. **Branch:** If on `main` or `master`, stop and tell the planner that a
-   bounded branch-preparation assignment is required. Otherwise use the current
-   feature branch as-is.
+2. **Branch:** If on `main` or `master`, stop and ask the user for a feature
+   branch. Otherwise use the current feature branch as-is.
 
 3. **Remote state:** Confirm the branch has an upstream and the remote contains
-   the local `HEAD`. If not, stop and tell the planner that the separate push
-   assignment is incomplete. Do not push from the PR-creation assignment.
+   the local `HEAD`. If not, run `/push` before creating the PR.
 
 4. **Create the PR.** Use `--draft` flag if the user requested draft mode, otherwise create as ready-for-review.
 
@@ -75,19 +69,16 @@ explicitly requests task tracking.
 
    Do not fall back to hand-composed `--body` prose. If creation fails, surface the exact stderr, fix the template/body-file problem, and retry with `--body-file`.
 
-5. **If ready (not draft):** For GitHub, do not return the PR to the planner for
-   `pr-poller` or `/pr-fixup` until any required screenshot capture and
-   embedding in step 6 are complete. Do not poll or remediate from this
-   PR-creation assignment.
+5. **If ready (not draft):** For GitHub, do not begin `/pr-fixup` until any
+   required screenshot capture and embedding in step 6 are complete.
 
 6. **Screenshots — required for any UI-visible change.** If the diff touches user-visible UI (typically under `apps/web/`, excluding e2e-only or backend-only edits), you must capture screenshots that show the change actually working and publish them through the host-specific flow before treating the PR as complete — do not wait to be asked. Capture both desktop and mobile viewports whenever the change is responsive.
 
    **Capture:**
-   - The planner assigns screenshot capture to a QA or implementer worker before
-     PR publication. The PR worker reuses fresh entries from
-     `apps/web/.pr-assets/manifest.json`.
-   - If fresh required assets are missing, stop and report the missing capture
-     packet; do not run Playwright from this PR worker.
+   - Capture screenshots directly before PR publication and reuse fresh entries
+     from `apps/web/.pr-assets/manifest.json`.
+   - If fresh required assets are missing, run the required Playwright capture
+     in this conversation or report the concrete environment blocker.
    - Screenshots must use synthetic or redacted data. Reject any asset that
      exposes secrets, authentication tokens, or personally identifiable
      information, and stop with a recapture request.
@@ -168,13 +159,11 @@ explicitly requests task tracking.
 
    Never commit the screenshot binaries to the PR branch itself — only to the throwaway `media/pr-<N>-screenshots` ref (`git rm` them from the PR branch tip if they were committed there earlier; with squash-merge, deleting at tip is enough). The `docs/screenshots/` directory is for product/docs imagery that is meant to merge — don't confuse the two. The media branch must survive branch-cleanup sweeps; deleting it 404s the images in the PR body, so don't treat "unmerged branch" as automatically safe to delete.
 
-   If the capture worker reported that screenshots are impossible in the
-   environment, return that blocker to the planner. The planner owns user
-   communication and decides whether publication may proceed without them.
+   If screenshots are impossible in the environment, report that blocker to the
+   user before publication.
 
-7. **Return the PR URL** after all applicable steps are complete. For a ready
-   GitHub PR, return its URL and number to the planner, which launches
-   `pr-poller` and coordinates `/pr-fixup`.
+7. **Report the PR URL** after all applicable steps are complete. For a ready
+   GitHub PR, continue with `/pr-fixup` in the same conversation when requested.
 
 ## Azure Repos flow
 

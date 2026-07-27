@@ -1,10 +1,8 @@
-# Poller Review-Evidence Mechanics
+# PR Review-Evidence Mechanics
 
-Load this reference only when the `pr-poller` is unavailable, its report is
-incomplete or contradictory, or a planner needs to interpret raw
-`scripts/pr-state` output while resolving a PR-state incident. It does not
-authorize the planner or a remediation worker to replace the registered
-`pr-poller` during normal operation.
+Load this reference when `scripts/pr-state --summary` is incomplete or
+contradictory, or when the primary conversation needs to interpret raw
+`scripts/pr-state` output while resolving a PR-state incident.
 
 Request runtime network approval before the first GitHub helper call; denial,
 cancellation, or interruption stops the workflow. Retry transient failures from

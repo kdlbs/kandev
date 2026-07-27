@@ -1,18 +1,15 @@
 ---
 name: code-review
-description: Review changed code for quality, security, and architecture compliance. Use after implementing features or before opening PRs.
+description: Review changed code for quality, security, and architecture compliance. Use only when the user explicitly requests local review or a PR finding requires it.
 ---
 
 # Code Review
 
 ## Planner Entry
 
-The user-started primary session reviews small, localized changes directly and
-uses current-head PR AI review as the routine independent semantic evidence.
-Delegate to the registered `code-review` worker only for exceptional
-architecture, cross-cutting, high-risk, or insufficiently reviewed changes.
-Assign fixes or security follow-up to workers only when their scope warrants it.
-An explicitly assigned review worker continues below and does not spawn workers.
+Run this local review only when the user explicitly asks or an actionable PR/CI
+finding requires it. Do not use it automatically before opening a PR: the two
+configured PR AI reviewers are the semantic-review gate.
 
 Review the current changes in the codebase (Go backend + Vite/React SPA monorepo). Every finding needs a `file_path:line_number` reference, an explanation of *why* it matters, and a concrete fix.
 
@@ -156,8 +153,8 @@ branch, do not edit the checkout or push code; report findings through the
 channel the user requested. Do not submit or resolve reviews unless explicitly
 asked.
 
-Report findings to the planner with a concrete suggested fix. Do not edit the
-checkout; the planner creates a bounded implementer assignment for remediation.
+Report findings with a concrete suggested fix. Do not edit the checkout during
+a review-only request; otherwise remediate in the same primary conversation.
 
 ### 5. Output
 

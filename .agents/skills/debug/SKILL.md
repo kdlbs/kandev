@@ -10,12 +10,9 @@ Diagnose efficiently and safely. Debugging produces evidence and a root-cause hy
 
 ## Planner Entry
 
-The planner performs first-pass triage directly. Delegate only a concrete broad
-or long/noisy debugging question after local triage to one `implementer` with
-production edits forbidden; then decide whether `/fix` is needed.
-
-An explicitly assigned worker follows the remaining procedure, cleans up its
-temporary artifacts, reports evidence, and does not spawn other workers.
+Perform triage, evidence gathering, and diagnosis directly in the primary
+conversation. Keep production edits out of the diagnostic phase, then decide
+whether `/fix` or `/tdd` is needed.
 
 ## First: Create The Pipeline
 
@@ -24,7 +21,7 @@ Create a visible task list:
 1. **Triage** - classify the bug and choose the cheapest faithful path
 2. **Gather evidence** - targeted test, debug export/logs, browser state, or instrumentation
 3. **Diagnose** - trace the failure to root cause
-4. **Report** - summarize evidence and propose a bounded `/fix` or `/tdd` packet for the planner when code changes are needed
+4. **Report** - summarize evidence and choose `/fix` or `/tdd` when code changes are needed
 5. **Clean up** - remove temporary logs, throwaway repro tests, isolated instances, and browser sessions
 
 ## Triage Gate
@@ -80,9 +77,8 @@ When you can state:
 - why it fails,
 - how to reproduce it,
 
-then stop debugging and return a bounded recommended fix packet to the planner.
-The planner assigns `/fix` or `/tdd` work to an implementer; this diagnostic
-worker does not continue into implementation or spawn another worker.
+then stop debugging and proceed through `/fix` or `/tdd` in the same primary
+conversation.
 
 ## Final Report
 

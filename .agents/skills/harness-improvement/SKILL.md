@@ -19,21 +19,23 @@ Before editing, classify the requested improvement:
 
 - **Session learning:** recurring failure, workaround, or convention discovered during a session. Read `references/session-learnings.md`.
 - **Skill:** task-specific playbook loaded on demand. Read `references/skills.md`.
-- **Subagent/agent:** role with a distinct model, tools, permissions, or isolation. Read `references/agents.md`, then all platform references unless the user explicitly scopes the request to one platform.
+- **Custom agent:** an exception that requires the user to explicitly reverse the
+  repository's single-session policy. Read `references/agents.md` before acting.
 - **Command:** explicitly invoked workflow shortcut. Prefer a skill unless the user wants manual invocation only.
 - **AGENTS.md / CLAUDE.md / rules:** always-on or path-scoped instruction. Read `references/instructions.md`.
 - **Cross-platform migration:** preserving behavior across Claude, Codex, Cursor, and OpenCode. Read the relevant platform files in `references/platforms/`.
 
-If the user names a target platform for a skill, command, or instruction file, load only that platform reference. For subagents/agents, the default is cross-platform sync: update every existing platform mirror (`.agents/agents`, `.codex/agents`, `.claude/agents`, `.cursor/agents`, `.opencode/agents`) unless the user explicitly says to update only one platform.
+If the user names a target platform for a skill, command, or instruction file,
+load only that platform reference. Do not create a custom agent or platform
+mirror unless the user explicitly requests a policy reversal.
 
 ## Workflow
 
 1. **Inventory first**
-   - Use `rg --files` to find existing `.agents/skills`, `.agents/agents`, `.claude`, `.codex`, `.cursor`, `.opencode`, `AGENTS.md`, and `CLAUDE.md` files.
+   - Use `rg --files` to find existing `.agents/skills`, `.claude`, `.codex`,
+     `.cursor`, `.opencode`, `AGENTS.md`, and `CLAUDE.md` files.
    - For platform-specific formats, read the bundled files under `references/platforms/` before consulting external docs. Treat those files as the first source of truth for Claude, Codex, Cursor, and OpenCode harness layout.
    - Check for duplicate or superseded skills/agents before adding new ones.
-   - For subagent/agent edits, map the role across all platform directories,
-     including `.cursor/agents`, before editing so mirrors stay aligned.
    - Prefer updating the existing artifact when the behavior belongs to an existing workflow.
 
 2. **Normalize the learning**
@@ -44,7 +46,6 @@ If the user names a target platform for a skill, command, or instruction file, l
 3. **Pick the narrowest home**
    - Put durable repo-wide constraints in `AGENTS.md` or scoped `AGENTS.md`.
    - Put task workflows in `.agents/skills/<name>/SKILL.md`.
-   - Put role definitions in `.agents/agents/<name>.md` for Claude-style agents in this repo.
    - Put deterministic logic in `scripts/` when agents keep retyping fragile shell/API sequences.
    - Avoid creating multiple aliases for the same behavior.
 
@@ -71,6 +72,7 @@ If the user names a target platform for a skill, command, or instruction file, l
 
 - Do not blindly copy upstream examples. Adapt model names, package managers, commands, paths, and verification steps to Kandev.
 - Do not add always-on instructions for rare workflows; use skills or commands.
-- Do not make subagents recursively spawn other subagents unless the user explicitly asks for nested orchestration.
+- Keep the single-session model policy intact unless the user explicitly asks
+  to change it and accepts the cost/context trade-off.
 - Do not keep deprecated/replaced skills around without a clear compatibility reason.
 - Do not web-search platform formats by default. Use external docs only when the bundled reference is missing the needed detail, conflicts with files already in the repo, or the user explicitly asks for latest/current upstream behavior; if that happens, say why before browsing.

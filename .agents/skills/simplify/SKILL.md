@@ -1,6 +1,6 @@
 ---
 name: simplify
-description: Simplify recently changed code — inline one-off abstractions, remove speculative code, reduce nesting, replace cleverness with clarity. Run after implementing a feature.
+description: Simplify recently changed code — inline one-off abstractions, remove speculative code, reduce nesting, replace cleverness with clarity. Use only on explicit request or PR-review remediation.
 ---
 
 # Simplify
@@ -9,16 +9,10 @@ Post-implementation simplification pass. Review recently changed code and active
 
 ## Planner Entry
 
-The planner may simplify small localized changes directly; delegate larger or
-cross-component work. Code/test/config changes still require final Spark
-`verify`. A simplify worker owns one packet and does not spawn workers.
+Run `/simplify` only on explicit request or when an actionable PR finding calls
+for it. It is not a default post-implementation or pre-PR pass.
 
 The best code is code you don't have to write. The second best is code anyone can read.
-
-## Available skills and subagents
-
-- **`verify` worker** — After simplification is accepted and committed through
-  hooks, the planner runs this post-commit gate before push.
 
 ## Steps
 
@@ -29,8 +23,8 @@ Run `git diff --name-only` (or `git diff origin/<base>...HEAD --name-only` for a
 ### 2. Apply simplifications
 
 Work through each changed file. Preserve behavior by inspection; do not run
-tests, lint, typecheck, or full verification from the simplify assignment.
-Report any verification concerns or focused checks the planner should delegate.
+tests, lint, typecheck, or full verification during this pass. Report any
+verification concerns or focused checks to run next.
 
 **Inline one-off abstractions:**
 - Helper functions with a single call site — inline them
@@ -59,12 +53,10 @@ Report any verification concerns or focused checks the planner should delegate.
 - Empty error handlers, unused catch variables
 - Leftover debug logging
 
-### 3. Verify
+### 3. Validate
 
-Report the required final change-aware verification and any focused concerns to the planner;
-do not run verification yourself. The planner delegates it to the `verify`
-worker. If anything breaks, the simplification changed behavior and the
-planner assigns the correction to a worker.
+Run the focused task check affected by the simplification. If anything breaks,
+the simplification changed behavior and must be corrected before continuing.
 
 ### 4. Summary
 

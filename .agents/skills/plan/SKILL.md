@@ -5,9 +5,9 @@ description: Create a committed implementation plan from a feature spec. Explore
 
 # Create Implementation Plan
 
-This is a planner-side artifact skill. The user-started primary planner creates
-the plan and worker packets for substantial independent work; it keeps small,
-localized execution and focused verification local.
+This is a primary-session artifact skill. The user-started conversation creates
+the plan and task files, then the user manually switches that same conversation
+to an implementation model to execute them.
 
 Translate a feature spec into a concrete, phased implementation plan saved under
 `docs/plans/<feature>/`. Plans and task files are committed implementation
@@ -106,7 +106,8 @@ Store slice / hook changes.
 
 ## Tests
 
-Every plan MUST include this section. For each testable behavior in the spec, list:
+Every plan MUST include this section. For each testable behavior in the spec,
+list the exact pre-PR validation:
 - **What:** the behavior under test (maps to a spec scenario)
 - **File:** where the test goes (`*_test.go` or `*.test.ts`)
 - **How:** table-driven unit test / integration test with real DB / mock service
@@ -115,6 +116,10 @@ At minimum, include:
 - One unit test per new function with non-trivial logic
 - One integration test that exercises the full path (handler → service → repo)
 - One test per edge case called out in the spec scenarios
+
+Do not add a generic local QA, review, security, simplify, or full-verification
+step to the plan. The listed task checks are the pre-PR evidence; the two PR AI
+reviewers perform semantic review after the PR opens.
 
 ---
 
@@ -129,15 +134,20 @@ For each user-facing scenario in the spec:
 
 ---
 
-## Implementation Waves
+## Implementation Waves And Parallel Candidates
 
-Group all task files into waves. Parallelism rules:
-- Backend packages: can run in parallel
-- Frontend (Vite/React SPA): usually sequential because shared build, type, and state surfaces overlap
-- E2E: after all backend + frontend changes are done
+Group task files by dependency order. Use waves to expose possible parallelism,
+but label a task as parallel-safe only when its files are disjoint and it does
+not touch shared schemas, migrations, generated contracts, lockfiles, or
+package-wide configuration. E2E follows the backend and frontend changes it
+covers.
+
+The default is sequential execution in the primary conversation. Waves do not
+authorize subagents: only the user may explicitly ask to use them after
+selecting the implementation model.
 
 ```
-Wave 1 (parallel):
+Wave 1 (parallel candidates — user authorization required):
 - [ ] [task-01-backend-contracts](task-01-backend-contracts.md)
 - [ ] [task-02-backend-repository](task-02-backend-repository.md)
 
@@ -182,9 +192,11 @@ Each task should be small enough for one focused implementation pass:
 - **Verification:** exact command(s), e.g. `cd apps/backend && go test -run TestName ./internal/path/...` or `cd apps && pnpm --filter @kandev/web test -- path/to/file.test.ts`.
 - **Files likely touched:** specific paths, not broad directories.
 - **Dependencies:** task numbers that must land first, or `None`.
+- **Parallelism:** `sequential` by default; set `parallel-safe` only with named
+  disjoint files and no shared-state blocker.
 - **Inputs:** relevant spec sections, plan sections, patterns, and dependencies.
 - **Output contract:** summary, files changed, tests run, blockers, risks, and
-  task status update.
+  task/plan status update in the same conversation.
 
 Break a task down further if it touches unrelated subsystems, needs more than one focused session, or the title contains "and".
 
