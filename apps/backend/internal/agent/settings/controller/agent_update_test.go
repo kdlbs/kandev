@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -23,6 +25,8 @@ type fakeRuntimeUpdater struct {
 	target          string
 	resolveErr      error
 	runErr          error
+	runErrs         []error
+	invalidateErr   error
 	refreshCaps     hostutility.AgentCapabilities
 	refreshErr      error
 	runCommand      []string
@@ -31,6 +35,8 @@ type fakeRuntimeUpdater struct {
 	runStarted      chan struct{}
 	releaseRun      chan struct{}
 	runCalls        int
+	invalidateCalls int
+	invalidatePkg   string
 	refreshCalls    int
 	resolvedPackage string
 }
@@ -73,6 +79,35 @@ func TestHostRuntimeUpdaterResolvesTargetWithDirectNPMArgv(t *testing.T) {
 	}
 }
 
+func TestHostRuntimeUpdaterInvalidatesOnlyManagedNPMExecutionTree(t *testing.T) {
+	cacheRoot := t.TempDir()
+	spec := agents.ManagedNPMRuntimeSpec{Package: "opencode-ai"}
+	target := filepath.Join(cacheRoot, "_npx", spec.ExecutionCacheKey())
+	other := filepath.Join(cacheRoot, "_npx", "keep-me")
+	if err := os.MkdirAll(target, 0o755); err != nil {
+		t.Fatalf("mkdir target: %v", err)
+	}
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatalf("mkdir other: %v", err)
+	}
+
+	executor := &recordingCommandExecutor{output: cacheRoot + "\n"}
+	updater := &hostRuntimeUpdater{executor: executor}
+	if err := updater.InvalidateExecutionCache(context.Background(), spec.Package); err != nil {
+		t.Fatalf("InvalidateExecutionCache: %v", err)
+	}
+	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("target stat error = %v, want not exists", err)
+	}
+	if _, err := os.Stat(other); err != nil {
+		t.Fatalf("unrelated cache entry was removed: %v", err)
+	}
+	want := []string{"npm", "config", "get", "cache"}
+	if got := strings.Join(executor.outputCommand, "\x00"); got != strings.Join(want, "\x00") {
+		t.Fatalf("command = %v, want %v", executor.outputCommand, want)
+	}
+}
+
 func (f *fakeRuntimeUpdater) CurrentCapabilities(string) (hostutility.AgentCapabilities, bool) {
 	return f.current, f.currentFound
 }
@@ -96,6 +131,9 @@ func (f *fakeRuntimeUpdater) RunUpdate(
 	release := f.releaseRun
 	output := f.updateOutput
 	err := f.runErr
+	if len(f.runErrs) >= f.runCalls {
+		err = f.runErrs[f.runCalls-1]
+	}
 	f.mu.Unlock()
 	if started != nil {
 		select {
@@ -113,6 +151,14 @@ func (f *fakeRuntimeUpdater) RunUpdate(
 	}
 	onChunk(output)
 	return err
+}
+
+func (f *fakeRuntimeUpdater) InvalidateExecutionCache(_ context.Context, packageName string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.invalidateCalls++
+	f.invalidatePkg = packageName
+	return f.invalidateErr
 }
 
 func (f *fakeRuntimeUpdater) Refresh(
@@ -282,6 +328,37 @@ func TestAgentUpdateRegistryFailureStopsBeforeMutation(t *testing.T) {
 	defer updater.mu.Unlock()
 	if updater.runCalls != 0 || updater.refreshCalls != 0 {
 		t.Fatalf("calls after registry failure: update=%d refresh=%d", updater.runCalls, updater.refreshCalls)
+	}
+}
+
+func TestAgentUpdateRepairsExecutionCacheAndRetriesOnce(t *testing.T) {
+	updater := &fakeRuntimeUpdater{
+		target:  "1.1.0",
+		runErrs: []error{errors.New("truncated npm execution tree"), nil},
+		refreshCaps: hostutility.AgentCapabilities{
+			Status:       hostutility.StatusOK,
+			AgentVersion: "1.1.0",
+		},
+	}
+	store, completed := newUpdateTestStore(updater, newMaintenanceCoordinator(), nil)
+
+	job, err := store.Enqueue("managed-acp", managedRuntimeSpec())
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
+	if !strings.Contains(final.Output, "repairing execution cache") ||
+		!strings.Contains(final.Output, "retrying managed runtime update") {
+		t.Fatalf("recovery output = %q", final.Output)
+	}
+
+	updater.mu.Lock()
+	defer updater.mu.Unlock()
+	if updater.runCalls != 2 {
+		t.Fatalf("update calls = %d, want 2", updater.runCalls)
+	}
+	if updater.invalidateCalls != 1 || updater.invalidatePkg != managedRuntimeSpec().Package {
+		t.Fatalf("cache repair = %d calls for %q", updater.invalidateCalls, updater.invalidatePkg)
 	}
 }
 

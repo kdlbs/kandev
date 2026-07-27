@@ -836,17 +836,6 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	}
 	s.finalizeAutomationRunIfEphemeral(ctx, data.TaskID, data.SessionID, false, errMsg)
 
-	// Check if the agent was started with a resume token AND session init hadn't completed.
-	// If init completed, this is a normal prompt failure (e.g. agent internal timeout),
-	// not a resume failure — skip the resume cleanup path.
-	if data.SessionID != "" && s.wasResumeAttempt(ctx, data.SessionID) &&
-		!s.agentManager.WasSessionInitialized(data.AgentExecutionID) {
-		if s.handleResumeFailure(ctx, data) {
-			return // Resume token cleared, session set to WAITING_FOR_INPUT
-		}
-		// Fall through to normal failure handling if cleanup failed
-	}
-
 	// Make all agent CLI failures recoverable — let the user choose to resume or start fresh.
 	if data.SessionID != "" {
 		s.handleRecoverableFailure(ctx, data)
@@ -1046,8 +1035,9 @@ func (s *Service) wasResumeAttempt(ctx context.Context, sessionID string) bool {
 }
 
 // clearResumeToken removes the resume token from the executor running record so
-// the next agent start won't use --resume. Used by both automatic resume failure
-// handling and user-initiated fresh start recovery.
+// the next agent start won't use --resume. It is reserved for explicit
+// user-initiated fresh-start recovery; ordinary ACP startup failures retain the
+// token so the session can be retried.
 //
 // Unconditional clear: passes expectedExecID="" so the narrow update is not
 // CAS-guarded — clearing a token is always intentional regardless of which
@@ -1059,54 +1049,6 @@ func (s *Service) clearResumeToken(ctx context.Context, sessionID string) {
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-}
-
-// handleResumeFailure handles the case where an agent failed while using a resume token.
-// It clears the token so the next attempt starts fresh, and notifies the user.
-//
-// The session is set to WAITING_FOR_INPUT so the user can send a new message
-// (which triggers a fresh agent start without --resume).
-//
-// Returns true to signal that the caller should skip normal failure handling
-// (scheduler retry, FAILED state) since we've handled the state transition ourselves.
-func (s *Service) handleResumeFailure(ctx context.Context, data watcher.AgentEventData) bool {
-	s.logger.Warn("detected resume failure, clearing token for fresh start on next user action",
-		zap.String("task_id", data.TaskID),
-		zap.String("session_id", data.SessionID),
-		zap.String("error", data.ErrorMessage))
-
-	// 1. Clear the resume token so the next attempt won't use --resume.
-	s.clearResumeToken(ctx, data.SessionID)
-
-	// 2. Send a status message about the failed resume.
-	if s.messageCreator != nil {
-		statusMsg := fmt.Sprintf("Previous agent session could not be restored (%s). Send a new message to start a fresh session.", data.ErrorMessage)
-		if err := s.messageCreator.CreateSessionMessage(
-			ctx,
-			data.TaskID,
-			statusMsg,
-			data.SessionID,
-			string(v1.MessageTypeStatus),
-			s.getActiveTurnID(data.SessionID),
-			map[string]interface{}{
-				"variant":       "warning",
-				"resume_failed": true,
-			},
-			false,
-		); err != nil {
-			s.logger.Warn("failed to create resume failure status message",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		}
-	}
-
-	// 3. Set session to WAITING_FOR_INPUT (not FAILED) so the user can interact.
-	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false)
-
-	// 4. Ensure task is in REVIEW state unless another session is still working.
-	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
-
-	return true
 }
 
 // handleRecoverableFailure handles agent failures by keeping the session recoverable.

@@ -71,6 +71,62 @@ func setupLiveResumeTestFixture(repo *mockRepository) {
 	}
 }
 
+func TestResumeSession_PersistsStartingBeforeLaunch(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(ctx context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			current, err := repo.GetTaskSession(ctx, "sess-1")
+			if err != nil {
+				return nil, err
+			}
+			if current.State != models.TaskSessionStateStarting {
+				return nil, fmt.Errorf("session state at launch = %s, want %s", current.State, models.TaskSessionStateStarting)
+			}
+			return &LaunchAgentResponse{AgentExecutionID: "exec-new", Status: v1.AgentStatusStarting}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+}
+
+func TestResumeSession_RollsBackStartingWhenLaunchFails(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+
+	launchErr := errors.New("credential broker rejected launch")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(ctx context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			current, err := repo.GetTaskSession(ctx, "sess-1")
+			if err != nil {
+				return nil, err
+			}
+			if current.State != models.TaskSessionStateStarting {
+				return nil, fmt.Errorf("session state at launch = %s, want %s", current.State, models.TaskSessionStateStarting)
+			}
+			return nil, launchErr
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeSession error = %v, want %v", err, launchErr)
+	}
+	current := repo.sessions["sess-1"]
+	if current.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state after failed launch = %s, want %s", current.State, models.TaskSessionStateFailed)
+	}
+	if !strings.Contains(current.ErrorMessage, launchErr.Error()) {
+		t.Fatalf("session error = %q, want launch error", current.ErrorMessage)
+	}
+}
+
 func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing.T) {
 	tests := []struct {
 		name         string

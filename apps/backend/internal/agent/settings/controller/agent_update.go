@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -27,6 +29,7 @@ type RuntimeUpdater interface {
 	CurrentCapabilities(agentName string) (hostutility.AgentCapabilities, bool)
 	ResolveTarget(ctx context.Context, packageName string) (string, error)
 	RunUpdate(ctx context.Context, command agents.Command, onChunk func(string)) error
+	InvalidateExecutionCache(ctx context.Context, packageName string) error
 	Refresh(
 		ctx context.Context,
 		agentName string,
@@ -101,6 +104,41 @@ func (u *hostRuntimeUpdater) RunUpdate(
 	onChunk func(string),
 ) error {
 	return u.executor.Stream(ctx, command, onChunk)
+}
+
+func (u *hostRuntimeUpdater) InvalidateExecutionCache(ctx context.Context, packageName string) error {
+	packageName = strings.TrimSpace(packageName)
+	if packageName == "" {
+		return errors.New("managed runtime package is empty")
+	}
+	output, err := u.executor.Output(ctx, agents.NewCommand("npm", "config", "get", "cache"))
+	if err != nil {
+		return fmt.Errorf("resolve npm cache root: %w", err)
+	}
+	cacheRoot := strings.TrimSpace(output)
+	if !filepath.IsAbs(cacheRoot) {
+		return fmt.Errorf("npm cache root is not absolute: %q", cacheRoot)
+	}
+	cacheRoot = filepath.Clean(cacheRoot)
+	if cacheRoot == string(filepath.Separator) {
+		return errors.New("refusing to invalidate execution cache under filesystem root")
+	}
+	npxRoot := filepath.Join(cacheRoot, "_npx")
+	if info, statErr := os.Lstat(npxRoot); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("refusing to invalidate execution cache through symlink: %s", npxRoot)
+	} else if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return fmt.Errorf("inspect npm execution cache: %w", statErr)
+	}
+	key := (agents.ManagedNPMRuntimeSpec{Package: packageName}).ExecutionCacheKey()
+	target := filepath.Join(npxRoot, key)
+	rel, err := filepath.Rel(npxRoot, target)
+	if err != nil || rel != key {
+		return fmt.Errorf("invalid npm execution cache target: %s", target)
+	}
+	if err := os.RemoveAll(target); err != nil {
+		return fmt.Errorf("remove npm execution cache %s: %w", target, err)
+	}
+	return nil
 }
 
 func (u *hostRuntimeUpdater) Refresh(
