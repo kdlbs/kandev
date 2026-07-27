@@ -111,18 +111,21 @@ func TestExecutorProfileEnvForSession_PrefersSessionProfileOverStaleEnvironmentR
 // still resolve through the environment row.
 func TestExecutorProfileEnvForSession_FallsBackToEnvironmentRow(t *testing.T) {
 	tests := []struct {
-		name   string
-		reader *fakeExecutorProfileReader
+		name      string
+		sessionID string
+		reader    *fakeExecutorProfileReader
 	}{
 		{
-			name: "session has no executor profile",
+			name:      "session has no executor profile",
+			sessionID: "session-no-profile",
 			reader: &fakeExecutorProfileReader{
-				session: &models.TaskSession{ID: "session-3"},
+				session: &models.TaskSession{ID: "session-no-profile"},
 				env:     &models.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-env"},
 			},
 		},
 		{
-			name: "session lookup fails",
+			name:      "session lookup fails",
+			sessionID: "session-error",
 			reader: &fakeExecutorProfileReader{
 				sessionErr: errors.New("boom"),
 				env:        &models.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-env"},
@@ -137,7 +140,7 @@ func TestExecutorProfileEnvForSession_FallsBackToEnvironmentRow(t *testing.T) {
 			}
 			m := newExecutorProfileEnvManager(t, tt.reader)
 
-			got := m.ExecutorProfileEnvForSession(context.Background(), "session-3", "env-1")
+			got := m.ExecutorProfileEnvForSession(context.Background(), tt.sessionID, "env-1")
 
 			if got["TOKEN"] != "from-env-row" {
 				t.Fatalf("TOKEN = %q, want environment-row fallback", got["TOKEN"])
