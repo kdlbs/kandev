@@ -18,18 +18,13 @@ export function readClipboardAttachments(clipboardData: DataTransfer): {
   const hasImageItem = Array.from(clipboardData.items).some((item) =>
     item.type.startsWith("image/"),
   );
-  if (hasImageItem || hasImageOnlyHtml(clipboardData.getData("text/html"))) {
+  if (hasImageItem || hasImageOnlyHtml(clipboardData)) {
     return { files: [], issue: "unreadable-image" };
   }
   return { files: [] };
 }
 
-function hasImageOnlyHtml(html: string): boolean {
-  if (!html) return false;
-  const parsed = new DOMParser().parseFromString(html, "text/html");
-  if (!parsed.body.querySelector("img")) return false;
-  parsed.body
-    .querySelectorAll("img, script, style, template, noscript")
-    .forEach((element) => element.remove());
-  return !parsed.body.textContent?.trim();
+function hasImageOnlyHtml(clipboardData: DataTransfer): boolean {
+  if (clipboardData.getData("text/plain").trim()) return false;
+  return /<img(?=[\t\n\f\r />])/i.test(clipboardData.getData("text/html"));
 }
