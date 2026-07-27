@@ -222,12 +222,20 @@ func executeSimulatedToolResult(e *emitter, line string) {
 // the actual output - the ACP shell-output normalizer must strip that
 // leading echo so the transcript's command header and Output disclosure
 // don't show the command twice.
-// Format: e2e:shell_result("<command>", "<stdout>")
+// Format: e2e:shell_result("<command>", "<stdout>"[, "<cwd>"])
 //
-// rawInputCommandKey/rawOutputKey mirror the "command"/"output" keys a real
-// shell provider's tool_call/tool_call_update JSON uses.
+// The optional third argument reproduces a provider that resolves a
+// relative file-path argument in the command to an absolute (cwd-joined)
+// one before actually invoking the real terminal, while the reported
+// "command" keeps the original relative form - the normalizer's workDir-
+// aware echo stripping must still recognize that echo.
+//
+// rawInputCommandKey/rawInputCwdKey/rawOutputKey mirror the
+// "command"/"cwd"/"output" keys a real shell provider's
+// tool_call/tool_call_update JSON uses.
 const (
 	rawInputCommandKey = "command"
+	rawInputCwdKey     = "cwd"
 	rawOutputKey       = "output"
 )
 
@@ -235,10 +243,17 @@ func executeSimulatedShellResult(e *emitter, line string) {
 	inner := extractParenContent(line, "e2e:shell_result(")
 	command, rest := extractFirstStringArg(inner)
 	rest = strings.TrimPrefix(strings.TrimSpace(rest), ",")
-	stdout, _ := extractFirstStringArg(strings.TrimSpace(rest))
+	stdout, rest := extractFirstStringArg(strings.TrimSpace(rest))
+	rest = strings.TrimPrefix(strings.TrimSpace(rest), ",")
+	cwd, _ := extractFirstStringArg(strings.TrimSpace(rest))
+
+	rawInput := map[string]any{rawInputCommandKey: command}
+	if cwd != "" {
+		rawInput[rawInputCwdKey] = cwd
+	}
 
 	toolID := nextToolID()
-	e.startTool(toolID, command, acp.ToolKindExecute, map[string]any{rawInputCommandKey: command})
+	e.startTool(toolID, command, acp.ToolKindExecute, rawInput)
 	e.completeTool(toolID, map[string]any{rawOutputKey: stdout})
 }
 

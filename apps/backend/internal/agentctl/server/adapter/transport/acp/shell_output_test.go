@@ -422,6 +422,40 @@ func TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithWorkDirResolvedPath
 	require.Equal(t, "hello\n", payload.ShellExec().Output.Stdout)
 }
 
+// TestNormalizeShellToolResultWorkDirFallbackNeverCorruptsNearMissOutput is a
+// safety regression for the workDir-collapse fallback added alongside the
+// above test: ReplaceAll(firstLine, workDir+"/", "") strips every
+// occurrence of that prefix from the echoed line, including one embedded in
+// a quoted argument that isn't a resolved file path (e.g. a grep pattern
+// that happens to contain workDir-looking text). If the collapsed line
+// still doesn't reconstruct "$ "+command exactly - because the real
+// terminal echo genuinely differs (different args, or the workDir text was
+// incidental rather than a resolved path) - the fallback must leave stdout
+// untouched rather than mangling legitimate output.
+func TestNormalizeShellToolResultWorkDirFallbackNeverCorruptsNearMissOutput(t *testing.T) {
+	t.Parallel()
+
+	command := `grep -n "/repo/notes" apps/foo.txt`
+	workDir := "/repo"
+	// The real terminal echo resolves the file argument to an absolute path
+	// (workDir-joined) AND happens to also carry a coincidental "/repo/"
+	// substring inside the quoted pattern - unrelated to path resolution.
+	// Collapsing every "/repo/" occurrence therefore also eats the pattern's
+	// own "/repo/" text, so the result can never exactly reconstruct
+	// "$ "+command: the fallback must decline to strip rather than guess.
+	stdout := `$ grep -n "/repo/notes" /repo/apps/foo.txt` + "\n1:a match\n"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeToolResult(payload, stdout)
+
+	require.Equal(t, stdout, payload.ShellExec().Output.Stdout)
+}
+
 func TestNormalizeShellToolUpdateStripsLeadingCommandEchoFromLiveOutput(t *testing.T) {
 	t.Parallel()
 

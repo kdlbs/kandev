@@ -58,4 +58,63 @@ test.describe("shell command output echo stripping", () => {
     // disclosure - it's already shown once in the command row above.
     await expect(outputRegion).not.toContainText(command);
   });
+
+  test("does not repeat a workDir-resolved absolute-path echo inside the expanded Output disclosure", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // Some providers resolve a relative file-path argument in the command
+    // to an absolute (cwd-joined) one before actually invoking the real
+    // terminal, while the reported "command" - the same text the chat
+    // header renders - keeps the original relative form. The captured echo
+    // line then no longer matches the command byte-for-byte.
+    const command = "cat notes.txt";
+    const cwd = "/workspace/example-repo";
+    const resolvedCommand = `cat ${cwd}/notes.txt`;
+    const echoedOutput = `$ ${resolvedCommand}\nhello\n`;
+
+    const script = [
+      `e2e:shell_result("${command}", "${echoedOutput.replace(/\n/g, "\\n")}", "${cwd}")`,
+      'e2e:message("done")',
+    ].join("\n");
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Shell echo workDir regression",
+      seedData.agentProfileId,
+      {
+        description: script,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const chat = session.activeChat();
+    const commandRow = chat.getByTestId("tool-execute-command").filter({ hasText: command });
+    await expect(commandRow).toBeVisible();
+    // The header keeps rendering the original relative command, unaffected
+    // by the provider's internal absolute-path resolution.
+    await expect(commandRow).toHaveText(command);
+
+    const disclosure = chat.getByRole("button", { name: "Show command output" });
+    const responsePromise = testPage.waitForResponse(
+      (response) => response.url().endsWith("/shell-output") && response.status() === 200,
+    );
+    await disclosure.click();
+    await responsePromise;
+
+    const outputRegion = chat.getByTestId("tool-execute-output");
+    await expect(outputRegion).toContainText("hello");
+    // Critical: neither the workDir-prefixed absolute path nor a repeat of
+    // the resolved command may leak into the Output disclosure.
+    await expect(outputRegion).not.toContainText(cwd);
+    await expect(outputRegion).not.toContainText(resolvedCommand);
+  });
 });
