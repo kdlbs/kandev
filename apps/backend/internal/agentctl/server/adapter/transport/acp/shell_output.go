@@ -78,18 +78,22 @@ func stripCommandEcho(command, workDir, stdout string, commitExactMatch bool) st
 	if rest, ok := strings.CutPrefix(stdout, "$ "+command); ok {
 		return finishCommandEchoStrip(rest, stdout, commitExactMatch)
 	}
+	return stripCommandEchoWithWorkDir(command, workDir, stdout, commitExactMatch)
+}
+
+// stripCommandEchoWithWorkDir is stripCommandEcho's fallback for providers
+// that resolve a relative file-path argument in the command to an absolute
+// (workDir-joined) one before actually invoking the real terminal, while the
+// tool call's reported "command" field - the same text the chat header
+// renders - keeps the original relative form. The captured echo line then no
+// longer matches literally. Retry against just the first echoed line with
+// the workDir prefix collapsed back out, so real output later in stdout
+// (which may legitimately contain workDir-prefixed paths of its own) is
+// never touched.
+func stripCommandEchoWithWorkDir(command, workDir, stdout string, commitExactMatch bool) string {
 	if workDir == "" {
 		return stdout
 	}
-	// Some providers resolve a relative file-path argument in the command to
-	// an absolute (workDir-joined) one before actually invoking the real
-	// terminal, while the tool call's reported "command" field - the same
-	// text the chat header renders - keeps the original relative form. The
-	// captured echo line then no longer matches literally. Retry against
-	// just the first echoed line with the workDir prefix collapsed back
-	// out, so real output later in stdout (which may legitimately contain
-	// workDir-prefixed paths of its own) is never touched.
-	//
 	// workDir's trailing slashes are collapsed to exactly one first: a
 	// provider can report cwd already "/"-terminated (e.g. "/repo/"), and
 	// the root directory "/" is inherently "/"-terminated. Appending "/"
