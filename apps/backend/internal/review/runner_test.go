@@ -789,6 +789,42 @@ func TestRunner_CancelStopsInferenceAndKeepsRunCancelled(t *testing.T) {
 	}
 }
 
+// TestRunner_failSkipsCanceledCause reproduces CI flake where cancel raced
+// CancelRun: inference errors wrapped with %v lost context.Canceled, so fail()
+// called FailRun before CancelRun and left the row terminal-failed. fail must
+// treat a cancelled run context as cancel even when the cause chain is broken.
+func TestRunner_failSkipsCanceledCause(t *testing.T) {
+	runner, store, _ := newBlockingHarness(t, okResponse("a.go", 2))
+	runner.Stop() // no live pass; we call fail directly
+
+	run, err := store.CreateRun(context.Background(), taskservice.CreateRunRequest{
+		TaskID: "task-fail-cancel",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := store.MarkRunRunning(context.Background(), run.ID); err != nil {
+		t.Fatalf("MarkRunRunning: %v", err)
+	}
+
+	// Broken wrapper: historical reviewBatches path used %v and dropped Canceled.
+	broken := fmt.Errorf("%w: %v", ErrExecutionFailed, context.Canceled)
+	if errors.Is(broken, context.Canceled) {
+		t.Fatal("precondition: broken wrapper must not preserve context.Canceled")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = runner.fail(ctx, run.ID, broken, time.Now())
+
+	if got := store.statusOf(run.ID); got == models.ReviewRunFailed {
+		t.Fatalf("fail must not mark a cancelled run failed, got %q", got)
+	}
+	if failure, ok := store.lastFailure(); ok {
+		t.Fatalf("fail must not record FailRun on cancel, got %#v", failure)
+	}
+}
+
 // TestRunner_ConcurrentLaunchesCreateOneRun covers the race where the DB check
 // and the in-memory claim were not atomic, leaving the loser's pending run row
 // orphaned with no goroutine behind it.
