@@ -38,13 +38,14 @@ type fakeGitHubCredentialLeaseIssuer struct {
 
 type fakeTaskGitCredentialPolicyResolver struct {
 	policy TaskGitCredentialPolicy
+	err    error
 }
 
 func (r fakeTaskGitCredentialPolicyResolver) ResolveTaskGitCredentialPolicy(
 	context.Context,
 	string,
 ) (TaskGitCredentialPolicy, error) {
-	return r.policy, nil
+	return r.policy, r.err
 }
 
 func (f *fakeGitHubCredentialLeaseIssuer) IssueGitHubCredentialLease(
@@ -168,6 +169,32 @@ func TestApplyGitCredentialSnapshotUsesExecutorSources(t *testing.T) {
 	}
 }
 
+func TestApplyGitCredentialSnapshotUsesManagedWorkspaceIdentity(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: "managed", WorkspaceMethod: "github_app_installation", WorkspaceActor: "acme-bot"},
+	})
+	session := &models.TaskSession{ID: "session-1"}
+	req := &LaunchAgentRequest{WorkspaceID: "workspace-1", Env: map[string]string{githubauth.CredentialBrokerURLEnv: "http://broker"}}
+
+	if err := exec.applyGitCredentialSnapshot(context.Background(), req, session); err != nil {
+		t.Fatalf("applyGitCredentialSnapshot() error = %v", err)
+	}
+	snapshot := session.Metadata[models.SessionMetaKeyGitCredentialSnapshot].(models.GitCredentialSnapshot)
+	if snapshot.Source != "workspace" || snapshot.Transport != "managed_https" || snapshot.WorkspaceMethod != "github_app_installation" || snapshot.Actor != "acme-bot" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestApplyGitCredentialSnapshotReturnsResolverError(t *testing.T) {
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{err: errors.New("resolver unavailable")})
+	err := exec.applyGitCredentialSnapshot(context.Background(), &LaunchAgentRequest{WorkspaceID: "workspace-1"}, &models.TaskSession{})
+	if err == nil || !strings.Contains(err.Error(), "resolver unavailable") {
+		t.Fatalf("applyGitCredentialSnapshot() error = %v", err)
+	}
+}
+
 func TestConfigureGitHubCredentialBrokerIssuesOneLeasePerRepository(t *testing.T) {
 	issuer := &fakeGitHubCredentialLeaseIssuer{}
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
@@ -242,14 +269,22 @@ func TestConfigureGitHubCredentialBrokerSkipsExecutorInheritedPolicy(t *testing.
 		policy: TaskGitCredentialPolicy{Mode: "executor"},
 	})
 	req := &LaunchAgentRequest{WorkspaceID: "workspace-1", Env: map[string]string{
-		githubauth.CredentialBrokerURLEnv: "http://broker.example/resolve",
-		"GIT_CONFIG_COUNT":                "3",
-		"GIT_CONFIG_KEY_0":                "core.hooksPath",
-		"GIT_CONFIG_VALUE_0":              "/work/hooks",
-		"GIT_CONFIG_KEY_1":                "credential.https://github.com.helper",
-		"GIT_CONFIG_VALUE_1":              "",
-		"GIT_CONFIG_KEY_2":                "credential.https://github.com.helper",
-		"GIT_CONFIG_VALUE_2":              "!agentctl git-credential",
+		githubauth.CredentialBrokerURLEnv:  "http://broker.example/resolve",
+		githubauth.CredentialLeaseEnv:      "lease",
+		githubauth.CredentialTaskIDEnv:     "task-1",
+		githubauth.CredentialSessionIDEnv:  "session-1",
+		githubauth.CredentialRepositoryEnv: "repo-1",
+		githubauth.CredentialOwnerEnv:      "acme",
+		githubauth.CredentialRepoEnv:       "widgets",
+		githubauth.CredentialHostEnv:       "github.com",
+		githubauth.CredentialScopesEnv:     `[{"repo":"widgets"}]`,
+		"GIT_CONFIG_COUNT":                 "3",
+		"GIT_CONFIG_KEY_0":                 "core.hooksPath",
+		"GIT_CONFIG_VALUE_0":               "/work/hooks",
+		"GIT_CONFIG_KEY_1":                 "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_1":               "",
+		"GIT_CONFIG_KEY_2":                 "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_2":               "!agentctl git-credential",
 	}}
 	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
 		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
@@ -263,6 +298,11 @@ func TestConfigureGitHubCredentialBrokerSkipsExecutorInheritedPolicy(t *testing.
 	}
 	if got := req.Env[githubauth.CredentialBrokerURLEnv]; got != "" {
 		t.Fatalf("broker URL = %q, want none for executor inheritance", got)
+	}
+	for _, key := range []string{githubauth.CredentialLeaseEnv, githubauth.CredentialTaskIDEnv, githubauth.CredentialSessionIDEnv, githubauth.CredentialRepositoryEnv, githubauth.CredentialOwnerEnv, githubauth.CredentialRepoEnv, githubauth.CredentialHostEnv, githubauth.CredentialScopesEnv} {
+		if _, ok := req.Env[key]; ok {
+			t.Fatalf("Env[%q] still contains a managed credential value", key)
+		}
 	}
 	if got, want := req.Env["GIT_CONFIG_COUNT"], "1"; got != want {
 		t.Fatalf("GIT_CONFIG_COUNT = %q, want %q", got, want)
