@@ -16,35 +16,33 @@ export function useLsp(
   const lspServerConfigs = useAppStore((s) => s.userSettings.lspServerConfigs);
   const lspLanguage = toLspLanguage(monacoLanguage);
   const shouldAutoStart = lspLanguage ? lspAutoStartLanguages.includes(lspLanguage) : false;
+  const isManuallyEnabled = useSyncExternalStore(
+    (cb) =>
+      lspClientManager.onChange((key) => {
+        if (key === `${sessionId}:${lspLanguage}`) cb();
+      }),
+    () =>
+      sessionId && lspLanguage
+        ? lspClientManager.isEnabledInStorage(sessionId, lspLanguage)
+        : false,
+  );
 
   const status = useSyncExternalStore(
     (cb) =>
-      lspClientManager.onStatusChange((key) => {
+      lspClientManager.onChange((key) => {
         if (key === `${sessionId}:${lspLanguage}`) cb();
       }),
     () =>
       sessionId && lspLanguage ? lspClientManager.getStatus(sessionId, lspLanguage) : DISABLED,
   );
 
-  // Auto-start: connect when file opens if language is in auto-start list
+  // Each mounted matching editor owns one connection lease. Manual policy and
+  // auto-start only decide whether the editor should acquire that lease.
   useEffect(() => {
-    if (!shouldAutoStart || !sessionId || !lspLanguage) return;
+    if ((!shouldAutoStart && !isManuallyEnabled) || !sessionId || !lspLanguage) return;
     const disconnect = lspClientManager.connect(sessionId, lspLanguage, lspServerConfigs);
     return disconnect;
-  }, [shouldAutoStart, sessionId, lspLanguage, lspServerConfigs]);
-
-  // Restore LSP state from localStorage: if the user previously enabled LSP
-  // manually for this session+language, reconnect automatically on page load.
-  useEffect(() => {
-    if (!sessionId || !lspLanguage) return;
-    if (shouldAutoStart) return;
-    const current = lspClientManager.getStatus(sessionId, lspLanguage);
-    if (current.state !== "disabled") return;
-
-    if (lspClientManager.isEnabledInStorage(sessionId, lspLanguage)) {
-      lspClientManager.connect(sessionId, lspLanguage, lspServerConfigs);
-    }
-  }, [sessionId, lspLanguage, shouldAutoStart, lspServerConfigs]);
+  }, [isManuallyEnabled, shouldAutoStart, sessionId, lspLanguage, lspServerConfigs]);
 
   // Manual toggle
   const toggle = useCallback(() => {
@@ -55,7 +53,6 @@ export function useLsp(
       current.state === "error" ||
       current.state === "unavailable"
     ) {
-      lspClientManager.connect(sessionId, lspLanguage, lspServerConfigs);
       lspClientManager.saveEnabledState(sessionId, lspLanguage);
     } else if (
       current.state === "ready" ||
@@ -65,7 +62,7 @@ export function useLsp(
       lspClientManager.stop(sessionId, lspLanguage);
       lspClientManager.clearEnabledState(sessionId, lspLanguage);
     }
-  }, [sessionId, lspLanguage, lspServerConfigs]);
+  }, [sessionId, lspLanguage]);
 
   return { status, lspLanguage, toggle };
 }

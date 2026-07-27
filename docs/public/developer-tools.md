@@ -198,6 +198,8 @@ Auto-start and auto-install are off for every language by default. Enable only t
 
 Language servers run beside the project on the **task host**, with the task workspace as their working directory. V1 supports Local PC and Local Docker tasks. SSH, Sprites, and remote-Docker tasks show an unsupported-executor state instead of starting a server. The desktop Monaco editor wires diagnostics, completion, hover, definition, references, signature help, and semantic tokens. The mobile file viewer does not start language servers in the background.
 
+Only enable Kotlin language support for repositories you trust. Kotlin project import can evaluate Gradle or Maven build configuration on the task host; use a disposable Local Docker executor when the repository or its build files are untrusted.
+
 Server lookup checks the task host's `PATH` and its `~/.kandev/lsp-servers` directory. Auto-install uses different toolchains:
 
 - TypeScript/JavaScript and Python install npm packages into Kandev's language-server storage;

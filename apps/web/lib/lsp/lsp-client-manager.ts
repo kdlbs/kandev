@@ -49,14 +49,14 @@ export const LSP_DEFAULT_CONFIGS: Record<string, Record<string, unknown>> = {
 const DISABLED_STATUS = { state: "disabled" } as const;
 const LSP_IDLE_TIMEOUT = 2 * 60 * 1000; // 2 minutes
 
-type StatusListener = (key: string, status: LspStatus) => void;
+type ChangeListener = (key: string) => void;
 class LSPClientManager {
   private connections = new Map<string, ManagedLspConnection>();
   private connectionGeneration = 0;
   private statuses = new Map<string, LspStatus>();
   /** Keeps Monaco model identity stable after an LSP connection stops or crashes. */
   private workspaceMetadata = new Map<string, WorkspaceMetadata>();
-  private listeners = new Set<StatusListener>();
+  private listeners = new Set<ChangeListener>();
   private fileOpener: ((uri: string, line?: number, column?: number) => void) | null = null;
   /** Tracks which connections own placeholder Monaco models created for references/definitions. */
   private placeholderModelOwners = new Map<string, Set<string>>();
@@ -82,6 +82,7 @@ class LSPClientManager {
     try {
       localStorage.setItem(this.lspStorageKey(sessionId, language), "1");
     } catch {}
+    this.notifyChange(`${sessionId}:${language}`);
   }
 
   /** Clear the saved LSP state (manual stop). */
@@ -89,6 +90,7 @@ class LSPClientManager {
     try {
       localStorage.removeItem(this.lspStorageKey(sessionId, language));
     } catch {}
+    this.notifyChange(`${sessionId}:${language}`);
   }
 
   /** Check if LSP was previously enabled for this session+language. */
@@ -128,18 +130,18 @@ class LSPClientManager {
     return [...repositories];
   }
 
-  onStatusChange(listener: StatusListener): () => void {
+  onChange(listener: ChangeListener): () => void {
     this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
+    return () => this.listeners.delete(listener);
+  }
+
+  private notifyChange(key: string): void {
+    for (const listener of this.listeners) listener(key);
   }
 
   private setStatus(key: string, status: LspStatus) {
     this.statuses.set(key, status);
-    for (const listener of this.listeners) {
-      listener(key, status);
-    }
+    this.notifyChange(key);
   }
 
   // ------- Connection lifecycle -------
@@ -623,9 +625,7 @@ class LSPClientManager {
 
     this.cleanupConnection(conn);
     this.statuses.delete(key);
-    for (const listener of this.listeners) {
-      listener(key, DISABLED_STATUS);
-    }
+    this.notifyChange(key);
   }
 
   disconnectAll(): void {
@@ -647,9 +647,7 @@ class LSPClientManager {
         this.cleanupConnection(conn);
         if (!wasCurrent) return;
         this.statuses.delete(key);
-        for (const listener of this.listeners) {
-          listener(key, DISABLED_STATUS);
-        }
+        this.notifyChange(key);
       }, LSP_IDLE_TIMEOUT);
     }
   }
