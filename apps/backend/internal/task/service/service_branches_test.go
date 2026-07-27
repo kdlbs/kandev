@@ -987,3 +987,35 @@ func TestAddBranchToTask_ActiveTurnUsesLegacyMaterializer(t *testing.T) {
 		t.Fatalf("task repositories = %#v, want added branch", rows)
 	}
 }
+
+func TestAddBranchToTask_LiveTaskRollsBackDeferredMaterialization(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-live-deferred", Name: "WS"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-live-deferred", WorkspaceID: "ws-live-deferred", Name: "WF"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-live-deferred", WorkspaceID: "ws-live-deferred", Name: "app", DefaultBranch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{WorkspaceID: "ws-live-deferred", WorkflowID: "wf-live-deferred", WorkflowStepID: "step", Title: "Task", Repositories: []TaskRepositoryInput{{RepositoryID: "repo-live-deferred", BaseBranch: "main"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedWorktreeTaskEnv(t, repo, task.ID, "env-live-deferred")
+	svc.SetBranchMaterializer(&stubMaterializer{})
+
+	_, err = svc.AddBranchToTask(ctx, AddBranchToTaskRequest{TaskID: task.ID, RepositoryID: "repo-live-deferred", BaseBranch: "main", CheckoutBranch: "feature/deferred"})
+	if err == nil {
+		t.Fatal("AddBranchToTask succeeded after live materialization was deferred")
+	}
+	rows, err := repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("task repositories = %#v, want deferred attachment rolled back", rows)
+	}
+}

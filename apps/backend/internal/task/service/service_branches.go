@@ -333,6 +333,9 @@ func (s *Service) materializeBranch(ctx context.Context, taskID, taskRepositoryI
 			zap.Error(err))
 		return nil, fmt.Errorf("materialize branch: %w", err)
 	}
+	if alreadyLaunched && result == nil {
+		return nil, fmt.Errorf("materialize branch: live task did not create a worktree")
+	}
 	return result, nil
 }
 
