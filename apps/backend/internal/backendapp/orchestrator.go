@@ -99,6 +99,7 @@ func provideOrchestrator(
 			githubExecutorCredentialLeaseAdapter{service: githubSvc},
 			githubCredentialBrokerEndpoint(cfg),
 		)
+		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
@@ -178,6 +179,26 @@ func provideOrchestrator(
 
 type githubCredentialLeaseService interface {
 	IssueGitHubCredentialLease(context.Context, githubpkg.CredentialLeaseRequest) (*githubpkg.CredentialLease, error)
+	DescribeTaskGitCredentialPolicy(context.Context, string) (githubpkg.TaskGitCredentialPolicy, error)
+}
+
+type githubExecutorCredentialPolicyAdapter struct {
+	service githubCredentialLeaseService
+}
+
+func (a githubExecutorCredentialPolicyAdapter) ResolveTaskGitCredentialPolicy(
+	ctx context.Context,
+	workspaceID string,
+) (executorpkg.TaskGitCredentialPolicy, error) {
+	policy, err := a.service.DescribeTaskGitCredentialPolicy(ctx, workspaceID)
+	if err != nil {
+		return executorpkg.TaskGitCredentialPolicy{}, err
+	}
+	return executorpkg.TaskGitCredentialPolicy{
+		Mode:            policy.Mode,
+		WorkspaceMethod: policy.WorkspaceMethod,
+		WorkspaceActor:  policy.WorkspaceActor,
+	}, nil
 }
 
 type githubExecutorCredentialLeaseAdapter struct {

@@ -68,6 +68,14 @@ Two current preparation exceptions are easy to miss:
 
 ## Managed GitHub credentials
 
+The workspace's GitHub connection and the task's Git transport policy are separate. **Managed
+workspace credentials** is the default and provides the broker behavior below. Select **Inherit
+executor Git credentials** in the workspace GitHub settings to leave Git and `gh` to the host or
+selected executor; Kandev then injects no GitHub broker helper or shim. Local and Worktree use
+host-visible Git/SSH credentials, while Docker, SSH, and cloud require executor-configured
+credentials. An explicit executor-profile `GH_TOKEN` or `GITHUB_TOKEN` overrides the managed
+workspace route.
+
 For attached GitHub repositories, Kandev normally gives the task an opaque lease for each
 repository instead of placing the workspace PAT, selected CLI token, or App installation token in
 its ambient environment. Git's credential helper selects the lease whose HTTPS host and path

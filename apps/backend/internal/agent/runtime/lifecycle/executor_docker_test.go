@@ -909,10 +909,13 @@ func TestContainerBuildEnvVarsMergesEphemeralGitLabCredentialHelper(t *testing.T
 		"GIT_CONFIG_KEY_0":   "credential.http://gitlab.internal:8080.helper",
 		"GIT_CONFIG_VALUE_0": `!f() { echo "username=oauth2"; echo "password=$GITLAB_TOKEN"; }; f`,
 	}
-	env := (&ContainerManager{}).buildEnvVars(ContainerConfig{
+	env, err := (&ContainerManager{}).buildEnvVars(ContainerConfig{
 		AgentConfig: agents.NewMockAgent(),
 		Credentials: credentials,
 	})
+	if err != nil {
+		t.Fatalf("buildEnvVars() error = %v", err)
+	}
 	joined := strings.Join(env, "\n")
 	if !strings.Contains(joined, "GIT_CONFIG_COUNT=4") || !strings.Contains(joined, "GIT_CONFIG_KEY_3=credential.http://gitlab.internal:8080.helper") {
 		t.Fatalf("GitLab credential helper was not merged:\n%s", joined)
@@ -922,6 +925,19 @@ func TestContainerBuildEnvVarsMergesEphemeralGitLabCredentialHelper(t *testing.T
 	}
 	if strings.Contains(joined, "password=glpat-super-secret") {
 		t.Fatalf("token embedded in credential helper:\n%s", joined)
+	}
+}
+
+func TestContainerBuildEnvVarsRejectsMalformedIndexedGitConfig(t *testing.T) {
+	_, err := (&ContainerManager{}).buildEnvVars(ContainerConfig{
+		AgentConfig: agents.NewMockAgent(),
+		Credentials: map[string]string{
+			"GIT_CONFIG_COUNT": "1",
+			"GIT_CONFIG_KEY_0": "core.hooksPath",
+		},
+	})
+	if err == nil {
+		t.Fatal("buildEnvVars() error = nil, want malformed indexed Git config error")
 	}
 }
 

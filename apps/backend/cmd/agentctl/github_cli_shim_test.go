@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-func TestInstallGitHubCLIShimCreatesGHEntrypoint(t *testing.T) {
+func TestInstallGitHubCLIShimCreatesManagedTools(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "agentctl")
 	if err := os.WriteFile(binary, []byte("agentctl"), 0o700); err != nil {
@@ -24,12 +24,14 @@ func TestInstallGitHubCLIShimCreatesGHEntrypoint(t *testing.T) {
 		t.Fatalf("installGitHubCLIShim() error = %v", err)
 	}
 	t.Cleanup(cleanup)
-	entrypoint := filepath.Join(shimDir, githubCLIShimName())
-	if _, err := os.Stat(entrypoint); err != nil {
-		t.Fatalf("stat gh shim: %v", err)
-	}
-	if filepath.Dir(entrypoint) != shimDir {
-		t.Fatalf("entrypoint = %q, want inside %q", entrypoint, shimDir)
+	for _, name := range []string{githubCLIShimName(), "agentctl"} {
+		entrypoint := filepath.Join(shimDir, name)
+		if _, err := os.Stat(entrypoint); err != nil {
+			t.Fatalf("stat %s managed tool: %v", name, err)
+		}
+		if filepath.Dir(entrypoint) != shimDir {
+			t.Fatalf("entrypoint = %q, want inside %q", entrypoint, shimDir)
+		}
 	}
 }
 

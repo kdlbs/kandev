@@ -267,6 +267,10 @@ func installGitHubCLIShim(agentctlExecutable, tempRoot string) (string, func(), 
 		cleanup()
 		return "", nil, fmt.Errorf("install gh shim: %w", err)
 	}
+	if err := linkOrCopyExecutable(agentctlExecutable, filepath.Join(dir, "agentctl")); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("install agentctl helper: %w", err)
+	}
 	return dir, cleanup, nil
 }
 

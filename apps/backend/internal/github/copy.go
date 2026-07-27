@@ -40,12 +40,13 @@ func (s *Service) CopyWorkspaceSettingsToWorkspace(ctx context.Context, sourceWo
 		return nil, fmt.Errorf("read source github settings: %w", err)
 	}
 	target := &WorkspaceSettings{
-		WorkspaceID:         targetWorkspaceID,
-		RepoScopeMode:       source.RepoScopeMode,
-		RepoScopeOrgs:       append([]string(nil), source.RepoScopeOrgs...),
-		RepoScopeRepos:      append([]RepoFilter(nil), source.RepoScopeRepos...),
-		SavedPresets:        cloneRawMessage(source.SavedPresets),
-		DefaultQueryPresets: cloneRawMessage(source.DefaultQueryPresets),
+		WorkspaceID:            targetWorkspaceID,
+		TaskGitCredentialsMode: source.TaskGitCredentialsMode,
+		RepoScopeMode:          source.RepoScopeMode,
+		RepoScopeOrgs:          append([]string(nil), source.RepoScopeOrgs...),
+		RepoScopeRepos:         append([]RepoFilter(nil), source.RepoScopeRepos...),
+		SavedPresets:           cloneRawMessage(source.SavedPresets),
+		DefaultQueryPresets:    cloneRawMessage(source.DefaultQueryPresets),
 	}
 	// Copy the action presets before the workspace-settings write. These are two
 	// separate store writes without a shared transaction, so ordering the

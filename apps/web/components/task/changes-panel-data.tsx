@@ -39,6 +39,7 @@ import {
 } from "./changes-panel-helpers";
 import type { OpenDiffOptions } from "./changes-diff-target";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
+import { getGitCredentialDisplay } from "./changes-git-credential-display";
 
 function useChangesPanelStoreData() {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -62,7 +63,19 @@ function useChangesPanelStoreData() {
     if (Array.isArray(taskPRs) && taskPRs.length > 1) return undefined;
     return state.pendingPrUrlByTaskId.byTaskId[taskId]?.[""];
   });
-  return { activeTaskId, activeSessionId, taskTitle, baseBranch, existingPrUrl };
+  const gitCredentialDisplay = useAppStore((state) =>
+    getGitCredentialDisplay(
+      activeSessionId ? state.taskSessions.items[activeSessionId]?.metadata : undefined,
+    ),
+  );
+  return {
+    activeTaskId,
+    activeSessionId,
+    taskTitle,
+    baseBranch,
+    existingPrUrl,
+    gitCredentialDisplay,
+  };
 }
 
 type DialogsType = ReturnType<typeof useChangesDialogHandlers> & ReturnType<typeof useVcsDialogs>;
@@ -298,7 +311,8 @@ function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): 
 }
 
 export function useChangesPanelData() {
-  const { activeTaskId, activeSessionId, baseBranch, existingPrUrl } = useChangesPanelStoreData();
+  const { activeTaskId, activeSessionId, baseBranch, existingPrUrl, gitCredentialDisplay } =
+    useChangesPanelStoreData();
   const baseBranchByRepo = useBaseBranchByRepo(activeTaskId);
   const git = useSessionGit(activeSessionId);
   const { toast } = useToast();
@@ -364,6 +378,7 @@ export function useChangesPanelData() {
     repoDisplayName,
     prByRepo,
     existingPrUrl,
+    gitCredentialDisplay,
     walkthroughRequestReady,
     ...prData,
   };

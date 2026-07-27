@@ -211,6 +211,7 @@ const createTablesSQL = `
 
 	CREATE TABLE IF NOT EXISTS github_workspace_settings (
 		workspace_id TEXT PRIMARY KEY,
+		task_git_credentials_mode TEXT NOT NULL DEFAULT 'managed',
 		repo_scope_mode TEXT NOT NULL DEFAULT 'all',
 		repo_scope_orgs TEXT NOT NULL DEFAULT '[]',
 		repo_scope_repos TEXT NOT NULL DEFAULT '[]',
@@ -486,6 +487,9 @@ func (s *Store) applyIdempotentSchemaColumns() {
 }
 
 func (s *Store) initSchemaUpgrades() error {
+	if err := s.addTaskGitCredentialsMode(); err != nil {
+		return err
+	}
 	// Watcher self-heal columns: when the dispatch pipeline detects an
 	// orphaned watcher (e.g. its agent profile has been soft-deleted), it
 	// disables the row and stamps a human-readable cause + timestamp here
@@ -506,6 +510,20 @@ func (s *Store) initSchemaUpgrades() error {
 	}
 	if err := s.addAppRegistrationReferenceColumns(); err != nil {
 		return err
+	}
+	return nil
+}
+
+func (s *Store) addTaskGitCredentialsMode() error {
+	columns, err := s.tableColumns("github_workspace_settings")
+	if err != nil {
+		return fmt.Errorf("read github_workspace_settings columns: %w", err)
+	}
+	if _, ok := columns["task_git_credentials_mode"]; ok {
+		return nil
+	}
+	if _, err := s.db.Exec(`ALTER TABLE github_workspace_settings ADD COLUMN task_git_credentials_mode TEXT NOT NULL DEFAULT 'managed'`); err != nil {
+		return fmt.Errorf("add github_workspace_settings.task_git_credentials_mode: %w", err)
 	}
 	return nil
 }
@@ -2504,14 +2522,15 @@ func (s *Store) ResetIssueWatchState(ctx context.Context, watchID string) error 
 func defaultWorkspaceSettings(workspaceID string) *WorkspaceSettings {
 	now := time.Now().UTC()
 	return &WorkspaceSettings{
-		WorkspaceID:         workspaceID,
-		RepoScopeMode:       RepoScopeModeAll,
-		RepoScopeOrgs:       []string{},
-		RepoScopeRepos:      []RepoFilter{},
-		SavedPresets:        json.RawMessage("[]"),
-		DefaultQueryPresets: nil,
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		WorkspaceID:            workspaceID,
+		TaskGitCredentialsMode: TaskGitCredentialsModeManaged,
+		RepoScopeMode:          RepoScopeModeAll,
+		RepoScopeOrgs:          []string{},
+		RepoScopeRepos:         []RepoFilter{},
+		SavedPresets:           json.RawMessage("[]"),
+		DefaultQueryPresets:    nil,
+		CreatedAt:              now,
+		UpdatedAt:              now,
 	}
 }
 
@@ -2536,12 +2555,20 @@ func normalizeRepoScopeMode(mode string) string {
 	}
 }
 
+func normalizeTaskGitCredentialsMode(mode string) string {
+	if strings.EqualFold(strings.TrimSpace(mode), TaskGitCredentialsModeExecutor) {
+		return TaskGitCredentialsModeExecutor
+	}
+	return TaskGitCredentialsModeManaged
+}
+
 func normalizeWorkspaceSettings(settings *WorkspaceSettings) *WorkspaceSettings {
 	if settings == nil {
 		return nil
 	}
 	out := *settings
 	out.WorkspaceID = strings.TrimSpace(out.WorkspaceID)
+	out.TaskGitCredentialsMode = normalizeTaskGitCredentialsMode(out.TaskGitCredentialsMode)
 	out.RepoScopeMode = normalizeRepoScopeMode(out.RepoScopeMode)
 	if out.RepoScopeMode != RepoScopeModeOrgs {
 		out.RepoScopeOrgs = nil
@@ -2597,17 +2624,18 @@ func (s *Store) GetWorkspaceSettings(ctx context.Context, workspaceID string) (*
 		return nil, fmt.Errorf("workspace_id is required")
 	}
 	var row struct {
-		WorkspaceID         string         `db:"workspace_id"`
-		RepoScopeMode       string         `db:"repo_scope_mode"`
-		RepoScopeOrgsJSON   string         `db:"repo_scope_orgs"`
-		RepoScopeReposJSON  string         `db:"repo_scope_repos"`
-		SavedPresets        string         `db:"saved_presets"`
-		DefaultQueryPresets sql.NullString `db:"default_query_presets"`
-		CreatedAt           time.Time      `db:"created_at"`
-		UpdatedAt           time.Time      `db:"updated_at"`
+		WorkspaceID            string         `db:"workspace_id"`
+		TaskGitCredentialsMode string         `db:"task_git_credentials_mode"`
+		RepoScopeMode          string         `db:"repo_scope_mode"`
+		RepoScopeOrgsJSON      string         `db:"repo_scope_orgs"`
+		RepoScopeReposJSON     string         `db:"repo_scope_repos"`
+		SavedPresets           string         `db:"saved_presets"`
+		DefaultQueryPresets    sql.NullString `db:"default_query_presets"`
+		CreatedAt              time.Time      `db:"created_at"`
+		UpdatedAt              time.Time      `db:"updated_at"`
 	}
 	err := s.ro.GetContext(ctx, &row, `
-		SELECT workspace_id, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
+		SELECT workspace_id, task_git_credentials_mode, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
 		       saved_presets, default_query_presets, created_at, updated_at
 		FROM github_workspace_settings
 		WHERE workspace_id = ?`, workspaceID)
@@ -2618,13 +2646,14 @@ func (s *Store) GetWorkspaceSettings(ctx context.Context, workspaceID string) (*
 		return nil, err
 	}
 	settings := &WorkspaceSettings{
-		WorkspaceID:        row.WorkspaceID,
-		RepoScopeMode:      row.RepoScopeMode,
-		RepoScopeOrgsJSON:  row.RepoScopeOrgsJSON,
-		RepoScopeReposJSON: row.RepoScopeReposJSON,
-		SavedPresets:       json.RawMessage(row.SavedPresets),
-		CreatedAt:          row.CreatedAt,
-		UpdatedAt:          row.UpdatedAt,
+		WorkspaceID:            row.WorkspaceID,
+		TaskGitCredentialsMode: row.TaskGitCredentialsMode,
+		RepoScopeMode:          row.RepoScopeMode,
+		RepoScopeOrgsJSON:      row.RepoScopeOrgsJSON,
+		RepoScopeReposJSON:     row.RepoScopeReposJSON,
+		SavedPresets:           json.RawMessage(row.SavedPresets),
+		CreatedAt:              row.CreatedAt,
+		UpdatedAt:              row.UpdatedAt,
 	}
 	if row.DefaultQueryPresets.Valid {
 		settings.DefaultQueryPresets = json.RawMessage(row.DefaultQueryPresets.String)
@@ -2660,17 +2689,18 @@ func (s *Store) UpsertWorkspaceSettings(ctx context.Context, settings *Workspace
 	}
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO github_workspace_settings (
-			workspace_id, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
+			workspace_id, task_git_credentials_mode, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
 			saved_presets, default_query_presets, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(workspace_id) DO UPDATE SET
+			task_git_credentials_mode = excluded.task_git_credentials_mode,
 			repo_scope_mode = excluded.repo_scope_mode,
 			repo_scope_orgs = excluded.repo_scope_orgs,
 			repo_scope_repos = excluded.repo_scope_repos,
 			saved_presets = excluded.saved_presets,
 			default_query_presets = excluded.default_query_presets,
 			updated_at = excluded.updated_at`,
-		settings.WorkspaceID, settings.RepoScopeMode, string(orgsJSON), string(reposJSON),
+		settings.WorkspaceID, settings.TaskGitCredentialsMode, settings.RepoScopeMode, string(orgsJSON), string(reposJSON),
 		string(settings.SavedPresets), defaults, now, now)
 	return err
 }
@@ -2685,10 +2715,10 @@ func (s *Store) PatchWorkspaceSettings(ctx context.Context, req *UpdateWorkspace
 	now := time.Now().UTC()
 	if _, err := s.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO github_workspace_settings (
-			workspace_id, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
+			workspace_id, task_git_credentials_mode, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
 			saved_presets, default_query_presets, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		workspaceID, RepoScopeModeAll, "[]", "[]", "[]", nil, now, now); err != nil {
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		workspaceID, TaskGitCredentialsModeManaged, RepoScopeModeAll, "[]", "[]", "[]", nil, now, now); err != nil {
 		return nil, err
 	}
 
@@ -2698,6 +2728,9 @@ func (s *Store) PatchWorkspaceSettings(ctx context.Context, req *UpdateWorkspace
 	}
 	if err := appendWorkspaceScopePatch(&patch, req); err != nil {
 		return nil, err
+	}
+	if req.TaskGitCredentialsMode != nil {
+		patch.add("task_git_credentials_mode = ?", normalizeTaskGitCredentialsMode(*req.TaskGitCredentialsMode))
 	}
 	if err := appendWorkspacePresetPatch(&patch, req); err != nil {
 		return nil, err

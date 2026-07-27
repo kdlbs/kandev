@@ -79,3 +79,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-24-opt-in-authentication | [Opt-in Authentication and Per-User Workspace Scoping](2026-07-24-opt-in-authentication.md) | accepted | backend, frontend, protocol, security | 2026-07-24 |
 | 2026-07-24-semantic-notification-events | [Semantic notification events come from domain occurrences](2026-07-24-semantic-notification-events.md) | accepted | backend, frontend, desktop | 2026-07-24 |
 | 2026-07-26-single-session-model-switching | [Single-Session Model Switching](2026-07-26-single-session-model-switching.md) | accepted (amended 2026-07-27) | workflow, infra | 2026-07-26 |
+| 2026-07-27-task-git-credential-policy | [Separate GitHub Automation From Task Git Credential Policy](2026-07-27-task-git-credential-policy.md) | accepted | backend, frontend, security | 2026-07-27 |

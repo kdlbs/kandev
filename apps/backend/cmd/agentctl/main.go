@@ -18,7 +18,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"strconv"
-	"strings"
 	"syscall"
 	"time"
 
@@ -28,7 +27,6 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
-	"github.com/kandev/kandev/internal/githubauth"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -119,9 +117,6 @@ func runGitHubUtilityCommand() (int, bool) {
 }
 
 func prepareGitHubCLIShim() (func(), error) {
-	if os.Getenv(githubauth.CredentialBrokerURLEnv) == "" {
-		return func() {}, nil
-	}
 	executable, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("resolve agentctl executable for gh shim: %w", err)
@@ -133,12 +128,6 @@ func prepareGitHubCLIShim() (func(), error) {
 	if err := os.Setenv(envGitHubCLIShimDir, shimDir); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("configure gh shim directory: %w", err)
-	}
-	path := pathWithoutDirectory(os.Getenv("PATH"), shimDir)
-	path = strings.Join([]string{shimDir, path}, string(os.PathListSeparator))
-	if err := os.Setenv("PATH", path); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("configure gh shim PATH: %w", err)
 	}
 	return cleanup, nil
 }

@@ -620,6 +620,16 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
 	}
+	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
+	if err != nil {
+		return nil, "", execConfig, nil, nil, err
+	}
+	if err := e.configureGitHubCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
+		return nil, "", execConfig, nil, nil, err
+	}
+	if err := e.applyGitCredentialSnapshot(ctx, req, session); err != nil {
+		return nil, "", execConfig, nil, nil, err
+	}
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)
 

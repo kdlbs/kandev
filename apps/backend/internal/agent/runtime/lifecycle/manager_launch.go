@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/gitconfigenv"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -509,9 +510,11 @@ func mergeRouteOverrideEnv(req *LaunchRequest) {
 	if req.Env == nil {
 		req.Env = make(map[string]string, len(req.RouteOverride.Env))
 	}
-	for k, v := range req.RouteOverride.Env {
-		req.Env[k] = v
+	merged, err := gitconfigenv.Merge(req.Env, req.RouteOverride.Env)
+	if err != nil {
+		return
 	}
+	req.Env = merged
 }
 
 // newProgressCallback builds a PrepareProgressCallback that publishes progress events for a task/session.

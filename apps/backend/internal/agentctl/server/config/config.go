@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -494,6 +495,13 @@ func ValidateCommandArgs(args []string) error {
 // CollectAgentEnv collects environment variables to pass to the agent.
 // It filters out AGENTCTL_* variables and optionally merges additional env vars.
 func CollectAgentEnv(additional map[string]string) []string {
+	env, _ := CollectAgentEnvWithError(additional)
+	return env
+}
+
+// CollectAgentEnvWithError collects environment variables for an agent instance.
+// It rejects malformed indexed Git configuration rather than changing Git's effective config.
+func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 	envMap := make(map[string]string)
 
 	// Start with current environment, excluding AGENTCTL_* and npm_config_* vars.
@@ -508,9 +516,12 @@ func CollectAgentEnv(additional map[string]string) []string {
 		}
 	}
 
-	// Merge additional env vars
-	for k, v := range additional {
-		envMap[k] = v
+	// Merge additional env vars. Git's indexed configuration environment is a
+	// single ordered protocol, so it must not be overlaid key by key.
+	var err error
+	envMap, err = gitconfigenv.Merge(envMap, additional)
+	if err != nil {
+		return nil, fmt.Errorf("compose indexed Git config: %w", err)
 	}
 	if envMap["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"] != "" {
 		prependPathEntry(envMap, envMap["KANDEV_GITHUB_CLI_SHIM_DIR"])
@@ -521,7 +532,7 @@ func CollectAgentEnv(additional map[string]string) []string {
 	for k, v := range envMap {
 		result = append(result, k+"="+v)
 	}
-	return result
+	return result, nil
 }
 
 func prependPathEntry(env map[string]string, entry string) {

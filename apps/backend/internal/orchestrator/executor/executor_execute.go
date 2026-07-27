@@ -1216,6 +1216,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if err := e.configureGitHubCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
 		return nil, execConfig, err
 	}
+	if err := e.applyGitCredentialSnapshot(ctx, req, session); err != nil {
+		return nil, execConfig, err
+	}
 
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree

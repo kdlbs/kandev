@@ -132,6 +132,23 @@ const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
 // reconnection. It is display metadata and is not replayed to the provider.
 const SessionMetaKeyACPModelState = "acp_model_state"
 
+// SessionMetaKeyGitCredentialSnapshot records the non-secret Git credential
+// routing contract that successfully launched or resumed a session.
+const SessionMetaKeyGitCredentialSnapshot = "git_credential_snapshot"
+
+// GitCredentialSnapshot is launch-time display metadata. It never contains a
+// token, broker lease, helper command, credential file, or SSH key detail.
+type GitCredentialSnapshot struct {
+	Version         int       `json:"version"`
+	Policy          string    `json:"policy"`
+	Source          string    `json:"source"`
+	WorkspaceMethod string    `json:"workspace_method,omitempty"`
+	Actor           string    `json:"actor"`
+	Transport       string    `json:"transport"`
+	ExecutorType    string    `json:"executor_type,omitempty"`
+	CapturedAt      time.Time `json:"captured_at"`
+}
+
 // TurnMetaKeyRuntimeConfigSnapshot stores the immutable effective runtime
 // configuration attributed to one prompt/response turn.
 const TurnMetaKeyRuntimeConfigSnapshot = "runtime_config_snapshot"

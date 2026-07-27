@@ -14,6 +14,40 @@ const (
 	githubSearchResultLimit     = 1000
 )
 
+// TaskGitCredentialPolicy describes non-secret credential routing information
+// for one workspace. It is safe to persist in task-session metadata and render
+// in the Changes panel.
+type TaskGitCredentialPolicy struct {
+	Mode            string `json:"mode"`
+	WorkspaceMethod string `json:"workspace_method,omitempty"`
+	WorkspaceActor  string `json:"workspace_actor,omitempty"`
+}
+
+// DescribeTaskGitCredentialPolicy returns routing and known automation identity
+// without resolving a token, lease, or credential helper.
+func (s *Service) DescribeTaskGitCredentialPolicy(ctx context.Context, workspaceID string) (TaskGitCredentialPolicy, error) {
+	settings, err := s.GetWorkspaceSettings(ctx, workspaceID)
+	if err != nil {
+		return TaskGitCredentialPolicy{}, err
+	}
+	policy := TaskGitCredentialPolicy{Mode: settings.TaskGitCredentialsMode}
+	if s.store == nil {
+		return policy, nil
+	}
+	connection, err := s.store.GetWorkspaceConnection(ctx, workspaceID)
+	if err != nil || connection == nil {
+		return policy, err
+	}
+	policy.WorkspaceMethod = string(connection.Source)
+	switch connection.Source {
+	case ConnectionSourcePAT, ConnectionSourceGHCLI:
+		policy.WorkspaceActor = connection.Login
+	case ConnectionSourceGitHubAppInstallation:
+		policy.WorkspaceActor = connection.InstallationAccountLogin
+	}
+	return policy, nil
+}
+
 // GetWorkspaceSettings returns the GitHub operational settings for a workspace.
 func (s *Service) GetWorkspaceSettings(ctx context.Context, workspaceID string) (*WorkspaceSettings, error) {
 	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
@@ -54,10 +88,22 @@ func (s *Service) UpdateWorkspaceSettings(ctx context.Context, req *UpdateWorksp
 	if req.RepoScopeMode != nil && !isValidRepoScopeMode(*req.RepoScopeMode) {
 		return nil, fmt.Errorf("%w: invalid repo_scope_mode %q", ErrWorkspaceSettingsValidation, *req.RepoScopeMode)
 	}
+	if req.TaskGitCredentialsMode != nil && !isValidTaskGitCredentialsMode(*req.TaskGitCredentialsMode) {
+		return nil, fmt.Errorf("%w: invalid task_git_credentials_mode %q", ErrWorkspaceSettingsValidation, *req.TaskGitCredentialsMode)
+	}
 	if s.store == nil {
 		return nil, fmt.Errorf("github store not configured")
 	}
 	return s.store.PatchWorkspaceSettings(ctx, req)
+}
+
+func isValidTaskGitCredentialsMode(mode string) bool {
+	switch strings.TrimSpace(strings.ToLower(mode)) {
+	case TaskGitCredentialsModeManaged, TaskGitCredentialsModeExecutor:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) SearchUserPRsPagedForWorkspace(

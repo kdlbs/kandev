@@ -6,6 +6,7 @@ import (
 	"go.uber.org/zap"
 
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/gitconfigenv"
 )
 
 // metadataKeyProfileEnvResolved caches resolved profile env vars on an execution
@@ -68,6 +69,10 @@ func mergeEnvFillMissing(dst, src map[string]string) {
 		if _, exists := dst[k]; !exists {
 			dst[k] = v
 		}
+	}
+	merged, err := gitconfigenv.Merge(src, dst)
+	if err == nil {
+		gitconfigenv.CopyIndexed(dst, merged)
 	}
 }
 

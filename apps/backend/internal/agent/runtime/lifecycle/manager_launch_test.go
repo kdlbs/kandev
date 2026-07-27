@@ -571,6 +571,33 @@ func TestLegacyRouteStillAppliesFlagsAndEnv(t *testing.T) {
 	}
 }
 
+func TestLegacyRouteComposesIndexedGitConfig(t *testing.T) {
+	req := &LaunchRequest{
+		Env: map[string]string{
+			"GIT_CONFIG_COUNT":   "1",
+			"GIT_CONFIG_KEY_0":   "core.hooksPath",
+			"GIT_CONFIG_VALUE_0": "/opt/locstat/hooks",
+		},
+		RouteOverride: &RouteOverride{Env: map[string]string{
+			"GIT_CONFIG_COUNT":   "1",
+			"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
+		}},
+	}
+
+	mergeRouteOverrideEnv(req)
+
+	if got := req.Env["GIT_CONFIG_COUNT"]; got != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got)
+	}
+	if got := req.Env["GIT_CONFIG_KEY_0"]; got != "core.hooksPath" {
+		t.Fatalf("GIT_CONFIG_KEY_0 = %q, want base entry", got)
+	}
+	if got := req.Env["GIT_CONFIG_KEY_1"]; got != "credential.https://github.com.helper" {
+		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want route entry", got)
+	}
+}
+
 func TestBuildEnvForExecution_DoesNotCopyTaskDescriptionToEnv(t *testing.T) {
 	mgr := newTestManager(t)
 	env, err := mgr.buildEnvForExecution(

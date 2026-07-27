@@ -729,6 +729,11 @@ func (s *Service) SetGitHubCredentialBroker(issuer executor.GitHubCredentialLeas
 	s.executor.SetGitHubCredentialBroker(issuer, endpoint)
 }
 
+// SetTaskGitCredentialPolicyResolver configures non-secret workspace policy lookup.
+func (s *Service) SetTaskGitCredentialPolicyResolver(resolver executor.TaskGitCredentialPolicyResolver) {
+	s.executor.SetTaskGitCredentialPolicyResolver(resolver)
+}
+
 // SetTurnService sets the turn service for tracking conversation turns.
 //
 // A "turn" represents a single conversation round-trip: user prompt → agent response.

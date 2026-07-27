@@ -2,6 +2,8 @@ package config
 
 import (
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -13,6 +15,74 @@ func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
 	want := strings.Join([]string{"/kandev/shims", "/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
 	if got := envSliceValue(env, "PATH"); got != want {
 		t.Fatalf("PATH = %q, want %q", got, want)
+	}
+}
+
+func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", "/opt/locstat/hooks")
+	t.Setenv("GIT_CONFIG_KEY_1", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_1", "cat_sort_uniq")
+
+	env := CollectAgentEnv(map[string]string{
+		"GIT_CONFIG_COUNT":   "2",
+		"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
+		"GIT_CONFIG_KEY_1":   "credential.useHttpPath",
+		"GIT_CONFIG_VALUE_1": "true",
+	})
+
+	if got := envSliceValue(env, "GIT_CONFIG_COUNT"); got != "4" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 4", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_0"); got != "core.hooksPath" {
+		t.Fatalf("GIT_CONFIG_KEY_0 = %q, want core.hooksPath", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_2"); got != "credential.https://github.com.helper" {
+		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want managed helper", got)
+	}
+}
+
+func TestCollectAgentEnvPreservesParentGitConfigHook(t *testing.T) {
+	repository := t.TempDir()
+	hooks := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hookPath := filepath.Join(hooks, "pre-commit")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0o755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+	runGit(t, nil, "init", repository)
+	runGit(t, nil, "-C", repository, "config", "user.name", "Kandev Test")
+	runGit(t, nil, "-C", repository, "config", "user.email", "kandev@example.test")
+
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", hooks)
+	t.Setenv("GIT_CONFIG_KEY_1", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_1", "cat_sort_uniq")
+	env := CollectAgentEnv(map[string]string{
+		"GIT_CONFIG_COUNT":   "2",
+		"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
+		"GIT_CONFIG_KEY_1":   "credential.useHttpPath",
+		"GIT_CONFIG_VALUE_1": "true",
+	})
+
+	runGit(t, env, "-C", repository, "commit", "--allow-empty", "-m", "verify inherited hook")
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("inherited pre-commit hook did not run: %v", err)
+	}
+}
+
+func runGit(t *testing.T, env []string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", args...)
+	if env != nil {
+		command.Env = env
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
 	}
 }
 

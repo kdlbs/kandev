@@ -638,8 +638,9 @@ type Executor struct {
 	gitlabCredentials GitLabCredentialResolver
 	logger            *logger.Logger
 
-	githubCredentialIssuer    GitHubCredentialLeaseIssuer
-	githubCredentialBrokerURL string
+	githubCredentialIssuer         GitHubCredentialLeaseIssuer
+	githubCredentialBrokerURL      string
+	githubCredentialPolicyResolver TaskGitCredentialPolicyResolver
 
 	// Configuration
 	retryLimit int

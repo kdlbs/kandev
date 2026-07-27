@@ -4,6 +4,12 @@
 > [ADR-2026-07-21-workspace-selectable-github-app-registrations](2026-07-21-workspace-selectable-github-app-registrations.md):
 > Kandev stores multiple App registrations and every workspace explicitly selects one registration
 > and installation. The automation and personal identity boundaries remain unchanged.
+>
+> Amended by
+> [ADR-2026-07-27-task-git-credential-policy](2026-07-27-task-git-credential-policy.md):
+> workspace automation identity and task Git credential routing are separate settings. Background
+> automation still uses the workspace connection; tasks may explicitly inherit executor
+> credentials instead of receiving the managed broker contract.
 
 - Status: accepted
 - Date: 2026-07-19

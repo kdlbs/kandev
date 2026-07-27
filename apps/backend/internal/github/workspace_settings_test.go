@@ -47,6 +47,46 @@ func TestStore_GitHubWorkspaceSettingsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestTaskGitCredentialModeDefaultsManaged(t *testing.T) {
+	store := newTestStore(t)
+	settings, err := store.GetWorkspaceSettings(context.Background(), "ws-credential-mode")
+	if err != nil {
+		t.Fatalf("GetWorkspaceSettings() error = %v", err)
+	}
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal workspace settings: %v", err)
+	}
+	if !strings.Contains(string(raw), `"task_git_credentials_mode":"managed"`) {
+		t.Fatalf("settings JSON = %s, want managed task Git credential mode", raw)
+	}
+}
+
+func TestService_UpdateWorkspaceSettings_TaskGitCredentialMode(t *testing.T) {
+	store := newTestStore(t)
+	svc := newWorkspaceAuthenticatedTestService(t, NewMockClient(), store, "ws-credential-mode")
+	executor := TaskGitCredentialsModeExecutor
+	updated, err := svc.UpdateWorkspaceSettings(context.Background(), &UpdateWorkspaceSettingsRequest{
+		WorkspaceID:            "ws-credential-mode",
+		TaskGitCredentialsMode: &executor,
+	})
+	if err != nil {
+		t.Fatalf("UpdateWorkspaceSettings() error = %v", err)
+	}
+	if got := updated.TaskGitCredentialsMode; got != TaskGitCredentialsModeExecutor {
+		t.Fatalf("TaskGitCredentialsMode = %q, want executor", got)
+	}
+
+	invalid := "host"
+	_, err = svc.UpdateWorkspaceSettings(context.Background(), &UpdateWorkspaceSettingsRequest{
+		WorkspaceID:            "ws-credential-mode",
+		TaskGitCredentialsMode: &invalid,
+	})
+	if !errors.Is(err, ErrWorkspaceSettingsValidation) {
+		t.Fatalf("UpdateWorkspaceSettings() error = %v, want validation error", err)
+	}
+}
+
 func TestService_SearchUserPRsPagedForWorkspace_FiltersToSelectedRepos(t *testing.T) {
 	client := NewMockClient()
 	client.AddPR(&PR{RepoOwner: "kdlbs", RepoName: "kandev", Number: 1, Title: "in scope"})

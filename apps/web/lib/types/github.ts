@@ -312,9 +312,11 @@ export type RepoFilter = {
 };
 
 export type GitHubRepoScopeMode = "all" | "orgs" | "repos";
+export type TaskGitCredentialsMode = "managed" | "executor";
 
 export type GitHubWorkspaceSettings = {
   workspace_id: string;
+  task_git_credentials_mode?: TaskGitCredentialsMode;
   repo_scope_mode: GitHubRepoScopeMode;
   repo_scope_orgs: string[];
   repo_scope_repos: RepoFilter[];
@@ -326,6 +328,7 @@ export type GitHubWorkspaceSettings = {
 
 export type UpdateGitHubWorkspaceSettingsRequest = {
   workspace_id: string;
+  task_git_credentials_mode?: TaskGitCredentialsMode;
   repo_scope_mode?: GitHubRepoScopeMode;
   repo_scope_orgs?: string[];
   repo_scope_repos?: RepoFilter[];

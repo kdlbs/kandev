@@ -36,6 +36,17 @@ type fakeGitHubCredentialLeaseIssuer struct {
 	calls    int
 }
 
+type fakeTaskGitCredentialPolicyResolver struct {
+	policy TaskGitCredentialPolicy
+}
+
+func (r fakeTaskGitCredentialPolicyResolver) ResolveTaskGitCredentialPolicy(
+	context.Context,
+	string,
+) (TaskGitCredentialPolicy, error) {
+	return r.policy, nil
+}
+
 func (f *fakeGitHubCredentialLeaseIssuer) IssueGitHubCredentialLease(
 	_ context.Context,
 	req GitHubCredentialLeaseRequest,
@@ -89,11 +100,13 @@ func TestConfigureGitHubCredentialBroker(t *testing.T) {
 		envGitHubCredentialOwner:      "acme",
 		envGitHubCredentialRepo:       "widgets",
 		envGitHubCredentialHost:       "github.com",
-		"GIT_CONFIG_COUNT":            "3",
+		"GIT_CONFIG_COUNT":            "4",
 		"GIT_CONFIG_KEY_1":            "credential.https://github.com.helper",
-		"GIT_CONFIG_VALUE_1":          "!agentctl git-credential",
-		"GIT_CONFIG_KEY_2":            "credential.useHttpPath",
-		"GIT_CONFIG_VALUE_2":          "true",
+		"GIT_CONFIG_VALUE_1":          "",
+		"GIT_CONFIG_KEY_2":            "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_2":          "!agentctl git-credential",
+		"GIT_CONFIG_KEY_3":            "credential.useHttpPath",
+		"GIT_CONFIG_VALUE_3":          "true",
 		"GIT_TERMINAL_PROMPT":         "0",
 	}
 	if got := req.Env[envGitHubCredentialScopes]; !strings.Contains(got, `"repository_id":"repo-1"`) {
@@ -175,6 +188,44 @@ func TestConfigureGitHubCredentialBrokerPreservesExplicitProfileToken(t *testing
 	}
 	if got := req.Env[envGitHubCredentialLease]; got != "" {
 		t.Fatalf("broker lease = %q, want none with explicit profile auth", got)
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerSkipsExecutorInheritedPolicy(t *testing.T) {
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: "executor"},
+	})
+	req := &LaunchAgentRequest{WorkspaceID: "workspace-1", Env: map[string]string{
+		githubauth.CredentialBrokerURLEnv: "http://broker.example/resolve",
+		"GIT_CONFIG_COUNT":                "3",
+		"GIT_CONFIG_KEY_0":                "core.hooksPath",
+		"GIT_CONFIG_VALUE_0":              "/work/hooks",
+		"GIT_CONFIG_KEY_1":                "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_1":              "",
+		"GIT_CONFIG_KEY_2":                "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_2":              "!agentctl git-credential",
+	}}
+	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
+		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
+	}}
+
+	if err := exec.configureGitHubCredentialBroker(context.Background(), req, info); err != nil {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+	}
+	if issuer.calls != 0 {
+		t.Fatalf("IssueGitHubCredentialLease calls = %d, want 0", issuer.calls)
+	}
+	if got := req.Env[githubauth.CredentialBrokerURLEnv]; got != "" {
+		t.Fatalf("broker URL = %q, want none for executor inheritance", got)
+	}
+	if got, want := req.Env["GIT_CONFIG_COUNT"], "1"; got != want {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want %q", got, want)
+	}
+	if got, want := req.Env["GIT_CONFIG_KEY_0"], "core.hooksPath"; got != want {
+		t.Fatalf("GIT_CONFIG_KEY_0 = %q, want %q", got, want)
 	}
 }
 
