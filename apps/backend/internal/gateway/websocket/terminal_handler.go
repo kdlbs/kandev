@@ -416,7 +416,12 @@ func (h *TerminalHandler) startUserShellProcess(
 		return "", http.StatusServiceUnavailable, err.Error()
 	}
 
-	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand}
+	// Export the executor profile's env vars (secrets revealed) so the terminal
+	// sees the same variables the agent subprocess and the repository setup
+	// script get. Best-effort: an unresolvable profile just yields no extras.
+	profileEnv := h.lifecycleMgr.ExecutorProfileEnvForEnvironment(c.Request.Context(), scopeID)
+
+	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand, Env: profileEnv}
 
 	h.logger.Info("handleUserShellWS: calling StartUserShell",
 		zap.String("session_id", sessionID),
@@ -424,7 +429,8 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("working_dir", workingDir),
 		zap.String("preferred_shell", preferredShell),
 		zap.String("label", opts.Label),
-		zap.String("initial_command", opts.InitialCommand))
+		zap.String("initial_command", opts.InitialCommand),
+		zap.Int("profile_env_count", len(profileEnv)))
 
 	info, err := interactiveRunner.StartUserShell(
 		c.Request.Context(), scopeID, sessionID, terminalID, workingDir, preferredShell, opts,

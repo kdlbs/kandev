@@ -14,9 +14,10 @@ import (
 
 // UserShellOptions contains optional parameters for starting a user shell.
 type UserShellOptions struct {
-	Label          string // Display name (e.g., "Terminal" or script name)
-	InitialCommand string // Command to run after shell starts
-	Closable       *bool  // Whether the terminal can be closed (nil = auto-determine)
+	Label          string            // Display name (e.g., "Terminal" or script name)
+	InitialCommand string            // Command to run after shell starts
+	Closable       *bool             // Whether the terminal can be closed (nil = auto-determine)
+	Env            map[string]string // Extra env exported into the shell (e.g. executor-profile vars)
 }
 
 // CreateUserShellResult contains the result of creating a new user shell.
@@ -176,6 +177,7 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 		TerminalID:           terminalID,
 		Label:                label,
 		InitialCommand:       initialCommand,
+		Env:                  opts.Env,
 		DisableTurnDetection: true,
 		IsUserShell:          true,
 	}
@@ -217,6 +219,23 @@ func (r *InteractiveRunner) StartUserShell(ctx context.Context, scopeID, process
 		zap.Bool("deferred_start", info.OSPID == 0))
 
 	return info, nil
+}
+
+// StartEnvForTesting returns the environment recorded for a process's deferred
+// PTY start. Exposed so callers that only wire the env (the terminal gateway)
+// can assert on it without spawning a shell.
+func (r *InteractiveRunner) StartEnvForTesting(processID string) (map[string]string, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	proc, ok := r.processes[processID]
+	if !ok {
+		return nil, false
+	}
+	env := make(map[string]string, len(proc.startEnv))
+	for k, v := range proc.startEnv {
+		env[k] = v
+	}
+	return env, true
 }
 
 // ListUserShells returns every user shell registered for the scope, sorted

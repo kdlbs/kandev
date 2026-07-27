@@ -15,8 +15,10 @@ import (
 	"github.com/gin-gonic/gin"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 func TestStripTerminalResponses(t *testing.T) {
@@ -255,4 +257,68 @@ func testTerminalLogger(t *testing.T) *logger.Logger {
 		t.Fatalf("create logger: %v", err)
 	}
 	return log
+}
+
+type stubExecutorProfileReader struct {
+	env     *taskmodels.TaskEnvironment
+	profile *taskmodels.ExecutorProfile
+}
+
+func (s *stubExecutorProfileReader) GetTaskEnvironment(_ context.Context, _ string) (*taskmodels.TaskEnvironment, error) {
+	return s.env, nil
+}
+
+func (s *stubExecutorProfileReader) GetExecutorProfile(_ context.Context, _ string) (*taskmodels.ExecutorProfile, error) {
+	return s.profile, nil
+}
+
+// A shell terminal opened on a workspace must start with the executor profile's
+// env vars exported — the agent subprocess and the repository setup script both
+// get them, and the terminal was the remaining gap.
+func TestStartUserShellProcessExportsExecutorProfileEnv(t *testing.T) {
+	log := testTerminalLogger(t)
+	manager := lifecycle.NewManager(
+		nil,
+		bus.NewMemoryEventBus(log),
+		nil,
+		nil,
+		nil,
+		nil,
+		lifecycle.ExecutorFallbackDeny,
+		t.TempDir(),
+		log,
+	)
+	manager.SetExecutorProfileReader(&stubExecutorProfileReader{
+		env: &taskmodels.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
+		profile: &taskmodels.ExecutorProfile{
+			ID:      "prof-1",
+			EnvVars: []taskmodels.ProfileEnvVar{{Key: "FONTAWESOME_NPM_AUTH_TOKEN", Value: "fa-secret-value"}},
+		},
+	})
+	handler := NewTerminalHandler(manager, nil, nil, log)
+	runner := process.NewInteractiveRunner(nil, log, 2*1024*1024)
+
+	execution := &lifecycle.AgentExecution{
+		ID:                "exec-1",
+		SessionID:         "session-1",
+		TaskEnvironmentID: "env-1",
+		WorkspacePath:     t.TempDir(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/terminal/environment/env-1?terminalId=term-1", nil)
+
+	processID, status, errMsg := handler.startUserShellProcess(c, execution, "env-1", "term-1", runner)
+	if errMsg != "" {
+		t.Fatalf("startUserShellProcess() status=%d error=%q", status, errMsg)
+	}
+
+	env, ok := runner.StartEnvForTesting(processID)
+	if !ok {
+		t.Fatalf("process %q not registered", processID)
+	}
+	if env["FONTAWESOME_NPM_AUTH_TOKEN"] != "fa-secret-value" {
+		t.Fatalf("shell env = %#v, want executor-profile var exported", env)
+	}
 }

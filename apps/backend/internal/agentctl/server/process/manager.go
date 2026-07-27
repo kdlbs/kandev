@@ -2243,14 +2243,46 @@ func (m *Manager) StartShell() error {
 	return nil
 }
 
-// StartTerminalShell creates a managed per-terminal shell.
+// StartTerminalShell creates a managed per-terminal shell. The shell inherits the
+// instance's agent environment (executor-profile env vars, credentials, KANDEV_*
+// metadata) so a terminal opened on a remote workspace sees the same variables
+// the agent subprocess does. Caller-supplied cfg.Env still wins.
 func (m *Manager) StartTerminalShell(terminalID string, cfg shell.Config) (*shell.Session, error) {
 	release, err := m.admitStart()
 	if err != nil {
 		return nil, err
 	}
 	defer release()
+	cfg.Env = mergeAgentEnvIntoShellConfig(m.agentEnvSnapshot(), cfg.Env)
 	return m.shellMgr.Start(terminalID, cfg)
+}
+
+// agentEnvSnapshot returns a copy of the instance agent environment under the
+// start lock, so a concurrent Configure appending to AgentEnv can't race.
+func (m *Manager) agentEnvSnapshot() []string {
+	m.startMu.Lock()
+	defer m.startMu.Unlock()
+	return append([]string(nil), m.cfg.AgentEnv...)
+}
+
+// mergeAgentEnvIntoShellConfig folds the instance agent env into the shell's
+// override map. Explicit overrides take precedence over the inherited value.
+func mergeAgentEnvIntoShellConfig(agentEnv []string, overrides map[string]string) map[string]string {
+	if len(agentEnv) == 0 {
+		return overrides
+	}
+	merged := make(map[string]string)
+	for _, entry := range agentEnv {
+		eq := strings.IndexByte(entry, '=')
+		if eq <= 0 {
+			continue
+		}
+		merged[entry[:eq]] = entry[eq+1:]
+	}
+	for k, v := range overrides {
+		merged[k] = v
+	}
+	return merged
 }
 
 // StartVscode starts the code-server process on a random OS-assigned port.

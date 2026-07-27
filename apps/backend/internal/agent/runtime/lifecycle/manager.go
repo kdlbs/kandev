@@ -119,6 +119,12 @@ type Manager struct {
 	// only component allowed to write the lifecycle-owned columns of this table.
 	runningWriter ExecutorRunningWriter
 
+	// executorProfileReader resolves the executor profile bound to a task
+	// environment so user shell terminals can be given the same profile env
+	// vars the agent subprocess gets. See executor_profile_env.go. Nil → the
+	// terminal inherits only the backend process environment.
+	executorProfileReader ExecutorProfileReader
+
 	// agentProfileReader resolves the full agent_profiles row (including the
 	// office-enrichment fields added in ADR 0005 Wave A) for the launch-prep
 	// SkillDeployer hook. Nil → skill deploy is skipped.

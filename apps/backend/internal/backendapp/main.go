@@ -460,6 +460,11 @@ func startAgentInfrastructure(
 	// before any Launch / EnsureWorkspaceExecutionForSession can run.
 	lifecycleMgr.SetExecutorRunningWriter(repos.Task)
 
+	// Lets user shell terminals export the executor profile's env vars, so the
+	// terminal sees the same variables the agent subprocess and the repository
+	// setup script get.
+	lifecycleMgr.SetExecutorProfileReader(repos.Task)
+
 	// Configure quick-chat workspace cleanup
 	if homeDir := cfg.ResolvedHomeDir(); homeDir != "" {
 		quickChatDir := filepath.Join(homeDir, "quick-chat")
