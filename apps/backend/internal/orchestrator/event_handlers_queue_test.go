@@ -97,6 +97,8 @@ func TestExecuteQueuedMessage_RequeuesCancelReleaseFailure(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q-cancel",
@@ -121,6 +123,27 @@ func TestExecuteQueuedMessage_RequeuesCancelReleaseFailure(t *testing.T) {
 	}
 	if !reflect.DeepEqual(status.Entries[0].Metadata, queuedMsg.Metadata) {
 		t.Fatalf("expected queued metadata to be preserved, got %#v", status.Entries[0].Metadata)
+	}
+	if status.Entries[0].Metadata[metaKeyUserMessageRecorded] != true {
+		t.Fatalf("expected requeued cancel-release prompt to retain recorded-user-message metadata, got %#v", status.Entries[0].Metadata)
+	}
+
+	secondPromptDone := make(chan struct{})
+	agentMgr.mu.Lock()
+	agentMgr.promptErr = nil
+	agentMgr.promptDone = secondPromptDone
+	agentMgr.capturedPrompts = agentMgr.capturedPrompts[:0]
+	agentMgr.capturedPromptCalls = agentMgr.capturedPromptCalls[:0]
+	agentMgr.mu.Unlock()
+
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+	select {
+	case <-secondPromptDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("boot-ready drain did not dispatch the cancel-release requeued prompt")
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("expected boot-ready drain to reuse the existing user message, got %d", len(messages.userMessages))
 	}
 }
 
