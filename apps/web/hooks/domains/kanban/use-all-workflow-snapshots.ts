@@ -1,4 +1,4 @@
-import { useEffect, useRef, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from "react";
 import { fetchWorkflowSnapshot } from "@/lib/api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { toKanbanTask } from "@/lib/kanban/map-task";
@@ -7,6 +7,7 @@ import type { Task } from "@/lib/types/http";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
+import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 
 type KanbanTask = KanbanState["tasks"][number];
 type Workflow = { id: string; name: string };
@@ -104,6 +105,22 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
   const lastFetchedRef = useRef<string>("");
   const lastWorkspaceIdRef = useRef<string | null>(null);
   const fetchGenRef = useRef(0);
+  const refreshResolversRef = useRef<Array<() => void>>([]);
+  const [refreshNonce, setRefreshNonce] = useState(0);
+  const resolveRefreshes = useCallback(() => {
+    const resolvers = refreshResolversRef.current.splice(0);
+    resolvers.forEach((resolve) => resolve());
+  }, []);
+  const refresh = useCallback(
+    () =>
+      new Promise<void>((resolve) => {
+        refreshResolversRef.current.push(resolve);
+        setRefreshNonce((current) => current + 1);
+      }),
+    [],
+  );
+
+  useForegroundRefresh(refresh, Boolean(workspaceId), workspaceId);
 
   useEffect(() => {
     // Skip clear on initial mount to preserve SSR-hydrated snapshots.
@@ -117,11 +134,13 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
     }
 
     if (!workspaceId) {
+      resolveRefreshes();
       return;
     }
 
     const workspaceWorkflows = workflows.filter((w) => w.workspaceId === workspaceId);
     if (workspaceWorkflows.length === 0) {
+      resolveRefreshes();
       return;
     }
 
@@ -132,8 +151,11 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
         .sort()
         .join(",") +
       ":" +
-      connectionStatus;
+      connectionStatus +
+      ":" +
+      refreshNonce;
     if (lastFetchedRef.current === key) {
+      resolveRefreshes();
       return;
     }
     if (
@@ -143,6 +165,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
       )
     ) {
       lastFetchedRef.current = key;
+      resolveRefreshes();
       return;
     }
     lastFetchedRef.current = key;
@@ -164,6 +187,9 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
         return;
       }
       store.getState().setKanbanMultiLoading(false);
+      resolveRefreshes();
     });
-  }, [workspaceId, workflows, connectionStatus, store]);
+  }, [workspaceId, workflows, connectionStatus, refreshNonce, resolveRefreshes, store]);
+
+  return { refresh };
 }

@@ -220,6 +220,40 @@ describe("useTaskSessions refreshes", () => {
   });
 });
 
+describe("useTaskSessions foreground refresh", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.clearAllMocks();
+  });
+
+  it("refetches a loaded session list when the Kandev window regains focus", async () => {
+    mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];
+    mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = true;
+    apiMock.listTaskSessions.mockResolvedValueOnce({ sessions: [session("old", "COMPLETED")] });
+
+    renderHook(() => useTaskSessions(TASK_ID));
+    await act(async () => {});
+    apiMock.listTaskSessions.mockClear();
+
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() =>
+      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(TASK_ID, {
+        cache: "no-store",
+      }),
+    );
+    expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [
+      session("old", "COMPLETED"),
+    ]);
+  });
+});
+
 describe("useTaskSessions queued refreshes", () => {
   beforeEach(() => {
     resetMockState();

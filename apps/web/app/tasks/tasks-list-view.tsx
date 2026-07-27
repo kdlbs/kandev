@@ -16,6 +16,7 @@ import { isTaskInFlight } from "@/lib/ui/state-icons";
 import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
 import { TaskListRowPrimaryContent } from "./rich-task-list-row";
+import { PullToRefresh } from "@/components/mobile/pull-to-refresh";
 import {
   TASKS_LIST_GROUP_OPTIONS,
   TASKS_LIST_SORT_OPTIONS,
@@ -45,6 +46,7 @@ export type TasksListViewProps = {
   handleArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   handleUnarchive: (taskId: string) => Promise<void>;
   handleDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onRefresh?: () => void | Promise<void>;
 };
 
 export function TasksListView({
@@ -68,8 +70,9 @@ export function TasksListView({
   handleArchive,
   handleUnarchive,
   handleDelete,
+  onRefresh,
 }: TasksListViewProps) {
-  return (
+  const content = (
     <main className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
       <div className="space-y-4">
         <TasksListControls
@@ -102,6 +105,7 @@ export function TasksListView({
       </div>
     </main>
   );
+  return onRefresh ? <PullToRefresh onRefresh={onRefresh}>{content}</PullToRefresh> : content;
 }
 
 function TasksListControls({

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 const mockClearKanbanMulti = vi.fn();
 const mockSetKanbanMultiLoading = vi.fn();
@@ -88,6 +88,23 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
     expect(mockSetKanbanMultiLoading).not.toHaveBeenCalledWith(true);
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
+  });
+
+  it("refetches boot-hydrated snapshots when the Kandev window regains focus", async () => {
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": { workflowId: "wf-A", workflowName: "A", steps: [], tasks: [] },
+    };
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
+
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() =>
+      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith("wf-A", {
+        cache: "no-store",
+      }),
+    );
   });
 
   it("clears snapshots when workspaceId changes", async () => {
