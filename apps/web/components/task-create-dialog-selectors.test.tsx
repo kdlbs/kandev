@@ -1,10 +1,18 @@
-import { createRef, type ReactNode } from "react";
+import { createRef, StrictMode, type ReactNode } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ToastProvider } from "@/components/toast-provider";
+import { MAX_FILES, processFile } from "@/components/task/chat/file-attachment";
 import { TaskFormInputs } from "./task-create-dialog-selectors";
 import type { TaskFormInputsHandle } from "./task-create-dialog-types";
+
+vi.mock("@/components/task/chat/file-attachment", async () => {
+  const actual = await vi.importActual<typeof import("@/components/task/chat/file-attachment")>(
+    "@/components/task/chat/file-attachment",
+  );
+  return { ...actual, processFile: vi.fn() };
+});
 
 // Capture the props (notably `onTranscript` / `onAutoSend`) that
 // TaskFormInputs hands the voice button so we can drive transcripts
@@ -44,6 +52,8 @@ vi.mock("@/hooks/use-task-create-prompt-mention", () => ({
 afterEach(() => {
   cleanup();
   voiceCalls.length = 0;
+  vi.restoreAllMocks();
+  vi.mocked(processFile).mockReset();
 });
 
 function lastVoiceProps(): VoiceProps {
@@ -60,9 +70,9 @@ function Wrapper({ children }: { children: ReactNode }) {
   );
 }
 
-function renderTaskFormInputs(initial: string) {
+function renderTaskFormInputs(initial: string, strict = false) {
   const ref = createRef<TaskFormInputsHandle>();
-  const utils = render(
+  const form = (
     <TaskFormInputs
       isSessionMode={false}
       autoFocus={false}
@@ -70,9 +80,9 @@ function renderTaskFormInputs(initial: string) {
       onDescriptionChange={() => {}}
       onKeyDown={() => {}}
       descriptionValueRef={ref}
-    />,
-    { wrapper: Wrapper },
+    />
   );
+  const utils = render(strict ? <StrictMode>{form}</StrictMode> : form, { wrapper: Wrapper });
   const textarea = screen.getByTestId("task-description-input") as HTMLTextAreaElement;
   return { ...utils, textarea, ref };
 }
@@ -219,6 +229,34 @@ describe("TaskFormInputs voice-input wiring — at-cursor splice", () => {
 });
 
 describe("TaskFormInputs attachment feedback", () => {
+  it("warns once when Strict Mode replays an attachment-limit update", async () => {
+    vi.mocked(processFile).mockImplementation(async (file) => ({
+      id: file.name,
+      data: "",
+      mimeType: file.type,
+      fileName: file.name,
+      size: file.size,
+      isImage: false,
+      deliveryMode: "path",
+    }));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { textarea } = renderTaskFormInputs("", true);
+    const files = Array.from(
+      { length: MAX_FILES + 1 },
+      (_, index) => new File(["file"], `attachment-${index}.txt`, { type: "text/plain" }),
+    );
+
+    fireEvent.paste(textarea, {
+      clipboardData: {
+        files,
+        items: files.map((file) => ({ kind: "file", type: file.type, getAsFile: () => file })),
+        getData: () => "",
+      },
+    });
+
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledTimes(1));
+  });
+
   it("warns when a pasted image exceeds the attachment limit", async () => {
     const { textarea } = renderTaskFormInputs("");
     const image = new File(["image"], "copied-image.png", { type: "image/png" });

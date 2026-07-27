@@ -64,6 +64,12 @@ function fileWithSize(name: string, size: number) {
   return file;
 }
 
+const attachmentCountLimitMessage = `You can attach up to ${MAX_FILES} files.`;
+
+function toastMessage() {
+  return screen.getByTestId("toast-message").textContent;
+}
+
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
@@ -179,7 +185,7 @@ describe("useChatInputState", () => {
 });
 
 describe("useChatInputState attachment feedback", () => {
-  it("accepts no more than the maximum number of files from one batch", async () => {
+  it("warns when a batch exceeds the maximum number of files", async () => {
     const { result } = renderInputState(vi.fn());
     const files = Array.from({ length: MAX_FILES + 1 }, (_, index) =>
       fileWithSize(`attachment-${index}.txt`, 1),
@@ -190,6 +196,26 @@ describe("useChatInputState attachment feedback", () => {
     });
 
     expect(result.current.attachments).toHaveLength(MAX_FILES);
+    expect(toastMessage()).toContain(attachmentCountLimitMessage);
+  });
+
+  it("warns when adding files after reaching the maximum number of files", async () => {
+    const { result } = renderInputState(vi.fn());
+    const files = Array.from({ length: MAX_FILES }, (_, index) =>
+      fileWithSize(`attachment-${index}.txt`, 1),
+    );
+
+    await act(async () => {
+      await result.current.addFiles(files);
+    });
+    await waitFor(() => expect(result.current.attachments).toHaveLength(MAX_FILES));
+
+    await act(async () => {
+      await result.current.addFiles([fileWithSize("one-too-many.txt", 1)]);
+    });
+
+    expect(result.current.attachments).toHaveLength(MAX_FILES);
+    expect(toastMessage()).toContain(attachmentCountLimitMessage);
   });
 
   it("accepts only files that fit within the total size limit from one batch", async () => {
@@ -217,9 +243,8 @@ describe("useChatInputState attachment feedback", () => {
       await result.current.addFiles([oversizedFile]);
     });
 
-    const warning = screen.getByTestId("toast-message");
-    expect(warning.textContent).toContain("Attachment is too large");
-    expect(warning.textContent).toContain(
+    expect(toastMessage()).toContain("Attachment is too large");
+    expect(toastMessage()).toContain(
       `recording.mov is 11 MB. The maximum file size is ${MAX_FILE_SIZE / 1024 / 1024} MB.`,
     );
     expect(result.current.attachments).toEqual([]);
@@ -232,9 +257,8 @@ describe("useChatInputState attachment feedback", () => {
       await result.current.addFiles([], "unreadable-image");
     });
 
-    const warning = screen.getByTestId("toast-message");
-    expect(warning.textContent).toContain("Pasted image couldn’t be attached");
-    expect(warning.textContent).toContain(
+    expect(toastMessage()).toContain("Pasted image couldn’t be attached");
+    expect(toastMessage()).toContain(
       "The browser didn’t provide image data. Save the image, then attach the file instead.",
     );
     expect(result.current.attachments).toEqual([]);

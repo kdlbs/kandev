@@ -38,6 +38,29 @@ import { cn } from "@/lib/utils";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
+type AttachmentLimitRejection = "count" | "total-size" | null;
+
+function acceptAttachmentsWithinLimits(
+  existing: FileAttachment[],
+  processed: FileAttachment[],
+): { accepted: FileAttachment[]; rejection: AttachmentLimitRejection } {
+  let nextCount = existing.length;
+  let nextTotalSize = existing.reduce((sum, att) => sum + att.size, 0);
+  const accepted: FileAttachment[] = [];
+
+  for (const att of processed) {
+    if (nextCount >= MAX_FILES) return { accepted, rejection: "count" };
+    if (nextTotalSize + att.size > MAX_TOTAL_SIZE) {
+      return { accepted, rejection: "total-size" };
+    }
+    accepted.push(att);
+    nextCount += 1;
+    nextTotalSize += att.size;
+  }
+
+  return { accepted, rejection: null };
+}
+
 type RepositoryOption = {
   value: string;
   label: string;
@@ -326,6 +349,7 @@ type TaskFormInputsProps = {
 
 function useFileAttachments() {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
+  const attachmentsRef = useRef<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const rejectOversizedFile = useAttachmentFileFeedback();
   const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
@@ -344,32 +368,28 @@ function useFileAttachments() {
       }
       if (processed.length === 0) return;
 
-      setAttachments((prev) => {
-        let nextCount = prev.length;
-        let nextTotalSize = prev.reduce((sum, att) => sum + att.size, 0);
-        const accepted: FileAttachment[] = [];
-        for (const att of processed) {
-          if (nextCount >= MAX_FILES) break;
-          if (nextTotalSize + att.size > MAX_TOTAL_SIZE) break;
-          accepted.push(att);
-          nextCount += 1;
-          nextTotalSize += att.size;
-        }
-        if (nextCount >= MAX_FILES && accepted.length < processed.length) {
-          console.warn(`Maximum ${MAX_FILES} files allowed`);
-        } else if (accepted.length < processed.length) {
-          console.warn(
-            `Total attachment size limit exceeded (max: ${formatBytes(MAX_TOTAL_SIZE)})`,
-          );
-        }
-        return accepted.length > 0 ? [...prev, ...accepted] : prev;
-      });
+      const { accepted, rejection } = acceptAttachmentsWithinLimits(
+        attachmentsRef.current,
+        processed,
+      );
+      if (rejection === "count") {
+        console.warn(`Maximum ${MAX_FILES} files allowed`);
+      } else if (rejection === "total-size") {
+        console.warn(`Total attachment size limit exceeded (max: ${formatBytes(MAX_TOTAL_SIZE)})`);
+      }
+      if (accepted.length === 0) return;
+
+      const next = [...attachmentsRef.current, ...accepted];
+      attachmentsRef.current = next;
+      setAttachments(next);
     },
     [rejectOversizedFile, warnUnreadablePastedImage],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((att) => att.id !== id));
+    const next = attachmentsRef.current.filter((att) => att.id !== id);
+    attachmentsRef.current = next;
+    setAttachments(next);
   }, []);
 
   return { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment };
