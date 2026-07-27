@@ -112,6 +112,34 @@ export function getConversationLoadingState(params: {
   };
 }
 
+/**
+ * Decides whether message-list-native's initial divider-scroll effect may
+ * (re-)apply `scrollIntoView` on the divider this render, versus leaving
+ * whatever position the reader (or a prior correction) already settled on.
+ *
+ * True on the very first successful application (didScrollToDivider is
+ * false) regardless of the other two gates — that first placement must
+ * always happen once a divider target exists. After that, a re-assertion
+ * (e.g. the transcript's initial data arriving in more than one wave, which
+ * can shift where the divider actually lands) is only allowed while BOTH
+ * the reader hasn't interacted yet (isUserScrolling — wheel, touch, or a
+ * key press) AND the visit is still within its short settling window since
+ * mount. Either gate tripping freezes the position for good: a live
+ * message arriving well after the visit has genuinely settled — with no
+ * interaction event to catch, e.g. a scrollbar drag — must never yank the
+ * reader back to the divider.
+ */
+export function canReassertDividerScroll(params: {
+  hasDividerTarget: boolean;
+  didScrollToDivider: boolean;
+  isUserScrolling: boolean;
+  isWithinSettlingWindow: boolean;
+}): boolean {
+  if (!params.hasDividerTarget) return false;
+  if (!params.didScrollToDivider) return true;
+  return !params.isUserScrolling && params.isWithinSettlingWindow;
+}
+
 // The chat banner stays visible until the user explicitly dismisses it, even
 // after the agent resumes — so the user can read the full error message at
 // their own pace. The sidebar icon, by contrast, also auto-hides once the

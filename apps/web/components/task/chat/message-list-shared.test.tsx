@@ -72,6 +72,7 @@ import {
   getConversationLoadingState,
   getEffectiveActiveTurnId,
   getStreamingAgentMessageId,
+  canReassertDividerScroll,
 } from "./message-list-shared";
 
 const item: RenderItem = { type: "message", message: { id: "m1" } as Message };
@@ -86,6 +87,66 @@ describe("getEffectiveActiveTurnId", () => {
 
   it("ignores a stale active turn after the session settles", () => {
     expect(getEffectiveActiveTurnId("turn-stale", false)).toBeNull();
+  });
+});
+
+describe("canReassertDividerScroll", () => {
+  it("never applies without a divider target", () => {
+    expect(
+      canReassertDividerScroll({
+        hasDividerTarget: false,
+        didScrollToDivider: false,
+        isUserScrolling: false,
+        isWithinSettlingWindow: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("always applies the first time, regardless of the other gates", () => {
+    expect(
+      canReassertDividerScroll({
+        hasDividerTarget: true,
+        didScrollToDivider: false,
+        isUserScrolling: true,
+        isWithinSettlingWindow: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("re-asserts while still settling and the reader hasn't scrolled", () => {
+    expect(
+      canReassertDividerScroll({
+        hasDividerTarget: true,
+        didScrollToDivider: true,
+        isUserScrolling: false,
+        isWithinSettlingWindow: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("stops re-asserting once the reader has scrolled, even mid-settling-window", () => {
+    expect(
+      canReassertDividerScroll({
+        hasDividerTarget: true,
+        didScrollToDivider: true,
+        isUserScrolling: true,
+        isWithinSettlingWindow: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("stops re-asserting once the settling window elapses, even without any interaction", () => {
+    // Covers a scrollbar drag or a live message arriving long after the
+    // visit settled — neither fires wheel/touchstart/keydown, so the
+    // settling window is the only thing bounding this case.
+    expect(
+      canReassertDividerScroll({
+        hasDividerTarget: true,
+        didScrollToDivider: true,
+        isUserScrolling: false,
+        isWithinSettlingWindow: false,
+      }),
+    ).toBe(false);
   });
 });
 

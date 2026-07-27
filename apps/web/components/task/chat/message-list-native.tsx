@@ -17,6 +17,7 @@ import {
   getEffectiveActiveTurnId,
   getLastTurnGroupId,
   getStreamingAgentMessageId,
+  canReassertDividerScroll,
 } from "./message-list-shared";
 
 /**
@@ -260,9 +261,12 @@ function useScrollToDividerOrBottom(
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || itemCount === 0) return;
-    const canReassertDivider =
-      (!didScrollToDivider.current || (!isUserScrollingRef.current && isWithinSettlingWindow())) &&
-      dividerBeforeItemKey;
+    const canReassertDivider = canReassertDividerScroll({
+      hasDividerTarget: Boolean(dividerBeforeItemKey),
+      didScrollToDivider: didScrollToDivider.current,
+      isUserScrolling: isUserScrollingRef.current,
+      isWithinSettlingWindow: isWithinSettlingWindow(),
+    });
     if (canReassertDivider) {
       if (useDockviewStore.getState().pendingChatScrollTop === null) {
         const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
