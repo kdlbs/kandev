@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
   IconArrowBackUp,
   IconCopy,
+  IconDots,
   IconEye,
   IconFold,
   IconFoldDown,
@@ -13,14 +14,33 @@ import {
   IconTextWrap,
 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { FileActionsDropdown } from "@/components/editors/file-actions-dropdown";
-import { ExternalVcsFileLink } from "@/components/editors/external-vcs-file-link";
+import {
+  FileActionsDropdown,
+  FileActionsMenuItems,
+} from "@/components/editors/file-actions-dropdown";
+import {
+  ExternalVcsFileLink,
+  ExternalVcsFileMenuItem,
+} from "@/components/editors/external-vcs-file-link";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
-const iconBtnActive = "h-6 w-6 p-0 cursor-pointer opacity-100 bg-muted";
+const iconBtnActive = "h-6 w-6 p-0 cursor-pointer bg-muted opacity-100";
+const iconBtnDestructive =
+  "h-6 w-6 p-0 cursor-pointer opacity-60 hover:text-destructive hover:opacity-100";
+const mobileMenuItem = "cursor-pointer gap-3 text-sm";
+const mobileMenuIcon = "size-4 text-muted-foreground";
 
 function isMarkdownPath(filePath: string): boolean {
   const ext = filePath.split(".").pop()?.toLowerCase();
@@ -83,7 +103,87 @@ function ToolbarIconBtn({
   );
 }
 
-export function FileDiffToolbar(props: FileDiffToolbarProps) {
+type DiffDisplayControlsProps = {
+  expandUnchanged: boolean;
+  globalViewMode: "split" | "unified";
+  wordWrap: boolean;
+  onToggleExpandUnchanged: () => void;
+  onToggleViewMode: () => void;
+  onToggleWordWrap: () => void;
+};
+
+function DiffDisplayControls({
+  expandUnchanged,
+  globalViewMode,
+  wordWrap,
+  onToggleExpandUnchanged,
+  onToggleViewMode,
+  onToggleWordWrap,
+}: DiffDisplayControlsProps) {
+  return (
+    <>
+      <ToolbarIconBtn
+        onClick={onToggleExpandUnchanged}
+        tooltip={expandUnchanged ? "Collapse unchanged" : "Expand all"}
+        active={expandUnchanged}
+      >
+        {expandUnchanged ? (
+          <IconFold className="h-3.5 w-3.5" />
+        ) : (
+          <IconFoldDown className="h-3.5 w-3.5" />
+        )}
+      </ToolbarIconBtn>
+      <ToolbarIconBtn onClick={onToggleWordWrap} tooltip="Toggle word wrap" active={wordWrap}>
+        <IconTextWrap className="h-3.5 w-3.5" />
+      </ToolbarIconBtn>
+      <ToolbarIconBtn
+        onClick={onToggleViewMode}
+        tooltip={globalViewMode === "split" ? "Switch to unified view" : "Switch to split view"}
+      >
+        {globalViewMode === "split" ? (
+          <IconLayoutRows className="h-3.5 w-3.5" />
+        ) : (
+          <IconLayoutColumns className="h-3.5 w-3.5" />
+        )}
+      </ToolbarIconBtn>
+    </>
+  );
+}
+
+function MobileDiffViewMenuItems({
+  expandUnchanged,
+  wordWrap,
+  onToggleExpandUnchanged,
+  onToggleWordWrap,
+}: Pick<
+  FileDiffToolbarProps,
+  "expandUnchanged" | "wordWrap" | "onToggleExpandUnchanged" | "onToggleWordWrap"
+>) {
+  return (
+    <>
+      <DropdownMenuSeparator />
+      <DropdownMenuLabel>View</DropdownMenuLabel>
+      <DropdownMenuCheckboxItem
+        checked={expandUnchanged}
+        className={mobileMenuItem}
+        onCheckedChange={onToggleExpandUnchanged}
+      >
+        <IconFoldDown className={mobileMenuIcon} />
+        Expand unchanged lines
+      </DropdownMenuCheckboxItem>
+      <DropdownMenuCheckboxItem
+        checked={wordWrap}
+        className={mobileMenuItem}
+        onCheckedChange={onToggleWordWrap}
+      >
+        <IconTextWrap className={mobileMenuIcon} />
+        Wrap long lines
+      </DropdownMenuCheckboxItem>
+    </>
+  );
+}
+
+function MobileFileActionsMenu(props: FileDiffToolbarProps) {
   const {
     diff,
     filePath,
@@ -104,15 +204,115 @@ export function FileDiffToolbar(props: FileDiffToolbarProps) {
     onToggleWordWrap,
     repo,
   } = props;
-  const { isMobile } = useResponsiveBreakpoint();
+  const handleCopyDiff = useCallback(() => {
+    void navigator.clipboard.writeText(diff || "");
+  }, [diff]);
+  const [open, setOpen] = useState(false);
+  const fileName = filePath.split("/").pop() || filePath;
+
+  return (
+    <DropdownMenu open={open} onOpenChange={setOpen}>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={`More actions for ${filePath}`}
+          title={`More actions for ${filePath}`}
+          className="size-11 shrink-0 cursor-pointer text-muted-foreground transition-[scale,color,background-color] duration-150 ease-out active:scale-[0.96]"
+          onPointerDown={(event) => event.preventDefault()}
+          onClick={() => setOpen(true)}
+        >
+          <IconDots className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        data-testid="review-file-actions-menu"
+        aria-label={`Actions for ${filePath}`}
+        align="end"
+        className="w-64"
+      >
+        <DropdownMenuLabel className="truncate font-medium text-foreground" title={filePath}>
+          {fileName}
+        </DropdownMenuLabel>
+        <DropdownMenuItem className={mobileMenuItem} onSelect={handleCopyDiff}>
+          <IconCopy className={mobileMenuIcon} />
+          Copy diff
+        </DropdownMenuItem>
+        {onOpenFile && (
+          <DropdownMenuItem className={mobileMenuItem} onSelect={() => onOpenFile(filePath, repo)}>
+            <IconPencil className={mobileMenuIcon} />
+            Edit file
+          </DropdownMenuItem>
+        )}
+        {onPreviewMarkdown && isMarkdownPath(filePath) && (
+          <DropdownMenuItem className={mobileMenuItem} onSelect={() => onPreviewMarkdown(filePath)}>
+            <IconEye className={mobileMenuIcon} />
+            Preview markdown
+          </DropdownMenuItem>
+        )}
+        <ExternalVcsFileMenuItem
+          filePath={filePath}
+          previousPath={previousPath}
+          status={status}
+          taskId={taskId}
+          sessionId={sessionId}
+          repositoryId={repositoryId}
+          repositoryName={repo}
+          publishedBranch={publishedBranch}
+          baseBranch={baseBranch}
+        />
+        <FileActionsMenuItems filePath={filePath} sessionId={sessionId} />
+        <MobileDiffViewMenuItems
+          expandUnchanged={expandUnchanged}
+          wordWrap={wordWrap}
+          onToggleExpandUnchanged={onToggleExpandUnchanged}
+          onToggleWordWrap={onToggleWordWrap}
+        />
+        {source === "uncommitted" && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" className={mobileMenuItem} onSelect={onDiscard}>
+              <IconArrowBackUp className="size-4" />
+              Revert changes
+            </DropdownMenuItem>
+          </>
+        )}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
+  const {
+    diff,
+    filePath,
+    previousPath,
+    status,
+    taskId,
+    sessionId,
+    repositoryId,
+    source,
+    publishedBranch,
+    baseBranch,
+    wordWrap,
+    expandUnchanged,
+    onDiscard,
+    onOpenFile,
+    onPreviewMarkdown,
+    onToggleExpandUnchanged,
+    onToggleWordWrap,
+    repo,
+  } = props;
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
   const handleCopyDiff = useCallback(() => {
-    navigator.clipboard.writeText(diff || "");
+    void navigator.clipboard.writeText(diff || "");
   }, [diff]);
   const handleToggleViewMode = useCallback(
     () => setGlobalViewMode(globalViewMode === "split" ? "unified" : "split"),
     [globalViewMode, setGlobalViewMode],
   );
+
   return (
     <div className="flex items-center gap-0.5">
       <ToolbarIconBtn onClick={handleCopyDiff} tooltip="Copy diff">
@@ -128,32 +328,16 @@ export function FileDiffToolbar(props: FileDiffToolbarProps) {
         repositoryName={repo}
         publishedBranch={publishedBranch}
         baseBranch={baseBranch}
-        size={isMobile ? "touch" : "xs"}
+        size="xs"
       />
-      <ToolbarIconBtn
-        onClick={onToggleExpandUnchanged}
-        tooltip={expandUnchanged ? "Collapse unchanged" : "Expand all"}
-        active={expandUnchanged}
-      >
-        {expandUnchanged ? (
-          <IconFold className="h-3.5 w-3.5" />
-        ) : (
-          <IconFoldDown className="h-3.5 w-3.5" />
-        )}
-      </ToolbarIconBtn>
-      <ToolbarIconBtn onClick={onToggleWordWrap} tooltip="Toggle word wrap" active={wordWrap}>
-        <IconTextWrap className="h-3.5 w-3.5" />
-      </ToolbarIconBtn>
-      <ToolbarIconBtn
-        onClick={handleToggleViewMode}
-        tooltip={globalViewMode === "split" ? "Switch to unified view" : "Switch to split view"}
-      >
-        {globalViewMode === "split" ? (
-          <IconLayoutRows className="h-3.5 w-3.5" />
-        ) : (
-          <IconLayoutColumns className="h-3.5 w-3.5" />
-        )}
-      </ToolbarIconBtn>
+      <DiffDisplayControls
+        expandUnchanged={expandUnchanged}
+        globalViewMode={globalViewMode}
+        wordWrap={wordWrap}
+        onToggleExpandUnchanged={onToggleExpandUnchanged}
+        onToggleViewMode={handleToggleViewMode}
+        onToggleWordWrap={onToggleWordWrap}
+      />
       {onPreviewMarkdown && isMarkdownPath(filePath) && (
         <ToolbarIconBtn onClick={() => onPreviewMarkdown(filePath)} tooltip="Preview markdown">
           <IconEye className="h-3.5 w-3.5" />
@@ -166,14 +350,15 @@ export function FileDiffToolbar(props: FileDiffToolbarProps) {
       )}
       <FileActionsDropdown filePath={filePath} sessionId={sessionId} size="xs" />
       {source === "uncommitted" && (
-        <ToolbarIconBtn
-          onClick={onDiscard}
-          tooltip="Revert changes"
-          className="h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100 hover:text-destructive"
-        >
+        <ToolbarIconBtn onClick={onDiscard} tooltip="Revert changes" className={iconBtnDestructive}>
           <IconArrowBackUp className="h-3.5 w-3.5" />
         </ToolbarIconBtn>
       )}
     </div>
   );
+}
+
+export function FileDiffToolbar(props: FileDiffToolbarProps) {
+  const { isMobile } = useResponsiveBreakpoint();
+  return isMobile ? <MobileFileActionsMenu {...props} /> : <DesktopFileDiffToolbar {...props} />;
 }
