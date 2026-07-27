@@ -127,10 +127,6 @@ func (s *workflowStore) ApplyTransition(ctx context.Context, taskID, sessionID, 
 	if err != nil {
 		return fmt.Errorf("load target step for transition: %w", err)
 	}
-	if err := s.validateWIPLimit(ctx, task, targetStep); err != nil {
-		return err
-	}
-
 	// Keep WorkflowID in sync with the target step's owning workflow. Most
 	// callers transition within the same workflow (targetStep.WorkflowID ==
 	// task.WorkflowID already), but applyPendingMove uses this path for
@@ -178,24 +174,6 @@ func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.T
 		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
 	}
 	return limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, task, targetStep.ID, task.ID, targetStep.WIPLimit)
-}
-
-func (s *workflowStore) validateWIPLimit(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
-	if targetStep == nil || targetStep.WIPLimit <= 0 || task.WorkflowStepID == targetStep.ID {
-		return nil
-	}
-	limitsRepo, ok := s.repo.(workflowMoveLimitsRepository)
-	if !ok {
-		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
-	}
-	occupants, err := limitsRepo.CountTasksByWorkflowStepExcludingTask(ctx, targetStep.ID, task.ID)
-	if err != nil {
-		return fmt.Errorf("count target workflow step tasks: %w", err)
-	}
-	if occupants >= targetStep.WIPLimit {
-		return wfmodels.NewWIPLimitError(targetStep.ID, targetStep.WIPLimit, occupants)
-	}
-	return nil
 }
 
 func (s *workflowStore) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {

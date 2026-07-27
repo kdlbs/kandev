@@ -277,7 +277,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	// Update the task's workflow step
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.updateTransitionTaskWithCapacity(ctx, task, targetStep); err != nil {
 		s.logger.Error("failed to move task to next workflow step",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
@@ -344,6 +344,27 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		}
 		s.setSessionWaitingForInput(ctx, taskID, effectiveSession.ID)
 	}
+}
+
+func (s *Service) updateTransitionTaskWithCapacity(
+	ctx context.Context,
+	task *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	if targetStep == nil || targetStep.WIPLimit <= 0 {
+		return s.repo.UpdateTask(ctx, task)
+	}
+	limitedRepo, ok := s.repo.(workflowLimitedMoveRepository)
+	if !ok {
+		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
+	}
+	return limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(
+		ctx,
+		task,
+		targetStep.ID,
+		task.ID,
+		targetStep.WIPLimit,
+	)
 }
 
 func (s *Service) validateTransitionWIPLimit(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {

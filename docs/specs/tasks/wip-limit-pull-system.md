@@ -23,10 +23,11 @@ non-ephemeral tasks than the configured limit.
 
 Integration watchers use the same admission rule as interactive and API task
 creation. If a GitHub review watch observes more pull requests than its target
-step can accept, Kandev creates and auto-starts only the tasks that obtain
-capacity. Pull requests rejected for capacity remain eligible for a later poll;
-Kandev does not leave a task, session, repository association, or permanent
-review-watch reservation for a rejected attempt.
+step can accept, Kandev creates only the tasks that obtain capacity and
+auto-starts those tasks only when the configured step enables
+`auto_start_agent`. Pull requests rejected for capacity remain eligible for a
+later poll; Kandev does not leave a task, session, repository association, or
+permanent review-watch reservation for a rejected attempt.
 
 When a task leaves a limited step that has a feeder configured, Kandev attempts
 to pull queued tasks from the feeder into the vacated step until the step reaches
