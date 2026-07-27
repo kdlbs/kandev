@@ -239,7 +239,7 @@ function BranchHoverCard({
   const trigger = (
     <button
       type="button"
-      className="flex items-center justify-center size-5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors cursor-default"
+      className="flex items-center justify-center size-5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
       aria-label="Show branch and Git credential details"
     >
       <IconGitBranch className="h-3.5 w-3.5" />

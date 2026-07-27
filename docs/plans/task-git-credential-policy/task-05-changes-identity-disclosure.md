@@ -22,13 +22,13 @@ spec: "../../specs/integrations/github-authentication.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run components/task/git-credential-disclosure.test.ts components/task/changes-panel-header.test.tsx
+cd apps && pnpm --filter @kandev/web test -- --run components/task/changes-git-credential-display.test.ts
 cd apps/web && pnpm run typecheck
 ```
 
 ## Files likely touched
 
-- `apps/web/components/task/git-credential-disclosure.ts`
+- `apps/web/components/task/changes-git-credential-display.ts`
 - focused parser/view-model tests
 - `apps/web/components/task/changes-panel-header.tsx`
 - focused header component tests

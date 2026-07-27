@@ -63,10 +63,12 @@ function useChangesPanelStoreData() {
     if (Array.isArray(taskPRs) && taskPRs.length > 1) return undefined;
     return state.pendingPrUrlByTaskId.byTaskId[taskId]?.[""];
   });
-  const gitCredentialDisplay = useAppStore((state) =>
-    getGitCredentialDisplay(
-      activeSessionId ? state.taskSessions.items[activeSessionId]?.metadata : undefined,
-    ),
+  const activeSessionMetadata = useAppStore((state) =>
+    activeSessionId ? state.taskSessions.items[activeSessionId]?.metadata : undefined,
+  );
+  const gitCredentialDisplay = useMemo(
+    () => getGitCredentialDisplay(activeSessionMetadata),
+    [activeSessionMetadata],
   );
   return {
     activeTaskId,

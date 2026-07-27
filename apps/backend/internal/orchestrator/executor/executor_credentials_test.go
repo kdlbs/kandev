@@ -141,6 +141,33 @@ func TestApplyGitCredentialSnapshotOmitsManagedSourceWithoutBroker(t *testing.T)
 	}
 }
 
+func TestApplyGitCredentialSnapshotUsesExecutorSources(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		policy      TaskGitCredentialPolicy
+		env         map[string]string
+		wantSource  string
+		wantActor   string
+		wantTransit string
+	}{
+		{name: "profile token", env: map[string]string{envGHToken: "token"}, wantSource: "executor_profile", wantTransit: "profile_token"},
+		{name: "executor inheritance", policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor}, env: map[string]string{}, wantSource: "executor", wantTransit: "executor_selected"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+			exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{policy: tc.policy})
+			session := &models.TaskSession{ID: "session-1"}
+			if err := exec.applyGitCredentialSnapshot(context.Background(), &LaunchAgentRequest{WorkspaceID: "workspace-1", Env: tc.env}, session); err != nil {
+				t.Fatalf("applyGitCredentialSnapshot() error = %v", err)
+			}
+			snapshot, ok := session.Metadata[models.SessionMetaKeyGitCredentialSnapshot].(models.GitCredentialSnapshot)
+			if !ok || snapshot.Source != tc.wantSource || snapshot.Actor != tc.wantActor || snapshot.Transport != tc.wantTransit {
+				t.Fatalf("snapshot = %#v", session.Metadata[models.SessionMetaKeyGitCredentialSnapshot])
+			}
+		})
+	}
+}
+
 func TestConfigureGitHubCredentialBrokerIssuesOneLeasePerRepository(t *testing.T) {
 	issuer := &fakeGitHubCredentialLeaseIssuer{}
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())

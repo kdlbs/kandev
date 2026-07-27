@@ -27,13 +27,13 @@ spec: "../../specs/integrations/github-authentication.md"
 make -C apps/backend build
 cd apps && pnpm --filter @kandev/web build:vite
 cd apps/web && pnpm e2e:run --project chromium tests/integrations/github-workspace-settings.spec.ts tests/git/git-credential-identity.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/integrations/mobile-github-auth-settings.spec.ts tests/git/mobile-git-credential-identity.spec.ts
+cd apps/web && pnpm e2e:run --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts tests/git/mobile-git-credential-identity.spec.ts
 ```
 
 ## Files likely touched
 
 - `apps/web/e2e/tests/integrations/github-workspace-settings.spec.ts`
-- `apps/web/e2e/tests/integrations/mobile-github-auth-settings.spec.ts`
+- `apps/web/e2e/tests/integrations/mobile-github-workspace-settings.spec.ts`
 - `apps/web/e2e/tests/git/git-credential-identity.spec.ts`
 - `apps/web/e2e/tests/git/mobile-git-credential-identity.spec.ts`
 - `apps/web/e2e/pages/github-auth-settings-page.ts`

@@ -495,7 +495,23 @@ func ValidateCommandArgs(args []string) error {
 // CollectAgentEnv collects environment variables to pass to the agent.
 // It filters out AGENTCTL_* variables and optionally merges additional env vars.
 func CollectAgentEnv(additional map[string]string) []string {
-	env, _ := CollectAgentEnvWithError(additional)
+	env, err := CollectAgentEnvWithError(additional)
+	if err == nil {
+		return env
+	}
+	// Legacy callers cannot surface an error. Preserve their filtered parent
+	// environment rather than returning nil when an optional overlay is bad.
+	return CollectAgentEnvWithoutAdditional()
+}
+
+func CollectAgentEnvWithoutAdditional() []string {
+	env := make([]string, 0, len(os.Environ()))
+	for _, value := range os.Environ() {
+		if idx := strings.Index(value, "="); idx > 0 &&
+			!strings.HasPrefix(value[:idx], "AGENTCTL_") && !isNpmEnvVar(value[:idx]) {
+			env = append(env, value)
+		}
+	}
 	return env
 }
 

@@ -348,7 +348,8 @@ post-signature processing failures produce `failing`; a later valid successful d
   does not fetch the supplied URL as validation.
 - App private keys, client secrets, webhook secrets, personal tokens, and live installation tokens
   never enter executor environments. Only brokered PAT/CLI tokens or repository-restricted
-  installation tokens reach the trusted child operation.
+  installation tokens reach a managed trusted child operation; explicit executor-profile
+  `GITHUB_TOKEN`/`GH_TOKEN` values are an unmanaged exception and can reach that child instead.
 - Managed helper configuration resets the inherited GitHub HTTPS helper chain, disables terminal
   prompts, and activates Kandev's `agentctl`/`gh` tool directory only for broker-enabled task
   instances. It does not claim to prevent a host-authority agent from manually switching a remote

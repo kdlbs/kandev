@@ -36,7 +36,7 @@ func (s *Service) DescribeTaskGitCredentialPolicy(ctx context.Context, workspace
 	}
 	connection, err := s.store.GetWorkspaceConnection(ctx, workspaceID)
 	if err != nil || connection == nil {
-		return policy, err
+		return policy, nil
 	}
 	policy.WorkspaceMethod = string(connection.Source)
 	switch connection.Source {

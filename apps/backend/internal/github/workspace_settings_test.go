@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStore_GitHubWorkspaceSettingsRoundTrip(t *testing.T) {
@@ -59,6 +60,50 @@ func TestTaskGitCredentialModeDefaultsManaged(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"task_git_credentials_mode":"managed"`) {
 		t.Fatalf("settings JSON = %s, want managed task Git credential mode", raw)
+	}
+}
+
+func TestDescribeTaskGitCredentialPolicyUsesConnectionIdentity(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	installationID := int64(42)
+	for _, tc := range []struct {
+		name   string
+		conn   WorkspaceConnection
+		method string
+		actor  string
+	}{
+		{
+			name: "PAT", conn: WorkspaceConnection{WorkspaceID: "ws-pat", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "alice", Status: ConnectionStatusActive},
+			method: "pat", actor: "alice",
+		},
+		{
+			name: "GitHub App", conn: WorkspaceConnection{WorkspaceID: "ws-app", Source: ConnectionSourceGitHubAppInstallation, GitHubHost: defaultGitHubHost, InstallationID: &installationID, InstallationAccountLogin: "acme-bot", InstallationAccountType: "Organization", AppRegistrationID: "app-1", Status: ConnectionStatusActive},
+			method: "github_app_installation", actor: "acme-bot",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := store.db.ExecContext(ctx, `INSERT INTO workspaces (id) VALUES (?)`, tc.conn.WorkspaceID); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+			if tc.conn.AppRegistrationID != "" {
+				registration := newAppRegistration(tc.conn.AppRegistrationID, 99, "Acme automation", time.Now().UTC())
+				if err := store.InsertAppRegistration(ctx, registration); err != nil {
+					t.Fatalf("create app registration: %v", err)
+				}
+			}
+			if err := store.UpsertWorkspaceConnection(ctx, &tc.conn); err != nil {
+				t.Fatalf("UpsertWorkspaceConnection() error = %v", err)
+			}
+			svc := newWorkspaceAuthenticatedTestService(t, NewMockClient(), store, tc.conn.WorkspaceID)
+			policy, err := svc.DescribeTaskGitCredentialPolicy(ctx, tc.conn.WorkspaceID)
+			if err != nil {
+				t.Fatalf("DescribeTaskGitCredentialPolicy() error = %v", err)
+			}
+			if policy.Mode != TaskGitCredentialsModeManaged || policy.WorkspaceMethod != tc.method || policy.WorkspaceActor != tc.actor {
+				t.Fatalf("policy = %+v", policy)
+			}
+		})
 	}
 }
 

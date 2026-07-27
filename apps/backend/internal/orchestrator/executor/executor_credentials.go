@@ -106,7 +106,6 @@ func (e *Executor) applyGitCredentialSnapshot(
 	snapshot := models.GitCredentialSnapshot{
 		Version:      1,
 		Policy:       policy.Mode,
-		Actor:        "runtime_selected",
 		ExecutorType: req.ExecutorType,
 		CapturedAt:   time.Now().UTC(),
 	}
