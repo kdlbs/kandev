@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
 
 function errorMessage(error: unknown) {
@@ -26,9 +26,11 @@ export function useAgentUpdateDialogState({
   const [loading, setLoading] = useState(false);
   const [starting, setStarting] = useState(false);
   const [activeJobID, setActiveJobID] = useState<string | null>(null);
+  const previewRequestID = useRef(0);
   const activeJob = activeJobID === job?.job_id ? job : undefined;
 
   const reset = useCallback(() => {
+    previewRequestID.current += 1;
     setPreview(null);
     setPreviewError(null);
     setLoading(false);
@@ -37,14 +39,17 @@ export function useAgentUpdateDialogState({
   }, []);
 
   const loadPreview = useCallback(async () => {
+    const requestID = ++previewRequestID.current;
     setLoading(true);
+    setPreview(null);
     setPreviewError(null);
     try {
-      setPreview(await onPreview(agentName));
+      const nextPreview = await onPreview(agentName);
+      if (requestID === previewRequestID.current) setPreview(nextPreview);
     } catch (error) {
-      setPreviewError(errorMessage(error));
+      if (requestID === previewRequestID.current) setPreviewError(errorMessage(error));
     } finally {
-      setLoading(false);
+      if (requestID === previewRequestID.current) setLoading(false);
     }
   }, [agentName, onPreview]);
 

@@ -183,6 +183,7 @@ type UpdateFooterProps = {
   preview: AgentUpdatePreview | null;
   previewError: string | null;
   job?: AgentUpdateJob;
+  loading: boolean;
   starting: boolean;
   installInFlight: boolean;
   onApprove: () => void;
@@ -190,11 +191,37 @@ type UpdateFooterProps = {
   mobile?: boolean;
 };
 
+function canApproveUpdate({
+  preview,
+  previewError,
+  loading,
+  updateInFlight,
+  starting,
+  installInFlight,
+}: {
+  preview: AgentUpdatePreview | null;
+  previewError: string | null;
+  loading: boolean;
+  updateInFlight: boolean;
+  starting: boolean;
+  installInFlight: boolean;
+}) {
+  return (
+    Boolean(preview?.current_version) &&
+    !previewError &&
+    !loading &&
+    !updateInFlight &&
+    !starting &&
+    !installInFlight
+  );
+}
+
 function UpdateFooter({
   agentName,
   preview,
   previewError,
   job,
+  loading,
   starting,
   installInFlight,
   onApprove,
@@ -203,8 +230,14 @@ function UpdateFooter({
 }: UpdateFooterProps) {
   const updateInFlight = Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status));
   const canRetry = job?.status === "failed";
-  const canApprove =
-    Boolean(preview) && !previewError && !updateInFlight && !starting && !installInFlight;
+  const canApprove = canApproveUpdate({
+    preview,
+    previewError,
+    loading,
+    updateInFlight,
+    starting,
+    installInFlight,
+  });
   const showApprove = !job || canRetry;
   const content = (
     <>
@@ -320,6 +353,7 @@ export function AgentRuntimeUpdateControl({
       preview={preview}
       previewError={previewError}
       job={activeJob}
+      loading={loading}
       starting={starting}
       installInFlight={installInFlight}
       onApprove={() => void approve()}

@@ -66,4 +66,25 @@ test.describe("managed agent runtime updates", () => {
     await expect(testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`)).toHaveCount(0);
     await expect(testPage.getByTestId(`agent-update-result-${runtime.agentName}`)).toHaveCount(0);
   });
+
+  test("requires a current runtime version before approval", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      previewResponse: {
+        agent_name: "claude-acp",
+        package: "@agentclientprotocol/claude-agent-acp",
+        current_version: "",
+        target_version: "0.63.0",
+        command: ["npm", "exec"],
+        command_string: "npm exec",
+      },
+    });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+
+    const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
+    await expect(dialog).toContainText("Unknown → 0.63.0");
+    await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toBeDisabled();
+    expect(runtime.postCount()).toBe(0);
+  });
 });
