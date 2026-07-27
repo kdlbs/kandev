@@ -204,14 +204,17 @@ function useScrollToMessage() {
  *   component's first commit, unrelated to user-triggered pagination),
  *   which can also retroactively shift where useScrollPositionOnPrepend
  *   lands the scroll. Rather than trying to classify every wave as
- *   "prepend" or "append" up front, the correction below simply keeps
- *   re-asserting the divider's position on every relevant change until
- *   the reader actually starts scrolling (isUserScrolling), which a plain
- *   'scroll' event can't distinguish from our own programmatic writes —
- *   wheel/touchstart is real user intent no other effect here produces.
- *   Once that happens, it's the user's scroll position to own, same as
- *   Slack never re-snapping you to the unread line once you've started
- *   reading.
+ *   "prepend" or "append" up front, the correction below keeps
+ *   re-asserting the divider's position on every relevant change, bounded
+ *   by BOTH of: the reader hasn't started scrolling yet (isUserScrolling
+ *   — wheel/touchstart/keydown, since a plain 'scroll' event can't tell
+ *   user intent apart from our own programmatic writes), AND still being
+ *   within a short settling window since mount (isWithinSettlingWindow).
+ *   The window exists so a live message arriving long after the visit has
+ *   genuinely settled — with no wheel/touch/key event to catch, e.g. a
+ *   scrollbar drag — can never re-trigger a correction; once either gate
+ *   trips, it's the user's scroll position to own, same as Slack never
+ *   re-snapping you to the unread line once you've started reading.
  * - didScrollToDivider and didInitialScroll are separate latches so the
  *   bottom-fallback firing first (before dividerBeforeItemKey resolves)
  *   doesn't block the divider correction from still applying once it
@@ -233,18 +236,34 @@ function useScrollToDividerOrBottom(
     };
     el.addEventListener("wheel", markUserScrolling, { passive: true });
     el.addEventListener("touchstart", markUserScrolling, { passive: true });
+    el.addEventListener("keydown", markUserScrolling);
     return () => {
       el.removeEventListener("wheel", markUserScrolling);
       el.removeEventListener("touchstart", markUserScrolling);
+      el.removeEventListener("keydown", markUserScrolling);
     };
   }, [scrollRef]);
+
+  // Bounds how long the divider correction below can keep re-asserting
+  // itself after mount, independent of user interaction: a scrollbar drag
+  // (no wheel/touch/key event) or a live message arriving long after the
+  // visit has settled must never be able to re-trigger it. 4s comfortably
+  // covers the slowest observed multi-wave initial load (WS backfill
+  // continuing after the REST fetch) without lingering into the range
+  // where the user has plausibly started reading and scrolling normally.
+  const mountedAtRef = useRef<number | null>(null);
+  if (mountedAtRef.current === null) mountedAtRef.current = Date.now();
+  const isWithinSettlingWindow = () => Date.now() - (mountedAtRef.current ?? 0) < 4000;
 
   const didInitialScroll = useRef(false);
   const didScrollToDivider = useRef(false);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el || itemCount === 0) return;
-    if ((!didScrollToDivider.current || !isUserScrollingRef.current) && dividerBeforeItemKey) {
+    const canReassertDivider =
+      (!didScrollToDivider.current || (!isUserScrollingRef.current && isWithinSettlingWindow())) &&
+      dividerBeforeItemKey;
+    if (canReassertDivider) {
       if (useDockviewStore.getState().pendingChatScrollTop === null) {
         const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
         if (dividerEl) {

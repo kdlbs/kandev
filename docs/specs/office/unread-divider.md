@@ -43,10 +43,20 @@ UI alone.
   read." The first visit begins live-advancing the cursor as normal.
 - **Initial scroll**: on visit start, if the divider falls on a
   currently-loaded message that's outside the initial viewport, the message
-  list performs a one-time scroll to bring it into view (`block: "start"`)
-  instead of the default scroll-to-bottom. This applies once per visit and
-  does not fight a pending explicit layout scroll restoration
-  (`pendingChatScrollTop`), which always wins when set.
+  list scrolls to bring it into view (`block: "start"`) instead of the
+  default scroll-to-bottom. This is a one-time positioning decision from
+  the reader's perspective: the transcript's initial data can itself
+  arrive in more than one wave (e.g. a WebSocket-delivered backfill
+  continuing after the first paint), which can shift where the divider
+  actually lands — so the correction re-asserts itself across such
+  changes rather than freezing on a possibly-incomplete first render. It
+  stops permanently the moment either of two things happens, whichever
+  comes first: the reader scrolls (wheel, touch, or a key press), or a
+  short (4s) settling window since mount elapses — bounding how long a
+  live message arriving well after the visit has genuinely settled (with
+  no interaction event to catch, e.g. a scrollbar drag) could otherwise
+  re-trigger it. It does not fight a pending explicit layout scroll
+  restoration (`pendingChatScrollTop`), which always wins when set.
 - **Pagination**: `findUnreadDividerItemId` looks for the divider's anchor
   message among the *currently loaded* render items. If the anchor is older
   than everything loaded so far (paginated out), the whole loaded window is
