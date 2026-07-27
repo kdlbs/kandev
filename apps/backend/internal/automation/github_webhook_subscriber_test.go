@@ -219,7 +219,7 @@ func TestGitHubWebhookSubscriberPushTriggerBranchMatch(t *testing.T) {
 		if evt.AutomationID != a.ID || evt.TriggerID != trig.ID {
 			t.Fatalf("evt = %+v", evt)
 		}
-		if evt.DedupKey != "push:acme/repo@sha-2" {
+		if evt.DedupKey != "push:acme/repo@main@sha-2" {
 			t.Fatalf("dedup key = %q", evt.DedupKey)
 		}
 		// {{push.message}} resolves from data["message"]; assert it's populated.
@@ -251,6 +251,104 @@ func TestGitHubWebhookSubscriberPushTriggerBranchMatch(t *testing.T) {
 	case evt := <-fired:
 		t.Fatalf("expected dedup to suppress second fire, got %+v", evt)
 	default:
+	}
+}
+
+// TestGitHubWebhookSubscriberPushDedupIsPerBranch pins that the same commit SHA
+// pushed to two different (matching) branches fires once per branch, while a
+// duplicate delivery on one branch stays suppressed.
+func TestGitHubWebhookSubscriberPushDedupIsPerBranch(t *testing.T) {
+	svc := newTestService(t)
+	newTestSubscriber(t, svc)
+	fired := subscribeAutomationTriggered(t, svc.eventBus)
+
+	a := createTestAutomation(t, svc, "ws-1")
+	trig := addTestTrigger(t, svc, a.ID, TriggerTypeGitHubPush, GitHubPushTriggerConfig{
+		Repos:    []github.RepoFilter{{Owner: "acme", Name: "repo"}},
+		Branches: []string{"main", "develop"},
+	})
+
+	publishPush := func(branch, sha string) {
+		if err := svc.eventBus.Publish(context.Background(), events.GitHubPushReceived, bus.NewEvent(
+			events.GitHubPushReceived, "test", &github.GitHubPushEventPayload{
+				WorkspaceIDs: []string{"ws-1"}, Owner: "acme", Name: "repo",
+				Branch: branch, SHA: sha,
+			},
+		)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	recordFired := func() {
+		select {
+		case evt := <-fired:
+			// Record as a terminal (succeeded) run: it still carries the dedup
+			// key for same-key suppression, but doesn't count toward the
+			// concurrency cap, so a distinct-branch push can still fire.
+			if err := svc.RecordRun(context.Background(), &AutomationRun{
+				AutomationID: a.ID, TriggerID: trig.ID, TriggerType: TriggerTypeGitHubPush,
+				Status: RunStatusSucceeded, DedupKey: evt.DedupKey,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		default:
+			t.Fatal("expected AutomationTriggered to fire")
+		}
+	}
+
+	// Same SHA on two branches: each fires (distinct dedup keys).
+	publishPush("main", "shaX")
+	recordFired()
+	publishPush("develop", "shaX")
+	recordFired()
+
+	// Duplicate delivery on the same branch is suppressed.
+	publishPush("main", "shaX")
+	select {
+	case evt := <-fired:
+		t.Fatalf("expected same-branch duplicate to be suppressed, got %+v", evt)
+	default:
+	}
+}
+
+// TestGitHubWebhookSubscriberCITriggerBranchFilter pins that a CI trigger scoped
+// to a branch only fires for check runs on that branch.
+func TestGitHubWebhookSubscriberCITriggerBranchFilter(t *testing.T) {
+	svc := newTestService(t)
+	newTestSubscriber(t, svc)
+	fired := subscribeAutomationTriggered(t, svc.eventBus)
+
+	a := createTestAutomation(t, svc, "ws-1")
+	addTestTrigger(t, svc, a.ID, TriggerTypeGitHubCI, GitHubCITriggerConfig{
+		Repos:       []github.RepoFilter{{Owner: "acme", Name: "repo"}},
+		Conclusions: []string{"failure"},
+		Branches:    []string{"main"},
+	})
+
+	publishCI := func(branch string, runID int64) {
+		if err := svc.eventBus.Publish(context.Background(), events.GitHubCheckRunCompleted, bus.NewEvent(
+			events.GitHubCheckRunCompleted, "test", &github.GitHubCheckRunEventPayload{
+				WorkspaceIDs: []string{"ws-1"}, Owner: "acme", Name: "repo",
+				Branch: branch, SHA: "abc", CheckName: "build", Conclusion: "failure", CheckRunID: runID,
+			},
+		)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Wrong branch: no fire.
+	publishCI("develop", 1)
+	select {
+	case evt := <-fired:
+		t.Fatalf("expected no fire for non-matching CI branch, got %+v", evt)
+	default:
+	}
+
+	// Matching branch: fires.
+	publishCI("main", 2)
+	select {
+	case <-fired:
+	default:
+		t.Fatal("expected CI trigger to fire for matching branch")
 	}
 }
 

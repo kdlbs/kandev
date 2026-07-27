@@ -32,28 +32,44 @@ func NewGitHubWebhookSubscriber(svc *Service, eventBus bus.EventBus, log *logger
 	return &GitHubWebhookSubscriber{svc: svc, eventBus: eventBus, logger: log}
 }
 
-// Start subscribes to the GitHub webhook bus events. Idempotent.
+// Start subscribes to the GitHub webhook bus events. Idempotent, and
+// retryable: a subscription failure leaves the subscriber un-started (partial
+// subscriptions are rolled back) so a later Start re-attempts both, rather than
+// permanently disabling push/CI processing.
 func (s *GitHubWebhookSubscriber) Start(_ context.Context) {
 	if s.started || s.eventBus == nil {
 		return
 	}
-	s.started = true
 
+	subs, err := s.subscribeAll()
+	if err != nil {
+		for _, sub := range subs {
+			_ = sub.Unsubscribe()
+		}
+		s.logger.Error("failed to subscribe automation GitHub webhook events; will retry on next Start",
+			zap.Error(err))
+		return
+	}
+
+	s.subs = subs
+	s.started = true
+	s.logger.Info("automation GitHub webhook subscriber started")
+}
+
+// subscribeAll subscribes to both webhook events, returning any subscriptions
+// created so far alongside the first error (for rollback by the caller).
+func (s *GitHubWebhookSubscriber) subscribeAll() ([]bus.Subscription, error) {
+	var subs []bus.Subscription
 	pushSub, err := s.eventBus.Subscribe(events.GitHubPushReceived, s.handlePush)
 	if err != nil {
-		s.logger.Error("failed to subscribe to github.push_received", zap.Error(err))
-	} else {
-		s.subs = append(s.subs, pushSub)
+		return subs, fmt.Errorf("subscribe %s: %w", events.GitHubPushReceived, err)
 	}
-
+	subs = append(subs, pushSub)
 	ciSub, err := s.eventBus.Subscribe(events.GitHubCheckRunCompleted, s.handleCheckRun)
 	if err != nil {
-		s.logger.Error("failed to subscribe to github.check_run_completed", zap.Error(err))
-	} else {
-		s.subs = append(s.subs, ciSub)
+		return subs, fmt.Errorf("subscribe %s: %w", events.GitHubCheckRunCompleted, err)
 	}
-
-	s.logger.Info("automation GitHub webhook subscriber started")
+	return append(subs, ciSub), nil
 }
 
 // Stop unsubscribes from the bus. Idempotent.
@@ -102,7 +118,9 @@ func (s *GitHubWebhookSubscriber) checkPushTrigger(
 		return
 	}
 
-	dedupKey := fmt.Sprintf("push:%s/%s@%s", payload.Owner, payload.Name, payload.SHA)
+	// The same commit SHA can be pushed to multiple matching branches; key the
+	// dedup on the branch too so a later branch's push isn't suppressed.
+	dedupKey := fmt.Sprintf("push:%s/%s@%s@%s", payload.Owner, payload.Name, payload.Branch, payload.SHA)
 	data, _ := json.Marshal(map[string]interface{}{
 		"repo":         fmt.Sprintf("%s/%s", payload.Owner, payload.Name),
 		"branch":       payload.Branch,
@@ -143,7 +161,8 @@ func (s *GitHubWebhookSubscriber) checkCITrigger(
 		return
 	}
 	if !matchesFilterValue(payload.Conclusion, cfg.Conclusions) ||
-		!matchesFilterValue(payload.CheckName, cfg.CheckNames) {
+		!matchesFilterValue(payload.CheckName, cfg.CheckNames) ||
+		!matchesBranches(payload.Branch, cfg.Branches) {
 		return
 	}
 

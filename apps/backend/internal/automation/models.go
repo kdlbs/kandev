@@ -168,6 +168,7 @@ type GitHubCITriggerConfig struct {
 	Repos       []github.RepoFilter `json:"repos"`
 	Conclusions []string            `json:"conclusions"` // success, failure, etc.
 	CheckNames  []string            `json:"check_names,omitempty"`
+	Branches    []string            `json:"branches,omitempty"` // head-branch glob filter; empty = all
 }
 
 // WebhookTriggerConfig holds configuration for webhook triggers.

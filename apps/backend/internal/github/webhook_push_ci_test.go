@@ -63,6 +63,60 @@ func TestGitHubWebhookPushPublishesPushReceived(t *testing.T) {
 	}
 }
 
+func TestGitHubWebhookResolvesDistinctActiveWorkspaces(t *testing.T) {
+	installationID := int64(42)
+	conn := func(ws string, status ConnectionStatus) *WorkspaceConnection {
+		return &WorkspaceConnection{
+			WorkspaceID: ws, AppRegistrationID: "registration-work",
+			Source: ConnectionSourceGitHubAppInstallation, InstallationID: &installationID,
+			Status: status,
+		}
+	}
+	store := &githubWebhookMemoryStore{workspaces: map[int64][]*WorkspaceConnection{
+		installationID: {
+			conn("workspace-1", ConnectionStatusActive),
+			conn("workspace-1", ConnectionStatusActive),    // duplicate → collapsed
+			conn("workspace-2", ConnectionStatusActive),    // distinct → kept
+			conn("workspace-3", ConnectionStatusSuspended), // suspended → excluded
+			conn("workspace-4", ConnectionStatusRevoked),   // revoked → excluded
+		},
+	}}
+	eventBus := newTestMemoryBus(t)
+	var received *GitHubPushEventPayload
+	if _, err := eventBus.Subscribe(events.GitHubPushReceived, func(_ context.Context, e *bus.Event) error {
+		received = e.Data.(*GitHubPushEventPayload)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	service := NewAppRegistrationWebhookService("registration-work", "work-secret", store, nil, nil, eventBus)
+	payload := []byte(`{
+		"ref":"refs/heads/main","after":"abc1234",
+		"repository":{"name":"repo","owner":{"login":"acme"}},
+		"installation":{"id":42},"pusher":{"name":"alice"}
+	}`)
+	request := signedWebhookRequest("work-secret", "delivery-multi-ws", "push", payload)
+
+	result, err := service.Handle(context.Background(), request)
+	if err != nil {
+		t.Fatalf("Handle() error = %v", err)
+	}
+	if result.Affected != 2 {
+		t.Fatalf("expected 2 distinct active workspaces, got affected=%d", result.Affected)
+	}
+	if received == nil {
+		t.Fatal("expected push event to be published")
+	}
+	got := map[string]bool{}
+	for _, ws := range received.WorkspaceIDs {
+		got[ws] = true
+	}
+	if len(received.WorkspaceIDs) != 2 || !got["workspace-1"] || !got["workspace-2"] ||
+		got["workspace-3"] || got["workspace-4"] {
+		t.Fatalf("expected [workspace-1 workspace-2], got %v", received.WorkspaceIDs)
+	}
+}
+
 func TestGitHubWebhookPushIgnoresBranchDelete(t *testing.T) {
 	installationID := int64(42)
 	store := &githubWebhookMemoryStore{workspaces: map[int64][]*WorkspaceConnection{

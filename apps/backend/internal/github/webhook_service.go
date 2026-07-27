@@ -594,7 +594,10 @@ func (s *GitHubWebhookService) resolveWorkspaceIDs(ctx context.Context, installa
 	seen := make(map[string]bool, len(connections))
 	workspaceIDs := make([]string, 0, len(connections))
 	for _, connection := range connections {
-		if connection == nil || connection.WorkspaceID == "" || seen[connection.WorkspaceID] {
+		// Only active installations may drive automation events: a suspended
+		// or revoked App binding must not still fire push/CI automations.
+		if connection == nil || connection.WorkspaceID == "" ||
+			connection.Status != ConnectionStatusActive || seen[connection.WorkspaceID] {
 			continue
 		}
 		seen[connection.WorkspaceID] = true
