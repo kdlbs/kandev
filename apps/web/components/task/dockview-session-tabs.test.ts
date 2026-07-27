@@ -12,6 +12,7 @@ import {
 } from "./dockview-session-tabs";
 import { CENTER_GROUP, RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { makeSharedEnvironmentHandoffApi } from "./dockview-session-tabs.test-utils";
 
 type FakePanel = {
   id: string;
@@ -248,6 +249,22 @@ function makeReorderingAutoSessionApi(): {
 }
 
 describe("reconcileRemovedSessionPanels", () => {
+  it("replaces the outgoing session before its final close can destroy the center group", () => {
+    const { api, events, groupIds } = makeSharedEnvironmentHandoffApi();
+
+    reconcileRemovedSessionPanels(api, new Set<string>(), ["incoming"], "incoming");
+
+    expect({
+      events,
+      groupIds: groupIds(),
+      incomingGroup: api.getPanel("session:incoming")?.group.id ?? null,
+    }).toEqual({
+      events: ["add:session:incoming", "close:session:outgoing"],
+      groupIds: [CENTER_GROUP, RIGHT_TOP_GROUP, "group-right-bottom"],
+      incomingGroup: CENTER_GROUP,
+    });
+  });
+
   it("closes a stale tracked panel that's still live in dockview", () => {
     // createdSet has session-A; A's panel is live; A is no longer in the task's
     // session list, so it must be closed.

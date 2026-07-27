@@ -226,6 +226,7 @@ type OptionalAgentTaskOpts = {
   executor_profile_id?: string;
   metadata?: Record<string, unknown>;
   parent_id?: string;
+  workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
   attachments?: MessageAttachmentInput[];
 };
 
@@ -248,6 +249,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   setIf(fields, "executor_profile_id", opts.executor_profile_id);
   setIf(fields, "metadata", opts.metadata);
   setIf(fields, "parent_id", opts.parent_id);
+  setIf(fields, "workspace_mode", opts.workspace_mode);
   setIf(fields, "attachments", opts.attachments);
   return fields;
 }
@@ -619,6 +621,8 @@ export class ApiClient {
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
       parent_id?: string;
+      /** Workspace behavior for a child task. */
+      workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
       attachments?: MessageAttachmentInput[];
     },
   ): Promise<CreateTaskResponse> {
