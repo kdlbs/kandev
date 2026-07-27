@@ -3,7 +3,9 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -12,6 +14,8 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 )
+
+var errFlakySubscribe = errors.New("flaky subscribe failure")
 
 func newTestSubscriber(t *testing.T, svc *Service) *GitHubWebhookSubscriber {
 	t.Helper()
@@ -357,4 +361,68 @@ func TestGitHubWebhookSubscriberStopDrainsCleanly(t *testing.T) {
 	sub := newTestSubscriber(t, svc)
 	sub.Stop()
 	// Calling Stop twice (once here, once via t.Cleanup) must be safe.
+}
+
+// flakySubscribeBus is a minimal bus.EventBus whose Subscribe fails on the
+// call whose 1-based index equals failCall (0 = never), used to exercise the
+// subscriber's retryable-Start contract. It tracks the count of live
+// subscriptions so a test can assert partial subscriptions are rolled back.
+type flakySubscribeBus struct {
+	subscribeCalls int
+	failCall       int
+	activeCount    int
+}
+
+type flakySub struct{ bus *flakySubscribeBus }
+
+func (s *flakySub) Unsubscribe() error { s.bus.activeCount--; return nil }
+func (s *flakySub) IsValid() bool      { return true }
+
+func (b *flakySubscribeBus) Subscribe(string, bus.EventHandler) (bus.Subscription, error) {
+	b.subscribeCalls++
+	if b.subscribeCalls == b.failCall {
+		return nil, errFlakySubscribe
+	}
+	b.activeCount++
+	return &flakySub{bus: b}, nil
+}
+
+func (b *flakySubscribeBus) Publish(context.Context, string, *bus.Event) error { return nil }
+func (b *flakySubscribeBus) QueueSubscribe(string, string, bus.EventHandler) (bus.Subscription, error) {
+	return nil, nil
+}
+
+func (b *flakySubscribeBus) Request(context.Context, string, *bus.Event, time.Duration) (*bus.Event, error) {
+	return nil, nil
+}
+func (b *flakySubscribeBus) Close()            {}
+func (b *flakySubscribeBus) IsConnected() bool { return true }
+
+// TestGitHubWebhookSubscriberStartRetryableAfterFailure pins the retry
+// contract: a failed subscription leaves the subscriber un-started with any
+// partial subscription rolled back, and a later Start re-attempts and succeeds.
+func TestGitHubWebhookSubscriberStartRetryableAfterFailure(t *testing.T) {
+	svc := newTestService(t)
+	fb := &flakySubscribeBus{failCall: 2} // first Subscribe ok, second fails
+	log, _ := logger.NewFromZap(zap.NewNop())
+	sub := NewGitHubWebhookSubscriber(svc, fb, log)
+	t.Cleanup(sub.Stop)
+
+	sub.Start(context.Background())
+	if sub.started {
+		t.Fatal("expected subscriber to remain un-started after a subscription failure")
+	}
+	if fb.activeCount != 0 {
+		t.Fatalf("expected the partial subscription to be rolled back, active=%d", fb.activeCount)
+	}
+
+	// Bus recovers; a later Start must re-attempt and succeed.
+	fb.failCall = 0
+	sub.Start(context.Background())
+	if !sub.started {
+		t.Fatal("expected subscriber to be started after a successful retry")
+	}
+	if fb.activeCount != 2 {
+		t.Fatalf("expected 2 live subscriptions after retry, active=%d", fb.activeCount)
+	}
 }
