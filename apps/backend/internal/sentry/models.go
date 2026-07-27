@@ -148,8 +148,9 @@ type SentryIssue struct {
 // (RESTClient.SearchIssues) only accepts one project per call — callers that
 // need several issue an underlying request per slug and merge the results
 // (see Service.CheckIssueWatch). Empty = browse "all projects" in the org,
-// used only by the manual issue browser; a watch's filter requires at least
-// one entry (enforced in validateFilter).
+// used only by the manual issue browser, whose single-select UI and the
+// httpSearchIssues handler both cap it at one entry when non-empty; a
+// watch's filter requires at least one entry (enforced in validateFilter).
 type SearchFilter struct {
 	OrgSlug      string   `json:"orgSlug"`
 	ProjectSlugs []string `json:"projectSlugs,omitempty"`
