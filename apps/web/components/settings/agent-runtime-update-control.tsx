@@ -1,10 +1,28 @@
 "use client";
 
-import { IconLoader2, IconRefresh } from "@tabler/icons-react";
+import { IconAlertTriangle, IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-
-import type { AgentUpdateJob, InstallJob } from "@/lib/api";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@kandev/ui/dialog";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+} from "@kandev/ui/drawer";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
 import type { RuntimeUpdate } from "@/lib/types/http";
+import { useAgentUpdateDialogState } from "./use-agent-update-dialog-state";
 
 const ACTIVE_UPDATE_STATUSES = new Set<AgentUpdateJob["status"]>([
   "queued",
@@ -22,44 +40,10 @@ function updatePhase(status: AgentUpdateJob["status"] | undefined): string | nul
     case "updating":
       return "Updating runtime…";
     case "refreshing":
-      return "Refreshing models…";
+      return "Refreshing agent capabilities…";
     default:
       return null;
   }
-}
-
-function updateButtonLabel(status: AgentUpdateJob["status"] | undefined) {
-  switch (status) {
-    case "queued":
-      return "Update queued";
-    case "resolving":
-      return "Resolving update";
-    case "updating":
-      return "Updating agent";
-    case "refreshing":
-      return "Refreshing agent capabilities";
-    case "failed":
-      return "Retry update";
-    default:
-      return "Update agent";
-  }
-}
-
-function VersionSummary({
-  runtimeUpdate,
-  job,
-}: {
-  runtimeUpdate: RuntimeUpdate;
-  job?: AgentUpdateJob;
-}) {
-  const current = job?.current_version || runtimeUpdate.current_version || "Unknown";
-  if (job?.target_version) {
-    return <p className="break-words font-mono text-xs">{`${current} → ${job.target_version}`}</p>;
-  }
-  if (job?.status === "resolving") {
-    return <p className="break-words font-mono text-xs">{`${current} → Checking latest…`}</p>;
-  }
-  return <p className="break-words text-xs text-muted-foreground">Current version: {current}</p>;
 }
 
 function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdateJob }) {
@@ -67,7 +51,7 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
   if (job.status === "succeeded" && job.refresh_error) {
     return (
       <p
-        className="break-words text-xs text-amber-600 dark:text-amber-400"
+        className="break-words text-amber-600 dark:text-amber-400"
         role="alert"
         data-testid={`agent-update-result-${agentName}`}
       >
@@ -78,7 +62,7 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
   if (job.status === "succeeded") {
     return (
       <p
-        className="break-words text-xs text-green-600 dark:text-green-400"
+        className="break-words text-green-600 dark:text-green-400"
         role="status"
         data-testid={`agent-update-result-${agentName}`}
       >
@@ -89,7 +73,7 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
   if (job.status === "failed") {
     return (
       <p
-        className="break-words text-xs text-destructive"
+        className="break-words text-destructive"
         role="alert"
         data-testid={`agent-update-result-${agentName}`}
       >
@@ -100,71 +84,338 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
   return null;
 }
 
-export function AgentRuntimeUpdateControl({
-  agentName,
-  runtimeUpdate,
-  job,
-  installJob,
-  onUpdate,
-}: {
+type UpdateBodyProps = {
   agentName: string;
-  runtimeUpdate: RuntimeUpdate;
+  preview: AgentUpdatePreview | null;
+  loading: boolean;
+  previewError: string | null;
+  approveError: string | null;
   job?: AgentUpdateJob;
-  installJob?: InstallJob;
-  onUpdate: (agentName: string) => void;
-}) {
-  if (!runtimeUpdate.supported) return null;
+  onRetryPreview: () => void;
+};
 
-  const updateInFlight = Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status));
-  const installInFlight = installJob?.status === "queued" || installJob?.status === "running";
-  const disabled = updateInFlight || installInFlight;
+function UpdateBody({
+  agentName,
+  preview,
+  loading,
+  previewError,
+  approveError,
+  job,
+  onRetryPreview,
+}: UpdateBodyProps) {
   const phase = updatePhase(job?.status);
-  const buttonLabel = updateButtonLabel(job?.status);
-
   return (
-    <div className="min-w-0 space-y-2" data-testid={`agent-update-control-${agentName}`}>
-      <VersionSummary runtimeUpdate={runtimeUpdate} job={job} />
+    <div
+      className="max-h-[calc(80dvh-10rem)] min-h-0 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 text-xs/relaxed"
+      data-testid={`agent-update-dialog-body-${agentName}`}
+    >
+      {loading && (
+        <p className="flex items-center gap-2 text-muted-foreground" role="status">
+          <IconLoader2 className="size-4 animate-spin" />
+          Checking the latest runtime version…
+        </p>
+      )}
+      {previewError && (
+        <div
+          className="space-y-2 rounded-md border border-destructive/30 bg-destructive/5 p-3"
+          role="alert"
+        >
+          <p className="flex items-start gap-2 text-destructive">
+            <IconAlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>{previewError}</span>
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={onRetryPreview}>
+            Retry version check
+          </Button>
+        </div>
+      )}
+      {approveError && (
+        <div
+          className="rounded-md border border-destructive/30 bg-destructive/5 p-3"
+          role="alert"
+          data-testid={`agent-update-approve-error-${agentName}`}
+        >
+          <p className="flex items-start gap-2 text-destructive">
+            <IconAlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>Unable to start update: {approveError}</span>
+          </p>
+        </div>
+      )}
+      {preview && (
+        <>
+          <div className="space-y-1">
+            <p className="font-medium">Runtime version</p>
+            <p className="break-words font-mono text-sm">
+              {(job?.current_version || preview.current_version || "Unknown") +
+                " → " +
+                (job?.target_version || preview.target_version)}
+            </p>
+          </div>
+          <div className="space-y-1 text-muted-foreground">
+            <p>
+              This updates the managed runtime on this Kandev host, then refreshes its models and
+              capabilities.
+            </p>
+            <p>
+              Active sessions keep running; only later probes and launches use the refreshed
+              runtime.
+            </p>
+          </div>
+          <div className="space-y-1">
+            <p className="font-medium">Command that will run</p>
+            <pre className="whitespace-pre-wrap break-all rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground">
+              {preview.command_string}
+            </pre>
+          </div>
+        </>
+      )}
       {phase && (
         <p
-          className="flex items-center gap-1.5 text-xs text-muted-foreground"
+          className="flex items-center gap-1.5 text-muted-foreground"
           role="status"
           data-testid={`agent-update-phase-${agentName}`}
         >
-          <IconLoader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />
-          <span className="min-w-0 break-words">{phase}</span>
-        </p>
-      )}
-      {installInFlight && (
-        <p className="break-words text-xs text-muted-foreground">
-          Agent installation is in progress.
+          <IconLoader2 className="size-3.5 shrink-0 animate-spin" />
+          {phase}
         </p>
       )}
       {job?.output && (
         <pre
           data-testid={`agent-update-log-${agentName}`}
-          className="max-h-40 overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words rounded-md bg-muted px-2 py-1.5 font-mono text-xs text-muted-foreground"
+          className="whitespace-pre-wrap break-words rounded-md bg-muted p-3 font-mono text-xs text-muted-foreground"
         >
           {job.output}
         </pre>
       )}
       <UpdateResult agentName={agentName} job={job} />
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="min-h-11 w-full cursor-pointer whitespace-normal"
-        disabled={disabled}
-        aria-label={buttonLabel}
-        onClick={() => onUpdate(agentName)}
-        data-testid={`agent-update-button-${agentName}`}
-      >
-        {updateInFlight ? (
-          <IconLoader2 className="mr-2 h-4 w-4 animate-spin" />
-        ) : (
-          <IconRefresh className="mr-2 h-4 w-4" />
-        )}
-        {buttonLabel}
-      </Button>
     </div>
+  );
+}
+
+type UpdateFooterProps = {
+  agentName: string;
+  preview: AgentUpdatePreview | null;
+  previewError: string | null;
+  job?: AgentUpdateJob;
+  loading: boolean;
+  starting: boolean;
+  installInFlight: boolean;
+  onApprove: () => void;
+  onClose: () => void;
+  mobile?: boolean;
+};
+
+function canApproveUpdate({
+  preview,
+  previewError,
+  loading,
+  updateInFlight,
+  starting,
+  installInFlight,
+}: {
+  preview: AgentUpdatePreview | null;
+  previewError: string | null;
+  loading: boolean;
+  updateInFlight: boolean;
+  starting: boolean;
+  installInFlight: boolean;
+}) {
+  return (
+    Boolean(preview?.current_version) &&
+    !previewError &&
+    !loading &&
+    !updateInFlight &&
+    !starting &&
+    !installInFlight
+  );
+}
+
+function UpdateFooter({
+  agentName,
+  preview,
+  previewError,
+  job,
+  loading,
+  starting,
+  installInFlight,
+  onApprove,
+  onClose,
+  mobile,
+}: UpdateFooterProps) {
+  const updateInFlight = Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status));
+  const canRetry = job?.status === "failed";
+  const canApprove = canApproveUpdate({
+    preview,
+    previewError,
+    loading,
+    updateInFlight,
+    starting,
+    installInFlight,
+  });
+  const showApprove = !job || canRetry;
+  const content = (
+    <>
+      <Button type="button" variant="outline" onClick={onClose}>
+        {job?.status === "succeeded" ? "Done" : "Cancel"}
+      </Button>
+      {showApprove && (
+        <Button
+          type="button"
+          disabled={!canApprove}
+          onClick={onApprove}
+          data-testid={`agent-update-confirm-${agentName}`}
+        >
+          {starting && <IconLoader2 className="mr-2 size-4 animate-spin" />}
+          {canRetry ? "Retry update" : "Approve update"}
+        </Button>
+      )}
+    </>
+  );
+  if (mobile) {
+    return (
+      <DrawerFooter className="border-t pb-[max(1rem,env(safe-area-inset-bottom))]">
+        {content}
+      </DrawerFooter>
+    );
+  }
+  return <DialogFooter className="border-t px-4 py-3">{content}</DialogFooter>;
+}
+
+function UpdateTrigger({
+  agentName,
+  displayName,
+  installInFlight,
+  onOpen,
+}: {
+  agentName: string;
+  displayName: string;
+  installInFlight: boolean;
+  onOpen: () => void;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span tabIndex={installInFlight ? 0 : -1} className="inline-flex">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-11 w-11 cursor-pointer active:scale-95 sm:h-7 sm:w-7"
+            aria-label={`Update ${displayName}`}
+            disabled={installInFlight}
+            onClick={onOpen}
+            data-testid={`agent-update-trigger-${agentName}`}
+          >
+            <IconRefresh className="size-4" />
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {installInFlight ? "Agent installation is in progress" : `Update ${displayName}`}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+export function AgentRuntimeUpdateControl({
+  agentName,
+  displayName,
+  runtimeUpdate,
+  job,
+  installJob,
+  onPreview,
+  onUpdate,
+}: {
+  agentName: string;
+  displayName: string;
+  runtimeUpdate: RuntimeUpdate;
+  job?: AgentUpdateJob;
+  installJob?: InstallJob;
+  onPreview: (agentName: string) => Promise<AgentUpdatePreview>;
+  onUpdate: (agentName: string) => Promise<AgentUpdateJob>;
+}) {
+  const { isMobile } = useResponsiveBreakpoint();
+  const {
+    activeJob,
+    approve,
+    approveError,
+    handleOpenChange,
+    loading,
+    loadPreview,
+    open,
+    preview,
+    previewError,
+    starting,
+  } = useAgentUpdateDialogState({ agentName, job, onPreview, onUpdate });
+  const installInFlight = installJob?.status === "queued" || installJob?.status === "running";
+
+  if (!runtimeUpdate.supported) return null;
+
+  const body = (
+    <UpdateBody
+      agentName={agentName}
+      preview={preview}
+      loading={loading}
+      previewError={previewError}
+      approveError={approveError}
+      job={activeJob}
+      onRetryPreview={() => void loadPreview()}
+    />
+  );
+
+  const footer = (mobile = false) => (
+    <UpdateFooter
+      agentName={agentName}
+      preview={preview}
+      previewError={previewError}
+      job={activeJob}
+      loading={loading}
+      starting={starting}
+      installInFlight={installInFlight}
+      onApprove={() => void approve()}
+      onClose={() => handleOpenChange(false)}
+      mobile={mobile}
+    />
+  );
+
+  return (
+    <>
+      <UpdateTrigger
+        agentName={agentName}
+        displayName={displayName}
+        installInFlight={installInFlight}
+        onOpen={() => handleOpenChange(true)}
+      />
+      {isMobile ? (
+        <Drawer open={open} onOpenChange={handleOpenChange}>
+          <DrawerContent className="max-h-[80dvh]" data-testid={`agent-update-drawer-${agentName}`}>
+            <DrawerHeader className="shrink-0 text-left">
+              <DrawerTitle>Update {displayName}</DrawerTitle>
+              <DrawerDescription>
+                Review the update before Kandev changes this host runtime.
+              </DrawerDescription>
+            </DrawerHeader>
+            {body}
+            {footer(true)}
+          </DrawerContent>
+        </Drawer>
+      ) : (
+        <Dialog open={open} onOpenChange={handleOpenChange}>
+          <DialogContent
+            className="max-h-[80dvh] gap-0 p-0 sm:max-w-xl"
+            data-testid={`agent-update-dialog-${agentName}`}
+          >
+            <DialogHeader className="px-4 pt-4">
+              <DialogTitle>Update {displayName}</DialogTitle>
+              <DialogDescription>
+                Review the update before Kandev changes this host runtime.
+              </DialogDescription>
+            </DialogHeader>
+            {body}
+            {footer()}
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
   );
 }

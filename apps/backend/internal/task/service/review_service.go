@@ -61,6 +61,11 @@ type ReviewService struct {
 	repo     reviewRepo
 	eventBus bus.EventBus
 	logger   *logger.Logger
+	// authorizeTask gates cross-task finding writes by the task's workspace
+	// ownership (opt-in auth). Nil = unscoped (internal callers such as the
+	// built-in review runner / auth disabled). Mirrors PlanService and
+	// WalkthroughService.
+	authorizeTask func(ctx context.Context, taskID string) error
 }
 
 // NewReviewService creates a new code-review service.
@@ -70,6 +75,21 @@ func NewReviewService(repo reviewRepo, eventBus bus.EventBus, log *logger.Logger
 		eventBus: eventBus,
 		logger:   log.WithFields(zap.String("component", "review-service")),
 	}
+}
+
+// SetTaskAuthorizer wires the per-user task-access check (opt-in auth). The
+// authorizer must return nil for contexts without a request identity. Mirrors
+// PlanService / WalkthroughService so publish_review_findings_kandev honors an
+// explicit cross-task task_id only within the caller's reach.
+func (s *ReviewService) SetTaskAuthorizer(fn func(ctx context.Context, taskID string) error) {
+	s.authorizeTask = fn
+}
+
+func (s *ReviewService) authorize(ctx context.Context, taskID string) error {
+	if s.authorizeTask == nil {
+		return nil
+	}
+	return s.authorizeTask(ctx, taskID)
 }
 
 // CreateRunRequest describes a new review pass.
@@ -279,6 +299,9 @@ type ReviewFindingInput struct {
 func (s *ReviewService) PublishFindings(ctx context.Context, req PublishFindingsRequest) (*models.TaskReviewRun, []*models.TaskReviewFinding, error) {
 	if req.TaskID == "" {
 		return nil, nil, ErrTaskIDRequired
+	}
+	if err := s.authorize(ctx, req.TaskID); err != nil {
+		return nil, nil, err
 	}
 	if len(req.Findings) == 0 {
 		return nil, nil, fmt.Errorf("%w: at least one finding is required", ErrInvalidReviewFinding)

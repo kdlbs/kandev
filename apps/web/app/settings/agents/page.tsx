@@ -26,7 +26,7 @@ import {
   listAvailableAgents,
   listInstallJobs,
 } from "@/lib/api";
-import type { AgentUpdateJob, InstallJob } from "@/lib/api";
+import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAgentRuntimeUpdates } from "@/hooks/domains/settings/use-agent-runtime-updates";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
@@ -204,7 +204,8 @@ type InstalledAgentsSectionProps = {
   resolveRuntimeUpdate: (name: string) => RuntimeUpdate | undefined;
   installJobs: Record<string, InstallJob>;
   updateJobs: Record<string, AgentUpdateJob>;
-  handleUpdate: (name: string) => Promise<void>;
+  previewUpdate: (name: string) => Promise<AgentUpdatePreview>;
+  startUpdate: (name: string) => Promise<AgentUpdateJob>;
   setTuiDialogOpen: (open: boolean) => void;
   handleRescan: () => Promise<void>;
 };
@@ -272,7 +273,8 @@ function InstalledAgentsSection({
   resolveRuntimeUpdate,
   installJobs,
   updateJobs,
-  handleUpdate,
+  previewUpdate,
+  startUpdate,
   setTuiDialogOpen,
   handleRescan,
 }: InstalledAgentsSectionProps) {
@@ -324,7 +326,8 @@ function InstalledAgentsSection({
             runtimeUpdate={resolveRuntimeUpdate(agent.name)}
             installJob={installJobs[agent.name]}
             updateJob={updateJobs[agent.name]}
-            onUpdate={(name) => void handleUpdate(name)}
+            onPreview={previewUpdate}
+            onUpdate={startUpdate}
             onAuthComplete={() => void handleRescan()}
           />
         ))}
@@ -524,7 +527,7 @@ function useAgentPageState() {
   };
 
   const { installJobs, handleInstall } = useInstallAgent(handleRescan);
-  const { updateJobs, handleUpdate } = useAgentRuntimeUpdates();
+  const { updateJobs, previewUpdate, startUpdate } = useAgentRuntimeUpdates();
 
   const handleCreateCustomTUI = async (data: {
     display_name: string;
@@ -565,7 +568,8 @@ function useAgentPageState() {
     installJobs,
     handleInstall,
     updateJobs,
-    handleUpdate,
+    previewUpdate,
+    startUpdate,
   };
 }
 
@@ -588,7 +592,8 @@ export default function AgentsSettingsPage() {
     installJobs,
     handleInstall,
     updateJobs,
-    handleUpdate,
+    previewUpdate,
+    startUpdate,
   } = useAgentPageState();
   const { copiedValue, copy } = useCopyCommand();
 
@@ -613,7 +618,8 @@ export default function AgentsSettingsPage() {
         resolveRuntimeUpdate={resolveRuntimeUpdate}
         installJobs={installJobs}
         updateJobs={updateJobs}
-        handleUpdate={handleUpdate}
+        previewUpdate={previewUpdate}
+        startUpdate={startUpdate}
         setTuiDialogOpen={setTuiDialogOpen}
         handleRescan={handleRescan}
       />

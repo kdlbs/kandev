@@ -284,6 +284,17 @@ type AgentUpdateJobDTO struct {
 	FinishedAt     *time.Time           `json:"finished_at,omitempty"`
 }
 
+// AgentUpdatePreviewDTO is a read-only representation of the next managed
+// runtime update. The command is derived from trusted built-in agent metadata.
+type AgentUpdatePreviewDTO struct {
+	AgentName      string   `json:"agent_name"`
+	Package        string   `json:"package"`
+	CurrentVersion string   `json:"current_version,omitempty"`
+	TargetVersion  string   `json:"target_version"`
+	Command        []string `json:"command"`
+	CommandString  string   `json:"command_string"`
+}
+
 type ListAgentUpdateJobsResponse struct {
 	Jobs []AgentUpdateJobDTO `json:"jobs"`
 }

@@ -35,6 +35,11 @@ type reviewComponents struct {
 // "no capable reviewer" (a clear, actionable failure) instead of panicking.
 func buildReviewComponents(p routeParams) reviewComponents {
 	service := taskservice.NewReviewService(p.taskRepo, p.eventBus, p.log)
+	// Gate cross-task finding writes by workspace ownership, matching the plan
+	// and walkthrough services. Under enforced auth an agent may only publish
+	// to a task within its reach; unscoped callers (the built-in review runner,
+	// auth disabled) are unaffected.
+	service.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 
 	resolver := review.NewResolver(
 		reviewProfileLookup{profiles: p.agentSettingsRepo},

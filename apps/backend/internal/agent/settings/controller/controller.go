@@ -23,10 +23,13 @@ import (
 func buildCommandString(cmd []string) string {
 	var parts []string
 	for _, arg := range cmd {
-		if strings.ContainsAny(arg, " \t\n\"'`$\\") {
+		switch {
+		case arg == "":
+			parts = append(parts, `""`)
+		case strings.ContainsAny(arg, " \t\n\"'`$\\"):
 			escaped := strings.ReplaceAll(arg, "\"", "\\\"")
 			parts = append(parts, "\""+escaped+"\"")
-		} else {
+		default:
 			parts = append(parts, arg)
 		}
 	}
