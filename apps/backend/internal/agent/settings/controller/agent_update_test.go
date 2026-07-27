@@ -131,7 +131,7 @@ func (f *fakeRuntimeUpdater) RunUpdate(
 	release := f.releaseRun
 	output := f.updateOutput
 	err := f.runErr
-	if len(f.runErrs) >= f.runCalls {
+	if f.runCalls-1 < len(f.runErrs) {
 		err = f.runErrs[f.runCalls-1]
 	}
 	f.mu.Unlock()
