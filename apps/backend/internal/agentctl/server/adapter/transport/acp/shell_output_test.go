@@ -365,6 +365,63 @@ func TestNormalizeShellToolResultStripsLeadingCommandEcho(t *testing.T) {
 	}
 }
 
+// TestNormalizeShellToolResultStripsLeadingCommandEchoWithWorkDirResolvedPath
+// is a regression for a real-world report: PR #1898's fix only strips the
+// echo when the captured terminal line matches the tool call's reported
+// "command" byte-for-byte. Some providers resolve a relative file-path
+// argument to an absolute one (workDir-joined) before actually invoking the
+// real terminal, while the "command" field reported on the tool call - the
+// same text the chat header renders - keeps the original relative form.
+// The literal prefix match then never fires, and the full echoed line
+// (with the resolved absolute path) leaks into the persisted Output.
+func TestNormalizeShellToolResultStripsLeadingCommandEchoWithWorkDirResolvedPath(t *testing.T) {
+	t.Parallel()
+
+	command := `grep -n "^const STRATEGY\|STRATEGY =" apps/web/components/task/chat/message-list.tsx`
+	workDir := "/home/clem/.kandev/tasks/new-message-line_0vc/kdlbs-kandev"
+	absolutePath := workDir + "/apps/web/components/task/chat/message-list.tsx"
+	resolvedCommand := strings.Replace(command, "apps/web/components/task/chat/message-list.tsx", absolutePath, 1)
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeToolResult(payload, "$ "+resolvedCommand+"\n24:const STRATEGY = \"native\";\n")
+
+	require.Equal(t, "24:const STRATEGY = \"native\";\n", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithWorkDirResolvedPath
+// covers the same workDir-resolved-path mismatch on the live-update path
+// (terminal_output plus a terminal_exit completion, no rawOutput).
+func TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithWorkDirResolvedPath(t *testing.T) {
+	t.Parallel()
+
+	command := "cat notes.txt"
+	workDir := "/repo"
+	resolvedCommand := "cat /repo/notes.txt"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{
+			"terminal_output": map[string]any{"data": "$ " + resolvedCommand + "\nhello\n"},
+			"terminal_exit":   map[string]any{"exit_code": float64(0)},
+		},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, "hello\n", payload.ShellExec().Output.Stdout)
+}
+
 func TestNormalizeShellToolUpdateStripsLeadingCommandEchoFromLiveOutput(t *testing.T) {
 	t.Parallel()
 
