@@ -422,6 +422,55 @@ func TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithWorkDirResolvedPath
 	require.Equal(t, "hello\n", payload.ShellExec().Output.Stdout)
 }
 
+// TestNormalizeShellToolUpdateWorkDirFallbackDefersPendingEchoWithoutNewline
+// covers the pending (non-final) counterpart of the workDir fallback: a
+// buffer that is exactly the resolved echo with no trailing newline yet
+// must be left untouched, since the real output (or even just the
+// separator newline) may still be in flight.
+func TestNormalizeShellToolUpdateWorkDirFallbackDefersPendingEchoWithoutNewline(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "cat notes.txt", "cwd": "/repo"},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output": map[string]any{"data": "$ cat /repo/notes.txt"}},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, "$ cat /repo/notes.txt", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolUpdateWorkDirFallbackCommitsPendingEchoWithNewline
+// covers the fallback's other pending-path branch: once a trailing newline
+// confirms the echo line is complete (hasMore == true), the strip commits
+// immediately even though commitExactMatch is false - the same behavior
+// finishCommandEchoStrip already applies once its literal-match "rest"
+// carries a newline.
+func TestNormalizeShellToolUpdateWorkDirFallbackCommitsPendingEchoWithNewline(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "cat notes.txt", "cwd": "/repo"},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output": map[string]any{"data": "$ cat /repo/notes.txt\n"}},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, "", payload.ShellExec().Output.Stdout)
+}
+
 // TestNormalizeShellToolResultWorkDirFallbackNeverCorruptsNearMissOutput is a
 // safety regression for the workDir-collapse fallback added alongside the
 // above test: ReplaceAll(firstLine, workDirPrefix, "") strips every
