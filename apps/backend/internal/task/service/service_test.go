@@ -3036,8 +3036,9 @@ func TestService_MarkSessionReadRejectsCrossSessionMessage(t *testing.T) {
 		t.Fatalf("seed message: %v", err)
 	}
 
-	if _, err := svc.MarkSessionRead(ctx, sessionID, "msg-other"); err == nil {
-		t.Fatal("expected MarkSessionRead to reject a message from a different session")
+	_, markErr := svc.MarkSessionRead(ctx, sessionID, "msg-other")
+	if !errors.Is(markErr, ErrInvalidMarkSessionRead) {
+		t.Fatalf("MarkSessionRead error = %v, want ErrInvalidMarkSessionRead", markErr)
 	}
 
 	session, err := svc.GetTaskSession(ctx, sessionID)
@@ -3058,8 +3059,9 @@ func TestService_MarkSessionReadRejectsUnknownMessage(t *testing.T) {
 	setupTestTask(t, repo)
 	sessionID := setupTestSession(t, repo)
 
-	if _, err := svc.MarkSessionRead(ctx, sessionID, "task-description"); err == nil {
-		t.Fatal("expected MarkSessionRead to reject an unknown message id")
+	_, err := svc.MarkSessionRead(ctx, sessionID, "task-description")
+	if !errors.Is(err, ErrInvalidMarkSessionRead) {
+		t.Fatalf("MarkSessionRead error = %v, want ErrInvalidMarkSessionRead", err)
 	}
 
 	session, err := svc.GetTaskSession(ctx, sessionID)

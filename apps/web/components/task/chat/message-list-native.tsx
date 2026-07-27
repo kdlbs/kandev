@@ -131,6 +131,17 @@ function useAutoScroll(
 ) {
   const isNearBottomRef = useRef(true);
   const prevIsWorkingRef = useRef(isWorking);
+  // The very first "messages changed" layout effect run below coincides
+  // with mount — deliberately skipped here because initial positioning
+  // (scroll to bottom, or to the Slack-style "New" divider instead) is
+  // fully owned by the caller's own didInitialScroll/didScrollToDivider
+  // effect. Without this guard, this layout effect's unconditional
+  // isNearBottomRef.current === true default raced that effect on mount
+  // and clobbered a just-applied divider scroll back to the bottom, since
+  // both are layout/effect timing siblings on the same commit and the
+  // native "scroll" event that would otherwise flip isNearBottomRef to
+  // false hasn't fired yet by the time this one reads it.
+  const hasHandledMountRef = useRef(false);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -158,6 +169,10 @@ function useAutoScroll(
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    if (!hasHandledMountRef.current) {
+      hasHandledMountRef.current = true;
+      return;
+    }
     // Skip auto-scroll when a layout rebuild scroll restore is pending
     if (useDockviewStore.getState().pendingChatScrollTop !== null) return;
     if (isNearBottomRef.current) {
@@ -171,6 +186,85 @@ function useScrollToMessage() {
     const el = document.getElementById(`msg-${messageId}`);
     el?.scrollIntoView({ block: "center", behavior: "smooth" });
   }, []);
+}
+
+/**
+ * Scroll to bottom on initial load — or, if this visit's Slack-style "New"
+ * boundary lands on a currently-loaded item, straight to the divider
+ * instead (mirrors Slack drawing the line where you left off rather than
+ * always jumping to the newest message).
+ *
+ * - dividerBeforeItemKey is derived from usePanelActive (Dockview's
+ *   active-tab signal), backed by useSyncExternalStore, which only
+ *   resolves true on a render *after* this component's own mount — so on
+ *   the very first run here it's still null even for a session that does
+ *   have an unread divider.
+ * - The initial messages fetch can itself arrive in more than one wave
+ *   (e.g. a WebSocket-delivered backfill continuing after this
+ *   component's first commit, unrelated to user-triggered pagination),
+ *   which can also retroactively shift where useScrollPositionOnPrepend
+ *   lands the scroll. Rather than trying to classify every wave as
+ *   "prepend" or "append" up front, the correction below simply keeps
+ *   re-asserting the divider's position on every relevant change until
+ *   the reader actually starts scrolling (isUserScrolling), which a plain
+ *   'scroll' event can't distinguish from our own programmatic writes —
+ *   wheel/touchstart is real user intent no other effect here produces.
+ *   Once that happens, it's the user's scroll position to own, same as
+ *   Slack never re-snapping you to the unread line once you've started
+ *   reading.
+ * - didScrollToDivider and didInitialScroll are separate latches so the
+ *   bottom-fallback firing first (before dividerBeforeItemKey resolves)
+ *   doesn't block the divider correction from still applying once it
+ *   does. Embedded, always-invisible previews (isVisible hardcoded false,
+ *   see TaskChatPanel) never resolve a divider, so they keep the
+ *   original, unconditional scroll-to-bottom-on-mount behavior untouched.
+ */
+function useScrollToDividerOrBottom(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  itemCount: number,
+  dividerBeforeItemKey: string | null | undefined,
+) {
+  const isUserScrollingRef = useRef(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const markUserScrolling = () => {
+      isUserScrollingRef.current = true;
+    };
+    el.addEventListener("wheel", markUserScrolling, { passive: true });
+    el.addEventListener("touchstart", markUserScrolling, { passive: true });
+    return () => {
+      el.removeEventListener("wheel", markUserScrolling);
+      el.removeEventListener("touchstart", markUserScrolling);
+    };
+  }, [scrollRef]);
+
+  const didInitialScroll = useRef(false);
+  const didScrollToDivider = useRef(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || itemCount === 0) return;
+    if ((!didScrollToDivider.current || !isUserScrollingRef.current) && dividerBeforeItemKey) {
+      if (useDockviewStore.getState().pendingChatScrollTop === null) {
+        const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
+        if (dividerEl) {
+          dividerEl.scrollIntoView({ block: "start" });
+          didScrollToDivider.current = true;
+          didInitialScroll.current = true;
+          return;
+        }
+      }
+    }
+    if (didInitialScroll.current) return;
+    // If a layout rebuild scroll restore is pending, skip initial scroll
+    // (the restore handler will set the correct position)
+    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
+      didInitialScroll.current = true;
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
+    didInitialScroll.current = true;
+  }, [itemCount, dividerBeforeItemKey]);
 }
 
 export const NativeMessageList = memo(function NativeMessageList({
@@ -206,22 +300,7 @@ export const NativeMessageList = memo(function NativeMessageList({
   useScrollPositionOnPrepend(scrollRef, items.length);
   const sentinelRef = useLazyLoadSentinel(scrollRef, hasMore, isLoadingMore, loadMore);
   useAutoScroll(scrollRef, messages, isWorking);
-
-  // Scroll to bottom on initial load
-  const didInitialScroll = useRef(false);
-  useEffect(() => {
-    if (didInitialScroll.current || items.length === 0) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    // If a layout rebuild scroll restore is pending, skip initial scroll
-    // (the restore handler will set the correct position)
-    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
-      didInitialScroll.current = true;
-      return;
-    }
-    el.scrollTop = el.scrollHeight;
-    didInitialScroll.current = true;
-  }, [items.length]);
+  useScrollToDividerOrBottom(scrollRef, items.length, dividerBeforeItemKey);
 
   return (
     <SessionPanelContent ref={scrollRef} className="relative p-4 chat-message-list">
@@ -241,7 +320,12 @@ export const NativeMessageList = memo(function NativeMessageList({
       {items.map((item) => {
         const key = getItemKey(item);
         return (
-          <div key={key} id={`msg-${key}`} className="pb-2" style={{ overflowAnchor: "none" }}>
+          <div
+            key={key}
+            id={`msg-${key}`}
+            className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] sm:scroll-mt-0"
+            style={{ overflowAnchor: "none" }}
+          >
             {dividerBeforeItemKey === key && <UnreadDivider />}
             <MessageItem
               item={item}

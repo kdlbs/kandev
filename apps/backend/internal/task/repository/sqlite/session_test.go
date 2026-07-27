@@ -222,6 +222,41 @@ func TestUpdateTaskSessionLastReadMessageID(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskSessionLastReadMessageIDTiebreaksEqualTimestampsByID verifies
+// the monotonic guard's deterministic tiebreaker: when two messages share the
+// exact same created_at (e.g. a burst of messages persisted in the same
+// instant), ordering falls back to comparing message id, and a "stale" id in
+// that ordering is still rejected rather than silently accepted just because
+// the timestamps tie.
+func TestUpdateTaskSessionLastReadMessageIDTiebreaksEqualTimestampsByID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	seedForMsgTest(t, repo, "task-tie", "session-tie", "turn-tie")
+	sameInstant := time.Now().UTC()
+	insertAgentMsg(t, repo, "msg-a", "session-tie", "turn-tie", "user", "a", sameInstant)
+	insertAgentMsg(t, repo, "msg-b", "session-tie", "turn-tie", "agent", "b", sameInstant)
+
+	// "msg-b" > "msg-a" lexically, so it's the tiebreak winner at this
+	// shared timestamp — advancing to it must succeed.
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-tie", "msg-b"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID to tiebreak winner: %v", err)
+	}
+
+	// Falling back to the tiebreak loser at the same timestamp must be
+	// rejected as stale, exactly like a strictly-older timestamp would be.
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-tie", "msg-a"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID stale tiebreak: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-tie")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.LastReadMessageID != "msg-b" {
+		t.Fatalf("session.LastReadMessageID = %q, want unchanged %q after stale tiebreak", session.LastReadMessageID, "msg-b")
+	}
+}
+
 // TestTaskSessionNotFoundErrorsAreTyped verifies that GetTaskSession,
 // UpdateTaskSession, UpdateTaskSessionState, and UpdateTaskSessionBaseCommit
 // all return ErrTaskSessionNotFound for a missing session, that

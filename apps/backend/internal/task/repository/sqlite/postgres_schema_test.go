@@ -110,6 +110,72 @@ func TestPostgresImproveKandevWorkflowIndexMigration(t *testing.T) {
 	}
 }
 
+// TestPostgresUpdateTaskSessionLastReadMessageIDMonotonic is the Postgres
+// counterpart to TestUpdateTaskSessionLastReadMessageID (SQLite): the
+// mark-read cursor guard used to compare SQLite's rowid pseudo-column, which
+// does not exist on Postgres and would fail this query outright. It now
+// compares (created_at, id), which is portable — this test proves the
+// forward-advance and stale-rejection behavior against a real Postgres
+// backend, not just SQLite. Skips unless KANDEV_TEST_POSTGRES_DSN is set.
+func TestPostgresUpdateTaskSessionLastReadMessageIDMonotonic(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+
+	// seedForMsgTest uses SQLite's `INSERT OR IGNORE`, which Postgres
+	// rejects outright — seed directly with plain INSERTs instead (safe
+	// here since each test gets a freshly created, empty isolated schema).
+	seedNow := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, '', 'test task', ?, ?)
+	`), "task-pg-read", seedNow, seedNow); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-pg-read", TaskID: "task-pg-read", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_turns (id, task_session_id, task_id, started_at, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`), "turn-pg-read", "session-pg-read", "task-pg-read", seedNow, seedNow, seedNow); err != nil {
+		t.Fatalf("seed turn: %v", err)
+	}
+
+	now := time.Now().UTC()
+	insertAgentMsg(t, repo, "msg-pg-1", "session-pg-read", "turn-pg-read", "user", "hi", now)
+	insertAgentMsg(t, repo, "msg-pg-2", "session-pg-read", "turn-pg-read", "agent", "hello", now.Add(time.Second))
+
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-pg-read", "msg-pg-2"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID advance on postgres: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-pg-read")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.LastReadMessageID != "msg-pg-2" {
+		t.Fatalf("session.LastReadMessageID = %q, want %q", session.LastReadMessageID, "msg-pg-2")
+	}
+
+	// A delayed/retried request for the older message must not regress the
+	// cursor on Postgres either — silent no-op, not an error.
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-pg-read", "msg-pg-1"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID stale update on postgres: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, "session-pg-read")
+	if err != nil {
+		t.Fatalf("GetTaskSession after stale update: %v", err)
+	}
+	if session.LastReadMessageID != "msg-pg-2" {
+		t.Fatalf("session.LastReadMessageID = %q, want unchanged %q after stale update", session.LastReadMessageID, "msg-pg-2")
+	}
+}
+
 func TestPostgresExecutionProfileMigration(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

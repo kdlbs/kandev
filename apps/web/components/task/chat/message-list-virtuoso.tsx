@@ -98,6 +98,38 @@ function useStableFirstItemIndex(items: RenderItem[]) {
   return state.firstItemIndex;
 }
 
+/**
+ * Corrects the initial scroll position to this visit's Slack-style unread
+ * divider (see findUnreadDividerItemId) once it resolves, mirroring Slack
+ * drawing the line where you left off instead of always landing on the
+ * newest message.
+ *
+ * Deliberately NOT done via Virtuoso's own `initialTopMostItemIndex` prop
+ * (which only takes effect on Virtuoso's first render): dividerBeforeItemKey
+ * is derived from usePanelActive (Dockview's active-tab signal), which is
+ * backed by useSyncExternalStore and typically only resolves true one
+ * render *after* this component's own mount — so on Virtuoso's actual first
+ * render it's still null even for a session that does have an unread
+ * divider, and a value frozen at that first render could never be
+ * corrected. Scrolling here imperatively, gated on a change to
+ * dividerBeforeItemKey rather than mount, catches it whenever it resolves.
+ */
+function useScrollToDividerOnceResolved(
+  virtuosoRef: React.RefObject<VirtuosoHandle | null>,
+  items: RenderItem[],
+  firstItemIndex: number,
+  dividerBeforeItemKey: string | null | undefined,
+) {
+  const didScrollRef = useRef(false);
+  useEffect(() => {
+    if (didScrollRef.current || !dividerBeforeItemKey) return;
+    const dividerIndex = items.findIndex((item) => getItemKey(item) === dividerBeforeItemKey);
+    if (dividerIndex < 0) return;
+    virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + dividerIndex, align: "start" });
+    didScrollRef.current = true;
+  }, [virtuosoRef, items, firstItemIndex, dividerBeforeItemKey]);
+}
+
 function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   const {
     items,
@@ -113,6 +145,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   const itemCount = items.length;
   const streamingMessageId = getStreamingAgentMessageId(messages);
   const firstItemIndex = useStableFirstItemIndex(items);
+  useScrollToDividerOnceResolved(virtuosoRef, items, firstItemIndex, dividerBeforeItemKey);
 
   const loadCooldownRef = useRef(false);
   const handleStartReached = useCallback(() => {

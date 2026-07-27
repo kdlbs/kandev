@@ -82,6 +82,15 @@ describe("findUnreadDividerItemId", () => {
     const items = [messageItem(makeMessage("m10")), messageItem(makeMessage("m11"))];
     expect(findUnreadDividerItemId(items, "m1-not-loaded")).toBe("m10");
   });
+
+  it("ignores the synthetic task-description placeholder as a cursor boundary", () => {
+    // A CREATED session with no real messages yet renders only the
+    // frontend-only task-description placeholder. It must never satisfy a
+    // real lastReadMessageId lookup or be treated as a message to place the
+    // divider after.
+    const items = [messageItem(makeMessage("task-description"))];
+    expect(findUnreadDividerItemId(items, "m1")).toBeNull();
+  });
 });
 
 describe("lastRenderedMessageId", () => {
@@ -114,5 +123,19 @@ describe("lastRenderedMessageId", () => {
     const items = [messageItem(makeMessage("m1")), messageItem(makeMessage("m2"))];
     expect(lastRenderedMessageId(items)).toBe("m2");
     expect(lastRenderedMessageId(items)).not.toBe("m3-hidden-from-render");
+  });
+
+  it("returns null for a CREATED session with only the synthetic task-description placeholder", () => {
+    // use-processed-messages.ts injects this placeholder only when there are
+    // zero real messages. It must never be reported as "the latest message"
+    // — doing so would make the mark-read call target a message id that
+    // doesn't exist in the backend on every visit to a brand-new session.
+    const items = [messageItem(makeMessage("task-description"))];
+    expect(lastRenderedMessageId(items)).toBeNull();
+  });
+
+  it("skips a trailing synthetic task-description placeholder to find the last real message", () => {
+    const items = [messageItem(makeMessage("m1")), messageItem(makeMessage("task-description"))];
+    expect(lastRenderedMessageId(items)).toBe("m1");
   });
 });

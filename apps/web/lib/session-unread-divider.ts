@@ -2,10 +2,23 @@ import type { RenderItem } from "@/hooks/use-processed-messages";
 
 /** Message ids carried by a render item — a "message" item carries its own
  *  id, a "turn_group" carries every message bundled into that visual group,
- *  and non-message items (prepare_progress, agent_error_notice) carry none. */
+ *  and non-message items (prepare_progress, agent_error_notice) carry none.
+ *
+ *  The frontend-only "task-description" placeholder (injected by
+ *  use-processed-messages.ts when a session has no real messages yet) is
+ *  excluded too: it never exists as a row in the backend messages table, so
+ *  treating it as a real message id would make lastRenderedMessageId return
+ *  "task-description" as the cursor target — which the backend's
+ *  MarkSessionRead correctly rejects as an unknown message id (400), but
+ *  only after a wasted round trip logged as a console error on every visit
+ *  to a session with no messages yet. */
 function renderItemMessageIds(item: RenderItem): string[] {
-  if (item.type === "message") return [item.message.id];
-  if (item.type === "turn_group") return item.messages.map((message) => message.id);
+  if (item.type === "message") {
+    return item.message.id === "task-description" ? [] : [item.message.id];
+  }
+  if (item.type === "turn_group") {
+    return item.messages.map((message) => message.id).filter((id) => id !== "task-description");
+  }
   return [];
 }
 

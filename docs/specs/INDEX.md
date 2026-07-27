@@ -29,6 +29,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [assistant](office/assistant.md) | draft |
 | [automations-settings](office/automations-settings.md) | draft |
 | [testing](office/testing.md) | shipped |
+| [unread-divider](office/unread-divider.md) | shipped |
 
 ## platform/ — cross-cutting capabilities
 

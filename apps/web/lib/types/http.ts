@@ -441,20 +441,12 @@ export type TaskSession = ActiveSubagentCountFields & {
   last_read_message_id?: string;
 };
 
-export type TaskSessionsResponse = {
-  sessions: TaskSession[];
-  total: number;
-};
-
-export type TaskSessionResponse = {
-  session: TaskSession;
-};
-
-export type ApproveSessionResponse = {
-  success: boolean;
-  session: TaskSession;
-  workflow_step?: WorkflowStepDTO;
-};
+export type {
+  TaskSessionsResponse,
+  TaskSessionResponse,
+  MarkSessionReadResponse,
+  ApproveSessionResponse,
+} from "./http-session-responses";
 
 export type NotificationProviderType = "local" | "apprise" | "system";
 

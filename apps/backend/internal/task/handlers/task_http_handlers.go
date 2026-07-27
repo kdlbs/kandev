@@ -476,26 +476,37 @@ type markSessionReadRequest struct {
 }
 
 // httpMarkSessionRead advances the session's Slack-style unread-divider read
-// cursor to req.MessageID. A missing session is a 404; any other failure
+// cursor to req.MessageID. A missing session is a 404; bad caller input
 // (empty ids, an unknown message, or a message belonging to a different
-// session) is a 400 — the caller sent bad input, not a missing resource.
+// session — see service.ErrInvalidMarkSessionRead) is a 400; any other,
+// unexpected failure (a repository/DB error) is logged and returned as a
+// sanitized 500 rather than leaking the raw internal error to the caller.
 func (h *TaskHandlers) httpMarkSessionRead(c *gin.Context) {
 	var req markSessionReadRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
 		return
 	}
-	session, err := h.service.MarkSessionRead(c.Request.Context(), c.Param("id"), req.MessageID)
+	sessionID := c.Param("id")
+	session, err := h.service.MarkSessionRead(c.Request.Context(), sessionID, req.MessageID)
 	if err != nil {
 		if errors.Is(err, models.ErrTaskSessionNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"error": "task session not found"})
 			return
 		}
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		if errors.Is(err, service.ErrInvalidMarkSessionRead) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		h.logger.Error("failed to mark session read",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to mark session read"})
 		return
 	}
-	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
-		Session: dto.FromTaskSession(session),
+	c.JSON(http.StatusOK, dto.MarkSessionReadResponse{
+		SessionID:         session.ID,
+		LastReadMessageID: session.LastReadMessageID,
 	})
 }
 

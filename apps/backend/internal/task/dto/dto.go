@@ -308,7 +308,7 @@ type TaskSessionSummaryDTO struct {
 	// (ADR-0049); see TaskSessionDTO.
 	ForegroundActivity  v1.ForegroundActivity `json:"foreground_activity,omitempty"`
 	ActiveSubagentCount int                   `json:"active_subagent_count"`
-	LastReadMessageID string                        `json:"last_read_message_id,omitempty"`
+	LastReadMessageID   string                `json:"last_read_message_id,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
@@ -324,6 +324,16 @@ type ListTaskSessionSummariesResponse struct {
 
 type GetTaskSessionResponse struct {
 	Session TaskSessionDTO `json:"session"`
+}
+
+// MarkSessionReadResponse is intentionally narrow: it carries only the
+// updated read cursor, never a full session snapshot. A full-session
+// response would be frozen at request time and, if applied verbatim by a
+// client, could overwrite a newer field (e.g. state) that arrived via a
+// concurrent WebSocket update while this request was still in flight.
+type MarkSessionReadResponse struct {
+	SessionID         string `json:"session_id"`
+	LastReadMessageID string `json:"last_read_message_id"`
 }
 
 type ListTaskSessionsResponse struct {

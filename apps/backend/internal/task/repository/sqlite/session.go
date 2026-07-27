@@ -1181,14 +1181,19 @@ func (r *Repository) UpdateTaskSessionBaseCommit(ctx context.Context, id string,
 // concurrent metadata or full-row write, and vice versa.
 //
 // The write is monotonic: it only advances the cursor when messageID is not
-// older than the currently persisted one, comparing each message's SQLite
-// rowid (== insertion order, since task_session_messages is a normal
-// rowid table keyed on a non-integer TEXT id). This guards against
-// out-of-order delivery — e.g. two overlapping mark-read requests where the
-// response for an older message is processed after a newer one — silently
-// regressing last_read_message_id and resurrecting the "New" divider over
-// transcript the user already read. A cursor referencing a message that no
-// longer exists (deleted) is treated as rank 0 so the guard never wedges.
+// older than the currently persisted one, comparing each message's
+// (created_at, id) — created_at as the primary ordering (matches every
+// other transcript ordering in this codebase, e.g. ListMessages' `ORDER BY
+// created_at ASC`), with id as a deterministic tiebreaker for messages
+// created in the same instant. Portable across SQLite and Postgres — no
+// dialect branching needed, unlike the rowid-based approach this replaced
+// (SQLite's rowid pseudo-column doesn't exist on Postgres). This guards
+// against out-of-order delivery — e.g. two overlapping mark-read requests
+// where the response for an older message is processed after a newer one —
+// silently regressing last_read_message_id and resurrecting the "New"
+// divider over transcript the user already read. A cursor referencing a
+// message that no longer exists (deleted) is treated as having no rank, so
+// the guard never wedges: NOT EXISTS is satisfied and the update proceeds.
 func (r *Repository) UpdateTaskSessionLastReadMessageID(ctx context.Context, id, messageID string) error {
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
@@ -1197,11 +1202,15 @@ func (r *Repository) UpdateTaskSessionLastReadMessageID(ctx context.Context, id,
 		 WHERE id = ?
 		   AND (
 		         last_read_message_id IS NULL OR last_read_message_id = ''
-		         OR (SELECT rowid FROM task_session_messages WHERE id = ?)
-		             >= COALESCE(
-		                  (SELECT rowid FROM task_session_messages WHERE id = task_sessions.last_read_message_id),
-		                  0
-		                )
+		         OR NOT EXISTS (
+		              SELECT 1 FROM task_session_messages cur, task_session_messages incoming
+		               WHERE cur.id = task_sessions.last_read_message_id
+		                 AND incoming.id = ?
+		                 AND (
+		                       cur.created_at > incoming.created_at
+		                       OR (cur.created_at = incoming.created_at AND cur.id > incoming.id)
+		                     )
+		            )
 		       )
 	`), messageID, now, id, messageID)
 	if err != nil {

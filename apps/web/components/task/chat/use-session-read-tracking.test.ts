@@ -3,11 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSession } from "@/lib/types/http";
 
 const mockMarkSessionRead = vi.fn();
-const mockSetTaskSession = vi.fn();
+const mockUpdateSessionReadCursor = vi.fn();
 
 type MockState = {
   taskSessions: { items: Record<string, TaskSession> };
-  setTaskSession: typeof mockSetTaskSession;
+  updateSessionReadCursor: typeof mockUpdateSessionReadCursor;
 };
 
 let mockState: MockState;
@@ -42,9 +42,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockState = {
     taskSessions: { items: {} },
-    setTaskSession: mockSetTaskSession,
+    updateSessionReadCursor: mockUpdateSessionReadCursor,
   };
-  mockMarkSessionRead.mockResolvedValue({ session: session({ last_read_message_id: "m2" }) });
+  mockMarkSessionRead.mockResolvedValue({ session_id: "session-1", last_read_message_id: "m2" });
 });
 
 describe("useSessionReadTracking", () => {
@@ -54,6 +54,63 @@ describe("useSessionReadTracking", () => {
 
     expect(result.current).toBeNull();
     expect(mockMarkSessionRead).not.toHaveBeenCalled();
+  });
+
+  it("does not capture an anchor before the session record has loaded into the store, capturing correctly once it does", async () => {
+    // Session absent entirely (still fetching) — must not treat this the
+    // same as "loaded, and legitimately has no prior cursor" (see the
+    // next test). Locking in a capture here would use undefined?.last_
+    // read_message_id ?? null as the answer, when the real answer isn't
+    // known yet.
+    const { result, rerender } = renderHook(
+      ({ latest }: { latest: string | null }) => useSessionReadTracking("session-1", true, latest),
+      { initialProps: { latest: null as string | null } },
+    );
+    expect(result.current).toBeNull();
+    expect(mockMarkSessionRead).not.toHaveBeenCalled();
+
+    // The session finishes loading with a real prior cursor already set
+    // (e.g. a fetch that resolved after this hook's first render).
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    rerender({ latest: "m3" });
+
+    expect(result.current).toBe("m1");
+    await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m3"));
+  });
+
+  it("does not dispatch mark-read while the session hasn't loaded yet, even if latestMessageId already resolved", async () => {
+    // Reproduces a real mobile bug: unlike the dockview panel path (isVisible
+    // lags behind usePanelActive's async resolution, giving the session
+    // fetch a head start), mobile's isVisible is true from render one — so
+    // if the *messages* list resolves before the *session metadata* fetch
+    // does, latestMessageId can already be non-null while the session
+    // record itself is still missing from the store. The mark-read
+    // dispatch effect must not race ahead of the capture above and advance
+    // the cursor before this visit's real "prior" boundary is ever read —
+    // that would silently swallow the divider with no error.
+    const { rerender } = renderHook(
+      ({ latest }: { latest: string | null }) => useSessionReadTracking("session-1", true, latest),
+      { initialProps: { latest: "m5" as string | null } },
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockMarkSessionRead).not.toHaveBeenCalled();
+
+    // Session loads with the real prior cursor — the capture (during
+    // render, before this commit's effects) must see this value, not
+    // whatever a premature dispatch might have already advanced it to.
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    rerender({ latest: "m5" });
+
+    await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m5"));
+  });
+
+  it("captures null when the session has loaded but genuinely has no prior cursor (first-ever visit)", () => {
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: undefined });
+    const { result } = renderHook(() => useSessionReadTracking("session-1", true, "m1"));
+
+    expect(result.current).toBeNull();
   });
 
   it("freezes the divider anchor at the cursor value from before this visit's advance", async () => {
@@ -83,7 +140,9 @@ describe("useSessionReadTracking", () => {
     // Divider anchor is unchanged — still the value from when the visit started.
     expect(result.current).toBe("m1");
   });
+});
 
+describe("useSessionReadTracking — mark-read dispatch", () => {
   it("does not call markSessionRead again once the cursor already matches the latest message", async () => {
     mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m2" });
     renderHook(() => useSessionReadTracking("session-1", true, "m2"));
@@ -104,9 +163,18 @@ describe("useSessionReadTracking", () => {
     expect(result.current).toBe("m1");
     await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledTimes(1));
 
-    // Leave: cursor is now advanced to m2 server-side.
+    // Leave: cursor is now advanced to m2 server-side. Advance the clock
+    // past the hide-debounce (see use-session-read-tracking.ts) so the
+    // reset that lets the next show re-capture actually commits — a real
+    // navigate-away is far slower than the debounce window, and fake
+    // timers drive that deterministically rather than a real sleep.
+    vi.useFakeTimers();
     mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m2" });
     rerender({ visible: false, latest: "m2" });
+    act(() => {
+      vi.advanceTimersByTime(350);
+    });
+    vi.useRealTimers();
     expect(result.current).toBeNull();
 
     // More messages arrive while away, then the user navigates back in.
@@ -136,13 +204,14 @@ describe("useSessionReadTracking", () => {
     // Two overlapping requests: an older m2 whose response we control via a
     // deferred promise, and a newer m3 that resolves immediately. m3's
     // response lands first, then m2's stale response resolves last.
-    let resolveM2: ((value: { session: TaskSession }) => void) | undefined;
-    const m2Response = new Promise<{ session: TaskSession }>((resolve) => {
+    type MarkReadResult = { session_id: string; last_read_message_id: string };
+    let resolveM2: ((value: MarkReadResult) => void) | undefined;
+    const m2Response = new Promise<MarkReadResult>((resolve) => {
       resolveM2 = resolve;
     });
     mockMarkSessionRead.mockImplementation((_sessionId: string, messageId: string) => {
       if (messageId === "m2") return m2Response;
-      return Promise.resolve({ session: session({ last_read_message_id: messageId }) });
+      return Promise.resolve({ session_id: "session-1", last_read_message_id: messageId });
     });
 
     const { rerender } = renderHook(
@@ -157,19 +226,17 @@ describe("useSessionReadTracking", () => {
     rerender({ latest: "m3" });
     await waitFor(() => expect(mockMarkSessionRead).toHaveBeenCalledWith("session-1", "m3"));
     await waitFor(() =>
-      expect(mockSetTaskSession).toHaveBeenCalledWith(
-        expect.objectContaining({ last_read_message_id: "m3" }),
-      ),
+      expect(mockUpdateSessionReadCursor).toHaveBeenCalledWith("session-1", "m3"),
     );
-    mockSetTaskSession.mockClear();
+    mockUpdateSessionReadCursor.mockClear();
 
     // The delayed, now-stale m2 response finally resolves. It must be
     // discarded rather than regressing the store back to m2.
-    resolveM2?.({ session: session({ last_read_message_id: "m2" }) });
+    resolveM2?.({ session_id: "session-1", last_read_message_id: "m2" });
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(mockSetTaskSession).not.toHaveBeenCalled();
+    expect(mockUpdateSessionReadCursor).not.toHaveBeenCalled();
   });
 });

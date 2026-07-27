@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1179,12 +1180,18 @@ func TestHTTPMoveTaskAllowsRunningPrimarySession(t *testing.T) {
 type markSessionReadRepo struct {
 	mockRepository
 	messages map[string]*models.Message
+	// getMessageErr, when set, simulates an unexpected repository/DB failure
+	// from GetMessage (as opposed to the ordinary "message not found" case).
+	getMessageErr error
 }
 
 func (m *markSessionReadRepo) GetMessage(_ context.Context, id string) (*models.Message, error) {
+	if m.getMessageErr != nil {
+		return nil, m.getMessageErr
+	}
 	msg, ok := m.messages[id]
 	if !ok {
-		return nil, fmt.Errorf("message not found: %s", id)
+		return nil, sql.ErrNoRows
 	}
 	return msg, nil
 }
@@ -1243,9 +1250,11 @@ func TestHTTPMarkSessionReadAdvancesCursor(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
 	assert.Equal(t, "msg-1", repo.sessions["session-1"].LastReadMessageID)
-	var body dto.GetTaskSessionResponse
+	var body dto.MarkSessionReadResponse
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &body))
-	assert.Equal(t, "msg-1", body.Session.LastReadMessageID)
+	assert.Equal(t, "session-1", body.SessionID)
+	assert.Equal(t, "msg-1", body.LastReadMessageID)
+	assert.JSONEq(t, `{"session_id":"session-1","last_read_message_id":"msg-1"}`, rec.Body.String())
 }
 
 func TestHTTPMarkSessionReadMissingSessionReturns404(t *testing.T) {
@@ -1295,6 +1304,62 @@ func TestHTTPMarkSessionReadRejectsCrossSessionMessage(t *testing.T) {
 
 	assert.Equal(t, http.StatusBadRequest, rec.Code)
 	assert.Empty(t, repo.sessions["session-1"].LastReadMessageID)
+}
+
+func TestHTTPMarkSessionReadRejectsUnknownMessage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &markSessionReadRepo{
+		mockRepository: mockRepository{
+			sessions: map[string]*models.TaskSession{
+				"session-1": {ID: "session-1", TaskID: "task-1"},
+			},
+		},
+		messages: map[string]*models.Message{},
+	}
+	h := &TaskHandlers{service: newMarkSessionReadService(t, repo, log), logger: log}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Params = gin.Params{{Key: "id", Value: "session-1"}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/task-sessions/session-1/mark-read",
+		strings.NewReader(`{"message_id":"does-not-exist"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpMarkSessionRead(c)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Empty(t, repo.sessions["session-1"].LastReadMessageID)
+}
+
+// TestHTTPMarkSessionReadSanitizesUnexpectedRepositoryError verifies an
+// unexpected repository/DB failure (as opposed to bad caller input) never
+// leaks its raw error text to the client and is reported as a 500, not a
+// 400 — the caller did nothing wrong here.
+func TestHTTPMarkSessionReadSanitizesUnexpectedRepositoryError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &markSessionReadRepo{
+		mockRepository: mockRepository{
+			sessions: map[string]*models.TaskSession{
+				"session-1": {ID: "session-1", TaskID: "task-1"},
+			},
+		},
+		messages:      map[string]*models.Message{},
+		getMessageErr: errors.New("connection refused: dial tcp 127.0.0.1:5432"),
+	}
+	h := &TaskHandlers{service: newMarkSessionReadService(t, repo, log), logger: log}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Params = gin.Params{{Key: "id", Value: "session-1"}}
+	c.Request = httptest.NewRequest(http.MethodPost, "/task-sessions/session-1/mark-read",
+		strings.NewReader(`{"message_id":"msg-1"}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpMarkSessionRead(c)
+
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
+	assert.NotContains(t, rec.Body.String(), "connection refused")
+	assert.NotContains(t, rec.Body.String(), "5432")
 }
 
 func TestHTTPMarkSessionReadRejectsInvalidJSON(t *testing.T) {

@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +11,15 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// ErrInvalidMarkSessionRead marks a MarkSessionRead failure as caused by bad
+// caller input (empty ids, an unknown message, a message belonging to a
+// different session) rather than an unexpected internal failure. The HTTP
+// handler uses errors.Is against this to decide 400 vs a sanitized 500 —
+// without it, a genuine database/repository error would otherwise be
+// indistinguishable from a validation failure and leak as a 400 with the
+// raw internal error text.
+var ErrInvalidMarkSessionRead = errors.New("invalid mark-session-read request")
 
 // SessionReadyPollInterval is how often WaitForSessionReady polls session state.
 const SessionReadyPollInterval = 1 * time.Second
@@ -121,20 +132,26 @@ func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp st
 // messageID must belong to sessionID — a stale id, a synthetic frontend-only
 // row (e.g. the task-description placeholder), or a cross-session id is
 // rejected rather than persisted, since a wrong cursor would hide genuinely
-// unread messages behind a mispositioned "New" divider.
+// unread messages behind a mispositioned "New" divider. Every rejection
+// caused by bad caller input (as opposed to an unexpected repository/DB
+// failure) wraps ErrInvalidMarkSessionRead so the HTTP handler can return
+// 400 for the former and a sanitized, logged 500 for the latter.
 func (s *Service) MarkSessionRead(ctx context.Context, sessionID, messageID string) (*models.TaskSession, error) {
 	if sessionID == "" {
-		return nil, fmt.Errorf("session_id is required")
+		return nil, fmt.Errorf("%w: session_id is required", ErrInvalidMarkSessionRead)
 	}
 	if messageID == "" {
-		return nil, fmt.Errorf("message_id is required")
+		return nil, fmt.Errorf("%w: message_id is required", ErrInvalidMarkSessionRead)
 	}
 	message, err := s.messages.GetMessage(ctx, messageID)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: message %s not found", ErrInvalidMarkSessionRead, messageID)
+		}
 		return nil, fmt.Errorf("failed to look up message %s: %w", messageID, err)
 	}
 	if message.TaskSessionID != sessionID {
-		return nil, fmt.Errorf("message %s does not belong to session %s", messageID, sessionID)
+		return nil, fmt.Errorf("%w: message %s does not belong to session %s", ErrInvalidMarkSessionRead, messageID, sessionID)
 	}
 	if err := s.sessions.UpdateTaskSessionLastReadMessageID(ctx, sessionID, messageID); err != nil {
 		return nil, err

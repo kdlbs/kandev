@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { openTaskSession } from "../../helpers/session";
+import { isScrolledIntoView, seedScrollTestConversation } from "../../helpers/unread-divider";
 
 test.describe("Unread divider", () => {
   test("shows the Slack-style New divider only for messages read before a rewound cursor, and clears after the next visit", async ({
@@ -7,7 +8,7 @@ test.describe("Unread divider", () => {
     apiClient,
     seedData,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(150_000);
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -24,12 +25,22 @@ test.describe("Unread divider", () => {
     const sessionId = task.session_id;
 
     let session = await openTaskSession(testPage, task.id);
-    await session.waitForChatIdle({ timeout: 30_000 });
+    // attemptTimeout must be raised explicitly, not just `timeout` — its
+    // default is capped at min(15_000, ...) regardless of `timeout` (see
+    // SessionPage.waitForChatIdle). Past that cap it does a page.reload()
+    // to recover from a stuck WS subscription, which is a *real*
+    // navigate-away-and-back from this feature's own perspective — it
+    // would legitimately (and correctly) re-capture a fresh divider
+    // anchor, making later assertions in this test fail for a reason
+    // unrelated to what they're testing (the cursor advancing live while
+    // the session stays genuinely, continuously visible in one browser
+    // session).
+    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
 
     // First-ever visit: there is no prior read cursor, so nothing renders as
     // "New" — but the cursor must still advance to the latest message so a
     // later visit has a real boundary to compare against.
-    await expect(session.chat.getByTestId("unread-divider")).toHaveCount(0);
+    await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
     await expect
       .poll(async () => (await apiClient.getTaskSession(sessionId)).session.last_read_message_id)
       .not.toBeUndefined();
@@ -42,8 +53,8 @@ test.describe("Unread divider", () => {
     // cursor keeps advancing live while the session stays in view, so this
     // alone must not produce a divider either.
     await session.sendMessageViaButton("second question");
-    await session.waitForChatIdle({ timeout: 30_000 });
-    await expect(session.chat.getByTestId("unread-divider")).toHaveCount(0);
+    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
 
     const fullTranscript = await apiClient.listSessionMessages(sessionId);
     expect(fullTranscript.messages.length).toBeGreaterThan(firstExchange.messages.length);
@@ -71,14 +82,15 @@ test.describe("Unread divider", () => {
     await testPage.waitForLoadState("networkidle");
     session = await openTaskSession(testPage, task.id);
 
-    const divider = session.chat.getByTestId("unread-divider");
+    const activeChat = session.activeChat();
+    const divider = activeChat.getByTestId("unread-divider");
     await expect(divider).toBeVisible();
 
     // Positioned as part of the first unread message's own row (the
     // renderer nests the divider inside that message's wrapper, immediately
     // before its content) — never inside or before an already-read row.
-    const firstUnreadRow = testPage.locator(`[id="msg-${firstUnreadMessage.id}"]`);
-    const readRow = testPage.locator(`[id="msg-${readCursorMessageId}"]`);
+    const firstUnreadRow = activeChat.locator(`[id="msg-${firstUnreadMessage.id}"]`);
+    const readRow = activeChat.locator(`[id="msg-${readCursorMessageId}"]`);
     await expect(firstUnreadRow).toBeVisible();
     await expect(readRow).toBeVisible();
     await expect(firstUnreadRow.getByTestId("unread-divider")).toHaveCount(1);
@@ -95,6 +107,38 @@ test.describe("Unread divider", () => {
     await testPage.goto("/");
     await testPage.waitForLoadState("networkidle");
     session = await openTaskSession(testPage, task.id);
-    await expect(session.chat.getByTestId("unread-divider")).toHaveCount(0);
+    await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
+  });
+
+  test("scrolls straight to the New divider on visit start when it's outside the initial viewport, instead of jumping to the newest message", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+
+    const { taskId, newestMessageId } = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Unread Divider Scroll Test",
+    );
+
+    // First visit to a task that was running off-screen. The seeded cursor
+    // must remain unread until this visit, so do not make a throwaway visit
+    // before opening the task under test.
+    const session = await openTaskSession(testPage, taskId);
+    const activeChat = session.activeChat();
+    const scrollContainer = activeChat.locator(".chat-message-list");
+
+    const divider = activeChat.getByTestId("unread-divider");
+    await expect(divider).toBeVisible();
+
+    await expect.poll(() => isScrolledIntoView(scrollContainer, divider)).toBe(true);
+
+    // The newest message — where a naive scroll-to-bottom would have left
+    // the viewport — must NOT be in view; we scrolled up to the divider
+    // instead.
+    const newestRow = activeChat.locator(`[id="msg-${newestMessageId}"]`);
+    expect(await isScrolledIntoView(scrollContainer, newestRow)).toBe(false);
   });
 });
