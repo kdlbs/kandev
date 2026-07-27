@@ -206,7 +206,7 @@ func (m *MockClient) Reset() {
 // analog on SentryIssue): OrgSlug, Environment, and StatsPeriod. The real REST
 // client's URL building for those params is covered in rest_client_test.go.
 func mockMatchesFilter(issue *SentryIssue, f SearchFilter) bool {
-	if f.ProjectSlug != "" && issue.ProjectSlug != f.ProjectSlug {
+	if len(f.ProjectSlugs) > 0 && !containsFold(f.ProjectSlugs, issue.ProjectSlug) {
 		return false
 	}
 	if len(f.Levels) > 0 && !containsFold(f.Levels, issue.Level) {

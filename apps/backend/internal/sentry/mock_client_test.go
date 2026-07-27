@@ -25,13 +25,37 @@ func TestMockClient_SearchFiltersByProject(t *testing.T) {
 	m.AddIssue("inst-1", &SentryIssue{ShortID: "BE-1", Title: "Crash", Level: "fatal", Status: "unresolved", ProjectSlug: "backend"})
 
 	res, err := mockInstance(m, "inst-1").SearchIssues(context.Background(), SearchFilter{
-		OrgSlug: "acme", ProjectSlug: "frontend",
+		OrgSlug: "acme", ProjectSlugs: []string{"frontend"},
 	}, "")
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
 	if len(res.Issues) != 1 || res.Issues[0].ShortID != "FE-1" {
 		t.Errorf("expected only FE-1, got %+v", res.Issues)
+	}
+}
+
+// TestMockClient_SearchMatchesAnyConfiguredProject pins the ANY-of semantics
+// (same as Levels/Statuses) a multi-project watch relies on: a filter listing
+// several projects matches an issue from any one of them.
+func TestMockClient_SearchMatchesAnyConfiguredProject(t *testing.T) {
+	m := NewMockClient()
+	m.AddIssue("inst-1", &SentryIssue{ShortID: "FE-1", ProjectSlug: "frontend"})
+	m.AddIssue("inst-1", &SentryIssue{ShortID: "BE-1", ProjectSlug: "backend"})
+	m.AddIssue("inst-1", &SentryIssue{ShortID: "OTHER-1", ProjectSlug: "other"})
+
+	res, err := mockInstance(m, "inst-1").SearchIssues(context.Background(), SearchFilter{
+		OrgSlug: "acme", ProjectSlugs: []string{"frontend", "backend"},
+	}, "")
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	got := make([]string, 0, len(res.Issues))
+	for _, i := range res.Issues {
+		got = append(got, i.ShortID)
+	}
+	if !sameStrings(got, []string{"FE-1", "BE-1"}) {
+		t.Errorf("got %v, want FE-1 and BE-1 only", got)
 	}
 }
 

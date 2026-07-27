@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   orgSelectItems,
-  projectSelectItems,
+  projectMultiSelectItems,
   maxInflightTasksString,
   parseMaxInflightTasks,
   buildFilterPayload,
@@ -34,20 +34,20 @@ describe("orgSelectItems", () => {
   });
 });
 
-describe("projectSelectItems", () => {
+describe("projectMultiSelectItems", () => {
   const projects = [proj("frontend", "Frontend"), proj("api", "API")];
 
   it("labels projects as 'name (slug)'", () => {
-    const items = projectSelectItems(projects, "");
+    const items = projectMultiSelectItems(projects, []);
     expect(items).toEqual([
       { id: "frontend", label: "Frontend (frontend)" },
       { id: "api", label: "API (api)" },
     ]);
   });
 
-  it("keeps the current project even if not in the visible list", () => {
-    const items = projectSelectItems(projects, "archived");
-    expect(items.map((i) => i.id)).toContain("archived");
+  it("keeps every currently-selected project even if not in the visible list", () => {
+    const items = projectMultiSelectItems(projects, ["archived", "frontend"]);
+    expect(items.map((i) => i.id)).toEqual(["frontend", "api", "archived"]);
   });
 });
 
@@ -84,18 +84,24 @@ describe("parseMaxInflightTasks", () => {
 });
 
 describe("buildFilterPayload", () => {
-  it("trims the org slug and drops an empty project slug", () => {
-    const form = { ...makeEmptyForm("ws-1"), orgSlug: "  acme  ", projectSlug: "" };
+  it("trims the org slug and drops an empty project selection", () => {
+    const form = { ...makeEmptyForm("ws-1"), orgSlug: "  acme  ", projectSlugs: [] };
     const filter = buildFilterPayload(form);
     expect(filter.orgSlug).toBe("acme");
-    expect(filter.projectSlug).toBeUndefined();
+    expect(filter.projectSlugs).toBeUndefined();
   });
 
-  it("keeps a concrete project slug", () => {
-    const form = { ...makeEmptyForm("ws-1"), orgSlug: "acme", projectSlug: "web" };
+  it("keeps a single selected project", () => {
+    const form = { ...makeEmptyForm("ws-1"), orgSlug: "acme", projectSlugs: ["web"] };
     const filter = buildFilterPayload(form);
     expect(filter.orgSlug).toBe("acme");
-    expect(filter.projectSlug).toBe("web");
+    expect(filter.projectSlugs).toEqual(["web"]);
+  });
+
+  it("keeps every selected project when several are chosen", () => {
+    const form = { ...makeEmptyForm("ws-1"), orgSlug: "acme", projectSlugs: ["web", "api"] };
+    const filter = buildFilterPayload(form);
+    expect(filter.projectSlugs).toEqual(["web", "api"]);
   });
 });
 
@@ -104,12 +110,37 @@ describe("isWatchFormReady", () => {
     const legacyUnbound = {
       ...makeEmptyForm("ws-1"),
       orgSlug: "acme",
-      projectSlug: "web",
+      projectSlugs: ["web"],
       workflowId: "workflow-1",
       workflowStepId: "step-1",
       sentryInstanceId: "",
     };
 
     expect(isWatchFormReady(legacyUnbound, { requiresInstance: false })).toBe(true);
+  });
+
+  it("rejects a form with no project selected", () => {
+    const form = {
+      ...makeEmptyForm("ws-1"),
+      orgSlug: "acme",
+      projectSlugs: [],
+      workflowId: "workflow-1",
+      workflowStepId: "step-1",
+    };
+
+    expect(isWatchFormReady(form)).toBe(false);
+  });
+
+  it("accepts a form with several projects selected", () => {
+    const form = {
+      ...makeEmptyForm("ws-1"),
+      sentryInstanceId: "instance-a",
+      orgSlug: "acme",
+      projectSlugs: ["web", "api"],
+      workflowId: "workflow-1",
+      workflowStepId: "step-1",
+    };
+
+    expect(isWatchFormReady(form)).toBe(true);
   });
 });

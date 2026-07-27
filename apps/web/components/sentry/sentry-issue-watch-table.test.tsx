@@ -13,7 +13,7 @@ function watch(over: Partial<SentryIssueWatch>): SentryIssueWatch {
     workflowStepId: "step",
     repositoryId: "",
     baseBranch: "",
-    filter: { orgSlug: "acme", projectSlug: "web" },
+    filter: { orgSlug: "acme", projectSlugs: ["web"] },
     agentProfileId: "ap",
     executorProfileId: "",
     prompt: "",

@@ -218,13 +218,13 @@ func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 	}
 	q := ctx.Request.URL.Query()
 	filter := SearchFilter{
-		OrgSlug:     q.Get("orgSlug"),
-		ProjectSlug: q.Get("projectSlug"),
-		Environment: q.Get("environment"),
-		Query:       q.Get("query"),
-		StatsPeriod: q.Get("statsPeriod"),
-		Levels:      trimAll(q["level"]),
-		Statuses:    trimAll(q["status"]),
+		OrgSlug:      q.Get("orgSlug"),
+		ProjectSlugs: trimAll(q["projectSlug"]),
+		Environment:  q.Get("environment"),
+		Query:        q.Get("query"),
+		StatsPeriod:  q.Get("statsPeriod"),
+		Levels:       trimAll(q["level"]),
+		Statuses:     trimAll(q["status"]),
 	}
 	result, err := c.service.SearchIssues(ctx.Request.Context(), workspaceID, c.instanceID(ctx), filter, q.Get("cursor"))
 	if err != nil {

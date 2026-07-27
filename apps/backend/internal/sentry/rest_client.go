@@ -385,6 +385,13 @@ func (c *RESTClient) searchIssues(
 	if filter.OrgSlug == "" {
 		return nil, &APIError{StatusCode: http.StatusBadRequest, Message: "orgSlug required"}
 	}
+	if len(filter.ProjectSlugs) > 1 {
+		// One Sentry request is scoped to at most one project (see
+		// issuesSearchPath). A watch polling several projects issues one
+		// request per slug — see Service.CheckIssueWatch — instead of
+		// reaching this method with more than one.
+		return nil, &APIError{StatusCode: http.StatusBadRequest, Message: "searchIssues: at most one project slug per request"}
+	}
 	q := url.Values{}
 	if limit > 0 {
 		q.Set("per_page", strconv.Itoa(limit))
@@ -406,7 +413,7 @@ func (c *RESTClient) searchIssues(
 		q.Set("query", built)
 	}
 	var nodes []issueNode
-	resp, err := c.do(ctx, issuesSearchPath(filter.OrgSlug, filter.ProjectSlug), q, &nodes)
+	resp, err := c.do(ctx, issuesSearchPath(filter.OrgSlug, projectSlugForRequest(filter)), q, &nodes)
 	if err != nil {
 		return nil, err
 	}
@@ -436,6 +443,16 @@ func issuesSearchPath(orgSlug, projectSlug string) string {
 		return "/organizations/" + url.PathEscape(orgSlug) + "/issues/"
 	}
 	return "/projects/" + url.PathEscape(orgSlug) + "/" + url.PathEscape(projectSlug) + "/issues/"
+}
+
+// projectSlugForRequest returns the sole project slug to scope a single
+// Sentry request to, or "" for the org-wide fallback. searchIssues already
+// rejects more than one entry, so this is just an ergonomic accessor.
+func projectSlugForRequest(f SearchFilter) string {
+	if len(f.ProjectSlugs) == 0 {
+		return ""
+	}
+	return f.ProjectSlugs[0]
 }
 
 // buildIssueQueryString assembles Sentry's search-bar syntax from a

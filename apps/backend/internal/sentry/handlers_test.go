@@ -236,7 +236,7 @@ func TestHTTP_SearchIssues_ForwardsFilter(t *testing.T) {
 	if w := do(router, http.MethodGet, target, ""); w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 	}
-	if seen.OrgSlug != "acme" || seen.ProjectSlug != "fe" || seen.Query != "boom" || seen.StatsPeriod != "24h" {
+	if seen.OrgSlug != "acme" || !sameStrings(seen.ProjectSlugs, []string{"fe"}) || seen.Query != "boom" || seen.StatsPeriod != "24h" {
 		t.Errorf("filter = %+v", seen)
 	}
 	if !sameStrings(seen.Levels, []string{"error", "fatal"}) {
@@ -244,6 +244,27 @@ func TestHTTP_SearchIssues_ForwardsFilter(t *testing.T) {
 	}
 	if !sameStrings(seen.Statuses, []string{"unresolved"}) {
 		t.Errorf("statuses = %v", seen.Statuses)
+	}
+}
+
+// TestHTTP_SearchIssues_ForwardsMultipleProjectSlugs pins that the browse
+// endpoint accepts several `projectSlug` query params (repeated, same as
+// `level`/`status`) and forwards them as SearchFilter.ProjectSlugs in order.
+func TestHTTP_SearchIssues_ForwardsMultipleProjectSlugs(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")
+	var seen SearchFilter
+	client.searchIssuesFn = func(filter SearchFilter, _ string) (*SearchResult, error) {
+		seen = filter
+		return &SearchResult{IsLast: true}, nil
+	}
+	target := "/api/v1/sentry/issues?workspace_id=ws-1&instanceId=" + inst.ID +
+		"&orgSlug=acme&projectSlug=frontend&projectSlug=backend"
+	if w := do(router, http.MethodGet, target, ""); w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
+	}
+	if !sameStrings(seen.ProjectSlugs, []string{"frontend", "backend"}) {
+		t.Errorf("projectSlugs = %v", seen.ProjectSlugs)
 	}
 }
 

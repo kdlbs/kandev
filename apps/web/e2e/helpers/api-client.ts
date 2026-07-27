@@ -2336,7 +2336,7 @@ export class ApiClient {
     agentProfileId: string;
     executorProfileId?: string;
     orgSlug: string;
-    projectSlug?: string;
+    projectSlugs?: string[];
     prompt?: string;
     pollIntervalSeconds?: number;
   }): Promise<{ id: string; sentryInstanceId: string; enabled: boolean }> {
@@ -2350,7 +2350,7 @@ export class ApiClient {
         workflowStepId: opts.workflowStepId,
         repositoryId: "",
         baseBranch: "",
-        filter: { orgSlug: opts.orgSlug, projectSlug: opts.projectSlug },
+        filter: { orgSlug: opts.orgSlug, projectSlugs: opts.projectSlugs },
         agentProfileId: opts.agentProfileId,
         executorProfileId: opts.executorProfileId ?? "",
         prompt: opts.prompt ?? "Investigate {{issue.title}}",

@@ -14,7 +14,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@kandev/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
@@ -25,21 +24,14 @@ import {
   ScriptEditor,
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
-import {
-  listSentryInstances,
-  listSentryProjects,
-  listSentryOrganizations,
-} from "@/lib/api/domains/sentry-api";
+import { listSentryInstances, listSentryOrganizations } from "@/lib/api/domains/sentry-api";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import { SENTRY_ISSUE_WATCH_PLACEHOLDERS } from "./sentry-issue-watch-placeholders";
-import { LevelMultiSelect, StatusMultiSelect } from "./sentry-issue-watch-multiselect";
 import { MaxInflightTasksField } from "./sentry-issue-watch-throttle-field";
+import { SelectField, FilterFields, type FormSetter } from "./sentry-issue-watch-filter-fields";
 import {
-  STATS_PERIOD_OPTIONS,
   type FormState,
-  orgSelectItems,
-  projectSelectItems,
   parseMaxInflightTasks,
   isWatchFormReady,
   buildWatchPayload,
@@ -50,9 +42,6 @@ import type {
   CreateSentryIssueWatchRequest,
   SentryConfig,
   SentryIssueWatch,
-  SentryLevel,
-  SentryProject,
-  SentryStatus,
   UpdateSentryIssueWatchRequest,
 } from "@/lib/types/sentry";
 
@@ -88,190 +77,6 @@ function useFormData(workspaceId: string) {
     [agentProfiles],
   );
   return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
-}
-
-function useSentryProjects(workspaceId: string, instanceId: string, orgSlug: string) {
-  const [projects, setProjects] = useState<SentryProject[]>([]);
-  useEffect(() => {
-    if (!workspaceId || !instanceId) {
-      setProjects([]);
-      return;
-    }
-    setProjects([]);
-    let cancelled = false;
-    listSentryProjects(workspaceId, instanceId)
-      .then((res) => {
-        if (!cancelled) setProjects(res.projects ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setProjects([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [workspaceId, instanceId]);
-  // Sentry's auth-token endpoint already filters to the user's accessible orgs;
-  // if an orgSlug is set, restrict to projects that match.
-  return useMemo(
-    () => (orgSlug ? projects.filter((p) => p.orgSlug === orgSlug) : projects),
-    [projects, orgSlug],
-  );
-}
-
-function SelectField(props: {
-  label: string;
-  description?: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  items: { id: string; label: string }[];
-  disabled?: boolean;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label>{props.label}</Label>
-      {props.description && <p className="text-xs text-muted-foreground">{props.description}</p>}
-      <Select
-        value={props.value || undefined}
-        onValueChange={props.onChange}
-        disabled={props.disabled}
-      >
-        <SelectTrigger className="cursor-pointer">
-          <SelectValue placeholder={props.placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-          {props.items.map((item) => (
-            <SelectItem key={item.id} value={item.id}>
-              {item.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-type FormSetter = React.Dispatch<React.SetStateAction<FormState>>;
-
-function OrgProjectRow({
-  form,
-  setForm,
-  projects,
-  orgs,
-}: {
-  form: FormState;
-  setForm: FormSetter;
-  projects: SentryProject[];
-  orgs: string[];
-}) {
-  const onOrgChange = (v: string) =>
-    // The selected project may belong to a different org — clear it so the
-    // project dropdown re-picks within the new org.
-    setForm((p) => ({ ...p, orgSlug: v, projectSlug: "" }));
-  const onProjectChange = (v: string) => setForm((p) => ({ ...p, projectSlug: v }));
-  const orgItems = orgSelectItems(orgs, form.orgSlug);
-  const projectItems = projectSelectItems(projects, form.projectSlug);
-  return (
-    <div className="grid grid-cols-2 gap-4">
-      <SelectField
-        label="Organization slug"
-        description="The Sentry org to poll."
-        value={form.orgSlug}
-        onChange={onOrgChange}
-        placeholder={orgItems.length === 0 ? "No organizations available" : "Select organization"}
-        items={orgItems}
-        disabled={orgItems.length === 0}
-      />
-      <SelectField
-        label="Project slug"
-        description="The Sentry project to poll."
-        value={form.projectSlug}
-        onChange={onProjectChange}
-        placeholder={projectItems.length === 0 ? "No projects available" : "Select project"}
-        items={projectItems}
-        disabled={projectItems.length === 0}
-      />
-    </div>
-  );
-}
-
-function FilterFields({
-  form,
-  setForm,
-  orgs,
-}: {
-  form: FormState;
-  setForm: FormSetter;
-  orgs: string[];
-}) {
-  const projects = useSentryProjects(form.workspaceId, form.sentryInstanceId, form.orgSlug);
-  const toggleLevel = useCallback(
-    (level: SentryLevel) =>
-      setForm((p) => ({
-        ...p,
-        levels: p.levels.includes(level)
-          ? p.levels.filter((l) => l !== level)
-          : [...p.levels, level],
-      })),
-    [setForm],
-  );
-  const toggleStatus = useCallback(
-    (status: SentryStatus) =>
-      setForm((p) => ({
-        ...p,
-        statuses: p.statuses.includes(status)
-          ? p.statuses.filter((s) => s !== status)
-          : [...p.statuses, status],
-      })),
-    [setForm],
-  );
-  return (
-    <>
-      <OrgProjectRow form={form} setForm={setForm} projects={projects} orgs={orgs} />
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1.5">
-          <Label>Environment</Label>
-          <p className="text-xs text-muted-foreground">Optional — restrict to one environment.</p>
-          <Input
-            value={form.environment}
-            onChange={(e) => setForm((p) => ({ ...p, environment: e.target.value }))}
-            placeholder="production"
-          />
-        </div>
-        <SelectField
-          label="Stats period"
-          description="How far back to look for matching issues."
-          value={form.statsPeriod}
-          onChange={(v) => setForm((p) => ({ ...p, statsPeriod: v }))}
-          placeholder="(any)"
-          items={STATS_PERIOD_OPTIONS.map((o) => ({ id: o.value, label: o.label }))}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label>Levels</Label>
-        <p className="text-xs text-muted-foreground">
-          Click to toggle. Matches issues at ANY of the selected levels.
-        </p>
-        <LevelMultiSelect selected={form.levels} onToggle={toggleLevel} />
-      </div>
-      <div className="space-y-1.5">
-        <Label>Statuses</Label>
-        <p className="text-xs text-muted-foreground">
-          Click to toggle. Matches issues at ANY of the selected statuses.
-        </p>
-        <StatusMultiSelect selected={form.statuses} onToggle={toggleStatus} />
-      </div>
-      <div className="space-y-1.5">
-        <Label>Query</Label>
-        <p className="text-xs text-muted-foreground">Free-text Sentry search query (optional).</p>
-        <Input
-          value={form.query}
-          onChange={(e) => setForm((p) => ({ ...p, query: e.target.value }))}
-          placeholder="is:unresolved transaction:/api/checkout"
-        />
-      </div>
-    </>
-  );
 }
 
 function PlaceholdersHelp() {
@@ -600,7 +405,7 @@ export function SentryIssueWatchDialog({
             instances={instances}
             value={form.sentryInstanceId}
             onChange={(v) =>
-              setForm((p) => ({ ...p, sentryInstanceId: v, orgSlug: "", projectSlug: "" }))
+              setForm((p) => ({ ...p, sentryInstanceId: v, orgSlug: "", projectSlugs: [] }))
             }
             disabled={!!watch}
           />

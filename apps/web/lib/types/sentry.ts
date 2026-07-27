@@ -95,7 +95,7 @@ export interface SentryIssue {
 
 export interface SentrySearchFilter {
   orgSlug: string;
-  projectSlug?: string;
+  projectSlugs?: string[];
   environment?: string;
   levels?: SentryLevel[];
   statuses?: SentryStatus[];

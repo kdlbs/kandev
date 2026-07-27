@@ -124,12 +124,12 @@ func TestRESTClient_SearchIssues_BuildsQueryStringAndPaginates(t *testing.T) {
 	})
 	c := pointTo(NewRESTClient(&SentryConfig{}, "tok"), ts.URL)
 	res, err := c.SearchIssues(context.Background(), SearchFilter{
-		OrgSlug:     "acme",
-		ProjectSlug: "frontend",
-		Environment: "prod",
-		Levels:      []string{"error"},
-		Statuses:    []string{"unresolved"},
-		Query:       "boom",
+		OrgSlug:      "acme",
+		ProjectSlugs: []string{"frontend"},
+		Environment:  "prod",
+		Levels:       []string{"error"},
+		Statuses:     []string{"unresolved"},
+		Query:        "boom",
 	}, "abc")
 	if err != nil {
 		t.Fatalf("search: %v", err)
@@ -168,6 +168,22 @@ func TestRESTClient_SearchIssues_RequiresOrgSlug(t *testing.T) {
 	_, err := c.SearchIssues(context.Background(), SearchFilter{}, "")
 	if err == nil {
 		t.Error("expected error when orgSlug missing")
+	}
+}
+
+// TestRESTClient_SearchIssues_RejectsMultipleProjectSlugs pins that a single
+// REST request can only scope to one project (Sentry's project-scoped issue
+// endpoint takes exactly one slug in its path). Watches spanning several
+// projects issue one request per slug at the service layer instead of
+// reaching this method with more than one — see Service.CheckIssueWatch.
+func TestRESTClient_SearchIssues_RejectsMultipleProjectSlugs(t *testing.T) {
+	c := pointTo(NewRESTClient(&SentryConfig{}, "tok"), "http://nope")
+	_, err := c.SearchIssues(context.Background(), SearchFilter{
+		OrgSlug:      "acme",
+		ProjectSlugs: []string{"frontend", "backend"},
+	}, "")
+	if err == nil {
+		t.Fatal("expected error for multiple project slugs in one request")
 	}
 }
 
