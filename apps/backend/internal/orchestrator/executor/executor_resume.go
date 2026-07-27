@@ -523,6 +523,10 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 // terminal transition wins and is left untouched by transitionSessionState.
 func (e *Executor) rollbackResumeStateAfterLaunchFailure(ctx context.Context, taskID, sessionID string, priorState models.TaskSessionState, launchErr error) {
 	if e.onSessionStateTransition != nil {
+		current, err := e.repo.GetTaskSession(ctx, sessionID)
+		if err != nil || current == nil || current.State != models.TaskSessionStateStarting {
+			return
+		}
 		_, _, rollbackErr := e.transitionSessionState(ctx, taskID, sessionID, priorState, launchErr.Error())
 		if rollbackErr != nil {
 			e.logger.Warn("failed to roll back session state after resume launch failure",

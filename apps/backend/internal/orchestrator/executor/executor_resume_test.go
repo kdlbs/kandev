@@ -127,6 +127,36 @@ func TestResumeSession_RollsBackStartingWhenLaunchFails(t *testing.T) {
 	}
 }
 
+func TestRollbackResumeStateAfterLaunchFailure_SkipsTransitionAfterConcurrentStateChange(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateCancelled
+
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	exec.SetOnSessionStateTransition(func(
+		context.Context,
+		string,
+		string,
+		models.TaskSessionState,
+		string,
+		func(),
+	) (bool, models.TaskSessionState, error) {
+		t.Fatal("state transition must not run after a concurrent state change")
+		return false, models.TaskSessionStateCancelled, nil
+	})
+
+	exec.rollbackResumeStateAfterLaunchFailure(
+		context.Background(),
+		"task-1",
+		"sess-1",
+		models.TaskSessionStateFailed,
+		errors.New("launch failed"),
+	)
+	if got := repo.sessions["sess-1"].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %s, want %s", got, models.TaskSessionStateCancelled)
+	}
+}
+
 func TestResumeSession_RollsBackStartingOnLiveAlreadyRunningRace(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
