@@ -224,7 +224,14 @@ func TestResolveForReviewRedetectsStoredMasterAfterClonePath(t *testing.T) {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 	basePath := t.TempDir()
-	repoPath := filepath.Join(basePath, "owner", "repo")
+	cloner := repoclone.NewCloner(
+		repoclone.Config{BasePath: basePath}, repoclone.ProtocolHTTPS, "", newTestLogger(),
+	)
+	cloner.SetGitCredentialProvider(staticRepoCloneCredential{})
+	repoPath, err := cloner.WorkspaceRepoPath(workspace.ID, "github", "owner", "repo")
+	if err != nil {
+		t.Fatalf("WorkspaceRepoPath: %v", err)
+	}
 	gitDir := filepath.Join(repoPath, ".git")
 	if err := os.MkdirAll(filepath.Join(gitDir, "refs", "remotes", "origin"), 0o755); err != nil {
 		t.Fatalf("mkdir origin refs: %v", err)
@@ -260,7 +267,7 @@ func TestResolveForReviewRedetectsStoredMasterAfterClonePath(t *testing.T) {
 	}
 
 	adapter := &repositoryResolverAdapter{
-		cloner:  repoclone.NewCloner(repoclone.Config{BasePath: basePath}, repoclone.ProtocolHTTPS, "", newTestLogger()),
+		cloner:  cloner,
 		taskSvc: harness.taskSvc,
 		logger:  newTestLogger(),
 	}
@@ -285,6 +292,18 @@ func TestResolveForReviewRedetectsStoredMasterAfterClonePath(t *testing.T) {
 	if stored.DefaultBranch != "main" {
 		t.Fatalf("stored default_branch = %q, want main", stored.DefaultBranch)
 	}
+}
+
+type staticRepoCloneCredential struct{}
+
+func (staticRepoCloneCredential) ResolveGitCredential(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+) (string, string, error) {
+	return "x-access-token", "test-token", nil
 }
 
 func TestGetSessionModel_Caching(t *testing.T) {

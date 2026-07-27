@@ -137,6 +137,7 @@ func TestValidateCommandPrefix(t *testing.T) {
 		{name: "unterminated quote rejected", prefix: `greywall "unterminated`, wantErr: true},
 		{name: "trailing backslash rejected", prefix: `greywall foo\`, wantErr: true},
 		{name: "only-empty-quotes rejected", prefix: `""`, wantErr: true},
+		{name: "whitespace executable rejected", prefix: `"   " --arg`, wantErr: true},
 		{name: "leading flag rejected", prefix: `--foo greywall`, wantErr: true},
 		{name: "leading dash rejected", prefix: `-x sandbox`, wantErr: true},
 	}
@@ -169,8 +170,13 @@ func TestValidateProfileEnvVarDTOs(t *testing.T) {
 		{name: "valid secret", envVars: []dto.ProfileEnvVarDTO{{Key: "TOKEN", SecretID: "sec-1"}}},
 		{name: "empty key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: ""}}, wantErr: true},
 		{name: "whitespace key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "   "}}, wantErr: true},
+		{name: "padded key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: " FOO ", Value: "x"}}, wantErr: true},
 		{name: "equals key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD=KEY", Value: "x"}}, wantErr: true},
 		{name: "null key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD\x00KEY", Value: "x"}}, wantErr: true},
+		{name: "shell injection keys rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD; touch /tmp/pwned", Value: "x"}}, wantErr: true},
+		{name: "command substitution key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "$(touch /tmp/pwned)", Value: "x"}}, wantErr: true},
+		{name: "newline key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD\nKEY", Value: "x"}}, wantErr: true},
+		{name: "numeric first character rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "1BAD", Value: "x"}}, wantErr: true},
 		{name: "duplicate key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "one"}, {Key: " FOO ", Value: "two"}}, wantErr: true},
 		{name: "value and secret rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar", SecretID: "sec-1"}}, wantErr: true},
 		{name: "null value rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bad\x00val"}}, wantErr: true},
@@ -324,5 +330,36 @@ func TestCreateAgentProfiles_RejectsBadCommandPrefix(t *testing.T) {
 	}}, &testAgent{id: "test-agent", name: "test-agent"})
 	if !errors.Is(err, ErrInvalidCommandPrefix) {
 		t.Fatalf("expected ErrInvalidCommandPrefix, got %v", err)
+	}
+	if len(st.created) != 0 {
+		t.Fatalf("bad nested profile create made %d profile writes", len(st.created))
+	}
+}
+
+func TestCreateAgent_RejectsBadNestedProfileBeforeAnyWrite(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	ctrl := newTestController(map[string]agents.Agent{
+		"test-agent": &testAgent{
+			id:          "test-agent",
+			name:        "test-agent",
+			displayName: "Test Agent",
+			enabled:     true,
+		},
+	})
+	st := newFakeStore()
+	ctrl.repo = st
+
+	_, err := ctrl.CreateAgent(context.Background(), CreateAgentRequest{
+		Name: "test-agent",
+		Profiles: []CreateAgentProfileRequest{{
+			Name:          "Bad",
+			CommandPrefix: `--not-a-launcher`,
+		}},
+	})
+	if !errors.Is(err, ErrInvalidCommandPrefix) {
+		t.Fatalf("expected ErrInvalidCommandPrefix, got %v", err)
+	}
+	if len(st.agents) != 0 || len(st.created) != 0 {
+		t.Fatalf("bad create made writes: agents=%d profiles=%d", len(st.agents), len(st.created))
 	}
 }

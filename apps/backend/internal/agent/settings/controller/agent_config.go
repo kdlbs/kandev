@@ -174,6 +174,9 @@ type CommandPreviewRequest struct {
 
 // PreviewAgentCommand generates a preview of the CLI command that will be executed
 func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, req CommandPreviewRequest) (*dto.CommandPreviewResponse, error) {
+	if err := validateCommandPrefix(req.CommandPrefix); err != nil {
+		return nil, err
+	}
 	agentConfig, ok := c.agentRegistry.Get(agentName)
 	if !ok {
 		return nil, fmt.Errorf("agent type %q not found in registry", agentName)
@@ -209,10 +212,9 @@ func (c *Controller) PreviewAgentCommand(ctx context.Context, agentName string, 
 			cmd = cmd.With().Flag(cliFlagTokens...).Build()
 		}
 		// Prepend the launcher prefix last, mirroring
-		// lifecycle.CommandBuilder.BuildCommand. Tolerate malformed input
-		// silently — the preview is informational. Passthrough never applies
-		// the prefix (neither does the launch path), so this stays in the ACP
-		// branch only.
+		// lifecycle.CommandBuilder.BuildCommand. Prefixes were validated above;
+		// passthrough never applies one (neither does the launch path), so this
+		// stays in the ACP branch only.
 		if prefixTokens, err := cliflags.Tokenise(req.CommandPrefix); err == nil && len(prefixTokens) > 0 {
 			cmd = agents.NewCommand(append(prefixTokens, cmd.Args()...)...)
 		}

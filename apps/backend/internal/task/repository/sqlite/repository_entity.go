@@ -94,6 +94,29 @@ func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteRepositoryIfUnreferenced soft-deletes only an unadopted repository.
+// Keeping the reference check inside UPDATE closes the cleanup/adoption race.
+func (r *Repository) DeleteRepositoryIfUnreferenced(ctx context.Context, id string) (bool, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE repositories
+		SET deleted_at = ?, updated_at = ?
+		WHERE id = ?
+			AND deleted_at IS NULL
+			AND NOT EXISTS (
+				SELECT 1 FROM task_repositories WHERE repository_id = repositories.id
+			)
+	`), now, now, id)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 // DeleteRepositoryIfNoActiveTaskSessions soft-deletes a repository only when
 // no live task linked to it has a session that blocks deletion. Keeping the
 // predicate in the UPDATE prevents a session from becoming active between a

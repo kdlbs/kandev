@@ -3,7 +3,6 @@ package lifecycle
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"time"
 
@@ -189,6 +188,11 @@ func (m *Manager) Stop() error {
 	return nil
 }
 
+// StopReasonBackendShutdown identifies the graceful backend-shutdown path.
+// Executors may preserve resumable remote state for this reason only; user
+// stops and rollback cleanup deliberately retain their destructive semantics.
+const StopReasonBackendShutdown = "backend shutdown"
+
 // StopAllAgents attempts a graceful shutdown of all active agents concurrently.
 func (m *Manager) StopAllAgents(ctx context.Context) error {
 	m.shuttingDown.Store(true)
@@ -205,7 +209,7 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 		wg.Add(1)
 		go func(e *AgentExecution) {
 			defer wg.Done()
-			if err := m.StopAgent(ctx, e.ID, false); err != nil {
+			if err := m.StopAgentWithReason(ctx, e.ID, StopReasonBackendShutdown, false); err != nil {
 				errCh <- err
 				m.logger.Warn("failed to stop agent during shutdown",
 					zap.String("execution_id", e.ID),
@@ -225,55 +229,6 @@ func (m *Manager) StopAllAgents(ctx context.Context) error {
 }
 
 const stopReasonStaleExecutionCleanup = "stale execution cleanup"
-
-// cleanupExitedContainer handles cleanup for a single exited container.
-func (m *Manager) cleanupExitedContainer(ctx context.Context, containerID string) {
-	execution, tracked := m.executionStore.GetByContainerID(containerID)
-	if !tracked {
-		return
-	}
-
-	// Get the Docker executor's ContainerManager from the registry.
-	var containerMgr *ContainerManager
-	if m.executorRegistry != nil {
-		if backend, berr := m.executorRegistry.GetBackend(executor.NameDocker); berr == nil {
-			if dockerExec, ok := backend.(*DockerExecutor); ok {
-				containerMgr = dockerExec.ContainerMgr()
-			}
-		}
-	}
-	if containerMgr == nil {
-		m.logger.Warn("docker container manager unavailable, cannot clean up container",
-			zap.String("container_id", containerID))
-		return
-	}
-
-	// Get container info to get exit code
-	info, err := containerMgr.GetContainerInfo(ctx, containerID)
-	if err != nil {
-		m.logger.Warn("failed to get container info during cleanup",
-			zap.String("container_id", containerID),
-			zap.Error(err))
-		return
-	}
-
-	// Mark execution as completed
-	errorMsg := ""
-	if info.ExitCode != 0 {
-		errorMsg = fmt.Sprintf("container exited with code %d", info.ExitCode)
-	}
-	_ = m.MarkCompleted(execution.ID, info.ExitCode, errorMsg)
-
-	// Remove the container
-	if err := containerMgr.RemoveContainer(ctx, containerID, false); err != nil {
-		m.logger.Warn("failed to remove container during cleanup",
-			zap.String("container_id", containerID),
-			zap.Error(err))
-	}
-
-	// Remove the execution from tracking so new agents can be launched
-	m.RemoveExecution(execution.ID)
-}
 
 // CleanupStaleExecutionBySessionID cleans up a stale execution: stops the runtime
 // instance, closes the client connection, and removes it from tracking.

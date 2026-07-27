@@ -45,7 +45,8 @@ type Hub struct {
 	dispatcher *ws.Dispatcher
 
 	// Optional provider for session data on subscription (e.g., git status)
-	sessionDataProvider SessionDataProvider
+	sessionDataProvider       SessionDataProvider
+	userSubscriptionListeners []func(userID string)
 
 	// sessionMode tracks per-session focus state and fires listeners when
 	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
@@ -58,6 +59,10 @@ type Hub struct {
 	// (gh, git, agentctl HTTP calls) or otherwise abort side-effecting work
 	// like session.launch. It still cancels on server shutdown.
 	dispatchCtx context.Context
+
+	// authPolicy carries the per-user scoping hooks (opt-in auth). Zero
+	// value = unscoped, today's behavior. See access.go.
+	authPolicy AuthPolicy
 
 	mu     sync.RWMutex
 	logger *logger.Logger
@@ -283,6 +288,63 @@ func (h *Hub) Broadcast(msg *ws.Message) {
 	h.broadcast <- msg
 }
 
+// setAuthPolicy installs the scoping hooks (see Gateway.SetAuthPolicy).
+func (h *Hub) setAuthPolicy(policy AuthPolicy) {
+	h.authPolicy = policy
+}
+
+// BroadcastToWorkspace routes a notification to the clients allowed to see a
+// workspace: its owner's connections, synthetic (auth-disabled) connections,
+// and everyone when the workspace is unowned or the resolver is unavailable.
+// The graceful fallbacks make this a strict narrowing of Broadcast — an
+// event never disappears entirely because ownership could not be resolved;
+// it only stops crossing user boundaries once ownership is known.
+func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
+	resolver := h.authPolicy.WorkspaceOwner
+	if resolver == nil || workspaceID == "" {
+		h.Broadcast(msg)
+		return
+	}
+	owner, err := resolver(h.DispatchContext(), workspaceID)
+	if err != nil || owner == "" {
+		h.Broadcast(msg)
+		return
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal workspace broadcast", zap.Error(err))
+		return
+	}
+	h.mu.RLock()
+	recipients := make([]*Client, 0, len(h.clients))
+	for client := range h.clients {
+		if clientMayReceive(client, owner) {
+			recipients = append(recipients, client)
+		}
+	}
+	h.mu.RUnlock()
+	h.sendToClients(data, recipients, msg.Action)
+}
+
+// BroadcastToWorkspaceOrDrop routes like BroadcastToWorkspace but, when auth is
+// enforced and the workspace is unknown, DROPS the message instead of falling
+// back to a global broadcast. Every Office notification is workspace-scoped, so
+// an office payload whose workspace could not be resolved must never cross user
+// boundaries. With auth disabled (single user) it degrades to a plain global
+// broadcast, preserving today's behavior.
+func (h *Hub) BroadcastToWorkspaceOrDrop(workspaceID string, msg *ws.Message) {
+	if workspaceID == "" && h.workspaceScopeEnforced() {
+		return // fail closed: no unattributed office fan-out under auth
+	}
+	h.BroadcastToWorkspace(workspaceID, msg)
+}
+
+// workspaceScopeEnforced reports whether per-user auth is currently on.
+func (h *Hub) workspaceScopeEnforced() bool {
+	enforced := h.authPolicy.Enforced
+	return enforced != nil && enforced()
+}
+
 // getSubscribersLocked reads subscribers for an ID from a subscriber map under the read lock.
 func (h *Hub) getSubscribersLocked(m map[string]map[*Client]bool, id string) []*Client {
 	h.mu.RLock()
@@ -296,9 +358,11 @@ func (h *Hub) getSubscribersLocked(m map[string]map[*Client]bool, id string) []*
 }
 
 // sendToClients delivers a pre-marshalled message to a list of clients.
-func (h *Hub) sendToClients(data []byte, clients []*Client, action string) {
+func (h *Hub) sendToClients(data []byte, clients []*Client, action string) int {
+	queued := 0
 	for _, client := range clients {
 		if client.sendBytes(data) {
+			queued++
 			h.logger.Debug("Sent message to client",
 				zap.String("client_id", client.ID),
 				zap.String("action", action))
@@ -308,6 +372,7 @@ func (h *Hub) sendToClients(data []byte, clients []*Client, action string) {
 				zap.String("action", action))
 		}
 	}
+	return queued
 }
 
 // BroadcastToTask sends a notification to clients subscribed to a specific task
@@ -374,18 +439,18 @@ func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
 }
 
 // BroadcastToUser sends a notification to clients subscribed to a specific user
-func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) {
+func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) bool {
 	data, err := json.Marshal(msg)
 	if err != nil {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
-		return
+		return false
 	}
 	clients := h.getSubscribersLocked(h.userSubscribers, userID)
 	h.logger.Debug("BroadcastToUser",
 		zap.String("user_id", userID),
 		zap.String("action", msg.Action),
 		zap.Int("subscriber_count", len(clients)))
-	h.sendToClients(data, clients, msg.Action)
+	return h.sendToClients(data, clients, msg.Action) > 0
 }
 
 // SubscribeToTask subscribes a client to task notifications
@@ -439,17 +504,32 @@ func (h *Hub) UnsubscribeFromSession(client *Client, sessionID string) {
 // SubscribeToUser subscribes a client to user notifications
 func (h *Hub) SubscribeToUser(client *Client, userID string) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	if _, ok := h.userSubscribers[userID]; !ok {
 		h.userSubscribers[userID] = make(map[*Client]bool)
 	}
 	h.userSubscribers[userID][client] = true
 	client.userSubscriptions[userID] = true
+	listeners := append([]func(string){}, h.userSubscriptionListeners...)
+	h.mu.Unlock()
 
 	h.logger.Debug("Client subscribed to user",
 		zap.String("client_id", client.ID),
 		zap.String("user_id", userID))
+	for _, listener := range listeners {
+		listener(userID)
+	}
+}
+
+// AddUserSubscriptionListener registers a callback invoked after a user has
+// been registered as a subscriber. Callbacks run without the hub lock held so
+// they can safely send messages through the hub.
+func (h *Hub) AddUserSubscriptionListener(listener func(userID string)) {
+	if listener == nil {
+		return
+	}
+	h.mu.Lock()
+	h.userSubscriptionListeners = append(h.userSubscriptionListeners, listener)
+	h.mu.Unlock()
 }
 
 // UnsubscribeFromUser unsubscribes a client from user notifications

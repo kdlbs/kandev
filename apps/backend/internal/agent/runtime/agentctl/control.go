@@ -71,6 +71,10 @@ type CreateInstanceRequest struct {
 	// single-repo tracker. Empty map disables the override and falls back
 	// to the hardcoded origin/main → master priority list inside agentctl.
 	BaseBranches map[string]string `json:"base_branches,omitempty"`
+	// WorkspaceSourceRoots are canonical host roots explicitly attached to the
+	// workspace. Agentctl permits file operations through links only beneath
+	// these roots.
+	WorkspaceSourceRoots []string `json:"workspace_source_roots,omitempty"`
 }
 
 // CreateInstanceResponse contains the result of creating a new agent instance.

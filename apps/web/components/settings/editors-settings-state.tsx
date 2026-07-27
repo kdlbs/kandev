@@ -236,6 +236,7 @@ function mapTasksListSettingsFields(
   return {
     tasksListSort: parseTasksListSort(s.tasks_list_sort),
     tasksListGroup: parseTasksListGroup(s.tasks_list_group),
+    tasksListShowDetails: s.tasks_list_show_details ?? false,
   };
 }
 

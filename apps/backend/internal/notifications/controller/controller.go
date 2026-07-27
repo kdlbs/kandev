@@ -48,11 +48,15 @@ func (c *Controller) CreateProvider(ctx context.Context, req dto.UpsertProviderR
 	}
 	providerType := models.ProviderType(req.Type)
 	config := req.Config
-	provider, err := c.service.CreateProvider(ctx, userID, name, providerType, config, enabled, req.Events)
+	events := []string{service.EventTaskSessionClarificationAsked}
+	if req.Events != nil {
+		events = *req.Events
+	}
+	provider, err := c.service.CreateProvider(ctx, userID, name, providerType, config, enabled, events)
 	if err != nil {
 		return dto.NotificationProviderDTO{}, err
 	}
-	return dto.FromProvider(provider, req.Events), nil
+	return dto.FromProvider(provider, events), nil
 }
 
 func (c *Controller) UpdateProvider(ctx context.Context, providerID string, req dto.UpdateProviderRequest) (dto.NotificationProviderDTO, error) {

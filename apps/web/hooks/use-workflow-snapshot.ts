@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { fetchWorkflowSnapshot } from "@/lib/api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
 
 export function useWorkflowSnapshot(workflowId: string | null) {
   const store = useAppStoreApi();
@@ -11,7 +12,10 @@ export function useWorkflowSnapshot(workflowId: string | null) {
   useEffect(() => {
     if (!workflowId) return;
     let cancelled = false;
-    const existing = store.getState().kanban;
+    const requestState = store.getState();
+    const requestedWorkspaceId = requestState.workspaces.activeId;
+    const requestedGeneration = requestState.workspaceContextGeneration;
+    const existing = requestState.kanban;
     if (
       !skippedInitialHydratedRef.current &&
       existing.workflowId === workflowId &&
@@ -26,17 +30,33 @@ export function useWorkflowSnapshot(workflowId: string | null) {
     }
     fetchWorkflowSnapshot(workflowId, { cache: "no-store" })
       .then((snapshot) => {
-        if (cancelled) return;
+        if (
+          cancelled ||
+          !isCurrentWorkspaceContext(store.getState(), requestedWorkspaceId, requestedGeneration)
+        ) {
+          return;
+        }
         store.getState().hydrate(snapshotToState(snapshot));
       })
       .catch((error) => {
         // Suppress superseded-fetch noise; retry happens on WS reconnect.
-        if (cancelled) return;
+        if (
+          cancelled ||
+          !isCurrentWorkspaceContext(store.getState(), requestedWorkspaceId, requestedGeneration)
+        ) {
+          return;
+        }
         console.warn("[useWorkflowSnapshot] failed to load snapshot:", error);
       })
       .finally(() => {
         // Only clear the flag this effect raised; skip when cancelled or when a concurrent caller owns it.
-        if (cancelled || !setLoading) return;
+        if (
+          cancelled ||
+          !setLoading ||
+          !isCurrentWorkspaceContext(store.getState(), requestedWorkspaceId, requestedGeneration)
+        ) {
+          return;
+        }
         store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
       });
     return () => {

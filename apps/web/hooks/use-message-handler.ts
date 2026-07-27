@@ -19,6 +19,10 @@ import {
   collectPromptReferenceExpansions,
   formatPromptReferenceExpansions,
 } from "@/lib/prompts/expand-prompt-references";
+import {
+  deriveSessionInputMode,
+  type SessionInputMode,
+} from "./domains/session/session-input-mode";
 
 function buildDocumentContext(
   activeDocument: ActiveDocument | null,
@@ -142,7 +146,6 @@ export interface UseMessageHandlerParams {
   sessionModel: string | null;
   activeModel: string | null;
   planModeEnabled?: boolean;
-  isAgentBusy?: boolean;
   hasPendingClarification?: boolean;
   activeDocument?: ActiveDocument | null;
   planComments?: PlanComment[];
@@ -203,13 +206,30 @@ export async function sendMessageRequest(
   );
 }
 
+const TERMINAL_SESSION_STATES = new Set(["FAILED", "CANCELLED", "COMPLETED"]);
+
+function requireSessionInputMode(state: AppState, selectedSessionId: string): SessionInputMode {
+  const selectedSession = state.taskSessions.items[selectedSessionId] ?? null;
+  const inputMode = deriveSessionInputMode(selectedSession);
+  if (inputMode === "unavailable") {
+    // A terminal session row (agent process has exited) gets the backend's
+    // actionable copy; a missing row keeps the generic message since there is
+    // nothing session-specific to say.
+    const message =
+      selectedSession && TERMINAL_SESSION_STATES.has(selectedSession.state)
+        ? "Session has ended. Please create a new session to continue."
+        : "The selected session is not available for input.";
+    throw new MessageSendError("session-unavailable", message);
+  }
+  return inputMode;
+}
+
 export function useMessageHandler({
   resolvedSessionId,
   taskId,
   sessionModel,
   activeModel,
   planModeEnabled = false,
-  isAgentBusy = false,
   hasPendingClarification = false,
   activeDocument = null,
   planComments = [],
@@ -258,7 +278,8 @@ export function useMessageHandler({
       const contextFilesMeta =
         realFiles.length > 0 ? realFiles.map((f) => ({ path: f.path, name: f.name })) : undefined;
 
-      if (isAgentBusy || hasPendingClarification) {
+      const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
+      if (hasPendingClarification || inputMode === "queue") {
         const queueAttachments = payload.attachments?.map((att) => ({
           type: att.type,
           data: att.data,
@@ -301,7 +322,6 @@ export function useMessageHandler({
       activeModel,
       sessionModel,
       planModeEnabled,
-      isAgentBusy,
       hasPendingClarification,
       queue,
       buildFinalMessage,

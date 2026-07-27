@@ -144,7 +144,7 @@ Pending inline comments are scoped to the current review session but persist onl
 
 ## Generate a walkthrough
 
-Select **Walkthrough** from Changes or Review. Kandev sends the built-in `changes-walkthrough` prompt to the active session. If the agent is running, the request queues; otherwise it starts a new turn. The agent must have task MCP and must call `show_walkthrough_kandev` with an ordered list of file and line anchors.
+Select **Walkthrough** from Changes or Review. Kandev sends the built-in `changes-walkthrough` prompt to the active session. If the agent is actively generating, the request queues; if it is idle — or only waiting on background work it spawned — it starts a new turn immediately. The agent must have task MCP and must call `show_walkthrough_kandev` with an ordered list of file and line anchors.
 
 <DocsVideo
   webm="./media/feature-guides/code-walkthrough.webm"
@@ -175,7 +175,7 @@ The creation dialog requires a title, defaults it from the task title, accepts a
 - Azure Repos uses `az repos pr create` and requires Azure CLI, the `azure-devops` extension, and either `az login` or `AZURE_DEVOPS_EXT_PAT`.
 - Other Git hosts do not have a built-in creation path. Use that host's tooling from the terminal.
 
-GitHub has the complete in-app PR review path. A linked PR detail panel shows checks, reviews, comments, conflicts, and merge readiness. It can add PR feedback to agent context, submit an approval when allowed, ask an agent to address conflicts, and merge using a method allowed by the repository. Branch protection remains authoritative; merge is enabled only when required checks, review state, and mergeability are ready.
+GitHub has the complete in-app PR review path. A linked PR detail panel shows checks, reviews, comments, conflicts, and merge readiness. It can add PR feedback to agent context, submit an approval when allowed, ask an agent to address conflicts, and merge using a method allowed by the repository. On an open PR, use the reviews list to re-request a reviewer whose review was dismissed. On a phone, open **Review** from the task bottom navigation to reach the same PR detail. GitHub permissions and repository policy remain authoritative; merge is enabled only when required checks, review state, and mergeability are ready.
 
 GitLab has a provider-specific linked-MR panel. It shows overview and branch state, approvals and pipeline rollup, files, commits, reviewers, assignees, labels, and threaded discussions. It can add selected feedback to agent context, reply or resolve discussions, approve or unapprove, update people and labels, toggle MR notifications, merge, refresh, and unlink. GitLab permissions and project policy remain authoritative. See [Integrations](integrations.md#gitlab) for linking and watch limits.
 

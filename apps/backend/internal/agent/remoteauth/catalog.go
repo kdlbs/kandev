@@ -11,12 +11,10 @@ import (
 )
 
 const (
-	ghCLISpecID          = "gh_cli"
-	ghCLITokenMethodID   = "gh_cli_token"
-	ghCLIEnvMethodID     = "gh_cli_env"
-	ghCLIEnvVar          = "GITHUB_TOKEN"
-	ghCLIDisplayName     = "GitHub CLI"
-	ghCLITokenMethodType = "gh_cli_token"
+	ghCLISpecID      = "gh_cli"
+	ghCLIEnvMethodID = "gh_cli_env"
+	ghCLIEnvVar      = "GITHUB_TOKEN"
+	ghCLIDisplayName = "GitHub CLI"
 )
 
 // Method describes one selectable remote authentication method.
@@ -60,12 +58,6 @@ func BuildCatalogForHost(enabledAgents []agents.Agent, currentOS, homeDir string
 		ID:          ghCLISpecID,
 		DisplayName: ghCLIDisplayName,
 		Methods: []Method{
-			{
-				MethodID:  ghCLITokenMethodID,
-				Type:      ghCLITokenMethodType,
-				Label:     "Copy token from local gh CLI",
-				SetupHint: "Runs `gh auth token` on your machine and sets GITHUB_TOKEN in the remote environment",
-			},
 			{
 				MethodID: ghCLIEnvMethodID,
 				Type:     "env",

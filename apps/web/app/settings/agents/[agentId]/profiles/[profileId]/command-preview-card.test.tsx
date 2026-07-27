@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { CommandPreviewCard } from "./command-preview-card";
 import type { CommandPreviewResponse } from "@/app/actions/agents";
 
@@ -60,10 +60,14 @@ describe("CommandPreviewCard", () => {
     await waitFor(() => expect(screen.getByText("agent --new")).toBeTruthy());
 
     // The stale request finally resolves — it must not clobber the newer preview.
-    resolveStale(response("agent --stale"));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await act(async () => {
+      resolveStale(response("agent --stale"));
+      await stalePromise;
+    });
 
-    expect(screen.getByText("agent --new")).toBeTruthy();
-    expect(screen.queryByText("agent --stale")).not.toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByText("agent --new")).toBeTruthy();
+      expect(screen.queryByText("agent --stale")).not.toBeTruthy();
+    });
   });
 });

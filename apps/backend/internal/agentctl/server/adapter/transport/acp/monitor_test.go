@@ -279,6 +279,52 @@ func TestConvertToolCallResultUpdate_MonitorRegistrationOverridesCompleted(t *te
 	}
 }
 
+func TestConvertToolCallResultUpdate_MonitorAttestationIsAgentScoped(t *testing.T) {
+	tests := []struct {
+		name     string
+		agentID  string
+		attested bool
+	}{
+		{name: "Claude", agentID: claudeAgentID, attested: true},
+		{name: "controlled mock", agentID: mockAgentID, attested: true},
+		{name: "Codex", agentID: codexAgentID, attested: false},
+		{name: "unrecognized adapter", agentID: "other-acp", attested: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestAdapter()
+			a.agentID = tc.agentID
+			a.normalizer = NewNormalizer(tc.agentID)
+			initial := &acp.SessionUpdateToolCall{
+				ToolCallId: "tc-monitor",
+				Title:      monitorToolName,
+				Kind:       acp.ToolKind("other"),
+				Meta:       monitorMeta(),
+				RawInput:   map[string]any{"command": "gh pr checks --watch"},
+			}
+			if event := a.convertToolCallUpdate("s1", initial); event == nil {
+				t.Fatal("initial Monitor tool call returned nil")
+			}
+
+			completed := acp.ToolCallStatus(toolStatusCompleted)
+			event := a.convertToolCallResultUpdate("s1", &acp.SessionToolCallUpdate{
+				ToolCallId: "tc-monitor",
+				Status:     &completed,
+				Meta:       monitorMeta(),
+				RawOutput:  "Monitor started (task task-42, timeout 60000ms).",
+			})
+			if event == nil || event.NormalizedPayload == nil {
+				t.Fatal("Monitor registration update returned no payload")
+			}
+			got := event.NormalizedPayload.BackgroundWork() != nil
+			if got != tc.attested {
+				t.Fatalf("background attestation present = %t, want %t", got, tc.attested)
+			}
+		})
+	}
+}
+
 func TestConvertToolCallResultUpdate_RealCompletedStaysComplete(t *testing.T) {
 	a := newTestAdapter()
 	completed := acp.ToolCallStatus("completed")

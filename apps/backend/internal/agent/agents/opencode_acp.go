@@ -16,7 +16,11 @@ var opencodeACPLogoLight []byte
 //go:embed logos/opencode_dark.svg
 var opencodeACPLogoDark []byte
 
-const opencodeACPPkg = "opencode-ai"
+const (
+	opencodeACPPackage     = "opencode-ai"
+	opencodeACPVersion     = "1.18.4"
+	opencodeACPPackageSpec = opencodeACPPackage + "@" + opencodeACPVersion
+)
 
 var (
 	_ Agent            = (*OpenCodeACP)(nil)
@@ -70,10 +74,10 @@ func (a *OpenCodeACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	// Check for the opencode CLI on PATH. Auth state is surfaced later by
-	// the ACP probe, not by scanning ~/.opencode.
+	// Check for the opencode CLI on PATH. Any installed version is eligible
+	// for the ACP probe; auth and protocol compatibility are surfaced there.
 	result, err := Detect(ctx, WithCommand("opencode"))
-	if err != nil {
+	if err != nil || !result.Available {
 		return result, err
 	}
 	result.SupportsMCP = true
@@ -103,9 +107,10 @@ func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 		// See GH issue #1247.
 		RequiresProcessKill: true,
 		SessionConfig: SessionConfig{
-			NativeSessionResume: true,
-			CanRecover:          &canRecover,
-			SessionDirTemplate:  "{home}/.opencode",
+			NativeSessionResume:         true,
+			NewSessionOnWorkspaceRebind: true,
+			CanRecover:                  &canRecover,
+			SessionDirTemplate:          "{home}/.opencode",
 		},
 	}
 }
@@ -127,7 +132,7 @@ func (a *OpenCodeACP) RemoteAuth() *RemoteAuth {
 }
 
 func (a *OpenCodeACP) InstallScript() string {
-	return "npm install -g " + opencodeACPPkg
+	return "npm install -g " + opencodeACPPackageSpec
 }
 
 func (a *OpenCodeACP) BillingType() usage.BillingType { return defaultBillingType() }

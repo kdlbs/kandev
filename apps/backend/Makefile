@@ -95,9 +95,34 @@ else
 endif
 
 # Build info
-VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
-COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || powershell -c "Get-Date -Format 'yyyy-MM-ddTHH:mm:ssZ'" 2>/dev/null || echo "unknown")
+#
+# Keyed on $(OS)$(MSYSTEM) like the shell-syntax block above. cmd.exe has no
+# /dev/null and resolves redirections *before* running the command, so under
+# native cmd/PowerShell `2>/dev/null` aborts each command outright and hands
+# every value to its fallback — stamping local Windows builds dev/unknown/unknown
+# while printing "The system cannot find the path specified." per assignment.
+# cmd's own `date` is no substitute: given arguments it prompts for input and
+# still exits 0, so it would swallow the `||`. Git Bash sets MSYSTEM and runs
+# recipes through sh, so it takes the POSIX branch.
+#
+# Fallbacks are unquoted: sh strips the quotes, cmd's `echo` would keep them.
+#
+# NULL_REDIR holds the whole redirect token, not just the device path, so a
+# caller simulating another platform can blank it (`make NULL_REDIR=`) instead
+# of naming a device this shell would misread — see scripts/check-make-shells.
+ifeq ($(OS)$(MSYSTEM),Windows_NT)
+  NULL_REDIR := 2>NUL
+  # `Get-Date -Format` renders *local* time with a literal Z; UtcNow is real UTC.
+  # InvariantCulture is not optional: ToString uses the current culture's
+  # calendar, so a th-TH host stamps year 2569 and ar-SA stamps 1448.
+  BUILD_TIME := $(shell powershell -NoProfile -Command "[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ',[Globalization.CultureInfo]::InvariantCulture)" $(NULL_REDIR) || echo unknown)
+else
+  NULL_REDIR := 2>/dev/null
+  BUILD_TIME := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ' $(NULL_REDIR) || echo unknown)
+endif
+
+VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
+COMMIT := $(shell git rev-parse --short HEAD $(NULL_REDIR) || echo unknown)
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 

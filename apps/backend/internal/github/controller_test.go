@@ -3,12 +3,14 @@ package github
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -16,11 +18,33 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+func TestValidGitHubCallbackState(t *testing.T) {
+	valid := base64.RawURLEncoding.EncodeToString(make([]byte, oauthRandomBytes))
+	for name, test := range map[string]struct {
+		state string
+		want  bool
+	}{
+		"valid":              {state: valid, want: true},
+		"empty":              {state: "", want: false},
+		"malformed":          {state: "%%%", want: false},
+		"wrong decoded size": {state: base64.RawURLEncoding.EncodeToString([]byte("short")), want: false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := validGitHubCallbackState(test.state); got != test.want {
+				t.Fatalf("validGitHubCallbackState(%q) = %v, want %v", test.state, got, test.want)
+			}
+		})
+	}
+}
 
 // stubClient implements Client with no-op defaults; override fields as needed.
 type stubClient struct {
@@ -28,6 +52,7 @@ type stubClient struct {
 	getIssueFunc          func(ctx context.Context, owner, repo string, number int) (*Issue, error)
 	mergePRFn             func(ctx context.Context, owner, repo string, number int, mergeMethod string) error
 	getRepoMergeMethodsFn func() (RepoMergeMethods, error)
+	requestReviewersFn    func(ctx context.Context, owner, repo string, number int, reviewers []string) error
 }
 
 func (s *stubClient) IsAuthenticated(context.Context) (bool, error) { return true, nil }
@@ -71,6 +96,9 @@ func (s *stubClient) ListUserRepos(context.Context, string, int) ([]GitHubRepo, 
 func (s *stubClient) ListAccessibleRepos(context.Context, string, int) ([]GitHubRepo, error) {
 	return nil, nil
 }
+func (s *stubClient) HasRepositoryAccess(context.Context, string, string) (bool, error) {
+	return true, nil
+}
 func (s *stubClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
 	return nil, nil
 }
@@ -90,6 +118,13 @@ func (s *stubClient) ListPRCommits(context.Context, string, string, int) ([]PRCo
 	return nil, nil
 }
 func (s *stubClient) SubmitReview(context.Context, string, string, int, string, string) error {
+	return nil
+}
+
+func (s *stubClient) RequestReviewers(ctx context.Context, owner, repo string, number int, reviewers []string) error {
+	if s.requestReviewersFn != nil {
+		return s.requestReviewersFn(ctx, owner, repo, number, reviewers)
+	}
 	return nil
 }
 func (s *stubClient) MergePR(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
@@ -138,12 +173,61 @@ func newControllerTestLogger() *logger.Logger {
 	return log
 }
 
+type controllerTestConnectionReader struct {
+	connection *WorkspaceConnection
+}
+
+func (r controllerTestConnectionReader) GetWorkspaceConnection(
+	context.Context,
+	string,
+) (*WorkspaceConnection, error) {
+	return r.connection, nil
+}
+
+func (controllerTestConnectionReader) GetUserConnection(
+	context.Context,
+	string,
+	string,
+) (*UserConnection, error) {
+	return nil, nil
+}
+
+func useControllerTestWorkspace(router *gin.Engine) {
+	router.Use(func(ctx *gin.Context) {
+		query := ctx.Request.URL.Query()
+		if query.Get("workspace_id") == "" && ctx.GetHeader("X-Test-Omit-Workspace") == "" {
+			query.Set("workspace_id", "ws-1")
+			ctx.Request.URL.RawQuery = query.Encode()
+		}
+		ctx.Next()
+	})
+}
+
+func configureControllerTestResolver(svc *Service, client Client, workspaceID string) {
+	resolver := NewCredentialResolver(controllerTestConnectionReader{connection: &WorkspaceConnection{
+		WorkspaceID:          workspaceID,
+		Source:               ConnectionSourceLegacyShared,
+		GitHubHost:           defaultGitHubHost,
+		Status:               ConnectionStatusActive,
+		CredentialGeneration: 1,
+	}}, nil)
+	resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+		if client == nil {
+			return nil, AuthMethodNone, ErrGitHubNotConfigured
+		}
+		return client, AuthMethodPAT, nil
+	})
+	svc.resolver = resolver
+}
+
 func setupControllerTest(client Client) (*gin.Engine, *Controller) {
 	gin.SetMode(gin.TestMode)
 	log := newControllerTestLogger()
 	svc := NewService(client, "pat", nil, nil, nil, log)
+	configureControllerTestResolver(svc, client, "ws-1")
 	ctrl := NewController(svc, log)
 	router := gin.New()
+	useControllerTestWorkspace(router)
 	ctrl.RegisterHTTPRoutes(router)
 	return router, ctrl
 }
@@ -169,7 +253,11 @@ func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
 	}
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
 	t.Cleanup(func() { _ = sqlxDB.Close() })
-	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (
+	if _, err := sqlxDB.Exec(`CREATE TABLE workspaces (
+		id TEXT PRIMARY KEY
+	);
+	INSERT INTO workspaces (id) VALUES ('ws-1');
+	CREATE TABLE tasks (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT,
 		title TEXT NOT NULL DEFAULT '',
@@ -185,11 +273,43 @@ func setupControllerStoreTest(t *testing.T) (*gin.Engine, *Store) {
 	}
 	log := newControllerTestLogger()
 	svc := NewService(&stubClient{}, "pat", nil, store, nil, log)
+	if err := store.UpsertWorkspaceConnection(context.Background(), &WorkspaceConnection{
+		WorkspaceID:          "ws-1",
+		Source:               ConnectionSourceLegacyShared,
+		GitHubHost:           defaultGitHubHost,
+		Status:               ConnectionStatusActive,
+		CredentialGeneration: 1,
+	}); err != nil {
+		t.Fatalf("seed workspace connection: %v", err)
+	}
+	svc.resolver.SetLegacyFactory(func(context.Context) (Client, string, error) {
+		return svc.client, AuthMethodPAT, nil
+	})
 	svc.SetPromptResolver(staticPromptResolver{content: "resolved default prompt"})
 	ctrl := NewController(svc, log)
 	router := gin.New()
+	useControllerTestWorkspace(router)
 	ctrl.RegisterHTTPRoutes(router)
 	return router, store
+}
+
+func TestCredentialBrokerReadinessUsesExactResolveRoute(t *testing.T) {
+	router, controller := setupControllerTest(&stubClient{})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/github/credentials/resolve", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured readiness status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+
+	controller.service.SetCredentialBroker(&CredentialBroker{})
+	request = httptest.NewRequest(http.MethodGet, "/api/v1/github/credentials/resolve", nil)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("configured readiness response = %d headers=%v", response.Code, response.Header())
+	}
 }
 
 func TestHttpListTaskIssues_WorkspaceScopedMetadataLinks(t *testing.T) {
@@ -282,6 +402,7 @@ func TestHttpListTaskIssues_WorkspaceScopedMetadataLinks(t *testing.T) {
 func TestHttpListTaskIssues_RequiresWorkspace(t *testing.T) {
 	router, _ := setupControllerStoreTest(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/task-issues", nil)
+	req.Header.Set("X-Test-Omit-Workspace", "true")
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 	if w.Code != http.StatusBadRequest {
@@ -334,6 +455,7 @@ func TestHttpTriggerReviewWatchPublishesNewPREvents(t *testing.T) {
 	log := newControllerTestLogger()
 	eb := &mockEventBus{}
 	svc := NewService(client, "pat", nil, store, eb, log)
+	configureControllerTestResolver(svc, client, "ws-1")
 	router := gin.New()
 	NewController(svc, log).RegisterHTTPRoutes(router)
 
@@ -356,6 +478,161 @@ func TestHttpTriggerReviewWatchPublishesNewPREvents(t *testing.T) {
 	}
 	if got := eb.publishedCount(); got != 1 {
 		t.Fatalf("published events = %d, want 1", got)
+	}
+}
+
+func TestHttpListReviewWatchesRequiresWorkspaceForRequests(t *testing.T) {
+	store := newTestStore(t)
+	watch := &ReviewWatch{WorkspaceID: "victim-workspace", Prompt: "secret review prompt"}
+	if err := store.CreateReviewWatch(context.Background(), watch); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(nil, AuthMethodNone, nil, store, nil, newControllerTestLogger())
+	router := gin.New()
+	NewController(svc, newControllerTestLogger()).RegisterHTTPRoutes(router)
+
+	foreign := httptest.NewRequest(http.MethodGet, "/api/v1/github/watches/review", nil)
+	foreign = foreign.WithContext(authn.WithIdentity(foreign.Context(), authn.Identity{
+		UserID: "foreign-member", Role: authn.RoleMember,
+	}))
+	foreignResponse := httptest.NewRecorder()
+	router.ServeHTTP(foreignResponse, foreign)
+	if foreignResponse.Code != http.StatusBadRequest || strings.Contains(foreignResponse.Body.String(), watch.Prompt) {
+		t.Fatalf("foreign response = %d %s, want no unscoped watch disclosure", foreignResponse.Code, foreignResponse.Body.String())
+	}
+
+	for _, identity := range []authn.Identity{
+		{UserID: "owner-member", Role: authn.RoleMember},
+		{UserID: "owner-admin", Role: authn.RoleAdmin},
+	} {
+		req := httptest.NewRequest(http.MethodGet,
+			"/api/v1/github/watches/review?workspace_id=victim-workspace", nil)
+		req = req.WithContext(authn.WithIdentity(req.Context(), identity))
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), watch.Prompt) {
+			t.Fatalf("%s response = %d %s, want scoped watch", identity.Role, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestHttpReviewWatchMutationMapsForeignWorkspaceToNotFound(t *testing.T) {
+	store := newTestStore(t)
+	watch := &ReviewWatch{WorkspaceID: "victim-workspace", Prompt: "secret review prompt"}
+	if err := store.CreateReviewWatch(context.Background(), watch); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(nil, AuthMethodNone, nil, store, nil, newControllerTestLogger())
+	svc.SetWorkspaceAuthorizer(func(context.Context, string) error { return repoerrors.ErrWorkspaceNotFound })
+	router := gin.New()
+	NewController(svc, newControllerTestLogger()).RegisterHTTPRoutes(router)
+
+	req := httptest.NewRequest(http.MethodDelete,
+		"/api/v1/github/watches/review/"+watch.ID+"?workspace_id=victim-workspace", nil)
+	req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "foreign", Role: authn.RoleMember}))
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+	if response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "workspace") {
+		t.Fatalf("foreign mutation response = %d %s, want sanitized 404", response.Code, response.Body.String())
+	}
+}
+
+func TestHTTPWatchListsRequireWorkspace(t *testing.T) {
+	store := newTestStore(t)
+	issueWatch := &IssueWatch{WorkspaceID: "victim-workspace", Prompt: "secret issue prompt"}
+	if err := store.CreateIssueWatch(context.Background(), issueWatch); err != nil {
+		t.Fatal(err)
+	}
+	prWatch := &PRWatch{WorkspaceID: "victim-workspace", SessionID: "session-1", TaskID: "task-1", Owner: "acme", Repo: "private", Branch: "main"}
+	if err := store.CreatePRWatch(context.Background(), prWatch); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO tasks (id, workspace_id) VALUES (?, ?)`, prWatch.TaskID, prWatch.WorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(nil, AuthMethodNone, nil, store, nil, newControllerTestLogger())
+	router := gin.New()
+	NewController(svc, newControllerTestLogger()).RegisterHTTPRoutes(router)
+
+	for _, path := range []string{"/api/v1/github/watches/issue", "/api/v1/github/watches/pr"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "foreign", Role: authn.RoleMember}))
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		if response.Code != http.StatusBadRequest || strings.Contains(response.Body.String(), "secret issue prompt") || strings.Contains(response.Body.String(), "private") {
+			t.Fatalf("GET %s = %d %s, want no unscoped disclosure", path, response.Code, response.Body.String())
+		}
+	}
+
+	for _, tc := range []struct {
+		path   string
+		secret string
+	}{
+		{"/api/v1/github/watches/issue?workspace_id=victim-workspace", "secret issue prompt"},
+		{"/api/v1/github/watches/pr?workspace_id=victim-workspace", "private"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "workspace-member", Role: authn.RoleMember}))
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), tc.secret) {
+			t.Fatalf("GET %s = %d %s, want scoped watch", tc.path, response.Code, response.Body.String())
+		}
+	}
+}
+
+func TestWatchHTTPAndWSMutationsHideForeignRows(t *testing.T) {
+	store := newTestStore(t)
+	issueWatch := &IssueWatch{WorkspaceID: "victim-workspace"}
+	if err := store.CreateIssueWatch(context.Background(), issueWatch); err != nil {
+		t.Fatal(err)
+	}
+	prWatch := &PRWatch{WorkspaceID: "victim-workspace", SessionID: "session-1", TaskID: "task-1", Owner: "acme", Repo: "private", Branch: "main"}
+	if err := store.CreatePRWatch(context.Background(), prWatch); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(nil, AuthMethodNone, nil, store, nil, newControllerTestLogger())
+	svc.SetWorkspaceAuthorizer(func(context.Context, string) error { return repoerrors.ErrWorkspaceNotFound })
+	router := gin.New()
+	NewController(svc, newControllerTestLogger()).RegisterHTTPRoutes(router)
+
+	for _, path := range []string{
+		"/api/v1/github/watches/issue/" + issueWatch.ID + "?workspace_id=victim-workspace",
+		"/api/v1/github/watches/pr/" + prWatch.ID + "?workspace_id=victim-workspace",
+	} {
+		req := httptest.NewRequest(http.MethodDelete, path, nil)
+		req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "foreign", Role: authn.RoleMember}))
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		if response.Code != http.StatusNotFound || strings.Contains(response.Body.String(), "workspace") {
+			t.Fatalf("DELETE %s = %d %s, want sanitized 404", path, response.Code, response.Body.String())
+		}
+	}
+
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "foreign", Role: authn.RoleMember})
+	for _, tc := range []struct {
+		name    string
+		handler func(context.Context, *ws.Message) (*ws.Message, error)
+		payload map[string]any
+	}{
+		{"issue-list", wsListIssueWatches(svc, newControllerTestLogger()), map[string]any{"workspace_id": "victim-workspace"}},
+		{"issue-delete", wsDeleteIssueWatch(svc, newControllerTestLogger()), map[string]any{"id": issueWatch.ID}},
+		{"pr-list", wsListPRWatches(svc, newControllerTestLogger()), map[string]any{"workspace_id": "victim-workspace"}},
+		{"pr-delete", wsDeletePRWatch(svc, newControllerTestLogger()), map[string]any{"id": prWatch.ID}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			message, err := ws.NewRequest("request-1", "github.watch", tc.payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			response, err := tc.handler(ctx, message)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.Type != ws.MessageTypeError || !strings.Contains(string(response.Payload), ws.ErrorCodeNotFound) {
+				t.Fatalf("response = %#v, want sanitized NOT_FOUND", response)
+			}
+		})
 	}
 }
 
@@ -438,6 +715,7 @@ func TestResetReviewWatchPublishesNewPREvents(t *testing.T) {
 	log := newControllerTestLogger()
 	eb := &mockEventBus{publishedCh: make(chan struct{}, 1)}
 	svc := NewService(client, "pat", nil, store, eb, log)
+	configureControllerTestResolver(svc, client, "ws-1")
 	svc.SetCascadeTaskDeleter(noopCascadeTaskDeleter{})
 
 	deleted, err := svc.ResetReviewWatch(context.Background(), watch.ID)
@@ -505,6 +783,7 @@ func TestHttpResetReviewWatchPublishesNewPREvents(t *testing.T) {
 	log := newControllerTestLogger()
 	eb := &mockEventBus{publishedCh: make(chan struct{}, 1)}
 	svc := NewService(client, "pat", nil, store, eb, log)
+	configureControllerTestResolver(svc, client, "ws-1")
 	svc.SetCascadeTaskDeleter(noopCascadeTaskDeleter{})
 	router := gin.New()
 	NewController(svc, log).RegisterHTTPRoutes(router)
@@ -541,7 +820,7 @@ func TestHttpLinkTaskIssue_SuccessAndInvalidJSON(t *testing.T) {
 		},
 	})
 	ctrl.service.SetTaskIssueStore(&fakeTaskIssueStore{
-		task:  &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{"keep": "me"}},
+		task:  &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{"keep": "me"}},
 		repos: []*taskmodels.TaskRepository{{RepositoryID: "repo-1"}},
 		entities: map[string]*taskmodels.Repository{
 			"repo-1": {ID: "repo-1", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
@@ -630,7 +909,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 		{
 			name:       "no client",
 			client:     nil,
-			store:      &fakeTaskIssueStore{},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1"}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusServiceUnavailable,
 			wantError:  "GitHub is not configured. Connect GitHub in Settings > Integrations.",
@@ -647,7 +926,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 		{
 			name:       "invalid reference",
 			client:     &stubClient{},
-			store:      &fakeTaskIssueStore{},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1"}},
 			body:       `{"issue":"#1470"}`,
 			wantStatus: http.StatusBadRequest,
 			wantError:  "invalid GitHub issue reference: owner and repo are required for issue numbers",
@@ -658,7 +937,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 				return &Issue{Number: 1, HTMLURL: "https://github.com/other/repo/issues/1", RepoOwner: "other", RepoName: "repo"}, nil
 			}},
 			store: &fakeTaskIssueStore{
-				task:  &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}},
+				task:  &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{}},
 				repos: []*taskmodels.TaskRepository{{RepositoryID: "repo-1"}},
 				entities: map[string]*taskmodels.Repository{
 					"repo-1": {ID: "repo-1", Provider: "github", ProviderOwner: "kdlbs", ProviderName: "kandev"},
@@ -673,7 +952,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
 				return nil, &GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
 			}},
-			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}}},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{}}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusNotFound,
 			wantError:  "failed to fetch GitHub issue",
@@ -683,7 +962,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
 				return nil, &GitHubAPIError{StatusCode: http.StatusUnauthorized, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
 			}},
-			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}}},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{}}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusUnauthorized,
 			wantError:  "failed to fetch GitHub issue",
@@ -693,7 +972,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 			client: &stubClient{getIssueFunc: func(context.Context, string, string, int) (*Issue, error) {
 				return nil, &GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: "/repos/kdlbs/kandev/issues/1470", Body: "private detail"}
 			}},
-			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}}},
+			store:      &fakeTaskIssueStore{task: &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{}}},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
 			wantStatus: http.StatusForbidden,
 			wantError:  "failed to fetch GitHub issue",
@@ -714,7 +993,7 @@ func TestHttpLinkTaskIssue_ErrorMapping(t *testing.T) {
 				return &Issue{Number: 1470, HTMLURL: "https://github.com/kdlbs/kandev/issues/1470", RepoOwner: "kdlbs", RepoName: "kandev"}, nil
 			}},
 			store: &fakeTaskIssueStore{
-				task:      &taskmodels.Task{ID: "task-1", Metadata: map[string]interface{}{}},
+				task:      &taskmodels.Task{ID: "task-1", WorkspaceID: "ws-1", Metadata: map[string]interface{}{}},
 				updateErr: errors.New("database unavailable"),
 			},
 			body:       `{"issue":"https://github.com/kdlbs/kandev/issues/1470"}`,
@@ -927,23 +1206,91 @@ func TestHttpGetPRInfo_ServiceError(t *testing.T) {
 }
 
 func TestHttpGetPRInfo_NoClient(t *testing.T) {
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/repos/acme/widget/pulls/99" {
+			t.Errorf("path = %q, want public PR endpoint", r.URL.Path)
+		}
+		if got := r.Header.Get("Accept"); got != githubAccept {
+			t.Errorf("Accept = %q, want %q", got, githubAccept)
+		}
+		if got := r.Header.Get("X-GitHub-Api-Version"); got != githubAPIVersion {
+			t.Errorf("X-GitHub-Api-Version = %q, want %q", got, githubAPIVersion)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"number":99,"title":"Public widget","state":"open","user":{"login":"octo"},"head":{"ref":"feature/public","sha":"abc123"},"base":{"ref":"main"}}`))
+	}))
+	t.Cleanup(api.Close)
+
+	originalAPIBase := anonymousAPIBase
+	anonymousAPIBase = api.URL
+	t.Cleanup(func() { anonymousAPIBase = originalAPIBase })
+
 	router, _ := setupControllerTest(nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/prs/acme/widget/99/info", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
-	if w.Code != http.StatusServiceUnavailable {
-		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var got struct {
-		Code string `json:"code"`
-	}
+	var got PR
 	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if got.Code != "github_not_configured" {
-		t.Fatalf("expected github_not_configured code, got %q", got.Code)
+	if got.Number != 99 || got.Title != "Public widget" {
+		t.Fatalf("PR = %#v, want public PR details", got)
+	}
+	if got.RepoOwner != "acme" || got.RepoName != "widget" || got.HeadBranch != "feature/public" || got.BaseBranch != "main" || got.AuthorLogin != "octo" {
+		t.Fatalf("PR fallback fields = %#v", got)
+	}
+}
+
+func TestHttpGetPRStatusesBatchAuthorizesBodyWorkspace(t *testing.T) {
+	router, controller := setupControllerTest(&stubClient{})
+	denied := errors.New("workspace not found")
+	controller.service.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
+		if workspaceID != "victim-workspace" {
+			t.Fatalf("workspaceID = %q, want victim workspace", workspaceID)
+		}
+		return denied
+	})
+	body := bytes.NewBufferString(`{"workspace_id":"victim-workspace","refs":[]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/statuses", body)
+	req = req.WithContext(authn.WithIdentity(req.Context(), authn.Identity{UserID: "attacker", Role: authn.RoleMember}))
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), denied.Error()) {
+		t.Fatalf("response = %d %s, want denied body-workspace access", w.Code, w.Body.String())
+	}
+}
+
+func TestWSGetPRFeedbackAuthorizesPayloadWorkspace(t *testing.T) {
+	service := NewService(&stubClient{}, AuthMethodPAT, nil, nil, nil, newControllerTestLogger())
+	denied := errors.New("workspace not found")
+	service.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
+		if workspaceID != "victim-workspace" {
+			t.Fatalf("workspaceID = %q, want victim workspace", workspaceID)
+		}
+		return denied
+	})
+	message, err := ws.NewRequest("request-1", "github.pr_feedback.get", map[string]any{
+		"workspace_id": "victim-workspace", "owner": "acme", "repo": "widget", "number": 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "attacker", Role: authn.RoleMember})
+	response, err := wsGetPRFeedback(service, newControllerTestLogger())(ctx, message)
+	if err != nil {
+		t.Fatalf("handler error = %v", err)
+	}
+	if response.Type != ws.MessageTypeError || !strings.Contains(string(response.Payload), denied.Error()) {
+		t.Fatalf("response = %#v, want denied workspace access", response)
 	}
 }
 
@@ -1208,7 +1555,7 @@ func TestHttpGetRepoMergeMethods_OK(t *testing.T) {
 	}
 	router, _ := setupControllerTest(sc)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods?workspace_id=ws-1", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -1234,7 +1581,7 @@ func TestHttpGetRepoMergeMethods_NoClient_Returns503(t *testing.T) {
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos/acme/widget/merge-methods?workspace_id=ws-1", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
@@ -1303,12 +1650,21 @@ func TestHttpMergePR_NoClient_Returns503(t *testing.T) {
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
 
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge", nil)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/github/prs/acme/widget/42/merge?workspace_id=ws-1", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 
 	if w.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Code string `json:"code"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != "github_not_configured" {
+		t.Fatalf("response code = %q, want github_not_configured", response.Code)
 	}
 }
 
@@ -1343,6 +1699,169 @@ func TestHttpSubmitReview_SelfApproveReturns422(t *testing.T) {
 	}
 	if resp.Error != ErrSelfApprove.Error() {
 		t.Errorf("expected error %q, got %q", ErrSelfApprove.Error(), resp.Error)
+	}
+}
+
+func TestHttpRequestReviewers_RequestsReviewers(t *testing.T) {
+	client := NewMockClient()
+	client.AddRepos("test-user", []GitHubRepo{{Owner: "acme", Name: "widget", FullName: "acme/widget"}})
+	router, _ := setupControllerTest(client)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/requested-reviewers", strings.NewReader(`{"reviewers":["octocat"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Requested bool          `json:"requested"`
+		Principal AuthPrincipal `json:"principal"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !response.Requested {
+		t.Fatal("expected requested=true")
+	}
+	if response.Principal.WorkspaceID != "ws-1" {
+		t.Fatalf("request principal workspace = %q, want ws-1", response.Principal.WorkspaceID)
+	}
+}
+
+func TestHttpRequestReviewers_NormalizesReviewersBeforeClientDelegation(t *testing.T) {
+	client := NewMockClient()
+	client.AddRepos("test-user", []GitHubRepo{{Owner: "acme", Name: "widget", FullName: "acme/widget"}})
+	router, _ := setupControllerTest(client)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/requested-reviewers", strings.NewReader(`{"reviewers":[" OctoCat ","octocat","hubot ","HUBOT"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got, want := client.requestedReviews[0].Reviewers, []string{"OctoCat", "hubot"}; !slices.Equal(got, want) {
+		t.Fatalf("reviewers sent to client = %#v, want %#v", got, want)
+	}
+}
+
+func TestHttpRequestReviewers_RejectsInvalidInput(t *testing.T) {
+	router, _ := setupControllerTest(NewMockClient())
+	for _, tc := range []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "zero PR number", path: "/api/v1/github/prs/acme/widget/0/requested-reviewers", body: `{"reviewers":["octocat"]}`},
+		{name: "empty reviewers", path: "/api/v1/github/prs/acme/widget/42/requested-reviewers", body: `{"reviewers":[]}`},
+		{name: "blank reviewer", path: "/api/v1/github/prs/acme/widget/42/requested-reviewers", body: `{"reviewers":[" "]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+func TestHttpRequestReviewers_RejectsBoundedInputBeforeClientDelegation(t *testing.T) {
+	overCountReviewers := make([]string, 51)
+	for i := range overCountReviewers {
+		overCountReviewers[i] = fmt.Sprintf("reviewer-%d", i)
+	}
+	overCountBody, err := json.Marshal(map[string][]string{"reviewers": overCountReviewers})
+	if err != nil {
+		t.Fatalf("marshal over-count body: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "malformed JSON", body: `{"reviewers":[`},
+		{name: "oversized body", body: `{"reviewers":["` + strings.Repeat("a", 64*1024) + `"]}`},
+		{name: "over-count reviewers", body: string(overCountBody)},
+		{name: "overlong login", body: `{"reviewers":["` + strings.Repeat("a", 257) + `"]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewMockClient()
+			router, _ := setupControllerTest(client)
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/requested-reviewers", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			if len(client.requestedReviews) != 0 {
+				t.Fatalf("client received reviewers: %#v", client.requestedReviews)
+			}
+		})
+	}
+}
+
+func TestHttpRequestReviewers_ErrNoClientReturns503(t *testing.T) {
+	router, _ := setupControllerTest(nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/requested-reviewers", strings.NewReader(`{"reviewers":["octocat"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHttpRequestReviewers_RepositoryOutsideWorkspaceReturnsSanitizedNotFound(t *testing.T) {
+	router, _ := setupControllerTest(NewMockClient())
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/github/prs/acme/widget/42/requested-reviewers",
+		strings.NewReader(`{"reviewers":["octocat"]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+	var response struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Code != "github_repository_not_found" {
+		t.Fatalf("code = %q, want github_repository_not_found", response.Code)
+	}
+	if response.Error != "GitHub repository is not available in this workspace." {
+		t.Fatalf("error = %q", response.Error)
+	}
+}
+
+func TestHttpRequestReviewers_UpstreamErrorReturns500(t *testing.T) {
+	router, _ := setupControllerTest(&stubClient{
+		requestReviewersFn: func(context.Context, string, string, int, []string) error {
+			return errors.New("GitHub rejected reviewers")
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/github/prs/acme/widget/42/requested-reviewers", strings.NewReader(`{"reviewers":["octocat"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
@@ -1416,7 +1935,7 @@ func TestHandleListAccessibleRepos_503_WhenUnavailable(t *testing.T) {
 	router := gin.New()
 	ctrl.RegisterHTTPRoutes(router)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/github/repos?workspace_id=ws-1", nil)
 	w := httptest.NewRecorder()
 	router.ServeHTTP(w, req)
 

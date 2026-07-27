@@ -14,7 +14,9 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,6 +53,11 @@ type Config struct {
 	// Generated internally when AGENTCTL_BOOTSTRAP_NONCE is present.
 	// Empty means authentication is disabled (e.g. dev/test without nonce).
 	AuthToken string
+
+	// ListenHostOverride forces HTTP listeners to a specific host. It is used by
+	// SSH launches, whose controller and instance traffic stays inside explicit
+	// loopback SSH forwards even though bootstrap authentication is enabled.
+	ListenHostOverride string
 
 	// BootstrapNonce is a one-time-use nonce for the handshake protocol.
 	// When set (via AGENTCTL_BOOTSTRAP_NONCE), agentctl generates its own AuthToken.
@@ -195,6 +202,9 @@ type InstanceConfig struct {
 	// continuation (thread ID appended at runtime). Only used by Amp.
 	ContinueCommand string
 
+	// ContinueArgs is the structured argv for ContinueCommand.
+	ContinueArgs []string
+
 	// VscodeCommand is the command to run the VS Code server (e.g., "code-server")
 	VscodeCommand string
 
@@ -231,6 +241,10 @@ type InstanceConfig struct {
 	// WorkspaceTracker's baseBranch. Empty falls back to the hardcoded
 	// origin/main → master priority list inside workspace_git_status.go.
 	BaseBranches map[string]string
+
+	// WorkspaceSourceRoots are canonical durable source roots permitted for
+	// linked workspace file operations.
+	WorkspaceSourceRoots []string
 }
 
 // Load loads the configuration from environment variables.
@@ -255,6 +269,7 @@ func Load() *Config {
 		LogFormat:          getEnv("AGENTCTL_LOG_FORMAT", "json"),
 		McpLogFile:         getEnv("KANDEV_MCP_LOG_FILE", ""),
 		VscodeCommand:      getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
+		ListenHostOverride: getEnv("AGENTCTL_LISTEN_HOST", ""),
 		IdleTimeout:        getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour),
 		IdleReaperInterval: getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute),
 	}
@@ -281,6 +296,9 @@ func Load() *Config {
 //
 // An empty return means "all interfaces" (the historical ":port" form).
 func (c *Config) ListenHost() string {
+	if c.ListenHostOverride != "" {
+		return c.ListenHostOverride
+	}
 	if c.AuthToken == "" {
 		return "127.0.0.1"
 	}
@@ -410,6 +428,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
 	}
+	if overrides.WorkspaceSourceRoots != nil {
+		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -450,11 +471,24 @@ type InstanceOverrides struct {
 	RequiresProcessKill    bool
 	StripEnv               []string
 	BaseBranches           map[string]string
+	WorkspaceSourceRoots   []string
 }
 
 // ParseCommand splits a command string into arguments
 func ParseCommand(cmd string) []string {
 	return strings.Fields(cmd)
+}
+
+// ValidateCommandArgs rejects argv that cannot safely identify an executable.
+func ValidateCommandArgs(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("agent command cannot be empty")
+	}
+	executable := strings.TrimSpace(args[0])
+	if executable == "" || strings.HasPrefix(executable, "-") {
+		return fmt.Errorf("agent command executable is invalid")
+	}
+	return nil
 }
 
 // CollectAgentEnv collects environment variables to pass to the agent.
@@ -478,6 +512,9 @@ func CollectAgentEnv(additional map[string]string) []string {
 	for k, v := range additional {
 		envMap[k] = v
 	}
+	if envMap["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"] != "" {
+		prependPathEntry(envMap, envMap["KANDEV_GITHUB_CLI_SHIM_DIR"])
+	}
 
 	// Convert back to slice
 	result := make([]string, 0, len(envMap))
@@ -485,6 +522,22 @@ func CollectAgentEnv(additional map[string]string) []string {
 		result = append(result, k+"="+v)
 	}
 	return result
+}
+
+func prependPathEntry(env map[string]string, entry string) {
+	if entry == "" {
+		return
+	}
+	cleanEntry := filepath.Clean(entry)
+	parts := filepath.SplitList(env["PATH"])
+	filtered := make([]string, 0, len(parts)+1)
+	filtered = append(filtered, entry)
+	for _, part := range parts {
+		if filepath.Clean(part) != cleanEntry {
+			filtered = append(filtered, part)
+		}
+	}
+	env["PATH"] = strings.Join(filtered, string(os.PathListSeparator))
 }
 
 func envBool(env []string, key string) bool {

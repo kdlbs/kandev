@@ -52,7 +52,7 @@ func TestCreateChildTask_HappyPath_InheritsWorkflow(t *testing.T) {
 }
 
 func TestCreateChildTask_OverridesWorkflow(t *testing.T) {
-	svc, _ := setupOfficeTest(t)
+	svc, repo := setupOfficeTest(t)
 	ctx := context.Background()
 
 	parent, err := svc.CreateTask(ctx, &CreateTaskRequest{
@@ -64,10 +64,13 @@ func TestCreateChildTask_OverridesWorkflow(t *testing.T) {
 		t.Fatalf("create parent: %v", err)
 	}
 
-	// Override with a workflow id different from parent's. The repository
-	// stores whatever workflow id we pass — even if there's no rows for
-	// it in workflow_steps, we just want to confirm the request shape.
+	// Override with another workflow in the parent's workspace.
 	otherWorkflowID := parent.WorkflowID + "-override"
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: otherWorkflowID, WorkspaceID: parent.WorkspaceID, Name: "Override",
+	}); err != nil {
+		t.Fatalf("create override workflow: %v", err)
+	}
 	childID, err := svc.CreateChildTask(ctx, parent, ChildTaskSpec{
 		Title:      "Switch flow",
 		WorkflowID: otherWorkflowID,

@@ -76,10 +76,10 @@ test.describe("Agent profile — CLI flags", () => {
       );
 
       // Direct DB-path verification: fetch the profile via the API and assert
-      // the cli_flags JSON contains our entry, enabled.
+      // the normalized CLI flags contain our entry, enabled.
       const stored = await apiClient.getAgentProfile(profile.id);
-      const found = stored.cli_flags.find((f) => f.flag === flagText);
-      expect(found, `cli_flags should include ${flagText}`).toBeDefined();
+      const found = stored.cliFlags.find((f) => f.flag === flagText);
+      expect(found, `cliFlags should include ${flagText}`).toBeDefined();
       expect(found?.enabled).toBe(true);
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
@@ -123,7 +123,7 @@ test.describe("Agent profile — CLI flags", () => {
       );
 
       const stored = await apiClient.getAgentProfile(profile.id);
-      const found = stored.cli_flags.find((f) => f.flag === "--toggle-me");
+      const found = stored.cliFlags.find((f) => f.flag === "--toggle-me");
       expect(found?.enabled).toBe(false);
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
@@ -166,7 +166,7 @@ test.describe("Agent profile — CLI flags", () => {
       await expect(testPage.getByTestId("cli-flag-row-1")).toBeHidden();
 
       const stored = await apiClient.getAgentProfile(profile.id);
-      expect(stored.cli_flags.map((f) => f.flag)).toEqual(["--keep-me"]);
+      expect(stored.cliFlags.map((f) => f.flag)).toEqual(["--keep-me"]);
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true);
     }

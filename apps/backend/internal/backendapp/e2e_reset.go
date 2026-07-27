@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"os"
 	"strings"
@@ -100,6 +101,19 @@ func handleE2EReset(
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID); err != nil {
 			log.Warn("e2e reset: GitHub workspace settings cleanup failed", zap.Error(err))
 		}
+		if err := deleteGitHubAuthForReset(ctx, repo.DB(), workspaceID); err != nil {
+			log.Error("e2e reset: GitHub authentication cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: "GitHub authentication cleanup failed"})
+			return
+		}
+		if githubSvc != nil {
+			githubSvc.ResetMockAuth(workspaceID)
+			if err := resetGitHubAppRegistrationsForE2E(ctx, githubSvc, workspaceID); err != nil {
+				log.Error("e2e reset: GitHub deployment App cleanup failed", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: "GitHub deployment App cleanup failed"})
+				return
+			}
+		}
 		// The workflow-sync poller reads these rows globally; delete before
 		// task/workflow deletion so a mid-reset tick can't resync workflows.
 		// The table always exists, so a failure is a genuine DB error — abort
@@ -152,6 +166,15 @@ func handleE2EReset(
 				return
 			}
 			gitLabReset = resetResult
+		}
+
+		// Clear native code-review runs and findings before deleting the tasks
+		// that own them. A review pass left in flight by an earlier spec would
+		// otherwise publish findings mid-reset and leak them into a later test.
+		if err := repo.DeleteTaskReviewByWorkspace(ctx, workspaceID); err != nil {
+			log.Error("e2e reset: task review cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
 		}
 
 		// Route through the task service (rather than a raw SQL DELETE) so
@@ -212,6 +235,42 @@ func handleE2EReset(
 			"deleted_gitlab_issue_watches":  gitLabReset.IssueWatches,
 		})
 	}
+}
+
+func resetGitHubAppRegistrationsForE2E(
+	ctx context.Context,
+	service *github.Service,
+	workspaceID string,
+) error {
+	if service == nil {
+		return nil
+	}
+	return service.ResetAppRegistrationsForE2E(ctx, workspaceID)
+}
+
+func deleteGitHubAuthForReset(ctx context.Context, database *sql.DB, workspaceID string) error {
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, query := range []string{
+		`DELETE FROM github_auth_flows WHERE workspace_id = ?`,
+		`DELETE FROM github_user_connections WHERE workspace_id = ?`,
+		`DELETE FROM github_workspace_connections WHERE workspace_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, query, workspaceID); err != nil {
+			return err
+		}
+	}
+	userSecretPrefix := "github:user:" + workspaceID + ":"
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM secrets
+		WHERE id = ? OR substr(id, 1, length(?)) = ?`,
+		github.WorkspacePATSecretKey(workspaceID), userSecretPrefix, userSecretPrefix); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func deleteAutomationsForReset(

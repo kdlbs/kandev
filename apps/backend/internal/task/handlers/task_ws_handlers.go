@@ -37,7 +37,9 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	for _, session := range sessions {
-		sessionDTOs = append(sessionDTOs, dto.FromTaskSessionSummary(session))
+		summary := dto.FromTaskSessionSummary(session)
+		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
+		sessionDTOs = append(sessionDTOs, summary)
 	}
 	resp := dto.ListTaskSessionSummariesResponse{
 		Sessions: sessionDTOs,
@@ -169,6 +171,9 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
+		if isTaskCreateValidationError(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 

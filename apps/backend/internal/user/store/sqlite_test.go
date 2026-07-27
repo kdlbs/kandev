@@ -140,6 +140,39 @@ func TestMarshalUserSettingsPersistsDisabledArchiveConfirmation(t *testing.T) {
 	}
 }
 
+func TestMarshalUserSettingsPersistsTasksListShowDetails(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{TasksListShowDetails: true})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if got, ok := payload["tasks_list_show_details"].(bool); !ok || !got {
+		t.Fatalf("tasks_list_show_details = %#v, want true", payload["tasks_list_show_details"])
+	}
+}
+
+func TestScanUserSettingsTasksListShowDetailsDefaultsAndLoads(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan defaults: %v", err)
+	}
+	if settings.TasksListShowDetails {
+		t.Fatal("TasksListShowDetails = true, want false")
+	}
+
+	settings, err = scanUserSettings(settingsScanner{raw: `{"tasks_list_show_details":true}`}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan stored settings: %v", err)
+	}
+	if !settings.TasksListShowDetails {
+		t.Fatal("TasksListShowDetails = false, want true")
+	}
+}
+
 func TestMarshalUserSettingsPersistsMCPTaskAgentProfileDefault(t *testing.T) {
 	raw, err := marshalUserSettingsPayload(&models.UserSettings{
 		MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultWorkspaceDefault,

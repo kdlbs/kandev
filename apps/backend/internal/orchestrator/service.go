@@ -13,13 +13,16 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -111,6 +114,11 @@ type TurnService interface {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState)
+	// PublishTaskActivityIfChanged recomputes the task-level MOST-ACTIVE-WINS
+	// activity aggregate and emits task.updated only when its three-state value
+	// changed — including a generating↔background flip that leaves the coarse
+	// state unchanged.
+	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.
@@ -148,6 +156,7 @@ type repoStore interface {
 	UpdateTaskStateIfNotArchived(ctx context.Context, id string, state v1.TaskState) (v1.TaskState, bool, error)
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
+	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
@@ -259,6 +268,15 @@ type Service struct {
 	// Task service owns the rich payload; orchestrator delegates.
 	taskEvents TaskEventPublisher
 
+	// sessionAccessCheck enforces per-user workspace scoping on the
+	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
+	sessionAccessCheck func(ctx context.Context, sessionID string) error
+
+	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
+	// entry points that name a task rather than a session (session.launch,
+	// session.ensure). Nil = unscoped.
+	taskAccessCheck func(ctx context.Context, taskID string) error
+
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
@@ -296,6 +314,11 @@ type Service struct {
 	// Phase 8 dependencies — also nil-safe.
 	engineTaskCreator      engine.TaskCreator
 	engineWorkflowSwitcher engine.WorkflowSwitcher
+
+	// Native code review. When set, buildWorkflowCallbacks registers the
+	// run_code_review on_enter action. Nil-safe: without it the action kind
+	// simply has no callback and the engine treats it as a no-op.
+	reviewRunner ReviewRunner
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
@@ -428,6 +451,22 @@ type Service struct {
 	// still settling" — they have no cancel to supersede it with, so any
 	// in-flight dispatch at all is reason enough to defer.
 	dispatchingQueued sync.Map
+
+	// foregroundActivity tracks, per session, whether the open turn is actively
+	// generating in the foreground or only waiting on a spawned background task
+	// (subagent / run-in-background shell). Keyed sessionID -> *turnActivity;
+	// see turn_activity.go. Consulted by checkSessionPromptable so a session
+	// that kicked off background work still accepts operator input.
+	// foregroundActivityMu protects record identity: lookups lock the selected
+	// record before releasing it, and execution teardown uses the same order
+	// before detaching an unused record.
+	foregroundActivityMu sync.Mutex
+	foregroundActivity   map[string]*turnActivity
+	// activityPublicationGuards serialize validation and event delivery by
+	// session across turnActivity record generations. Entries are reference
+	// counted and reclaimed when the last publisher/retirer releases them.
+	activityPublicationGuardsMu sync.Mutex
+	activityPublicationGuards   map[string]*activityPublicationGuard
 
 	// taskRuntimeStateMu serializes task-state flips derived from session
 	// runtime state. Without it, a completion/cancel path can check for active
@@ -596,6 +635,7 @@ func NewService(
 		return nil
 	})
 	exec.SetOnTaskRuntimeStateReconcile(s.reconcileTaskStateForRuntime)
+	exec.SetOnEarlyLaunchTaskStateReconcile(s.reconcileTaskStateForEarlyLaunchFailure)
 	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
@@ -670,6 +710,25 @@ func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.Rep
 	s.executor.SetRepoCloner(cloner, updater)
 }
 
+// RepositoryHostCloner is the narrow host-materialization contract. It returns
+// only the persisted local path; clone credentials remain private to the
+// orchestrator executor pipeline.
+type RepositoryHostCloner interface {
+	EnsureRepositoryCloned(context.Context, *models.Repository) (string, error)
+}
+
+// EnsureRepositoryCloned delegates host cloning through the executor's
+// authenticated clone pipeline.
+func (s *Service) EnsureRepositoryCloned(ctx context.Context, repository *models.Repository) (string, error) {
+	return s.executor.EnsureRepositoryCloned(ctx, repository)
+}
+
+// SetGitHubCredentialBroker configures renewable workspace GitHub credentials
+// for executor git and gh operations.
+func (s *Service) SetGitHubCredentialBroker(issuer executor.GitHubCredentialLeaseIssuer, endpoint string) {
+	s.executor.SetGitHubCredentialBroker(issuer, endpoint)
+}
+
 // SetTurnService sets the turn service for tracking conversation turns.
 //
 // A "turn" represents a single conversation round-trip: user prompt → agent response.
@@ -704,6 +763,76 @@ func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
 	s.taskEvents = publisher
 }
 
+// SetSessionAccessChecker installs the per-user workspace scoping check used by
+// the session-keyed WS actions (task session status, session PR check). Those
+// resolve sessions through the orchestrator's own repo handle rather than the
+// task service, so they do not inherit its authorize* checks and must ask here.
+//
+// The checker must return nil for contexts without a request identity, so
+// internal callers (event bus, schedulers) stay unscoped. Nil leaves every
+// session-keyed action unscoped, which is the pre-auth behavior.
+func (s *Service) SetSessionAccessChecker(check func(ctx context.Context, sessionID string) error) {
+	s.sessionAccessCheck = check
+}
+
+// SetTaskAccessChecker installs the task-keyed sibling of
+// SetSessionAccessChecker, used by the entry points that name a task rather
+// than a session. Same contract: nil for identity-less internal callers.
+func (s *Service) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
+	s.taskAccessCheck = check
+}
+
+// authorizeSession applies the configured per-user session check. No-op when
+// unwired.
+func (s *Service) authorizeSession(ctx context.Context, sessionID string) error {
+	if s.sessionAccessCheck == nil || sessionID == "" {
+		return nil
+	}
+	return s.sessionAccessCheck(ctx, sessionID)
+}
+
+// authorizeTask applies the configured per-user task check. No-op when unwired.
+func (s *Service) authorizeTask(ctx context.Context, taskID string) error {
+	if s.taskAccessCheck == nil || taskID == "" {
+		return nil
+	}
+	return s.taskAccessCheck(ctx, taskID)
+}
+
+// authorizeTaskSessionPair guards an entry point that accepts BOTH a task and a
+// session ID.
+//
+// Checking only the session is not enough: the caller can pass one of their own
+// sessions to satisfy that check while pointing taskID at another user's task,
+// which the method then uses for its task-scoped work (GetTaskPR, repository
+// resolution, PR-watch creation, recoverable-failure handling). Both IDs are
+// authorized, and the pair is required to be consistent so the two arguments
+// cannot describe different tasks.
+//
+// The pair check is skipped when the session cannot be loaded: by then both IDs
+// are already authorized, so a mismatch is a caller bug rather than a
+// cross-user leak, and failing here would change behavior for identity-less
+// internal callers.
+func (s *Service) authorizeTaskSessionPair(ctx context.Context, taskID, sessionID string) error {
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+	if err := s.authorizeTask(ctx, taskID); err != nil {
+		return err
+	}
+	if taskID == "" || sessionID == "" || s.repo == nil {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return nil //nolint:nilerr // both IDs authorized; consistency is best-effort
+	}
+	if session.TaskID != taskID {
+		return fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
+	}
+	return nil
+}
+
 // publishTaskUpdated forwards to the configured TaskEventPublisher.
 // No-op when the publisher isn't wired (tests, or before SetTaskEventPublisher
 // has been called during startup). Pass the pre-move workflow ID when the
@@ -721,6 +850,16 @@ func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task
 		return
 	}
 	s.taskEvents.PublishTaskStateChanged(ctx, task, oldState)
+}
+
+// publishTaskActivityIfChanged forwards a per-session activity flip to the task
+// service, which recomputes the task-level aggregate and emits task.updated only
+// when the aggregated value actually changes. No-op when the publisher isn't wired.
+func (s *Service) publishTaskActivityIfChanged(ctx context.Context, taskID string) {
+	if s.taskEvents == nil || taskID == "" {
+		return
+	}
+	s.taskEvents.PublishTaskActivityIfChanged(ctx, taskID)
 }
 
 func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID string) {
@@ -851,6 +990,13 @@ func (s *Service) SetEngineDecisionStore(store engine.DecisionStore) {
 	s.reinitWorkflowEngine()
 }
 
+// SetReviewRunner wires the native code-review runner, enabling the
+// run_code_review workflow step action.
+func (s *Service) SetReviewRunner(runner ReviewRunner) {
+	s.reviewRunner = runner
+	s.reinitWorkflowEngine()
+}
+
 // SetEngineCEOResolver wires the engine's CEOAgentResolver.
 func (s *Service) SetEngineCEOResolver(resolver engine.CEOAgentResolver) {
 	s.engineCEOResolver = resolver
@@ -954,6 +1100,15 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 // query the DB for any open turn and close it. Loops to mop up multiple
 // zombies (e.g. left over from before this fix) with a small sanity bound.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
+	s.completeTurnForTaskSession(ctx, "", sessionID)
+}
+
+func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
+	// Foreground ownership ends with the turn, but detached background work can
+	// outlive it. Preserve those registrations and expose them as background-idle;
+	// full cleanup belongs to execution/session teardown paths.
+	s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldTurnCompletion)
+
 	if s.turnService == nil {
 		return
 	}
@@ -1539,10 +1694,16 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 }
 
 func isMissingBranchError(err error) bool {
-	if err == nil {
-		return false
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		if isMissingBranchMessage(current.Error()) {
+			return true
+		}
 	}
-	msg := strings.ToLower(err.Error())
+	return false
+}
+
+func isMissingBranchMessage(message string) bool {
+	msg := strings.ToLower(message)
 	if strings.Contains(msg, "couldn't find remote ref") {
 		return true
 	}
@@ -1572,20 +1733,22 @@ var (
 const launchFailurePRLookupTimeout = time.Second
 
 func extractMissingBranchName(err error) string {
-	if err == nil {
-		return ""
+	branch := ""
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		msg := current.Error()
+		if match := quotedBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
+			branch = strings.TrimSpace(match[1])
+			continue
+		}
+		if match := remoteRefPattern.FindStringSubmatch(msg); len(match) == 2 {
+			branch = strings.TrimSpace(match[1])
+			continue
+		}
+		if match := pathspecBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
+			branch = strings.TrimSpace(match[1])
+		}
 	}
-	msg := err.Error()
-	if match := quotedBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
-		return strings.TrimSpace(match[1])
-	}
-	if match := remoteRefPattern.FindStringSubmatch(msg); len(match) == 2 {
-		return strings.TrimSpace(match[1])
-	}
-	if match := pathspecBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
-		return strings.TrimSpace(match[1])
-	}
-	return ""
+	return branch
 }
 
 const missingPRBranchRecoveryClaimKey = "missing_pr_branch_recovery_claimed"
@@ -1669,6 +1832,85 @@ func (s *Service) hasOnlyTaskRepository(ctx context.Context, taskID, repositoryI
 		strings.TrimSpace(repositories[0].RepositoryID) == repositoryID
 }
 
+// repositoryForMissingBranchFailure derives the failed repository from the
+// task's checkout configuration when environment preparation failed before the
+// executor constructed its repository-scoped launch request. It deliberately
+// returns no match for an empty or ambiguous branch so destructive recovery
+// actions remain scoped to the repository that actually failed.
+func (s *Service) repositoryForMissingBranchFailure(ctx context.Context, taskID, branch string) (string, string) {
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return "", branch
+	}
+	store, ok := s.repo.(interface {
+		ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
+	})
+	if !ok {
+		return "", branch
+	}
+	repositories, err := store.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		s.logger.Debug("failed to load task repositories for missing-branch guidance",
+			zap.String("task_id", taskID), zap.Error(err))
+		return "", branch
+	}
+
+	prNumber := missingBranchPRNumber(branch)
+	var repositoryID string
+	resolvedBranch := branch
+	for _, repository := range repositories {
+		if repository == nil || !taskRepositoryMatchesMissingBranch(repository, branch, prNumber) {
+			continue
+		}
+		if repositoryID != "" {
+			return "", branch
+		}
+		repositoryID = strings.TrimSpace(repository.RepositoryID)
+		if checkoutBranch := strings.TrimSpace(repository.CheckoutBranch); checkoutBranch != "" {
+			resolvedBranch = checkoutBranch
+		}
+	}
+	return repositoryID, resolvedBranch
+}
+
+var missingBranchPRRefPattern = regexp.MustCompile(`^pull/(\d+)/head$`)
+
+func missingBranchPRNumber(branch string) int {
+	match := missingBranchPRRefPattern.FindStringSubmatch(strings.TrimSpace(branch))
+	if len(match) != 2 {
+		return 0
+	}
+	number, err := strconv.Atoi(match[1])
+	if err != nil || number <= 0 {
+		return 0
+	}
+	return number
+}
+
+func taskRepositoryMatchesMissingBranch(repository *models.TaskRepository, branch string, prNumber int) bool {
+	if strings.TrimSpace(repository.CheckoutBranch) == branch {
+		return true
+	}
+	return prNumber > 0 && taskRepositoryPRNumber(repository.Metadata) == prNumber
+}
+
+func taskRepositoryPRNumber(metadata map[string]interface{}) int {
+	if metadata == nil {
+		return 0
+	}
+	switch value := metadata["pr_number"].(type) {
+	case int:
+		return value
+	case int64:
+		return int(value)
+	case float64:
+		if value > 0 && value == float64(int(value)) {
+			return int(value)
+		}
+	}
+	return 0
+}
+
 // handleSessionLaunchFailed creates branch guidance only after the caller has
 // persisted FAILED. The claim is stored on the session because prepare, start,
 // and resume may race.
@@ -1677,8 +1919,17 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 		return
 	}
 	recoveryCtx := context.WithoutCancel(ctx)
-	branch := extractMissingBranchName(launchErr)
-	prState := s.matchingTaskPRState(recoveryCtx, taskID, repositoryID, branch)
+	rawBranch := extractMissingBranchName(launchErr)
+	displayBranch := routingerr.Sanitize(rawBranch)
+	resolvedRepositoryID, resolvedBranch := s.repositoryForMissingBranchFailure(recoveryCtx, taskID, rawBranch)
+	if repositoryID == "" {
+		repositoryID = resolvedRepositoryID
+	}
+	if repositoryID != "" && repositoryID == resolvedRepositoryID {
+		rawBranch = resolvedBranch
+		displayBranch = routingerr.Sanitize(resolvedBranch)
+	}
+	prState := s.matchingTaskPRState(recoveryCtx, taskID, repositoryID, rawBranch)
 	if prState == githubPRStateOpen {
 		return
 	}
@@ -1699,7 +1950,9 @@ func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, session
 	if !claimed {
 		return
 	}
-	if err := s.createMissingPRBranchRecoveryMessage(recoveryCtx, taskID, sessionID, branch, prState); err != nil {
+	if err := s.createMissingPRBranchRecoveryMessage(
+		recoveryCtx, taskID, sessionID, displayBranch, prState,
+	); err != nil {
 		releaser, ok := s.repo.(failedSessionMetadataClaimReleaser)
 		if !ok {
 			s.logger.Warn("session repository cannot release missing-branch recovery claim after message failure",

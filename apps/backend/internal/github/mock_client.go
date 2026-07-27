@@ -48,6 +48,14 @@ type submittedReview struct {
 	Body   string `json:"body"`
 }
 
+// requestedReviewers records a RequestReviewers call for test assertions.
+type requestedReviewers struct {
+	Owner     string   `json:"owner"`
+	Repo      string   `json:"repo"`
+	Number    int      `json:"number"`
+	Reviewers []string `json:"reviewers"`
+}
+
 // mergedPR records a MergePR call for test assertions.
 type mergedPR struct {
 	Owner       string `json:"owner"`
@@ -97,6 +105,7 @@ type MockClient struct {
 	files            map[prKey][]PRFile
 	commits          map[prKey][]PRCommitInfo
 	submittedReviews []submittedReview
+	requestedReviews []requestedReviewers
 	mergedPRs        []mergedPR
 	mergeMethods     map[repoKey]RepoMergeMethods
 	gists            map[string]mockGist
@@ -374,6 +383,24 @@ func (m *MockClient) ListAccessibleRepos(_ context.Context, query string, _ int)
 	return filterReposByQuery(all, query), nil
 }
 
+func (m *MockClient) HasRepositoryAccess(_ context.Context, owner, repo string) (bool, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.reposUnavailable {
+		return false, ErrNoClient
+	}
+	want := owner + "/" + repo
+	for _, repos := range m.repos {
+		for _, candidate := range repos {
+			if strings.EqualFold(candidate.FullName, want) ||
+				(strings.EqualFold(candidate.Owner, owner) && strings.EqualFold(candidate.Name, repo)) {
+				return true, nil
+			}
+		}
+	}
+	return false, nil
+}
+
 func (m *MockClient) ListPRReviews(_ context.Context, owner, repo string, number int) ([]PRReview, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -550,6 +577,33 @@ func (m *MockClient) SubmitReview(_ context.Context, owner, repo string, number 
 		Owner: owner, Repo: repo, Number: number, Event: event, Body: body,
 	})
 	return nil
+}
+
+func (m *MockClient) RequestReviewers(_ context.Context, owner, repo string, number int, reviewers []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.requestedReviews = append(m.requestedReviews, requestedReviewers{
+		Owner: owner, Repo: repo, Number: number, Reviewers: append([]string(nil), reviewers...),
+	})
+	pr := m.prs[prKey{Owner: owner, Repo: repo, Number: number}]
+	if pr == nil {
+		return nil
+	}
+	for _, reviewer := range reviewers {
+		if !mockPRHasRequestedReviewer(pr, reviewer) {
+			pr.RequestedReviewers = append(pr.RequestedReviewers, RequestedReviewer{Login: reviewer, Type: reviewerTypeUser})
+		}
+	}
+	return nil
+}
+
+func mockPRHasRequestedReviewer(pr *PR, login string) bool {
+	for _, reviewer := range pr.RequestedReviewers {
+		if strings.EqualFold(reviewer.Login, login) {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *MockClient) GetRepoMergeMethods(_ context.Context, owner, repo string) (RepoMergeMethods, error) {
@@ -821,6 +875,7 @@ func (m *MockClient) Reset() {
 	m.files = make(map[prKey][]PRFile)
 	m.commits = make(map[prKey][]PRCommitInfo)
 	m.submittedReviews = nil
+	m.requestedReviews = nil
 	m.mergedPRs = nil
 	m.mergeMethods = make(map[repoKey]RepoMergeMethods)
 	m.gists = make(map[string]mockGist)
@@ -838,6 +893,15 @@ func (m *MockClient) SubmittedReviews() []submittedReview {
 	defer m.mu.RUnlock()
 	result := make([]submittedReview, len(m.submittedReviews))
 	copy(result, m.submittedReviews)
+	return result
+}
+
+// RequestedReviews returns all recorded RequestReviewers calls.
+func (m *MockClient) RequestedReviews() []requestedReviewers {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	result := make([]requestedReviewers, len(m.requestedReviews))
+	copy(result, m.requestedReviews)
 	return result
 }
 

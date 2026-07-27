@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 func eventBusHasType(bus *MockEventBus, eventType string) bool {
@@ -45,6 +46,12 @@ func (f *fakeBaseBranchPusher) snapshot() []fakeBaseBranchPusherCall {
 	return out
 }
 
+func setBranchUpdateWorkflowStep(svc *Service) {
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"step-1": {ID: "step-1", WorkflowID: "wf-1", Name: "Step"},
+	}})
+}
+
 // TestUpdateRepositoryBaseBranch_ResetsSessionBases confirms the picker
 // path also clears session.base_commit_sha and rewrites session.base_branch
 // for affected (task, repo) pairs. Without this the commits panel and
@@ -53,6 +60,7 @@ func (f *fakeBaseBranchPusher) snapshot() []fakeBaseBranchPusherCall {
 func TestUpdateRepositoryBaseBranch_ResetsSessionBases(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
 	svc.SetAgentBaseBranchPusher(&fakeBaseBranchPusher{})
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
@@ -101,6 +109,7 @@ func TestUpdateRepositoryBaseBranch_ResetsSessionBases(t *testing.T) {
 func TestUpdateRepositoryBaseBranch_PersistsAndPushes(t *testing.T) {
 	svc, bus, repo := createTestService(t)
 	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
 	pusher := &fakeBaseBranchPusher{}
 	svc.SetAgentBaseBranchPusher(pusher)
 
@@ -177,6 +186,7 @@ func TestUpdateRepositoryBaseBranch_PersistsAndPushes(t *testing.T) {
 func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 	svc, bus, repo := createTestService(t)
 	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
 	pusher := &fakeBaseBranchPusher{}
 	svc.SetAgentBaseBranchPusher(pusher)
 
@@ -224,6 +234,7 @@ func TestUpdateRepositoryBaseBranch_NoChangeSkipsWork(t *testing.T) {
 func TestUpdateRepositoryBaseBranch_RejectsUnsafeRefs(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
 	pusher := &fakeBaseBranchPusher{}
 	svc.SetAgentBaseBranchPusher(pusher)
 
@@ -257,6 +268,7 @@ func TestUpdateRepositoryBaseBranch_RejectsUnsafeRefs(t *testing.T) {
 func TestUpdateRepositoryBaseBranch_NotFound(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
 	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
 	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})

@@ -33,6 +33,7 @@ type handlerRepo interface {
 type TaskHandlers struct {
 	service                    *service.Service
 	orchestrator               OrchestratorStarter
+	foregroundActivity         dto.ForegroundActivityProvider
 	repo                       handlerRepo
 	planService                *service.PlanService
 	handoffSvc                 *service.HandoffService
@@ -91,13 +92,23 @@ type OrchestratorStarter interface {
 }
 
 func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
-	return &TaskHandlers{
+	h := &TaskHandlers{
 		service:      svc,
 		orchestrator: orchestrator,
 		repo:         repo,
 		planService:  planService,
 		logger:       log.WithFields(zap.String("component", "task-task-handlers")),
 	}
+	// The orchestrator also surfaces the in-memory fine-grained busy substate
+	// (ADR-0049). Derive the narrow provider from it so the
+	// session-fetch handlers can stamp foreground_activity onto sessions without
+	// waiting for a WS flip — generating for RUNNING sessions, background for any
+	// coarse state still holding detached work. Nil (e.g. in tests) simply omits
+	// the field.
+	if fa, ok := orchestrator.(dto.ForegroundActivityProvider); ok {
+		h.foregroundActivity = fa
+	}
+	return h
 }
 
 func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
@@ -124,6 +135,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks", h.httpCreateTask)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
+	api.POST("/tasks/:id/workspace-sources", h.httpAttachWorkspaceSources)
 	api.PATCH("/tasks/:id/repositories/:repo_id", h.httpUpdateTaskRepository)
 	api.POST("/tasks/:id/move", h.httpMoveTask)
 	api.DELETE("/tasks/:id", h.httpDeleteTask)

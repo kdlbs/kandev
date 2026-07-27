@@ -28,6 +28,7 @@ import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-po
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
+import { useAppStore } from "@/components/state-provider";
 import {
   hasPRChecksInProgressForDisplay,
   hasPRChecksPassedForDisplay,
@@ -175,6 +176,7 @@ function useChipPopoverInteractions() {
  * CI chip would be redundant.
  */
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const { prs, refresh } = useTaskPR(taskId);
   const { options: automationOptions } = useTaskCIAutomationOptions(taskId);
   // Defensive Array.isArray: a partial hydration can briefly seed the store
@@ -190,7 +192,7 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   // popover will actually open first (worst-status via pickDefaultPR — for a
   // single PR that's just the PR itself); the remaining PRs in a multi-PR
   // task warm when the popover opens.
-  usePRFeedbackBackgroundSync(pickDefaultPR(openPRs));
+  usePRFeedbackBackgroundSync(workspaceId, pickDefaultPR(openPRs));
   if (openPRs.length === 0) return null;
   if (openPRs.length === 1)
     return (

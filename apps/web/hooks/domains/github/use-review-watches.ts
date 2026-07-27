@@ -14,10 +14,7 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import type { CreateReviewWatchRequest, UpdateReviewWatchRequest } from "@/lib/types/github";
 
-// useReviewWatches has three modes:
-//   - workspaceId: string         → fetch watches scoped to one workspace
-//   - workspaceId: undefined      → fetch watches across all workspaces
-//   - workspaceId: null           → don't fetch (caller hasn't resolved a workspace yet)
+// useReviewWatches fetches only after the active workspace resolves.
 export function useReviewWatches(workspaceId?: string | null) {
   const items = useAppStore((state) => state.reviewWatches.items);
   const loaded = useAppStore((state) => state.reviewWatches.loaded);
@@ -30,13 +27,13 @@ export function useReviewWatches(workspaceId?: string | null) {
   const loadedScopeRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (workspaceId === null) return;
-    const scopeKey = workspaceId ?? "__all__";
+    if (!workspaceId) return;
+    const scopeKey = workspaceId;
     if (loadedScopeRef.current === scopeKey) return;
     let cancelled = false;
     loadedScopeRef.current = scopeKey;
     setReviewWatchesLoading(true);
-    listReviewWatches(workspaceId ?? undefined, { cache: "no-store" })
+    listReviewWatches(workspaceId, { cache: "no-store" })
       .then((response) => {
         if (cancelled) return;
         setReviewWatches(response?.watches ?? []);
@@ -101,8 +98,9 @@ export function useReviewWatches(workspaceId?: string | null) {
   const reset = useCallback(
     async (id: string, watchWorkspaceId: string) => {
       const result = await resetReviewWatch(id, watchWorkspaceId);
+      if (!workspaceId) return result;
       try {
-        const response = await listReviewWatches(workspaceId ?? undefined, { cache: "no-store" });
+        const response = await listReviewWatches(workspaceId, { cache: "no-store" });
         setReviewWatches(response?.watches ?? []);
       } catch {
         // Reset succeeded; a stale settings table is less harmful than failing the action.

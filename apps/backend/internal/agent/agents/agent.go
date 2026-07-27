@@ -152,7 +152,7 @@ type CommandOptions struct {
 	AgentType           string          // for --agent flag (e.g. "task" for subagent)
 	// CLIFlagTokens are user-configured CLI flag argv tokens derived from
 	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
-	// verbatim to the built command by every agent's BuildCommand.
+	// verbatim by lifecycle.CommandBuilder after the agent builds its command.
 	CLIFlagTokens []string
 	// CommandPrefixTokens are user-configured launcher tokens derived from
 	// AgentProfile.CommandPrefix (shell-tokenised). Prepended to the built
@@ -184,8 +184,9 @@ type PassthroughOptions struct {
 	// mcp_servers.…" overrides). Appended to the built command.
 	MCPArgs []string
 	// CLIFlagTokens are user-configured CLI flag argv tokens derived from
-	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Appended
-	// verbatim to the built passthrough command, mirroring CommandOptions.
+	// AgentProfile.CLIFlags (only Enabled entries, shell-tokenised). Unlike ACP
+	// commands, which lifecycle.CommandBuilder appends centrally, passthrough
+	// agents opt in by appending these tokens in BuildPassthroughCommand.
 	CLIFlagTokens []string
 }
 
@@ -246,12 +247,16 @@ type ResourceLimits struct {
 type SessionConfig struct {
 	NativeSessionResume     bool
 	HistoryContextInjection bool // Opt-in: inject conversation history on session resume for agents without native resume
-	ResumeFlag              Param
-	CanRecover              *bool
-	SessionDirTemplate      string
-	SessionDirTarget        string
-	ForkSessionCmd          Command
-	ContinueSessionCmd      Command
+	// NewSessionOnWorkspaceRebind forces session/new when an idle execution's
+	// working directory changes. Some providers accept session/load with a new
+	// cwd but keep tool execution pinned to the session's original directory.
+	NewSessionOnWorkspaceRebind bool
+	ResumeFlag                  Param
+	CanRecover                  *bool
+	SessionDirTemplate          string
+	SessionDirTarget            string
+	ForkSessionCmd              Command
+	ContinueSessionCmd          Command
 }
 
 // SupportsRecovery returns whether the agent supports session recovery.

@@ -11,14 +11,17 @@ import {
   IconScale,
   IconServerCog,
   IconTrash,
+  IconUsers,
 } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
+import { useAppStore } from "@/components/state-provider";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 
 const ROOT_HREF = "/settings/system";
 const DEFAULT_HREF = `${ROOT_HREF}/status`;
 
-const ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
+const BASE_ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
   { href: `${ROOT_HREF}/status`, label: "Status", icon: IconActivity },
   { href: `${ROOT_HREF}/feature-toggles`, label: "Feature Toggles", icon: IconFlask },
   { href: `${ROOT_HREF}/database`, label: "Database", icon: IconDatabase },
@@ -30,13 +33,27 @@ const ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
   { href: `${ROOT_HREF}/licenses`, label: "Licenses", icon: IconScale },
 ];
 
+const AUTH_ITEMS: Array<{ href: string; label: string; icon: TablerIcon }> = [
+  { href: `${ROOT_HREF}/users`, label: "Users", icon: IconUsers },
+];
+
 type SystemGroupProps = {
   pathname: string;
   expanded?: boolean;
   onToggle?: () => void;
 };
 
+/** null user (disabled/synthetic single-user mode) counts as admin for gating. */
+function useIsAdmin(): boolean {
+  const role = useAppStore((s) => s.auth.user?.role);
+  return role === undefined || role === "admin";
+}
+
 export function SystemGroup({ pathname, expanded, onToggle }: SystemGroupProps) {
+  const authEnabled = useFeature("auth");
+  const isAdmin = useIsAdmin();
+  const items = authEnabled && isAdmin ? [...BASE_ITEMS, ...AUTH_ITEMS] : BASE_ITEMS;
+
   return (
     <SettingsGroup
       label="System"
@@ -46,7 +63,7 @@ export function SystemGroup({ pathname, expanded, onToggle }: SystemGroupProps) 
       expanded={expanded}
       onToggle={onToggle}
     >
-      {ITEMS.map(({ href, label, icon }) => (
+      {items.map(({ href, label, icon }) => (
         <SettingsLeaf
           key={href}
           href={href}

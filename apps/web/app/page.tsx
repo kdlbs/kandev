@@ -139,6 +139,90 @@ async function loadSnapshotState(
   return state;
 }
 
+async function loadWorkspaceState({
+  activeWorkspaceId,
+  initialState,
+  settingsWorkflowId,
+  workflowIdParam,
+}: {
+  activeWorkspaceId: string;
+  initialState: Partial<AppState>;
+  settingsWorkflowId: string | null;
+  workflowIdParam: string | undefined;
+}) {
+  // Fire-and-forget: warm the backend PR cache for this workspace.
+  // The client will fetch the data after mount via useWorkspacePRs.
+  listWorkspaceTaskPRs(activeWorkspaceId, { cache: "no-store" }).catch(() => {});
+
+  const [workflowList, repositoriesResponse, quickChatResponse] = await Promise.all([
+    listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }),
+    listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
+      repositories: [],
+    })),
+    listQuickChatSessions(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ tasks: [] })),
+  ]);
+  // null preserves the user's explicit "All Workflows" choice.
+  const workflowId = resolveDesiredWorkflowId({
+    activeWorkflowId: workflowIdParam ?? null,
+    settingsWorkflowId,
+    workspaceWorkflows: workflowList.workflows,
+  });
+  const quickChatSessions = mapQuickChatSessions(quickChatResponse.tasks);
+
+  return {
+    workflowId,
+    initialState: {
+      ...initialState,
+      userSettings: {
+        ...(initialState.userSettings as AppState["userSettings"]),
+        workflowId,
+      },
+      workflows: {
+        items: workflowList.workflows.map((workflow) => ({
+          id: workflow.id,
+          workspaceId: workflow.workspace_id,
+          name: workflow.name,
+          hidden: workflow.hidden,
+        })),
+        activeId: workflowId,
+      },
+      repositories: {
+        itemsByWorkspaceId: { [activeWorkspaceId]: repositoriesResponse.repositories },
+        loadingByWorkspaceId: { [activeWorkspaceId]: false },
+        loadedByWorkspaceId: { [activeWorkspaceId]: true },
+      },
+      quickChat: {
+        isOpen: false,
+        sessions: quickChatSessions,
+        activeSessionId: null,
+      },
+    },
+  };
+}
+
+function renderPageClient(
+  initialState: Partial<AppState>,
+  workspaceId: string,
+  taskId?: string,
+  sessionId?: string,
+) {
+  return (
+    <>
+      <StateHydrator initialState={initialState} />
+      <PageClient workspaceId={workspaceId} initialTaskId={taskId} initialSessionId={sessionId} />
+    </>
+  );
+}
+
+function renderUnresolvedPage(initialState: Partial<AppState>) {
+  return (
+    <>
+      <StateHydrator initialState={initialState} />
+      <PageClient />
+    </>
+  );
+}
+
 export default async function Page({ searchParams }: PageProps) {
   try {
     const resolvedParams = searchParams ? await searchParams : {};
@@ -172,83 +256,28 @@ export default async function Page({ searchParams }: PageProps) {
       settingsWorkspaceId,
     );
 
-    let initialState = buildBaseState(workspaces, userSettingsResponse, activeWorkspaceId);
+    const initialState = buildBaseState(workspaces, userSettingsResponse, activeWorkspaceId);
 
     if (!activeWorkspaceId) {
-      return (
-        <>
-          <StateHydrator initialState={initialState} />
-          <PageClient />
-        </>
-      );
+      return renderUnresolvedPage(initialState);
     }
 
-    // Fire-and-forget: warm the backend PR cache for this workspace.
-    // The client will fetch the data after mount via useWorkspacePRs.
-    listWorkspaceTaskPRs(activeWorkspaceId, { cache: "no-store" }).catch(() => {});
-
-    const [workflowList, repositoriesResponse, quickChatResponse] = await Promise.all([
-      listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }),
-      listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
-        repositories: [],
-      })),
-      listQuickChatSessions(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ tasks: [] })),
-    ]);
-
-    // null preserves the user's "All Workflows" choice when more than one
-    // workflow is visible — only auto-pick when there's exactly one.
-    const workflowId = resolveDesiredWorkflowId({
-      activeWorkflowId: workflowIdParam ?? null,
+    const workspaceState = await loadWorkspaceState({
+      activeWorkspaceId,
+      initialState,
       settingsWorkflowId,
-      workspaceWorkflows: workflowList.workflows,
+      workflowIdParam,
     });
 
-    const quickChatSessions = mapQuickChatSessions(quickChatResponse.tasks);
+    if (!workspaceState.workflowId)
+      return renderPageClient(workspaceState.initialState, activeWorkspaceId);
 
-    initialState = {
-      ...initialState,
-      userSettings: {
-        ...(initialState.userSettings as AppState["userSettings"]),
-        workflowId,
-      },
-      workflows: {
-        items: workflowList.workflows.map((w) => ({
-          id: w.id,
-          workspaceId: w.workspace_id,
-          name: w.name,
-          hidden: w.hidden,
-        })),
-        activeId: workflowId,
-      },
-      repositories: {
-        itemsByWorkspaceId: { [activeWorkspaceId]: repositoriesResponse.repositories },
-        loadingByWorkspaceId: { [activeWorkspaceId]: false },
-        loadedByWorkspaceId: { [activeWorkspaceId]: true },
-      },
-      quickChat: {
-        isOpen: false,
-        sessions: quickChatSessions,
-        activeSessionId: null,
-      },
-    };
-
-    if (!workflowId) {
-      return (
-        <>
-          <StateHydrator initialState={initialState} />
-          <PageClient />
-        </>
-      );
-    }
-
-    const snapshotState = await loadSnapshotState(workflowId, taskId, sessionId);
-    initialState = { ...initialState, ...snapshotState };
-
-    return (
-      <>
-        <StateHydrator initialState={initialState} />
-        <PageClient initialTaskId={taskId} initialSessionId={sessionId} />
-      </>
+    const snapshotState = await loadSnapshotState(workspaceState.workflowId, taskId, sessionId);
+    return renderPageClient(
+      { ...workspaceState.initialState, ...snapshotState },
+      activeWorkspaceId,
+      taskId,
+      sessionId,
     );
   } catch {
     return <PageClient />;

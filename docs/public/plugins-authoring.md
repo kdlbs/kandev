@@ -253,6 +253,22 @@ its resource in `capabilities.api_read` (e.g. `tasks`, `sessions`, `messages`,
 Calling one without the declared capability returns gRPC `PermissionDenied`
 with a message naming the missing capability — declare what you use.
 
+**External login (`capabilities.auth`).** An auth-capable plugin can log a
+visitor in against an external IdP (OIDC/SAML). Handle the IdP callback / SAML
+ACS in a `webhook`, validate the token yourself, then set the reserved
+`X-Kandev-Auth-Login` response header to a JSON object
+`{"provider","subject","email","display_name"}`. Kandev maps it to a user
+(link-by-email or just-in-time member provisioning), mints the session, and sets
+the `kandev_session` cookie itself — your plugin never handles the raw token,
+and any `Set-Cookie` you return is dropped. Requires authentication enabled;
+emitting the header without `capabilities.auth` returns 403.
+
+**You MUST only assert an `email` the IdP has verified as owned by `subject`.**
+Kandev auto-links that email to (or provisions) an account, so an unverified or
+user-settable email claim is an account-takeover vector. Kandev refuses to
+auto-link to an admin account as defense-in-depth, but it cannot tell a verified
+email from an unverified one — that is on your plugin. See ADR 0050.
+
 **Writable data directory.** Kandev injects `KANDEV_PLUGIN_DATA_DIR` into
 every spawned plugin subprocess — a per-plugin writable directory
 (`~/.kandev/plugins/<id>/data`) for anything you'd rather keep on disk than

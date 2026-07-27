@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/watchreset"
 )
 
@@ -59,6 +60,43 @@ type Service struct {
 	// (KANDEV_MOCK_JIRA=true). Exposed via MockClient() so the e2e control routes
 	// can drive the same instance the clientFn returns.
 	mockClient *MockClient
+	// workspaceAuthorizer is the per-user workspace access boundary, wired
+	// post-construction via SetWorkspaceAuthorizer. Nil (unit tests, auth
+	// disabled) means unscoped — every workspace is visible, as before auth.
+	workspaceAuthorizer func(context.Context, string) error
+}
+
+// SetWorkspaceAuthorizer installs the per-user workspace access boundary applied
+// before user-facing Jira config reads/mutations. Wired to
+// taskSvc.AuthorizeWorkspaceAccess so a caller cannot reach a workspace it does
+// not own by naming its ID (e.g. the copy target, or the resolved default).
+func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
+	if s != nil {
+		s.workspaceAuthorizer = authorizer
+	}
+}
+
+func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
+	if s == nil || s.workspaceAuthorizer == nil {
+		return nil
+	}
+	return s.workspaceAuthorizer(ctx, workspaceID)
+}
+
+// resolveWorkspaceID normalizes an optional workspace ID (empty → default) and
+// authorizes the caller against the resolved workspace. Using it instead of
+// normalizeWorkspaceID on user-facing entry points closes the default-workspace
+// fallback: a scoped caller that omits workspace_id cannot land on a global
+// default it does not own.
+func (s *Service) resolveWorkspaceID(ctx context.Context, workspaceID string) (string, error) {
+	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return "", err
+	}
+	return workspaceID, nil
 }
 
 // SetTaskDeleter wires the cascade-delete dependency used by ResetIssueWatch.
@@ -131,7 +169,7 @@ func (s *Service) GetConfig(ctx context.Context) (*JiraConfig, error) {
 // flag so the UI can distinguish "configured but empty" from "needs
 // credentials".
 func (s *Service) GetConfigForWorkspace(ctx context.Context, workspaceID string) (*JiraConfig, error) {
-	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	workspaceID, err := s.resolveWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +214,7 @@ func (s *Service) SetConfig(ctx context.Context, req *SetConfigRequest) (*JiraCo
 
 // SetConfigForWorkspace is upsert for one workspace.
 func (s *Service) SetConfigForWorkspace(ctx context.Context, workspaceID string, req *SetConfigRequest) (*JiraConfig, error) {
-	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	workspaceID, err := s.resolveWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +261,7 @@ func (s *Service) DeleteConfig(ctx context.Context) error {
 
 // DeleteConfigForWorkspace removes both the config row and the stored secret.
 func (s *Service) DeleteConfigForWorkspace(ctx context.Context, workspaceID string) error {
-	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	workspaceID, err := s.resolveWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return err
 	}
@@ -256,6 +294,14 @@ func (s *Service) TestConnectionForWorkspace(ctx context.Context, workspaceID st
 	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
 	if err != nil {
 		return &TestConnectionResult{OK: false, Error: err.Error()}, nil
+	}
+	// Authorize before revealing/using the workspace's stored token: an omitted
+	// workspace_id resolves the global default, and a caller-supplied siteUrl in
+	// req would otherwise exfiltrate that workspace's token to an attacker host.
+	// Return a hard error (not a swallowed {OK:false} result) so the denial is a
+	// 404 rather than a probeable "test failed".
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
 	}
 	cfg, secret, err := s.resolveCredentials(ctx, workspaceID, req)
 	if err != nil {
@@ -464,8 +510,11 @@ func (s *Service) SearchTicketsForWorkspace(ctx context.Context, workspaceID, jq
 
 // clientFor returns the cached client, creating it if needed. The cache is
 // invalidated whenever the config changes so stale credentials never linger.
+// It is the single chokepoint for every data-plane read (projects, statuses,
+// tickets, transitions), so authorizing the resolved workspace here scopes all
+// of them — an omitted workspace_id must not resolve another user's default.
 func (s *Service) clientFor(ctx context.Context, workspaceID string) (Client, error) {
-	workspaceID, err := s.normalizeWorkspaceID(workspaceID)
+	workspaceID, err := s.resolveWorkspaceID(ctx, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -740,6 +789,13 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if err := validateIssueWatchCreate(req); err != nil {
 		return nil, err
 	}
+	// WorkspaceID comes from the request body, which the query-only integration
+	// middleware never authorizes. Without this a caller could plant a watch in
+	// another user's workspace that repeatedly spawns tasks with that user's
+	// credentials and an attacker-supplied JQL/prompt.
+	if err := s.authorizeWorkspaceAccess(ctx, req.WorkspaceID); err != nil {
+		return nil, err
+	}
 	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, req.WorkspaceID, req.RepositoryID, req.BaseBranch)
 	if err != nil {
 		return nil, err
@@ -769,12 +825,53 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 
 // ListIssueWatches returns the watches configured for a workspace.
 func (s *Service) ListIssueWatches(ctx context.Context, workspaceID string) ([]*IssueWatch, error) {
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	return s.store.ListIssueWatches(ctx, workspaceID)
 }
 
-// ListAllIssueWatches returns every watch across all workspaces.
+// ListAllIssueWatches returns every watch the caller may see. For a scoped
+// caller that is only their own workspaces' watches; for an identity-less
+// internal caller (unscoped) it is every watch, as before auth. The unscoped
+// list form is only reachable when workspace_id is omitted, which the query-only
+// integration middleware does not authorize — without this filter it leaked
+// every workspace's watch config (JQL, repo/agent/profile IDs, spawn prompt).
 func (s *Service) ListAllIssueWatches(ctx context.Context) ([]*IssueWatch, error) {
-	return s.store.ListAllIssueWatches(ctx)
+	watches, err := s.store.ListAllIssueWatches(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return s.filterIssueWatchesByAccess(ctx, watches)
+}
+
+// filterIssueWatchesByAccess keeps only watches whose workspace the caller may
+// access. Access decisions are memoized per workspace so a long list costs one
+// authorize call per distinct workspace, not one per watch. Only an
+// ErrWorkspaceNotFound denial drops a watch; any other authorizer error (a
+// transient DB failure, say) is propagated so the caller sees the failure
+// rather than a silently truncated 200.
+func (s *Service) filterIssueWatchesByAccess(ctx context.Context, watches []*IssueWatch) ([]*IssueWatch, error) {
+	decision := make(map[string]bool)
+	visible := make([]*IssueWatch, 0, len(watches))
+	for _, w := range watches {
+		allowed, seen := decision[w.WorkspaceID]
+		if !seen {
+			switch err := s.authorizeWorkspaceAccess(ctx, w.WorkspaceID); {
+			case err == nil:
+				allowed = true
+			case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+				allowed = false
+			default:
+				return nil, err
+			}
+			decision[w.WorkspaceID] = allowed
+		}
+		if allowed {
+			visible = append(visible, w)
+		}
+	}
+	return visible, nil
 }
 
 // GetIssueWatch returns a single watch by ID or ErrIssueWatchNotFound.
@@ -794,6 +891,11 @@ func (s *Service) GetIssueWatch(ctx context.Context, id string) (*IssueWatch, er
 func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIssueWatchRequest) (*IssueWatch, error) {
 	w, err := s.GetIssueWatch(ctx, id)
 	if err != nil {
+		return nil, err
+	}
+	// Authorize off the loaded row's workspace — the watch ID alone reveals
+	// nothing about ownership, so a caller must not mutate another user's watch.
+	if err := s.authorizeWorkspaceAccess(ctx, w.WorkspaceID); err != nil {
 		return nil, err
 	}
 	prevRepositoryID, prevBaseBranch := w.RepositoryID, w.BaseBranch

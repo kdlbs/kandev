@@ -1,128 +1,306 @@
-import { describe, it, expect, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import { ToolSubagentMessage } from "@/components/task/chat/messages/tool-subagent-message";
-import type { Message } from "@/lib/types/http";
-
-// Guards the subagent card's expand/collapse behavior. Regression coverage for
-// "silent" subagents (a result_text with no child tool calls) rendering
-// permanently expanded: auto-expand must key on the running state alone, not on
-// result_text, so completed cards collapse to their header + metadata row like
-// subagents that stream child tool calls.
-
-function subagentMessage(opts: {
-  status: string;
-  result_text?: string;
-  description?: string;
-}): Message {
-  return {
-    id: "m1",
-    content: "Subagent",
-    metadata: {
-      status: opts.status,
-      normalized: {
-        kind: "subagent_task",
-        subagent_task: {
-          description: opts.description ?? "Summarize the repo",
-          subagent_type: "general-purpose",
-          status: opts.status,
-          result_text: opts.result_text,
-        },
-      },
-    },
-  } as unknown as Message;
-}
-
-const noopRenderChild = () => null;
-const SILENT_RESULT = "Found 42 files across 7 packages.";
-const RESULT_TEXT = "subagent-result-text";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { sessionId as toSessionId, taskId as toTaskId, type Message } from "@/lib/types/http";
+import type { ToolCallMetadata } from "@/components/task/chat/types";
+import { isSubagentEffectivelyActive, ToolSubagentMessage } from "./tool-subagent-message";
 
 afterEach(cleanup);
 
+const COMPLETE = "complete";
+const SUBAGENT_CHEVRON = "subagent-chevron";
+const IN_PROGRESS = "in_progress";
+const STARTED = "started";
+const WORKING = "Working...";
+
+function subagentMessage({
+  metadataStatus = "in_progress",
+  payloadStatus = "started",
+  description = "ten_second_probe",
+  subagentType = "subagent",
+  prompt,
+  resultText,
+  durationMs,
+}: {
+  metadataStatus?: ToolCallMetadata["status"];
+  payloadStatus?: string;
+  description?: string;
+  subagentType?: string;
+  prompt?: string;
+  resultText?: string;
+  durationMs?: number;
+} = {}): Message {
+  return {
+    id: "codex-subagent-1",
+    session_id: toSessionId("session-1"),
+    task_id: toTaskId("task-1"),
+    author_type: "agent",
+    type: "tool_call",
+    content: "ten_second_probe",
+    created_at: "2026-07-23T12:00:00Z",
+    metadata: {
+      status: metadataStatus,
+      tool_call_id: "codex-subagent-tool-1",
+      normalized: {
+        kind: "subagent_task",
+        subagent_task: {
+          description,
+          subagent_type: subagentType,
+          status: payloadStatus,
+          child_session_id: "child-session-123456",
+          prompt,
+          result_text: resultText,
+          duration_ms: durationMs,
+        },
+      },
+    },
+  };
+}
+
+function childTool(id: string, content: string): Message {
+  return {
+    id,
+    session_id: toSessionId("session-1"),
+    task_id: toTaskId("task-1"),
+    author_type: "agent",
+    type: "tool_call",
+    content,
+    created_at: "2026-07-23T12:00:01Z",
+    metadata: { status: "complete", tool_call_id: id },
+  };
+}
+
+function renderSubagent(
+  comment: Message,
+  {
+    childMessages = [],
+    isContainingTurnActive = false,
+  }: { childMessages?: Message[]; isContainingTurnActive?: boolean } = {},
+) {
+  return render(
+    <ToolSubagentMessage
+      comment={comment}
+      childMessages={childMessages}
+      isContainingTurnActive={isContainingTurnActive}
+      renderChild={(message) => <span>{message.content}</span>}
+    />,
+  );
+}
+
+describe("isSubagentEffectivelyActive", () => {
+  it.each<{
+    name: string;
+    metadataStatus: ToolCallMetadata["status"];
+    payloadStatus: string;
+    isContainingTurnActive: boolean;
+    expected: boolean;
+  }>([
+    {
+      name: "in-progress metadata is active during its turn without a started payload",
+      metadataStatus: IN_PROGRESS,
+      payloadStatus: "queued",
+      isContainingTurnActive: true,
+      expected: true,
+    },
+    {
+      name: "in-progress metadata settles with its turn without a started payload",
+      metadataStatus: IN_PROGRESS,
+      payloadStatus: "queued",
+      isContainingTurnActive: false,
+      expected: false,
+    },
+    {
+      name: "started payload with pending metadata is active during its turn",
+      metadataStatus: "pending",
+      payloadStatus: STARTED,
+      isContainingTurnActive: true,
+      expected: true,
+    },
+    {
+      name: "started payload with pending metadata settles with its turn",
+      metadataStatus: "pending",
+      payloadStatus: STARTED,
+      isContainingTurnActive: false,
+      expected: false,
+    },
+    {
+      name: "started payload without metadata status is active during its turn",
+      metadataStatus: undefined,
+      payloadStatus: STARTED,
+      isContainingTurnActive: true,
+      expected: true,
+    },
+    {
+      name: "started payload without metadata status settles with its turn",
+      metadataStatus: undefined,
+      payloadStatus: STARTED,
+      isContainingTurnActive: false,
+      expected: false,
+    },
+    {
+      name: "running metadata stays active without a containing-turn signal",
+      metadataStatus: "running",
+      payloadStatus: "queued",
+      isContainingTurnActive: false,
+      expected: true,
+    },
+    {
+      name: "terminal metadata overrides a started payload in an active turn",
+      metadataStatus: COMPLETE,
+      payloadStatus: STARTED,
+      isContainingTurnActive: true,
+      expected: false,
+    },
+  ])("$name", ({ metadataStatus, payloadStatus, isContainingTurnActive, expected }) => {
+    const message = subagentMessage({ metadataStatus, payloadStatus });
+    const metadata = message.metadata as ToolCallMetadata;
+    if (metadataStatus === undefined) delete metadata.status;
+
+    expect(isSubagentEffectivelyActive(metadata, isContainingTurnActive)).toBe(expected);
+  });
+});
+
+describe("ToolSubagentMessage", () => {
+  it("does not expose a toggle for a settled contentless Codex subagent", () => {
+    renderSubagent(subagentMessage());
+
+    expect(screen.getByTestId("subagent-type").textContent).toContain("subagent");
+    expect(screen.getByTestId("subagent-meta-session")).toBeTruthy();
+    expect(screen.queryByTestId(SUBAGENT_CHEVRON)).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+
+    fireEvent.click(screen.getByTestId("subagent-header"));
+    expect(screen.queryByText(WORKING)).toBeNull();
+  });
+
+  it("shows a contentless active subagent as one non-expandable status row", () => {
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: "running",
+        description: "verify",
+        subagentType: "verify",
+      }),
+    );
+
+    expect(screen.getByTestId("subagent-type").textContent).toBe("verify");
+    expect(screen.queryByTestId("subagent-description")).toBeNull();
+    expect(screen.getByText(WORKING)).toBeTruthy();
+    expect(screen.queryByTestId(SUBAGENT_CHEVRON)).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("shows work only while a stale Codex lifecycle is in an active turn", () => {
+    const comment = subagentMessage();
+    const { rerender } = renderSubagent(comment, { isContainingTurnActive: true });
+
+    expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
+    expect(screen.getByText(WORKING)).toBeTruthy();
+
+    rerender(
+      <ToolSubagentMessage
+        comment={comment}
+        childMessages={[]}
+        isContainingTurnActive={false}
+        renderChild={(message) => <span>{message.content}</span>}
+      />,
+    );
+
+    expect(screen.queryByRole("status", { name: "Loading" })).toBeNull();
+    expect(screen.queryByText(WORKING)).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+});
+
 describe("ToolSubagentMessage expansion", () => {
-  it("collapses a completed subagent with child tool calls to its header", () => {
-    const child = { id: "c1", content: "sleep 30", metadata: {} } as unknown as Message;
-    render(
-      <ToolSubagentMessage
-        comment={subagentMessage({ status: "complete" })}
-        childMessages={[child]}
-        renderChild={() => <div data-testid="child-body">sleep 30</div>}
-      />,
-    );
-    expect(screen.queryByTestId("child-body")).toBeNull();
-  });
+  it("expands nested child tools and keeps their count", () => {
+    const childMessages = [
+      childTool("child-1", "first child"),
+      childTool("child-2", "second child"),
+    ];
+    renderSubagent(subagentMessage({ metadataStatus: COMPLETE, payloadStatus: COMPLETE }), {
+      childMessages,
+    });
 
-  it("collapses a completed silent subagent (result_text, no children)", () => {
-    render(
-      <ToolSubagentMessage
-        comment={subagentMessage({
-          status: "complete",
-          result_text: SILENT_RESULT,
-        })}
-        childMessages={[]}
-        renderChild={noopRenderChild}
-      />,
-    );
-    // Completed and no longer running -> collapsed: result text stays hidden
-    // until the user opens the card. The metadata row remains visible.
-    expect(screen.queryByTestId(RESULT_TEXT)).toBeNull();
-    expect(screen.getByTestId("subagent-type")).toBeTruthy();
-  });
+    expect(screen.getByTestId("subagent-child-count").textContent).toBe("2 tool calls");
+    expect(screen.getByTestId(SUBAGENT_CHEVRON)).toBeTruthy();
+    expect(screen.queryByText("first child")).toBeNull();
 
-  it("reveals the silent subagent's result text when expanded", () => {
-    render(
-      <ToolSubagentMessage
-        comment={subagentMessage({
-          status: "complete",
-          result_text: SILENT_RESULT,
-        })}
-        childMessages={[]}
-        renderChild={noopRenderChild}
-      />,
-    );
     fireEvent.click(screen.getByRole("button"));
-    expect(screen.getByTestId(RESULT_TEXT).textContent).toContain(SILENT_RESULT);
+    expect(screen.getByText("first child")).toBeTruthy();
+    expect(screen.getByText("second child")).toBeTruthy();
   });
 
-  it("auto-expands while the subagent is running, then auto-collapses on completion", () => {
-    const running = subagentMessage({ status: "running" });
-    const { rerender } = render(
-      <ToolSubagentMessage comment={running} childMessages={[]} renderChild={noopRenderChild} />,
+  it("keeps completed result-only subagents collapsed but expandable", () => {
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: COMPLETE,
+        payloadStatus: COMPLETE,
+        resultText: "Probe completed successfully",
+      }),
     );
-    // Running -> auto-expanded working indicator is shown.
-    expect(screen.queryByText("Subagent working...")).not.toBeNull();
+
+    expect(screen.getByRole("button").getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("subagent-result-text")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button"));
+    expect(screen.getByTestId("subagent-result-text").textContent).toBe(
+      "Probe completed successfully",
+    );
+  });
+
+  it("keeps a completed result collapsed after a contentless active state", () => {
+    const activeComment = subagentMessage({
+      metadataStatus: "running",
+      payloadStatus: STARTED,
+    });
+    const { rerender } = renderSubagent(activeComment);
+
+    expect(screen.getByText(WORKING)).toBeTruthy();
 
     rerender(
       <ToolSubagentMessage
-        comment={subagentMessage({ status: "complete", result_text: "Done." })}
+        comment={subagentMessage({
+          metadataStatus: COMPLETE,
+          payloadStatus: COMPLETE,
+          resultText: "Final summary",
+        })}
         childMessages={[]}
-        renderChild={noopRenderChild}
+        isContainingTurnActive={false}
+        renderChild={(message) => <span>{message.content}</span>}
       />,
     );
-    // Completed without a manual override -> auto-collapsed.
-    expect(screen.queryByTestId(RESULT_TEXT)).toBeNull();
+
+    expect(screen.queryByTestId("subagent-result-text")).toBeNull();
   });
 
-  it("keeps a manual collapse after the subagent completes", () => {
-    const { rerender } = render(
-      <ToolSubagentMessage
-        comment={subagentMessage({ status: "running" })}
-        childMessages={[]}
-        renderChild={noopRenderChild}
-      />,
+  it("keeps prompt-only subagents expandable", () => {
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: COMPLETE,
+        payloadStatus: COMPLETE,
+        prompt: "Inspect the lifecycle events",
+      }),
     );
-    // User collapses the running card.
-    fireEvent.click(screen.getByRole("button"));
-    expect(screen.queryByText("Subagent working...")).toBeNull();
 
-    // Completion emits result_text; the manual collapse must survive (it used
-    // to be wiped, forcing the card back open).
-    rerender(
-      <ToolSubagentMessage
-        comment={subagentMessage({ status: "complete", result_text: "Final summary." })}
-        childMessages={[]}
-        renderChild={noopRenderChild}
-      />,
+    expect(screen.getByTestId(SUBAGENT_CHEVRON)).toBeTruthy();
+    expect(screen.queryByText("Inspect the lifecycle events")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button"));
+    expect(screen.getByText("Inspect the lifecycle events")).toBeTruthy();
+  });
+
+  it("renders a completed contentless card as settled metadata", () => {
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: COMPLETE,
+        payloadStatus: COMPLETE,
+        durationMs: 2500,
+      }),
     );
-    expect(screen.queryByTestId(RESULT_TEXT)).toBeNull();
+
+    expect(screen.getByTestId("subagent-meta-session")).toBeTruthy();
+    expect(screen.getByTestId("subagent-meta-duration").textContent).toBe("2.5s");
+    expect(screen.queryByRole("status", { name: "Loading" })).toBeNull();
+    expect(screen.queryByTestId(SUBAGENT_CHEVRON)).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

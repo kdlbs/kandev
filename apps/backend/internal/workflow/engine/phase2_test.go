@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -87,25 +86,6 @@ func TestClearDecisionsAction_Construction(t *testing.T) {
 	}
 	if a.ClearDecisions == nil {
 		t.Fatalf("expected ClearDecisions to be set")
-	}
-}
-
-func TestPhase2Placeholders_ReturnNotYetWired(t *testing.T) {
-	cases := []struct {
-		name string
-		cb   ActionCallback
-	}{
-		{"queue_run", PlaceholderQueueRunCallback{}},
-		{"clear_decisions", PlaceholderClearDecisionsCallback{}},
-		{"queue_run_for_each_participant", PlaceholderQueueRunForEachParticipantCallback{}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := tc.cb.Execute(context.Background(), ActionInput{})
-			if !errors.Is(err, ErrActionNotYetWired) {
-				t.Fatalf("expected ErrActionNotYetWired, got %v", err)
-			}
-		})
 	}
 }
 

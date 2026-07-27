@@ -82,3 +82,11 @@ func isValidationError(err error) bool {
 		strings.Contains(msg, "invalid") ||
 		strings.Contains(msg, "not allowed in a git ref name")
 }
+
+func isTaskCreateValidationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return isValidationError(err) ||
+		strings.Contains(strings.ToLower(err.Error()), "workflow not found")
+}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/pkg/sftp"
@@ -99,7 +100,14 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 	platform SSHRemotePlatform,
 ) {
 	shell := sshShellForRemote(req.Metadata, platform)
-	envScript := buildSSHEnvInitScript(req.Env)
+	envScript, err := buildSSHEnvInitScript(req.Env)
+	if err != nil {
+		r.logger.Warn("auth setup script skipped: invalid environment key",
+			zap.String("display_name", displayName),
+			zap.String("method_id", method.MethodID),
+			zap.Error(err))
+		return
+	}
 	// `. /dev/stdin` sources the env lines fed via session.Stdin; `set -a`
 	// makes those assignments automatically exported so the user's setup
 	// script sees them in env without a per-key `export`. The script body
@@ -123,23 +131,10 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 		zap.String("method_id", method.MethodID))
 }
 
-// resolveGHToken handles the gh_cli_token credential: detects the token on
-// the kandev host and injects it as GITHUB_TOKEN in req.Env. Returns the
-// filtered method ID list (gh_cli_token removed). Same shape as Sprites.
+// resolveGHToken filters the retired host-global gh token method from stale
+// profiles. Explicit secret-backed GITHUB_TOKEN values are resolved separately.
 func (r *SSHExecutor) resolveGHToken(ids []string, req *ExecutorCreateRequest) []string {
-	if !containsID(ids, "gh_cli_token") {
-		return ids
-	}
-	token, err := DetectGHToken()
-	if err != nil {
-		r.logger.Warn("failed to detect gh token", zap.Error(err))
-	} else {
-		if req.Env == nil {
-			req.Env = make(map[string]string)
-		}
-		req.Env["GITHUB_TOKEN"] = token
-		r.logger.Debug("set GITHUB_TOKEN from local gh auth token")
-	}
+	_ = req
 	return removeID(ids, "gh_cli_token")
 }
 
@@ -247,9 +242,14 @@ func selectFileMethods(
 // remote shell via stdin and sourced under `set -a` — assignments stay
 // out of the shell's argv (and therefore out of `ps aux`) but still get
 // exported into the script's environment. Empty input returns "".
-func buildSSHEnvInitScript(env map[string]string) string {
+func buildSSHEnvInitScript(env map[string]string) (string, error) {
 	if len(env) == 0 {
-		return ""
+		return "", nil
+	}
+	for key := range env {
+		if !posixSSHEnvIdentifier.MatchString(key) {
+			return "", fmt.Errorf("invalid SSH environment variable key %q", key)
+		}
 	}
 	var b strings.Builder
 	for k, v := range env {
@@ -258,8 +258,10 @@ func buildSSHEnvInitScript(env map[string]string) string {
 		b.WriteString(shellQuote(v))
 		b.WriteString("\n")
 	}
-	return b.String()
+	return b.String(), nil
 }
+
+var posixSSHEnvIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // sshFileUploader implements FileUploader by writing files via SFTP. Each
 // WriteFile opens a fresh SFTP session to keep failure scopes small — the

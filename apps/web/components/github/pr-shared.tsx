@@ -68,7 +68,7 @@ export function AuthorLink({ author }: { author: string }) {
       href={`https://github.com/${author}`}
       target="_blank"
       rel="noopener noreferrer"
-      className="text-xs font-medium hover:underline cursor-pointer"
+      className="inline-block min-w-0 max-w-full truncate text-xs font-medium hover:underline cursor-pointer sm:max-w-none"
     >
       {author}
     </a>
@@ -217,6 +217,7 @@ export function FeedbackItemRow({
   createdAt,
   metaBadge,
   onAddAsContext,
+  trailingAction,
   isReply,
 }: {
   author: string;
@@ -225,12 +226,13 @@ export function FeedbackItemRow({
   createdAt: string;
   metaBadge?: React.ReactNode;
   onAddAsContext?: () => void;
+  trailingAction?: React.ReactNode;
   isReply?: boolean;
 }) {
   return (
     <div className={isReply ? "ml-4 pl-2.5 border-l-2 border-border" : ""}>
       <div className="px-2.5 py-2 rounded-md border border-border bg-muted/30 space-y-1">
-        <div className="flex items-center gap-2">
+        <div className="block sm:flex sm:flex-nowrap sm:items-center sm:gap-2">
           <AuthorAvatar src={authorAvatar} author={author} />
           <AuthorLink author={author} />
           {metaBadge}
@@ -238,6 +240,7 @@ export function FeedbackItemRow({
             {formatTimeAgo(createdAt)}
           </span>
           {onAddAsContext && <AddToContextButton onClick={onAddAsContext} />}
+          {trailingAction}
         </div>
         {body && <ExpandableBody body={body} className="pl-7" />}
       </div>

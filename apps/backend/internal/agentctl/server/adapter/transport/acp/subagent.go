@@ -6,8 +6,9 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
-// Subagent (Task) tool detection constants. These are the wire-level tool
-// identifiers four real agents use to spawn a child agent ("subagent"):
+// Subagent (Task) tool detection constants. These are the common wire-level
+// identifiers four agents use to spawn a child agent ("subagent"). Codex's
+// agent-scoped `_meta.codex` shapes are parsed by dialect_codex.go instead:
 //   - Claude-acp tags it via `_meta.claudeCode.toolName == "Agent"`.
 //   - OpenCode reports tool title == "task" (case-insensitive).
 //   - Cursor reports `rawInput._toolName == "task"` (title "Task: Subagent task").
@@ -55,6 +56,16 @@ type SubagentTaskResult struct {
 	// ResultText carries the silent-subagent final text (Auggie). Empty when
 	// the agent streams progress as nested tool calls instead.
 	ResultText string
+}
+
+// subagentFrame is the provider-neutral result of parsing one agent-specific
+// subagent metadata frame. The common normalizer owns payload construction;
+// dialects only describe the data observed on the wire.
+type subagentFrame struct {
+	description  string
+	prompt       string
+	subagentType string
+	result       SubagentTaskResult
 }
 
 // subagentAsyncLaunchedStatus is the Claude Code marker that the Task tool
@@ -112,7 +123,8 @@ func recognizeSubagent(meta map[string]any, title string, rawInput any) (descrip
 	return description, prompt, subagentType, true
 }
 
-// isSubagentSignal implements the four detection rules.
+// isSubagentSignal implements the four common detection rules. Agent-scoped
+// dialect signals (currently Codex) are checked by Normalizer first.
 func isSubagentSignal(meta map[string]any, title string, rawInput any) bool {
 	if isClaudeAgentMeta(meta) {
 		return true

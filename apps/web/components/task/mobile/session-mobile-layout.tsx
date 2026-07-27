@@ -24,11 +24,26 @@ import { fetchAndOpenFile } from "../file-browser-hooks";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
+import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selection";
+import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
+import { prTaskKey } from "@/components/github/pr-utils";
+import { ReviewPRSelector } from "@/components/review/review-pr-selector";
 import {
   MRDetailPanelComponent,
   mrTaskKey,
   selectExplicitPanelMR,
 } from "@/components/gitlab/mr-detail-panel";
+
+export type MobileReviewSource = "github" | "gitlab" | null;
+
+export function resolveMobileReviewSource(
+  hasGitHubPR: boolean,
+  hasGitLabMR: boolean,
+): MobileReviewSource {
+  if (hasGitHubPR) return "github";
+  if (hasGitLabMR) return "gitlab";
+  return null;
+}
 
 const TOP_NAV_HEIGHT = "3.5rem";
 const BOTTOM_NAV_HEIGHT = "3.25rem";
@@ -105,10 +120,15 @@ type MobilePanelAreaProps = {
   handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void;
   topNavHeight: string;
   bottomNavHeight: string;
+  reviewSource: MobileReviewSource;
   mrKey?: string;
+  prKey?: string;
+  reviewPRs: ReturnType<typeof useReviewPRSelection>["prs"];
+  selectedReviewPR: ReturnType<typeof useReviewPRSelection>["selectedPR"];
+  onSelectReviewPR: ReturnType<typeof useReviewPRSelection>["selectPR"];
 };
 
-function MobilePanelArea({
+export function MobilePanelArea({
   currentMobilePanel,
   activeTaskId,
   isPassthroughMode,
@@ -121,7 +141,12 @@ function MobilePanelArea({
   handlePanelChangeAndClearSheet,
   topNavHeight,
   bottomNavHeight,
+  reviewSource,
   mrKey,
+  prKey,
+  reviewPRs,
+  selectedReviewPR,
+  onSelectReviewPR,
 }: MobilePanelAreaProps) {
   const { keyboardOpen, bottomOffset } = useVisualViewportOffset();
   // Keep terminal content's visible bottom glued to the keybar top. When the
@@ -189,11 +214,46 @@ function MobilePanelArea({
           </SessionPanelContent>
         </div>
       )}
-      {currentMobilePanel === "review" && mrKey && (
+      {currentMobilePanel === "review" && reviewSource === "github" && prKey && (
+        <MobileGitHubReviewPanel
+          prKey={prKey}
+          reviewPRs={reviewPRs}
+          selectedReviewPR={selectedReviewPR}
+          onSelectReviewPR={onSelectReviewPR}
+        />
+      )}
+      {currentMobilePanel === "review" && reviewSource === "gitlab" && mrKey && (
         <div className="flex min-h-0 flex-1 flex-col" data-testid="mobile-mr-review-panel">
           <MRDetailPanelComponent panelId="mobile-mr-detail" params={{ mrKey }} />
         </div>
       )}
+    </div>
+  );
+}
+
+function MobileGitHubReviewPanel({
+  prKey,
+  reviewPRs,
+  selectedReviewPR,
+  onSelectReviewPR,
+}: Pick<MobilePanelAreaProps, "prKey" | "reviewPRs" | "selectedReviewPR" | "onSelectReviewPR"> & {
+  prKey: string;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="mobile-pr-review-panel">
+      <div className="shrink-0 px-2 py-2">
+        <ReviewPRSelector
+          prs={reviewPRs}
+          selectedPR={selectedReviewPR}
+          loading={false}
+          onSelectPR={onSelectReviewPR}
+          className="w-full"
+          testIdPrefix="mobile-review-pr-selector"
+        />
+      </div>
+      <div className="min-h-0 flex-1">
+        <PRDetailPanelComponent key={prKey} panelId="mobile-pr-detail" params={{ prKey }} />
+      </div>
     </div>
   );
 }
@@ -344,6 +404,7 @@ function useMobileMRSelection(
   effectiveSessionId: string | null,
   requestedPanel: MobileSessionPanel,
   changePanel: (panel: MobileSessionPanel) => void,
+  hasGitHubPR: boolean,
 ) {
   const mrs = useTaskMRs(activeTaskId);
   const reviewSourcesResolved = useAppStore((state) => {
@@ -360,13 +421,16 @@ function useMobileMRSelection(
 
   useEffect(() => {
     const hasInvalidReviewPreference =
-      requestedPanel === "review" && (!reviewMRKey || (reviewSourcesResolved && !selectedMR));
+      !hasGitHubPR &&
+      requestedPanel === "review" &&
+      (!reviewMRKey || (reviewSourcesResolved && !selectedMR));
     if (effectiveSessionId && hasInvalidReviewPreference) {
       setMobileSessionReview(effectiveSessionId, null);
     }
   }, [
     effectiveSessionId,
     requestedPanel,
+    hasGitHubPR,
     reviewMRKey,
     reviewSourcesResolved,
     selectedMR,
@@ -449,14 +513,28 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
   } = useSessionLayoutState({ sessionId: props.sessionId });
   const { selectedFile, handleOpenFileFromChat, handleOpenFile, handlePanelChangeAndClearSheet } =
     useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
+  const mobilePR = useReviewPRSelection(activeTaskId);
   const mobileMR = useMobileMRSelection(
     activeTaskId,
     effectiveSessionId,
     currentMobilePanel,
     handlePanelChangeAndClearSheet,
+    mobilePR.prs.length > 0,
   );
+  const reviewSource = resolveMobileReviewSource(mobilePR.prs.length > 0, mobileMR.mrs.length > 0);
   const effectiveMobilePanel =
-    currentMobilePanel === "review" && !mobileMR.selectedMR ? "chat" : currentMobilePanel;
+    currentMobilePanel === "review" && !reviewSource ? "chat" : currentMobilePanel;
+
+  const handleMobilePanelChange = useCallback(
+    (panel: MobileSessionPanel) => {
+      if (panel === "review" && reviewSource === "github") {
+        handlePanelChangeAndClearSheet(panel);
+        return;
+      }
+      mobileMR.handlePanelChange(panel);
+    },
+    [handlePanelChangeAndClearSheet, mobileMR.handlePanelChange, reviewSource],
+  );
 
   return (
     <div className="h-dvh relative bg-background">
@@ -482,16 +560,21 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         handlePanelChangeAndClearSheet={handlePanelChangeAndClearSheet}
         topNavHeight={TOP_NAV_HEIGHT}
         bottomNavHeight={BOTTOM_NAV_HEIGHT}
+        reviewSource={reviewSource}
         mrKey={mobileMR.selectedMR ? mrTaskKey(mobileMR.selectedMR) : undefined}
+        prKey={mobilePR.selectedPR ? prTaskKey(mobilePR.selectedPR) : undefined}
+        reviewPRs={mobilePR.prs}
+        selectedReviewPR={mobilePR.selectedPR}
+        onSelectReviewPR={mobilePR.selectPR}
       />
 
       <SessionMobileFooter
         sessionId={effectiveSessionId ?? null}
         activePanel={effectiveMobilePanel}
-        onPanelChange={mobileMR.handlePanelChange}
+        onPanelChange={handleMobilePanelChange}
         planBadge={hasUnseenPlanUpdate}
         changesBadge={totalChangesCount}
-        hasReview={mobileMR.mrs.length > 0}
+        hasReview={reviewSource !== null}
         showStatus={statusDrawerEnabled}
         onOpenStatus={openStatusDrawer}
       />

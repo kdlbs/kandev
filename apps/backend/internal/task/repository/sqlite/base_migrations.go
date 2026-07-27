@@ -44,6 +44,9 @@ func (r *Repository) migrateSessionsAddCostColumns() {
 
 // runMigrations applies idempotent ALTER TABLE migrations for schema evolution.
 func (r *Repository) runMigrations() error {
+	if err := r.ensureTaskWorkspaceFoldersSchema(); err != nil {
+		return err
+	}
 	r.migrate.Apply("task_sessions.execution_profile_id", `ALTER TABLE task_sessions ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.execution_profile_id", `ALTER TABLE executors_running ADD COLUMN execution_profile_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("executors_running.last_message_uuid", `ALTER TABLE executors_running ADD COLUMN last_message_uuid TEXT DEFAULT ''`)
@@ -169,12 +172,45 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workflows.source", `ALTER TABLE workflows ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`)
 	r.migrate.Apply("workflows.source_path", `ALTER TABLE workflows ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`)
 
+	// Native code review — indexes for the task_review_* tables. Declared here
+	// rather than in initTaskReviewSchema because schema init is a no-op on an
+	// existing DB (see AGENTS.md "Schema & migrations").
+	r.migrate.Apply("idx_task_review_runs_task", `CREATE INDEX IF NOT EXISTS idx_task_review_runs_task ON task_review_runs(task_id, created_at)`)
+	r.migrate.Apply("idx_task_review_findings_run", `CREATE INDEX IF NOT EXISTS idx_task_review_findings_run ON task_review_findings(run_id)`)
+	r.migrate.Apply("idx_task_review_findings_task_status", `CREATE INDEX IF NOT EXISTS idx_task_review_findings_task_status ON task_review_findings(task_id, status)`)
+	r.migrate.Apply("idx_task_review_findings_anchor", `CREATE INDEX IF NOT EXISTS idx_task_review_findings_anchor ON task_review_findings(task_id, repository_name, file_path)`)
+
 	// ADR 0005 Wave F — ensure the runner-projection tables exist so
 	// task SELECTs that reference them via correlated subquery don't
 	// fail. Required for tests and any environment where the workflow
 	// repo hasn't run yet.
 	r.ensureRunnerProjectionTables()
 
+	return nil
+}
+
+// ensureTaskWorkspaceFoldersSchema upgrades databases created before durable
+// folder attachments existed. CREATE TABLE/INDEX IF NOT EXISTS is replay-safe
+// on SQLite and Postgres.
+func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
+	if _, err := r.db.Exec(`
+		CREATE TABLE IF NOT EXISTS task_workspace_folders (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			local_path TEXT NOT NULL,
+			display_name TEXT NOT NULL,
+			position INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+			UNIQUE(task_id, local_path),
+			UNIQUE(task_id, display_name)
+		);
+		CREATE INDEX IF NOT EXISTS idx_task_workspace_folders_task_position
+			ON task_workspace_folders(task_id, position);
+	`); err != nil {
+		return fmt.Errorf("create task workspace folders schema: %w", err)
+	}
 	return nil
 }
 

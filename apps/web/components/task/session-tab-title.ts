@@ -42,10 +42,10 @@ function resolveModelTitle(
 
 export function resolveSessionTabTitle(args: ResolveSessionTabTitleArgs): string | null {
   if (args.customName) return args.customName;
-  const liveModelId = args.activeModelId || args.currentModelId;
   return (
+    resolveModelTitle(args, args.activeModelId) ??
     args.agentLabel ??
-    resolveModelTitle(args, liveModelId) ??
+    resolveModelTitle(args, args.currentModelId) ??
     resolveModelTitle(args, args.snapshotModel)
   );
 }

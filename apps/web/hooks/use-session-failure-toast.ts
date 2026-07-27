@@ -4,19 +4,13 @@ import { useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { nativeNotifications } from "@/lib/desktop/native-notification-client";
-import { NOTIFICATION_EVENT_TASK_SESSION_WAITING_FOR_INPUT } from "@/lib/notifications/events";
 import { listNotificationProviders } from "@/lib/api";
 import type { NotificationProvider } from "@/lib/types/http";
 
 function localSessionNotificationsEnabled(
   providers: Array<{ type: string; enabled: boolean; events: string[] }>,
 ): boolean {
-  return providers.some(
-    (provider) =>
-      provider.type === "local" &&
-      provider.enabled &&
-      provider.events.includes(NOTIFICATION_EVENT_TASK_SESSION_WAITING_FOR_INPUT),
-  );
+  return providers.some((provider) => provider.type === "local" && provider.enabled);
 }
 
 /** Watches for session failure notifications and shows an error toast. Mount once inside ToastProvider. */

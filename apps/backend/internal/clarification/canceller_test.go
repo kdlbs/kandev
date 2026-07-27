@@ -88,7 +88,7 @@ func TestCanceller_MarksDetachedOnDisconnect(t *testing.T) {
 		},
 	}}
 
-	cancelled := c.CancelSessionAndNotify(context.Background(), "s1")
+	cancelled := c.DetachSessionAndNotify(context.Background(), "s1")
 	if cancelled != 1 {
 		t.Fatalf("expected 1 cancelled, got %d", cancelled)
 	}
@@ -138,7 +138,7 @@ func TestCanceller_ExpireSessionAndNotify_MarksExpired(t *testing.T) {
 func TestCanceller_NoMessagesToUpdate(t *testing.T) {
 	c, repo, _ := newTestCanceller(t, map[string][]*taskmodels.Message{})
 
-	if got := c.CancelSessionAndNotify(context.Background(), "nonexistent"); got != 0 {
+	if got := c.DetachSessionAndNotify(context.Background(), "nonexistent"); got != 0 {
 		t.Errorf("expected 0 cancelled, got %d", got)
 	}
 	if len(repo.updated) != 0 {
@@ -159,7 +159,7 @@ func TestCanceller_PublishesMessageUpdatedEvent(t *testing.T) {
 		Metadata:      map[string]any{"status": "pending"},
 	}}
 
-	c.CancelSessionAndNotify(context.Background(), "s1")
+	c.DetachSessionAndNotify(context.Background(), "s1")
 
 	if len(eventBus.events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(eventBus.events))
@@ -179,7 +179,7 @@ func TestCanceller_MultiQuestion_MarksAllMessagesDetached(t *testing.T) {
 		{ID: "m3", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending", "question_id": "q3"}},
 	}
 
-	cancelled := c.CancelSessionAndNotify(context.Background(), "s1")
+	cancelled := c.DetachSessionAndNotify(context.Background(), "s1")
 	if cancelled != 1 {
 		t.Fatalf("expected 1 cancelled bundle, got %d", cancelled)
 	}
@@ -233,7 +233,7 @@ func TestCanceller_Idempotent_SkipsAnsweredMessages(t *testing.T) {
 		{ID: "m2", TaskSessionID: "s1", Metadata: map[string]any{"status": "pending"}},
 	}
 
-	c.CancelSessionAndNotify(context.Background(), "s1")
+	c.DetachSessionAndNotify(context.Background(), "s1")
 
 	if len(repo.updated) != 1 {
 		t.Fatalf("expected 1 message update (only the pending one), got %d", len(repo.updated))

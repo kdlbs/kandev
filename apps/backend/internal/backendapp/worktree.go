@@ -49,9 +49,11 @@ type bootMsgAdapter struct {
 }
 
 func (a *bootMsgAdapter) CreateMessage(ctx context.Context, req *lifecycle.BootMessageRequest) (*models.Message, error) {
+	isResuming, _ := req.Metadata["is_resuming"].(bool)
 	return a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        req.TaskID,
+		CompletedTurn: isResuming,
 		Content:       req.Content,
 		AuthorType:    req.AuthorType,
 		Type:          req.Type,

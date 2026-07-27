@@ -50,7 +50,8 @@ export function NotificationSoundSection({
         <div>
           <div className="text-base font-medium">Notification Sound</div>
           <p className="text-sm text-muted-foreground">
-            Play a sound on this device when an agent needs your input.
+            Play a sound on this device when a selected agent turn, question, or Office event
+            occurs.
           </p>
         </div>
         <Switch

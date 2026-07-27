@@ -40,8 +40,14 @@ export function StatusSurfaceMetrics({
   const host = snapshot?.sources.find((source) => source.kind === "backend");
   if (presentation === "mobile-drawer") {
     return (
-      <section data-testid="app-status-metrics" className="space-y-1" aria-label="System metrics">
-        <h3 className="px-1 text-sm font-medium">System metrics</h3>
+      <section
+        data-testid="app-status-metrics"
+        className="space-y-2 py-0.5"
+        aria-label="System metrics"
+      >
+        <h3 className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+          System metrics
+        </h3>
         {!host ? (
           <EmptyMetrics drawer />
         ) : (
@@ -129,7 +135,7 @@ function DrawerSourceMetrics({
   simplified: boolean;
 }) {
   return (
-    <div className="flex min-h-11 items-center gap-2 rounded-md px-3 text-sm hover:bg-muted/60">
+    <div className="flex min-h-11 w-full min-w-0 items-center gap-2 px-0 text-sm">
       {!simplified ? <SourceBadge source={source} updatedAt={updatedAt} showLabel /> : null}
       <div className="flex min-w-0 flex-1 items-center justify-end gap-3 overflow-hidden">
         <MetricValues source={source} updatedAt={updatedAt} limit={4} simplified={simplified} />

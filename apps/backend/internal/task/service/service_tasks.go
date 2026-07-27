@@ -1,3 +1,4 @@
+//revive:disable:file-length-limit // Legacy task operations remain cohesive; workspace-source additions live in focused files.
 package service
 
 import (
@@ -19,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -40,6 +42,10 @@ const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
 // subtask of a kanban subtask (nesting depth > 1). Office task trees are
 // intentionally exempt.
 var ErrSubtaskDepthExceeded = fmt.Errorf("cannot create a subtask of a subtask — maximum nesting depth is 1 for kanban tasks. Create a sibling task under the same parent or a top-level task instead")
+
+// ErrInvalidTaskWorkflow identifies task creation requests whose explicit
+// workflow or workflow step relationship is inconsistent.
+var ErrInvalidTaskWorkflow = errors.New("invalid task workflow")
 
 // ErrTaskAlreadyArchived is returned by ArchiveTask when the target task
 // already has archived_at set. Sentinel so cascade callers (e.g.
@@ -89,6 +95,9 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 // auto-resolve to the workspace's office workflow.
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
+	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+		return nil, err
+	}
 	if err := s.validateCreateTaskRequest(req); err != nil {
 		return nil, err
 	}
@@ -109,6 +118,9 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 		if err := s.resolveOfficeWorkflow(ctx, req); err != nil {
 			return nil, err
 		}
+	}
+	if err := s.validateTaskWorkflow(ctx, req); err != nil {
+		return nil, err
 	}
 
 	workflowStepID := s.resolveWorkflowStep(ctx, req)
@@ -197,6 +209,42 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 	}
 	if req.IsEphemeral && req.WorkflowID != "" {
 		return fmt.Errorf("workflow_id must be empty for ephemeral tasks")
+	}
+	if err := validateTaskRepositoryBranches(req.Repositories); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Service) validateTaskWorkflow(ctx context.Context, req *CreateTaskRequest) error {
+	if req.WorkflowID == "" {
+		if req.WorkflowStepID != "" {
+			return fmt.Errorf("%w: workflow_step_id requires workflow_id", ErrInvalidTaskWorkflow)
+		}
+		return nil
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, req.WorkflowID)
+	if err != nil {
+		return err
+	}
+	if workflow == nil {
+		return fmt.Errorf("%w: workflow not found", ErrInvalidTaskWorkflow)
+	}
+	if workflow.WorkspaceID != req.WorkspaceID {
+		return repoerrors.ErrWorkspaceNotFound
+	}
+	if req.WorkflowStepID == "" {
+		return nil
+	}
+	if s.workflowStepGetter == nil {
+		return fmt.Errorf("%w: workflow step validation unavailable", ErrInvalidTaskWorkflow)
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, req.WorkflowStepID)
+	if err != nil {
+		return fmt.Errorf("%w: workflow_step_id: %w", ErrInvalidTaskWorkflow, err)
+	}
+	if step == nil || step.WorkflowID != req.WorkflowID {
+		return fmt.Errorf("%w: workflow step not found: %s", ErrInvalidTaskWorkflow, req.WorkflowStepID)
 	}
 	return nil
 }
@@ -718,6 +766,9 @@ func (s *Service) resolveRepoInputRemote(
 		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, provider, owner, name)
 	}
 	providerHost := remoteProviderHost(provider, canonicalURL)
+	if provider == providerGitLab && providerHost != "https://gitlab.com" {
+		return "", "", false, fmt.Errorf("untrusted GitLab origin %q", providerHost)
+	}
 	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{
 		WorkspaceID:    workspaceID,
 		Provider:       provider,
@@ -915,20 +966,6 @@ func (s *Service) probeProviderDefaultBranchIfMissing(
 	return probed
 }
 
-// parseGitHubRepoURL parses a GitHub repository URL into owner and name.
-// Supports: https://github.com/owner/repo, github.com/owner/repo,
-// https://github.com/owner/repo.git, with optional trailing slashes.
-func parseGitHubRepoURL(rawURL string) (owner, name string, err error) {
-	provider, owner, name, _, parseErr := parseRemoteRepositoryURL(rawURL, "")
-	if parseErr != nil {
-		return "", "", parseErr
-	}
-	if provider != providerGitHub {
-		return "", "", fmt.Errorf("not a GitHub URL")
-	}
-	return owner, name, nil
-}
-
 // resolvePRNumber returns the GitHub PR number for a repository input. Prefers
 // the explicit PRNumber field; falls back to parsing a /pull/<N> path out of
 // GitHubURL when present. Returns 0 when no PR is identified.
@@ -976,6 +1013,9 @@ func (s *Service) replaceTaskRepositories(ctx context.Context, taskID, workspace
 
 // GetTask retrieves a task by ID and populates repositories
 func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return nil, err
+	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -988,12 +1028,16 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 	} else {
 		task.Repositories = repos
 	}
+	s.hydrateTaskWorkspaceFolders(ctx, task)
 
 	return task, nil
 }
 
 // UpdateTask updates an existing task and publishes a task.updated event
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return nil, err
+	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
 		return nil, err
@@ -1221,6 +1265,9 @@ func (s *Service) RestoreTaskMessageRollback(
 func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	start := time.Now()
 
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return err
+	}
 	// 1. Get task and verify it exists
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
@@ -1429,6 +1476,9 @@ func (s *Service) DeleteTaskWithReason(ctx context.Context, id, reason string) e
 }
 
 func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) error {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return err
+	}
 	_, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, reason, models.TaskResourceCleanupTriggerDelete, func(ctx context.Context, id string) (bool, error) {
 		if err := s.tasks.DeleteTask(ctx, id); err != nil {
 			return false, err
@@ -1516,6 +1566,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 		extra = map[string]interface{}{"reason": reason}
 	}
 	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
+	s.forgetTaskActivity(id)
 	s.logger.Info("task deleted",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
@@ -2365,22 +2416,47 @@ func excludeEnvironmentWorktree(worktrees []*worktree.Worktree, env *models.Task
 
 // ListTasks returns all tasks for a workflow
 func (s *Service) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
+	if err := s.authorizeWorkflowID(ctx, workflowID); err != nil {
+		return nil, err
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	if workflow == nil {
+		return nil, fmt.Errorf("workflow not found: %s", workflowID)
+	}
 	tasks, err := s.tasks.ListTasks(ctx, workflowID)
 	if err != nil {
 		return nil, err
 	}
+	tasks = filterTasksByWorkspace(tasks, workflow.WorkspaceID)
 
 	if err := s.loadTaskRepositoriesBatch(ctx, tasks); err != nil {
 		s.logger.Error("failed to batch-load task repositories", zap.Error(err))
 	}
+	s.hydrateTaskWorkspaceFoldersBatch(ctx, tasks)
 
 	return tasks, nil
+}
+
+func filterTasksByWorkspace(tasks []*models.Task, workspaceID string) []*models.Task {
+	filtered := tasks[:0]
+	for _, task := range tasks {
+		if task != nil && task.WorkspaceID == workspaceID {
+			filtered = append(filtered, task)
+		}
+	}
+	return filtered
 }
 
 // ListTasksByWorkspace returns paginated tasks for a workspace with task repositories loaded.
 // If query is non-empty, filters by task title, description, repository name, or repository path.
 // workflowID and repositoryID, when non-empty, further restrict results to that workflow/repository.
 func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error) {
+	if err := s.authorizeWorkspaceID(ctx, workspaceID); err != nil {
+		return nil, 0, err
+	}
 	tasks, total, err := s.tasks.ListTasksByWorkspace(ctx, workspaceID, workflowID, repositoryID, query, page, pageSize, sort, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig)
 	if err != nil {
 		return nil, 0, err
@@ -2402,6 +2478,7 @@ func (s *Service) ListTasksByWorkspace(ctx context.Context, workspaceID, workflo
 	if err := s.loadTaskRepositoriesBatch(ctx, tasks); err != nil {
 		s.logger.Error("failed to batch-load task repositories", zap.Error(err))
 	}
+	s.hydrateTaskWorkspaceFoldersBatch(ctx, tasks)
 
 	return tasks, total, nil
 }

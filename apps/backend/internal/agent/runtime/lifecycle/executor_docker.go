@@ -79,7 +79,8 @@ type DockerExecutor struct {
 
 	// newClientFunc creates the Docker client. Defaults to docker.NewClient.
 	// Override in tests to simulate failures.
-	newClientFunc func(config.DockerConfig, *logger.Logger) (*docker.Client, error)
+	newClientFunc   func(config.DockerConfig, *logger.Logger) (*docker.Client, error)
+	brokerPreflight func(context.Context, brokerAgentctlProcessClient, string, map[string]string) error
 
 	// Lazy-initialized on first use via ensureClient().
 	// Uses mu + initialized instead of sync.Once so that transient Docker
@@ -98,10 +99,11 @@ type DockerExecutor struct {
 // for host home bind mounts that were leaking host state into containers).
 func NewDockerExecutor(cfg config.DockerConfig, kandevHomeDir string, log *logger.Logger) *DockerExecutor {
 	return &DockerExecutor{
-		cfg:           cfg,
-		kandevHomeDir: kandevHomeDir,
-		logger:        log.WithFields(zap.String("runtime", "docker")),
-		newClientFunc: docker.NewClient,
+		cfg:             cfg,
+		kandevHomeDir:   kandevHomeDir,
+		logger:          log.WithFields(zap.String("runtime", "docker")),
+		newClientFunc:   docker.NewClient,
+		brokerPreflight: runBrokerReachabilityViaAgentctl,
 	}
 }
 
@@ -379,6 +381,12 @@ type reconnectAgentctlConn struct {
 	reusingProcess bool
 }
 
+type reconnectControlClient interface {
+	GetInstance(context.Context, string) (*agentctl.InstanceInfo, error)
+	DeleteInstance(context.Context, string) error
+	CreateInstance(context.Context, *agentctl.CreateInstanceRequest) (*agentctl.CreateInstanceResponse, error)
+}
+
 // bringupAgentctl health-checks agentctl on the container, finds (or creates)
 // the agent instance, transparently re-handshakes on a 401, and returns the
 // resolved instance endpoint for the user-facing client.
@@ -457,8 +465,8 @@ func isAgentctlAuthError(err error) bool {
 // Returns the instance port and whether the agent subprocess is also running.
 func (r *DockerExecutor) findExistingInstance(
 	ctx context.Context,
-	dockerClient *docker.Client,
-	ctl *agentctl.ControlClient,
+	dockerClient hostPortLookup,
+	ctl reconnectControlClient,
 	req *ExecutorCreateRequest,
 	containerID string,
 	containerIP string,
@@ -468,6 +476,20 @@ func (r *DockerExecutor) findExistingInstance(
 	// Try to get the existing instance by its ID
 	instance, err := ctl.GetInstance(ctx, prevExecutionID)
 	if err == nil && instance != nil && instance.Port > 0 {
+		if hasManagedGitHubBrokerEnv(req.Env) {
+			instanceHost, instancePort := resolveDockerEndpoint(
+				ctx, dockerClient, containerID, instance.Port, containerIP, r.logger)
+			client := agentctl.NewClient(instanceHost, instancePort, r.logger,
+				agentctl.WithAuthToken(authToken))
+			defer client.Close()
+			if preflightErr := r.brokerPreflight(ctx, client, req.SessionID, req.Env); preflightErr != nil {
+				return 0, false, preflightErr
+			}
+			if deleteErr := ctl.DeleteInstance(ctx, prevExecutionID); deleteErr != nil {
+				return 0, false, fmt.Errorf("delete stale broker-backed instance: %w", deleteErr)
+			}
+			return createReconnectInstance(ctx, ctl, req, prevExecutionID)
+		}
 		// Instance exists, check if agent subprocess is running
 		instanceHost, instancePort := resolveDockerEndpoint(ctx, dockerClient, containerID, instance.Port, containerIP, r.logger)
 		client := agentctl.NewClient(instanceHost, instancePort, r.logger,
@@ -481,7 +503,16 @@ func (r *DockerExecutor) findExistingInstance(
 	}
 
 	// Instance not found — create a new instance in the existing container
-	createReq := buildReconnectCreateInstanceRequest(req, prevExecutionID)
+	return createReconnectInstance(ctx, ctl, req, prevExecutionID)
+}
+
+func createReconnectInstance(
+	ctx context.Context,
+	ctl reconnectControlClient,
+	req *ExecutorCreateRequest,
+	instanceID string,
+) (int, bool, error) {
+	createReq := buildReconnectCreateInstanceRequest(req, instanceID)
 	resp, createErr := ctl.CreateInstance(ctx, createReq)
 	if createErr != nil {
 		return 0, false, fmt.Errorf("failed to create new instance: %w", createErr)
@@ -510,7 +541,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		ID:            instanceID,
 		WorkspacePath: dockerWorkspacePath,
 		AgentType:     agentType,
-		Env:           req.Env,
+		Env:           cloneStringMap(req.Env),
 		AutoApprovePermissions: autoApprovePermissionsOverride(
 			req.AutoApprovePermissions,
 			req.AutoApprovePermissionsOverride,

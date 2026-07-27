@@ -41,6 +41,7 @@ type UpdateUserSettingsRequest struct {
 	RepositoryIDs               *[]string
 	TasksListSort               *string
 	TasksListGroup              *string
+	TasksListShowDetails        *bool
 	InitialSetupComplete        *bool
 	PreferredShell              *string
 	DefaultEditorID             *string
@@ -205,6 +206,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	}
 	if err := applyTasksListPreferences(settings, req.TasksListSort, req.TasksListGroup); err != nil {
 		return err
+	}
+	if req.TasksListShowDetails != nil {
+		settings.TasksListShowDetails = *req.TasksListShowDetails
 	}
 	if req.InitialSetupComplete != nil {
 		settings.InitialSetupComplete = *req.InitialSetupComplete
@@ -589,6 +593,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"repository_ids":                  settings.RepositoryIDs,
 		"tasks_list_sort":                 settings.TasksListSort,
 		"tasks_list_group":                settings.TasksListGroup,
+		"tasks_list_show_details":         settings.TasksListShowDetails,
 		"initial_setup_complete":          settings.InitialSetupComplete,
 		"preferred_shell":                 settings.PreferredShell,
 		"default_editor_id":               settings.DefaultEditorID,

@@ -43,4 +43,9 @@ func TestNoopClient_ReturnsErrNoClient(t *testing.T) {
 	if !errors.Is(err, ErrNoClient) {
 		t.Errorf("SubmitReview error = %v, want ErrNoClient", err)
 	}
+
+	err = c.RequestReviewers(ctx, "o", "r", 1, []string{"octocat"})
+	if !errors.Is(err, ErrNoClient) {
+		t.Errorf("RequestReviewers error = %v, want ErrNoClient", err)
+	}
 }

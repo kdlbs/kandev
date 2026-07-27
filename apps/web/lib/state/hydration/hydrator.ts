@@ -1,5 +1,5 @@
 import type { Draft } from "immer";
-import type { AppState } from "../store";
+import type { AppState, HydrationState } from "../store";
 import { migrateView } from "../slices/ui/ui-slice";
 import { getStoredQuickChatNames } from "@/lib/local-storage";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
@@ -51,7 +51,7 @@ function mergeKanbanTasks(
 }
 
 /** Hydrate kanban and workspace slices. */
-function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: Partial<AppState>): void {
+function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState): void {
   if (state.kanban) {
     // Merge tasks by ID with timestamp comparison to avoid overwriting fresher WS data
     const { tasks, ...kanbanRest } = state.kanban;
@@ -67,7 +67,7 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: Partial<AppSta
 }
 
 /** Hydrate settings slices, preserving loading states. */
-function hydrateSettings(draft: Draft<AppState>, state: Partial<AppState>): void {
+function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   if (state.executors) deepMerge(draft.executors, state.executors);
   if (state.settingsAgents) deepMerge(draft.settingsAgents, state.settingsAgents);
   if (state.agentDiscovery) deepMerge(draft.agentDiscovery, state.agentDiscovery);
@@ -117,7 +117,7 @@ function bridgeSidebarViewsFromUserSettings(
 /** Hydrate session slices, protecting active sessions. */
 function hydrateSession(
   draft: Draft<AppState>,
-  state: Partial<AppState>,
+  state: HydrationState,
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
 ): void {
@@ -173,7 +173,7 @@ function hydrateSession(
 /** Hydrate session runtime slices (volatile state). */
 function hydrateSessionRuntime(
   draft: Draft<AppState>,
-  state: Partial<AppState>,
+  state: HydrationState,
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
 ): void {
@@ -224,7 +224,7 @@ function hydrateSessionRuntime(
 }
 
 /** Hydrate UI slices without overwriting active connection state. */
-export function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): void {
+export function hydrateUI(draft: Draft<AppState>, state: HydrationState): void {
   if (state.previewPanel) deepMerge(draft.previewPanel, state.previewPanel);
   if (state.rightPanel) deepMerge(draft.rightPanel, state.rightPanel);
   if (state.diffs) deepMerge(draft.diffs, state.diffs);
@@ -271,7 +271,7 @@ export function hydrateUI(draft: Draft<AppState>, state: Partial<AppState>): voi
  */
 export function hydrateState(
   draft: Draft<AppState>,
-  state: Partial<AppState>,
+  state: HydrationState,
   options: HydrationOptions = {},
 ): void {
   const {
@@ -296,16 +296,26 @@ export function hydrateState(
     Object.assign(draft.office, state.office);
   }
 
-  // Feature flags — overwrite whole map. SSR is authoritative; the backend
+  // Feature flags - overwrite whole map. SSR is authoritative; the backend
   // is the only source of truth for what's enabled in this deployment.
   if (state.features) {
     Object.assign(draft.features, state.features);
   }
+
+  // System slice - shallow-merge whichever fields the caller supplied.
+  // `system` aggregates many independently-fetched fields (info, diskUsage,
+  // updates, jobs, metrics, ...); callers only ever provide the
+  // subset they fetched, so use the same leaf-level deepMerge as the other
+  // multi-field slices above rather than overwriting the whole object.
+  if (state.system) deepMerge(draft.system, state.system);
 }
 
 /** Hydrate GitHub slices, preserving loading states. */
-function hydrateGitHub(draft: Draft<AppState>, state: Partial<AppState>): void {
+function hydrateGitHub(draft: Draft<AppState>, state: HydrationState): void {
   if (state.githubStatus) mergeWithLoading(draft.githubStatus, state.githubStatus);
+  if (state.githubAppRegistrations) {
+    mergeWithLoading(draft.githubAppRegistrations, state.githubAppRegistrations);
+  }
   if (state.taskPRs) deepMerge(draft.taskPRs, state.taskPRs);
   if (state.azureDevOpsTaskPullRequests) {
     deepMerge(draft.azureDevOpsTaskPullRequests, state.azureDevOpsTaskPullRequests);

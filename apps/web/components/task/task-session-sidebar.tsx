@@ -3,10 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { usePathname, useRouter } from "@/lib/routing/client-router";
 import { linkToTask } from "@/lib/links";
-import type { Repository, TaskSession, TaskSessionState, TaskState } from "@/lib/types/http";
-import type { TaskPR } from "@/lib/types/github";
-import type { KanbanState } from "@/lib/state/slices";
-import type { GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
+import type { Repository, TaskSession, TaskSessionState } from "@/lib/types/http";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
 import { buildTaskSwitcherProps } from "./task-session-sidebar-switcher-props";
@@ -24,18 +21,17 @@ import { useTaskRemoval } from "@/hooks/use-task-removal";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
 import { buildSwitchToSession, selectTaskWithLayout } from "./task-select-helpers";
-import { getSessionInfoForTask } from "@/lib/utils/session-info";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useArchivedTaskState } from "./task-archived-context";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
-import { buildPendingFlags, readPendingFlags } from "./task-session-sidebar-aggregate";
+import { buildPendingFlags } from "./task-session-sidebar-aggregate";
 import { useGroupedSidebarView } from "./task-session-sidebar-grouped-view";
 import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
 import { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
 import { useShallow } from "zustand/react/shallow";
-import { type AgentErrorOptions, agentErrorMessageForTask } from "@/lib/task-agent-error";
+import { buildSidebarItem } from "./task-session-sidebar-item";
 import {
   agentErrorAcknowledgementSessionIds,
   stablePrimarySessionIdsKey,
@@ -47,128 +43,30 @@ function useStablePrimarySessionIds(allTasks: Array<{ primarySessionId?: string 
   return useMemo(() => (key ? key.split("\0") : []), [key]);
 }
 
-/** Look up git status directly via primarySessionId, bypassing the session list. */
-function getGitStatusForTask(
-  task: { primarySessionId?: string | null },
-  envIdBySessionId: Record<string, string>,
-  gitStatusByEnvId: Record<string, GitStatusEntry>,
-): GitStatusEntry | undefined {
-  if (!task.primarySessionId) return undefined;
-  const envKey = envIdBySessionId[task.primarySessionId] ?? task.primarySessionId;
-  return gitStatusByEnvId[envKey];
-}
-
-/** Resolve diff stats for a task, falling back to direct git status when sessions aren't loaded. */
-function resolveDiffStats(
-  sessionDiffStats: { additions: number; deletions: number } | undefined,
-  task: { primarySessionId?: string | null },
-  envIdBySessionId: Record<string, string>,
-  gitStatusByEnvId: Record<string, GitStatusEntry>,
-): { additions: number; deletions: number } | undefined {
-  if (sessionDiffStats) return sessionDiffStats;
-  if (!task.primarySessionId) return undefined;
-  const gs = getGitStatusForTask(task, envIdBySessionId, gitStatusByEnvId);
-  if (!gs) return undefined;
-  const a = gs.branch_additions ?? 0;
-  const d = gs.branch_deletions ?? 0;
-  return a > 0 || d > 0 ? { additions: a, deletions: d } : undefined;
-}
-
-/** Format PR info for display, capitalising the state. */
-function toPrInfo(pr: TaskPR | undefined): { number: number; state: string } | undefined {
-  if (!pr?.state) return undefined;
-  return { number: pr.pr_number, state: pr.state[0].toUpperCase() + pr.state.slice(1) };
-}
-
-/** Map a kanban task to a sidebar item with session info and repository metadata. */
-type SidebarCtx = AgentErrorOptions & {
-  sessionsById: Record<string, TaskSession>;
-  sessionsByTaskId: Record<string, TaskSession[]>;
-  gitStatusByEnvId: Record<string, GitStatusEntry>;
-  envIdBySessionId: Record<string, string>;
-  repositorySlugById: Map<string, string | undefined>;
-  taskPRsByTaskId: Record<string, TaskPR[] | undefined>;
-  pendingFlags: Record<string, boolean>;
-  titleById: Map<string, string>;
-  workflowNameById: Map<string, string>;
-  stepTitleById: Map<string, string>;
-};
-
-function toIssueInfo(
-  task: KanbanState["tasks"][number],
-): { url: string; number: number } | undefined {
-  return task.issueUrl && task.issueNumber
-    ? { url: task.issueUrl, number: task.issueNumber }
-    : undefined;
-}
-
-function toSidebarItem(
-  task: KanbanState["tasks"][number] & { _workflowId: string },
-  ctx: SidebarCtx,
-) {
-  const sessionInfo = getSessionInfoForTask(
-    task.id,
-    ctx.sessionsByTaskId,
-    ctx.gitStatusByEnvId,
-    ctx.envIdBySessionId,
-  );
-  const resolvedSessionState =
-    sessionInfo.sessionState ?? (task.primarySessionState as TaskSessionState | undefined);
-  const repoSlug = task.repositoryId ? ctx.repositorySlugById.get(task.repositoryId) : undefined;
-  // Sidebar shows just one slot; pick the primary PR (first by created_at).
-  const pr = ctx.taskPRsByTaskId[task.id]?.[0];
-  const pending = readPendingFlags(ctx.pendingFlags, task.primarySessionId, {
-    primarySessionState: resolvedSessionState,
-    primarySessionPendingAction: task.primarySessionPendingAction,
-  });
-
-  const diffStats = resolveDiffStats(
-    sessionInfo.diffStats,
-    task,
-    ctx.envIdBySessionId,
-    ctx.gitStatusByEnvId,
-  );
-
-  return {
-    id: task.id,
-    title: task.title,
-    state: task.state as TaskState | undefined,
-    sessionState: resolvedSessionState,
-    description: task.description,
-    workflowId: task._workflowId,
-    workflowName: ctx.workflowNameById.get(task._workflowId),
-    workflowStepId: task.workflowStepId as string | undefined,
-    workflowStepTitle: task.workflowStepId
-      ? ctx.stepTitleById.get(task.workflowStepId as string)
-      : undefined,
-    repositoryPath: pr ? `${pr.owner}/${pr.repo}` : repoSlug,
-    diffStats,
-    isRemoteExecutor: task.isRemoteExecutor,
-    remoteExecutorType: task.primaryExecutorType ?? undefined,
-    remoteExecutorName: task.primaryExecutorName ?? undefined,
-    primarySessionId: task.primarySessionId ?? null,
-    hasPendingClarification: pending.clarification,
-    hasPendingPermission: pending.permission,
-    updatedAt: sessionInfo.updatedAt ?? task.updatedAt ?? task.createdAt,
-    createdAt: task.createdAt,
-    isArchived: false as boolean,
-    parentTaskTitle: task.parentTaskId ? ctx.titleById.get(task.parentTaskId) : undefined,
-    parentTaskId: task.parentTaskId ?? undefined,
-    workspaceMode: task.workspaceMode,
-    prInfo: toPrInfo(pr),
-    isPRReview: task.isPRReview ?? false,
-    isIssueWatch: task.isIssueWatch ?? false,
-    issueInfo: toIssueInfo(task),
-    agentErrorMessage: agentErrorMessageForTask(task, ctx.sessionsById, ctx.sessionsByTaskId, ctx),
-  };
-}
-
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
   workflowId: string | null;
   /** Hide the embedded filter bar when the host surface (e.g. AppSidebar) renders its own. */
   hideFilterBar?: boolean;
 };
+
+function usePendingSessionIds(
+  primarySessionIds: string[],
+  sessionsByTaskId: Record<string, TaskSession[]>,
+) {
+  return useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...primarySessionIds,
+          ...Object.values(sessionsByTaskId)
+            .flat()
+            .map((session) => session.id),
+        ]),
+      ),
+    [primarySessionIds, sessionsByTaskId],
+  );
+}
 
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
@@ -197,8 +95,8 @@ function useSidebarData(workspaceId: string | null) {
     isLoading: isLoadingWorkflow,
   } = useWorkspaceSidebarTasks(workspaceId);
 
-  // Stable primary session IDs from kanban tasks feed subscriptions and pending-flag selectors.
   const primarySessionIds = useStablePrimarySessionIds(allTasks);
+  const pendingSessionIds = usePendingSessionIds(primarySessionIds, sessionsByTaskId);
   const acknowledgementSessionIds = useMemo(
     () => agentErrorAcknowledgementSessionIds(allTasks, sessionsByTaskId),
     [allTasks, sessionsByTaskId],
@@ -210,7 +108,7 @@ function useSidebarData(workspaceId: string | null) {
     dismissedAgentErrors,
   });
   const pendingFlags = useAppStore(
-    useShallow((state) => buildPendingFlags(state.messages.bySession, primarySessionIds)),
+    useShallow((state) => buildPendingFlags(state.messages.bySession, pendingSessionIds)),
   );
 
   const tasksWithRepositories = useMemo(() => {
@@ -236,7 +134,7 @@ function useSidebarData(workspaceId: string | null) {
       acknowledgedAgentErrors,
       messagesBySession,
     };
-    const items: TaskSwitcherItem[] = allTasks.map((task) => toSidebarItem(task, mapCtx));
+    const items: TaskSwitcherItem[] = allTasks.map((task) => buildSidebarItem(task, mapCtx));
     if (
       archivedState.isArchived &&
       archivedState.archivedTaskId &&
@@ -494,9 +392,16 @@ export function useSidebarActions(store: StoreApi) {
   const linkActions = useSidebarLinkActions(store);
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
+  const [creatingSubtask, setCreatingSubtask] = useState<{ id: string; title: string } | null>(
+    null,
+  );
 
   const handleRenameTask = useCallback((taskId: string, currentTitle: string) => {
     setRenamingTask({ id: taskId, title: currentTitle });
+  }, []);
+
+  const handleCreateSubtask = useCallback((taskId: string, taskTitle: string) => {
+    setCreatingSubtask({ id: taskId, title: taskTitle });
   }, []);
 
   const handleRenameSubmit = useCallback(
@@ -522,6 +427,9 @@ export function useSidebarActions(store: StoreApi) {
     setRenamingTask,
     handleRenameTask,
     handleRenameSubmit,
+    creatingSubtask,
+    setCreatingSubtask,
+    handleCreateSubtask,
     ...linkActions,
     ...archiveActions,
     ...deleteActions,

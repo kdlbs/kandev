@@ -20,6 +20,7 @@ import { TaskSearchInput } from "./task-search-input";
 import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
+import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
 import { linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
@@ -37,6 +38,7 @@ type KanbanHeaderProps = {
   searchQuery?: string;
   onSearchChange?: (query: string) => void;
   isSearchLoading?: boolean;
+  tasksListOptions?: TasksListDisplayOptions;
 };
 
 type ViewToggleItem = {
@@ -111,12 +113,6 @@ function ViewToggleGroup({
       ))}
     </ToggleGroup>
   );
-}
-
-function getToggleValue(currentPage: string, kanbanViewMode: string | null): string {
-  if (currentPage === "tasks") return "list";
-  if (kanbanViewMode === "graph2") return "pipeline";
-  return "kanban";
 }
 
 function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
@@ -207,7 +203,7 @@ function TabletHeader({
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          <KanbanDisplayDropdown triggerSize="icon-lg" />
+          <KanbanDisplayDropdown triggerSize="icon-lg" currentPage={currentPage} />
           <HealthIndicatorButton
             hasIssues={showHealthIndicator}
             onClick={onOpenHealthDialog}
@@ -292,7 +288,7 @@ function DesktopHeader({
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          <KanbanDisplayDropdown triggerSize="icon-lg" />
+          <KanbanDisplayDropdown triggerSize="icon-lg" currentPage={currentPage} />
           <HealthIndicatorButton
             hasIssues={showHealthIndicator}
             onClick={onOpenHealthDialog}
@@ -312,13 +308,14 @@ function useHeaderViewChange(
   const router = useRouter();
   return (value: string) => {
     if (value === "list") {
+      onViewModeChange("list");
       if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
     } else if (value === "kanban") {
+      onViewModeChange("kanban");
       if (currentPage !== "kanban") router.push("/");
-      onViewModeChange("");
     } else if (value === "pipeline") {
+      onViewModeChange("pipeline");
       if (currentPage !== "kanban") router.push("/");
-      onViewModeChange("graph2");
     }
   };
 }
@@ -330,15 +327,16 @@ export function KanbanHeader({
   searchQuery = "",
   onSearchChange,
   isSearchLoading = false,
+  tasksListOptions,
 }: KanbanHeaderProps) {
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
-  const { kanbanViewMode, onViewModeChange, workspaces, activeWorkspaceId } =
+  const { effectiveTaskListingView, onViewModeChange, workspaces, activeWorkspaceId } =
     useKanbanDisplaySettings();
   const releaseNotes = useReleaseNotes();
   const healthIndicator = useSystemHealthIndicator();
-  const toggleValue = getToggleValue(currentPage, kanbanViewMode);
+  const toggleValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;
   const handleViewChange = useHeaderViewChange(currentPage, workspaceId, onViewModeChange);
   const title = getHeaderTitle(currentPage);
   const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId);
@@ -359,6 +357,7 @@ export function KanbanHeader({
           workspaceLabel={workspaceLabel}
           hideTitle={hideTitle}
           {...sharedSearch}
+          tasksListOptions={tasksListOptions}
           {...healthProps}
         />
       );
@@ -384,6 +383,7 @@ export function KanbanHeader({
             workspaceId={workspaceId}
             currentPage={currentPage}
             {...sharedSearch}
+            tasksListOptions={tasksListOptions}
             {...healthProps}
           />
         </>

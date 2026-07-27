@@ -22,6 +22,12 @@ vi.mock("@/app/github/github-page-client", () => ({
   ),
 }));
 
+vi.mock("@/app/page-client", () => ({
+  PageClient: ({ workspaceId }: { workspaceId?: string }) => (
+    <div data-testid="kanban-page" data-workspace-id={workspaceId ?? ""} />
+  ),
+}));
+
 vi.mock("@/lib/api/domains/workspace-api", () => ({
   listWorkspaces: mocks.listWorkspaces,
   listRepositories: mocks.listRepositories,
@@ -48,6 +54,21 @@ afterEach(() => {
 });
 
 describe("SpaRoutes data-backed workspace context", () => {
+  it("passes the selected workspace to the kanban home client", () => {
+    mockGitHubWorkspaceBootstrap();
+    window.history.replaceState({}, "", `/?workspaceId=${SELECTED_WORKSPACE_ID}`);
+
+    render(
+      <StateProvider>
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    expect(screen.getByTestId("kanban-page").getAttribute("data-workspace-id")).toBe(
+      SELECTED_WORKSPACE_ID,
+    );
+  });
+
   it("keeps the currently active workspace when opening GitHub from another workspace", async () => {
     mockGitHubWorkspaceBootstrap();
 

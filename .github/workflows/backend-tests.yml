@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "apps/backend/**"
+      # check-make-shells also lints the root Makefile's $(shell ...) probes, so
+      # a change there has to be able to trip it.
+      - "Makefile"
       - "scripts/check-make-shells"
       - ".github/workflows/backend-tests.yml"
       - "!**/*.md"
@@ -14,6 +17,7 @@ on:
     branches: [main]
     paths:
       - "apps/backend/**"
+      - "Makefile"
       - "scripts/check-make-shells"
       - ".github/workflows/backend-tests.yml"
       - "!**/*.md"

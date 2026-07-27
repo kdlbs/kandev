@@ -402,6 +402,7 @@ func TestAddBranchToTask_ForwardsRepositoryURL(t *testing.T) {
 	s := newTaskModeServer(t, backend, "task-current")
 
 	result := callTool(t, s, "add_branch_to_task_kandev", map[string]interface{}{
+		"task_id":         "task-current",
 		"repository_url":  "https://github.com/acme/widgets",
 		"checkout_branch": "feature/x",
 	})
@@ -416,6 +417,52 @@ func TestAddBranchToTask_ForwardsRepositoryURL(t *testing.T) {
 		"repository_url should be forwarded as github_url to match create_task wire format")
 	assert.Equal(t, "feature/x", payload["checkout_branch"])
 	assert.Equal(t, "", payload["repository_id"])
+}
+
+func TestAddBranchToTask_RejectsAnotherTask(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "add_branch_to_task_kandev", map[string]interface{}{
+		"task_id":         "task-other",
+		"repository_id":   "repo-1",
+		"checkout_branch": "feature/x",
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+}
+
+func TestAddWorkspaceSourcesDefaultsTaskAndForwardsMixedSources(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "add_workspace_sources_kandev", map[string]interface{}{
+		"sources": []interface{}{
+			map[string]interface{}{"kind": "repository", "repository_id": "repo-1", "base_branch": "main"},
+			map[string]interface{}{"kind": "folder", "local_path": "/tmp/docs", "display_name": "docs"},
+		},
+	})
+
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPAddWorkspaceSources, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"])
+	assert.Len(t, payload["sources"], 2)
+}
+
+func TestAddWorkspaceSourcesRejectsAnotherTask(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "add_workspace_sources_kandev", map[string]interface{}{
+		"task_id": "task-other",
+		"sources": []interface{}{map[string]interface{}{"kind": "folder", "local_path": "/tmp/docs"}},
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
 }
 
 // TestAddBranchToTask_ForwardsLocalPath verifies local_path is plumbed through

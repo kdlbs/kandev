@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -234,22 +235,8 @@ func validateCLIFlagDTOs(in []dto.CLIFlagDTO) error {
 // launch path's cliflags.Tokenise error branch unreachable in practice, so a
 // bad prefix surfaces at save time rather than silently dropping at task start.
 func validateCommandPrefix(prefix string) error {
-	if strings.TrimSpace(prefix) == "" {
-		return nil
-	}
-	tokens, err := cliflags.Tokenise(prefix)
-	if err != nil {
+	if err := cliflags.ValidateCommandPrefix(prefix); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidCommandPrefix, err)
-	}
-	if len(tokens) == 0 || tokens[0] == "" {
-		return fmt.Errorf("%w: must start with a launcher command", ErrInvalidCommandPrefix)
-	}
-	// The first token is the launcher executable. A leading '-' means the user
-	// typed a flag first (e.g. "--foo greywall"), which would run the flag as
-	// the program — almost certainly a mistake, and a confusing failure mode
-	// for a sandbox boundary.
-	if strings.HasPrefix(tokens[0], "-") {
-		return fmt.Errorf("%w: first token %q must be a launcher command, not a flag", ErrInvalidCommandPrefix, tokens[0])
 	}
 	return nil
 }
@@ -503,6 +490,8 @@ const (
 	reservedProfileEnvVarPrefix = "KANDEV_"
 )
 
+var posixEnvIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
 	if len(in) > maxProfileEnvVars {
 		return fmt.Errorf("%w: at most %d entries allowed", ErrInvalidProfileEnvVars, maxProfileEnvVars)
@@ -510,6 +499,9 @@ func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
 	seen := make(map[string]int, len(in))
 	for i, ev := range in {
 		key := strings.TrimSpace(ev.Key)
+		if key != ev.Key {
+			return fmt.Errorf("%w: env_vars[%d].key must be a POSIX environment identifier", ErrInvalidProfileEnvVars, i)
+		}
 		if err := validateEnvVarKey(key, i, seen); err != nil {
 			return err
 		}
@@ -528,8 +520,8 @@ func validateEnvVarKey(key string, i int, seen map[string]int) error {
 	if len(key) > maxProfileEnvVarKeyLen {
 		return fmt.Errorf("%w: env_vars[%d].key exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarKeyLen)
 	}
-	if strings.ContainsAny(key, "=\x00") {
-		return fmt.Errorf("%w: env_vars[%d].key must not contain '=' or null bytes", ErrInvalidProfileEnvVars, i)
+	if !posixEnvIdentifier.MatchString(key) {
+		return fmt.Errorf("%w: env_vars[%d].key must be a POSIX environment identifier", ErrInvalidProfileEnvVars, i)
 	}
 	if strings.HasPrefix(key, reservedProfileEnvVarPrefix) || key == reservedProfileEnvVarKey {
 		return fmt.Errorf("%w: env_vars[%d].key %q is reserved", ErrInvalidProfileEnvVars, i, key)

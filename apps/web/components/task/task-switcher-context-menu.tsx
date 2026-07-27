@@ -31,7 +31,12 @@ import {
 import { TaskNestContextMenuItems } from "@/components/task/task-nest-context-menu";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { TaskColorMenu } from "./task-switcher-color-menu";
-import { TaskArchiveItem, TaskDeleteItem, TaskDetachItem } from "./task-switcher-action-items";
+import {
+  TaskArchiveItem,
+  TaskCreateSubtaskItem,
+  TaskDeleteItem,
+  TaskDetachItem,
+} from "./task-switcher-action-items";
 import type { TaskSwitcherItem } from "./task-switcher";
 
 export type StepDef = {
@@ -49,6 +54,7 @@ type ContextMenuProps = {
   children: React.ReactElement<{ menuOpen?: boolean }>;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
+  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: (taskId: string, taskTitle?: string) => void;
@@ -81,6 +87,7 @@ export function TaskItemWithContextMenu({
   children,
   onRenameTask,
   onArchiveTask,
+  onCreateSubtask,
   onDeleteTask,
   onDetachTask,
   onLinkPullRequest,
@@ -123,6 +130,7 @@ export function TaskItemWithContextMenu({
           steps={steps}
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
+          onCreateSubtask={onCreateSubtask}
           onDeleteTask={onDeleteTask}
           onDetachTask={onDetachTask}
           onLinkPullRequest={onLinkPullRequest}
@@ -164,6 +172,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
     steps,
     onRenameTask,
     onArchiveTask,
+    onCreateSubtask,
     onDeleteTask,
     onDetachTask,
     onMoveToStep,
@@ -230,6 +239,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
         onTogglePin={withClear(onTogglePin)}
       />
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
+      <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
       <ContextMenuItem disabled>
         <IconCopy className="mr-2 h-4 w-4" />
         Duplicate

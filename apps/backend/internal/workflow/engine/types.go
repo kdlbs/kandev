@@ -43,6 +43,7 @@ const (
 	ActionResetAgentContext ActionKind = "reset_agent_context"
 	ActionSetWorkflowData   ActionKind = "set_workflow_data"
 	ActionSetSessionMode    ActionKind = "set_session_mode"
+	ActionRunCodeReview     ActionKind = "run_code_review"
 
 	// New Phase 2 action kinds (ADR-0004). Defined and exposed via callbacks
 	// that intentionally return ErrActionNotYetWired — they will be wired
@@ -83,6 +84,7 @@ type Action struct {
 	AutoStartAgent             *AutoStartAgentAction
 	SetWorkflowData            *SetWorkflowDataAction
 	SetSessionMode             *SetSessionModeAction
+	RunCodeReview              *RunCodeReviewAction
 	QueueRun                   *QueueRunAction
 	ClearDecisions             *ClearDecisionsAction
 	QueueRunForEachParticipant *QueueRunForEachParticipantAction
@@ -140,9 +142,15 @@ type SetSessionModeAction struct {
 	Mode string
 }
 
+// RunCodeReviewAction starts a native code-review pass on step entry.
+// AgentProfileID is optional; empty means "use the configured code-review
+// utility agent". See docs/specs/native-code-review/spec.md.
+type RunCodeReviewAction struct {
+	AgentProfileID string
+}
+
 // QueueRunAction represents the Phase 2 "queue a run on a target task/agent"
-// action. The action is declared but its callback is not yet wired into the
-// engine; see PlaceholderQueueRunCallback.
+// action. The callback is QueueRunCallback.
 //
 // Targets: "primary" | "participant_role:<role>" | "agent_profile_id:<id>" |
 // "workspace.ceo_agent" (resolved at engine evaluation time, post-wire-up).
@@ -297,6 +305,11 @@ func compileOnEnter(step *wfmodels.WorkflowStep) []Action {
 				continue // skip set_session_mode actions with no target mode
 			}
 			actions = append(actions, Action{Kind: ActionSetSessionMode, SetSessionMode: &SetSessionModeAction{Mode: mode}})
+		case wfmodels.OnEnterRunCodeReview:
+			actions = append(actions, Action{
+				Kind:          ActionRunCodeReview,
+				RunCodeReview: &RunCodeReviewAction{AgentProfileID: readReviewAgentProfileID(action.Config)},
+			})
 		case wfmodels.OnEnterClearDecisions:
 			actions = append(actions, Action{
 				Kind:           ActionClearDecisions,
@@ -463,6 +476,17 @@ func readSessionMode(config map[string]any) string {
 	}
 	mode, _ := config["mode"].(string)
 	return mode
+}
+
+// readReviewAgentProfileID reads the optional reviewing agent profile for a
+// run_code_review action. An empty result is valid and means "use the
+// configured code-review utility agent".
+func readReviewAgentProfileID(config map[string]any) string {
+	if config == nil {
+		return ""
+	}
+	profileID, _ := config[wfmodels.ReviewAgentProfileConfigKey].(string)
+	return profileID
 }
 
 func readStepID(config map[string]any) (string, error) {

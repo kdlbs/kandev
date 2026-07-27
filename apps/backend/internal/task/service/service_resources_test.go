@@ -1085,6 +1085,64 @@ func TestService_DeleteWorkflow_ArchivesChildTasks(t *testing.T) {
 	}
 }
 
+func TestService_DeleteWorkflow_IgnoresLegacyTaskFromAnotherWorkspace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	for _, workspace := range []*models.Workspace{
+		{ID: "ws-victim", Name: "Victim", OwnerID: "user-victim"},
+		{ID: "ws-foreign", Name: "Foreign", OwnerID: "user-foreign"},
+	} {
+		if err := repo.CreateWorkspace(ctx, workspace); err != nil {
+			t.Fatalf("CreateWorkspace %s: %v", workspace.ID, err)
+		}
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-victim", WorkspaceID: "ws-victim", Name: "Victim workflow",
+	}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	for _, task := range []*models.Task{
+		{
+			ID: "task-valid", WorkspaceID: "ws-victim", WorkflowID: "wf-victim",
+			WorkflowStepID: "step-1", Title: "Valid",
+		},
+		{
+			ID: "task-legacy-foreign", WorkspaceID: "ws-foreign", WorkflowID: "wf-victim",
+			WorkflowStepID: "step-1", Title: "Legacy foreign",
+		},
+	} {
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatalf("CreateTask %s: %v", task.ID, err)
+		}
+	}
+
+	if err := svc.DeleteWorkflow(ctxAs("user-victim"), "wf-victim"); err != nil {
+		t.Fatalf("DeleteWorkflow: %v", err)
+	}
+
+	if _, err := repo.GetWorkflow(ctx, "wf-victim"); err == nil {
+		t.Fatal("victim workflow still exists after deletion")
+	}
+	valid, err := repo.GetTask(ctx, "task-valid")
+	if err != nil {
+		t.Fatalf("GetTask valid: %v", err)
+	}
+	if valid.ArchivedAt == nil {
+		t.Fatal("valid same-workspace task was not archived")
+	}
+	foreign, err := repo.GetTask(ctx, "task-legacy-foreign")
+	if err != nil {
+		t.Fatalf("GetTask legacy foreign: %v", err)
+	}
+	if foreign.ArchivedAt != nil {
+		t.Fatalf("legacy foreign task was mutated: archived_at=%v", foreign.ArchivedAt)
+	}
+	if foreign.WorkspaceID != "ws-foreign" || foreign.WorkflowID != "wf-victim" {
+		t.Fatalf("legacy foreign task identity changed: %+v", foreign)
+	}
+}
+
 // leakyListTaskRepo wraps the real TaskRepository and injects extra tasks
 // into ListTasks results, simulating a TOCTOU race where a task is archived
 // between the snapshot and the cascade loop.

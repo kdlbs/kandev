@@ -159,6 +159,10 @@ test.describe("External VCS file links", () => {
       repositoryPath,
       BASE_GITHUB_REPOSITORY,
     );
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Base external file link",

@@ -482,6 +482,16 @@ func (c *GHClient) ListAccessibleRepos(ctx context.Context, query string, limit 
 	return filterReposByQuery(repos, query), nil
 }
 
+// HasRepositoryAccess probes the repository root through the selected gh
+// account. It does not rely on the first page returned by /user/repos.
+func (c *GHClient) HasRepositoryAccess(ctx context.Context, owner, repo string) (bool, error) {
+	out, err := c.run(ctx, "api", fmt.Sprintf("/repos/%s/%s", owner, repo), "--jq", ".full_name")
+	if err != nil {
+		return false, err
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
 // buildAccessibleReposGHArgs constructs the `gh api /user/repos?...` argv for
 // ListAccessibleRepos. Keeping it pure makes the endpoint/query construction
 // unit-testable without spawning gh. Callers must clamp `limit` via
@@ -767,6 +777,17 @@ func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number 
 	_, err := c.run(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("submit review on PR #%d: %w", number, err)
+	}
+	return nil
+}
+
+func (c *GHClient) RequestReviewers(ctx context.Context, owner, repo string, number int, reviewers []string) error {
+	args := []string{"api", fmt.Sprintf("repos/%s/%s/pulls/%d/requested_reviewers", owner, repo, number), "-X", "POST"}
+	for _, reviewer := range reviewers {
+		args = append(args, "-f", "reviewers[]="+reviewer)
+	}
+	if _, err := c.run(ctx, args...); err != nil {
+		return fmt.Errorf("request reviewers on PR #%d: %w", number, err)
 	}
 	return nil
 }

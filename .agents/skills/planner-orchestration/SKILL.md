@@ -57,6 +57,11 @@ manage Kandev platform entities and may be used only when the user explicitly
 asks to create or manage Kandev tasks or sessions. They are not a delegation
 fallback. If native harness delegation is unavailable, stop and report it.
 
+In Codex, a registered `agent_type` is a role override. Spawn it with
+`fork_turns: "none"` or a bounded recent-turn count, never `fork_turns: "all"`.
+Put the complete work packet and the paths to read in the initial prompt so the
+worker has the context that an all-history fork would otherwise provide.
+
 ## Worker Contract
 
 A worker executes exactly one bounded assignment. It follows the assigned
@@ -190,3 +195,11 @@ fix becomes large/complex, changes a contract or trust boundary, invalidates
 prior evidence, or exposes a gap that gate must assess. A bug fix preserving
 an existing ADR or invariant is not by itself a new boundary. Simplification,
 when used, happens before semantic review so its edits are covered.
+
+When a final verifier is silent after two normal status waits, inspect the
+worker state and its owned command/process group before waiting again. If no
+command remains, interrupt that same worker once to retrieve its buffered
+completion report; do not replace it. Start another verifier only after the
+first is confirmed stopped and did not produce a usable exact-artifact result.
+If liveness cannot be established, report verification blocked. This recovers
+completed reports without paying for duplicate full suites.

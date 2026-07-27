@@ -280,6 +280,7 @@ features:
   office: false
   plugins: false
   app_status_bar: true
+  app_status_bar: true
 ```
 
 Copying this entire file is unnecessary and can freeze old defaults in a deployment. Keep only deliberate overrides. On Windows, do not copy the Unix Docker host/path literals from this example.

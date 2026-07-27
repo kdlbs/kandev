@@ -43,22 +43,22 @@ describe("resolveDesiredWorkflowId", () => {
     expect(result).toBeNull();
   });
 
-  it("auto-selects the only visible workflow when exactly one exists", () => {
+  it("preserves All Workflows when exactly one workflow is visible", () => {
     const result = resolveDesiredWorkflowId({
       activeWorkflowId: null,
       settingsWorkflowId: null,
       workspaceWorkflows: [workflow("wf-only")],
     });
-    expect(result).toBe("wf-only");
+    expect(result).toBeNull();
   });
 
-  it("ignores hidden workflows when resolving the fallback", () => {
+  it("ignores hidden workflows when preserving an empty filter", () => {
     const result = resolveDesiredWorkflowId({
       activeWorkflowId: null,
       settingsWorkflowId: null,
       workspaceWorkflows: [workflow("wf-1", { hidden: true }), workflow("wf-2")],
     });
-    expect(result).toBe("wf-2");
+    expect(result).toBeNull();
   });
 
   it("does not honor an active id that is no longer visible", () => {
@@ -94,7 +94,7 @@ describe("resolveDesiredWorkflowId", () => {
       settingsWorkflowId: "wf-hidden",
       workspaceWorkflows: [workflow("wf-hidden", { hidden: true }), workflow("wf-visible")],
     });
-    expect(result).toBe("wf-visible");
+    expect(result).toBeNull();
   });
 });
 

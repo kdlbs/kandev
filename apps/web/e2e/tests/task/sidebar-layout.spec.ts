@@ -5,7 +5,7 @@
  *   - Repo group headers: letter avatar, task count, collapsible
  *   - Subtasks (parent_id): nested under parent with arrow indicator
  *   - Unassigned group: tasks with no repo
- *   - Context menu: Rename, Archive, Delete options via right-click
+ *   - Context menu: Create Subtask, Rename, Archive, Delete options via right-click
  *   - Active task highlight: selected task has aria/visual selection state
  */
 import { test, expect } from "../../fixtures/test-base";
@@ -191,6 +191,7 @@ test.describe("Sidebar layout — context menu", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await apiClient.createTask(seedData.workspaceId, "Context Menu Task", {
       workflow_id: seedData.workflowId,
@@ -217,11 +218,17 @@ test.describe("Sidebar layout — context menu", () => {
     await expect(testPage.getByRole("menuitem", { name: "Rename" })).toBeVisible({
       timeout: 5_000,
     });
+    await expect(testPage.getByRole("menuitem", { name: "Create Subtask" })).toBeVisible({
+      timeout: 5_000,
+    });
     await expect(testPage.getByRole("menuitem", { name: "Archive" })).toBeVisible({
       timeout: 5_000,
     });
     await expect(testPage.getByRole("menuitem", { name: "Delete" })).toBeVisible({
       timeout: 5_000,
+    });
+    await prCapture.screenshot("desktop-create-subtask-context-menu", {
+      caption: "Desktop task context menu with Create Subtask",
     });
 
     // Dismiss

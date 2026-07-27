@@ -1,22 +1,54 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import "@/app/globals.css";
+import { setOnUnauthorized } from "@/lib/api/client";
 import { PluginModalHost } from "@/components/plugins/plugin-modal-host";
-import { StateProvider } from "@/components/state-provider";
+import { useAppStoreApi, StateProvider } from "@/components/state-provider";
 import { PluginBootBridge } from "@/lib/plugins/plugin-boot-bridge";
 import { AppShell } from "./app-shell";
+import { AuthGatedScreen, useAuthGateDecision } from "./auth-gate";
 import { loadBootPayload } from "./boot-payload";
 import type { BootPayload } from "./boot-payload";
 import { SpaRoutes } from "./spa-routes";
 
-function App({ payload }: { payload: BootPayload }) {
+const AUTH_ROUTE_PATHS = new Set(["/login", "/setup", "/invite"]);
+
+/** Registers the 401 handler once: clear the auth slice and bounce to
+ * /login, guarding against redirect loops when already on an auth page. */
+function useUnauthorizedRedirect() {
+  const store = useAppStoreApi();
+  useEffect(() => {
+    setOnUnauthorized(() => {
+      store.getState().clearAuthenticated();
+      if (!AUTH_ROUTE_PATHS.has(window.location.pathname)) {
+        window.location.assign("/login");
+      }
+    });
+    return () => setOnUnauthorized(null);
+  }, [store]);
+}
+
+function AppBody({ payload }: { payload: BootPayload }) {
+  useUnauthorizedRedirect();
+  const decision = useAuthGateDecision();
+  if (decision !== "app") {
+    return <AuthGatedScreen decision={decision} />;
+  }
   return (
-    <StateProvider initialState={payload.initialState ?? {}}>
+    <>
       <PluginBootBridge plugins={payload.plugins} />
       <PluginModalHost />
       <AppShell>
         <SpaRoutes routeData={payload.routeData} />
       </AppShell>
+    </>
+  );
+}
+
+function App({ payload }: { payload: BootPayload }) {
+  return (
+    <StateProvider initialState={payload.initialState ?? {}}>
+      <AppBody payload={payload} />
     </StateProvider>
   );
 }

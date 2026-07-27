@@ -18,9 +18,9 @@ const defaultGitHubPollInterval = 60 * time.Second
 // GitHubEvaluator polls GitHub for events matching automation triggers.
 // It handles github_pr, github_push, and github_ci trigger types.
 type GitHubEvaluator struct {
-	svc      *Service
-	ghClient github.Client
-	logger   *logger.Logger
+	svc           *Service
+	githubService *github.Service
+	logger        *logger.Logger
 
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -28,17 +28,17 @@ type GitHubEvaluator struct {
 }
 
 // NewGitHubEvaluator creates a new GitHub trigger evaluator.
-func NewGitHubEvaluator(svc *Service, ghClient github.Client, log *logger.Logger) *GitHubEvaluator {
+func NewGitHubEvaluator(svc *Service, githubService *github.Service, log *logger.Logger) *GitHubEvaluator {
 	return &GitHubEvaluator{
-		svc:      svc,
-		ghClient: ghClient,
-		logger:   log,
+		svc:           svc,
+		githubService: githubService,
+		logger:        log,
 	}
 }
 
 // Start begins the polling loop.
 func (e *GitHubEvaluator) Start(ctx context.Context) {
-	if e.started || e.ghClient == nil {
+	if e.started || e.githubService == nil {
 		return
 	}
 	e.started = true
@@ -111,11 +111,19 @@ func (e *GitHubEvaluator) checkPRTrigger(ctx context.Context, t *AutomationTrigg
 	if len(repos) == 0 {
 		return // Cannot poll without specific repos
 	}
+	automation, err := e.svc.GetAutomation(ctx, t.AutomationID)
+	if err != nil || automation == nil || automation.WorkspaceID == "" {
+		e.logger.Debug("automation trigger is missing workspace ownership",
+			zap.String("trigger_id", t.ID), zap.Error(err))
+		return
+	}
 
 	for _, repo := range repos {
 		// Use ListReviewRequestedPRs with a custom query scoped to this repo.
 		query := fmt.Sprintf("is:pr is:open repo:%s/%s", repo.Owner, repo.Name)
-		prs, err := e.ghClient.ListReviewRequestedPRs(ctx, "", "", query)
+		prs, err := e.githubService.ListAutomationPRs(
+			ctx, automation.WorkspaceID, repo.Owner, repo.Name, query,
+		)
 		if err != nil {
 			e.logger.Debug("failed to list PRs for automation trigger",
 				zap.String("repo", repo.Owner+"/"+repo.Name),

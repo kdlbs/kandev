@@ -214,11 +214,33 @@ test.describe("Clarification flow", () => {
     // Agent moved on; a late custom answer remains editable and goes through
     // the event fallback as a new prompt.
     const input = session.clarificationInput();
+    const inputRow = session.clarificationCustomInput();
     await expect(input).toBeEnabled();
-    await session.clarificationCustomInput().click({ position: { x: 4, y: 4 } });
+    await expect(input).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    const [inputBox, inputRowBox] = await Promise.all([
+      input.boundingBox(),
+      inputRow.boundingBox(),
+    ]);
+    if (!inputBox || !inputRowBox) {
+      throw new Error("expected the custom answer input and row to have bounding boxes");
+    }
+    expect(Math.abs(inputBox.x - inputRowBox.x)).toBeLessThanOrEqual(16);
+
+    await inputRow.click({ position: { x: 4, y: 4 } });
     await expect(input).toBeFocused();
     await input.pressSequentially("Use the embedded database for this task");
     await expect(input).toHaveValue("Use the embedded database for this task");
+    const [filledInputBox, filledInputRowBox] = await Promise.all([
+      input.boundingBox(),
+      inputRow.boundingBox(),
+    ]);
+    if (!filledInputBox || !filledInputRowBox) {
+      throw new Error("expected the filled custom answer input and row to have bounding boxes");
+    }
+    const inputCenter = filledInputBox.y + filledInputBox.height / 2;
+    const rowCenter = filledInputRowBox.y + filledInputRowBox.height / 2;
+    expect(Math.abs(inputCenter - rowCenter)).toBeLessThanOrEqual(1);
+
     await input.press("Enter");
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("Use the embedded database for this task");

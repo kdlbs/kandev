@@ -47,6 +47,7 @@ import {
 } from "@/components/github/my-github/action-presets";
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { hasGitHubPersonalActor } from "@/lib/github-auth";
 
 type GitHubPageClientProps = {
   workspaceId?: string;
@@ -79,14 +80,24 @@ function PageHeader({ onOpenMobileSidebar }: { onOpenMobileSidebar?: () => void 
   );
 }
 
-function NotAuthenticatedNotice() {
+function NotAuthenticatedNotice({
+  workspaceId,
+  personalRequired,
+}: {
+  workspaceId?: string;
+  personalRequired: boolean;
+}) {
+  const settingsHref = workspaceId
+    ? `/settings/workspace/${workspaceId}/integrations/github`
+    : "/settings/integrations/github";
   return (
     <Alert>
       <AlertDescription>
-        GitHub is not connected. Configure GitHub authentication (gh CLI or a Personal Access Token)
-        in{" "}
-        <Link href="/settings" className="underline font-medium cursor-pointer">
-          Settings → GitHub
+        {personalRequired
+          ? "Connect your personal GitHub identity to see pull requests and issues assigned to you."
+          : "GitHub is not connected. Configure workspace automation with gh CLI or a personal access token."}{" "}
+        <Link href={settingsHref} className="underline font-medium cursor-pointer">
+          Open GitHub settings
         </Link>{" "}
         to see your pull requests and issues.
       </AlertDescription>
@@ -106,6 +117,10 @@ function NoWorkspaceNotice() {
   );
 }
 
+function hasGitHubUserIdentity(status: ReturnType<typeof useGitHubStatus>["status"]) {
+  return hasGitHubPersonalActor(status);
+}
+
 function resolveTitle(
   selection: SidebarSelection,
   saved: SavedPreset[],
@@ -123,6 +138,7 @@ function resolveTitle(
 }
 
 function ResultsList({
+  workspaceId,
   selection,
   items,
   loading,
@@ -133,6 +149,7 @@ function ResultsList({
   prKeyToTasks,
   issueKeyToTasks,
 }: {
+  workspaceId: string | null;
   selection: SidebarSelection;
   items: Array<GitHubPR | GitHubIssue>;
   loading: boolean;
@@ -146,6 +163,7 @@ function ResultsList({
   if (selection.kind === "pr") {
     return (
       <PRList
+        workspaceId={workspaceId}
         items={items as GitHubPR[]}
         loading={loading}
         error={error}
@@ -306,7 +324,7 @@ function useSearchInteractionControls(
   return { autoResetSearchRef, markSearchInteracted, setCustomQuery, setRepoFilter };
 }
 
-function useGitHubPageState(workspaceId: string | null) {
+function useGitHubPageState(workspaceId: string | null, enabled: boolean) {
   const { pr: resolvedPrPresets, issue: resolvedIssuePresets } =
     useResolvedQueryPresets(workspaceId);
   const {
@@ -340,6 +358,7 @@ function useGitHubPageState(workspaceId: string | null) {
 
   const presets = selection.kind === "pr" ? resolvedPrPresets : resolvedIssuePresets;
   const search = useGitHubSearch<GitHubPR | GitHubIssue>({
+    enabled,
     kind: selection.kind,
     presets,
     preset: selection.source === "preset" ? selection.id : "",
@@ -445,6 +464,7 @@ function AuthenticatedLayout({
       {!workspaceId && <NoWorkspaceNotice />}
       <div className="flex-1 overflow-auto px-6 py-4">
         <ResultsList
+          workspaceId={workspaceId ?? null}
           selection={selection}
           items={search.items}
           loading={search.loading}
@@ -472,10 +492,11 @@ export function GitHubPageClient({
   steps,
   repositories,
 }: GitHubPageClientProps) {
-  const { status, loaded } = useGitHubStatus();
+  const { status, loaded } = useGitHubStatus(workspaceId ?? null);
+  const authed = hasGitHubUserIdentity(status);
   const [launchPayload, setLaunchPayload] = useState<LaunchPayload | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const state = useGitHubPageState(workspaceId ?? null);
+  const state = useGitHubPageState(workspaceId ?? null, authed);
   const { presets: storedPresets } = useGitHubActionPresets(workspaceId ?? null);
   const prPresets = useMemo(() => resolvePRPresets(storedPresets), [storedPresets]);
   const issuePresets = useMemo(() => resolveIssuePresets(storedPresets), [storedPresets]);
@@ -486,7 +507,6 @@ export function GitHubPageClient({
 
   const onStartTask = useCallback((payload: LaunchPayload) => setLaunchPayload(payload), []);
   const onCloseLaunch = useCallback(() => setLaunchPayload(null), []);
-  const authed = !!status?.authenticated;
   const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
   // Close the mobile sheet after any sidebar selection. KindToggle clicks also
   // route through onSelect — closing on every selection is acceptable UX since
@@ -508,7 +528,10 @@ export function GitHubPageClient({
       {!loaded && <div className="p-6 text-sm text-muted-foreground">Checking GitHub status…</div>}
       {loaded && !authed && (
         <div className="p-6 max-w-2xl">
-          <NotAuthenticatedNotice />
+          <NotAuthenticatedNotice
+            workspaceId={workspaceId}
+            personalRequired={status?.automation?.source === "github_app_installation"}
+          />
         </div>
       )}
       {loaded && authed && (

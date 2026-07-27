@@ -25,6 +25,7 @@ import { prStatusKey, usePRStatuses } from "./use-pr-statuses";
 import { PRRowTaskIndicator } from "./pr-row-task-indicator";
 
 type PRListProps = {
+  workspaceId: string | null;
   items: GitHubPR[];
   loading: boolean;
   error: string | null;
@@ -150,8 +151,16 @@ function PRRow({
   );
 }
 
-function PRListBody({ loading, error, items, presets, onStartTask, prKeyToTasks }: PRListProps) {
-  const statuses = usePRStatuses(items);
+function PRListBody({
+  workspaceId,
+  loading,
+  error,
+  items,
+  presets,
+  onStartTask,
+  prKeyToTasks,
+}: PRListProps) {
+  const statuses = usePRStatuses(workspaceId, items);
   if (loading) {
     return (
       <div className="flex justify-center py-10">

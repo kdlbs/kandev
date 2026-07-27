@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/user/store"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -31,7 +32,12 @@ const (
 
 // Client represents a single WebSocket connection
 type Client struct {
-	ID                      string
+	ID string
+	// identity is the authenticated caller behind this connection. Zero for
+	// anonymous connections (auth disabled and no synthetic identity set by
+	// the HTTP middleware — e.g. direct hub tests); synthetic in disabled
+	// mode; a real user when auth is enabled.
+	identity                authn.Identity
 	conn                    *websocket.Conn
 	hub                     *Hub
 	send                    chan []byte
@@ -47,9 +53,10 @@ type Client struct {
 }
 
 // NewClient creates a new WebSocket client
-func NewClient(id string, conn *websocket.Conn, hub *Hub, log *logger.Logger) *Client {
+func NewClient(id string, identity authn.Identity, conn *websocket.Conn, hub *Hub, log *logger.Logger) *Client {
 	return &Client{
 		ID:                   id,
+		identity:             identity,
 		conn:                 conn,
 		hub:                  hub,
 		send:                 make(chan []byte, 256),
@@ -60,6 +67,17 @@ func NewClient(id string, conn *websocket.Conn, hub *Hub, log *logger.Logger) *C
 		runSubscriptions:     make(map[string]bool),
 		logger:               log.WithFields(zap.String("client_id", id)),
 	}
+}
+
+// dispatchContext returns the hub's lifetime context carrying this client's
+// identity, so dispatched RPC handlers (workspace.list, task CRUD, …) and
+// subscription checks apply the same per-user scoping as HTTP requests.
+func (c *Client) dispatchContext() context.Context {
+	ctx := c.hub.DispatchContext()
+	if c.identity.UserID != "" {
+		ctx = authn.WithIdentity(ctx, c.identity)
+	}
+	return ctx
 }
 
 // ReadPump pumps messages from the WebSocket connection to the hub.
@@ -177,7 +195,20 @@ func (c *Client) handleMessage(msg *ws.Message) {
 	// the response either way once the connection is gone, but the
 	// handler's work should run to completion so it doesn't leave partial
 	// state behind. The dispatch ctx still cancels on server shutdown.
-	dispatchCtx := c.hub.DispatchContext()
+	dispatchCtx := c.dispatchContext()
+
+	// Per-user scoping backstop: refuse before the handler runs if the payload
+	// names a task or session this client may not touch. See dispatch_scope.go
+	// for why this lives here and not only in each handler.
+	if err := c.authorizeAction(dispatchCtx, msg.Payload); err != nil {
+		c.logger.Debug("denied out-of-scope action",
+			zap.String("action", msg.Action),
+			zap.String("user_id", c.identity.UserID),
+			zap.Error(err))
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "not found", nil)
+		return
+	}
+
 	response, err := c.hub.dispatcher.Dispatch(dispatchCtx, msg)
 	if err != nil {
 		c.logger.Error("Handler error",
@@ -210,6 +241,14 @@ func (c *Client) handleSubscribe(msg *ws.Message) {
 		return
 	}
 
+	// Per-user scoping: a client may only observe tasks in its own workspaces.
+	if check := c.hub.authPolicy.Subscriptions.Task; check != nil {
+		if err := check(c.dispatchContext(), req.TaskID); err != nil {
+			c.sendError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot subscribe to this task", nil)
+			return
+		}
+	}
+
 	c.hub.SubscribeToTask(c, req.TaskID)
 
 	// Send success response
@@ -228,6 +267,16 @@ type SessionSubscribeRequest struct {
 	SessionID string `json:"session_id"`
 }
 
+// ownUserTopic resolves the user-topic this client may subscribe to: its own
+// authenticated user, or the pre-auth default user for anonymous/synthetic
+// connections (today's single-user behavior).
+func (c *Client) ownUserTopic() string {
+	if c.identity.UserID != "" && !c.identity.Synthetic {
+		return c.identity.UserID
+	}
+	return store.DefaultUserID
+}
+
 func (c *Client) handleUserSubscribe(msg *ws.Message) {
 	var req UserSubscribeRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -237,9 +286,9 @@ func (c *Client) handleUserSubscribe(msg *ws.Message) {
 
 	userID := req.UserID
 	if userID == "" {
-		userID = store.DefaultUserID
+		userID = c.ownUserTopic()
 	}
-	if userID != store.DefaultUserID {
+	if userID != c.ownUserTopic() {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot subscribe to another user", nil)
 		return
 	}
@@ -264,6 +313,10 @@ func (c *Client) handleSessionSubscribe(msg *ws.Message) {
 		return
 	}
 
+	if !c.maySubscribeSession(msg, req.SessionID) {
+		return
+	}
+
 	c.hub.SubscribeToSession(c, req.SessionID)
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success":    true,
@@ -275,6 +328,20 @@ func (c *Client) handleSessionSubscribe(msg *ws.Message) {
 	c.sendSessionData(req.SessionID)
 }
 
+// maySubscribeSession applies the per-user session scoping check, emitting the
+// forbidden error itself. Returns true when the subscription may proceed.
+func (c *Client) maySubscribeSession(msg *ws.Message, sessionID string) bool {
+	check := c.hub.authPolicy.Subscriptions.Session
+	if check == nil {
+		return true
+	}
+	if err := check(c.dispatchContext(), sessionID); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot subscribe to this session", nil)
+		return false
+	}
+	return true
+}
+
 func (c *Client) handleUserUnsubscribe(msg *ws.Message) {
 	var req UserSubscribeRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -283,9 +350,9 @@ func (c *Client) handleUserUnsubscribe(msg *ws.Message) {
 	}
 	userID := req.UserID
 	if userID == "" {
-		userID = store.DefaultUserID
+		userID = c.ownUserTopic()
 	}
-	if userID != store.DefaultUserID {
+	if userID != c.ownUserTopic() {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "cannot unsubscribe from another user", nil)
 		return
 	}
@@ -445,6 +512,9 @@ func (c *Client) handleSessionFocus(msg *ws.Message) {
 	}
 	if req.SessionID == "" {
 		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		return
+	}
+	if !c.maySubscribeSession(msg, req.SessionID) {
 		return
 	}
 	c.hub.FocusSession(c, req.SessionID)

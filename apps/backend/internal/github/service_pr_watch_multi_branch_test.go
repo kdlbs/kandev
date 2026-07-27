@@ -18,7 +18,7 @@ func TestCreatePRWatch_AllowsMultipleBranchesPerRepo(t *testing.T) {
 
 	seedTask(t, store, "task-1", false)
 
-	w1, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/primary")
+	w1, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/primary")
 	if err != nil {
 		t.Fatalf("CreatePRWatch primary: %v", err)
 	}
@@ -26,7 +26,7 @@ func TestCreatePRWatch_AllowsMultipleBranchesPerRepo(t *testing.T) {
 		t.Fatal("primary watch must not be nil")
 	}
 
-	w2, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/branch-2")
+	w2, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/branch-2")
 	if err != nil {
 		t.Fatalf("CreatePRWatch branch-2: %v", err)
 	}
@@ -56,11 +56,11 @@ func TestCreatePRWatch_IdempotentPerBranch(t *testing.T) {
 
 	seedTask(t, store, "task-1", false)
 
-	first, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/x")
+	first, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/x")
 	if err != nil {
 		t.Fatalf("first CreatePRWatch: %v", err)
 	}
-	second, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/x")
+	second, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/x")
 	if err != nil {
 		t.Fatalf("second CreatePRWatch: %v", err)
 	}
@@ -86,11 +86,11 @@ func TestGetPRWatchBySessionRepoAndBranch_FindsRightRow(t *testing.T) {
 	ctx := context.Background()
 	seedTask(t, svc.store, "task-1", false)
 
-	primary, err := svc.CreatePRWatch(ctx, "s1", "task-1", "repo-1", "owner", "repo", 1217, "feature/primary")
+	primary, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "s1", "task-1", "repo-1", "owner", "repo", 1217, "feature/primary")
 	if err != nil {
 		t.Fatalf("primary: %v", err)
 	}
-	secondary, err := svc.CreatePRWatch(ctx, "s1", "task-1", "repo-1", "owner", "repo", 0, "feature/secondary")
+	secondary, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "s1", "task-1", "repo-1", "owner", "repo", 0, "feature/secondary")
 	if err != nil {
 		t.Fatalf("secondary: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestUpdatePRWatchBranchIfSearching_NoCollision_UpdatesBranch(t *testing.T) 
 	ctx := context.Background()
 	seedTask(t, store, "task-1", false)
 
-	w, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/old")
+	w, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/old")
 	if err != nil {
 		t.Fatalf("create watch: %v", err)
 	}
@@ -147,11 +147,11 @@ func TestUpdatePRWatchBranchIfSearching_CollidesWithSibling_DropsSource(t *testi
 	ctx := context.Background()
 	seedTask(t, store, "task-1", false)
 
-	source, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
+	source, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
 	if err != nil {
 		t.Fatalf("create source watch: %v", err)
 	}
-	sibling, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
 	if err != nil {
 		t.Fatalf("create sibling watch: %v", err)
 	}
@@ -185,11 +185,11 @@ func TestUpdatePRWatchBranchIfSearching_CollidesWithSiblingHasPR_DropsSource(t *
 	ctx := context.Background()
 	seedTask(t, store, "task-1", false)
 
-	source, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
+	source, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/A")
 	if err != nil {
 		t.Fatalf("create source watch: %v", err)
 	}
-	sibling, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
+	sibling, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 0, "feature/B")
 	if err != nil {
 		t.Fatalf("create sibling watch: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestUpdatePRWatchBranchIfSearching_PRAlreadyFound_NoOp(t *testing.T) {
 	ctx := context.Background()
 	seedTask(t, store, "task-1", false)
 
-	w, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 42, "feature/found")
+	w, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 42, "feature/found")
 	if err != nil {
 		t.Fatalf("create watch: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestTriggerPRStatusSync_AssociatesExactPRWhenSiblingIsFresh(t *testing.T) {
 		t.Fatalf("seed merged sibling: %v", err)
 	}
 
-	watch, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 1299, "feature/second")
+	watch, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 1299, "feature/second")
 	if err != nil {
 		t.Fatalf("CreatePRWatch: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestApplyBatchedNumberedWatch_AssociatesExactPRWhenSiblingExists(t *testing
 		t.Fatalf("seed merged sibling: %v", err)
 	}
 
-	watch, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 1299, "feature/second")
+	watch, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 1299, "feature/second")
 	if err != nil {
 		t.Fatalf("CreatePRWatch: %v", err)
 	}
@@ -364,7 +364,7 @@ func TestApplyBatchedNumberedWatch_AssociatesExactPRWhenSiblingExists(t *testing
 		ChecksState: "pending",
 	}
 
-	result := svc.applyBatchedNumberedWatch(ctx, watch, map[string]*PRStatus{
+	result := svc.applyBatchedNumberedWatch(ctx, "legacy", watch, map[string]*PRStatus{
 		prStatusCacheKey("owner", "repo", 1299): status,
 	}, now)
 	if result.SyncFailed {
@@ -386,12 +386,12 @@ func TestApplyBatchedNumberedWatch_MissingPRDataDoesNotPanic(t *testing.T) {
 	seedTask(t, store, "task-1", false)
 
 	now := time.Now().UTC()
-	watch, err := svc.CreatePRWatch(ctx, "session-1", "task-1", "repo-1", "owner", "repo", 1299, "feature/second")
+	watch, err := svc.CreatePRWatchForWorkspace(ctx, testWorkspaceID, "session-1", "task-1", "repo-1", "owner", "repo", 1299, "feature/second")
 	if err != nil {
 		t.Fatalf("CreatePRWatch: %v", err)
 	}
 
-	result := svc.applyBatchedNumberedWatch(ctx, watch, map[string]*PRStatus{
+	result := svc.applyBatchedNumberedWatch(ctx, "legacy", watch, map[string]*PRStatus{
 		prStatusCacheKey("owner", "repo", 1299): &PRStatus{ChecksState: "pending"},
 	}, now)
 	if !result.SyncFailed {

@@ -1,9 +1,8 @@
 "use client";
 
-import { useMemo, useReducer, useState, useSyncExternalStore, type FormEvent } from "react";
-import { IconBell, IconRefresh } from "@tabler/icons-react";
+import { useMemo, useState, type FormEvent } from "react";
+import { IconBell } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
 import { Textarea } from "@kandev/ui/textarea";
@@ -14,6 +13,10 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kande
 import { DEFAULT_NOTIFICATION_EVENTS } from "@/lib/notifications/events";
 import type { NotificationProvider } from "@/lib/types/http";
 import {
+  DesktopNotificationsSection,
+  useNotificationPermission,
+} from "@/components/settings/notification-permission-section";
+import {
   useNotificationsState,
   useSaveRequest,
   useNotificationsActions,
@@ -21,91 +24,6 @@ import {
   type NotificationsState,
   type AppriseFormMode,
 } from "@/components/settings/notifications-settings-actions";
-
-type DesktopNotificationsSectionProps = {
-  notificationPermission: NotificationPermission | "unsupported";
-  onRequestPermission: () => void;
-  onRefreshPermission: () => void;
-  onTestNotification: () => void;
-};
-
-function DesktopNotificationsSection({
-  notificationPermission,
-  onRequestPermission,
-  onRefreshPermission,
-  onTestNotification,
-}: DesktopNotificationsSectionProps) {
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <div className="text-base font-medium">Desktop Notifications</div>
-          <p className="text-sm text-muted-foreground">
-            Notify this device when an agent needs your input.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            title="Enable desktop notifications"
-            variant="default"
-            size="sm"
-            onClick={onRequestPermission}
-            disabled={
-              notificationPermission === "granted" || notificationPermission === "unsupported"
-            }
-            className={
-              notificationPermission === "granted"
-                ? "bg-emerald-500 text-white hover:bg-emerald-500"
-                : undefined
-            }
-          >
-            {notificationPermission === "granted" ? "Enabled" : "Enable"}
-          </Button>
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button variant="ghost" size="icon" onClick={onRefreshPermission}>
-                  <IconRefresh className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Refresh permission status</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          <HoverCard>
-            <HoverCardTrigger asChild>
-              <Button
-                title="Send test notification"
-                variant="outline"
-                className="cursor-pointer"
-                size="icon"
-                onClick={() => {
-                  void onTestNotification();
-                }}
-              >
-                <IconBell className="h-4 w-4" />
-              </Button>
-            </HoverCardTrigger>
-            <HoverCardContent side="top" className="text-sm">
-              If you do not see notifications, check your OS settings and allow this browser.
-            </HoverCardContent>
-          </HoverCard>
-        </div>
-      </div>
-
-      {notificationPermission === "denied" && (
-        <p className="text-sm text-amber-600">
-          Notifications are blocked in your browser. Enable them in site settings, then click
-          Refresh.
-        </p>
-      )}
-      {notificationPermission === "unsupported" && (
-        <p className="text-sm text-amber-600">
-          This browser does not support desktop notifications.
-        </p>
-      )}
-    </div>
-  );
-}
 
 function AppriseProviderCardActions({
   provider,
@@ -245,20 +163,6 @@ function AppriseProviderList({
       })}
     </>
   );
-}
-
-function useNotificationPermission() {
-  const mounted = useSyncExternalStore(
-    () => () => undefined,
-    () => true,
-    () => false,
-  );
-  const [, bumpPermission] = useReducer((value) => value + 1, 0);
-  let notificationPermission: NotificationPermission | "unsupported";
-  if (!mounted) notificationPermission = "default";
-  else if (typeof Notification === "undefined") notificationPermission = "unsupported";
-  else notificationPermission = Notification.permission;
-  return { notificationPermission, bumpPermission };
 }
 
 type ExternalProvidersSectionProps = {
@@ -434,9 +338,9 @@ function useNotificationPageSaveState(state: NotificationsState, soundIsDirty: b
 
 export function NotificationsSettings() {
   const state = useNotificationsState();
-  const { notificationPermission, bumpPermission } = useNotificationPermission();
+  const { notificationPermission, refreshPermission } = useNotificationPermission();
   const saveRequest = useSaveRequest(state);
-  const actions = useNotificationsActions(state, bumpPermission);
+  const actions = useNotificationsActions(state, refreshPermission);
   const [soundIsDirty, setSoundIsDirty] = useState(false);
   const saveState = useNotificationPageSaveState(state, soundIsDirty);
   const { tableProviders, tableEvents } = useTableData(state);

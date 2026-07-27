@@ -28,6 +28,11 @@ apps/backend/
 │   │   ├── settings/     # Agent settings
 │   │   ├── mcpconfig/    # MCP server configuration
 │   │   └── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
+│   ├── auth/             # Opt-in user authentication + per-user scoping
+│   │   ├── authn/        # Request-identity plumbing (context + gin helpers, RequireAdmin)
+│   │   ├── httpmw/       # Global enforcement middleware (allowlist, synthetic identity)
+│   │   ├── httpapi/      # /api/v1/auth/* + /api/v1/users endpoints
+│   │   └── store/        # auth_identities, auth_sessions, auth_api_tokens, auth_invites
 │   ├── agentctl/
 │   │   └── server/       # agentctl HTTP server
 │   │       ├── acp/      # ACP protocol implementation
@@ -79,6 +84,7 @@ apps/backend/
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
+│   ├── githubauth/       # Shared GitHub credential-broker environment contract
 │   ├── common/           # Shared utilities, config, logger
 │   ├── integration/      # External integrations
 │   ├── integrations/     # Shared shapes for third-party integrations
@@ -118,6 +124,16 @@ apps/backend/
 - Located in `internal/orchestrator/`
 
 **Watcher Dispatch Coordinator** (`internal/orchestrator/watcher_dispatch.go`) is the single pipeline that turns a freshly-observed external issue (Linear, Jira, future) into a Kandev task. Bus subscribers for each integration forward the event to `WatcherDispatchCoordinator.Dispatch` with a per-integration `WatcherSource` implementation (`source_linear.go`, `source_jira.go`). Source methods carry the integration-specific bits (reserve dedup, build task request, attach task ID, release, auto-start params); the coordinator owns the cross-cutting pipeline (create task, decide auto-start, error/release handling). Add a new watcher = implement `WatcherSource` + register a one-line bus subscriber. Do NOT add another `createXIssueTask` mirror.
+
+**GitHub App registration catalog** (`internal/github/`) stores zero or more managed/imported App
+registrations; none is a global default. Workspace App connections must carry both registration ID
+and installation ID. Runtime clients, token caches, broker leases, OAuth state, webhook delivery,
+and service cache scopes must retain registration identity and credential generation. Reusing a
+registration intentionally shares root App credentials and bot identity; installation grants and
+workspace credentials remain isolated. Registration create/import/select/install belongs to the
+workspace GitHub settings flow, and backend startup configuration is not an App credential source.
+Registration-specific callback and webhook routes select one candidate registration but never
+replace state verification, installation association, or HMAC verification.
 
 **Workflow Engine** (`internal/workflow/engine/`) provides typed state-machine evaluation:
 - `Engine.HandleTrigger()` evaluates step actions for triggers (on_enter, on_turn_start, on_turn_complete, on_exit)
@@ -161,6 +177,16 @@ and can leak ACP subprocesses.
 - `remote_docker`, `remote_vps`, `k8s` - Planned
 
 **Remote SSH executor platforms:** Treat supported remote OS/arch values as an end-to-end contract. Platform probe/normalization, lifecycle support checks, agentctl helper resolution, platform default shell, SSH readiness endpoints, frontend response types, and tests must stay aligned. Preserve raw unsupported platform details in user-facing errors, but use normalized values for supported-platform matching. Keep shell defaults platform-aware: Darwin defaults to `zsh`, Linux defaults to `bash`, unless an explicit shell is saved.
+
+**Opt-in authentication & per-user scoping** (`internal/auth/`): auth is OFF by default; the global middleware (`auth/httpmw`, installed after CORS in `backendapp.buildHTTPServer`) then injects a synthetic admin identity for the pre-auth single user, so behavior is unchanged. Enablement is the `features.auth` runtime flag (`KANDEV_FEATURES_AUTH`, Settings > System > Feature Toggles) — the auth service derives its mode from `cfg.Features.Auth` (`disabled` / `setup` = flag-on-no-admin / `enabled` = flag-on-admin-exists); there is no separate `auth.mode` setting. When enabled, requests authenticate via a `kandev_session` cookie (opaque token, SHA-256 at rest, DB-backed) or a `kandev_pat_*` bearer token. Scoping rules:
+- **Identity travels in the request context** (`authn.IdentityFromContext`). No identity = internal caller (pollers, event bus, office schedulers) = unscoped. Synthetic identity = auth disabled = unscoped.
+- **In-session agent MCP is scoped to the task owner.** The MCP tools an agent gets inside its own session are relayed over the agent's WebSocket stream, which carries no credential of its own. `internal/mcp/scope` resolves the stream's task → workspace → owner and attaches that user's real identity before dispatch (`lifecycle.Manager.SetMCPIdentityScoper`), so the same `authorize*` checks apply as for the PAT-authenticated `/mcp` endpoint. The owning task comes from the `AgentExecution`, never from the agent-supplied payload — do not "improve" this by reading `session_id`/`task_id` out of the request. Tool handlers stay identity-agnostic. Under enforced auth every dispatch is scoped to *somebody*: a resolvable active owner gets their identity; an unowned workspace gets a sentinel user ID that reaches unowned rows only; anything unresolvable (missing task/workspace row, or an owner whose account was deleted or disabled) is **denied**. Never return an identity-free context from this path — the task service reads that as an internal caller and grants everything.
+- **Workspaces are per-user** (`workspaces.owner_id`); the task service filters/denies at the service layer with `*NotFound` sentinels (no existence leak). Unowned rows (`owner_id=''`) stay visible until the setup wizard claims them for the admin.
+- **New user-facing service entry points must apply scoping** — call the `authorize*` helpers in `task/service/service_access.go` (or the same pattern) when adding routes that read or mutate workspace-scoped data. This includes **session-keyed** entry points: any service method taking a caller-supplied `sessionID` (or a `taskID` used to reach sessions) authorizes via `authorizeTaskID(session.TaskID)`. Authorize off the row you already read rather than calling `AuthorizeSessionAccess`, which re-reads the session. Batch helpers that take ID *lists* (`BatchGetSessionsForTasks`, `GetPrimarySessionInfoForTasks`, …) are exempt by convention: their callers derive the IDs from an already-authorized task list, so per-ID checks would add N queries to list views for no gain — keep it that way, and don't hand them caller-supplied IDs.
+- **Two session paths bypass the task service and must guard themselves.** (1) Handlers that resolve an execution by a bare in-memory lookup (`GetExecutionBySessionID`, `*BySessionID`) skip the `GetOrEnsure*` chokepoint where the lifecycle check runs — call `service.AuthorizeSessionAccess` (see `ProcessHandlers.denySessionAccess`) or `lifecycleMgr.CheckSessionAccess` first. (2) The orchestrator reads sessions through its own repo handle, so it inherits nothing from the task service; session-keyed entry points there call `authorizeSession` / `authorizeTask`, wired by `SetSessionAccessChecker` / `SetTaskAccessChecker`. An entry point that accepts **both** a task and a session ID must use `authorizeTaskSessionPair`, never `authorizeSession` alone: the caller can satisfy a session-only check with one of their own sessions while pointing `taskID` at someone else's task, which the method then uses for its task-scoped work. Put the guard **first** in the method, before any repo/executor/agent-manager use — `TestSessionKeyedEntryPointsGuardBeforeDependencies` runs each entry point with nil dependencies and fails on a panic if a guard is placed too late.
+- **Dispatched WS actions have a gateway backstop.** `Client.authorizeAction` (`internal/gateway/websocket/dispatch_scope.go`) checks any payload carrying `task_id` or `session_id` against the client's identity *before* dispatch, so a newly added action is scoped by default rather than only when its author remembers. Handler-level scoping is still required (defense in depth, and it covers non-WS callers) — do not delete a service-layer check because the backstop exists. The backstop reads `task_id`, `session_id` and `task_environment_id` — keep using those names for task-scoped actions, because an action that invents a new name for the same kind of resource silently opts out. (`user_shell.stop` was exactly that: it keys off `task_environment_id` with `task_id` optional, so a `task_id`-only backstop missed it.) Also avoid permissive types (`any`, `json.RawMessage`) for those fields: a payload that fails to unmarshal into the ref struct is treated as naming nothing.
+- **WS**: clients carry their identity; dispatched actions and subscriptions are scoped; workspace-carrying events route via `Hub.BroadcastToWorkspace`. A new `hub.Broadcast` (global) call site needs a `//ws:global` justification comment.
+- **Self-authenticating webhooks** (automation, office channels, plugin webhooks) and `/health`, `/api/v1/features`, `/api/v1/app-state` stay public — the allowlist lives in `auth/httpmw/middleware.go` with a pinning test.
 
 ## Execution Flow
 

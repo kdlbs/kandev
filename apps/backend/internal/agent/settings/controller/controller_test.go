@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,6 +169,26 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 	for _, cmdPart := range result.Command {
 		if cmdPart == "--model" {
 			t.Errorf("PreviewAgentCommand() should not emit --model, got %v", result.Command)
+		}
+	}
+}
+
+func TestController_PreviewAgentCommand_RejectsInvalidCommandPrefix(t *testing.T) {
+	controller := newTestController(map[string]agents.Agent{
+		"test-agent": &testAgent{
+			id:      "test-agent",
+			name:    "test-agent",
+			enabled: true,
+			runtime: &agents.RuntimeConfig{Cmd: agents.NewCommand("test-cli")},
+		},
+	})
+
+	for _, prefix := range []string{`greywall "unterminated`, `'' --arg`, `--not-a-launcher`} {
+		_, err := controller.PreviewAgentCommand(context.Background(), "test-agent", CommandPreviewRequest{
+			CommandPrefix: prefix,
+		})
+		if !errors.Is(err, ErrInvalidCommandPrefix) {
+			t.Errorf("prefix %q: expected ErrInvalidCommandPrefix, got %v", prefix, err)
 		}
 	}
 }

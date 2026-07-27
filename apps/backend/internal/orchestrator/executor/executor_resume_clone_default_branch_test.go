@@ -62,6 +62,21 @@ func TestResolveTaskRepoInfo_BackfillsDefaultBranchAfterClone(t *testing.T) {
 	}
 }
 
+func TestEnsureRepositoryCloned_ReturnsOnlyLocalPath(t *testing.T) {
+	clonePath := filepath.Join(t.TempDir(), "clone")
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetRepoCloner(&fakeRepoCloner{returnPath: clonePath}, &recordingRepoUpdater{})
+	repository := &models.Repository{ID: "repo-1", Provider: "github", ProviderOwner: "acme", ProviderName: "thing"}
+
+	path, err := exec.EnsureRepositoryCloned(context.Background(), repository)
+	if err != nil {
+		t.Fatalf("EnsureRepositoryCloned: %v", err)
+	}
+	if path != clonePath || repository.LocalPath != clonePath {
+		t.Fatalf("path = %q, repository.LocalPath = %q; want %q", path, repository.LocalPath, clonePath)
+	}
+}
+
 // TestResolveTaskRepoInfo_BackfillsDefaultBranchForAlreadyClonedRepo guards
 // against the second-launch regression: a previous failed attempt populated
 // repositories.local_path but left default_branch empty (because the backfill
@@ -376,11 +391,13 @@ func TestApplyResumeRepoConfig_SelfHealsStaleProviderPath(t *testing.T) {
 // fakeRepoCloner returns a fixed local path for any clone request.
 type fakeRepoCloner struct{ returnPath string }
 
-func (f *fakeRepoCloner) EnsureClonedForProvider(
-	_ context.Context, _, _, _, _, _, _, _ string,
+func (f *fakeRepoCloner) EnsureWorkspaceClonedForProvider(
+	_ context.Context, _, _, _, _, _, _, _, _ string,
 ) (string, error) {
 	return f.returnPath, nil
 }
+
+func (f *fakeRepoCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
 
 func (f *fakeRepoCloner) BuildCloneURLWithHost(_, _, owner, name string) (string, error) {
 	return "https://github.com/" + owner + "/" + name + ".git", nil

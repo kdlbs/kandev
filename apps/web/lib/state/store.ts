@@ -29,10 +29,11 @@ import {
   createLinearSlice,
   createOfficeSlice,
   createFeaturesSlice,
+  createAuthSlice,
   createAutomationsSlice,
   createSystemSlice,
   createPluginsSlice,
-  defaultKanbanState,
+  createReviewSlice,
   defaultWorkspaceState,
   defaultSettingsState,
   defaultSessionState,
@@ -45,11 +46,12 @@ import {
   defaultLinearState,
   defaultOfficeState,
   defaultFeaturesState,
+  defaultAuthState,
   defaultAutomationsState,
   defaultSystemState,
   defaultPluginsState,
+  defaultReviewState,
   type WorkspaceState,
-  type WorkflowsState,
   type ExecutorsState,
   type SettingsAgentsState,
   type AgentDiscoveryState,
@@ -74,9 +76,16 @@ import {
   type SystemSliceActions,
   type AutomationsSliceActions,
   type FeaturesSliceActions,
+  type AuthSliceActions,
   type GitHubSliceActions,
+  type GitLabSliceActions,
   type AzureDevOpsSliceActions,
+  type JiraSliceActions,
+  type LinearSliceActions,
+  type OfficeSliceActions,
   type PluginsSliceActions,
+  type ReviewSliceActions,
+  type KanbanSlice,
 } from "./slices";
 import type {
   AvailableCommand,
@@ -92,43 +101,9 @@ import type {
 
 // Re-export all types from slices for backwards compatibility.
 export type * from "./store-reexports";
-import type { GitLabSliceActions } from "./slices/gitlab/types";
-import type { JiraIssueWatch } from "@/lib/types/jira";
-import type { LinearIssueWatch } from "@/lib/types/linear";
-import type {
-  AgentProfile,
-  AgentRoutePreview,
-  AgentRouteData,
-  Skill,
-  Project,
-  Approval,
-  ActivityEntry,
-  CostSummary,
-  BudgetPolicy,
-  Routine,
-  InboxItem,
-  OfficeMeta,
-  ProviderHealth,
-  RouteAttempt,
-  Run,
-  DashboardData,
-  OfficeTask,
-  TaskFilterState,
-  TaskViewMode,
-  TaskSortField,
-  TaskSortDir,
-  TaskGroupBy,
-  WorkspaceRouting,
-} from "./slices/office/types";
 
 // Combined AppState type
-export type AppState = {
-  // Kanban slice
-  kanban: (typeof defaultKanbanState)["kanban"];
-  kanbanMulti: (typeof defaultKanbanState)["kanbanMulti"];
-  workflows: (typeof defaultKanbanState)["workflows"];
-  tasks: (typeof defaultKanbanState)["tasks"];
-
+export type AppState = KanbanSlice & {
   // Workspace slice
   workspaces: (typeof defaultWorkspaceState)["workspaces"];
   repositories: (typeof defaultWorkspaceState)["repositories"];
@@ -185,6 +160,7 @@ export type AppState = {
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
+  githubAppRegistrations: (typeof defaultGitHubState)["githubAppRegistrations"];
   taskPRs: (typeof defaultGitHubState)["taskPRs"];
   taskIssues: (typeof defaultGitHubState)["taskIssues"];
   pendingPrUrlByTaskId: (typeof defaultGitHubState)["pendingPrUrlByTaskId"];
@@ -219,6 +195,9 @@ export type AppState = {
   // Feature flags slice
   features: (typeof defaultFeaturesState)["features"];
 
+  // Auth slice (actions merged via AuthSliceActions intersection on AppState)
+  auth: (typeof defaultAuthState)["auth"];
+
   // Automations slice
   automations: (typeof defaultAutomationsState)["automations"];
   automationRuns: (typeof defaultAutomationsState)["automationRuns"];
@@ -228,6 +207,9 @@ export type AppState = {
 
   // Plugins slice (actions merged via PluginsSliceActions intersection on AppState)
   plugins: (typeof defaultPluginsState)["plugins"];
+
+  // Review slice (actions merged via ReviewSliceActions intersection on AppState)
+  taskReview: (typeof defaultReviewState)["taskReview"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -243,6 +225,7 @@ export type AppState = {
   quickChat: (typeof defaultUIState)["quickChat"];
   sessionFailureNotification: (typeof defaultUIState)["sessionFailureNotification"];
   taskDeletedNotification: (typeof defaultUIState)["taskDeletedNotification"];
+  updateAvailableNotification: (typeof defaultUIState)["updateAvailableNotification"];
   bottomTerminal: (typeof defaultUIState)["bottomTerminal"];
   sidebarViews: (typeof defaultUIState)["sidebarViews"];
   collapsedSubtaskParents: (typeof defaultUIState)["collapsedSubtaskParents"];
@@ -252,65 +235,10 @@ export type AppState = {
   acknowledgedAgentErrors: (typeof defaultUIState)["acknowledgedAgentErrors"];
   dismissedAgentErrors: (typeof defaultUIState)["dismissedAgentErrors"];
 
-  // GitLab actions
-  setTaskMRs: GitLabSliceActions["setTaskMRs"];
-  setTaskMR: GitLabSliceActions["setTaskMR"];
-  removeTaskMR: GitLabSliceActions["removeTaskMR"];
-  resetTaskMRs: GitLabSliceActions["resetTaskMRs"];
-  setGitLabReviewWatches: GitLabSliceActions["setGitLabReviewWatches"];
-  setGitLabReviewWatchesLoading: GitLabSliceActions["setGitLabReviewWatchesLoading"];
-  addGitLabReviewWatch: GitLabSliceActions["addGitLabReviewWatch"];
-  updateGitLabReviewWatchInStore: GitLabSliceActions["updateGitLabReviewWatchInStore"];
-  removeGitLabReviewWatch: GitLabSliceActions["removeGitLabReviewWatch"];
-  setGitLabIssueWatches: GitLabSliceActions["setGitLabIssueWatches"];
-  setGitLabIssueWatchesLoading: GitLabSliceActions["setGitLabIssueWatchesLoading"];
-  addGitLabIssueWatch: GitLabSliceActions["addGitLabIssueWatch"];
-  updateGitLabIssueWatchInStore: GitLabSliceActions["updateGitLabIssueWatchInStore"];
-  removeGitLabIssueWatch: GitLabSliceActions["removeGitLabIssueWatch"];
-  setGitLabMRWatches: GitLabSliceActions["setGitLabMRWatches"];
-  setGitLabMRWatchesLoading: GitLabSliceActions["setGitLabMRWatchesLoading"];
-  removeGitLabMRWatch: GitLabSliceActions["removeGitLabMRWatch"];
-  setGitLabActionPresets: GitLabSliceActions["setGitLabActionPresets"];
-  setGitLabActionPresetsLoading: GitLabSliceActions["setGitLabActionPresetsLoading"];
-  setGitLabStats: GitLabSliceActions["setGitLabStats"];
-  setGitLabStatsLoading: GitLabSliceActions["setGitLabStatsLoading"];
-  setGitLabStatus: GitLabSliceActions["setGitLabStatus"];
-  setGitLabStatusLoading: GitLabSliceActions["setGitLabStatusLoading"];
-
-  // JIRA actions
-  setJiraIssueWatches: (watches: JiraIssueWatch[]) => void;
-  setJiraIssueWatchesLoading: (loading: boolean) => void;
-  addJiraIssueWatch: (watch: JiraIssueWatch) => void;
-  updateJiraIssueWatch: (watch: JiraIssueWatch) => void;
-  removeJiraIssueWatch: (id: string) => void;
-  resetJiraIssueWatches: () => void;
-
-  // Linear actions
-  setLinearIssueWatches: (watches: LinearIssueWatch[]) => void;
-  setLinearIssueWatchesLoading: (loading: boolean) => void;
-  addLinearIssueWatch: (watch: LinearIssueWatch) => void;
-  updateLinearIssueWatch: (watch: LinearIssueWatch) => void;
-  removeLinearIssueWatch: (id: string) => void;
-  resetLinearIssueWatches: () => void;
-
   // Actions from all slices
-  hydrate: (state: Partial<AppState>, options?: HydrationOptions) => void;
+  hydrate: (state: HydrationState, options?: HydrationOptions) => void;
   setActiveWorkspace: (workspaceId: string | null) => void;
   setWorkspaces: (workspaces: WorkspaceState["items"]) => void;
-  setActiveWorkflow: (workflowId: string | null) => void;
-  setWorkflows: (workflows: WorkflowsState["items"]) => void;
-  reorderWorkflowItems: (workflowIds: string[]) => void;
-  setWorkflowSnapshot: (
-    workflowId: string,
-    data: import("./slices/kanban/types").WorkflowSnapshotData,
-  ) => void;
-  setKanbanMultiLoading: (loading: boolean) => void;
-  clearKanbanMulti: () => void;
-  updateMultiTask: (
-    workflowId: string,
-    task: import("./slices/kanban/types").KanbanState["tasks"][number],
-  ) => void;
-  removeMultiTask: (workflowId: string, taskId: string) => void;
   setExecutors: (executors: ExecutorsState["items"]) => void;
   setSettingsAgents: (agents: SettingsAgentsState["items"]) => void;
   setAgentDiscovery: (agents: AgentDiscoveryState["items"]) => void;
@@ -402,6 +330,7 @@ export type AppState = {
   setQuickChatInitialPrompt: UIA["setQuickChatInitialPrompt"];
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
+  setUpdateAvailableNotification: (n: UISliceTypes.UpdateAvailableNotification | null) => void;
   toggleBottomTerminal: () => void;
   openBottomTerminalWithCommand: (command: string) => void;
   clearBottomTerminalCommand: () => void;
@@ -436,10 +365,6 @@ export type AppState = {
     meta: { hasMore?: boolean; isLoading?: boolean; oldestCursor?: string | null },
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
-  setActiveSession: (taskId: string, sessionId: string) => void;
-  setActiveSessionAuto: (taskId: string, sessionId: string) => void;
-  setActiveTask: (taskId: string) => void;
-  clearActiveSession: () => void;
   setTaskSession: (session: TaskSession) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
@@ -563,57 +488,31 @@ export type AppState = {
   toggleAppSidebarSettingsMode: UIA["toggleAppSidebarSettingsMode"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
-  // Office actions
-  setOfficeAgentProfiles: (agents: AgentProfile[]) => void;
-  addOfficeAgentProfile: (agent: AgentProfile) => void;
-  updateOfficeAgentProfile: (id: string, patch: Partial<AgentProfile>) => void;
-  removeOfficeAgentProfile: (id: string) => void;
-  setSkills: (skills: Skill[]) => void;
-  addSkill: (skill: Skill) => void;
-  updateSkill: (id: string, patch: Partial<Skill>) => void;
-  removeSkill: (id: string) => void;
-  setProjects: (projects: Project[]) => void;
-  addProject: (project: Project) => void;
-  updateProject: (id: string, patch: Partial<Project>) => void;
-  removeProject: (id: string) => void;
-  setApprovals: (approvals: Approval[]) => void;
-  setActivity: (entries: ActivityEntry[]) => void;
-  setCostSummary: (summary: CostSummary | null) => void;
-  setBudgetPolicies: (policies: BudgetPolicy[]) => void;
-  setRoutines: (routines: Routine[]) => void;
-  setInboxItems: (items: InboxItem[]) => void;
-  setInboxCount: (count: number) => void;
-  setRuns: (runs: Run[]) => void;
-  setDashboard: (data: DashboardData | null) => void;
-  setTasks: (tasks: OfficeTask[]) => void;
-  appendTasks: (tasks: OfficeTask[]) => void;
-  patchTaskInStore: (taskId: string, patch: Partial<OfficeTask>) => void;
-  setTaskFilters: (filters: Partial<TaskFilterState>) => void;
-  setTaskViewMode: (mode: TaskViewMode) => void;
-  setTaskSortField: (field: TaskSortField) => void;
-  setTaskSortDir: (dir: TaskSortDir) => void;
-  setTaskGroupBy: (groupBy: TaskGroupBy) => void;
-  toggleNesting: () => void;
-  setTasksLoading: (loading: boolean) => void;
-  setMeta: (meta: OfficeMeta | null) => void;
-  setOfficeLoading: (loading: boolean) => void;
-  setOfficeRefetchTrigger: (type: string) => void;
-  setWorkspaceRouting: (workspaceId: string, cfg: WorkspaceRouting | undefined) => void;
-  setKnownProviders: (providers: string[]) => void;
-  setRoutingPreview: (workspaceId: string, agents: AgentRoutePreview[]) => void;
-  setProviderHealth: (workspaceId: string, health: ProviderHealth[]) => void;
-  upsertProviderHealth: (workspaceId: string, row: ProviderHealth) => void;
-  setRunAttempts: (runId: string, attempts: RouteAttempt[]) => void;
-  appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
-  setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
 } & GitHubSliceActions &
+  GitLabSliceActions &
+  JiraSliceActions &
+  LinearSliceActions &
+  OfficeSliceActions &
+  import("./store-reexports").WorkspaceSourceStoreState &
   AzureDevOpsSliceActions &
   SystemSliceActions &
   FeaturesSliceActions &
+  AuthSliceActions &
   AutomationsSliceActions &
-  PluginsSliceActions;
+  PluginsSliceActions &
+  ReviewSliceActions;
 
-export function createAppStore(initialState?: Partial<AppState>) {
+// Most callers hydrate a fully-shaped slice per top-level key (see
+// mergeInitialState / hydrateState), but `system` is a grab-bag of many
+// independently-fetched fields (info, diskUsage, updates, ...). Callers that
+// only have one piece of it (e.g. update notification settings from the
+// settings boot payload) must be able to pass a partial `system` object
+// without fabricating placeholder values for the rest.
+export type HydrationState = Omit<Partial<AppState>, "system"> & {
+  system?: Partial<AppState["system"]>;
+};
+
+export function createAppStore(initialState?: HydrationState) {
   const merged = mergeInitialState(initialState);
 
   return createStore<AppState>()(
@@ -644,6 +543,8 @@ export function createAppStore(initialState?: Partial<AppState>) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createFeaturesSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createAuthSlice(set as any),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createSystemSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createUISlice(set as any, get as any, api as any),
@@ -651,6 +552,10 @@ export function createAppStore(initialState?: Partial<AppState>) {
       ...createAutomationsSlice(set as any, get as any, api as any),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createPluginsSlice(set as any, get as any, api as any),
+      // createReviewSlice only needs `set`; passing get/api would be superfluous
+      // arguments (CodeQL js/superfluous-trailing-arguments).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...createReviewSlice(set as any),
       // Re-assert merged initial state so caller-supplied values win over slice defaults.
       ...buildStateOverrides(merged),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -661,5 +566,5 @@ export function createAppStore(initialState?: Partial<AppState>) {
 
 export type StoreProviderProps = {
   children: React.ReactNode;
-  initialState?: Partial<AppState>;
+  initialState?: HydrationState;
 };

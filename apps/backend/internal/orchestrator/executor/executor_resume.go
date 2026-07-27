@@ -70,22 +70,6 @@ type repoInfo struct {
 	Repository             *models.Repository
 }
 
-// resolvePrimaryRepoInfo fetches and resolves the primary repository info for a task.
-func (e *Executor) resolvePrimaryRepoInfo(ctx context.Context, taskID string) (*repoInfo, error) {
-	info := &repoInfo{}
-	primaryTaskRepo, err := e.repo.GetPrimaryTaskRepository(ctx, taskID)
-	if err != nil {
-		e.logger.Error("failed to get primary task repository",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return nil, err
-	}
-	if primaryTaskRepo == nil {
-		return info, nil
-	}
-	return e.resolveTaskRepoInfo(ctx, primaryTaskRepo)
-}
-
 // resolveAllRepoInfo returns the resolved repository info for every repository
 // linked to the task, ordered by Position. Returns a single-element slice for
 // single-repo tasks and an empty slice for repo-less tasks (e.g. quick chat).
@@ -171,7 +155,8 @@ func (e *Executor) ensureRepoLocalPath(ctx context.Context, repo *models.Reposit
 	if repo.SourceType == sourceTypeLocal || repo.ProviderOwner == "" || repo.ProviderName == "" {
 		return nil
 	}
-	if repo.LocalPath != "" && isLocalGitRepo(repo.LocalPath) {
+	if repo.LocalPath != "" && isLocalGitRepo(repo.LocalPath) &&
+		(e.repoCloner == nil || !e.repoCloner.ShouldRecloneForWorkspace(repo.WorkspaceID, repo.LocalPath)) {
 		return nil
 	}
 	localPath, cloneErr := e.ensureRepoCloned(ctx, repo)
@@ -238,6 +223,26 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 	// backfill existed).
 
 	return localPath, nil
+}
+
+// EnsureRepositoryCloned is the host-materialization seam for provider-backed
+// repositories. Authentication and clone-url construction deliberately remain
+// inside Executor so callers never receive credentials or construct git calls.
+func (e *Executor) EnsureRepositoryCloned(ctx context.Context, repo *models.Repository) (string, error) {
+	if repo == nil {
+		return "", errors.New("repository is required")
+	}
+	if repo.LocalPath != "" {
+		return repo.LocalPath, nil
+	}
+	path, err := e.ensureRepoCloned(ctx, repo)
+	if err != nil {
+		return "", err
+	}
+	if path != "" {
+		repo.LocalPath = path
+	}
+	return path, nil
 }
 
 // backfillRepoDefaultBranch populates repo.DefaultBranch from the local clone
@@ -625,6 +630,15 @@ func (e *Executor) buildResumeRequest(ctx context.Context, task *v1.Task, sessio
 
 	existingRunning := e.applyRunningRecordToResumeRequest(ctx, req, task, session, startAgent)
 	e.injectGitLabWorkspaceCredentials(ctx, req)
+	if folders, folderErr := e.repo.ListTaskWorkspaceFolders(ctx, task.ID); folderErr != nil {
+		return nil, "", execConfig, existingEnv, nil, folderErr
+	} else {
+		for _, f := range folders {
+			if f != nil {
+				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{Name: f.DisplayName, LocalPath: f.LocalPath})
+			}
+		}
+	}
 
 	return req, repositoryID, execConfig, existingEnv, existingRunning, nil
 }

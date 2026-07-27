@@ -1,6 +1,51 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"strings"
+	"testing"
+)
+
+func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
+	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_URL", "https://kandev.example/api/github/credentials/resolve")
+	t.Setenv("KANDEV_GITHUB_CLI_SHIM_DIR", "/kandev/shims")
+	env := CollectAgentEnv(map[string]string{"PATH": "/profile/bin:/usr/bin"})
+	want := strings.Join([]string{"/kandev/shims", "/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
+	if got := envSliceValue(env, "PATH"); got != want {
+		t.Fatalf("PATH = %q, want %q", got, want)
+	}
+}
+
+func envSliceValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
+}
+
+func TestValidateCommandArgs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "valid preserves empty argument", args: []string{"runner", "", "two words"}},
+		{name: "empty argv", args: nil, want: true},
+		{name: "empty executable", args: []string{"", "arg"}, want: true},
+		{name: "whitespace executable", args: []string{" \t", "arg"}, want: true},
+		{name: "flag executable", args: []string{"--runner", "arg"}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCommandArgs(tc.args)
+			if (err != nil) != tc.want {
+				t.Fatalf("ValidateCommandArgs(%#v) error = %v, want error=%v", tc.args, err, tc.want)
+			}
+		})
+	}
+}
 
 func TestConsumeNonce(t *testing.T) {
 	t.Run("valid nonce returns token and burns nonce", func(t *testing.T) {
@@ -149,6 +194,19 @@ func TestApplyOverrides_BaseBranches(t *testing.T) {
 // (empty AuthToken) the server must bind loopback only; when a token is
 // configured it binds all interfaces (empty host → ":port").
 func TestListenHost(t *testing.T) {
+	t.Run("explicit override wins when token is configured", func(t *testing.T) {
+		cfg := &Config{AuthToken: "secret", ListenHostOverride: "127.0.0.1"}
+		if got := cfg.ListenHost(); got != "127.0.0.1" {
+			t.Fatalf("ListenHost() = %q, want explicit loopback override", got)
+		}
+	})
+	t.Run("loads explicit override from launch environment", func(t *testing.T) {
+		t.Setenv("AGENTCTL_BOOTSTRAP_NONCE", "nonce")
+		t.Setenv("AGENTCTL_LISTEN_HOST", "127.0.0.1")
+		if got := Load().ListenHost(); got != "127.0.0.1" {
+			t.Fatalf("Load().ListenHost() = %q, want loopback override", got)
+		}
+	})
 	t.Run("no token binds loopback only", func(t *testing.T) {
 		cfg := &Config{AuthToken: ""}
 		if got := cfg.ListenHost(); got != "127.0.0.1" {

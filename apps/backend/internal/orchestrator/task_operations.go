@@ -14,6 +14,7 @@ import (
 
 	"go.uber.org/zap"
 
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
@@ -61,6 +62,15 @@ const resumeReasonFailedSessionResumable = "failed_session_resumable"
 var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
 var ErrAgentNotReadyForPrompt = errors.New("agent not ready for prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
+
+type primarySessionTaskStateUpdater interface {
+	UpdateTaskStateIfPrimarySessionState(
+		ctx context.Context,
+		taskID, sessionID string,
+		expectedSessionState models.TaskSessionState,
+		state v1.TaskState,
+	) (bool, error)
+}
 
 // ErrSessionNotPromptable is returned when a session cannot accept a prompt
 // because of its lifecycle state (STARTING, CREATED, FAILED, CANCELLED).
@@ -260,7 +270,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 				// LaunchAgent failures persist FAILED in the executor. Earlier
 				// workspace failures return here and are recorded through the same
 				// session-level recovery claim.
-				s.handleEarlyMissingPRBranchLaunchFailure(bgCtx, taskID, sessionID, launchErr)
+				launchErr = s.handleSessionLaunchFailure(bgCtx, taskID, sessionID, launchErr)
 				s.logger.Warn("failed to launch workspace for prepared session (file browsing may be unavailable)",
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
@@ -482,8 +492,7 @@ func (s *Service) StartCreatedSession(
 	if err != nil {
 		// The executor persists LaunchAgent failures. Cover earlier prepared-session
 		// failures here; the session-level claim makes either completion order safe.
-		s.handleEarlyMissingPRBranchLaunchFailure(ctx, taskID, sessionID, err)
-		return nil, err
+		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
 
 	// Record the initial user message and set plan mode metadata after launch.
@@ -499,19 +508,21 @@ func (s *Service) StartCreatedSession(
 	return execution, nil
 }
 
-// handleEarlyMissingPRBranchLaunchFailure covers failures that occur before
-// Executor reaches AgentManager.LaunchAgent. Those failures do not run the
-// executor's launch-failure bookkeeping, so this fallback owns the terminal
-// transition and lets the shared persisted claim create guidance once.
-func (s *Service) handleEarlyMissingPRBranchLaunchFailure(
+// handleSessionLaunchFailure covers launch and resume failures that have not
+// already won terminal bookkeeping. The state CAS makes it safe as an
+// idempotent fallback when executor bookkeeping did run.
+func (s *Service) handleSessionLaunchFailure(
 	ctx context.Context,
 	taskID, sessionID string,
 	launchErr error,
-) {
-	if !isMissingBranchError(launchErr) {
-		return
-	}
-	s.recordSessionLaunchFailure(ctx, taskID, sessionID, launchErr)
+	preloadedSession ...*models.TaskSession,
+) error {
+	failureCtx := context.WithoutCancel(ctx)
+	safeErr := routingerr.SanitizeError(launchErr)
+	s.recordSessionLaunchFailure(
+		failureCtx, taskID, sessionID, safeErr, preloadedSession...,
+	)
+	return safeErr
 }
 
 // recordSessionLaunchFailure transitions a still-active session to FAILED,
@@ -533,9 +544,7 @@ func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessio
 		}
 		return
 	}
-	updated, err := s.taskRepo.UpdateTaskStateIfSessionState(
-		ctx, taskID, sessionID, models.TaskSessionStateFailed, v1.TaskStateFailed,
-	)
+	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to update task state to FAILED after early launch error",
 			zap.String("task_id", taskID),
@@ -547,6 +556,37 @@ func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessio
 		return
 	}
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateFailed)
+}
+
+func (s *Service) updateTaskStateForEarlyLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+) (bool, error) {
+	if updater, ok := s.taskRepo.(primarySessionTaskStateUpdater); ok {
+		return updater.UpdateTaskStateIfPrimarySessionState(
+			ctx, taskID, sessionID, models.TaskSessionStateFailed, v1.TaskStateFailed,
+		)
+	}
+	// Lightweight test repositories predate the primary-aware extension.
+	return s.taskRepo.UpdateTaskStateIfSessionState(
+		ctx, taskID, sessionID, models.TaskSessionStateFailed, v1.TaskStateFailed,
+	)
+}
+
+func (s *Service) reconcileTaskStateForEarlyLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	state v1.TaskState,
+) error {
+	if state != v1.TaskStateFailed {
+		return fmt.Errorf("unsupported early launch task state %q", state)
+	}
+	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
+	if err != nil || !updated {
+		return err
+	}
+	s.processParentChildrenCompletedForTaskState(ctx, taskID, state)
+	return nil
 }
 
 func (s *Service) scheduleTaskForSession(ctx context.Context, taskID, sessionID string) error {
@@ -837,7 +877,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		RouteOverride:        route,
 	})
 	if err != nil {
-		return nil, err
+		return nil, s.handleSessionLaunchFailure(ctx, taskID, sessionID, err)
 	}
 
 	s.postLaunchStart(ctx, taskID, execution, effectivePrompt, planModeActive || configMode, planModeActive, autoStart, attachments)
@@ -1265,8 +1305,9 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 			// ResumeSession launches the workspace directly rather than through
 			// LaunchPreparedSession. Record this failure with the same state CAS,
 			// persisted recovery claim, and archive-safe task CAS as early launch.
-			s.recordSessionLaunchFailure(resumeCtx, taskID, sessionID, err, session)
-			return nil, err
+			return nil, s.handleSessionLaunchFailure(
+				resumeCtx, taskID, sessionID, err, session,
+			)
 		}
 	}
 	if readySession == nil {
@@ -1528,16 +1569,13 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 			}
 			return nil
 		}
-		s.updateTaskSessionState(resumeCtx, session.TaskID, sessionID, models.TaskSessionStateFailed, err.Error(), false, session)
-		if stateErr := s.taskRepo.UpdateTaskState(resumeCtx, session.TaskID, v1.TaskStateFailed); stateErr != nil {
-			s.logger.Warn("failed to update task state to FAILED after session ensure resume error",
-				zap.String("task_id", session.TaskID),
-				zap.String("session_id", sessionID),
-				zap.Error(stateErr))
-		} else {
-			s.processParentChildrenCompletedForTaskState(resumeCtx, session.TaskID, v1.TaskStateFailed)
-		}
-		return fmt.Errorf("failed to resume session: %w", err)
+		return s.handleSessionLaunchFailure(
+			resumeCtx,
+			session.TaskID,
+			sessionID,
+			fmt.Errorf("failed to resume session: %w", err),
+			session,
+		)
 	}
 
 	// ResumeSession launches the agent asynchronously. Wait for it to finish
@@ -1608,7 +1646,18 @@ func (s *Service) reapPromptUnreadyExecution(ctx context.Context, sessionID stri
 	if err := s.executor.StopExecution(ctx, executionID, promptReadinessRecoveryStopReason, true); err != nil {
 		return err
 	}
+	s.markExecutionFailed(sessionID, executionID)
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
+	taskID := ""
+	if refreshed != nil {
+		taskID = refreshed.TaskID
+	}
+	s.retireExecutionActivityAndPublish(
+		context.WithoutCancel(ctx),
+		taskID,
+		sessionID,
+		executionID,
+	)
 	if err != nil {
 		return fmt.Errorf("reload session after prompt-readiness teardown: %w", err)
 	}
@@ -1673,7 +1722,8 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 		ExecutorID:     session.ExecutorID,
 		StartAgent:     true,
 	}); err != nil {
-		return fmt.Errorf("failed to start agent on prepared workspace: %w", err)
+		launchErr := fmt.Errorf("failed to start agent on prepared workspace: %w", err)
+		return s.handleSessionLaunchFailure(launchCtx, session.TaskID, sessionID, launchErr)
 	}
 
 	// Same reasoning as ensureSessionRunning's resume path: use launchCtx
@@ -1734,6 +1784,11 @@ func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) err
 	}
 }
 
+// sessionNotFoundStatus is the status-response error used for both a missing
+// session and one the caller does not own, so the response cannot be used to
+// tell the two apart.
+const sessionNotFoundStatus = "session not found"
+
 // GetTaskSessionStatus returns the status of a task session including whether it's resumable
 func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID string) (dto.TaskSessionStatusResponse, error) {
 	s.logger.Debug("checking task session status",
@@ -1745,10 +1800,17 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		TaskID:    taskID,
 	}
 
+	// Per-user scoping: a foreign session is indistinguishable from a missing
+	// one, so reuse the same response shape rather than a distinct error.
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		resp.Error = sessionNotFoundStatus
+		return resp, nil
+	}
+
 	// 1. Load session from database
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		resp.Error = "session not found"
+		resp.Error = sessionNotFoundStatus
 		return resp, nil
 	}
 
@@ -2174,6 +2236,10 @@ func (s *Service) CancelTaskExecution(ctx context.Context, taskID string, reason
 
 // StopSession stops agent execution for a specific session
 func (s *Service) StopSession(ctx context.Context, sessionID string, reason string, force bool) error {
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+
 	s.logger.Info("stopping session execution",
 		zap.String("session_id", sessionID),
 		zap.String("reason", reason),
@@ -2183,6 +2249,14 @@ func (s *Service) StopSession(ctx context.Context, sessionID string, reason stri
 
 // DeleteSession deletes a session that is not currently running.
 func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("session not found: %w", err)
@@ -2196,6 +2270,12 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 
 	taskID := session.TaskID
 	wasPrimary := session.IsPrimary
+
+	// A settled DB state can still own a workspace execution or detached
+	// background work. Quiesce that runtime boundary before removing the row.
+	if err := s.quiesceSessionExecutionBeforeDeletion(ctx, taskID, sessionID); err != nil {
+		return err
+	}
 
 	s.logger.Info("deleting session",
 		zap.String("session_id", sessionID),
@@ -2215,12 +2295,50 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	// Same reasoning for the push-detection tracker. Multi-repo sessions
 	// accumulate one entry per repo; pushTrackerForget walks them all.
 	s.pushTrackerForget(sessionID)
+	// And the foreground/background turn-activity signal. Execution teardown
+	// normally retires it after the final owner exits; deletion forcibly
+	// invalidates any trailing token so the removed session cannot be recreated
+	// through a stale activity pointer.
+	s.clearTurnActivity(sessionID)
 
 	// Auto-promote another session if we deleted the primary
 	if wasPrimary {
 		s.promoteNextPrimaryAfterRemoval(ctx, taskID, sessionID)
 	}
 
+	return nil
+}
+
+// quiesceSessionExecutionBeforeDeletion stops the in-memory lifecycle
+// execution, if one exists, before a session row is removed. A runtime that
+// explicitly reports the exact execution as absent is already quiesced; other
+// stop failures preserve the row because detaching a possibly-live execution
+// would let trailing frames recreate activity after deletion.
+func (s *Service) quiesceSessionExecutionBeforeDeletion(
+	ctx context.Context,
+	taskID, sessionID string,
+) error {
+	if s.agentManager == nil {
+		return nil
+	}
+	executionID, executionErr := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	if executionErr != nil || executionID == "" {
+		return nil
+	}
+	stopErr := s.executor.StopExecution(ctx, executionID, "session deleted", true)
+	if stopErr != nil && !errors.Is(stopErr, agentruntime.ErrNotFound) {
+		return fmt.Errorf("failed to stop session execution before deletion: %w", stopErr)
+	}
+	if stopErr != nil {
+		s.logger.Debug("session execution already absent during deletion",
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID),
+			zap.Error(stopErr))
+	}
+	s.markExecutionFailed(sessionID, executionID)
+	s.retireExecutionActivityAndPublish(
+		context.WithoutCancel(ctx), taskID, sessionID, executionID,
+	)
 	return nil
 }
 
@@ -2260,6 +2378,10 @@ func (s *Service) promoteNextPrimaryAfterRemoval(ctx context.Context, taskID, de
 // SetPrimarySession marks a session as the primary session for its task
 // and broadcasts a task.updated event so the frontend reflects the change.
 func (s *Service) SetPrimarySession(ctx context.Context, sessionID string) error {
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+
 	if err := s.repo.SetSessionPrimary(ctx, sessionID); err != nil {
 		return fmt.Errorf("failed to set session as primary: %w", err)
 	}
@@ -2288,6 +2410,10 @@ const maxSessionNameLength = 120
 // session.state_changed event (same state) so all clients update the tab label.
 // An empty name clears the custom label, falling back to the derived title.
 func (s *Service) RenameSession(ctx context.Context, sessionID, name string) error {
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+
 	name = strings.TrimSpace(name)
 	// Truncate by runes, not bytes — a byte slice could split a multi-byte
 	// UTF-8 sequence and persist an invalid string.
@@ -2638,19 +2764,13 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 
 	// Only allow prompts when the session is ready for input.
 	// Reject when the agent is still starting, already processing, or in a terminal state.
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.loadPromptableSession(ctx, taskID, sessionID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get session: %w", err)
+		return nil, err
 	}
-	if err := s.checkSessionPromptable(taskID, sessionID, session.State); err != nil {
-		if !errors.Is(err, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {
-			return nil, err
-		}
-		readySession, waitErr := s.waitForStartingSessionPromptable(ctx, taskID, sessionID)
-		if waitErr != nil {
-			return nil, waitErr
-		}
-		session = readySession
+	foregroundClaim, err := s.claimForegroundForPrompt(taskID, sessionID, session)
+	if err != nil {
+		return nil, err
 	}
 
 	// Apply config-mode and plan-mode prompt transforms.
@@ -2661,6 +2781,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	_, hadExecutionBeforeEnsure := s.executor.GetExecutionBySession(sessionID)
 	resumedForPrompt := !hadExecutionBeforeEnsure
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
+		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
 		return nil, fmt.Errorf("failed to ensure session is running: %w", err)
 	}
 
@@ -2676,10 +2797,21 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		// Re-apply transforms in case metadata changed during ensureSessionRunning.
 		effectivePrompt = s.effectivePromptForSession(sessionID, prompt, planMode, session)
 	}
+	activityExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
+	foregroundDispatch := s.beginForegroundDispatch(
+		sessionID,
+		foregroundClaim,
+		activityExecutionID,
+	)
+	if foregroundDispatch == nil {
+		s.releaseForegroundClaimOnFailure(ctx, taskID, sessionID, foregroundClaim)
+		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+	}
 
-	// Check if model switching is requested
-	if result, switched, err := s.trySwitchModel(ctx, taskID, sessionID, model, effectivePrompt, session); switched || err != nil {
-		return result, err
+	if result, handled, switchErr := s.trySwitchModelForPrompt(
+		ctx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch,
+	); handled {
+		return result, switchErr
 	}
 
 	previousSessionState := session.State
@@ -2689,25 +2821,107 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// the pre-injection prompt; PromptTask re-applies config/plan transforms.
 	s.rememberTurnPrompt(sessionID, prompt, model, planMode, attachments)
 
-	claimedSession, err := s.claimSessionRunningForPrompt(ctx, taskID, sessionID, claimEntryID, session)
+	claimedSession, err := s.claimSessionRunningForPrompt(
+		ctx, taskID, sessionID, claimEntryID, session, foregroundClaim,
+	)
 	if err != nil {
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
 		return nil, err
 	}
 	session = claimedSession
 	s.startTurnForSession(ctx, sessionID)
+	// beginForegroundDispatch atomically established foreground-generating
+	// ownership before any cleanup/provider event could interleave. Publish that
+	// flip now that session admission succeeded; claimed RUNNING prompts also need
+	// the broadcast because their earlier atomic claim made the same transition.
+	if foregroundDispatch.yieldedBeforeBegin || foregroundClaim != nil {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
 
 	// Use context.WithoutCancel to prevent WebSocket request timeout from canceling the prompt.
 	// Prompts can take a long time (minutes) while the WS request may timeout in 15 seconds.
 	// We still want to log and respond, but the prompt should continue regardless.
 	promptCtx := context.WithoutCancel(ctx)
-	result, err := s.executor.Prompt(promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly, session)
+	result, err := s.executor.PromptWithDispatchCallback(
+		promptCtx, taskID, sessionID, effectivePrompt, attachments, dispatchOnly,
+		func() {
+			if s.acceptForegroundDispatch(foregroundDispatch) {
+				s.publishForegroundActivityChanged(promptCtx, taskID, sessionID)
+			}
+		}, session,
+	)
 	if err != nil {
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, foregroundDispatch)
 		return s.handlePromptDispatchFailure(ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments, previousSessionState, err)
 	}
 	return &PromptResult{
 		StopReason:   result.StopReason,
 		AgentMessage: result.AgentMessage,
 	}, nil
+}
+
+func (s *Service) loadPromptableSession(ctx context.Context, taskID, sessionID string) (*models.TaskSession, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	if promptErr := s.checkSessionPromptable(taskID, sessionID, session.State); promptErr != nil {
+		if !errors.Is(promptErr, ErrSessionNotPromptable) || session.State != models.TaskSessionStateStarting {
+			return nil, promptErr
+		}
+		return s.waitForStartingSessionPromptable(ctx, taskID, sessionID)
+	}
+	return session, nil
+}
+
+// claimForegroundForPrompt closes the gap between reading a RUNNING session's
+// background-idle substate and dispatching its next prompt.
+func (s *Service) claimForegroundForPrompt(taskID, sessionID string, session *models.TaskSession) (*foregroundClaim, error) {
+	if session.State != models.TaskSessionStateRunning {
+		return nil, nil
+	}
+	claim := s.claimForegroundTurn(sessionID)
+	if claim != nil {
+		return claim, nil
+	}
+	s.logger.Warn("rejected prompt: another prompt claimed the background-idle foreground turn first",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+	return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+}
+
+func (s *Service) releaseForegroundClaimOnFailure(ctx context.Context, taskID, sessionID string, claim *foregroundClaim) {
+	if s.releaseForegroundClaim(claim) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
+}
+
+func (s *Service) rollbackForegroundDispatchOnFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	dispatch *foregroundDispatch,
+) {
+	if s.rollbackForegroundDispatch(dispatch) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
+}
+
+// trySwitchModelForPrompt keeps foreground admission consistent when a model
+// switch either dispatches the prompt itself or fails before reaching the agent.
+func (s *Service) trySwitchModelForPrompt(ctx context.Context, taskID, sessionID, model, prompt string, session *models.TaskSession, dispatch *foregroundDispatch) (*PromptResult, bool, error) {
+	result, switched, err := s.trySwitchModel(ctx, taskID, sessionID, model, prompt, session)
+	if !switched && err == nil {
+		return nil, false, nil
+	}
+	if err != nil {
+		s.rollbackForegroundDispatchOnFailure(ctx, taskID, sessionID, dispatch)
+		return result, true, err
+	}
+	revealedBackground := s.acceptForegroundDispatch(dispatch)
+	if revealedBackground || dispatch.yieldedBeforeBegin || s.acceptedForegroundDispatchClaim(dispatch) {
+		s.publishForegroundActivityChanged(ctx, taskID, sessionID)
+	}
+	return result, true, nil
 }
 
 // handlePromptDispatchFailure handles a failed executor.Prompt call from
@@ -2772,7 +2986,12 @@ func (s *Service) effectivePromptForSession(sessionID, prompt string, planMode b
 // call near its top. Reloading the session and re-running
 // checkSessionPromptable here makes "is it actually still safe to mark this
 // session RUNNING right now" an atomic fact, not a stale read.
-func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sessionID, claimEntryID string, session *models.TaskSession) (*models.TaskSession, error) {
+func (s *Service) claimSessionRunningForPrompt(
+	ctx context.Context,
+	taskID, sessionID, claimEntryID string,
+	session *models.TaskSession,
+	foregroundClaim *foregroundClaim,
+) (*models.TaskSession, error) {
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
@@ -2788,7 +3007,9 @@ func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sess
 	if freshSession == nil {
 		return nil, errQueuedDispatchSuperseded
 	}
-	if promptErr := s.checkSessionPromptable(taskID, sessionID, freshSession.State); promptErr != nil {
+	if promptErr := s.recheckPromptableWithForegroundClaim(
+		taskID, sessionID, freshSession.State, foregroundClaim,
+	); promptErr != nil {
 		return nil, promptErr
 	}
 	s.setSessionRunning(ctx, taskID, sessionID, freshSession)
@@ -2814,6 +3035,30 @@ func (s *Service) claimSessionRunningForPrompt(ctx context.Context, taskID, sess
 	return freshSession, nil
 }
 
+func (s *Service) recheckPromptableWithForegroundClaim(
+	taskID, sessionID string,
+	state models.TaskSessionState,
+	claim *foregroundClaim,
+) error {
+	if claim == nil {
+		return s.checkSessionPromptable(taskID, sessionID, state)
+	}
+	if state != models.TaskSessionStateRunning {
+		// ensureSessionRunning may resume the agent after this prompt claimed a
+		// background-idle RUNNING session. AgentBootReady advances the durable
+		// state to WAITING_FOR_INPUT before dispatch; keep the valid claim across
+		// that expected transition while still rejecting terminal or otherwise
+		// non-promptable states.
+		if err := s.checkSessionPromptable(taskID, sessionID, state); err != nil {
+			return err
+		}
+	}
+	if !s.isForegroundClaimCurrent(sessionID, claim) {
+		return fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
+	}
+	return nil
+}
+
 // checkSessionPromptable returns nil when the session's state accepts a new
 // prompt. RUNNING is rejected with ErrAgentPromptInProgress; any other
 // non-acceptable state (STARTING / CREATED / FAILED / CANCELLED) is rejected
@@ -2829,6 +3074,20 @@ func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.
 		models.TaskSessionStateIdle:
 		return nil
 	case models.TaskSessionStateRunning:
+		// Narrow the busy signal: a session that kicked off background work and
+		// is otherwise idle in the foreground should still accept a new message
+		// rather than reporting "running" and dropping it.
+		//
+		// This is a *read*, not a claim — DrainQueuedMessage and the STARTING wait
+		// both call it without going on to drive a turn themselves. PromptTask,
+		// which does, follows a passing read with claimForegroundTurn to close the
+		// check-then-act window against a second concurrent prompt.
+		if !s.isForegroundTurnGenerating(sessionID) {
+			s.logger.Debug("accepting prompt: foreground turn idle, only background work outstanding",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return nil
+		}
 		s.logger.Warn("rejected prompt while agent is already running",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
@@ -2930,6 +3189,10 @@ func (s *Service) trySwitchModel(ctx context.Context, taskID, sessionID, model, 
 
 // RespondToPermission sends a response to a permission request for a session
 func (s *Service) RespondToPermission(ctx context.Context, sessionID, pendingID, optionID string, cancelled, rejected bool) error {
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+
 	s.logger.Debug("responding to permission request",
 		zap.String("session_id", sessionID),
 		zap.String("pending_id", pendingID),
@@ -3095,6 +3358,10 @@ func (s *Service) isCancelInFlight(sessionID string) bool {
 // turn) so the user can unstick a session whose agent subprocess crashed. Other errors
 // still fail the cancel.
 func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+
 	s.logger.Debug("cancelling agent turn", zap.String("session_id", sessionID))
 
 	// Deduplicate concurrent retries. The UI's cancel button has no in-flight
@@ -3450,6 +3717,10 @@ func (s *Service) CompleteTask(ctx context.Context, taskID string) error {
 // ResetAgentContext resets the agent's conversation context for a session,
 // clearing conversation history while preserving the workspace environment.
 func (s *Service) ResetAgentContext(ctx context.Context, sessionID string) error {
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return err
+	}
+
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return fmt.Errorf("session not found: %w", err)

@@ -24,6 +24,8 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+const legacyExecutorTypeLocalPC = "local_pc"
+
 // resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
 func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (string, *AgentProfileInfo, error) {
 	profileID := executionProfileID(req)
@@ -204,21 +206,32 @@ func baseBranchMetadataKey(spec RepoLaunchSpec) string {
 	return repoName + "-" + branchSlug
 }
 
-// agentCommands holds the initial and continue command strings for an agent execution.
+// agentCommands holds both the display strings and structured argv for an agent execution.
 type agentCommands struct {
-	initial   string
-	continue_ string // continue command for one-shot agents (empty if not applicable)
+	initial      string
+	continue_    string // continue command for one-shot agents (empty if not applicable)
+	args         []string
+	continueArgs []string
+}
+
+func newAgentCommands(args, continueArgs []string) agentCommands {
+	return agentCommands{
+		initial:      strings.Join(args, " "),
+		continue_:    strings.Join(continueArgs, " "),
+		args:         args,
+		continueArgs: continueArgs,
+	}
 }
 
 // resolveProfileLaunchTokens resolves the user-configured cli_flags argv tokens
 // and the launcher command_prefix tokens for a profile. Both must be applied on
 // every command build — the initial launch AND fresh restarts (context reset) —
-// or a sandboxed profile would silently relaunch without its wrapper.
+// or a configured profile could silently relaunch without its wrapper.
 //
 // cli_flags are best-effort: a malformed entry is logged and dropped so a typo
-// doesn't block the task. command_prefix is a sandbox boundary, so it fails
-// CLOSED: a profile that configured a prefix which cannot be resolved returns an
-// error and aborts the launch rather than running the agent unwrapped.
+// doesn't block the task. command_prefix is launcher policy, so it fails closed:
+// a profile that configured a prefix which cannot be resolved returns an error
+// and aborts the launch rather than running the agent unwrapped.
 func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo) (cliFlagTokens, commandPrefixTokens []string, err error) {
 	if profileInfo == nil {
 		return nil, nil, nil
@@ -231,12 +244,15 @@ func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo) (cli
 		cliFlagTokens = tokens
 	}
 	if strings.TrimSpace(profileInfo.CommandPrefix) != "" {
-		tokens, tokErr := cliflags.Tokenise(profileInfo.CommandPrefix)
-		if tokErr != nil || len(tokens) == 0 {
+		if validateErr := cliflags.ValidateCommandPrefix(profileInfo.CommandPrefix); validateErr != nil {
 			return nil, nil, fmt.Errorf("resolve command_prefix for profile %s: %w",
-				profileInfo.ProfileID, tokErr)
+				profileInfo.ProfileID, validateErr)
 		}
-		commandPrefixTokens = tokens
+		commandPrefixTokens, err = cliflags.Tokenise(profileInfo.CommandPrefix)
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve command_prefix for profile %s: %w",
+				profileInfo.ProfileID, err)
+		}
 	}
 	return cliFlagTokens, commandPrefixTokens, nil
 }
@@ -244,7 +260,7 @@ func (m *Manager) resolveProfileLaunchTokens(profileInfo *AgentProfileInfo) (cli
 // buildAgentCommand builds the agent command strings for the execution.
 // Returns both the initial command and the continue command (for one-shot agents like Amp).
 // Returns an error when a configured command_prefix cannot be resolved, so a
-// sandboxed profile fails closed instead of launching unwrapped.
+// configured profile fails closed instead of launching unwrapped.
 func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfileInfo, agentConfig agents.Agent, preferNative bool) (agentCommands, error) {
 	model := ""
 	autoApprove := false
@@ -281,10 +297,24 @@ func (m *Manager) buildAgentCommand(req *LaunchRequest, profileInfo *AgentProfil
 		Runtime:             models.ExecutorType(req.ExecutorType).Runtime(),
 		PreferNativeBinary:  preferNative,
 	}
-	return agentCommands{
-		initial:   m.commandBuilder.BuildCommandString(agentConfig, cmdOpts),
-		continue_: m.commandBuilder.BuildContinueCommandString(agentConfig, cmdOpts),
-	}, nil
+	args := m.commandBuilder.BuildCommandArgs(agentConfig, cmdOpts)
+	continueArgs := m.commandBuilder.BuildContinueCommandArgs(agentConfig, cmdOpts)
+	if err := validateBuiltAgentCommands(args, continueArgs); err != nil {
+		return agentCommands{}, err
+	}
+	return newAgentCommands(args, continueArgs), nil
+}
+
+func validateBuiltAgentCommands(args, continueArgs []string) error {
+	if err := cliflags.ValidateCommandArgs(args); err != nil {
+		return fmt.Errorf("validate agent command: %w", err)
+	}
+	if continueArgs != nil {
+		if err := cliflags.ValidateCommandArgs(continueArgs); err != nil {
+			return fmt.Errorf("validate continue command: %w", err)
+		}
+	}
+	return nil
 }
 
 // launchResolveWorkspacePath resolves the effective workspace path for non-worktree executors.
@@ -322,6 +352,11 @@ func (m *Manager) resolveWorkspaceFromProvider(ctx context.Context, req *LaunchR
 }
 
 func (m *Manager) launchResolveWorkspacePath(ctx context.Context, req *LaunchRequest) (workspacePath, mainRepoGitDir, worktreeID, worktreeBranch string) {
+	// Clone-based runtimes own their workspace filesystem. In particular, never
+	// pass a host checkout into Docker, SSH, or Sprites on reset/reconnect.
+	if backend, err := m.getExecutorBackend(req.ExecutorType); err == nil && backend.RequiresCloneURL() {
+		return "", "", "", ""
+	}
 	// Worktree mode requires a repository. Repo-less tasks fall through to the
 	// scratch workspace path below — even if the executor type was worktree.
 	useWorktree := req.UseWorktree && req.RepositoryPath != ""
@@ -603,6 +638,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
+		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,
 		AutoApprovePermissions:         profileInfo != nil && profileInfo.AutoApprove,
@@ -617,10 +653,8 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		OnProgress:                     onProgress,
 	}
 
-	if resumer, ok := rt.(RemoteSessionResumer); ok {
-		if err := resumer.ResumeRemoteInstance(ctx, execReq); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed remote resume preflight: %w", err)
-		}
+	if err := resumeRemoteInstancePreflight(ctx, rt, execReq); err != nil {
+		return nil, nil, nil, err
 	}
 
 	execInstance, err := rt.CreateInstance(ctx, execReq)
@@ -628,6 +662,17 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		return nil, nil, nil, fmt.Errorf("failed to create execution: %w", err)
 	}
 	return execReq, execInstance, rt, nil
+}
+
+func resumeRemoteInstancePreflight(ctx context.Context, rt ExecutorBackend, req *ExecutorCreateRequest) error {
+	resumer, ok := rt.(RemoteSessionResumer)
+	if !ok {
+		return nil
+	}
+	if err := resumer.ResumeRemoteInstance(ctx, req); err != nil {
+		return fmt.Errorf("failed remote resume preflight: %w", err)
+	}
+	return nil
 }
 
 // runEnvironmentPreparer runs the environment preparer for the executor type, if one is registered.
@@ -925,6 +970,8 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 		}
 		execution.AgentCommand = cmds.initial
 		execution.ContinueCommand = cmds.continue_
+		execution.AgentArgs = cmds.args
+		execution.ContinueArgs = cmds.continueArgs
 		if req.ACPSessionID != "" && execution.ACPSessionID == "" {
 			execution.ACPSessionID = req.ACPSessionID
 		}
@@ -936,6 +983,8 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			if err := m.materializeRuntimeProjectMCP(sharedCtx, execution, agentConfig); err != nil {
 				execution.AgentCommand = ""
 				execution.ContinueCommand = ""
+				execution.AgentArgs = nil
+				execution.ContinueArgs = nil
 				execution.isResumedSession = false
 				execution.IsPassthrough = false
 				return nil, err
@@ -992,6 +1041,14 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
+	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders); err != nil {
+		return nil, err
+	}
+	if req.ExecutorType == string(models.ExecutorTypeLocal) || req.ExecutorType == legacyExecutorTypeLocalPC {
+		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req)); err != nil {
+			return nil, err
+		}
+	}
 	progressRecorder := newPrepareProgressRecorder(m.newProgressCallback(req.TaskID, req.SessionID))
 
 	// 4b. Run environment preparation (if preparer registered for this executor type).
@@ -1029,6 +1086,21 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
 		return nil, err
 	}
+	// A reset/relaunch receives the complete durable repository projection from
+	// the orchestrator. Reconcile it through the fresh live agentctl rather than
+	// relying on the legacy primary-repository prepare script alone.
+	if rt.RequiresCloneURL() && len(reqWithWorktree.RepoSpecs()) > 1 && execInstance != nil && execInstance.Client != nil {
+		projection, projectionErr := remoteWorkspaceProjectionFromLaunch(&reqWithWorktree)
+		if projectionErr == nil {
+			projectionErr = materializeWorkspaceRepositories(ctx, execInstance.Client, projection)
+		}
+		if projectionErr != nil {
+			_ = rt.StopInstance(context.WithoutCancel(ctx), execInstance, false)
+			err = fmt.Errorf("reconstruct remote workspace repositories: %w", projectionErr)
+			m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+			return nil, err
+		}
+	}
 
 	// Remote executors (Docker, Sprites) clone the workspace inside the
 	// container, so the worktree path's host-side copy_files never ran.
@@ -1055,11 +1127,14 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		// instance directly to avoid leaking it, then fail closed.
 		if rt != nil && execInstance != nil {
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if stopErr := rt.StopInstance(cleanupCtx, execInstance, false); stopErr != nil {
+			if stopErr := rt.StopInstance(cleanupCtx, execInstance, true); stopErr != nil {
 				m.logger.Warn("failed to stop runtime instance after command resolution error",
 					zap.Error(stopErr))
 			}
 			cancel()
+		}
+		if execInstance != nil && execInstance.Client != nil {
+			execInstance.Client.Close()
 		}
 		return nil, err
 	}
@@ -1118,6 +1193,8 @@ func (m *Manager) buildExecutionFromInstance(
 	}
 	execution.AgentCommand = cmds.initial
 	execution.ContinueCommand = cmds.continue_
+	execution.AgentArgs = cmds.args
+	execution.ContinueArgs = cmds.continueArgs
 	return execution, nil
 }
 
@@ -1167,7 +1244,7 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if stopErr := rt.StopInstance(cleanupCtx, execInstance, false); stopErr != nil {
+		if stopErr := rt.StopInstance(cleanupCtx, execInstance, true); stopErr != nil {
 			m.logger.Warn("failed to stop runtime instance during launch rollback",
 				zap.String("execution_id", execution.ID),
 				zap.Error(stopErr))
@@ -1258,9 +1335,9 @@ func (m *Manager) resolveApprovalPolicyAndDisplayName(ctx context.Context, execu
 }
 
 // createBootMessage creates a boot message and starts the stderr polling goroutine.
-// Returns the message and stop channel (both nil if bootMessageService is not configured).
+// Returns nil values when boot messages are unavailable.
 func (m *Manager) createBootMessage(ctx context.Context, execution *AgentExecution, bootCommand, agentDisplayName string) (*models.Message, chan struct{}) {
-	if m.bootMessageService == nil {
+	if m.bootMessageService == nil || execution == nil {
 		return nil, nil
 	}
 	bootMsg, bootErr := m.bootMessageService.CreateMessage(ctx, &BootMessageRequest{
@@ -1322,7 +1399,7 @@ func (m *Manager) configureAndStartAgent(ctx context.Context, execution *AgentEx
 		return "", fmt.Errorf("failed to prepare agent env: %w", err)
 	}
 
-	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, env, approvalPolicy, execution.ContinueCommand); err != nil {
+	if err := execution.agentctl.ConfigureAgent(ctx, execution.AgentCommand, execution.AgentArgs, env, approvalPolicy, execution.ContinueCommand, execution.ContinueArgs); err != nil {
 		return "", fmt.Errorf("failed to configure agent: %w", err)
 	}
 

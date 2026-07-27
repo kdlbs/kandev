@@ -17,7 +17,7 @@ type Repository interface {
 	ReplaceSubscriptions(ctx context.Context, providerID, userID string, events []string) error
 
 	InsertDelivery(ctx context.Context, delivery *models.Delivery) (bool, error)
-	DeleteDelivery(ctx context.Context, providerID, eventType, taskSessionID string) error
+	DeleteDelivery(ctx context.Context, providerID, eventType, occurrenceID string) error
 
 	Close() error
 }

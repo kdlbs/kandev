@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -38,6 +39,29 @@ import (
 func newTestTaskService(t *testing.T) (*service.Service, *sqliterepo.Repository) {
 	svc, repo, _ := newTestTaskServiceWithEventBus(t)
 	return svc, repo
+}
+
+type staticWorkflowStepGetter struct {
+	steps map[string]*workflowmodels.WorkflowStep
+}
+
+func (g *staticWorkflowStepGetter) GetStep(
+	_ context.Context,
+	stepID string,
+) (*workflowmodels.WorkflowStep, error) {
+	step := g.steps[stepID]
+	if step == nil {
+		return nil, fmt.Errorf("workflow step not found: %s", stepID)
+	}
+	return step, nil
+}
+
+func (*staticWorkflowStepGetter) GetNextStepByPosition(
+	context.Context,
+	string,
+	int,
+) (*workflowmodels.WorkflowStep, error) {
+	return nil, nil
 }
 
 func newTestTaskServiceWithEventBus(t *testing.T) (*service.Service, *sqliterepo.Repository, *bus.MemoryEventBus) {
@@ -188,6 +212,22 @@ func TestHandleAddBranchToTask_RejectsMultipleLocators(t *testing.T) {
 	resp, err := h.handleAddBranchToTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleAddWorkspaceSourcesRejectsUnknownKind(t *testing.T) {
+	h := &Handlers{}
+	msg := makeWSMessage(t, ws.ActionMCPAddWorkspaceSources, map[string]interface{}{
+		"task_id": "task-1",
+		"sources": []interface{}{map[string]interface{}{"kind": "unknown"}},
+	})
+
+	resp, err := h.handleAddWorkspaceSources(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestClassifyWorkspaceSourceErrorMapsRepositoryNotFound(t *testing.T) {
+	assert.Equal(t, ws.ErrorCodeNotFound, classifyWorkspaceSourceError(fmt.Errorf("wrapped: %w", repository.ErrRepositoryNotFound)))
 }
 
 func TestHandleCreateTask_MissingTitle(t *testing.T) {
@@ -1189,6 +1229,43 @@ func TestHandleCreateTask_InvalidWorkflowReturnsValidationError(t *testing.T) {
 	assert.Contains(t, ep.Message, "was not found")
 }
 
+func TestHandleCreateTask_StepOutsideWorkflowReturnsValidationError(t *testing.T) {
+	svc, _ := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+	svc.SetWorkflowStepGetter(&staticWorkflowStepGetter{
+		steps: map[string]*workflowmodels.WorkflowStep{
+			"foreign-step": {ID: "foreign-step", WorkflowID: "foreign-workflow"},
+		},
+	})
+
+	h := &Handlers{
+		taskSvc: svc,
+		logger:  testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"workflow_step_id": "foreign-step",
+		"title":            "Task with mismatched step",
+		"agent_profile_id": "profile-1",
+		"start_agent":      false,
+	})
+
+	resp, err := h.handleCreateTask(ctx, msg)
+
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	var ep ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
+	assert.Contains(t, ep.Message, "workflow step not found")
+}
+
 func TestHandleCreateTask_StartAgentUsesWorkspaceDefaultAgentProfile(t *testing.T) {
 	svc, _ := newTestTaskService(t)
 	ctx := context.Background()
@@ -1871,6 +1948,11 @@ func TestHandleCreateTask_SubtaskCanRequestNewWorkspaceMode(t *testing.T) {
 
 func TestHandleCreateTask_SubtaskHonorsExplicitWorkspaceAndWorkflow(t *testing.T) {
 	svc, repo := newTestTaskService(t)
+	svc.SetWorkflowStepGetter(&staticWorkflowStepGetter{
+		steps: map[string]*workflowmodels.WorkflowStep{
+			"step-other": {ID: "step-other", WorkflowID: "wf-2"},
+		},
+	})
 	ctx := context.Background()
 	parentID := seedParentWithRepo(t, svc, repo)
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-2", Name: "Other"}))

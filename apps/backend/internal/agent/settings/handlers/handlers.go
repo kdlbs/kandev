@@ -13,12 +13,11 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
-
-const queryValueTrue = "true"
 
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
@@ -26,25 +25,27 @@ type Handlers struct {
 	controller *controller.Controller
 	hub        Broadcaster
 	logger     *logger.Logger
+	interlock  gin.HandlerFunc
 }
 
 type Broadcaster interface {
 	Broadcast(msg *ws.Message)
 }
 
-func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logger) *Handlers {
+func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) *Handlers {
 	return &Handlers{
 		controller: ctrl,
 		hub:        hub,
 		logger:     log.WithFields(zap.String("component", "agent-settings-handlers")),
+		interlock:  httpmw.InterimSettingsInterlock(interlockToken),
 	}
 }
 
-func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger) {
+func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) {
 	// Wire the install job store with the same broadcaster used by other
 	// agent-settings notifications so streaming install events reach the UI.
 	ctrl.SetJobBroadcaster(hub)
-	handlers := NewHandlers(ctrl, hub, log)
+	handlers := NewHandlers(ctrl, hub, log, interlockToken)
 	handlers.registerHTTP(router)
 }
 
@@ -52,24 +53,23 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
-	api.GET("/agents/usage", h.httpAgentSubscriptionUsage)
 	api.GET("/agents", h.httpListAgents)
-	api.POST("/agents", h.httpCreateAgent)
-	api.POST("/agents/tui", h.httpCreateCustomTUIAgent)
+	api.POST("/agents", h.interlock, h.httpCreateAgent)
+	api.POST("/agents/tui", h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/:id", h.httpGetAgent)
-	api.PATCH("/agents/:id", h.httpUpdateAgent)
-	api.DELETE("/agents/:id", h.httpDeleteAgent)
-	api.POST("/agents/:id/profiles", h.httpCreateProfile)
+	api.PATCH("/agents/:id", h.interlock, h.httpUpdateAgent)
+	api.DELETE("/agents/:id", h.interlock, h.httpDeleteAgent)
+	api.POST("/agents/:id/profiles", h.interlock, h.httpCreateProfile)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
-	api.POST("/agent-install/:agentName", h.httpInstallAgent)
+	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
-	api.PATCH("/agent-profiles/:id", h.httpUpdateProfile)
-	api.DELETE("/agent-profiles/:id", h.httpDeleteProfile)
+	api.PATCH("/agent-profiles/:id", h.interlock, h.httpUpdateProfile)
+	api.DELETE("/agent-profiles/:id", h.interlock, h.httpDeleteProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
-	api.POST("/agent-profiles/:id/mcp-config", h.httpUpdateProfileMcpConfig)
+	api.POST("/agent-profiles/:id/mcp-config", h.interlock, h.httpUpdateProfileMcpConfig)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -82,11 +82,6 @@ func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, resp)
 	h.broadcastAvailableAgentsAsync()
-}
-
-func (h *Handlers) httpAgentSubscriptionUsage(c *gin.Context) {
-	fresh := c.Query("fresh") == queryValueTrue || c.Query("fresh") == "1"
-	c.JSON(http.StatusOK, h.controller.SubscriptionUsage(c.Request.Context(), fresh))
 }
 
 func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
@@ -482,7 +477,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 }
 
 func (h *Handlers) httpDeleteProfile(c *gin.Context) {
-	force := c.Query("force") == queryValueTrue
+	force := c.Query("force") == "true"
 	profile, err := h.controller.DeleteProfile(c.Request.Context(), c.Param("id"), force)
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
@@ -586,7 +581,7 @@ func (h *Handlers) httpGetAgentModels(c *gin.Context) {
 	}
 
 	// Check for refresh query parameter
-	refresh := c.Query("refresh") == queryValueTrue
+	refresh := c.Query("refresh") == "true"
 
 	resp, err := h.controller.FetchDynamicModels(c.Request.Context(), agentName, refresh)
 	if err != nil {

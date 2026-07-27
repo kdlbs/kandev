@@ -580,3 +580,55 @@ func TestApplyRepositoryConfig_PropagatesRepositoryID(t *testing.T) {
 		t.Errorf("req.RepositoryID = %q, want %q", req.RepositoryID, "repo-abc")
 	}
 }
+
+func TestApplyRepositoryConfig_DirectLocalSetsFilesystemSafeRepoName(t *testing.T) {
+	e := newEnvTestExecutor(t)
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
+	info := &repoInfo{
+		RepositoryID:   "repo-abc",
+		RepositoryPath: "/repos/widget",
+		Repository: &models.Repository{
+			ID:   "repo-abc",
+			Name: "acme/widget",
+		},
+	}
+	execCfg := executorConfig{ExecutorID: "exec-1", ExecutorType: string(models.ExecutorTypeLocal)}
+
+	if _, err := e.applyRepositoryConfig(req, task, info, execCfg, nil); err != nil {
+		t.Fatalf("applyRepositoryConfig: %v", err)
+	}
+
+	if req.RepoName != "acme-widget" {
+		t.Errorf("req.RepoName = %q, want %q", req.RepoName, "acme-widget")
+	}
+	if req.TaskDirName != "" {
+		t.Errorf("req.TaskDirName = %q, want empty for direct-local launch", req.TaskDirName)
+	}
+}
+
+func TestApplyRepositoryConfig_DirectLocalFallsBackToRepositoryIDForUnsafeRepoName(t *testing.T) {
+	e := newEnvTestExecutor(t)
+	req := &LaunchAgentRequest{TaskID: "task-1"}
+	task := &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "Some task"}
+	info := &repoInfo{
+		RepositoryID:   "repo_123",
+		RepositoryPath: "/repos/widget",
+		Repository: &models.Repository{
+			ID:   "repo_123",
+			Name: "日本語!!!",
+		},
+	}
+	execCfg := executorConfig{ExecutorID: "exec-1", ExecutorType: string(models.ExecutorTypeLocal)}
+
+	if _, err := e.applyRepositoryConfig(req, task, info, execCfg, nil); err != nil {
+		t.Fatalf("applyRepositoryConfig: %v", err)
+	}
+
+	if req.RepoName != "repo_123" {
+		t.Errorf("req.RepoName = %q, want stable repository ID fallback %q", req.RepoName, "repo_123")
+	}
+	if req.TaskDirName != "" {
+		t.Errorf("req.TaskDirName = %q, want empty for direct-local launch", req.TaskDirName)
+	}
+}

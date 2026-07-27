@@ -10,22 +10,30 @@ import (
 	"go.uber.org/zap"
 )
 
+// TaskWorkspaceResolver resolves the owning workspace ID for a task ID. It lets
+// the office broadcaster attribute run events (which carry task_id but no
+// workspace_id) to a workspace so they route to the owner instead of everyone.
+type TaskWorkspaceResolver func(ctx context.Context, taskID string) (string, error)
+
 // OfficeEventBroadcaster subscribes to office domain events on the event bus
-// and broadcasts them as WS notifications to all connected clients.
-// Clients filter by workspace_id in the payload.
+// and broadcasts them as WS notifications to the owning workspace's clients.
+// Clients additionally filter by workspace_id in the payload.
 type OfficeEventBroadcaster struct {
 	hub           *Hub
 	subscriptions []bus.Subscription
 	logger        *logger.Logger
+	resolveTaskWS TaskWorkspaceResolver
 }
 
 // RegisterOfficeNotifications creates an OfficeEventBroadcaster, subscribes to
-// all office-relevant events, and returns it. The broadcaster is cleaned up when
-// ctx is cancelled.
-func RegisterOfficeNotifications(ctx context.Context, eventBus bus.EventBus, hub *Hub, log *logger.Logger) *OfficeEventBroadcaster {
+// all office-relevant events, and returns it. resolveTaskWS (may be nil) maps a
+// task_id to its workspace so run events without a workspace_id still route to
+// the owner. The broadcaster is cleaned up when ctx is cancelled.
+func RegisterOfficeNotifications(ctx context.Context, eventBus bus.EventBus, hub *Hub, resolveTaskWS TaskWorkspaceResolver, log *logger.Logger) *OfficeEventBroadcaster {
 	b := &OfficeEventBroadcaster{
-		hub:    hub,
-		logger: log.WithFields(zap.String("component", "ws-office-broadcaster")),
+		hub:           hub,
+		logger:        log.WithFields(zap.String("component", "ws-office-broadcaster")),
+		resolveTaskWS: resolveTaskWS,
 	}
 	if eventBus == nil {
 		return b
@@ -120,7 +128,7 @@ func stripPayloadKeys(data interface{}, dropKeys []string) interface{} {
 // filter by workspace_id); session-scoped fields leaked from the source event
 // would otherwise mis-classify the envelope as session-routed for accounting.
 func (b *OfficeEventBroadcaster) subscribeWithout(eventBus bus.EventBus, subject, action string, dropKeys ...string) {
-	sub, err := eventBus.Subscribe(subject, func(_ context.Context, event *bus.Event) error {
+	sub, err := eventBus.Subscribe(subject, func(ctx context.Context, event *bus.Event) error {
 		data := stripPayloadKeys(event.Data, dropKeys)
 		msg, err := ws.NewNotification(action, data)
 		if err != nil {
@@ -128,8 +136,11 @@ func (b *OfficeEventBroadcaster) subscribeWithout(eventBus bus.EventBus, subject
 				zap.String("action", action), zap.Error(err))
 			return nil
 		}
-		// Broadcast to all clients — they filter by workspace_id in the payload.
-		b.hub.Broadcast(msg)
+		// Route to the owning workspace's clients; clients additionally filter
+		// by workspace_id in the payload. Every office event is workspace-scoped,
+		// so when the workspace can't be resolved under auth we DROP rather than
+		// fan out globally (BroadcastToWorkspaceOrDrop).
+		b.hub.BroadcastToWorkspaceOrDrop(b.workspaceForEvent(ctx, event.Data), msg)
 		return nil
 	})
 	if err != nil {
@@ -138,4 +149,28 @@ func (b *OfficeEventBroadcaster) subscribeWithout(eventBus bus.EventBus, subject
 		return
 	}
 	b.subscriptions = append(b.subscriptions, sub)
+}
+
+// workspaceForEvent resolves the workspace an office event belongs to. It
+// prefers an explicit workspace_id in the payload and, failing that, resolves
+// the workspace from a task_id (run events carry task_id but no workspace_id).
+// Returns "" when neither is available — the caller fails closed under auth.
+func (b *OfficeEventBroadcaster) workspaceForEvent(ctx context.Context, data interface{}) string {
+	if wsID := extractWorkspaceID(data); wsID != "" {
+		return wsID
+	}
+	if b.resolveTaskWS == nil {
+		return ""
+	}
+	taskID := extractStringField(data, "task_id")
+	if taskID == "" {
+		return ""
+	}
+	wsID, err := b.resolveTaskWS(ctx, taskID)
+	if err != nil {
+		b.logger.Debug("office event task->workspace resolve failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		return ""
+	}
+	return wsID
 }

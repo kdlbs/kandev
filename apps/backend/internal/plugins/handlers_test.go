@@ -480,7 +480,8 @@ func TestWriteWebhookResponse_OutOfRangePluginStatusReturns502(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
 
-	writeWebhookResponse(ctx, &pluginsdk.WebhookResponse{Status: 0, Body: []byte("boom")})
+	ctrl := &Controller{svc: &Service{}, log: testLogger(t)}
+	ctrl.writeWebhookResponse(ctx, &store.Record{}, &pluginsdk.WebhookResponse{Status: 0, Body: []byte("boom")})
 
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502, body=%s", rec.Code, rec.Body.String())
@@ -495,7 +496,8 @@ func TestWriteWebhookResponse_ValidStatusRelaysHeadersAndBody(t *testing.T) {
 	rec := httptest.NewRecorder()
 	ctx, _ := gin.CreateTestContext(rec)
 
-	writeWebhookResponse(ctx, &pluginsdk.WebhookResponse{
+	ctrl := &Controller{svc: &Service{}, log: testLogger(t)}
+	ctrl.writeWebhookResponse(ctx, &store.Record{}, &pluginsdk.WebhookResponse{
 		Status:  201,
 		Headers: map[string]string{"X-Plugin": "slack"},
 		Body:    []byte(`{"ok":true}`),

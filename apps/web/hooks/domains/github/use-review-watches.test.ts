@@ -61,6 +61,11 @@ function NullProbe() {
   return null;
 }
 
+function UnresolvedProbe() {
+  useReviewWatches();
+  return null;
+}
+
 function readProbe(el: HTMLElement) {
   return JSON.parse(el.textContent ?? "{}") as {
     loaded: boolean;
@@ -95,6 +100,11 @@ describe("useReviewWatches", () => {
 
   it("does not fetch when workspaceId is null", () => {
     render(createElement(StateProvider, null, createElement(NullProbe)));
+    expect(mocks.listReviewWatches).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch when no workspace is active", () => {
+    render(createElement(StateProvider, null, createElement(UnresolvedProbe)));
     expect(mocks.listReviewWatches).not.toHaveBeenCalled();
   });
 });

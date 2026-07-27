@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useMemo } from "react";
-import type { TaskState, TaskSessionState } from "@/lib/types/http";
+import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu, type StepDef } from "./task-switcher-context-menu";
 import {
@@ -18,6 +18,8 @@ export type TaskSwitcherItem = {
   title: string;
   state?: TaskState;
   sessionState?: TaskSessionState;
+  /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
+  foregroundActivity?: ForegroundActivity | null;
   description?: string;
   workflowId?: string;
   workflowName?: string;
@@ -58,6 +60,7 @@ type TaskSwitcherProps = {
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
+  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
@@ -143,6 +146,7 @@ type TaskRowProps = {
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
+  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
@@ -199,6 +203,7 @@ function TaskRow({
   onSelectTask,
   onRenameTask,
   onArchiveTask,
+  onCreateSubtask,
   onDeleteTask,
   onDetachTask,
   onMoveToStep,
@@ -229,6 +234,7 @@ function TaskRow({
       steps={taskSteps}
       onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
+      onCreateSubtask={onCreateSubtask}
       onDeleteTask={onDeleteTask}
       onDetachTask={onDetachTask}
       {...taskLinkHandlerProps(props)}
@@ -257,6 +263,7 @@ function TaskRow({
         title={task.title}
         state={task.state}
         sessionState={task.sessionState}
+        foregroundActivity={task.foregroundActivity}
         isArchived={task.isArchived}
         isSelected={isSelected}
         diffStats={task.diffStats}
@@ -404,6 +411,7 @@ type GroupSectionProps = {
   onSelectTask: (taskId: string) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
+  onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onDeleteTask?: (taskId: string) => void;
   onDetachTask?: (taskId: string) => void;
   onLinkPullRequest?: TaskLinkHandler;
@@ -445,6 +453,7 @@ function GroupSection({
   onSelectTask,
   onRenameTask,
   onArchiveTask,
+  onCreateSubtask,
   onDeleteTask,
   onDetachTask,
   onLinkPullRequest,
@@ -484,6 +493,7 @@ function GroupSection({
       onSelectTask,
       onRenameTask,
       onArchiveTask,
+      onCreateSubtask,
       onDeleteTask,
       onDetachTask,
       onLinkPullRequest,
@@ -541,6 +551,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   onSelectTask,
   onRenameTask,
   onArchiveTask,
+  onCreateSubtask,
   onDeleteTask,
   onDetachTask,
   onLinkPullRequest,
@@ -598,6 +609,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onSelectTask={onSelectTask}
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
+          onCreateSubtask={onCreateSubtask}
           onDeleteTask={onDeleteTask}
           onDetachTask={onDetachTask}
           onLinkPullRequest={onLinkPullRequest}

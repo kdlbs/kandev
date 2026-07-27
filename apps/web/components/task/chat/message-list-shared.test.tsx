@@ -6,6 +6,7 @@ import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { Message } from "@/lib/types/http";
 
 const rendererSpy = vi.fn();
+const turnGroupSpy = vi.fn();
 const mockStoreState = vi.hoisted(() => ({
   taskSessions: {
     items: {
@@ -31,7 +32,10 @@ vi.mock("@/components/task/chat/message-renderer", () => ({
   },
 }));
 vi.mock("@/components/task/chat/messages/turn-group-message", () => ({
-  TurnGroupMessage: () => <div data-testid="turn-group" />,
+  TurnGroupMessage: (props: unknown) => {
+    turnGroupSpy(props);
+    return <div data-testid="turn-group" />;
+  },
 }));
 vi.mock("@/components/session/prepare-progress", () => ({
   PrepareProgress: () => <div data-testid="prepare" />,
@@ -65,6 +69,7 @@ import {
   MessageItem,
   MessageListStatus,
   getConversationLoadingState,
+  getEffectiveActiveTurnId,
   getStreamingAgentMessageId,
 } from "./message-list-shared";
 
@@ -72,6 +77,16 @@ const item: RenderItem = { type: "message", message: { id: "m1" } as Message };
 const noop = () => {};
 const perm = new Map<string, Message>();
 const kids = new Map<string, Message[]>();
+
+describe("getEffectiveActiveTurnId", () => {
+  it("preserves the active turn while the session is working", () => {
+    expect(getEffectiveActiveTurnId("turn-active", true)).toBe("turn-active");
+  });
+
+  it("ignores a stale active turn after the session settles", () => {
+    expect(getEffectiveActiveTurnId("turn-stale", false)).toBeNull();
+  });
+});
 
 function row(onOpenFile: (p: string) => void) {
   return (
@@ -84,7 +99,7 @@ function row(onOpenFile: (p: string) => void) {
       worktreePath="/wt"
       onOpenFile={onOpenFile}
       isLastGroup={false}
-      isTurnActive={false}
+      activeTurnId={null}
       onScrollToMessage={noop}
     />
   );
@@ -103,6 +118,7 @@ function Harness({ onOpenFile }: { onOpenFile: (p: string) => void }) {
 describe("MessageItem memo boundary", () => {
   afterEach(() => {
     rendererSpy.mockClear();
+    turnGroupSpy.mockClear();
   });
 
   it("does not re-render the row when the parent re-renders with stable props", () => {
@@ -139,13 +155,76 @@ describe("MessageItem agent error notice", () => {
         childrenByParentToolCallId={kids}
         taskId="t1"
         isLastGroup={false}
-        isTurnActive={false}
+        activeTurnId={null}
         onScrollToMessage={noop}
       />,
     );
 
     expect(screen.getByTestId("last-agent-error-notice").getAttribute("role")).toBe("alert");
     expect(screen.queryByText("agent process exited")).not.toBeNull();
+  });
+});
+
+describe("MessageItem containing turn activity", () => {
+  afterEach(() => {
+    rendererSpy.mockClear();
+    turnGroupSpy.mockClear();
+  });
+
+  it("does not reactivate a historical message while another turn is active", () => {
+    const historicalItem: RenderItem = {
+      type: "message",
+      message: { id: "historical", turn_id: "turn-old" } as Message,
+    };
+    render(
+      <MessageItem
+        item={historicalItem}
+        sessionId="s1"
+        permissionsByToolCallId={perm}
+        childrenByParentToolCallId={kids}
+        isLastGroup={false}
+        activeTurnId="turn-new"
+        onScrollToMessage={noop}
+      />,
+    );
+
+    expect(rendererSpy).toHaveBeenLastCalledWith(
+      expect.objectContaining({ isContainingTurnActive: false }),
+    );
+  });
+
+  it("marks only the matching turn group active", () => {
+    const historicalGroup: RenderItem = {
+      type: "turn_group",
+      id: "group-old",
+      turnId: "turn-old",
+      messages: [],
+    };
+    const { rerender } = render(
+      <MessageItem
+        item={historicalGroup}
+        sessionId="s1"
+        permissionsByToolCallId={perm}
+        childrenByParentToolCallId={kids}
+        isLastGroup
+        activeTurnId="turn-new"
+        onScrollToMessage={noop}
+      />,
+    );
+    expect(turnGroupSpy).toHaveBeenLastCalledWith(expect.objectContaining({ isTurnActive: false }));
+
+    rerender(
+      <MessageItem
+        item={historicalGroup}
+        sessionId="s1"
+        permissionsByToolCallId={perm}
+        childrenByParentToolCallId={kids}
+        isLastGroup
+        activeTurnId="turn-old"
+        onScrollToMessage={noop}
+      />,
+    );
+    expect(turnGroupSpy).toHaveBeenLastCalledWith(expect.objectContaining({ isTurnActive: true }));
   });
 });
 

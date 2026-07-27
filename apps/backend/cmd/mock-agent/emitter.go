@@ -179,10 +179,32 @@ func (e *emitter) endMonitorTool(id acp.ToolCallId) {
 const (
 	subagentKeyStatus       = "status"
 	subagentStatusCompleted = "completed"
+	subagentStatusAsync     = "async_launched"
 	subagentKeyDescription  = "description"
 	subagentKeyPrompt       = "prompt"
 	subagentKeySubagentType = "subagent_type"
 )
+
+const (
+	claudeOriginMetaKey          = "_claude/origin"
+	claudeOriginHuman            = "human"
+	claudeOriginTaskNotification = "task-notification"
+)
+
+// foregroundIdle emits the human-origin usage boundary Claude sends after it
+// hands the foreground back while detached work remains active.
+func (e *emitter) foregroundIdle() {
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{UsageUpdate: &acp.SessionUsageUpdate{
+			Size: 1_000_000,
+			Used: 24_000,
+			Meta: map[string]any{
+				claudeOriginMetaKey: map[string]any{"kind": claudeOriginHuman},
+			},
+		}},
+	})
+}
 
 // subagentClaudeMeta builds the `_meta.claudeCode.toolName=Agent` payload that
 // claude-agent-acp tags subagent (Task) tool_call notifications with. The
@@ -239,6 +261,54 @@ func (e *emitter) startSubagentTool(id acp.ToolCallId, description, prompt, suba
 			}),
 			withStartMeta(subagentClaudeMeta()),
 		),
+	})
+}
+
+// launchAsyncSubagentTool mirrors Claude's detached Agent launch: the Task
+// invocation is terminal, but its independently-running workload is not.
+func (e *emitter) launchAsyncSubagentTool(
+	id acp.ToolCallId,
+	description, prompt, subagentType string,
+) {
+	e.startSubagentTool(id, description, prompt, subagentType)
+	withUpdateMeta := func(meta any) acp.ToolCallUpdateOpt {
+		return func(tu *acp.SessionToolCallUpdate) { tu.Meta = toMetaMap(meta) }
+	}
+	response := map[string]any{
+		"claudeCode": map[string]any{
+			"toolResponse": map[string]any{
+				"agentId":           asyncSubagentAgentID,
+				"agentType":         subagentType,
+				subagentKeyStatus:   subagentStatusAsync,
+				"isAsync":           true,
+				"outputFile":        "/tmp/kandev-e2e-detached.output",
+				"canReadOutputFile": true,
+			},
+		},
+	}
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.UpdateToolCall(id,
+			acp.WithUpdateRawOutput("Async agent launched successfully."),
+			withUpdateMeta(response),
+		),
+	})
+}
+
+// completeDetachedWork emits the same task-notification usage boundary Claude
+// sends when an async workload finishes. The provider does not expose the task
+// ID on this frame, so the orchestrator retires it only when one registration is
+// outstanding and the completion is therefore unambiguous.
+func (e *emitter) completeDetachedWork() {
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{UsageUpdate: &acp.SessionUsageUpdate{
+			Size: 1_000_000,
+			Used: 25_000,
+			Meta: map[string]any{
+				claudeOriginMetaKey: map[string]any{"kind": claudeOriginTaskNotification},
+			},
+		}},
 	})
 }
 

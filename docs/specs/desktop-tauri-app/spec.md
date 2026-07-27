@@ -26,7 +26,8 @@ implemented launch and backend-lifecycle behavior, it provides:
 - New Task, Check for Updates, Help, external-link, and standard application commands;
 - persisted window size, position, and maximized state, restored onto a visible display;
 - signed, prompt-before-install desktop updates through the existing System > Updates page;
-- native notifications for waiting-for-input and session-failure events;
+- native notifications for selected turn-finished, clarification-requested, and
+  session-failure events;
 - focus/reopen behavior for a second launch and Dock activation where supported.
 
 The macOS red window close control quits Kandev and stops its owned backend. It does not hide the
@@ -134,7 +135,11 @@ OS publisher-identity signing is configured.
 
 For desktop-owned launches, Kandev uses native OS notifications for:
 
-- a session waiting for user input; and
+- a completed agent turn when that provider event is selected;
+- a structured clarification request that needs a user answer when that
+  provider event is selected;
+- a newer Kandev release when `system.update_available` is selected for the
+  Local provider;
 - a session that failed.
 
 Notification delivery respects the existing notification settings and suppresses duplicate
@@ -145,6 +150,15 @@ official Tauri notification plugin does not expose payload-aware body-click call
 so a raw notification click cannot be correlated to an arbitrary payload on every supported OS.
 Generic focus and activation events therefore never navigate. Repeated delivery of the same event
 identity is deduplicated.
+
+Turn-finished and clarification-requested delivery follows the selected event
+checkboxes. Session-failure delivery is an independent safety alert whenever
+the Local provider is enabled; it does not reuse either semantic subscription.
+Update-available delivery uses the release version as its occurrence identity
+and the same Local-provider preference as browser delivery. The existing
+Notifications settings control requests native permission from a user gesture;
+background events never prompt. An open app keeps the in-app update indication
+when native permission is denied or native delivery fails.
 
 ## Desktop bridge and permissions
 
@@ -244,9 +258,14 @@ display before being shown.
   Kandev prompts in the existing Updates page before any download, install, or restart.
 - **GIVEN** a Linux AppImage installation, **WHEN** the user confirms a valid update, **THEN** the
   signed AppImage updater artifact installs and Kandev relaunches after clean backend shutdown.
-- **GIVEN** a session waits for input while Kandev is not focused, **WHEN** its native notification
-  is delivered, **THEN** Kandev sends no duplicate browser or shell notification and generic app
-  focus or activation does not navigate to an inferred task.
+- **GIVEN** a selected turn-finished or clarification-requested event occurs
+  while Kandev is not focused, **WHEN** its native notification is delivered,
+  **THEN** Kandev sends no duplicate browser or shell notification and generic
+  app focus or activation does not navigate to an inferred task.
+- **GIVEN** `system.update_available` is selected for Local and native
+  permission is denied, **WHEN** a newer release is detected, **THEN** the open
+  app retains its in-app update indication, does not prompt in the background,
+  and does not mark a task route from generic activation.
 - **GIVEN** a saved window position belongs to a disconnected display, **WHEN** Kandev reopens,
   **THEN** the main window appears within a currently visible display.
 - **GIVEN** the same settings page is opened in a browser or narrow/mobile viewport, **WHEN** it
@@ -260,7 +279,7 @@ display before being shown.
 - Global shortcuts that operate while another application is focused.
 - Silent, forced, or downgrade updates; App Store/Microsoft Store/Snap distribution.
 - Auto-updating Linux `.deb` or `.rpm` packages outside their package managers.
-- Notifications beyond waiting-for-input and session failure in this increment.
+- Notification events beyond the canonical provider catalog in this increment.
 - A separate native settings window, multiple native windows, or a rewritten native UI.
 - Mobile Tauri targets. Native shortcuts have no mobile analogue; the shared settings page must
   remain responsive and preserve browser/mobile behavior.

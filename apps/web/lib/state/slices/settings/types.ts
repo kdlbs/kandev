@@ -147,6 +147,7 @@ export type UserSettingsState = {
   repositoryIds: string[];
   tasksListSort: TasksListSort;
   tasksListGroup: TasksListGroup;
+  tasksListShowDetails: boolean;
   preferredShell: string | null;
   shellOptions: Array<{ value: string; label: string }>;
   defaultEditorId: string | null;

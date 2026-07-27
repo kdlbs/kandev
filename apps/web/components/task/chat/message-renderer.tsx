@@ -40,6 +40,7 @@ type AdapterContext = {
   onOpenFile?: (path: string) => void;
   onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
+  isContainingTurnActive?: boolean;
 };
 
 function TaskDescriptionStartButton({ taskId, sessionId }: { taskId: string; sessionId: string }) {
@@ -243,6 +244,7 @@ const adapters: MessageAdapter[] = [
         <ToolSubagentMessage
           comment={comment}
           childMessages={childMessages}
+          isContainingTurnActive={ctx.isContainingTurnActive}
           worktreePath={ctx.worktreePath}
           onOpenFile={ctx.onOpenFile}
           renderChild={renderChild}
@@ -373,6 +375,7 @@ type MessageRendererProps = {
   onOpenFile?: (path: string) => void;
   onScrollToMessage?: (messageId: string) => void;
   isTurnActive?: boolean;
+  isContainingTurnActive?: boolean;
 };
 
 export const MessageRenderer = memo(function MessageRenderer({
@@ -386,6 +389,7 @@ export const MessageRenderer = memo(function MessageRenderer({
   onOpenFile,
   onScrollToMessage,
   isTurnActive = false,
+  isContainingTurnActive = false,
 }: MessageRendererProps) {
   const ctx = {
     isTaskDescription,
@@ -397,6 +401,7 @@ export const MessageRenderer = memo(function MessageRenderer({
     onOpenFile,
     onScrollToMessage,
     isTurnActive,
+    isContainingTurnActive,
   };
   const adapter =
     adapters.find((entry) => entry.matches(comment, ctx)) ?? adapters[adapters.length - 1];

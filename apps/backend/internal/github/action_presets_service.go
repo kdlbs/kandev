@@ -11,6 +11,9 @@ import (
 // GetActionPresets returns the stored preset lists for a workspace, falling
 // back to the built-in defaults for any list that hasn't been customised yet.
 func (s *Service) GetActionPresets(ctx context.Context, workspaceID string) (*ActionPresets, error) {
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
+	}
 	stored, err := s.store.GetActionPresets(ctx, workspaceID)
 	if err != nil {
 		return nil, err
@@ -41,6 +44,9 @@ func (s *Service) UpdateActionPresets(ctx context.Context, req *UpdateActionPres
 	if req == nil || req.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required")
 	}
+	if err := s.authorizeWorkspaceAccess(ctx, req.WorkspaceID); err != nil {
+		return nil, err
+	}
 	stored, err := s.store.GetActionPresets(ctx, req.WorkspaceID)
 	if err != nil {
 		return nil, err
@@ -66,6 +72,9 @@ func (s *Service) UpdateActionPresets(ctx context.Context, req *UpdateActionPres
 func (s *Service) ResetActionPresets(ctx context.Context, workspaceID string) (*ActionPresets, error) {
 	if workspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required")
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, workspaceID); err != nil {
+		return nil, err
 	}
 	if err := s.store.DeleteActionPresets(ctx, workspaceID); err != nil {
 		return nil, err

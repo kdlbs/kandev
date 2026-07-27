@@ -2,6 +2,100 @@
 
 All notable changes to Kandev.
 
+## 0.82.0 - 2026-07-25
+
+### Features
+
+- opt-in authentication & multi-user segregation ([#1930](https://github.com/kdlbs/kandev/pull/1930))
+- notify user when a kandev update is detected ([#1924](https://github.com/kdlbs/kandev/pull/1924)) by @ClemDNL
+- show full timestamp as tooltip on chat message relative time ([#1925](https://github.com/kdlbs/kandev/pull/1925)) by @ClemDNL
+- re-request dismissed reviews ([#1921](https://github.com/kdlbs/kandev/pull/1921))
+- move subtask action to task context menu ([#1920](https://github.com/kdlbs/kandev/pull/1920))
+- add opt-in plugin auto-updater ([#1903](https://github.com/kdlbs/kandev/pull/1903))
+- add keybindings and modal window capabilities ([#1895](https://github.com/kdlbs/kandev/pull/1895))
+- add configurable command prefix for sandboxed ACP launch ([#1888](https://github.com/kdlbs/kandev/pull/1888)) by @tito
+- nest a task under another as a sub-task from the sidebar ([#1837](https://github.com/kdlbs/kandev/pull/1837)) by @jcoatelen-ledger
+- create local repositories from new tasks ([#1849](https://github.com/kdlbs/kandev/pull/1849))
+- improve task sidebar overflow cue ([#1908](https://github.com/kdlbs/kandev/pull/1908))
+- add simplified resource metrics display ([#1904](https://github.com/kdlbs/kandev/pull/1904))
+- mark selected task repositories ([#1881](https://github.com/kdlbs/kandev/pull/1881))
+- add external vcs file links ([#1883](https://github.com/kdlbs/kandev/pull/1883))
+- move GitLab MR linking to task menus ([#1868](https://github.com/kdlbs/kandev/pull/1868))
+- resolve @prompt references in workflow prompts ([#1865](https://github.com/kdlbs/kandev/pull/1865))
+- add global app status surface ([#1869](https://github.com/kdlbs/kandev/pull/1869))
+- add cross-integration entity references ([#1862](https://github.com/kdlbs/kandev/pull/1862))
+- host-side conversation reads + utility-agent invoke ([#1852](https://github.com/kdlbs/kandev/pull/1852))
+- complete GitLab integration parity ([#1832](https://github.com/kdlbs/kandev/pull/1832))
+- add planner and worker agent orchestration ([#1834](https://github.com/kdlbs/kandev/pull/1834))
+- explain repository scope ([#1842](https://github.com/kdlbs/kandev/pull/1842))
+- add main-top-bar slot for the default app top bar ([#1841](https://github.com/kdlbs/kandev/pull/1841))
+
+### Bug Fixes
+
+- polish clarification custom answer input ([#1942](https://github.com/kdlbs/kandev/pull/1942))
+- restore managed native service updates ([#1943](https://github.com/kdlbs/kandev/pull/1943)) ([#1945](https://github.com/kdlbs/kandev/pull/1945))
+- make remote repository entry reliable ([#1936](https://github.com/kdlbs/kandev/pull/1936))
+- route update alerts through notification providers ([#1938](https://github.com/kdlbs/kandev/pull/1938))
+- scope in-session agent MCP calls to the task owner ([#1937](https://github.com/kdlbs/kandev/pull/1937))
+- confine tarball extraction with os.Root ([#1934](https://github.com/kdlbs/kandev/pull/1934))
+- move Docker client to the maintained moby client module ([#1935](https://github.com/kdlbs/kandev/pull/1935))
+- deduplicate model options and restore reasoning scroll ([#1933](https://github.com/kdlbs/kandev/pull/1933))
+- improve queue scrolling and diff comment feedback ([#1932](https://github.com/kdlbs/kandev/pull/1932))
+- scope walkthrough overlays to their task ([#1928](https://github.com/kdlbs/kandev/pull/1928))
+- resolve low and medium Dependabot alerts ([#1926](https://github.com/kdlbs/kandev/pull/1926))
+- resolve open high-severity Dependabot advisories ([#1919](https://github.com/kdlbs/kandev/pull/1919))
+- preserve chat focus when restoring task layout ([#1923](https://github.com/kdlbs/kandev/pull/1923))
+- distinguish session notification events ([#1918](https://github.com/kdlbs/kandev/pull/1918))
+- harden ACP launcher configuration ([#1917](https://github.com/kdlbs/kandev/pull/1917))
+- make plugin reload idempotent so re-boot never duplicates slots ([#1914](https://github.com/kdlbs/kandev/pull/1914))
+- keep composer usable during clarifications ([#1916](https://github.com/kdlbs/kandev/pull/1916))
+- patch critical Dependabot advisories ([#1915](https://github.com/kdlbs/kandev/pull/1915))
+- support make dev on native Windows ([#1886](https://github.com/kdlbs/kandev/pull/1886)) by @JnManso
+- restore sidebar task title overflow ([#1913](https://github.com/kdlbs/kandev/pull/1913))
+- collapse completed silent subagent cards ([#1901](https://github.com/kdlbs/kandev/pull/1901))
+- stabilize task and workspace creation ([#1910](https://github.com/kdlbs/kandev/pull/1910))
+- sign and verify release tags ([#1902](https://github.com/kdlbs/kandev/pull/1902))
+- distinguish archived automation runs from cancelled ones ([#1860](https://github.com/kdlbs/kandev/pull/1860)) by @ClemDNL
+- strip echoed command from persisted shell output ([#1898](https://github.com/kdlbs/kandev/pull/1898)) by @ClemDNL
+- resume an unarchived task's archive-cancelled and multi-repo sessions ([#1905](https://github.com/kdlbs/kandev/pull/1905)) by @ClemDNL
+- preserve saved panel focus on task return ([#1907](https://github.com/kdlbs/kandev/pull/1907))
+- support long Git worktree paths on Windows ([#1878](https://github.com/kdlbs/kandev/pull/1878))
+- improve session failure recovery UX ([#1866](https://github.com/kdlbs/kandev/pull/1866))
+- dedupe repository listing and close local-path create race ([#1897](https://github.com/kdlbs/kandev/pull/1897)) by @ClemDNL
+- inherit service temporary environment ([#1894](https://github.com/kdlbs/kandev/pull/1894))
+- scope Office agent tools and task mutations ([#1867](https://github.com/kdlbs/kandev/pull/1867))
+- restore persisted file tree expansions ([#1892](https://github.com/kdlbs/kandev/pull/1892))
+- list logical drives in folder picker ([#1870](https://github.com/kdlbs/kandev/pull/1870))
+- focus deferred clarification custom answer ([#1871](https://github.com/kdlbs/kandev/pull/1871))
+- scope PR branch failure guidance ([#1873](https://github.com/kdlbs/kandev/pull/1873))
+- hide workspace ownership marker ([#1874](https://github.com/kdlbs/kandev/pull/1874))
+- clarify task title editing ([#1875](https://github.com/kdlbs/kandev/pull/1875))
+- separate office task session ownership ([#1893](https://github.com/kdlbs/kandev/pull/1893))
+- publish session state_changed when archiving cancels sessions ([#1891](https://github.com/kdlbs/kandev/pull/1891)) by @ClemDNL
+- retain enhanced prompt results ([#1854](https://github.com/kdlbs/kandev/pull/1854)) by @ASRagab
+- follow session switch when moving between different-agent steps ([#1879](https://github.com/kdlbs/kandev/pull/1879))
+- re-clone provider repos when local path is missing or not a git repo ([#1876](https://github.com/kdlbs/kandev/pull/1876))
+- prevent blank mobile task views ([#1877](https://github.com/kdlbs/kandev/pull/1877)) ([#1889](https://github.com/kdlbs/kandev/pull/1889))
+- select pull request on review surface ([#1857](https://github.com/kdlbs/kandev/pull/1857))
+- preserve custom layout proportions across screens ([#1872](https://github.com/kdlbs/kandev/pull/1872))
+- stop PR polling on denied GitHub access ([#1864](https://github.com/kdlbs/kandev/pull/1864))
+- unload previous version before reloading on plugin update ([#1861](https://github.com/kdlbs/kandev/pull/1861))
+- restore line expansion for multi-repo diffs ([#1856](https://github.com/kdlbs/kandev/pull/1856))
+- select utility agents per plugin ([#1855](https://github.com/kdlbs/kandev/pull/1855))
+- reject disallowed cross-origin state changes in CORS ([#1850](https://github.com/kdlbs/kandev/pull/1850))
+- keep draft pull requests out of merge-ready state ([#1851](https://github.com/kdlbs/kandev/pull/1851))
+- preserve inherited workspaces on subtask deletion ([#1840](https://github.com/kdlbs/kandev/pull/1840))
+- surface orphaned tasks in pipeline view after step deletion ([#1809](https://github.com/kdlbs/kandev/pull/1809)) by @yattdev
+- reset office session state when execution profile changes ([#1846](https://github.com/kdlbs/kandev/pull/1846))
+- scope and label clarification shortcuts ([#1847](https://github.com/kdlbs/kandev/pull/1847))
+- reconcile dockview size before restoring layout ([#1843](https://github.com/kdlbs/kandev/pull/1843)) ([#1845](https://github.com/kdlbs/kandev/pull/1845))
+- order plugins before system ([#1844](https://github.com/kdlbs/kandev/pull/1844))
+
+### Performance
+
+- cache storage analysis results ([#1911](https://github.com/kdlbs/kandev/pull/1911))
+- speed up CI check feedback ([#1882](https://github.com/kdlbs/kandev/pull/1882))
+
 ## 0.81.0 - 2026-07-21
 
 ### Features

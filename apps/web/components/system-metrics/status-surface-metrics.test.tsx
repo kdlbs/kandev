@@ -146,7 +146,10 @@ describe("StatusSurfaceMetrics", () => {
     renderMetrics(true);
 
     expect(subscribeMock).toHaveBeenCalledWith(true);
-    expect(screen.getByLabelText("Host metrics").parentElement?.className).toContain("min-h-11");
+    const metricsRow = screen.getByLabelText("Host metrics").parentElement;
+    expect(metricsRow?.className).toContain("min-h-11");
+    expect(metricsRow?.className).toContain("w-full");
+    expect(metricsRow?.className).toContain("min-w-0");
   });
 
   it("omits the host marker and meters in simplified desktop mode", () => {

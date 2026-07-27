@@ -1,6 +1,7 @@
 package backendapp
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -18,6 +19,7 @@ import (
 	workflowrepository "github.com/kandev/kandev/internal/workflow/repository"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	authstore "github.com/kandev/kandev/internal/auth/store"
 	editorstore "github.com/kandev/kandev/internal/editors/store"
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	"github.com/kandev/kandev/internal/office"
@@ -26,64 +28,59 @@ import (
 	userstore "github.com/kandev/kandev/internal/user/store"
 )
 
-func provideRepositories(cfg *config.Config, log *logger.Logger, version string) (*db.Pool, *Repositories, []func() error, error) {
+func provideRepositories(ctx context.Context, cfg *config.Config, log *logger.Logger, version string) (*db.Pool, *Repositories, []func() error, error) {
 	cleanups := make([]func() error, 0, 12)
 	pool, cleanup, err := persistence.Provide(cfg, log, version)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	cleanups = append(cleanups, cleanup)
-
-	writer := pool.Writer()
-	reader := pool.Reader()
+	writer, reader := pool.Writer(), pool.Reader()
 
 	taskRepoImpl, cleanup, err := repository.Provide(writer, reader, log)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	cleanups = append(cleanups, cleanup)
-
 	// Workflow repo must be initialized before analytics repo because
 	// analytics creates indexes on the workflow_steps table.
 	workflowRepo, err := workflowrepository.NewWithDB(writer, reader, log)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-
 	analyticsRepo, cleanup, err := analyticsrepository.Provide(writer, reader)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	cleanups = append(cleanups, cleanup)
-
 	agentSettingsRepo, cleanup, err := settingsstore.Provide(writer, reader, log)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	cleanups = append(cleanups, cleanup)
-
-	supportRepos, supportCleanups, err := provideSupportRepos(writer, reader)
+	supportRepos, supportCleanups, err := provideSupportRepos(ctx, writer, reader)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 	cleanups = append(cleanups, supportCleanups...)
-
 	officeRepo, officeCleanup, err := office.Provide(writer, reader, log)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("office repo: %w", err)
 	}
 	cleanups = append(cleanups, officeCleanup)
-
 	terminalRepoImpl, err := terminalrepo.NewWithDB(writer, reader, log)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("terminal repo: %w", err)
 	}
-
 	runtimeFlagsStore, err := runtimeflags.NewSQLiteStore(writer, reader)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("runtime flags store: %w", err)
 	}
 
+	authRepo, err := authstore.New(writer, reader)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("auth store: %w", err)
+	}
 	masterKeyProvider, err := secrets.NewMasterKeyProvider(cfg.ResolvedDataDir())
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("master key: %w", err)
@@ -103,6 +100,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 		Analytics:     analyticsRepo,
 		AgentSettings: agentSettingsRepo,
 		User:          supportRepos.user,
+		UserAccounts:  supportRepos.userAccounts,
 		Notification:  supportRepos.notification,
 		Editor:        supportRepos.editor,
 		Prompts:       supportRepos.prompts,
@@ -112,6 +110,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 		Office:        officeRepo,
 		Terminal:      terminalRepoImpl,
 		RuntimeFlags:  runtimeFlagsStore,
+		Auth:          authRepo,
 	}
 	return pool, repos, cleanups, nil
 }
@@ -120,6 +119,7 @@ func provideRepositories(cfg *config.Config, log *logger.Logger, version string)
 // that share a common (writer, reader) wire-up pattern.
 type supportRepositorySet struct {
 	user         userstore.Repository
+	userAccounts userstore.AccountRepository
 	notification notificationstore.Repository
 	editor       editorstore.Repository
 	prompts      promptstore.Repository
@@ -129,7 +129,7 @@ type supportRepositorySet struct {
 // provideSupportRepos wires up user, notification, editor, prompt, and utility
 // repositories. Extracted from provideRepositories to keep its statement count
 // within the funlen limit.
-func provideSupportRepos(writer, reader *sqlx.DB) (supportRepositorySet, []func() error, error) {
+func provideSupportRepos(ctx context.Context, writer, reader *sqlx.DB) (supportRepositorySet, []func() error, error) {
 	var cleanups []func() error
 	var repos supportRepositorySet
 
@@ -139,8 +139,10 @@ func provideSupportRepos(writer, reader *sqlx.DB) (supportRepositorySet, []func(
 	}
 	cleanups = append(cleanups, cleanup)
 	repos.user = userRepo
+	// Same concrete store, account-management view (used by internal/auth).
+	repos.userAccounts = userRepo
 
-	notificationRepo, cleanup, err := notificationstore.Provide(writer, reader)
+	notificationRepo, cleanup, err := notificationstore.Provide(ctx, writer, reader)
 	if err != nil {
 		return repos, nil, err
 	}

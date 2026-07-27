@@ -4,6 +4,7 @@ import {
   hasPendingClarification,
   hasPendingPermissionRequest,
 } from "@/lib/utils/pending-clarification";
+import { aggregateTaskPendingInput } from "@/lib/utils/task-pending-input";
 
 /** Flat per-session pending flags keyed for shallow comparison so the sidebar
  *  only re-renders when a clarification/permission flag actually flips, not on
@@ -25,40 +26,33 @@ export function buildPendingFlags(
   return flags;
 }
 
-export type PendingActionFallback = {
-  primarySessionState?: string | null;
-  primarySessionPendingAction?: TaskPendingAction | null;
-};
-
-function fallbackPendingFlags(fallback?: PendingActionFallback): {
-  clarification: boolean;
-  permission: boolean;
-} {
-  if (fallback?.primarySessionState !== "WAITING_FOR_INPUT") {
-    return { clarification: false, permission: false };
-  }
-  return {
-    clarification: fallback.primarySessionPendingAction === "clarification",
-    permission: fallback.primarySessionPendingAction === "permission",
-  };
+export function workflowStepTitle(
+  task: KanbanState["tasks"][number],
+  stepTitleById: Map<string, string>,
+): string | undefined {
+  if (!task.workflowStepId) return undefined;
+  return stepTitleById.get(task.workflowStepId as string);
 }
 
-export function readPendingFlags(
+export function readTaskPendingFlags(
   pendingFlags: Record<string, boolean>,
-  sessionId?: string | null,
-  fallback?: PendingActionFallback,
+  sessions: Array<{ id: string; state: string }>,
+  taskPendingAction?: TaskPendingAction | null,
 ): { clarification: boolean; permission: boolean } {
-  if (!sessionId) return { clarification: false, permission: false };
-  const clarKey = pendingClarKey(sessionId);
-  const permKey = pendingPermKey(sessionId);
-  const hasMessageFlags =
-    Object.prototype.hasOwnProperty.call(pendingFlags, clarKey) ||
-    Object.prototype.hasOwnProperty.call(pendingFlags, permKey);
-  if (!hasMessageFlags) return fallbackPendingFlags(fallback);
-  return {
-    clarification: pendingFlags[clarKey] ?? false,
-    permission: pendingFlags[permKey] ?? false,
-  };
+  const { clarification, permission } = aggregateTaskPendingInput(
+    sessions,
+    (session) => {
+      const clarKey = pendingClarKey(session.id);
+      const permKey = pendingPermKey(session.id);
+      if (!(clarKey in pendingFlags) && !(permKey in pendingFlags)) return undefined;
+      return {
+        clarification: pendingFlags[clarKey] ?? false,
+        permission: pendingFlags[permKey] ?? false,
+      };
+    },
+    taskPendingAction,
+  );
+  return { clarification, permission };
 }
 
 export type SidebarStepInfo = {

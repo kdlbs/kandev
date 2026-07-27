@@ -322,6 +322,16 @@ func (r *Repository) listWorkspaceCascadeDeleteWorkflows(
 }
 
 // ListWorkspaces returns all workspaces
+// ClaimUnownedWorkspaces assigns every pre-auth workspace (empty owner_id) to
+// ownerID. Called by the auth setup wizard when promoting the instance's
+// single user to the admin account; idempotent.
+func (r *Repository) ClaimUnownedWorkspaces(ctx context.Context, ownerID string) error {
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE workspaces SET owner_id = ? WHERE owner_id = '' OR owner_id IS NULL
+	`), ownerID)
+	return err
+}
+
 func (r *Repository) ListWorkspaces(ctx context.Context) ([]*models.Workspace, error) {
 	rows, err := r.ro.QueryContext(ctx, `
 		SELECT id, name, description, owner_id, default_executor_id, default_environment_id, default_agent_profile_id, default_config_agent_profile_id, task_prefix, task_sequence, office_workflow_id, created_at, updated_at

@@ -2454,7 +2454,8 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 		messages := &mockMessageCreator{sessionMessageDone: make(chan struct{})}
 		svc.messageCreator = messages
 
-		if _, err := svc.PrepareTaskSession(context.Background(), taskID, "profile1", "", "", "", true); err != nil {
+		sessionID, err := svc.PrepareTaskSession(context.Background(), taskID, "profile1", "", "", "", true)
+		if err != nil {
 			t.Fatalf("PrepareTaskSession: %v", err)
 		}
 		select {
@@ -2467,6 +2468,17 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 			t.Fatal("transport failure created missing-branch recovery message")
 		case <-time.After(100 * time.Millisecond):
 		}
+		require.Eventually(t, func() bool {
+			session, getErr := baseRepo.GetTaskSession(context.Background(), sessionID)
+			return getErr == nil &&
+				session.State == models.TaskSessionStateFailed &&
+				strings.Contains(session.ErrorMessage, "Could not resolve host")
+		}, time.Second, 10*time.Millisecond, "expected transport failure to mark the session FAILED")
+		require.Eventually(t, func() bool {
+			taskRepo.mu.Lock()
+			defer taskRepo.mu.Unlock()
+			return taskRepo.updatedStates[taskID] == v1.TaskStateFailed
+		}, time.Second, 10*time.Millisecond, "expected transport failure to mark the task FAILED")
 	})
 
 	t.Run("executor callback recovery is not duplicated", func(t *testing.T) {
@@ -2509,7 +2521,7 @@ func TestPrepareTaskSession_WorkspaceLaunchFailureRecovery(t *testing.T) {
 	})
 }
 
-func TestHandleEarlyMissingPRBranchLaunchFailure_SkipsTaskFailureWhenSessionTransitionLoses(t *testing.T) {
+func TestHandleSessionLaunchFailure_SkipsTaskFailureWhenSessionTransitionLoses(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
 	taskRepo := newMockTaskRepo()
@@ -2519,10 +2531,10 @@ func TestHandleEarlyMissingPRBranchLaunchFailure_SkipsTaskFailureWhenSessionTran
 	svc.messageCreator = messages
 	svc.eventBus = bus.NewMemoryEventBus(testLogger())
 
-	svc.handleEarlyMissingPRBranchLaunchFailure(
+	require.Error(t, svc.handleSessionLaunchFailure(
 		context.Background(), "task1", "session1",
 		errors.New("fatal: couldn't find remote ref feature/deleted-pr"),
-	)
+	))
 
 	if len(messages.sessionMessages) != 0 {
 		t.Fatalf("terminal-race loser created %d recovery messages", len(messages.sessionMessages))
@@ -2537,7 +2549,183 @@ func TestHandleEarlyMissingPRBranchLaunchFailure_SkipsTaskFailureWhenSessionTran
 	}
 }
 
-func TestHandleEarlyMissingPRBranchLaunchFailure_ArchiveSafeTaskWrite(t *testing.T) {
+func TestHandleSessionLaunchFailure_PersistsGenericCredentialFailure(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	if err := repo.SetSessionPrimary(context.Background(), "session1"); err != nil {
+		t.Fatalf("SetSessionPrimary: %v", err)
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateScheduling}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	eventBus := &recordingEventBus{}
+	svc.eventBus = eventBus
+
+	const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890AB"
+	returnedErr := svc.handleSessionLaunchFailure(
+		context.Background(), "task1", "session1",
+		errors.New("resolve workspace Git credential: token="+secret),
+	)
+	require.Error(t, returnedErr)
+	require.NotContains(t, returnedErr.Error(), secret)
+
+	failedSession, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if failedSession.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", failedSession.State)
+	}
+	if strings.Contains(failedSession.ErrorMessage, secret) {
+		t.Fatalf("session error contains raw credential: %q", failedSession.ErrorMessage)
+	}
+	if !strings.Contains(failedSession.ErrorMessage, "resolve workspace Git credential") {
+		t.Fatalf("session error is not actionable: %q", failedSession.ErrorMessage)
+	}
+	if len(messages.sessionMessages) != 0 {
+		t.Fatalf("generic credential failure created %d missing-branch messages", len(messages.sessionMessages))
+	}
+	if len(eventBus.events) != 1 || eventBus.events[0].subject != events.TaskSessionStateChanged {
+		t.Fatalf("session lifecycle events = %#v, want one %s event", eventBus.events, events.TaskSessionStateChanged)
+	}
+	taskRepo.mu.Lock()
+	defer taskRepo.mu.Unlock()
+	if got := taskRepo.tasks["task1"].State; got != v1.TaskStateFailed {
+		t.Fatalf("task state = %s, want FAILED", got)
+	}
+}
+
+func TestHandleSessionLaunchFailure_DoesNotOverwriteTerminalSession(t *testing.T) {
+	for _, state := range []models.TaskSessionState{
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateCancelled,
+	} {
+		t.Run(string(state), func(t *testing.T) {
+			repo := setupTestRepo(t)
+			seedTaskAndSession(t, repo, "task1", "session1", state)
+			taskRepo := newMockTaskRepo()
+			taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateInProgress}
+			svc := createTestService(repo, newMockStepGetter(), taskRepo)
+			svc.eventBus = bus.NewMemoryEventBus(testLogger())
+
+			require.Error(t, svc.handleSessionLaunchFailure(
+				context.Background(), "task1", "session1",
+				errors.New("resolve workspace Git credential: GitHub is not configured"),
+			))
+
+			session, err := repo.GetTaskSession(context.Background(), "session1")
+			if err != nil {
+				t.Fatalf("GetTaskSession: %v", err)
+			}
+			if session.State != state {
+				t.Fatalf("session state = %s, want %s", session.State, state)
+			}
+			taskRepo.mu.Lock()
+			defer taskRepo.mu.Unlock()
+			if taskRepo.stateWrites["task1"] != 0 {
+				t.Fatalf("terminal session caused %d task writes", taskRepo.stateWrites["task1"])
+			}
+		})
+	}
+}
+
+func TestStartCreatedSession_PersistsEarlyCredentialFailure(t *testing.T) {
+	baseRepo := setupTestRepo(t)
+	seedTaskAndSession(t, baseRepo, "task1", "session1", models.TaskSessionStateCreated)
+	if err := baseRepo.SetSessionPrimary(context.Background(), "session1"); err != nil {
+		t.Fatalf("SetSessionPrimary: %v", err)
+	}
+	failureRepo := &taskEnvironmentFailureRepo{
+		Repository: baseRepo,
+		err:        errors.New("resolve workspace Git credential: GitHub is not configured"),
+		called:     make(chan struct{}),
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID: "task1", WorkspaceID: "ws1", WorkflowID: "wf1",
+		Title: "Test Task", Description: "start", State: v1.TaskStateScheduling,
+	}
+	agentMgr := &mockAgentManager{}
+	exec := executor.NewExecutor(agentMgr, failureRepo, testLogger(), executor.ExecutorConfig{})
+	svc := &Service{
+		logger:             testLogger(),
+		repo:               failureRepo,
+		workflowStepGetter: newMockStepGetter(),
+		taskRepo:           taskRepo,
+		agentManager:       agentMgr,
+		executor:           exec,
+		messageQueue:       messagequeue.NewServiceMemory(testLogger()),
+		scheduler: scheduler.NewScheduler(
+			queue.NewTaskQueue(1), exec, taskRepo, testLogger(), scheduler.SchedulerConfig{},
+		),
+		eventBus: &recordingEventBus{},
+	}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	_, err := svc.StartCreatedSession(
+		context.Background(), "task1", "session1", "profile1", "start",
+		true, false, true, nil, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "GitHub is not configured") {
+		t.Fatalf("StartCreatedSession error = %v, want GitHub credential failure", err)
+	}
+	session, getErr := baseRepo.GetTaskSession(context.Background(), "session1")
+	if getErr != nil {
+		t.Fatalf("GetTaskSession: %v", getErr)
+	}
+	if session.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", session.State)
+	}
+	if !strings.Contains(session.ErrorMessage, "resolve workspace Git credential: GitHub is not configured") {
+		t.Fatalf("session error = %q, want actionable credential failure", session.ErrorMessage)
+	}
+	taskRepo.mu.Lock()
+	taskState := taskRepo.tasks["task1"].State
+	taskRepo.mu.Unlock()
+	if taskState != v1.TaskStateFailed {
+		t.Fatalf("task state = %s, want FAILED", taskState)
+	}
+	if len(messages.sessionMessages) != 0 {
+		t.Fatalf("credential failure created %d missing-branch guidance messages", len(messages.sessionMessages))
+	}
+}
+
+func TestHandleSessionLaunchFailure_GenericFailureSurvivesCancelledContext(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
+	if err := repo.SetSessionPrimary(context.Background(), "session1"); err != nil {
+		t.Fatalf("SetSessionPrimary: %v", err)
+	}
+	taskRepo := &ctxAwareTaskRepo{inner: newMockTaskRepo()}
+	taskRepo.inner.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateScheduling}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo.inner)
+	svc.taskRepo = taskRepo
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.Error(t, svc.handleSessionLaunchFailure(
+		ctx, "task1", "session1", errors.New("resolve workspace Git credential: GitHub is not configured"),
+	))
+
+	failedSession, err := repo.GetTaskSession(context.Background(), "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if failedSession.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", failedSession.State)
+	}
+	taskRepo.inner.mu.Lock()
+	defer taskRepo.inner.mu.Unlock()
+	if got := taskRepo.inner.tasks["task1"].State; got != v1.TaskStateFailed {
+		t.Fatalf("task state = %s, want FAILED", got)
+	}
+}
+
+func TestHandleSessionLaunchFailure_ArchiveSafeTaskWrite(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
 	taskRepo := newMockTaskRepo()
@@ -2552,10 +2740,10 @@ func TestHandleEarlyMissingPRBranchLaunchFailure_ArchiveSafeTaskWrite(t *testing
 	svc.messageCreator = messages
 	svc.eventBus = bus.NewMemoryEventBus(testLogger())
 
-	svc.handleEarlyMissingPRBranchLaunchFailure(
+	require.Error(t, svc.handleSessionLaunchFailure(
 		context.Background(), "task1", "session1",
 		errors.New("fatal: couldn't find remote ref feature/deleted-pr"),
-	)
+	))
 
 	failedSession, err := repo.GetTaskSession(context.Background(), "session1")
 	if err != nil {
@@ -2574,7 +2762,7 @@ func TestHandleEarlyMissingPRBranchLaunchFailure_ArchiveSafeTaskWrite(t *testing
 	}
 }
 
-func TestHandleEarlyMissingPRBranchLaunchFailure_ConcurrentLaunchesCreateOneMessage(t *testing.T) {
+func TestHandleSessionLaunchFailure_ConcurrentLaunchesCreateOneMessage(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCreated)
 	taskRepo := newMockTaskRepo()
@@ -2595,7 +2783,7 @@ func TestHandleEarlyMissingPRBranchLaunchFailure_ConcurrentLaunchesCreateOneMess
 			defer done.Done()
 			ready.Done()
 			<-start
-			svc.handleEarlyMissingPRBranchLaunchFailure(context.Background(), "task1", "session1", launchErr)
+			_ = svc.handleSessionLaunchFailure(context.Background(), "task1", "session1", launchErr)
 		}()
 	}
 	ready.Wait()
@@ -3831,7 +4019,9 @@ func TestResumeTaskSession_FailureTaskWriteIsConditionalOnFailedSession(t *testi
 	taskRepo.updateIfSessionState = func(context.Context, string, string, models.TaskSessionState, v1.TaskState) (bool, error) {
 		return false, nil
 	}
-	launchErr := errors.New("resume workspace failed")
+	sentinel := errors.New("resume workspace failed")
+	const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890AB"
+	launchErr := fmt.Errorf("token=%s: %w", secret, sentinel)
 	agentMgr := &mockAgentManager{
 		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 			return nil, launchErr
@@ -3856,8 +4046,11 @@ func TestResumeTaskSession_FailureTaskWriteIsConditionalOnFailedSession(t *testi
 	}
 
 	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
-	if !errors.Is(err, launchErr) {
-		t.Fatalf("ResumeTaskSession error = %v, want %v", err, launchErr)
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("ResumeTaskSession error = %v, want wrapped sentinel", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("ResumeTaskSession returned raw credential: %v", err)
 	}
 	failed, err := repo.GetTaskSession(ctx, "session1")
 	if err != nil {
@@ -3865,6 +4058,9 @@ func TestResumeTaskSession_FailureTaskWriteIsConditionalOnFailedSession(t *testi
 	}
 	if failed.State != models.TaskSessionStateFailed {
 		t.Fatalf("session state = %s, want FAILED", failed.State)
+	}
+	if strings.Contains(failed.ErrorMessage, secret) {
+		t.Fatalf("session error contains raw credential: %q", failed.ErrorMessage)
 	}
 	taskRepo.mu.Lock()
 	defer taskRepo.mu.Unlock()

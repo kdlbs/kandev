@@ -1161,6 +1161,7 @@ test_summary_mode_returns_compact_fixup_state() {
   assert_jq "summary pending check count" '.pending_checks | length == 2' "$json"
   assert_jq "summary pending check" '.pending_checks[0] | .name == "claude-review" and .status == "in_progress" and .run_id == "27340000003"' "$json"
   assert_jq "summary pending status context keeps target url" '.pending_checks[] | select(.name == "external pending") | .status == "pending" and .details_url == null and .target_url == "https://ci.example.test/build/1"' "$json"
+  assert_jq "summary exposes normalized passing checks" '(.passed_check_count == (.successful_checks | length)) and any(.successful_checks[]; .name == "web lint" and .conclusion == "success") and any(.successful_checks[]; .name == "opencode-review-same-repo" and .conclusion == "success")' "$json"
   assert_jq "summary unresolved count" '.unresolved_review_thread_count == 2' "$json"
   assert_jq "summary filtered thread count" '.filtered_review_thread_count == 1' "$json"
   assert_jq "summary unresolved threads" '.unresolved_threads | length == 1' "$json"
@@ -1262,6 +1263,47 @@ test_comment_mode_rejects_incompatible_flags() {
   pass "--comment rejects incompatible flags"
 }
 
+join_line_continuations() {
+  local file=$1
+  local line buffer='' lineno=0 start=1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$((lineno + 1))
+    [[ -n "$buffer" ]] || start=$lineno
+    if [[ "$line" == *\\ ]]; then
+      buffer+="${line%\\} "
+      continue
+    fi
+    printf '%s:%s\n' "$start" "$buffer$line"
+    buffer=''
+  done <"$file"
+  [[ -z "$buffer" ]] || printf '%s:%s\n' "$start" "$buffer"
+}
+
+test_jq_file_args_avoid_process_substitution() {
+  local pattern='(--slurpfile|--rawfile|--argfile)[[:space:]]+[^[:space:]]+[[:space:]]+<\('
+  local tmp
+  make_tmp_dir tmp
+
+  printf '%s\n' "jq -cn --slurpfile page <(printf x) '.'" >"$tmp/same_line.sh"
+  if ! join_line_continuations "$tmp/same_line.sh" | grep -qE "$pattern"; then
+    fail "guard misses process substitution on a single line"
+  fi
+
+  printf '%s\n' 'jq -cn \' '  --slurpfile page \' '  <(printf x)' >"$tmp/continued.sh"
+  if ! join_line_continuations "$tmp/continued.sh" | grep -qE "$pattern"; then
+    fail "guard misses process substitution split across a line continuation"
+  fi
+
+  local offenders
+  offenders="$(join_line_continuations "$SCRIPT" | grep -E "$pattern" || true)"
+  if [[ -n "$offenders" ]]; then
+    printf '%s\n' "$offenders" >&2
+    fail "jq file arguments must not come from process substitution (native jq cannot open /proc/<pid>/fd/<n>)"
+  fi
+  pass "jq file arguments avoid process substitution"
+}
+
+test_jq_file_args_avoid_process_substitution
 test_snapshot_happy_path
 test_old_head_review_does_not_qualify
 test_exact_head_selected_review_qualifies
