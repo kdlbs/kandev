@@ -60,6 +60,17 @@ type UseTaskOperationsParams = {
   setTotal: (total: number) => void;
 };
 
+const EMPTY_WORKFLOW_STEPS: KanbanStep[] = [];
+
+type KanbanStep = {
+  id: string;
+  title: string;
+  events?: {
+    on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+    on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
+  };
+};
+
 function useLatestWorkspaceRequest(activeWorkspaceId: string | null) {
   const latestFetchRef = useRef({ seq: 0, workspaceId: activeWorkspaceId });
 
@@ -505,7 +516,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
   const { isMobile } = useResponsiveBreakpoint();
   const showTaskDetails = useAppStore((state) => state.userSettings.tasksListShowDetails ?? false);
   const activeSteps = useAppStore((state) =>
-    state.kanban.workflowId === s.activeWorkflowId ? state.kanban.steps : [],
+    state.kanban.workflowId === s.activeWorkflowId ? state.kanban.steps : EMPTY_WORKFLOW_STEPS,
   );
   useWorkflowSnapshot(s.activeWorkflowId);
   useWorkspacePRs(showTaskDetails ? s.activeWorkspaceId : null);
@@ -594,14 +605,7 @@ type MobileTasksCreateDialogProps = {
   onOpenChange: (open: boolean) => void;
   workspaceId: string;
   workflowId: string | null;
-  steps: Array<{
-    id: string;
-    title: string;
-    events?: {
-      on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
-      on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
-    };
-  }>;
+  steps: KanbanStep[];
   onCreated: () => Promise<void>;
 };
 
