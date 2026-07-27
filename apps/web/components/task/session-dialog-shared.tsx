@@ -21,6 +21,7 @@ import {
   MAX_TOTAL_SIZE,
   type FileAttachment,
 } from "./chat/file-attachment";
+import { readClipboardAttachments } from "./chat/clipboard-attachments";
 import { useAttachmentFileFeedback } from "./chat/use-attachment-file-feedback";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 
@@ -175,13 +176,7 @@ export function useDialogAttachments(disabled: boolean) {
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
       if (disabled) return;
-      const files: File[] = [];
-      for (const item of e.clipboardData?.items ?? []) {
-        if (item.kind === "file") {
-          const f = item.getAsFile();
-          if (f) files.push(f);
-        }
-      }
+      const { files } = readClipboardAttachments(e.clipboardData);
       if (files.length > 0) {
         e.preventDefault();
         void addFiles(files);
