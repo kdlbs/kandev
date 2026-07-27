@@ -218,7 +218,7 @@ export function useQueue(sessionId: string | null) {
     () => {
       if (!sessionId) return;
       if (connectionStatus !== "connected") return;
-      void refetch(sessionId).catch((err) => {
+      return refetch(sessionId).catch((err) => {
         console.error("Failed to fetch queue status after foreground refresh:", err);
       });
     },

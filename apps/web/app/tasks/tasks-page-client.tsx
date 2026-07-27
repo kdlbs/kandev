@@ -124,6 +124,8 @@ function useTaskOperations({
             description: errorDescription(err),
             variant: "error",
           });
+        } else {
+          console.error("[TasksPage] Silent foreground refresh failed:", err);
         }
       } finally {
         if (shouldCommit()) setIsLoading(false);
@@ -568,7 +570,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
         handleArchive={s.handleArchive}
         handleUnarchive={s.handleUnarchive}
         handleDelete={s.handleDelete}
-        onRefresh={isMobile ? () => s.fetchTasks(true) : undefined}
+        onRefresh={isMobile ? () => s.fetchTasks() : undefined}
       />
       {isMobile && s.activeWorkspaceId && (
         <>

@@ -4,6 +4,7 @@ import { useRef, useState, type ReactNode, type TouchEvent } from "react";
 import { IconRefresh } from "@tabler/icons-react";
 import {
   PULL_TO_REFRESH_THRESHOLD,
+  isAtVerticalScrollTop,
   pullDistance,
   shouldRefreshAfterPull,
 } from "@/lib/mobile/pull-to-refresh";
@@ -14,16 +15,6 @@ function refreshLabel(refreshing: boolean, distance: number): string {
   if (refreshing) return "Refreshing tasks";
   if (distance >= PULL_TO_REFRESH_THRESHOLD) return "Release to refresh";
   return "Pull to refresh";
-}
-
-function isAtVerticalScrollTop(target: EventTarget | null, root: HTMLDivElement | null): boolean {
-  let current = target instanceof HTMLElement ? target : null;
-  while (current) {
-    if (current.scrollHeight > current.clientHeight && current.scrollTop > 0) return false;
-    if (current === root) break;
-    current = current.parentElement;
-  }
-  return true;
 }
 
 export function PullToRefresh({
@@ -91,7 +82,11 @@ export function PullToRefresh({
       onTouchStartCapture={onTouchStart}
       onTouchMoveCapture={onTouchMove}
       onTouchEndCapture={onTouchEnd}
-      onTouchCancelCapture={onTouchEnd}
+      onTouchCancelCapture={() => {
+        pullRef.current = null;
+        distanceRef.current = 0;
+        setDistance(0);
+      }}
       data-testid="pull-to-refresh"
     >
       {visible && (

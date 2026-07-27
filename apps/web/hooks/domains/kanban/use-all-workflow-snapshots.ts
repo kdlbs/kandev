@@ -79,12 +79,24 @@ async function fetchAndWriteSnapshot(
         stepIds.has(task.workflowStepId),
     );
 
-    store.getState().setWorkflowSnapshot(wf.id, {
+    const workflowSnapshot = {
       workflowId: wf.id,
       workflowName: wf.name,
       steps,
       tasks: [...tasks, ...inFlightCreatedTasks],
-    });
+    };
+    store.getState().setWorkflowSnapshot(wf.id, workflowSnapshot);
+    const activeKanban = store.getState().kanban;
+    if (activeKanban?.workflowId === wf.id) {
+      store.getState().hydrate({
+        kanban: {
+          ...activeKanban,
+          isLoading: false,
+          steps,
+          tasks: workflowSnapshot.tasks,
+        },
+      });
+    }
   } catch (err) {
     console.error(
       `[useAllWorkflowSnapshots] Failed to fetch snapshot for workflow "${wf.name}" (${wf.id}):`,
@@ -105,16 +117,19 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
   const lastFetchedRef = useRef<string>("");
   const lastWorkspaceIdRef = useRef<string | null>(null);
   const fetchGenRef = useRef(0);
-  const refreshResolversRef = useRef<Array<() => void>>([]);
+  const refreshResolversRef = useRef<Array<{ generation: number; resolve: () => void }>>([]);
   const [refreshNonce, setRefreshNonce] = useState(0);
-  const resolveRefreshes = useCallback(() => {
-    const resolvers = refreshResolversRef.current.splice(0);
-    resolvers.forEach((resolve) => resolve());
+  const resolveRefreshes = useCallback((generation: number) => {
+    const ready = refreshResolversRef.current.filter((entry) => entry.generation === generation);
+    refreshResolversRef.current = refreshResolversRef.current.filter(
+      (entry) => entry.generation !== generation,
+    );
+    ready.forEach(({ resolve }) => resolve());
   }, []);
   const refresh = useCallback(
     () =>
       new Promise<void>((resolve) => {
-        refreshResolversRef.current.push(resolve);
+        refreshResolversRef.current.push({ generation: fetchGenRef.current, resolve });
         setRefreshNonce((current) => current + 1);
       }),
     [],
@@ -126,6 +141,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
     // Skip clear on initial mount to preserve SSR-hydrated snapshots.
     if (lastWorkspaceIdRef.current !== workspaceId) {
       if (lastWorkspaceIdRef.current !== null) {
+        resolveRefreshes(fetchGenRef.current);
         store.getState().clearKanbanMulti();
         lastFetchedRef.current = "";
         fetchGenRef.current += 1;
@@ -134,13 +150,13 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
     }
 
     if (!workspaceId) {
-      resolveRefreshes();
+      resolveRefreshes(fetchGenRef.current);
       return;
     }
 
     const workspaceWorkflows = workflows.filter((w) => w.workspaceId === workspaceId);
     if (workspaceWorkflows.length === 0) {
-      resolveRefreshes();
+      resolveRefreshes(fetchGenRef.current);
       return;
     }
 
@@ -155,7 +171,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
       ":" +
       refreshNonce;
     if (lastFetchedRef.current === key) {
-      resolveRefreshes();
+      resolveRefreshes(fetchGenRef.current);
       return;
     }
     if (
@@ -165,7 +181,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
       )
     ) {
       lastFetchedRef.current = key;
-      resolveRefreshes();
+      resolveRefreshes(fetchGenRef.current);
       return;
     }
     lastFetchedRef.current = key;
@@ -187,7 +203,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
         return;
       }
       store.getState().setKanbanMultiLoading(false);
-      resolveRefreshes();
+      resolveRefreshes(myGen);
     });
   }, [workspaceId, workflows, connectionStatus, refreshNonce, resolveRefreshes, store]);
 
