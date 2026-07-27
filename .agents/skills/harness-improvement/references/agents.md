@@ -1,8 +1,9 @@
 # Single-Session Policy
 
-Kandev intentionally has no project-local custom-agent files. The durable
-planning and implementation workflow uses the user-started primary conversation
-so model choice, transcript, and cost remain visible and predictable.
+Kandev intentionally has no project-local custom-agent files for planning or
+implementation. The durable workflow uses the user-started primary conversation
+so model choice, transcript, and cost remain visible and predictable. The only
+repository-defined exception is the read-only `pr-poller` waiting aid.
 Platform-provided explorers and other harness-managed investigation agents are
 not prohibited by this policy.
 
@@ -29,8 +30,12 @@ a plan's waves.
 
 ## Exception
 
-Create a custom agent only when the user explicitly requests one and accepts its
-additional context and coordination cost. Native subagents explicitly authorized
-for a plan do not require custom-agent files. For a custom agent, read only the
-relevant `platforms/<platform>.md` reference and state the affected model,
-reasoning, isolation, and cost trade-off before editing.
+The `pr-poller` is allowed only when the user explicitly asks the primary
+conversation to wait for or monitor a PR. It is read-only, time-bounded, and
+cannot edit, comment, resolve threads, or spawn children.
+
+Create any other custom agent only when the user explicitly requests one and
+accepts its additional context and coordination cost. Native subagents explicitly
+authorized for a plan do not require custom-agent files. For a custom agent,
+read only the relevant `platforms/<platform>.md` reference and state the
+affected model, reasoning, isolation, and cost trade-off before editing.

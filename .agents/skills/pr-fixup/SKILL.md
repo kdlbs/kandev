@@ -6,9 +6,11 @@ description: Wait for CI and automated reviews on a PR, fix valid failures and c
 # PR Fixup
 
 Use this workflow directly in the user-started primary conversation. Do not
-launch a poller, verifier, implementer, or any other subagent. For a
-cost-controlled workflow, the user may switch the same conversation to the
-lower-cost implementation/test model before starting CI remediation.
+launch a verifier, implementer, or other remediation subagent. A read-only
+`pr-poller` is the sole exception: launch it only when the user explicitly asks
+to wait for or monitor PR updates. For a cost-controlled workflow, the user may
+switch the same conversation to the lower-cost implementation/test model before
+starting CI remediation.
 
 Use `gh` by default; when it is unavailable after access is approved, use an
 available GitHub integration. `scripts/pr-state`, `scripts/pr-resolve`, and
@@ -46,6 +48,13 @@ Treat `trusted_producer=true` as qualifying provenance only for the dedicated Op
 For pending CI, do not run a rapid parent polling loop. Wait at a reasonable
 interval, then run the same summary again. Stop after about 20 minutes and
 report the exact pending checks as "CI in progress."
+
+When the user explicitly asks to wait or monitor, the main conversation may
+delegate one platform `pr-poller`. Give it the PR number and any selected
+reviewer, then use its report only as status evidence. The poller is read-only,
+time-bounded, and must not edit, push, comment, resolve threads, inspect source,
+or spawn children. The primary conversation owns all triage and remediation;
+never launch a poller automatically or relaunch one after a denied approval.
 
 Treat the state as clean only when the current head has no failed or pending
 checks, no merge conflict, no actionable review thread or issue comment, and

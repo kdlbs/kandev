@@ -82,6 +82,11 @@ When the user authorizes subagents:
 If the user does not explicitly authorize delegation, do not infer permission
 from a plan's waves or parallelism labels.
 
+The read-only `pr-poller` is a delivery exception, not an implementation
+worker. Launch it only after the user explicitly asks to wait for or monitor PR
+updates; it reports status to the primary conversation and never remediates,
+comments, or spawns children.
+
 ## Task-Driven Validation And PR Review
 
 Each task file owns its TDD requirement and exact unit, integration, or E2E

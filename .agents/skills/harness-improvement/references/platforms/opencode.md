@@ -100,10 +100,11 @@ Important fields:
 - `hidden`: hide a subagent from autocomplete.
 - `permission.task`: restrict which subagents another agent can invoke.
 
-Kandev does not maintain `.opencode/agents/` mirrors. When the user explicitly
-requests a project agent, retain the selected primary model unless they choose
-otherwise and set `permission.task` deliberately to control recursive
-delegation.
+Kandev maintains only the read-only `.opencode/agents/pr-poller.md`, using
+DeepSeek Flash for an explicitly user-authorized PR wait. When the user
+explicitly requests another project agent, retain the selected primary model
+unless they choose otherwise and set `permission.task` deliberately to control
+recursive delegation.
 
 OpenCode `temperature` controls sampling randomness, not reasoning effort. With
 `model` unpinned, provider-specific reasoning settings also remain inherited

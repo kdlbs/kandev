@@ -15,8 +15,9 @@ implementation switch ineffective.
 
 Kandev's durable planning and implementation workflow uses the user-started
 primary conversation by default. Custom-agent definitions are removed across the
-shared, Codex, Cursor, and OpenCode mirrors, while platform-provided explorers
-and other harness-managed investigation agents remain available. Feature work
+shared, Codex, Cursor, and OpenCode mirrors except for one read-only PR poller
+per supported native platform. Platform-provided explorers and other
+harness-managed investigation agents remain available. Feature work
 creates durable specs, plans, and task files on a strong model, pauses for the
 user to manually switch the same conversation to a lower-cost model, then
 implements task files sequentially with TDD and their exact listed validation
@@ -24,6 +25,11 @@ commands.
 Plans may label parallel-safe waves; native subagents are launched only after
 the user explicitly authorizes them, with the selected active model and no
 full-history context fork.
+
+The PR poller is a narrow delivery exception. The primary conversation may
+launch it only after the user explicitly asks to wait for CI or review updates.
+It uses a cheap platform-specific model, reports a time-bounded status summary,
+and cannot edit, remediate, post or resolve comments, or spawn children.
 
 This decision supersedes [Planner Direct Small Work](2026-07-23-planner-direct-small-work.md)
 and [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md).
@@ -41,7 +47,9 @@ decision requires an explicit user-approved switch back to a strong model.
 ## Consequences
 
 Model choice and spending are visible in one transcript, with no inherited
-worker model or full-history fan-out. Task files become the durable handoff
+implementation-worker model or full-history fan-out. The PR poller adds a small
+isolated context cost only for explicit waits, avoiding repeated expensive
+primary-session polling. Task files become the durable handoff
 between model tiers and define the only required pre-PR validation. They also
 make parallelism visible without spending automatically. Broad local
 simplify, QA, code-review, security-review, and full-verification passes are

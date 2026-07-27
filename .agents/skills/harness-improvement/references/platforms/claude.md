@@ -80,10 +80,10 @@ You are a code reviewer. Provide specific, actionable feedback.
 
 Supported fields include `tools`, `disallowedTools`, `model`, `permissionMode`, `mcpServers`, `hooks`, `maxTurns`, `skills`, `initialPrompt`, `memory`, `effort`, `background`, `isolation`, and `color`.
 
-Kandev does not maintain project-local Claude subagent definitions. If the user
-explicitly requests one, state its model, reasoning effort, isolation, and
-additional context cost before creating it; do not recreate the former role or
-model-tier mapping.
+Kandev maintains only the read-only `pr-poller` Claude subagent, using Haiku for
+an explicitly user-authorized PR wait. If the user explicitly requests another
+agent, state its model, reasoning effort, isolation, and additional context cost
+before creating it; do not recreate the former role or model-tier mapping.
 
 Important behavior:
 

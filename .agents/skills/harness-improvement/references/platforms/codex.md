@@ -76,6 +76,10 @@ Codex subagents inherit the parent sandbox policy and live runtime overrides. A 
 
 Use read-only sandbox for review, exploration, and security agents. Use write access only for implementers or fixers.
 
+Kandev maintains only the read-only `.codex/agents/pr-poller.toml`, using Codex
+Spark for an explicitly user-authorized PR wait. Other project-local agents
+require the user's explicit request and cost approval.
+
 ## Conversion Notes
 
 Claude-style `.agents/agents/<name>.md` files are not Codex custom-agent TOML. To port one:
