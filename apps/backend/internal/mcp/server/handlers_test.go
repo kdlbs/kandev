@@ -834,3 +834,41 @@ func TestPlanTools_DescriptionsDocumentCrossTaskBehavior(t *testing.T) {
 			"%q description must document cross-task reach limits", name)
 	}
 }
+
+// TestTaskScopedTools_TaskIDIsOptional locks in that task_id is advertised as
+// optional (not required) on every tool whose handler falls back to the
+// session-bound task when task_id is omitted. Marking it required would
+// contradict the documented "defaults to your current task" behavior — the
+// schema/behavior mismatch flagged in review.
+func TestTaskScopedTools_TaskIDIsOptional(t *testing.T) {
+	s := newTaskModeServer(t, &testBackend{}, "task-A")
+	tools := s.mcpServer.ListTools()
+
+	for _, name := range []string{
+		"create_task_plan_kandev",
+		"get_task_plan_kandev",
+		"update_task_plan_kandev",
+		"delete_task_plan_kandev",
+		"show_walkthrough_kandev",
+		"get_walkthrough_kandev",
+		"delete_walkthrough_kandev",
+		"publish_review_findings_kandev",
+	} {
+		tool, ok := tools[name]
+		require.True(t, ok, "tool %q must be registered", name)
+
+		schema, err := json.Marshal(tool.Tool.InputSchema)
+		require.NoError(t, err)
+		var parsed map[string]interface{}
+		require.NoError(t, json.Unmarshal(schema, &parsed))
+
+		props, _ := parsed["properties"].(map[string]interface{})
+		assert.Contains(t, props, "task_id", "%q must still expose task_id", name)
+
+		required, _ := parsed["required"].([]interface{})
+		for _, r := range required {
+			assert.NotEqual(t, "task_id", r,
+				"%q must not mark task_id required — it defaults to the session task when omitted", name)
+		}
+	}
+}
