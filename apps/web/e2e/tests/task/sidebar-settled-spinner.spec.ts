@@ -94,7 +94,6 @@ test.describe("Sidebar spinner clears when a session settles", () => {
     await expect(settledRow.getByTestId("task-state-running")).toHaveCount(0, {
       timeout: 15_000,
     });
-    await expect(settledRow.getByTestId("task-state-running")).toHaveCount(0);
 
     // Settled turn with no pending clarification buckets into "review".
     await expect(settledRow.getByTestId("task-state-review")).toBeVisible({ timeout: 10_000 });

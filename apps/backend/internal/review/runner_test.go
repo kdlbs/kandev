@@ -825,6 +825,46 @@ func TestRunner_failSkipsCanceledCause(t *testing.T) {
 	}
 }
 
+func singleBatchPlan() BatchPlan {
+	return BatchPlan{Batches: [][]ChangedFile{{{Path: "a.go", Diff: "@@ -1 +1,2 @@\n x\n+y\n"}}}}
+}
+
+// reviewBatches must keep context.Canceled reachable through its %w wrapper so
+// fail() can leave a user cancel as cancelled. Reverting the inference wrapper
+// to %v would drop it and break this contract.
+func TestRunner_reviewBatchesPreservesCanceled(t *testing.T) {
+	runner := NewRunner(RunnerDeps{
+		Store:     newFakeStore(),
+		Resolver:  NewResolver(nil, &fakeUtility{found: true, enabled: true, agentID: "a", model: "m"}, nil),
+		Changes:   &fakeChangeSource{},
+		Inference: &fakeInference{err: fmt.Errorf("inference aborted: %w", context.Canceled)},
+		Prompts:   &fakePrompts{},
+		Sessions:  &fakeSessions{sessionID: "sess-1"},
+		Logger:    testLogger(t),
+	})
+
+	_, err := runner.reviewBatches(context.Background(), singleBatchPlan(),
+		ReviewerIdentity{Model: "m"}, "sess-1", PromptContext{})
+	if !errors.Is(err, ErrExecutionFailed) {
+		t.Fatalf("expected ErrExecutionFailed in the chain, got %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("reviewBatches must keep context.Canceled reachable, got %v", err)
+	}
+}
+
+// reviewBatches must keep the underlying parse error reachable through its %w
+// wrapper on the unparseable-response path.
+func TestRunner_reviewBatchesPreservesParseError(t *testing.T) {
+	h := newRunnerHarness(t, map[string]any{}, []string{"no findings here at all"})
+
+	_, err := h.runner.reviewBatches(context.Background(), singleBatchPlan(),
+		ReviewerIdentity{Model: "m"}, "sess-1", PromptContext{})
+	if !errors.Is(err, ErrUnparseableResponse) {
+		t.Fatalf("expected ErrUnparseableResponse in the chain, got %v", err)
+	}
+}
+
 // TestRunner_ConcurrentLaunchesCreateOneRun covers the race where the DB check
 // and the in-memory claim were not atomic, leaving the loser's pending run row
 // orphaned with no goroutine behind it.
