@@ -3061,7 +3061,7 @@ func TestStartCreatedSession_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 		preWrapped, false, false, true, nil, nil,
 	)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Office runtime context")
+	assert.Contains(t, err.Error(), "office runtime context")
 	assert.Contains(t, err.Error(), "start or wake the task through Office")
 	require.Empty(t, messages.userMessages)
 
@@ -3820,7 +3820,7 @@ func TestStartTask_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 		"", false, false, nil,
 	)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Office runtime context")
+	assert.Contains(t, err.Error(), "office runtime context")
 	assert.Contains(t, err.Error(), "start or wake the task through Office")
 	assert.False(t, launchCalled)
 }
@@ -5249,7 +5249,7 @@ func TestEnsureSessionRunning_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 
 	err = svc.ensureSessionRunning(ctx, "session1", session)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "Office runtime context")
+	assert.Contains(t, err.Error(), "office runtime context")
 	assert.False(t, startAgentProcessCalled)
 }
 

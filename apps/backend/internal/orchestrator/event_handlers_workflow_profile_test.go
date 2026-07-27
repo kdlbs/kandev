@@ -73,7 +73,7 @@ func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	prompt := spoofedReference + "\n\n" +
 		sysprompt.InjectOfficeContext("wrong-task", "wrong-session", "Do the work")
 	err = svc.autoStartStepPrompt(ctx, "task-office", session, step, prompt, false, false)
-	if err == nil || !strings.Contains(err.Error(), "Office runtime context") {
+	if err == nil || !strings.Contains(err.Error(), "office runtime context") {
 		t.Fatalf("autoStartStepPrompt error = %v, want missing Office runtime context", err)
 	}
 
