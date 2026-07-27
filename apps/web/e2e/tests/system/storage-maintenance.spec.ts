@@ -174,6 +174,7 @@ test.describe("System storage maintenance", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -224,7 +225,31 @@ test.describe("System storage maintenance", () => {
       status: 409,
       body: { busy_resources: expect.any(Array) },
     });
-    await expect(testPage.getByTestId("storage-error")).toContainText(/busy|active/i);
-    await expect(testPage.getByTestId("storage-run-now")).not.toHaveAttribute("data-job-state");
+    expect(responseBody.force_available).toBe(true);
+    expect(responseBody.busy_resources[0]).toMatchObject({
+      kind: expect.any(String),
+      label: expect.any(String),
+    });
+    await expect(testPage.getByTestId("storage-busy")).toContainText(
+      responseBody.busy_resources[0].label,
+    );
+    await expect(testPage.getByTestId("storage-busy")).toContainText(/may disrupt/i);
+    await prCapture.screenshot("busy-feedback", {
+      caption: "Desktop storage cleanup explains the active work and offers Run anyway",
+      fullPage: true,
+    });
+
+    const forceRequest = testPage.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v1/system/storage/run",
+    );
+    await testPage.getByTestId("storage-run-anyway").click();
+    expect((await forceRequest).postDataJSON()).toEqual({ force: true });
+    await expect(testPage.getByTestId("storage-run-now")).toHaveAttribute(
+      "data-job-state",
+      "succeeded",
+      { timeout: 20_000 },
+    );
   });
 });

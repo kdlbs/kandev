@@ -19,6 +19,12 @@ Intent -> Spec -> Plan + task files -> User model switch -> Sequential TDD imple
 Do not replace the spec, plan, or task files with chat-only notes. Do not skip
 from intent to code unless the user explicitly opts out of this workflow.
 
+When a user explicitly asks to proceed with feature planning, complete the whole
+strong-model design package — spec, plan, and task files — before pausing for
+review or a model switch. Pause after a standalone spec only when the user asks
+to review that spec before planning, or when a material open question blocks a
+safe plan.
+
 ## Phase 0: Track The Work
 
 Keep a visible task list and mark each phase as it completes:

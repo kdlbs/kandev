@@ -5,6 +5,53 @@ import { seedManagedGoCache } from "../../helpers/storage-maintenance";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
 test.describe("Mobile storage maintenance", () => {
+  test("explains busy activity and allows Run anyway without horizontal overflow", async ({
+    testPage,
+    prCapture,
+  }) => {
+    let runAttempts = 0;
+    await testPage.route("**/api/v1/system/storage/run", async (route) => {
+      runAttempts += 1;
+      if (runAttempts === 1) {
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({
+            error: "storage cleanup is blocked by active Kandev work",
+            busy_resources: [{ kind: "test_command", label: "A test command is running" }],
+            force_available: true,
+          }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ job_id: "mobile-force-cleanup" }),
+      });
+    });
+
+    await testPage.goto("/settings/system/storage");
+    await testPage.getByTestId("storage-run-now").tap();
+    await expect(testPage.getByTestId("storage-busy")).toContainText("A test command is running");
+    await expect(testPage.getByTestId("storage-run-anyway")).toBeVisible();
+    await prCapture.screenshot("busy-feedback", {
+      caption: "Mobile storage cleanup keeps the warning and Run anyway action in one column",
+      fullPage: true,
+    });
+    const forceRequest = testPage.waitForRequest(
+      (request) =>
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/v1/system/storage/run" &&
+        request.postDataJSON()?.force === true,
+    );
+    await testPage.getByTestId("storage-run-anyway").tap();
+    expect((await forceRequest).postDataJSON()).toEqual({ force: true });
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
   test("opens Storage from mobile navigation and analyzes without horizontal overflow", async ({
     testPage,
     backend,

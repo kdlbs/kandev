@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
+import { ApiError } from "@/lib/api/client";
 import type { StorageMaintenanceSettings, StorageOverviewResponse } from "@/lib/types/system";
 
 const mocks = vi.hoisted(() => ({
@@ -180,6 +181,31 @@ describe("useStorageMaintenance", () => {
 
     expect(result.current.cleanupJob).toBeUndefined();
     expect(result.current.error).toBe("storage maintenance is busy");
+  });
+
+  it("retains labeled busy feedback and reruns the same resources with force", async () => {
+    mocks.run.mockRejectedValueOnce(
+      new ApiError("storage cleanup is blocked by active Kandev work", 409, {
+        busy_resources: [{ kind: "test_command", label: "A test command is running" }],
+        force_available: true,
+      }),
+    );
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+
+    await act(async () => {
+      await result.current.runNow(["go_cache"]);
+    });
+    expect(result.current.busy).toEqual({
+      resources: [{ kind: "test_command", label: "A test command is running" }],
+      forceAvailable: true,
+      resourceSelection: ["go_cache"],
+    });
+
+    await act(async () => {
+      await result.current.runAnyway();
+    });
+    expect(mocks.run).toHaveBeenNthCalledWith(2, ["go_cache"], true);
   });
 });
 

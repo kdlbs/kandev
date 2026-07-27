@@ -10,6 +10,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
+	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -95,6 +96,25 @@ func TestStorageAsyncRoutesAndBusyResponse(t *testing.T) {
 	if response.Code != http.StatusConflict {
 		t.Fatalf("busy run status = %d, want 409", response.Code)
 	}
+	var busyBody struct {
+		BusyResources  []activity.BusyResource `json:"busy_resources"`
+		ForceAvailable bool                    `json:"force_available"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &busyBody); err != nil {
+		t.Fatalf("decode busy response: %v", err)
+	}
+	if len(busyBody.BusyResources) != 1 || busyBody.BusyResources[0].Label == "" || !busyBody.ForceAvailable {
+		t.Fatalf("busy response = %#v, want labeled force-available blocker", busyBody)
+	}
+
+	mutations.busy = false
+	request = httptest.NewRequest(http.MethodPost, "/api/v1/system/storage/run", bytes.NewBufferString(`{"force":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusAccepted || !mutations.force {
+		t.Fatalf("forced run status = %d force=%v, want 202/true", response.Code, mutations.force)
+	}
 }
 
 func TestStorageRestoreConflictReturnsConflict(t *testing.T) {
@@ -167,6 +187,7 @@ func newStorageRoutesTestRouterWithMutations(t *testing.T, mutations storage.Mut
 
 type fakeStorageMutations struct {
 	busy       bool
+	force      bool
 	restoreErr error
 	deleteErr  error
 }
@@ -177,9 +198,13 @@ func (f *fakeStorageMutations) AdoptGoCache(_ context.Context, _ string, _ strin
 
 func (f *fakeStorageMutations) Analyze(context.Context) (string, error) { return "analysis-job", nil }
 
-func (f *fakeStorageMutations) RunNow(context.Context, []string) (string, error) {
+func (f *fakeStorageMutations) RunNow(_ context.Context, _ []string, force bool) (string, error) {
+	f.force = force
 	if f.busy {
-		return "", &storage.BusyError{}
+		return "", &storage.BusyError{
+			Resources:      []activity.BusyResource{{Kind: activity.KindTestCommand, Label: "A test command is running"}},
+			ForceAvailable: true,
+		}
 	}
 	return "cleanup-job", nil
 }
