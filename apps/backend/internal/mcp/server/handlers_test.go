@@ -815,9 +815,11 @@ func TestGetTaskPlan_FallsBackToBoundTask(t *testing.T) {
 }
 
 // TestPlanTools_DescriptionsDocumentCrossTaskBehavior keeps the advertised
-// behavior in the tool schemas honest — the descriptions must state that
-// task_id can name another task and is rejected (not redirected) when out of
-// reach, so callers aren't surprised by the resolution precedence.
+// behavior in the tool schemas honest — the top-level description of every
+// session-defaulting tool must state that task_id can name another task and is
+// rejected (not redirected) when out of reach. LLMs read the tool description
+// first to decide whether cross-task addressing is possible, so this coverage
+// spans plan, walkthrough, and review tools uniformly (not just plan).
 func TestPlanTools_DescriptionsDocumentCrossTaskBehavior(t *testing.T) {
 	s := newTaskModeServer(t, &testBackend{}, "task-A")
 	tools := s.mcpServer.ListTools()
@@ -827,6 +829,10 @@ func TestPlanTools_DescriptionsDocumentCrossTaskBehavior(t *testing.T) {
 		"get_task_plan_kandev",
 		"update_task_plan_kandev",
 		"delete_task_plan_kandev",
+		"show_walkthrough_kandev",
+		"get_walkthrough_kandev",
+		"delete_walkthrough_kandev",
+		"publish_review_findings_kandev",
 	} {
 		tool, ok := tools[name]
 		require.True(t, ok, "tool %q must be registered", name)

@@ -994,7 +994,9 @@ func (s *Server) registerWalkthroughTools() {
 					"Use this after producing a change to narrate the diff (what each hunk does and why), "+
 					"or to explain how a part of the codebase works. Order steps to follow the reader's "+
 					"natural path through the code (entry point first, then the call chain). Keep text "+
-					"concise and do not add a 'Justification:' preamble."),
+					"concise and do not add a 'Justification:' preamble. task_id defaults to your current "+
+					"task; pass another task's ID to target it directly, allowed only within your reach "+
+					"(same workspace / task tree)."),
 			mcp.WithString("task_id", mcp.Description("The task ID to attach the walkthrough to. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
 			mcp.WithString("title", mcp.Description("Optional title for the walkthrough (default: 'Walkthrough')")),
 			mcp.WithArray("steps", mcp.Required(),
@@ -1006,14 +1008,14 @@ func (s *Server) registerWalkthroughTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_walkthrough_kandev",
-			mcp.WithDescription("Get the current code walkthrough for a task, including any steps."),
+			mcp.WithDescription("Get the current code walkthrough for a task, including any steps. task_id defaults to your current task; pass another task's ID (within your reach — same workspace / task tree) to read it directly."),
 			mcp.WithString("task_id", mcp.Description("The task ID to get the walkthrough for. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to read it directly.")),
 		),
 		s.wrapHandler("get_walkthrough_kandev", s.getWalkthroughHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_walkthrough_kandev",
-			mcp.WithDescription("Delete the code walkthrough for a task."),
+			mcp.WithDescription("Delete the code walkthrough for a task. task_id defaults to your current task; pass another task's ID (within your reach — same workspace / task tree) to target it directly."),
 			mcp.WithString("task_id", mcp.Description("The task ID to delete the walkthrough for. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
 		),
 		s.wrapHandler("delete_walkthrough_kandev", s.deleteWalkthroughHandler()),
@@ -1037,7 +1039,9 @@ func (s *Server) registerReviewTools() {
 					"leaks, contract breaks, missing tests — not style or formatting a linter owns. "+
 					"Be honest with severity; marking everything a blocker makes the review useless. "+
 					"Publishing adds to the task's findings; it does not replace earlier ones, except "+
-					"that an unresolved finding with the same file, line range, and title is refreshed."),
+					"that an unresolved finding with the same file, line range, and title is refreshed. "+
+					"task_id defaults to your current task; pass another task's ID to target it directly, "+
+					"allowed only within your reach (same workspace / task tree)."),
 			mcp.WithString("task_id", mcp.Description("The task ID to attach the findings to. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
 			mcp.WithString("summary", mcp.Description("Optional one-paragraph summary of the review")),
 			mcp.WithArray("findings", mcp.Required(),
