@@ -22,11 +22,15 @@ import {
   sortCommandsForSearch,
 } from "@/lib/commands/search";
 import { formatShortcut } from "@/lib/keyboard/utils";
-import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
-import { useAppStore } from "@/components/state-provider";
 import type { Task } from "@/lib/types/http";
 import { FileIcon } from "@/components/ui/file-icon";
 import { WorkspaceContentSearch } from "@/components/workspace-content-search";
+import {
+  CommandPanelScopeSwitcher,
+  getAdjacentCommandPanelScope,
+  isCommandPanelScopeMode,
+  type CommandPanelScopeMode,
+} from "@/components/command-panel-scope-switcher";
 import type { WorkspaceContentSearchError } from "@/hooks/domains/session/use-workspace-content-search";
 import type { WorkspaceContentSearchResult } from "@/lib/types/backend";
 
@@ -272,10 +276,10 @@ function getModeLabel(mode: CommandPanelMode, inputCommand: CommandItemType | nu
 }
 
 function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
+  const isScopeMode = isCommandPanelScopeMode(mode);
   return (
     <div className="border-t border-border px-3 py-1.5 flex items-center gap-3 text-[0.6rem] text-muted-foreground">
-      {mode === MODE_COMMANDS && (
+      {isScopeMode && (
         <>
           <KbdGroup>
             <Kbd>↑</Kbd>
@@ -283,8 +287,8 @@ function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
             <span>Navigate</span>
           </KbdGroup>
           <KbdGroup>
-            <Kbd>{formatShortcut(getShortcut("FILE_SEARCH", keyboardShortcuts))}</Kbd>
-            <span>File Search</span>
+            <Kbd>Tab</Kbd>
+            <span>Switch mode</span>
           </KbdGroup>
         </>
       )}
@@ -292,7 +296,7 @@ function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
         <Kbd>↵</Kbd>
         <span>{getEnterLabel(mode)}</span>
       </KbdGroup>
-      {mode !== MODE_COMMANDS && (
+      {!isScopeMode && (
         <KbdGroup>
           <Kbd>⌫</Kbd>
           <span>Back</span>
@@ -316,6 +320,7 @@ export type CommandPanelViewProps = {
   search: string;
   setSearch: (value: string) => void;
   handleKeyDown: (e: React.KeyboardEvent) => void;
+  onScopeChange: (mode: CommandPanelScopeMode) => void;
   goBack: () => void;
   fileResults: string[];
   isSearchingFiles: boolean;
@@ -341,28 +346,41 @@ function CommandPanelInputHeader({
   search,
   setSearch,
   handleKeyDown,
+  onScopeChange,
   goBack,
 }: CommandPanelViewProps) {
+  const isScopeMode = isCommandPanelScopeMode(mode);
   const modeLabel = getModeLabel(mode, inputCommand);
+  const onInputKeyDown = (event: React.KeyboardEvent) => {
+    if (isScopeMode && event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+      event.preventDefault();
+      onScopeChange(getAdjacentCommandPanelScope(mode, event.shiftKey));
+      return;
+    }
+    handleKeyDown(event);
+  };
   return (
-    <div className="flex items-center border-b border-border [&>[data-slot=command-input-wrapper]]:flex-1">
-      {mode !== MODE_COMMANDS && (
-        <button
-          onClick={goBack}
-          tabIndex={-1}
-          className="shrink-0 pl-2 flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-        >
-          <span>←</span>
-          <span>{modeLabel}</span>
-          <span className="text-muted-foreground/50">›</span>
-        </button>
-      )}
-      <CommandInput
-        placeholder={getInputPlaceholder(mode, inputCommand)}
-        value={search}
-        onValueChange={setSearch}
-        onKeyDown={handleKeyDown}
-      />
+    <div className="border-b border-border">
+      <div className="flex items-center [&>[data-slot=command-input-wrapper]]:flex-1">
+        {!isScopeMode && (
+          <button
+            onClick={goBack}
+            tabIndex={-1}
+            className="shrink-0 pl-2 flex min-h-10 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            <span>←</span>
+            <span>{modeLabel}</span>
+            <span className="text-muted-foreground/50">›</span>
+          </button>
+        )}
+        <CommandInput
+          placeholder={getInputPlaceholder(mode, inputCommand)}
+          value={search}
+          onValueChange={setSearch}
+          onKeyDown={onInputKeyDown}
+        />
+      </div>
+      {isScopeMode && <CommandPanelScopeSwitcher mode={mode} onScopeChange={onScopeChange} />}
     </div>
   );
 }

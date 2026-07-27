@@ -20,8 +20,11 @@ repositories.
 - The shortcut works while a workbench editor or text input has focus and takes
   precedence over that surface's local find shortcut. It prevents the browser's
   default search action.
-- The existing **Cmd/Ctrl+Shift+K** file-name and path search remains a separate
-  mode with its existing behavior.
+- The command palette visibly exposes **Commands**, **Files**, and **Contents**
+  as peer modes, with each mode's direct shortcut shown beside its label.
+- Clicking a mode or pressing **Tab** / **Shift+Tab** switches among those modes
+  without discarding the current query. The existing **Cmd/Ctrl+Shift+K**
+  shortcut still opens file-name and path search directly.
 - Search covers every repository materialized for the active task session.
   Tracked files and untracked, non-ignored files are eligible; ignored files,
   directories, and workspace metadata are not.
@@ -102,6 +105,9 @@ workspace file-name search contracts are unchanged.
 - **GIVEN** a task editor has focus, **WHEN** the user presses
   **Cmd/Ctrl+Shift+F**, **THEN** task content search opens and the browser or
   editor find UI does not.
+- **GIVEN** the palette is open with a query, **WHEN** the user clicks another
+  top-level mode or presses **Tab**, **THEN** the mode changes, the query remains,
+  and the input keeps focus.
 - **GIVEN** a line containing an exact occurrence and another containing only a
   fuzzy subsequence, **WHEN** both match the query, **THEN** the exact occurrence
   ranks first.

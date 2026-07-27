@@ -92,6 +92,24 @@ test("@search searches all task repositories and opens the selected match", asyn
     ),
   ).toHaveCount(1);
 
+  const commandsTab = dialog.getByRole("tab", { name: "Commands" });
+  const filesTab = dialog.getByRole("tab", { name: "Files" });
+  const contentsTab = dialog.getByRole("tab", { name: "Contents" });
+  await expect(contentsTab).toHaveAttribute("aria-selected", "true");
+
+  await commandsTab.click();
+  await expect(input).toBeFocused();
+  await expect(input).toHaveValue(SEARCH_TERM);
+  await expect(commandsTab).toHaveAttribute("aria-selected", "true");
+
+  await testPage.keyboard.press("Tab");
+  await expect(filesTab).toHaveAttribute("aria-selected", "true");
+  await expect(input).toHaveValue(SEARCH_TERM);
+
+  await testPage.keyboard.press("Tab");
+  await expect(contentsTab).toHaveAttribute("aria-selected", "true");
+  await expect(groups).toHaveCount(2, { timeout: 15_000 });
+
   const extraResult = dialog
     .locator(`[data-testid="content-search-result"][data-repository="${EXTRA_REPOSITORY_NAME}"]`)
     .filter({ hasText: sharedPath });

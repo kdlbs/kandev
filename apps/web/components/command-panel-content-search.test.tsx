@@ -9,7 +9,17 @@ vi.mock("@kandev/ui/command", () => ({
     open ? <div>{children}</div> : null,
   CommandEmpty: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CommandGroup: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  CommandInput: ({ placeholder }: { placeholder: string }) => <input placeholder={placeholder} />,
+  CommandInput: ({
+    placeholder,
+    value,
+    onKeyDown,
+  }: {
+    placeholder: string;
+    value: string;
+    onKeyDown: (event: React.KeyboardEvent<HTMLInputElement>) => void;
+  }) => (
+    <input role="combobox" placeholder={placeholder} value={value} onKeyDown={onKeyDown} readOnly />
+  ),
   CommandItem: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CommandList: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CommandShortcut: ({ children }: { children: ReactNode }) => <span>{children}</span>,
@@ -70,6 +80,7 @@ function viewProps(overrides: Partial<CommandPanelViewProps> = {}): CommandPanel
     search: "needle",
     setSearch: vi.fn(),
     handleKeyDown: vi.fn(),
+    onScopeChange: vi.fn(),
     goBack: vi.fn(),
     fileResults: [],
     isSearchingFiles: false,
@@ -115,5 +126,40 @@ describe("CommandPanelView task content search mode", () => {
 
     fireEvent.click(screen.getByTestId("mock-content-search"));
     expect(props.handleContentSelect).toHaveBeenCalledWith(result);
+  });
+
+  it("makes all palette scopes visible and switches without clearing the query", () => {
+    const onScopeChange = vi.fn();
+    const props = viewProps({ onScopeChange });
+    render(<CommandPanelView {...props} />);
+
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(3);
+    expect(screen.getByRole("tab", { name: "Commands" }).getAttribute("aria-selected")).toBe(
+      "false",
+    );
+    expect(screen.getByRole("tab", { name: "Files" }).getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByRole("tab", { name: "Contents" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+
+    expect(onScopeChange).toHaveBeenCalledWith("search-files");
+    expect(props.setSearch).not.toHaveBeenCalled();
+    expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("needle");
+  });
+
+  it("cycles palette scopes with Tab and Shift+Tab", () => {
+    const onScopeChange = vi.fn();
+    const props = viewProps({ onScopeChange });
+    render(<CommandPanelView {...props} />);
+    const input = screen.getByRole("combobox");
+
+    fireEvent.keyDown(input, { key: "Tab" });
+    expect(onScopeChange).toHaveBeenLastCalledWith("commands");
+
+    fireEvent.keyDown(input, { key: "Tab", shiftKey: true });
+    expect(onScopeChange).toHaveBeenLastCalledWith("search-files");
   });
 });

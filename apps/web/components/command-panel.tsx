@@ -5,12 +5,14 @@ import { useRouter } from "@/lib/routing/client-router";
 import { useCommands, useCommandPanelOpen } from "@/lib/commands/command-registry";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
 import { findFirstMatchingCommand, selectCommandSearchResult } from "@/lib/commands/search";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
-import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
-import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
+import { useCommandPanelShortcuts } from "@/hooks/use-command-panel-shortcuts";
 import { useContentSearchResultOpener } from "@/hooks/use-content-search-result-opener";
 import { useWorkspaceContentSearch } from "@/hooks/domains/session/use-workspace-content-search";
 import { useAppStore } from "@/components/state-provider";
+import {
+  isCommandPanelScopeMode,
+  type CommandPanelScopeMode,
+} from "@/components/command-panel-scope-switcher";
 
 import { listTasksByWorkspace } from "@/lib/api";
 import { linkToTask } from "@/lib/links";
@@ -437,7 +439,7 @@ function useCommandPanelHandlers(
         inputCommand.onInputSubmit(search.trim());
         return;
       }
-      if (mode !== MODE_COMMANDS && e.key === "Backspace" && !search) {
+      if (!isCommandPanelScopeMode(mode) && e.key === "Backspace" && !search) {
         e.preventDefault();
         setMode(MODE_COMMANDS);
         setSearch("");
@@ -446,6 +448,11 @@ function useCommandPanelHandlers(
     },
     [mode, search, inputCommand, setOpen, setMode, setSearch, setInputCommand],
   );
+
+  const onScopeChange = (nextMode: CommandPanelScopeMode) => {
+    setMode(nextMode);
+    setInputCommand(null);
+  };
 
   const goBack = useCallback(() => {
     setMode(MODE_COMMANDS);
@@ -461,37 +468,9 @@ function useCommandPanelHandlers(
     handleTaskSelect,
     handleFileSelect,
     handleKeyDown,
+    onScopeChange,
     goBack,
   };
-}
-
-function useCommandPanelShortcuts(
-  open: boolean,
-  setOpen: (open: boolean) => void,
-  state: ReturnType<typeof useCommandPanelState>,
-) {
-  const openRef = useRef(open);
-  useEffect(() => {
-    openRef.current = open;
-  }, [open]);
-
-  const toggleCommands = useCallback(() => setOpen(!openRef.current), [setOpen]);
-  const { mode, setMode, setSearch } = state;
-  const openFileSearch = useCallback(() => {
-    if (openRef.current && mode === MODE_SEARCH_FILES) {
-      setOpen(false);
-      return;
-    }
-    setMode(MODE_SEARCH_FILES);
-    setSearch("");
-    setOpen(true);
-  }, [mode, setMode, setOpen, setSearch]);
-
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
-  useKeyboardShortcut(getShortcut("SEARCH", keyboardShortcuts), toggleCommands);
-  useKeyboardShortcut(getShortcut("COMMAND_PANEL", keyboardShortcuts), toggleCommands);
-  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, toggleCommands);
-  useKeyboardShortcut(getShortcut("FILE_SEARCH", keyboardShortcuts), openFileSearch);
 }
 
 export function CommandPanel() {
@@ -539,7 +518,13 @@ export function CommandPanel() {
   });
   useFirstResultSelection(open, state, commands, contentResults);
 
-  useCommandPanelShortcuts(open, setOpen, state);
+  useCommandPanelShortcuts({
+    open,
+    setOpen,
+    mode,
+    setMode,
+    setSearch,
+  });
 
   const {
     grouped,
@@ -549,6 +534,7 @@ export function CommandPanel() {
     handleTaskSelect,
     handleFileSelect,
     handleKeyDown,
+    onScopeChange,
     goBack,
   } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps, repositories);
   const handleContentSelect = useContentSearchResultOpener(setOpen, worktreePath);
@@ -564,6 +550,7 @@ export function CommandPanel() {
       search={search}
       setSearch={setSearch}
       handleKeyDown={handleKeyDown}
+      onScopeChange={onScopeChange}
       goBack={goBack}
       fileResults={fileResults}
       isSearchingFiles={isSearchingFiles}
