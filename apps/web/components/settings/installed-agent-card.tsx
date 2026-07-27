@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useState } from "react";
+import { useState } from "react";
 import Link from "@/components/routing/app-link";
 import { IconLoader2, IconLock, IconSettings } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -41,7 +41,6 @@ function InstalledAgentIdentity({
   authRequired,
   loginAvailable,
   onAuthClick,
-  updateAction,
 }: {
   agent: AgentDiscovery;
   displayName: string;
@@ -50,7 +49,6 @@ function InstalledAgentIdentity({
   authRequired: boolean;
   loginAvailable: boolean;
   onAuthClick: () => void;
-  updateAction?: ReactNode;
 }) {
   return (
     <div className="space-y-1">
@@ -94,7 +92,6 @@ function InstalledAgentIdentity({
               </TooltipContent>
             </Tooltip>
           )}
-          {updateAction}
         </div>
       </div>
       <p
@@ -152,32 +149,32 @@ export function InstalledAgentCard({
           authRequired={authRequired}
           loginAvailable={loginAvailable}
           onAuthClick={handleAuthClick}
-          updateAction={
-            runtimeUpdate?.supported && onPreview && onUpdate ? (
-              <AgentRuntimeUpdateControl
-                agentName={agent.name}
-                displayName={displayName}
-                runtimeUpdate={runtimeUpdate}
-                job={updateJob}
-                installJob={installJob}
-                onPreview={onPreview}
-                onUpdate={onUpdate}
-              />
-            ) : null
-          }
         />
-        <Button size="sm" className="cursor-pointer mt-auto" asChild>
-          <Link
-            href={
-              hasAgentRecord
-                ? `/settings/agents/${encodeURIComponent(agent.name)}?mode=create`
-                : `/settings/agents/${encodeURIComponent(agent.name)}`
-            }
-          >
-            <IconSettings className="h-4 w-4 mr-2" />
-            {hasAgentRecord ? "Create new profile" : "Setup Profile"}
-          </Link>
-        </Button>
+        <div className="mt-auto flex items-center gap-2">
+          <Button size="sm" className="min-h-11 flex-1 cursor-pointer" asChild>
+            <Link
+              href={
+                hasAgentRecord
+                  ? `/settings/agents/${encodeURIComponent(agent.name)}?mode=create`
+                  : `/settings/agents/${encodeURIComponent(agent.name)}`
+              }
+            >
+              <IconSettings className="mr-2 h-4 w-4" />
+              {hasAgentRecord ? "Create new profile" : "Setup Profile"}
+            </Link>
+          </Button>
+          {runtimeUpdate?.supported && onPreview && onUpdate && (
+            <AgentRuntimeUpdateControl
+              agentName={agent.name}
+              displayName={displayName}
+              runtimeUpdate={runtimeUpdate}
+              job={updateJob}
+              installJob={installJob}
+              onPreview={onPreview}
+              onUpdate={onUpdate}
+            />
+          )}
+        </div>
         <AuthDialogs
           agent={agent}
           loginOpen={loginOpen}

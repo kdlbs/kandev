@@ -17,6 +17,15 @@ test.describe("managed agent runtime updates", () => {
     const trigger = testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`);
     await expect(trigger).toBeVisible();
     await expect(testPage.getByTestId(`agent-update-control-${runtime.agentName}`)).toHaveCount(0);
+    const profileAction = testPage.getByRole("link", { name: "Setup Profile" });
+    const [profileActionBox, triggerBox] = await Promise.all([
+      profileAction.boundingBox(),
+      trigger.boundingBox(),
+    ]);
+    expect(profileActionBox).not.toBeNull();
+    expect(triggerBox).not.toBeNull();
+    expect(Math.abs(profileActionBox!.y - triggerBox!.y)).toBeLessThanOrEqual(8);
+    expect(triggerBox!.x).toBeGreaterThan(profileActionBox!.x);
 
     await trigger.click();
     const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
@@ -26,6 +35,11 @@ test.describe("managed agent runtime updates", () => {
       'npm exec --yes --prefer-online --package=@agentclientprotocol/claude-agent-acp -- node -e ""',
     );
     await expect(dialog).toContainText("Active sessions keep running");
+    const viewport = testPage.viewportSize();
+    expect(viewport).not.toBeNull();
+    await expect
+      .poll(() => dialog.evaluate((element) => element.getBoundingClientRect().height))
+      .toBeLessThan(viewport!.height * 0.6);
     expect(runtime.previewCount()).toBe(1);
     expect(runtime.postCount()).toBe(0);
     await prCapture.screenshot("desktop-update-preview", {

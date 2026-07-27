@@ -104,7 +104,7 @@ function UpdateBody({
   const phase = updatePhase(job?.status);
   return (
     <div
-      className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 text-xs/relaxed"
+      className="max-h-[calc(80dvh-10rem)] min-h-0 space-y-4 overflow-y-auto overscroll-contain px-4 py-3 text-xs/relaxed"
       data-testid={`agent-update-dialog-body-${agentName}`}
     >
       {loading && (
@@ -372,10 +372,7 @@ export function AgentRuntimeUpdateControl({
       />
       {isMobile ? (
         <Drawer open={open} onOpenChange={handleOpenChange}>
-          <DrawerContent
-            className="h-[min(80dvh,42rem)] max-h-[80dvh]"
-            data-testid={`agent-update-drawer-${agentName}`}
-          >
+          <DrawerContent className="max-h-[80dvh]" data-testid={`agent-update-drawer-${agentName}`}>
             <DrawerHeader className="shrink-0 text-left">
               <DrawerTitle>Update {displayName}</DrawerTitle>
               <DrawerDescription>
@@ -389,7 +386,7 @@ export function AgentRuntimeUpdateControl({
       ) : (
         <Dialog open={open} onOpenChange={handleOpenChange}>
           <DialogContent
-            className="h-[min(80dvh,42rem)] max-h-[80dvh] grid-rows-[auto_minmax(0,1fr)_auto] gap-0 p-0 sm:max-w-xl"
+            className="max-h-[80dvh] gap-0 p-0 sm:max-w-xl"
             data-testid={`agent-update-dialog-${agentName}`}
           >
             <DialogHeader className="px-4 pt-4">
