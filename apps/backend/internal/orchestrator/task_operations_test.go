@@ -3061,8 +3061,8 @@ func TestStartCreatedSession_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 		preWrapped, false, false, true, nil, nil,
 	)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "office runtime context")
-	assert.Contains(t, err.Error(), "start or wake the task through Office")
+	assert.Contains(t, err.Error(), "office tasks must be started through Office")
+	assert.Contains(t, err.Error(), "StartTaskWithEnv")
 	require.Empty(t, messages.userMessages)
 
 	if writes := taskRepo.stateWrites["task1"]; writes != 0 {
@@ -3940,6 +3940,47 @@ func TestResumeTaskSession_WrongTask(t *testing.T) {
 	_, err := svc.ResumeTaskSession(context.Background(), "task1", "session1")
 	if err == nil {
 		t.Fatal("expected error when session does not belong to task")
+	}
+}
+
+func TestResumeTaskSession_OfficeWithoutSchedulerFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	dbTask, err := repo.GetTask(ctx, "task1")
+	if err != nil {
+		t.Fatalf("failed to load task: %v", err)
+	}
+	dbTask.ProjectID = "project-office"
+	if err := repo.UpdateTask(ctx, dbTask); err != nil {
+		t.Fatalf("failed to mark task as Office-owned: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	launchCalled := false
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalled = true
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	_, err = svc.ResumeTaskSession(ctx, "task1", "session1")
+	if err == nil || !strings.Contains(err.Error(), "office tasks must be resumed through Office") {
+		t.Fatalf("ResumeTaskSession error = %v, want Office scheduler guard", err)
+	}
+	if launchCalled {
+		t.Fatal("Office resume guard must run before launching an agent")
 	}
 }
 
@@ -5249,8 +5290,36 @@ func TestEnsureSessionRunning_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 
 	err = svc.ensureSessionRunning(ctx, "session1", session)
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "office runtime context")
+	assert.Contains(t, err.Error(), "office tasks must be restarted through Office")
 	assert.False(t, startAgentProcessCalled)
+}
+
+func TestEnsureSessionRunning_OfficeWaitingForInputFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+	dbTask, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	dbTask.ProjectID = "project-office"
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
+
+	launchCalled := false
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalled = true
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	err = svc.ensureSessionRunning(ctx, "session1", session)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "office tasks must be resumed through Office")
+	assert.False(t, launchCalled)
 }
 
 func validOfficeRuntimeEnv() map[string]string {
@@ -5261,7 +5330,36 @@ func validOfficeRuntimeEnv() map[string]string {
 		"KANDEV_AGENT_ID":     "agent-1",
 		"KANDEV_WORKSPACE_ID": "workspace-1",
 		"KANDEV_RUN_ID":       "run-1",
+		"KANDEV_TASK_ID":      "task1",
 	}
+}
+
+func TestStartTaskWithEnv_RejectsContextBoundToAnotherTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+	dbTask, err := repo.GetTask(ctx, "task1")
+	require.NoError(t, err)
+	dbTask.ProjectID = "project-office"
+	require.NoError(t, repo.UpdateTask(ctx, dbTask))
+
+	launchCalled := false
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCalled = true
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Office task", State: v1.TaskStateInProgress}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	env := validOfficeRuntimeEnv()
+	env["KANDEV_TASK_ID"] = "forged-task"
+
+	_, err = svc.StartTaskWithEnv(ctx, "task1", "profile1", "", "", "", "Do the work", "", false, false, nil, env)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "bound to task")
+	assert.False(t, launchCalled)
 }
 
 func TestEnsureSessionRunning_WaitingForInputUsesResumePath(t *testing.T) {

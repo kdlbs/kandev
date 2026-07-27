@@ -185,7 +185,8 @@ Kandev injects `$KANDEV_CLI`, `KANDEV_API_URL`, and `KANDEV_API_KEY` when the
 Office scheduler starts an Office run. The API key is a short-lived, scoped
 runtime token; it is not a personal access token or a value to create, copy,
 or persist in configuration. The run also receives its agent, workspace, task,
-and run identifiers automatically.
+and run identifiers automatically, and the launch context is bound to that
+task.
 
 If `agentctl kandev ...` reports that `KANDEV_API_URL` or `KANDEV_API_KEY` is
 missing, do not set either variable yourself. A regular task session should use

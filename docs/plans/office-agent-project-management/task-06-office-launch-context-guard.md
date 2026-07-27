@@ -14,9 +14,11 @@ spec: "../../specs/office/agents.md"
 
 - Every orchestrator path selecting `ModeOffice` verifies the
   scheduler-provided CLI path, API URL, signed token, agent/workspace identity,
-  and run ID before starting the agent process.
+  run ID, and task-bound task ID before starting the agent process.
 - A generic manual or workflow launch of an Office-owned task without that
   context fails closed with actionable guidance.
+- Generic Office resume and prepared-workspace relaunch paths fail closed and
+  require a scheduler-owned fresh run.
 - Scheduler launches through `StartTaskWithEnv` and non-Office task launches
   keep their existing behavior.
 
@@ -52,10 +54,12 @@ verification passes.
 
 ## Completion Evidence
 
-- Added one shared Office runtime-environment validator and applied it to
-  created-session starts, direct task starts, workflow auto-starts through
-  `StartCreatedSession`, and prepared-workspace agent starts.
-- The red regression run failed all four scenarios because each path previously
-  started without Office runtime context.
-- The green focused run passed all four scenarios.
+- Added a shared Office runtime-environment validator and task binding, then
+  applied it to created-session starts and direct task starts.
+- Guarded `ResumeTaskSession`, lazy session recovery, and prepared-workspace
+  relaunches so Office recovery cannot bypass the scheduler.
+- The red regression run failed the new resume/task-binding scenarios before
+  the guard and exposed the existing direct-guard wording assertions.
+- The green focused run passed six Office launch and recovery scenarios,
+  including a complete context map bound to a different task.
 - `cd apps/backend && rtk go test ./internal/orchestrator -count=1` passed.

@@ -266,11 +266,12 @@ and use their injected Kandev MCP tools instead.
 | `KANDEV_CLI` | Path to agentctl | CLI binary for API operations |
 
 An Office-mode launch requires `KANDEV_CLI`, `KANDEV_API_URL`,
-`KANDEV_API_KEY`, `KANDEV_AGENT_ID`, `KANDEV_WORKSPACE_ID`, and
-`KANDEV_RUN_ID`. Kandev fails the launch before starting the agent process when
-that signed run context is incomplete. Generic task/session start paths must
-not manufacture, persist, or accept user-supplied substitutes for these
-values.
+`KANDEV_API_KEY`, `KANDEV_AGENT_ID`, `KANDEV_WORKSPACE_ID`, `KANDEV_RUN_ID`,
+and the task-bound `KANDEV_TASK_ID`. Kandev fails the launch before starting
+the agent process when that signed run context is incomplete or bound to a
+different task. Generic task/session start paths must not manufacture,
+persist, or accept user-supplied substitutes for these values; only the
+internal Office scheduler adapter supplies the task-bound launch map.
 
 `KANDEV_CLI` resolves per executor:
 - **Docker** (`local_docker`): `/usr/local/bin/agentctl` (baked into the image).
@@ -547,7 +548,7 @@ Skill list (name, description, source type, which agents use each skill), inline
 - **Budget exhaustion**: agent's budget reaches zero. Status auto-transitions to `paused` with `pause_reason="budget"`. Active sessions complete the current turn but no further prompts are dispatched. Surfaces as a banner on the agent card. See [costs](./costs.md).
 - **Concurrency saturation**: agent at `max_concurrent_sessions`. Scheduler skips claiming wakeups for this agent; wakeups remain in `queued` indefinitely until a slot frees up. No retry, no expiry.
 - **Stale MCP tool reference**: agent in `ModeOffice` calls a tool not in the mode (e.g. a kanban tool from an old skill). MCP server returns `"Tool not available in office mode. Use $KANDEV_CLI instead."`.
-- **Missing Office launch context**: a generic task/session path attempts to start an Office-owned task without the scheduler-injected CLI path, API URL, signed run token, agent/workspace identity, or run ID. Kandev fails closed before starting the agent process and directs the caller to start or wake the task through Office. It never asks the user to configure or paste these credentials.
+- **Missing Office launch context**: a generic task/session path attempts to start or resume an Office-owned task without the scheduler-injected CLI path, API URL, signed run token, task-bound identity, or run ID. Kandev fails closed before starting or relaunching the agent process and directs the caller to start or wake the task through Office. It never asks the user to configure or paste these credentials.
 - **CLI auth failure**: agentctl call returns 401 because the JWT is expired or invalid. The CLI exits non-zero with structured error. Agent sees a clear failure and can surface it via comment.
 - **CLI invoked outside Office**: `agentctl kandev` cannot find `KANDEV_API_URL` or `KANDEV_API_KEY`. The CLI exits non-zero and explains that these values are injected automatically for Office runs; regular task sessions use Kandev MCP tools.
 - **Adapter without skill discovery**: agent type has no known `ProjectSkillDir`. Skill `SKILL.md` content appended to the system prompt as fallback.

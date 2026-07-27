@@ -75,11 +75,13 @@ Files:
 - `apps/backend/internal/orchestrator/task_operations_test.go`
 
 Changes:
-- Validate the minimum Office runtime environment before any
+- Validate the minimum, task-bound Office runtime environment before any
   `LaunchPreparedSession` call selects `ModeOffice`.
 - Fail before starting the agent when a generic/manual/workflow path reaches an
   Office-owned task without scheduler-provided `KANDEV_CLI`,
   `KANDEV_API_URL`, `KANDEV_API_KEY`, agent/workspace identity, and run ID.
+- Reject generic Office resume and prepared-workspace relaunch paths; Office
+  recovery must return to the scheduler so it can mint fresh runtime context.
 - Preserve scheduler launches through `StartTaskWithEnv` and keep regular
   task-mode launches unchanged.
 

@@ -73,10 +73,13 @@ func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	prompt := spoofedReference + "\n\n" +
 		sysprompt.InjectOfficeContext("wrong-task", "wrong-session", "Do the work")
 	err = svc.autoStartStepPrompt(ctx, "task-office", session, step, prompt, false, false)
-	if err == nil || !strings.Contains(err.Error(), "office runtime context") {
-		t.Fatalf("autoStartStepPrompt error = %v, want missing Office runtime context", err)
+	if err == nil || !strings.Contains(err.Error(), "office tasks must be started through Office") {
+		t.Fatalf("autoStartStepPrompt error = %v, want Office scheduler guard", err)
 	}
 
+	// recordAutoStartMessage persists the first-turn message before
+	// StartCreatedSession enforces the Office scheduler guard. Verify that the
+	// message still has canonical Office context even though launch is rejected.
 	if len(messages.userMessages) != 1 {
 		t.Fatalf("expected one recorded first-turn message, got %d", len(messages.userMessages))
 	}

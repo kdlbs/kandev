@@ -75,6 +75,7 @@ func TestNewKandevClient_MissingOfficeContextExplainsTaskModeAlternative(t *test
 	}
 	oldStderr := os.Stderr
 	os.Stderr = w
+	t.Cleanup(func() { os.Stderr = oldStderr })
 	code := runKandevCLI([]string{"projects", "list"})
 	_ = w.Close()
 	os.Stderr = oldStderr

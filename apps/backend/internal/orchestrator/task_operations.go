@@ -390,11 +390,7 @@ func (s *Service) StartCreatedSession(
 		return nil, fmt.Errorf("failed to determine office task status: %w", err)
 	}
 	if isOfficeTask {
-		if err := validateOfficeRuntimeEnv(nil); err != nil {
-			return nil, err
-		}
-		s.logger.Debug("skipping SCHEDULING transition for office task",
-			zap.String("task_id", taskID))
+		return nil, errOfficeTaskStartRequiresScheduler
 	} else if err := s.scheduleTaskForSession(ctx, taskID, sessionID); err != nil {
 		s.logger.Warn("failed to update task state to SCHEDULING",
 			zap.String("task_id", taskID),
@@ -721,7 +717,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		return nil, fmt.Errorf("failed to determine office task status: %w", err)
 	}
 	if isOfficeTask {
-		if err := validateOfficeRuntimeEnv(env); err != nil {
+		if err := validateOfficeLaunchEnv(taskID, env); err != nil {
 			return nil, err
 		}
 	}
@@ -918,6 +914,7 @@ func validateOfficeRuntimeEnv(env map[string]string) error {
 		"KANDEV_AGENT_ID",
 		"KANDEV_WORKSPACE_ID",
 		"KANDEV_RUN_ID",
+		"KANDEV_TASK_ID",
 	}
 	missing := make([]string, 0, len(required))
 	for _, key := range required {
@@ -932,6 +929,35 @@ func validateOfficeRuntimeEnv(env map[string]string) error {
 		"office runtime context is incomplete (missing %s); start or wake the task through Office",
 		strings.Join(missing, ", "),
 	)
+}
+
+var (
+	errOfficeTaskStartRequiresScheduler = errors.New(
+		"office tasks must be started through Office; use StartTaskWithEnv with scheduler-injected credentials",
+	)
+	errOfficeTaskResumeRequiresScheduler = errors.New(
+		"office tasks must be resumed through Office; use the Office scheduler to start a fresh run",
+	)
+	errOfficePreparedResumeRequiresScheduler = errors.New(
+		"office tasks must be restarted through Office; prepared-workspace resume is not supported for Office-owned tasks",
+	)
+)
+
+// validateOfficeLaunchEnv requires the scheduler context to be bound to the
+// task being launched. StartTaskWithEnv is only wired to the internal Office
+// scheduler adapter; the task binding still prevents a complete context map
+// from being reused for a different task.
+func validateOfficeLaunchEnv(taskID string, env map[string]string) error {
+	if err := validateOfficeRuntimeEnv(env); err != nil {
+		return err
+	}
+	if env["KANDEV_TASK_ID"] != taskID {
+		return fmt.Errorf(
+			"office runtime context is bound to task %q, not %q; start or wake the task through Office",
+			env["KANDEV_TASK_ID"], taskID,
+		)
+	}
+	return nil
 }
 
 // prepareSessionForStart creates the session for a launch and propagates any
@@ -1286,6 +1312,14 @@ func (s *Service) ResumeTaskSession(ctx context.Context, taskID, sessionID strin
 		return nil, fmt.Errorf("session is completed and cannot be resumed; create a new session instead")
 	}
 
+	isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to determine office task status: %w", err)
+	}
+	if isOfficeTask {
+		return nil, errOfficeTaskResumeRequiresScheduler
+	}
+
 	// Bury any open turns from the previous run before relaunching. Without
 	// this, startTurnForSession adopts the orphan on the next prompt and the
 	// UI's running timer counts from the orphan's started_at — which can be
@@ -1542,12 +1576,20 @@ func (s *Service) advanceTaskWorkflowStep(ctx context.Context, task *models.Task
 // After lazy recovery, a session may be in WAITING_FOR_INPUT with no agent process;
 // this function detects that case and triggers a resume.
 func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, session *models.TaskSession) error {
+	isOfficeTask, err := s.lookupOfficeTask(ctx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("failed to determine office task status: %w", err)
+	}
+
 	// Check if agent is genuinely running (in-memory execution store, not just DB state)
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
 		s.recoverAgentPromptStreamIfNeeded(ctx, sessionID)
 		if err := s.waitForAgentPromptReady(ctx, sessionID); err != nil {
 			if !errors.Is(err, ErrAgentNotReadyForPrompt) {
 				return err
+			}
+			if isOfficeTask {
+				return errOfficeTaskResumeRequiresScheduler
 			}
 			recoveryCtx := context.WithoutCancel(ctx)
 			if stopErr := s.reapPromptUnreadyExecution(recoveryCtx, sessionID, err); stopErr != nil {
@@ -1577,6 +1619,9 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 		if hasRunning {
 			return s.startAgentOnPreparedWorkspace(ctx, sessionID, session)
 		}
+	}
+	if isOfficeTask {
+		return errOfficeTaskResumeRequiresScheduler
 	}
 
 	running, err := s.repo.GetExecutorRunningBySessionID(ctx, sessionID)
@@ -1745,18 +1790,16 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 	// WAITING_FOR_INPUT — that's what waitForSessionReady polls for. No flag
 	// tracking required here.
 	launchCtx := context.WithoutCancel(ctx)
-	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
-	if err != nil {
-		return fmt.Errorf("failed to get task for prepared session: %w", err)
-	}
-	isOfficeTask, err := s.lookupOfficeTask(launchCtx, session.TaskID)
+	dbTask, err := s.repo.GetTask(launchCtx, session.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to determine office task status: %w", err)
 	}
-	if isOfficeTask {
-		if err := validateOfficeRuntimeEnv(nil); err != nil {
-			return err
-		}
+	if dbTask != nil && dbTask.IsFromOffice {
+		return errOfficePreparedResumeRequiresScheduler
+	}
+	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("failed to get task for prepared session: %w", err)
 	}
 	if _, err = s.executor.LaunchPreparedSession(launchCtx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: session.AgentProfileID,
