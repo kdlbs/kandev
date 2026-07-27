@@ -83,7 +83,7 @@ export function FileActionsDropdown({
   const btnClass =
     size === "xs"
       ? "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100"
-      : "h-8 w-8 p-0 cursor-pointer text-muted-foreground hover:text-foreground";
+      : "h-8 w-8 p-0 cursor-pointer";
 
   const iconClass = size === "xs" ? "h-3.5 w-3.5" : "h-4 w-4";
 

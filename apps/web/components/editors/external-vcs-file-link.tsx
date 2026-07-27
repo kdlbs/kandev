@@ -69,7 +69,7 @@ export function ExternalVcsFileLink({ size = "xs", ...input }: ExternalVcsFileLi
           asChild
           variant="ghost"
           size={buttonSize(size)}
-          className={`${sizeClasses[size]} cursor-pointer text-muted-foreground hover:text-foreground`}
+          className={`${sizeClasses[size]} cursor-pointer`}
         >
           <a
             href={link.url}
