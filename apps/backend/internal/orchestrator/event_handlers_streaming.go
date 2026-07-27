@@ -818,9 +818,32 @@ func (s *Service) updateTaskSessionStateWithHook(
 		s.publishTaskSessionStateChanged(ctx, taskID, sessionID, oldState, nextState, errorMessage, authoritativeUpdatedAt, session)
 	}
 
+	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)
+
 	// Auto-promote another session to primary when the current primary enters a terminal state
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
 	return session, true
+}
+
+// republishTaskActivityOnSettle recomputes the task-level MOST-ACTIVE-WINS
+// activity aggregate when a session leaves the generating-capable RUNNING state.
+// On agent completion the turn-activity record is retired (detached) while the
+// session is still RUNNING, then the session settles to WAITING_FOR_INPUT (or a
+// terminal state) without a task-level republish. A detached record safely
+// defaults to "generating" (turn_activity.go isForegroundTurnGenerating), so the
+// last cached task aggregate stays "generating" and the sidebar/board spinner
+// never clears. Republishing off the settled session list corrects the aggregate
+// (the completed session is no longer RUNNING, so it drops out); the call is
+// deduplicated by the task service and is a no-op when unchanged.
+func (s *Service) republishTaskActivityOnSettle(
+	ctx context.Context,
+	taskID string,
+	oldState, nextState models.TaskSessionState,
+) {
+	if oldState != models.TaskSessionStateRunning || nextState == models.TaskSessionStateRunning {
+		return
+	}
+	s.publishTaskActivityIfChanged(ctx, taskID)
 }
 
 func (s *Service) persistTaskSessionState(
@@ -926,6 +949,7 @@ func (s *Service) transitionTaskSessionState(
 		authoritativeUpdatedAt,
 		refreshed,
 	)
+	s.republishTaskActivityOnSettle(ctx, taskID, oldState, nextState)
 	s.maybePromotePrimary(ctx, taskID, sessionID, nextState)
 	return true, nextState, nil
 }
