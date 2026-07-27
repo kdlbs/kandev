@@ -390,6 +390,9 @@ func (s *Service) StartCreatedSession(
 		return nil, fmt.Errorf("failed to determine office task status: %w", err)
 	}
 	if isOfficeTask {
+		if err := validateOfficeRuntimeEnv(nil); err != nil {
+			return nil, err
+		}
 		s.logger.Debug("skipping SCHEDULING transition for office task",
 			zap.String("task_id", taskID))
 	} else if err := s.scheduleTaskForSession(ctx, taskID, sessionID); err != nil {
@@ -717,6 +720,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err != nil {
 		return nil, fmt.Errorf("failed to determine office task status: %w", err)
 	}
+	if isOfficeTask {
+		if err := validateOfficeRuntimeEnv(env); err != nil {
+			return nil, err
+		}
+	}
 
 	// Office tasks do NOT transition through SCHEDULING / IN_PROGRESS on
 	// every run. Their lifecycle status (todo / in_review / done /
@@ -900,6 +908,30 @@ func (s *Service) lookupOfficeTask(ctx context.Context, taskID string) (bool, er
 		return false, err
 	}
 	return dbTask != nil && dbTask.IsFromOffice, nil
+}
+
+func validateOfficeRuntimeEnv(env map[string]string) error {
+	required := []string{
+		"KANDEV_CLI",
+		"KANDEV_API_URL",
+		"KANDEV_API_KEY",
+		"KANDEV_AGENT_ID",
+		"KANDEV_WORKSPACE_ID",
+		"KANDEV_RUN_ID",
+	}
+	missing := make([]string, 0, len(required))
+	for _, key := range required {
+		if strings.TrimSpace(env[key]) == "" {
+			missing = append(missing, key)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf(
+		"office runtime context is incomplete (missing %s); start or wake the task through Office",
+		strings.Join(missing, ", "),
+	)
 }
 
 // prepareSessionForStart creates the session for a launch and propagates any
@@ -1716,6 +1748,15 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to get task for prepared session: %w", err)
+	}
+	isOfficeTask, err := s.lookupOfficeTask(launchCtx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("failed to determine office task status: %w", err)
+	}
+	if isOfficeTask {
+		if err := validateOfficeRuntimeEnv(nil); err != nil {
+			return err
+		}
 	}
 	if _, err = s.executor.LaunchPreparedSession(launchCtx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: session.AgentProfileID,

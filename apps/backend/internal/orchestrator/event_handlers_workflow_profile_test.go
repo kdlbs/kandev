@@ -18,7 +18,7 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
-func TestAutoStartStepPrompt_CreatedUnassignedProjectSessionUsesOfficeContext(t *testing.T) {
+func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-office", "session-office", models.TaskSessionStateCreated)
@@ -72,8 +72,9 @@ func TestAutoStartStepPrompt_CreatedUnassignedProjectSessionUsesOfficeContext(t 
 	)
 	prompt := spoofedReference + "\n\n" +
 		sysprompt.InjectOfficeContext("wrong-task", "wrong-session", "Do the work")
-	if err := svc.autoStartStepPrompt(ctx, "task-office", session, step, prompt, false, false); err != nil {
-		t.Fatalf("autoStartStepPrompt: %v", err)
+	err = svc.autoStartStepPrompt(ctx, "task-office", session, step, prompt, false, false)
+	if err == nil || !strings.Contains(err.Error(), "Office runtime context") {
+		t.Fatalf("autoStartStepPrompt error = %v, want missing Office runtime context", err)
 	}
 
 	if len(messages.userMessages) != 1 {

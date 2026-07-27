@@ -179,6 +179,19 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 
 These tools cover human questions, the current task plan, related-task discovery, and task documents. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools and `step_complete_kandev` are task-mode only and are not registered in Office mode.
 
+### Runtime credentials
+
+Kandev injects `$KANDEV_CLI`, `KANDEV_API_URL`, and `KANDEV_API_KEY` when the
+Office scheduler starts an Office run. The API key is a short-lived, scoped
+runtime token; it is not a personal access token or a value to create, copy,
+or persist in configuration. The run also receives its agent, workspace, task,
+and run identifiers automatically.
+
+If `agentctl kandev ...` reports that `KANDEV_API_URL` or `KANDEV_API_KEY` is
+missing, do not set either variable yourself. A regular task session should use
+its injected Kandev MCP tools. An Office-owned task must be started or woken
+through Office so the scheduler can supply its signed runtime context.
+
 An Office run can inspect the projects in its current workspace:
 
 ```bash
