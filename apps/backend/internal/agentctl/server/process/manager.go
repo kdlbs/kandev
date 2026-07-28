@@ -25,6 +25,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/gitconfigenv"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
 )
@@ -677,7 +678,11 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*P
 	if m.processRunner == nil {
 		return nil, fmt.Errorf("process runner not available")
 	}
-	return m.processRunner.Start(ctx, m.buildProcessRequest(req))
+	effectiveReq, err := m.buildProcessRequest(req)
+	if err != nil {
+		return nil, fmt.Errorf("prepare process environment: %w", err)
+	}
+	return m.processRunner.Start(ctx, effectiveReq)
 }
 
 // StopProcess stops a running process by ID.
@@ -1220,7 +1225,13 @@ func (m *Manager) startAgentShell() {
 	if !m.cfg.ShellEnabled {
 		return
 	}
-	shellCfg := m.buildShellConfig()
+	// Start calls this while holding startMu. Copy AgentEnv directly instead of
+	// calling agentEnvSnapshot, which would attempt to acquire the same mutex.
+	shellCfg, err := m.buildShellConfigWithAgentEnv(append([]string(nil), m.cfg.AgentEnv...))
+	if err != nil {
+		m.logger.Warn("failed to prepare shell environment", zap.Error(err))
+		return
+	}
 	shellSession, err := shell.NewSession(shellCfg, m.logger)
 	if err != nil {
 		m.logger.Warn("failed to create shell session", zap.Error(err))
@@ -1232,18 +1243,27 @@ func (m *Manager) startAgentShell() {
 
 // buildShellConfig creates the embedded shell configuration with the same
 // effective instance environment used by agent and terminal processes.
-func (m *Manager) buildShellConfig() shell.Config {
+func (m *Manager) buildShellConfig() (shell.Config, error) {
+	return m.buildShellConfigWithAgentEnv(m.agentEnvSnapshot())
+}
+
+func (m *Manager) buildShellConfigWithAgentEnv(agentEnv []string) (shell.Config, error) {
 	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
-	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
-	shellCfg.Env = mergeAgentEnvIntoShellConfig(m.agentEnvSnapshot(), nil)
-	return shellCfg
+	shellCfg.ShellCommand = preferredShellCommand(agentEnv)
+	var err error
+	shellCfg.Env, err = mergeAgentEnvIntoShellConfigWithError(agentEnv, nil)
+	if err != nil {
+		return shell.Config{}, err
+	}
+	return shellCfg, nil
 }
 
 // buildProcessRequest applies the instance environment to a task-scoped
 // process request. Explicit request values remain authoritative.
-func (m *Manager) buildProcessRequest(req StartProcessRequest) StartProcessRequest {
-	req.Env = mergeAgentEnvIntoShellConfig(m.agentEnvSnapshot(), req.Env)
-	return req
+func (m *Manager) buildProcessRequest(req StartProcessRequest) (StartProcessRequest, error) {
+	var err error
+	req.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), req.Env)
+	return req, err
 }
 
 func preferredShellCommand(env []string) string {
@@ -2246,8 +2266,10 @@ func (m *Manager) StartShell() error {
 	if !m.cfg.ShellEnabled {
 		return nil
 	}
-	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
-	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
+	shellCfg, err := m.buildShellConfig()
+	if err != nil {
+		return fmt.Errorf("prepare shell environment: %w", err)
+	}
 	shellSession, err := shell.NewSession(shellCfg, m.logger)
 	if err != nil {
 		return fmt.Errorf("failed to create shell session: %w", err)
@@ -2268,7 +2290,10 @@ func (m *Manager) StartTerminalShell(terminalID string, cfg shell.Config) (*shel
 		return nil, err
 	}
 	defer release()
-	cfg.Env = mergeAgentEnvIntoShellConfig(m.agentEnvSnapshot(), cfg.Env)
+	cfg.Env, err = mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), cfg.Env)
+	if err != nil {
+		return nil, fmt.Errorf("prepare terminal shell environment: %w", err)
+	}
 	return m.shellMgr.Start(terminalID, cfg)
 }
 
@@ -2288,21 +2313,26 @@ func (m *Manager) agentEnvSnapshot() []string {
 // immediately assigns the result back to its own cfg.Env, so no alias outlives
 // this call.
 func mergeAgentEnvIntoShellConfig(agentEnv []string, overrides map[string]string) map[string]string {
-	if len(agentEnv) == 0 {
+	merged, err := mergeAgentEnvIntoShellConfigWithError(agentEnv, overrides)
+	if err != nil {
 		return overrides
 	}
-	merged := make(map[string]string)
+	return merged
+}
+
+func mergeAgentEnvIntoShellConfigWithError(agentEnv []string, overrides map[string]string) (map[string]string, error) {
+	if len(agentEnv) == 0 && len(overrides) == 0 {
+		return overrides, nil
+	}
+	base := make(map[string]string, len(agentEnv))
 	for _, entry := range agentEnv {
 		eq := strings.IndexByte(entry, '=')
 		if eq <= 0 {
 			continue
 		}
-		merged[entry[:eq]] = entry[eq+1:]
+		base[entry[:eq]] = entry[eq+1:]
 	}
-	for k, v := range overrides {
-		merged[k] = v
-	}
-	return merged
+	return gitconfigenv.Merge(base, overrides)
 }
 
 // StartVscode starts the code-server process on a random OS-assigned port.

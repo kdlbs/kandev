@@ -54,5 +54,5 @@ launch paths.
 ## Output contract
 
 Report the environment ownership boundary, files changed, focused test output, and any finding
-that requires plan/spec revision. Focused and package-level lifecycle, gateway, and process tests
-pass, including the race-enabled regression set.
+that requires plan/spec revision. Focused lifecycle and gateway tests pass, including the
+race-enabled regression set; agentctl process tests are covered by Task 02.

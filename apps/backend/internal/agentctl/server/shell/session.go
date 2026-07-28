@@ -430,6 +430,21 @@ func (s *Session) Status() Status {
 	}
 }
 
+// Config returns a defensive copy of the session configuration.
+func (s *Session) Config() Config {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cfg := s.config
+	cfg.ShellArgs = append([]string(nil), s.config.ShellArgs...)
+	if s.config.Env != nil {
+		cfg.Env = make(map[string]string, len(s.config.Env))
+		for key, value := range s.config.Env {
+			cfg.Env[key] = value
+		}
+	}
+	return cfg
+}
+
 // readOutput continuously reads from PTY and broadcasts to subscribers
 func (s *Session) readOutput() {
 	buf := make([]byte, 4096)
