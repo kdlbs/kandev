@@ -260,7 +260,7 @@ func TestForegroundActivitySignal_NoPublishWithoutFlip(t *testing.T) {
 	}
 }
 
-func TestForegroundActivitySignal_ClaimReleasePublishesRestoredBackground(t *testing.T) {
+func TestForegroundActivitySignal_ClaimReleasePublishesCoarseGenerating(t *testing.T) {
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
@@ -288,7 +288,7 @@ func TestForegroundActivitySignal_ClaimReleasePublishesRestoredBackground(t *tes
 	got := activityValues(eb)
 	want := []string{string(v1.ForegroundActivityGenerating)}
 	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("expected restored background activity broadcast %v, got %v", want, got)
+		t.Fatalf("expected coarse generating activity broadcast %v, got %v", want, got)
 	}
 }
 
@@ -438,7 +438,7 @@ func TestForegroundActivitySignal_PropagatesToTaskLevel(t *testing.T) {
 	}
 }
 
-func TestForegroundActivitySignal_TurnCompletionPublishesBackgroundExactlyOnce(t *testing.T) {
+func TestForegroundActivitySignal_TurnCompletionPublishesCoarseExactlyOnce(t *testing.T) {
 	tests := []struct {
 		name string
 		act  func(*Service, string, string)
@@ -493,7 +493,7 @@ func TestForegroundActivitySignal_TurnCompletionPublishesBackgroundExactlyOnce(t
 			got := activityValues(eb)
 			want := []string{string(v1.ForegroundActivityGenerating)}
 			if len(got) != len(want) || got[0] != want[0] {
-				t.Fatalf("expected exactly one session background publication %v, got %v", want, got)
+				t.Fatalf("expected exactly one coarse session publication %v, got %v", want, got)
 			}
 			if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
 				t.Fatalf("expected exactly one task aggregate publication for %q, got %v", taskID, taskEvents.activityTaskIDs)
