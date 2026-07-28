@@ -40,9 +40,13 @@ func (s *Store) ValidateTaskMRScope(ctx context.Context, workspaceID, taskID, re
 	return nil
 }
 
-// ValidateTaskMRRepositoryIdentity verifies the durable provider identity for
-// the repository selected by the task. Legacy rows without a provider host
-// fail closed because owner/name alone cannot distinguish GitLab instances.
+// ValidateTaskMRRepositoryIdentity verifies the repository selected by the
+// task identifies the same GitLab host and project as the MR. It accepts a
+// match against either the repository's durable provider identity or its
+// remote_url, since self-hosted GitLab repositories added as local clones
+// never get a durable provider identity (only github.com/gitlab.com are
+// tagged at discovery time) yet still carry a resolvable remote_url. Rows
+// with neither signal resolving to a GitLab identity fail closed.
 func (s *Store) ValidateTaskMRRepositoryIdentity(
 	ctx context.Context,
 	workspaceID, taskID, repositoryID, configuredHost, projectPath string,
@@ -51,13 +55,14 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 		return ErrTaskMRRepositoryMismatch
 	}
 	var identity struct {
-		Provider string `db:"provider"`
-		Host     string `db:"provider_host"`
-		Owner    string `db:"provider_owner"`
-		Name     string `db:"provider_name"`
+		Provider  string `db:"provider"`
+		Host      string `db:"provider_host"`
+		Owner     string `db:"provider_owner"`
+		Name      string `db:"provider_name"`
+		RemoteURL string `db:"remote_url"`
 	}
 	err := s.ro.GetContext(ctx, &identity, `
-		SELECT r.provider, r.provider_host, r.provider_owner, r.provider_name
+		SELECT r.provider, r.provider_host, r.provider_owner, r.provider_name, r.remote_url
 		FROM task_repositories tr
 		JOIN repositories r ON r.id = tr.repository_id
 		JOIN tasks t ON t.id = tr.task_id
@@ -74,18 +79,27 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 	if err != nil {
 		return ErrTaskMRRepositoryMismatch
 	}
-	gotHost, err := normalizeHostOrigin(identity.Host)
-	if err != nil {
-		return ErrTaskMRRepositoryMismatch
-	}
-	gotProject := strings.Trim(strings.TrimSpace(identity.Owner+"/"+identity.Name), "/")
 	wantProject := strings.Trim(strings.TrimSpace(projectPath), "/")
-	if !strings.EqualFold(identity.Provider, "gitlab") ||
-		!strings.EqualFold(gotHost, wantHost) ||
-		!strings.EqualFold(gotProject, wantProject) {
-		return ErrTaskMRRepositoryMismatch
+
+	type candidate struct{ host, project string }
+	var candidates []candidate
+	if strings.EqualFold(identity.Provider, "gitlab") {
+		if gotHost, err := normalizeHostOrigin(identity.Host); err == nil {
+			gotProject := strings.Trim(strings.TrimSpace(identity.Owner+"/"+identity.Name), "/")
+			candidates = append(candidates, candidate{host: gotHost, project: gotProject})
+		}
 	}
-	return nil
+	if remoteHost, remoteProject := parseGitLabRemoteURLIdentity(identity.RemoteURL); remoteHost != "" {
+		if gotHost, err := normalizeHostOrigin(remoteHost); err == nil {
+			candidates = append(candidates, candidate{host: gotHost, project: remoteProject})
+		}
+	}
+	for _, c := range candidates {
+		if strings.EqualFold(c.host, wantHost) && strings.EqualFold(c.project, wantProject) {
+			return nil
+		}
+	}
+	return ErrTaskMRRepositoryMismatch
 }
 
 // ResolveTaskMRRepository validates an explicit repository or infers the sole

@@ -58,6 +58,48 @@ func parseMRURLForHost(rawURL, configuredHost string) (string, int, error) {
 	return projectPath, iid, nil
 }
 
+// parseGitLabRemoteURLIdentity extracts a normalized (host origin, project
+// path) pair from a git remote URL, accepting HTTPS, ssh://, and scp-style
+// (git@host:path) forms. SSH remotes are normalized to an HTTPS-style origin
+// so they can be host-compared against a configured GitLab connection host,
+// which is always stored as an HTTP(S) origin. Returns empty strings when the
+// URL cannot be parsed as an owner/repo remote.
+func parseGitLabRemoteURLIdentity(remoteURL string) (host, projectPath string) {
+	const sshScheme = "ssh"
+	remoteURL = strings.TrimSpace(remoteURL)
+	if remoteURL == "" {
+		return "", ""
+	}
+	var scheme, hostname, path string
+	if strings.Contains(remoteURL, "@") && !strings.Contains(remoteURL, "://") {
+		// scp-style shorthand: git@host:group/sub/project.git
+		_, rest, _ := strings.Cut(remoteURL, "@")
+		h, p, ok := strings.Cut(rest, ":")
+		if !ok {
+			return "", ""
+		}
+		scheme, hostname, path = sshScheme, h, p
+	} else {
+		parsed, err := url.Parse(remoteURL)
+		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return "", ""
+		}
+		scheme, hostname, path = parsed.Scheme, parsed.Host, parsed.Path
+	}
+	scheme = strings.ToLower(scheme)
+	if scheme != mentionHTTPScheme && scheme != mentionHTTPSScheme && scheme != sshScheme {
+		return "", ""
+	}
+	if scheme == sshScheme {
+		scheme = mentionHTTPSScheme
+	}
+	path = strings.TrimSuffix(strings.Trim(strings.TrimSpace(path), "/"), ".git")
+	if hostname == "" || path == "" || !strings.Contains(path, "/") {
+		return "", ""
+	}
+	return scheme + "://" + hostname, path
+}
+
 // AssociateExistingMRByURL validates a workspace-owned task/repository pair,
 // fetches the configured-host MR, and idempotently persists its association.
 func (s *Service) AssociateExistingMRByURL(
