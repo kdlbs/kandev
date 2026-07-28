@@ -13,6 +13,7 @@ import {
 import { getManualRightWidth, setEnvLayout, setManualRightWidth } from "@/lib/local-storage";
 import { resolveResponsiveRightWidth } from "@/lib/state/layout-manager/right-width";
 import { setSashDragging as setPinnedEnforcementSashDragging } from "@/lib/state/dockview-pinned-enforce";
+import { getDockviewElement, measureDockviewGridWidth } from "@/lib/state/dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { stopVscode } from "@/lib/api/domains/vscode-api";
 import { parkUserShell, stopUserShell } from "@/lib/api/domains/user-shell-api";
@@ -24,18 +25,6 @@ import {
 } from "@/lib/state/dockview-widths-debug";
 
 const debugWidths = createDebugLogger("dockview:widths");
-const DOCKVIEW_SELECTOR = ".dv-dockview";
-
-function measuredDockviewWidth(api: DockviewReadyEvent["api"]): number | undefined {
-  const domWidth =
-    typeof document !== "undefined"
-      ? document.querySelector<HTMLElement>(DOCKVIEW_SELECTOR)?.clientWidth
-      : undefined;
-  if (domWidth && domWidth > 0) return domWidth;
-  if (api.width > 0) return api.width;
-  return undefined;
-}
-
 // v3: bumped alongside DOCKVIEW_ENV_LAYOUT_PREFIX so the no-env fallback
 // also discards layouts captured with the now-removed dockview sidebar column.
 const LAYOUT_STORAGE_KEY = "dockview-layout-v3";
@@ -65,6 +54,20 @@ let enforcing = false;
  *  enforcement during the drag so the in-progress resize doesn't get
  *  reverted to the previous target on every intermediate layout change. */
 let sashDragging = false;
+let rightSashDragging = false;
+
+function hasPinnedRightColumn(api: DockviewReadyEvent["api"]): boolean {
+  return api.groups.some((group) => [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id));
+}
+
+function isPinnedRightSash(api: DockviewReadyEvent["api"], target: EventTarget | null): boolean {
+  if (!hasPinnedRightColumn(api)) return false;
+  const sash = (target as HTMLElement | null)?.closest(".dv-sash");
+  if (!sash) return false;
+  const sv = getRootSplitview(api);
+  const rootSashes = sv?.sashes as Array<{ container?: HTMLElement }> | undefined;
+  return rootSashes?.[rootSashes.length - 1]?.container === sash;
+}
 
 function restoreColumnToTarget(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,7 +91,7 @@ function restoreColumnToTarget(
  * `window.innerWidth`. The app sidebar sits outside Dockview, so the browser
  * viewport can materially overstate the space available to chat + files. */
 function applyRightConstraints(api: DockviewReadyEvent["api"]): number {
-  const measuredWidth = measuredDockviewWidth(api);
+  const measuredWidth = measureDockviewGridWidth(api);
   const sv = getRootSplitview(api);
   const sidebarWidth = sv?.length >= 3 ? sv.getViewSize(0) : 0;
   const maximumWidth = computeRightMaxPx(measuredWidth, sidebarWidth);
@@ -111,17 +114,13 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
-  const rightVisible =
-    store.rightPanelsVisible ||
-    !!api.getPanel("files") ||
-    !!api.getPanel("changes") ||
-    api.groups.some((group) => [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id));
+  const rightVisible = hasPinnedRightColumn(api);
   enforcing = true;
   try {
     if (rightVisible) {
       const maximumWidth = applyRightConstraints(api);
       const sidebarWidth = store.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
-      const measuredWidth = measuredDockviewWidth(api);
+      const measuredWidth = measureDockviewGridWidth(api);
       const target = resolveResponsiveRightWidth(
         measuredWidth,
         sidebarWidth,
@@ -141,12 +140,7 @@ function setLooseConstraints(api: DockviewReadyEvent["api"]): void {
   if (store.isRestoringLayout) return;
   if (api.hasMaximizedGroup() || store.preMaximizeLayout !== null) return;
 
-  if (
-    store.rightPanelsVisible ||
-    api.getPanel("files") ||
-    api.getPanel("changes") ||
-    api.groups.some((group) => [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id))
-  ) {
+  if (hasPinnedRightColumn(api)) {
     applyRightConstraints(api);
   }
 }
@@ -177,6 +171,7 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
     const t = e.target as HTMLElement | null;
     if (t?.closest(".dv-sash")) {
       sashDragging = true;
+      rightSashDragging = isPinnedRightSash(api, e.target);
       setPinnedEnforcementSashDragging(true);
       if (isDebug()) {
         debugWidths(`sash-drag-start ${formatWidthsSnapshot(snapshotColumnWidths(api))}`);
@@ -185,14 +180,16 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
   };
   const onMouseUp = (e: MouseEvent): void => {
     if (e.button !== 0 || !sashDragging) return;
+    const persistRight = rightSashDragging;
     sashDragging = false;
+    rightSashDragging = false;
     setPinnedEnforcementSashDragging(false);
     // Capture the post-drag width as the new target.
     requestAnimationFrame(() => {
       const sv = getRootSplitview(api);
       if (!sv) return;
       const store = useDockviewStore.getState();
-      if (store.rightPanelsVisible || api.getPanel("files") || api.getPanel("changes")) {
+      if (persistRight) {
         const newRight = sv.getViewSize(sv.length - 1);
         setPinnedTarget("right", newRight);
         setManualRightWidth(store.currentLayoutEnvId, newRight);
@@ -218,6 +215,7 @@ export function setupSashDragCapToggle(api: DockviewReadyEvent["api"]): () => vo
     // away while holding a sash) doesn't leave enforcement permanently paused
     // for the next mount (claude).
     sashDragging = false;
+    rightSashDragging = false;
     setPinnedEnforcementSashDragging(false);
   };
 }
@@ -231,7 +229,7 @@ function trackPinnedWidths(api: DockviewReadyEvent["api"]): void {
   try {
     // Right column is the last grid index when present. Skip when there is
     // no right column (compact preset, rightPanelsVisible=false).
-    if (store.rightPanelsVisible) {
+    if (hasPinnedRightColumn(api)) {
       if (getManualRightWidth(store.currentLayoutEnvId) === null) return;
       const rightIdx = sv.length - 1;
       const rightW = sv.getViewSize(rightIdx);
@@ -261,7 +259,7 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
   if (typeof window === "undefined") {
     return () => {};
   }
-  const dv = document.querySelector(DOCKVIEW_SELECTOR) as HTMLElement | null;
+  const dv = getDockviewElement(api);
   const parent = dv?.parentElement;
   const ro =
     parent && typeof ResizeObserver !== "undefined"
@@ -271,8 +269,7 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
       : null;
   if (ro && parent) ro.observe(parent);
   const onWindowResize = (): void => {
-    const currentParent = (document.querySelector(DOCKVIEW_SELECTOR) as HTMLElement | null)
-      ?.parentElement;
+    const currentParent = getDockviewElement(api)?.parentElement;
     if (currentParent) syncDockviewContainerSize(api, currentParent);
   };
   window.addEventListener("resize", onWindowResize);
@@ -296,6 +293,8 @@ export function syncDockviewContainerSize(
   const height = container.clientHeight;
   if (width <= 0 || height <= 0) return;
   if (width === api.width && height === api.height) {
+    // Environment switches can replace pinned targets without changing the
+    // container dimensions, so enforce even when Dockview's layout is a no-op.
     enforcePinnedTargets(api, true);
     return;
   }

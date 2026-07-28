@@ -23,18 +23,9 @@ import { getRootSplitview, getPinnedTarget, computeSidebarMaxPx } from "./layout
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import { getManualRightWidth } from "@/lib/local-storage";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { measureDockviewGridWidth } from "./dockview-measure";
 
 const debugWidths = createDebugLogger("dockview:widths");
-
-function measuredLayoutWidth(api: DockviewApi): number | undefined {
-  const domWidth =
-    typeof document !== "undefined"
-      ? document.querySelector<HTMLElement>(".dv-dockview")?.clientWidth
-      : undefined;
-  if (domWidth && domWidth > 0) return domWidth;
-  if (api.width > 0) return api.width;
-  return undefined;
-}
 
 /** Enforcement-in-progress guard to prevent infinite loops when our own
  *  `sv.resizeView` triggers `onDidLayoutChange`. */
@@ -125,7 +116,11 @@ export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargets
     if (ctx.rightPanelsVisible) {
       const sidebarWidth = ctx.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
       const manual = getManualRightWidth(ctx.envId ?? null);
-      const target = resolveResponsiveRightWidth(measuredLayoutWidth(api), sidebarWidth, manual);
+      const target = resolveResponsiveRightWidth(
+        measureDockviewGridWidth(api),
+        sidebarWidth,
+        manual,
+      );
       if (target > 0) {
         restoreColumnToTarget(sv, sv.length - 1, target);
       } else {

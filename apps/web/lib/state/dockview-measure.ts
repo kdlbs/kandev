@@ -1,5 +1,31 @@
 import type { DockviewApi } from "dockview-react";
 
+const dockviewRoots = new WeakMap<DockviewApi, HTMLElement>();
+
+export function registerDockviewRoot(api: DockviewApi, root: HTMLElement): void {
+  dockviewRoots.set(api, root);
+}
+
+export function unregisterDockviewRoot(api: DockviewApi): void {
+  dockviewRoots.delete(api);
+}
+
+export function getDockviewElement(api: DockviewApi): HTMLElement | null {
+  const root = dockviewRoots.get(api);
+  if (root) return root.querySelector<HTMLElement>(".dv-dockview");
+  return typeof document !== "undefined"
+    ? document.querySelector<HTMLElement>(".dv-dockview")
+    : null;
+}
+
+export function measureDockviewGridWidth(api: DockviewApi): number | undefined {
+  const dockview = getDockviewElement(api);
+  const domWidth = dockview?.clientWidth || dockview?.parentElement?.clientWidth;
+  if (domWidth && domWidth > 0) return domWidth;
+  if (api.width > 0) return api.width;
+  return undefined;
+}
+
 /**
  * Measure the live size of the dockview container element.
  *
@@ -11,7 +37,7 @@ import type { DockviewApi } from "dockview-react";
  * source of truth and lets us recover from a drifted internal width.
  */
 export function measureDockviewContainer(api: DockviewApi): { width: number; height: number } {
-  const live = liveContainerSize();
+  const live = liveContainerSize(api);
   if (live) return live;
   // No laid-out container (e.g. a fresh client-side navigation mounts dockview
   // before the grid has painted). `api.width/height` are 0 at that point, and
@@ -33,9 +59,8 @@ export function measureDockviewContainer(api: DockviewApi): { width: number; hei
 // a transient and must be treated like a not-yet-laid-out (0-width) container.
 const MIN_PLAUSIBLE_WIDTH_RATIO = 0.5;
 
-function liveContainerSize(): { width: number; height: number } | null {
-  if (typeof document === "undefined") return null;
-  const dv = document.querySelector(".dv-dockview") as HTMLElement | null;
+function liveContainerSize(api: DockviewApi): { width: number; height: number } | null {
+  const dv = getDockviewElement(api);
   const parent = dv?.parentElement;
   if (!parent || parent.clientWidth <= 0 || parent.clientHeight <= 0) return null;
   // Root flex layout changes are horizontal, so only the width can be a

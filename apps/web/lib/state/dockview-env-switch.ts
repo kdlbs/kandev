@@ -242,7 +242,7 @@ function restoreMissingSessionPanel(api: DockviewApi, sessionId: string): void {
   if (api.getPanel(`session:${sessionId}`)) return;
 
   const targetGroup = findRestoredSessionGroup(api);
-  const shouldActivate = !targetGroup || targetGroup.panels.length === 0 || !api.activePanel;
+  const shouldActivate = !api.activePanel;
   const panel = addIncomingSessionPanel(api, sessionId, targetGroup?.id, targetGroup ? 0 : -1, {
     inactive: !shouldActivate,
   });

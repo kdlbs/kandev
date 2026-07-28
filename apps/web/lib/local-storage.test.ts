@@ -131,6 +131,16 @@ describe("manual right width storage", () => {
     clearManualRightWidth("env-a");
     expect(getManualRightWidth("env-a")).toBeNull();
   });
+
+  it("cleans only the deleted task environments while preserving other widths", () => {
+    setManualRightWidth("env-a", 320);
+    setManualRightWidth("env-b", 420);
+
+    cleanupTaskStorage("task-a", [], ["env-a"]);
+
+    expect(getManualRightWidth("env-a")).toBeNull();
+    expect(getManualRightWidth("env-b")).toBe(420);
+  });
 });
 
 describe("task-scoped artifact notification storage", () => {

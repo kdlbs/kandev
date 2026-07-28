@@ -569,7 +569,8 @@ describe("performEnvSwitch missing Agent restoration", () => {
 
     const setActive = vi.fn();
     const planPanel = { id: "plan", api: { component: "plan", isActive: true } };
-    const centerGroup = { id: CANONICAL_CENTER_GROUP_ID, panels: [planPanel] };
+    const centerGroup = { id: CANONICAL_CENTER_GROUP_ID, panels: [] };
+    const planGroup = { id: "center-secondary", panels: [planPanel] };
     const addPanel = vi.fn(() => ({
       id: NEW_SESSION_PANEL_ID,
       api: { component: "chat", setActive },
@@ -579,7 +580,7 @@ describe("performEnvSwitch missing Agent restoration", () => {
       ...makeMockApi(),
       activePanel: planPanel,
       panels: [planPanel],
-      groups: [centerGroup],
+      groups: [centerGroup, planGroup],
       getPanel: vi.fn((id: string) => (id === "plan" ? planPanel : null)),
       addPanel,
     } as unknown as EnvSwitchParams["api"];

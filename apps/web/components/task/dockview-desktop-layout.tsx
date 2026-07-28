@@ -59,6 +59,7 @@ import { PanelPortalHost, usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
 import { resolveEffectiveDefaultLayout } from "@/lib/layout/layout-profiles";
 import type { LayoutState } from "@/lib/state/layout-manager";
+import { registerDockviewRoot, unregisterDockviewRoot } from "@/lib/state/dockview-measure";
 
 // ---------------------------------------------------------------------------
 // PORTAL SLOT — generic dockview component that adopts a persistent portal
@@ -275,6 +276,7 @@ type ReadyDockviewRefs = {
   readyDisposersRef: React.MutableRefObject<Array<() => void>>;
   saveTimerRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
   setApi: (api: DockviewReadyEvent["api"] | null) => void;
+  layoutRootRef: React.MutableRefObject<HTMLDivElement | null>;
 };
 
 type ReadyDockviewSetup = {
@@ -289,6 +291,11 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
   // settings. Seed the store before exposing the API or building a cold layout.
   useDockviewStore.getState().setUserDefaultLayout(layout.userDefaultLayout);
   refs.setApi(api);
+  const layoutRoot = refs.layoutRootRef.current;
+  if (layoutRoot) {
+    registerDockviewRoot(api, layoutRoot);
+    refs.readyDisposersRef.current.push(() => unregisterDockviewRoot(api));
+  }
 
   const currentEnvId = refs.envIdRef.current;
   const restored =
@@ -390,7 +397,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         api: event.api,
         appStore,
         layout: { buildDefaultLayout, compact, initialLayout, userDefaultLayout },
-        refs: { envIdRef, readyDisposersRef, saveTimerRef, setApi },
+        refs: { envIdRef, readyDisposersRef, saveTimerRef, setApi, layoutRootRef },
       });
     },
     [setApi, buildDefaultLayout, initialLayout, compact, userDefaultLayout, appStore],

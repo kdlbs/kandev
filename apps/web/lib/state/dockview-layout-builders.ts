@@ -64,7 +64,8 @@ function captureCallerChain(): string {
  *  the column to that target on every subsequent rebalance. */
 export function applyLayoutFixups(
   api: DockviewApi,
-  savedRightWidth?: number,
+  /** Retained for callers restoring legacy layouts; manual width is authoritative. */
+  _savedRightWidth?: number,
   manualRightWidth?: number | null,
 ): LayoutGroupIds {
   const sv = getRootSplitviewImpl(api);
@@ -75,7 +76,7 @@ export function applyLayoutFixups(
   const oldFiles = api.getPanel("all-files");
   if (oldFiles) oldFiles.api.setTitle("Files");
 
-  captureRightTarget(api, sv, savedRightWidth, manualRightWidth);
+  captureRightTarget(api, sv, manualRightWidth);
 
   logFixupsCapture(api, sv);
 
@@ -138,7 +139,6 @@ function captureSidebarTarget(api: DockviewApi, sv: any): void {
 function resolveRightTarget(
   cap: number,
   totalWidth: number | undefined,
-  _savedRightWidth: number | undefined,
   manualRightWidth: number | null | undefined,
 ): number {
   return Math.min(resolveResponsiveRightWidth(totalWidth, 0, manualRightWidth ?? null, cap), cap);
@@ -177,7 +177,6 @@ function captureRightTarget(
   api: DockviewApi,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   sv: any,
-  savedRightWidth?: number,
   manualRightWidth?: number | null,
 ): void {
   // Constrain the default preset's right column groups (stable well-known IDs).
@@ -199,7 +198,7 @@ function captureRightTarget(
   // both 3-column (sidebar+center+right) and 2-column (center+right, sidebar
   // hidden) layouts since the right column is always at sv.length-1.
   if (api.groups.some((g) => g.id === RIGHT_TOP_GROUP || g.id === RIGHT_BOTTOM_GROUP)) {
-    const target = resolveRightTarget(rightCap, measuredWidth, savedRightWidth, manualRightWidth);
+    const target = resolveRightTarget(rightCap, measuredWidth, manualRightWidth);
     const cur = sv.getViewSize(idx);
     if (typeof cur === "number" && cur > 0 && Math.abs(cur - target) > 1) {
       try {
