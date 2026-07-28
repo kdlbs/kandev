@@ -823,6 +823,32 @@ func TestIsAgentRunningForSession(t *testing.T) {
 		require.False(t, mgr.IsAgentRunningForSession(context.Background(), "nonexistent"))
 	})
 
+	t.Run("fresh starting execution is live before agentctl responds", func(t *testing.T) {
+		store := NewExecutionStore()
+		require.NoError(t, store.Add(&AgentExecution{
+			ID:        "exec-acp-starting",
+			SessionID: "session-acp-starting",
+			Status:    v1.AgentStatusStarting,
+			StartedAt: time.Now(),
+		}))
+
+		mgr := &Manager{executionStore: store, logger: newTestLogger().WithFields()}
+		require.True(t, mgr.IsAgentRunningForSession(context.Background(), "session-acp-starting"))
+	})
+
+	t.Run("expired starting execution without agentctl is stale", func(t *testing.T) {
+		store := NewExecutionStore()
+		require.NoError(t, store.Add(&AgentExecution{
+			ID:        "exec-acp-starting-stale",
+			SessionID: "session-acp-starting-stale",
+			Status:    v1.AgentStatusStarting,
+			StartedAt: time.Now().Add(-5 * time.Minute),
+		}))
+
+		mgr := &Manager{executionStore: store, logger: newTestLogger().WithFields()}
+		require.False(t, mgr.IsAgentRunningForSession(context.Background(), "session-acp-starting-stale"))
+	})
+
 	t.Run("passthrough with alive process returns true", func(t *testing.T) {
 		log := newTestLogger()
 		runner := process.NewInteractiveRunner(nil, log, 2*1024*1024)

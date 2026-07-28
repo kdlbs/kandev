@@ -46,7 +46,9 @@ function summarizeFilter(filter: SentrySearchFilter | undefined): string {
   if (!filter) return "(any)";
   const parts: string[] = [];
   if (filter.orgSlug) parts.push(`org:${filter.orgSlug}`);
-  if (filter.projectSlug) parts.push(`project:${filter.projectSlug}`);
+  if (filter.projectSlugs && filter.projectSlugs.length > 0) {
+    parts.push(`project:${filter.projectSlugs.join(",")}`);
+  }
   if (filter.environment) parts.push(`env:${filter.environment}`);
   if (filter.levels && filter.levels.length > 0) {
     parts.push(`level:${filter.levels.join(",")}`);

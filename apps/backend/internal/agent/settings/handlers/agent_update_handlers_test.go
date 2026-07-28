@@ -55,6 +55,10 @@ func (u *handlerRuntimeUpdater) RunUpdate(
 	return nil
 }
 
+func (u *handlerRuntimeUpdater) InvalidateExecutionCache(context.Context, string) error {
+	return nil
+}
+
 func (u *handlerRuntimeUpdater) Refresh(
 	context.Context,
 	string,

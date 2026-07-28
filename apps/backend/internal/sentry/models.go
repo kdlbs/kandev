@@ -7,6 +7,7 @@
 package sentry
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/kandev/kandev/internal/integrations/optional"
@@ -141,14 +142,44 @@ type SentryIssue struct {
 // expresses level/status filters by appending tokens to the free-text `query`
 // param; we expose them as structured fields so the UI can render multi-select
 // chips and the backend builds the right query string.
+//
+// ProjectSlugs supports polling/searching several projects at once (e.g. a
+// watcher scoped to "frontend" and "backend"). A single-request Sentry search
+// (RESTClient.SearchIssues) only accepts one project per call — callers that
+// need several issue an underlying request per slug and merge the results
+// (see Service.CheckIssueWatch). Empty = browse "all projects" in the org,
+// used only by the manual issue browser, whose single-select UI and the
+// httpSearchIssues handler both cap it at one entry when non-empty; a
+// watch's filter requires at least one entry (enforced in validateFilter).
 type SearchFilter struct {
-	OrgSlug     string   `json:"orgSlug"`
-	ProjectSlug string   `json:"projectSlug,omitempty"`
-	Environment string   `json:"environment,omitempty"`
-	Levels      []string `json:"levels,omitempty"`
-	Statuses    []string `json:"statuses,omitempty"`
-	Query       string   `json:"query,omitempty"`
-	StatsPeriod string   `json:"statsPeriod,omitempty"`
+	OrgSlug      string   `json:"orgSlug"`
+	ProjectSlugs []string `json:"projectSlugs,omitempty"`
+	Environment  string   `json:"environment,omitempty"`
+	Levels       []string `json:"levels,omitempty"`
+	Statuses     []string `json:"statuses,omitempty"`
+	Query        string   `json:"query,omitempty"`
+	StatsPeriod  string   `json:"statsPeriod,omitempty"`
+}
+
+// UnmarshalJSON accepts the legacy singular `projectSlug` string (stored by
+// every issue watch persisted before multi-project support) alongside the
+// current `projectSlugs` array, so existing rows keep their configured
+// project after this upgrade instead of silently losing it on next read.
+// When both are present (should not happen in practice) the plural field
+// wins. Marshaling always emits the plural key — this is read-compat only.
+func (f *SearchFilter) UnmarshalJSON(data []byte) error {
+	type plain SearchFilter // avoid recursing back into this method
+	aux := struct {
+		*plain
+		ProjectSlug *string `json:"projectSlug"`
+	}{plain: (*plain)(f)}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	if len(f.ProjectSlugs) == 0 && aux.ProjectSlug != nil && *aux.ProjectSlug != "" {
+		f.ProjectSlugs = []string{*aux.ProjectSlug}
+	}
+	return nil
 }
 
 // SearchResult is a page of issues from a search. Sentry uses opaque cursors

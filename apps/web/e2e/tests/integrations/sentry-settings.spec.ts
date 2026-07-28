@@ -1,3 +1,4 @@
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { SentrySettingsPage } from "../../pages/sentry-settings-page";
 
@@ -91,7 +92,7 @@ test.describe("Sentry settings — instances", () => {
       workflowStepId: seedData.startStepId,
       agentProfileId: seedData.agentProfileId,
       orgSlug: "acme",
-      projectSlug: "web",
+      projectSlugs: ["web"],
     });
 
     // API contract: delete-in-use rejects 409 and reports the blocking count.
@@ -115,5 +116,79 @@ test.describe("Sentry settings — instances", () => {
     await settings.cardByName("Secondary").getByTestId("sentry-instance-delete-button").click();
     await expect(settings.cardByName("Secondary")).toHaveCount(0);
     await expect(settings.cardByName("Primary")).toBeVisible();
+  });
+});
+
+// Scopes a Radix Select (or the ProjectMultiSelect trigger, which shares the
+// same role="combobox" contract) by its field label. The dialog renders each
+// field as `<div class="space-y-1.5"><Label>…</Label><Select>…</Select></div>`,
+// so the exact label text uniquely identifies the combobox via its parent.
+function comboboxByLabel(root: Locator, label: string) {
+  return root.getByText(label, { exact: true }).locator("xpath=..").getByRole("combobox");
+}
+
+test.describe("Sentry settings — issue watchers", () => {
+  test("creates a watcher scoped to multiple projects and persists all of them", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await apiClient.mockSentryReset();
+    const instance = await apiClient.createSentryInstance({
+      workspaceId: seedData.workspaceId,
+      name: "Multi-project Sentry",
+      secret: TOKEN,
+    });
+    await apiClient.mockSentrySetAuthHealth({ instanceId: instance.id, ok: true });
+    await apiClient.mockSentrySetOrganizations(instance.id, [
+      { id: "acme", slug: "acme", name: "Acme" },
+    ]);
+    await apiClient.mockSentrySetProjects(instance.id, [
+      { id: "frontend", slug: "frontend", name: "Frontend", orgSlug: "acme" },
+      { id: "backend", slug: "backend", name: "Backend", orgSlug: "acme" },
+    ]);
+
+    const settings = new SentrySettingsPage(testPage);
+    await settings.goto();
+
+    await testPage.getByRole("button", { name: "New watcher" }).click();
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    const pick = async (label: string, option: string | RegExp) => {
+      await comboboxByLabel(dialog, label).click();
+      await testPage.getByRole("listbox").getByRole("option", { name: option }).click();
+    };
+
+    await pick("Sentry instance", "Multi-project Sentry");
+    // The sole org auto-selects once the lookup resolves.
+    await expect(comboboxByLabel(dialog, "Organization slug")).toContainText("acme");
+
+    await comboboxByLabel(dialog, "Project slug").click();
+    const projectListbox = testPage.getByRole("listbox");
+    await projectListbox.getByRole("option", { name: "Frontend (frontend)" }).click();
+    await projectListbox.getByRole("option", { name: "Backend (backend)" }).click();
+    await expect(comboboxByLabel(dialog, "Project slug")).toContainText("2 projects selected");
+    await prCapture.screenshot("watcher-project-multiselect-open", {
+      caption: "Selecting multiple Sentry projects for one issue watcher",
+    });
+    await testPage.keyboard.press("Escape");
+
+    await pick("Workflow", "E2E Workflow");
+    await comboboxByLabel(dialog, "Workflow Step").click();
+    await testPage.getByRole("listbox").getByRole("option").first().click();
+
+    const createButton = dialog.getByRole("button", { name: "Create" });
+    await expect(createButton).toBeEnabled();
+    await createButton.click();
+    await expect(dialog).toBeHidden();
+
+    // The table's filter summary lists every selected project, proving the
+    // watch persisted with both — not just the last one picked.
+    await expect(testPage.getByText("project:frontend,backend")).toBeVisible();
+    await prCapture.screenshot("watcher-table-multi-project-persisted", {
+      caption: "Saved watcher polling both selected projects",
+    });
   });
 });

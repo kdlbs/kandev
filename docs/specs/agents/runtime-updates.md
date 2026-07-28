@@ -157,10 +157,13 @@ Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
 
 - If npm registry metadata cannot be resolved, the job fails before changing
   the runtime and retains the prior capability data.
+- If the first package update command fails, Kandev may remove only the
+  deterministic npm execution-cache directory for that built-in package and
+  retry the update once. It never runs a global npm cache clean. If the repair
+  or retry fails or times out, the job fails and retains the prior capability
+  data.
 - If preview version resolution fails, the dialog shows the error and keeps
   approval disabled. No update job or package command starts.
-- If the package update command fails or times out, the job fails and retains
-  the prior capability data.
 - If the package update succeeds but the capability probe fails because
   authentication is required or another recoverable probe error occurs, the
   job reports package-update success plus `refresh_error`; the previous model
@@ -215,6 +218,10 @@ Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
   approval because the registry changed, **WHEN** the update job resolves its
   target again, **THEN** the dialog shows a retryable update failure and retains
   the previous models.
+- **GIVEN** a managed package's extracted `_npx` execution tree is corrupt,
+  **WHEN** the first update preparation fails, **THEN** Kandev invalidates only
+  that built-in package's deterministic execution-cache directory, retries
+  once, and probes the rebuilt runtime before reporting success.
 - **GIVEN** the package update succeeds but the fresh probe requires
   authentication, **WHEN** the job finishes, **THEN** the dialog reports the new
   package version and refresh error, the previous models remain available, and
@@ -236,6 +243,8 @@ Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
 ## Out of scope
 
 - Scheduled or automatic package updates.
+- Automatically deleting or rebuilding npm execution caches during every
+  ordinary agent launch.
 - Exact package-version pins, version allowlists, rollback, or user-selected
   historical versions.
 - Updating configured remote executors or every running container from the

@@ -28,6 +28,14 @@ const (
 	KindMaintenanceRunning Kind = "maintenance_running"
 )
 
+// BusyResource is a privacy-safe description of host activity that can block
+// destructive storage maintenance. It intentionally contains a category, not
+// task/session identity or command content.
+type BusyResource struct {
+	Kind  Kind   `json:"kind"`
+	Label string `json:"label"`
+}
+
 type Options struct {
 	Now func() time.Time
 }
@@ -139,12 +147,29 @@ func (c *Coordinator) TryAcquireMaintenance(
 	ctx context.Context,
 	quietPeriod time.Duration,
 ) (*MaintenanceLease, []Kind, error) {
+	return c.tryAcquireMaintenance(ctx, quietPeriod, false)
+}
+
+// TryAcquireMaintenanceForce admits manual maintenance alongside task work
+// that is already active. It still rejects another maintenance run, and the
+// returned lease remains preemptible by task work admitted afterwards.
+func (c *Coordinator) TryAcquireMaintenanceForce(
+	ctx context.Context,
+) (*MaintenanceLease, []Kind, error) {
+	return c.tryAcquireMaintenance(ctx, 0, true)
+}
+
+func (c *Coordinator) tryAcquireMaintenance(
+	ctx context.Context,
+	quietPeriod time.Duration,
+	ignoreActive bool,
+) (*MaintenanceLease, []Kind, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.maintenance != nil {
 		return nil, []Kind{KindMaintenanceRunning}, ErrBusy
 	}
-	if busy := c.busyKindsLocked(); len(busy) > 0 {
+	if busy := c.busyKindsLocked(); !ignoreActive && len(busy) > 0 {
 		return nil, busy, ErrBusy
 	}
 	if quietPeriod > 0 && c.now().UTC().Sub(c.lastActivity) < quietPeriod {
@@ -160,6 +185,14 @@ func (c *Coordinator) BusyKinds() []Kind {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.busyKindsLocked()
+}
+
+// BusyResources returns the current activity categories with labels suitable
+// for a user-facing maintenance warning.
+func (c *Coordinator) BusyResources() []BusyResource {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return BusyResourcesForKinds(c.busyKindsLocked())
 }
 
 func (c *Coordinator) releaseTask(kind Kind) {
@@ -197,4 +230,43 @@ func (c *Coordinator) busyKindsLocked() []Kind {
 	}
 	sort.Slice(busy, func(i, j int) bool { return busy[i] < busy[j] })
 	return busy
+}
+
+// BusyResourcesForKinds converts stable activity kinds into user-facing
+// descriptions without exposing task/session identity.
+func BusyResourcesForKinds(kinds []Kind) []BusyResource {
+	resources := make([]BusyResource, 0, len(kinds))
+	for _, kind := range kinds {
+		resources = append(resources, BusyResource{Kind: kind, Label: busyLabel(kind)})
+	}
+	return resources
+}
+
+func busyLabel(kind Kind) string {
+	switch kind {
+	case KindExecutionStarting:
+		return "An agent execution is starting"
+	case KindExecutionPreparing:
+		return "An agent execution is preparing"
+	case KindExecutionRunning:
+		return "An agent execution is running"
+	case KindExecutionStopping:
+		return "An agent execution is stopping"
+	case KindShellCommand:
+		return "A shell command is running"
+	case KindTestCommand:
+		return "A test command is running"
+	case KindSetupScript:
+		return "A setup script is running"
+	case KindCleanupScript:
+		return "A cleanup script is running"
+	case KindDockerImageBuild:
+		return "A Docker image build is running"
+	case KindMaintenanceRunning:
+		return "Another storage maintenance run is running"
+	case KindQuietPeriod:
+		return "Kandev is in its configured idle period"
+	default:
+		return "Kandev host activity is running"
+	}
 }

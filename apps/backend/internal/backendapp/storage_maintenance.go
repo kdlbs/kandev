@@ -469,7 +469,10 @@ func (c *workspaceQuarantineController) acquireGoCacheMaintenance(
 	}
 	lease, busy, err := c.activity.TryAcquireMaintenance(ctx, 0)
 	if errors.Is(err, activity.ErrBusy) {
-		return nil, &storagepkg.BusyError{Resources: busy}
+		return nil, &storagepkg.BusyError{
+			Resources:      activity.BusyResourcesForKinds(busy),
+			ForceAvailable: false,
+		}
 	}
 	return lease, err
 }

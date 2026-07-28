@@ -104,6 +104,9 @@ The read-only `pr-poller` is the sole repository-defined exception: use it only
 after the user explicitly asks to wait for or monitor PR updates.
 
 Use the user's strong model for specs, plans, task files, and high-risk design.
+When the user asks to proceed with feature planning, produce the spec, plan,
+and task files as one design package; pause after a spec only when the user
+explicitly requests spec review or a material open question prevents planning.
 At the completed-plan checkpoint, ask the user to manually switch the main
 session to a lower-cost implementation model. Detailed feature, fix,
 validation, and delegation routing lives in the relevant skills, especially

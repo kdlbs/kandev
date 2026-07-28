@@ -1,11 +1,24 @@
 package agents
 
+import (
+	"crypto/sha512"
+	"encoding/hex"
+)
+
 // ManagedNPMRuntimeSpec defines a built-in npm-distributed ACP runtime.
 // Package and ACPArgs must come from trusted agent metadata, never request
 // input, because update jobs execute them directly.
 type ManagedNPMRuntimeSpec struct {
 	Package string
 	ACPArgs []string
+}
+
+// ExecutionCacheKey returns npm's deterministic _npx execution-tree key for
+// this trusted package spec. npm derives it from the full package string using
+// SHA-512 and the first 16 lowercase hexadecimal characters.
+func (s ManagedNPMRuntimeSpec) ExecutionCacheKey() string {
+	digest := sha512.Sum512([]byte(s.Package))
+	return hex.EncodeToString(digest[:])[:16]
 }
 
 // CachedACPCommand returns the normal launch command. The package is

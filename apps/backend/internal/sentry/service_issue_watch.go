@@ -179,12 +179,13 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 	return res.TasksDeleted, err
 }
 
-// CheckIssueWatch runs the watch's filter once and returns the Sentry
-// instance actually polled (resolved via resolveWatchInstanceID — never
-// w.SentryInstanceID directly, which is empty for an unbound legacy watch)
-// plus the issues that haven't been turned into tasks yet. last_polled_at is
-// stamped regardless of whether the search succeeded — a failing search
-// still counts as "we tried".
+// CheckIssueWatch runs the watch's filter once per configured project and
+// returns the Sentry instance actually polled (resolved via
+// resolveWatchInstanceID — never w.SentryInstanceID directly, which is empty
+// for an unbound legacy watch) plus the issues that haven't been turned into
+// tasks yet, merged across every project. last_polled_at is stamped
+// regardless of whether the search succeeded — a failing search still counts
+// as "we tried".
 //
 // Concurrency note: callers must tolerate being handed an issue that gets
 // stolen by a concurrent reserver. The duplicate publish is harmless — the
@@ -192,6 +193,15 @@ func (s *Service) ResetIssueWatch(ctx context.Context, watchID string) (int, err
 // bails. Same pattern as the Linear / Jira watchers.
 func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) (string, []*SentryIssue, error) {
 	defer s.stampWatchLastPolled(w.ID)
+	if len(w.Filter.ProjectSlugs) == 0 {
+		// A watch with no configured project is invalid, not "browse the whole
+		// org" — validateFilter rejects this at create/update time, so reaching
+		// it here means corrupted/legacy data. Fail loudly instead of silently
+		// polling (and creating tasks for) every project in the org.
+		err := fmt.Errorf("%w: watch has no configured project", ErrInvalidConfig)
+		s.stampWatchError(w.ID, err.Error())
+		return "", nil, err
+	}
 	instanceID, err := s.resolveWatchInstanceID(ctx, w)
 	if err != nil {
 		s.stampWatchError(w.ID, err.Error())
@@ -201,28 +211,38 @@ func (s *Service) CheckIssueWatch(ctx context.Context, w *IssueWatch) (string, [
 	if err != nil {
 		return instanceID, nil, err
 	}
-	// Intentionally reads only the first page per tick (bounded-page-per-tick
-	// invariant, matching the Linear/Jira watchers). SearchIssues sorts results
-	// by first-seen descending (sort=new) so newly created issues reliably land
-	// on page one and are not missed by the single-page read.
-	res, err := client.SearchIssues(ctx, w.Filter, "")
-	if err != nil {
-		return instanceID, nil, err
-	}
 	seen, err := s.store.ListSeenIssueShortIDs(ctx, w.ID)
 	if err != nil {
 		// Skip this tick rather than treat a failed dedup read as "nothing seen":
-		// a nil map would let the whole page (up to 100 issues) publish as events.
-		// The next tick retries with a working dedup set.
+		// a nil map would let the whole page (up to 100 issues per project)
+		// publish as events. The next tick retries with a working dedup set.
 		return instanceID, nil, fmt.Errorf("load dedup set for watch %s: %w", w.ID, err)
 	}
-	out := make([]*SentryIssue, 0, len(res.Issues))
-	for i := range res.Issues {
-		issue := res.Issues[i]
-		if _, ok := seen[issue.ShortID]; ok {
-			continue
+	out := make([]*SentryIssue, 0, len(w.Filter.ProjectSlugs))
+	for _, projectSlug := range w.Filter.ProjectSlugs {
+		projectFilter := w.Filter
+		projectFilter.ProjectSlugs = []string{projectSlug}
+		// Intentionally reads only the first page per project per tick
+		// (bounded-page-per-tick invariant, matching the Linear/Jira watchers).
+		// SearchIssues sorts results by first-seen descending (sort=new) so
+		// newly created issues reliably land on page one and are not missed by
+		// the single-page read.
+		res, err := client.SearchIssues(ctx, projectFilter, "")
+		if err != nil {
+			return instanceID, nil, fmt.Errorf("search issues for project %q: %w", projectSlug, err)
 		}
-		out = append(out, &issue)
+		for i := range res.Issues {
+			issue := res.Issues[i]
+			if _, ok := seen[issue.ShortID]; ok {
+				continue
+			}
+			// Guards against the same short_id surfacing twice within this
+			// tick (e.g. a duplicate page entry) so the orchestrator never
+			// gets handed the same issue twice from a single CheckIssueWatch
+			// call.
+			seen[issue.ShortID] = struct{}{}
+			out = append(out, &issue)
+		}
 	}
 	s.clearWatchError(w.ID)
 	return instanceID, out, nil
@@ -438,8 +458,8 @@ func validateFilter(f SearchFilter) error {
 	if f.OrgSlug == "" {
 		return fmt.Errorf("%w: filter.orgSlug is required", ErrInvalidConfig)
 	}
-	if f.ProjectSlug == "" {
-		return fmt.Errorf("%w: filter.projectSlug is required", ErrInvalidConfig)
+	if len(f.ProjectSlugs) == 0 {
+		return fmt.Errorf("%w: filter.projectSlugs must contain at least one project", ErrInvalidConfig)
 	}
 	return nil
 }
@@ -471,10 +491,21 @@ func validatePollInterval(seconds int) error {
 func normalizeFilter(f SearchFilter) SearchFilter {
 	out := SearchFilter{
 		OrgSlug:     strings.TrimSpace(f.OrgSlug),
-		ProjectSlug: strings.TrimSpace(f.ProjectSlug),
 		Environment: strings.TrimSpace(f.Environment),
 		Query:       strings.TrimSpace(f.Query),
 		StatsPeriod: strings.TrimSpace(f.StatsPeriod),
+	}
+	seenProjects := make(map[string]struct{}, len(f.ProjectSlugs))
+	for _, v := range f.ProjectSlugs {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, dup := seenProjects[v]; dup {
+			continue
+		}
+		seenProjects[v] = struct{}{}
+		out.ProjectSlugs = append(out.ProjectSlugs, v)
 	}
 	for _, v := range f.Levels {
 		v = strings.TrimSpace(v)

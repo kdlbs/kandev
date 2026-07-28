@@ -19,7 +19,7 @@ func (c *fakeClient) withSearchResults(issues []SentryIssue) *fakeClient {
 }
 
 func validFilter() SearchFilter {
-	return SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"}
+	return SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"frontend"}}
 }
 func intPtr(value int) *int {
 	return &value
@@ -34,8 +34,8 @@ func TestService_CreateIssueWatch_DefaultsAndValidation(t *testing.T) {
 	for name, filter := range map[string]SearchFilter{
 		"empty":          {},
 		"org only":       {OrgSlug: "acme"},
-		"whitespace org": {OrgSlug: "   ", ProjectSlug: "frontend"},
-		"multi status":   {OrgSlug: "acme", ProjectSlug: "frontend", Statuses: []string{"unresolved", "ignored"}},
+		"whitespace org": {OrgSlug: "   ", ProjectSlugs: []string{"frontend"}},
+		"multi status":   {OrgSlug: "acme", ProjectSlugs: []string{"frontend"}, Statuses: []string{"unresolved", "ignored"}},
 	} {
 		if _, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 			WorkspaceID: "ws-1", SentryInstanceID: instID,
@@ -96,7 +96,7 @@ func TestService_UpdateIssueWatch_LegacyMultiStatusToggle(t *testing.T) {
 	if _, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Enabled: &disabled}); err != nil {
 		t.Fatalf("toggle on legacy multi-status watch should succeed, got %v", err)
 	}
-	bad := SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend", Statuses: []string{"unresolved", "ignored"}}
+	bad := SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"frontend"}, Statuses: []string{"unresolved", "ignored"}}
 	if _, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Filter: &bad}); !errors.Is(err, ErrInvalidConfig) {
 		t.Errorf("filter patch with multiple statuses should be rejected, got %v", err)
 	}
@@ -456,5 +456,127 @@ func TestService_CheckIssueWatch_UnboundNoInstanceStampsError(t *testing.T) {
 	}
 	if !refreshed.Enabled {
 		t.Error("watch must stay enabled (stamp + skip, not disable) so it auto-heals")
+	}
+}
+
+// TestService_CheckIssueWatch_PollsEveryConfiguredProject pins multi-project
+// support: a watch bound to several projects issues one SearchIssues call per
+// project and merges the results into a single unseen-issue list.
+func TestService_CheckIssueWatch_PollsEveryConfiguredProject(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "A", "sntrys_abc")
+
+	var seenFilters []SearchFilter
+	f.client.searchIssuesFn = func(filter SearchFilter, _ string) (*SearchResult, error) {
+		seenFilters = append(seenFilters, filter)
+		if len(filter.ProjectSlugs) != 1 {
+			t.Fatalf("expected exactly one project slug per request, got %+v", filter)
+		}
+		switch filter.ProjectSlugs[0] {
+		case "frontend":
+			return &SearchResult{Issues: []SentryIssue{{ShortID: "FE-1", Title: "fe issue"}}, IsLast: true}, nil
+		case "backend":
+			return &SearchResult{Issues: []SentryIssue{{ShortID: "BE-1", Title: "be issue"}}, IsLast: true}, nil
+		default:
+			t.Fatalf("unexpected project slug forwarded: %q", filter.ProjectSlugs[0])
+			return nil, nil
+		}
+	}
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: inst.ID,
+		WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"frontend", "backend"}},
+	})
+	if err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	_, got, err := f.svc.CheckIssueWatch(ctx, w)
+	if err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	if len(seenFilters) != 2 {
+		t.Fatalf("expected one SearchIssues call per project, got %d", len(seenFilters))
+	}
+	gotIDs := make([]string, 0, len(got))
+	for _, i := range got {
+		gotIDs = append(gotIDs, i.ShortID)
+	}
+	if !sameStrings(gotIDs, []string{"FE-1", "BE-1"}) {
+		t.Errorf("expected issues merged across both projects, got %v", gotIDs)
+	}
+}
+
+// TestService_CheckIssueWatch_ProjectFailureAbortsCheck pins that a search
+// failure on any one of a watch's several projects surfaces to the caller
+// (fail-fast, matching the single-project behavior) rather than silently
+// returning a partial result.
+func TestService_CheckIssueWatch_ProjectFailureAbortsCheck(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "A", "sntrys_abc")
+	f.client.searchIssuesFn = func(filter SearchFilter, _ string) (*SearchResult, error) {
+		if len(filter.ProjectSlugs) == 1 && filter.ProjectSlugs[0] == "backend" {
+			return nil, errors.New("upstream 500")
+		}
+		return &SearchResult{Issues: []SentryIssue{{ShortID: "FE-1"}}, IsLast: true}, nil
+	}
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", SentryInstanceID: inst.ID,
+		WorkflowID: "wf", WorkflowStepID: "step",
+		Filter: SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"frontend", "backend"}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, _, err := f.svc.CheckIssueWatch(ctx, w); err == nil {
+		t.Error("expected error when any configured project's search fails")
+	}
+}
+
+// TestService_CheckIssueWatch_NoProjectConfigured_ReturnsError pins the
+// safety rule for corrupted/legacy data: a watch that somehow persisted with
+// zero project slugs must fail loudly, never fall back to polling (and
+// creating tasks for) every project in the org.
+func TestService_CheckIssueWatch_NoProjectConfigured_ReturnsError(t *testing.T) {
+	f := newSvcFixture(t)
+	ctx := context.Background()
+	inst := f.seedInstance(t, "ws-1", "A", "sntrys_abc")
+	w := newTestIssueWatch("ws-1")
+	w.SentryInstanceID = inst.ID
+	w.Filter.ProjectSlugs = nil
+	if err := f.store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("seed watch: %v", err)
+	}
+	if _, _, err := f.svc.CheckIssueWatch(ctx, w); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for watch with no configured project, got %v", err)
+	}
+	refreshed, _ := f.store.GetIssueWatch(ctx, w.ID)
+	if refreshed.LastError == "" {
+		t.Error("expected last_error stamped for unpollable watch")
+	}
+}
+
+func TestValidateFilter_RequiresAtLeastOneProjectSlug(t *testing.T) {
+	if err := validateFilter(SearchFilter{OrgSlug: "acme"}); !errors.Is(err, ErrInvalidConfig) {
+		t.Errorf("expected ErrInvalidConfig for filter with no projects, got %v", err)
+	}
+	if err := validateFilter(SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"frontend"}}); err != nil {
+		t.Errorf("expected valid single-project filter to pass, got %v", err)
+	}
+	if err := validateFilter(SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"frontend", "backend"}}); err != nil {
+		t.Errorf("expected valid multi-project filter to pass, got %v", err)
+	}
+}
+
+func TestNormalizeFilter_TrimsDedupesAndDropsEmptyProjectSlugs(t *testing.T) {
+	got := normalizeFilter(SearchFilter{
+		OrgSlug:      "acme",
+		ProjectSlugs: []string{" frontend ", "backend", "", "frontend", "  "},
+	})
+	if !sameStrings(got.ProjectSlugs, []string{"frontend", "backend"}) {
+		t.Errorf("expected [frontend backend], got %v", got.ProjectSlugs)
 	}
 }

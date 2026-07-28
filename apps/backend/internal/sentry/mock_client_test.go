@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"testing"
+	"time"
 )
 
 // mockInstance returns a Client view of the shared mock bound to instanceID.
@@ -25,13 +26,37 @@ func TestMockClient_SearchFiltersByProject(t *testing.T) {
 	m.AddIssue("inst-1", &SentryIssue{ShortID: "BE-1", Title: "Crash", Level: "fatal", Status: "unresolved", ProjectSlug: "backend"})
 
 	res, err := mockInstance(m, "inst-1").SearchIssues(context.Background(), SearchFilter{
-		OrgSlug: "acme", ProjectSlug: "frontend",
+		OrgSlug: "acme", ProjectSlugs: []string{"frontend"},
 	}, "")
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
 	if len(res.Issues) != 1 || res.Issues[0].ShortID != "FE-1" {
 		t.Errorf("expected only FE-1, got %+v", res.Issues)
+	}
+}
+
+// TestMockClient_SearchMatchesAnyConfiguredProject pins the ANY-of semantics
+// (same as Levels/Statuses) a multi-project watch relies on: a filter listing
+// several projects matches an issue from any one of them.
+func TestMockClient_SearchMatchesAnyConfiguredProject(t *testing.T) {
+	m := NewMockClient()
+	m.AddIssue("inst-1", &SentryIssue{ShortID: "FE-1", ProjectSlug: "frontend"})
+	m.AddIssue("inst-1", &SentryIssue{ShortID: "BE-1", ProjectSlug: "backend"})
+	m.AddIssue("inst-1", &SentryIssue{ShortID: "OTHER-1", ProjectSlug: "other"})
+
+	res, err := mockInstance(m, "inst-1").SearchIssues(context.Background(), SearchFilter{
+		OrgSlug: "acme", ProjectSlugs: []string{"frontend", "backend"},
+	}, "")
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	got := make([]string, 0, len(res.Issues))
+	for _, i := range res.Issues {
+		got = append(got, i.ShortID)
+	}
+	if !sameStrings(got, []string{"FE-1", "BE-1"}) {
+		t.Errorf("got %v, want FE-1 and BE-1 only", got)
 	}
 }
 
@@ -66,6 +91,65 @@ func TestMockClient_SearchFiltersByLevelStatusQuery(t *testing.T) {
 				t.Errorf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+// TestMockClient_SearchFiltersByStatsPeriod locks in the fix for the
+// "watch configured for the last 24h still processes older issues" bug: the
+// mock (which backs E2E tests) must enforce StatsPeriod against each issue's
+// FirstSeen the same way the real REST client now does via the `age:`
+// search token (see statsPeriodAgeToken in rest_client.go).
+func TestMockClient_SearchFiltersByStatsPeriod(t *testing.T) {
+	m := NewMockClient()
+	now := time.Now().UTC()
+	m.AddIssue("inst-1", &SentryIssue{
+		ShortID: "OLD-1", Title: "Ancient", ProjectSlug: "fe",
+		FirstSeen: now.Add(-72 * time.Hour).Format(time.RFC3339),
+	})
+	m.AddIssue("inst-1", &SentryIssue{
+		ShortID: "NEW-1", Title: "Recent", ProjectSlug: "fe",
+		FirstSeen: now.Add(-1 * time.Hour).Format(time.RFC3339),
+	})
+	client := mockInstance(m, "inst-1")
+
+	res, err := client.SearchIssues(context.Background(), SearchFilter{OrgSlug: "acme", StatsPeriod: "24h"}, "")
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	got := make([]string, 0, len(res.Issues))
+	for _, i := range res.Issues {
+		got = append(got, i.ShortID)
+	}
+	if !sameStrings(got, []string{"NEW-1"}) {
+		t.Errorf("expected only NEW-1 within the 24h window, got %v", got)
+	}
+
+	// No StatsPeriod configured -> no age restriction (unchanged behaviour).
+	res, err = client.SearchIssues(context.Background(), SearchFilter{OrgSlug: "acme"}, "")
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	got = got[:0]
+	for _, i := range res.Issues {
+		got = append(got, i.ShortID)
+	}
+	if !sameStrings(got, []string{"OLD-1", "NEW-1"}) {
+		t.Errorf("expected both issues without a period filter, got %v", got)
+	}
+}
+
+// TestParseStatsPeriod_RejectsOverflowRisk pins the fail-safe (not
+// fail-open-to-a-corrupt-duration) behaviour for absurdly large period
+// values that would otherwise overflow time.Duration's int64 nanoseconds
+// when multiplied by the week/day unit.
+func TestParseStatsPeriod_RejectsOverflowRisk(t *testing.T) {
+	for _, period := range []string{"999999999999w", "999999999999d", "0h", "3651w"} {
+		if _, ok := parseStatsPeriod(period); ok {
+			t.Errorf("parseStatsPeriod(%q) should be rejected, was accepted", period)
+		}
+	}
+	if d, ok := parseStatsPeriod("3650w"); !ok || d <= 0 {
+		t.Errorf("parseStatsPeriod(%q) at the bound should be accepted with a positive duration, got %v/%v", "3650w", d, ok)
 	}
 }
 

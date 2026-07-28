@@ -25,7 +25,7 @@ type QuarantineLister interface {
 type Mutations interface {
 	AdoptGoCache(context.Context, string, string) (StorageMaintenanceSettings, Capabilities, error)
 	Analyze(context.Context) (string, error)
-	RunNow(context.Context, []string) (string, error)
+	RunNow(context.Context, []string, bool) (string, error)
 	RestoreQuarantine(context.Context, string) (QuarantineEntry, error)
 	DeleteQuarantine(context.Context, string, string) (string, error)
 }
@@ -129,6 +129,7 @@ func (h *Handler) adoptGoCache(c *gin.Context) {
 
 type runRequest struct {
 	Resources []string `json:"resources"`
+	Force     bool     `json:"force"`
 }
 
 func (h *Handler) analyze(c *gin.Context) {
@@ -144,10 +145,13 @@ func (h *Handler) runNow(c *gin.Context) {
 			return
 		}
 	}
-	id, err := h.config.Mutations.RunNow(c.Request.Context(), request.Resources)
+	id, err := h.config.Mutations.RunNow(c.Request.Context(), request.Resources, request.Force)
 	var busy *BusyError
 	if errors.As(err, &busy) {
-		c.JSON(http.StatusConflict, gin.H{"error": busy.Error(), "busy_resources": busy.Resources})
+		c.JSON(http.StatusConflict, gin.H{
+			"error": busy.Error(), "busy_resources": busy.Resources,
+			"force_available": busy.ForceAvailable,
+		})
 		return
 	}
 	writeAcceptedJob(c, id, err)

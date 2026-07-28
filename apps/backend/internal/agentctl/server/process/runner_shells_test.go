@@ -455,3 +455,61 @@ func TestInteractiveRunner_CreateUserShell_AtomicRegistration(t *testing.T) {
 		t.Error("CreateUserShell() result should be immediately visible in ListUserShells()")
 	}
 }
+
+// User shell terminals must export the executor-profile env vars the caller
+// resolved, so the terminal sees the same variables as the agent subprocess and
+// the repository setup script.
+func TestInteractiveRunner_StartUserShellForwardsOptionEnv(t *testing.T) {
+	log := newTestLogger(t)
+	runner := NewInteractiveRunner(nil, log, 2*1024*1024)
+
+	info, err := runner.StartUserShell(
+		context.Background(),
+		"env-scope", "env-session", "term-1", t.TempDir(), "",
+		&UserShellOptions{Label: "Terminal", Env: map[string]string{"FONTAWESOME_NPM_AUTH_TOKEN": "fa-secret-value"}},
+	)
+	if err != nil {
+		t.Fatalf("StartUserShell() error = %v", err)
+	}
+
+	runner.mu.RLock()
+	proc, ok := runner.processes[info.ID]
+	runner.mu.RUnlock()
+	if !ok {
+		t.Fatalf("process %q not registered", info.ID)
+	}
+	if got := proc.startEnv["FONTAWESOME_NPM_AUTH_TOKEN"]; got != "fa-secret-value" {
+		t.Fatalf("startEnv[FONTAWESOME_NPM_AUTH_TOKEN] = %q, want profile secret; env=%#v", got, proc.startEnv)
+	}
+}
+
+func TestMergeAgentEnvIntoShellConfig(t *testing.T) {
+	if got := mergeAgentEnvIntoShellConfig(nil, nil); got != nil {
+		t.Fatalf("mergeAgentEnvIntoShellConfig(nil, nil) = %#v, want nil (inherit process env)", got)
+	}
+
+	// Instance agent env is inherited; explicit overrides still win, and
+	// malformed entries are dropped rather than producing empty keys.
+	merged := mergeAgentEnvIntoShellConfig(
+		[]string{"FONTAWESOME_NPM_AUTH_TOKEN=fa-secret-value", "TERM=dumb", "MALFORMED", "=novalue"},
+		map[string]string{"TERM": "xterm-256color"},
+	)
+	if merged["FONTAWESOME_NPM_AUTH_TOKEN"] != "fa-secret-value" {
+		t.Fatalf("merged token = %q, want inherited agent env value", merged["FONTAWESOME_NPM_AUTH_TOKEN"])
+	}
+	if merged["TERM"] != "xterm-256color" {
+		t.Fatalf("merged TERM = %q, want caller override to win", merged["TERM"])
+	}
+	if _, exists := merged[""]; exists {
+		t.Fatalf("merged contains empty key: %#v", merged)
+	}
+	if _, exists := merged["MALFORMED"]; exists {
+		t.Fatalf("merged contains valueless entry: %#v", merged)
+	}
+
+	// Overrides-only with no agent env passes the map through untouched.
+	overrides := map[string]string{"TOKEN": "t"}
+	if got := mergeAgentEnvIntoShellConfig(nil, overrides); got["TOKEN"] != "t" {
+		t.Fatalf("mergeAgentEnvIntoShellConfig(nil, overrides)[TOKEN] = %q, want t", got["TOKEN"])
+	}
+}

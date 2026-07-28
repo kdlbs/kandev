@@ -12,9 +12,9 @@ func newTestIssueWatch(workspaceID string) *IssueWatch {
 		WorkflowID:     "wf-1",
 		WorkflowStepID: "step-1",
 		Filter: SearchFilter{
-			OrgSlug:     "acme",
-			ProjectSlug: "frontend",
-			Levels:      []string{"error"},
+			OrgSlug:      "acme",
+			ProjectSlugs: []string{"frontend"},
+			Levels:       []string{"error"},
 		},
 		Prompt:  "Investigate {{issue.short_id}}",
 		Enabled: true,
@@ -50,7 +50,7 @@ func TestStore_IssueWatch_CreateGet(t *testing.T) {
 		t.Errorf("round-trip mismatch: %+v vs %+v", got, w)
 	}
 	// Filter survives the JSON round-trip.
-	if got.Filter.OrgSlug != "acme" || got.Filter.ProjectSlug != "frontend" ||
+	if got.Filter.OrgSlug != "acme" || !sameStrings(got.Filter.ProjectSlugs, []string{"frontend"}) ||
 		len(got.Filter.Levels) != 1 || got.Filter.Levels[0] != "error" {
 		t.Errorf("filter round-trip failed: %+v", got.Filter)
 	}
@@ -118,7 +118,7 @@ func TestStore_IssueWatch_Update(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	originalCreated := w.CreatedAt
-	w.Filter = SearchFilter{OrgSlug: "acme", ProjectSlug: "backend", Query: "deadlock"}
+	w.Filter = SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"backend"}, Query: "deadlock"}
 	w.Enabled = false
 	w.PollIntervalSeconds = 60
 	if err := store.UpdateIssueWatch(ctx, w); err != nil {

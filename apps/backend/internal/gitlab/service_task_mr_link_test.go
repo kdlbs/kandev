@@ -15,10 +15,11 @@ func seedTaskMRLinkFixture(t *testing.T, store *Store, workspaceID, taskID, repo
 	if _, err := store.db.Exec(`CREATE TABLE IF NOT EXISTS repositories (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,
-		provider TEXT NOT NULL DEFAULT '',
-		provider_host TEXT NOT NULL DEFAULT '',
-		provider_owner TEXT NOT NULL DEFAULT '',
-		provider_name TEXT NOT NULL DEFAULT ''
+		provider TEXT DEFAULT '',
+		provider_host TEXT DEFAULT '',
+		provider_owner TEXT DEFAULT '',
+		provider_name TEXT DEFAULT '',
+		remote_url TEXT DEFAULT ''
 	); CREATE TABLE IF NOT EXISTS task_repositories (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -54,6 +55,30 @@ func setTaskMRRepositoryIdentity(
 		SET provider = 'gitlab', provider_host = ?, provider_owner = ?, provider_name = ?
 		WHERE id = ?`, host, owner, name, repositoryID); err != nil {
 		t.Fatalf("set repository identity: %v", err)
+	}
+}
+
+func setTaskMRRepositoryRemoteURL(t *testing.T, store *Store, repositoryID, remoteURL string) {
+	t.Helper()
+	if _, err := store.db.Exec(
+		`UPDATE repositories SET remote_url = ? WHERE id = ?`, remoteURL, repositoryID,
+	); err != nil {
+		t.Fatalf("set repository remote_url: %v", err)
+	}
+}
+
+// setTaskMRRepositoryIdentityColumnsNull sets every provider identity column
+// (provider, provider_host, provider_owner, provider_name, remote_url) to
+// SQL NULL, mirroring rows persisted before those columns existed or by code
+// paths that never populated them. The production schema declares them
+// nullable, so ValidateTaskMRRepositoryIdentity must tolerate NULL scans.
+func setTaskMRRepositoryIdentityColumnsNull(t *testing.T, store *Store, repositoryID string) {
+	t.Helper()
+	if _, err := store.db.Exec(`UPDATE repositories
+		SET provider = NULL, provider_host = NULL, provider_owner = NULL,
+			provider_name = NULL, remote_url = NULL
+		WHERE id = ?`, repositoryID); err != nil {
+		t.Fatalf("null repository identity columns: %v", err)
 	}
 }
 
@@ -100,6 +125,28 @@ func TestAssociateExistingMRByURLCreatesIdempotentWorkspaceScopedLink(t *testing
 	rows, err := store.ListTaskMRsByTask(context.Background(), "task-1")
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("stored rows = %d, err = %v; want one", len(rows), err)
+	}
+}
+
+func TestAssociateExistingMRByURLAcceptsMRURLWithExplicitDefaultPort(t *testing.T) {
+	// The workspace's configured GitLab host and the incoming MR URL should
+	// match even when only one side spells out the scheme's implicit default
+	// port (":443" for https), since they identify the same web origin.
+	const configuredHost = "https://gitlab.acme.test:443"
+	const mrURLHost = "https://gitlab.acme.test"
+	svc, store, client := newTaskMRLinkService(t, configuredHost)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", configuredHost, "acme/api")
+	client.SeedMR("acme/api", &MR{
+		IID: 21, Title: "MR", WebURL: mrURLHost + "/acme/api/-/merge_requests/21",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		mrURLHost+"/acme/api/-/merge_requests/21",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
 	}
 }
 
@@ -151,7 +198,6 @@ func TestAssociateExistingMRByURLRejectsRepositoryIdentityMismatch(t *testing.T)
 		repositoryHost string
 		repositoryPath string
 	}{
-		{name: "same hostname with HTTPS origin", repositoryHost: "https://gitlab.internal.test:8080", repositoryPath: "group/subgroup/project"},
 		{name: "different GitLab host", repositoryHost: "http://other.internal.test:8080", repositoryPath: "group/subgroup/project"},
 		{name: "different subgroup project", repositoryHost: host, repositoryPath: "group/other/project"},
 		{name: "unknown legacy host", repositoryHost: "", repositoryPath: "group/subgroup/project"},
@@ -192,6 +238,197 @@ func TestAssociateExistingMRByURLAcceptsExactSelfManagedHTTPSRepositoryIdentity(
 		host+"/group/subgroup/project/-/merge_requests/11",
 	); err != nil {
 		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+}
+
+func TestAssociateExistingMRByURLAcceptsRepositoryIdentityWithExplicitDefaultPort(t *testing.T) {
+	const host = "https://gitlab.internal.test"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	// An explicit default HTTPS port (:443) must compare equal to the
+	// workspace host, which omits it.
+	setTaskMRRepositoryIdentity(t, store, "repo-1", "https://gitlab.internal.test:443", "group/subgroup/project")
+	client.SeedMR("group/subgroup/project", &MR{
+		IID: 13, Title: "MR", WebURL: host + "/group/subgroup/project/-/merge_requests/13",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/group/subgroup/project/-/merge_requests/13",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+}
+
+func TestAssociateExistingMRByURLAcceptsScpStyleRemoteWithBracketedIPv6Host(t *testing.T) {
+	const host = "https://[::1]"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryRemoteURL(t, store, "repo-1", "git@[::1]:clients/socodevi/laravel/co-up.git")
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+}
+
+func TestAssociateExistingMRByURLAcceptsSSHURLRemoteWithIPv6Host(t *testing.T) {
+	const host = "https://[::1]"
+	tests := []struct {
+		name      string
+		remoteURL string
+	}{
+		{name: "no port", remoteURL: "ssh://git@[::1]/clients/socodevi/laravel/co-up.git"},
+		{name: "explicit non-web port", remoteURL: "ssh://git@[::1]:2222/clients/socodevi/laravel/co-up.git"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, store, client := newTaskMRLinkService(t, host)
+			seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+			setTaskMRRepositoryRemoteURL(t, store, "repo-1", tt.remoteURL)
+			client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+				IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+				State: "opened", CreatedAt: time.Now().UTC(),
+			})
+
+			if _, err := svc.AssociateExistingMRByURL(
+				context.Background(), "ws-1", "task-1", "repo-1",
+				host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+			); err != nil {
+				t.Fatalf("AssociateExistingMRByURL: %v", err)
+			}
+		})
+	}
+}
+
+func TestAssociateExistingMRByURLAcceptsRepositoryIdentityWithSameHostDifferentScheme(t *testing.T) {
+	const host = "http://gitlab.internal.test:8080"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", "https://gitlab.internal.test:8080", "group/subgroup/project")
+	client.SeedMR("group/subgroup/project", &MR{
+		IID: 12, Title: "MR", WebURL: host + "/group/subgroup/project/-/merge_requests/12",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/group/subgroup/project/-/merge_requests/12",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+}
+
+func TestAssociateExistingMRByURLAcceptsRemoteURLWhenDurableIdentityEmpty(t *testing.T) {
+	// Reproduces the reported bug: a self-hosted GitLab repository added as a
+	// local clone never gets a durable provider identity (only github.com and
+	// gitlab.com are tagged at discovery time), but its remote_url still
+	// clearly identifies the same GitLab host and nested-subgroup project.
+	const host = "https://gitlab.savoirfairelinux.com"
+	tests := []struct {
+		name      string
+		remoteURL string
+	}{
+		{name: "https remote", remoteURL: host + "/clients/socodevi/laravel/co-up.git"},
+		{name: "https remote without .git suffix", remoteURL: host + "/clients/socodevi/laravel/co-up"},
+		{name: "https remote with trailing slash", remoteURL: host + "/clients/socodevi/laravel/co-up/"},
+		{name: "https remote with different case", remoteURL: "https://GitLab.SavoirFaireLinux.com/Clients/Socodevi/Laravel/Co-Up.git"},
+		{name: "http remote for https workspace host", remoteURL: "http://gitlab.savoirfairelinux.com/clients/socodevi/laravel/co-up.git"},
+		{name: "ssh url remote", remoteURL: "ssh://git@gitlab.savoirfairelinux.com/clients/socodevi/laravel/co-up.git"},
+		{name: "scp-style remote", remoteURL: "git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/co-up.git"},
+		// SSH transport ports (used by hosts that put SSH on a non-standard
+		// port) are unrelated to the GitLab web origin's port and must not
+		// be compared against it.
+		{name: "ssh url remote with explicit non-web port", remoteURL: "ssh://git@gitlab.savoirfairelinux.com:2222/clients/socodevi/laravel/co-up.git"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, store, client := newTaskMRLinkService(t, host)
+			seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+			setTaskMRRepositoryRemoteURL(t, store, "repo-1", tt.remoteURL)
+			client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+				IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+				State: "opened", CreatedAt: time.Now().UTC(),
+			})
+
+			if _, err := svc.AssociateExistingMRByURL(
+				context.Background(), "ws-1", "task-1", "repo-1",
+				host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+			); err != nil {
+				t.Fatalf("AssociateExistingMRByURL: %v", err)
+			}
+		})
+	}
+}
+
+func TestAssociateExistingMRByURLRejectsRemoteURLPointingElsewhere(t *testing.T) {
+	const host = "https://gitlab.savoirfairelinux.com"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	// Durable identity empty (legacy/unresolved row) and remote_url points to
+	// a different project than the MR being linked.
+	setTaskMRRepositoryRemoteURL(t, store, "repo-1", host+"/clients/socodevi/laravel/other-project.git")
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	_, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	)
+	if !errors.Is(err, ErrTaskMRRepositoryMismatch) {
+		t.Fatalf("error = %v, want ErrTaskMRRepositoryMismatch", err)
+	}
+}
+
+func TestAssociateExistingMRByURLRejectsRemoteURLOnDifferentHost(t *testing.T) {
+	const host = "https://gitlab.savoirfairelinux.com"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryRemoteURL(t, store, "repo-1", "https://gitlab.other.test/clients/socodevi/laravel/co-up.git")
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	_, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	)
+	if !errors.Is(err, ErrTaskMRRepositoryMismatch) {
+		t.Fatalf("error = %v, want ErrTaskMRRepositoryMismatch", err)
+	}
+}
+
+func TestAssociateExistingMRByURLRejectsRepositoryWithNullIdentityColumns(t *testing.T) {
+	// The production schema declares provider/provider_host/provider_owner/
+	// provider_name/remote_url as nullable columns, so rows can legitimately
+	// have SQL NULL there. ValidateTaskMRRepositoryIdentity must coalesce
+	// those to empty strings and fail closed with the normal mismatch error
+	// instead of an internal scan error.
+	const host = "https://gitlab.savoirfairelinux.com"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentityColumnsNull(t, store, "repo-1")
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	_, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	)
+	if !errors.Is(err, ErrTaskMRRepositoryMismatch) {
+		t.Fatalf("error = %v, want ErrTaskMRRepositoryMismatch", err)
 	}
 }
 

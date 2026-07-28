@@ -150,8 +150,20 @@ func (s *AgentUpdateJobStore) run(
 	err = s.updater.RunUpdate(ctx, spec.CacheUpdateCommand(), flusher.append)
 	flusher.flush()
 	if err != nil {
-		s.finishFailed(job, ctx, fmt.Errorf("update runtime: %w", err), ref)
-		return
+		flusher.append("managed runtime cache appears stale; repairing execution cache\n")
+		flusher.flush()
+		if repairErr := s.updater.InvalidateExecutionCache(ctx, spec.Package); repairErr != nil {
+			s.finishFailed(job, ctx, fmt.Errorf("repair runtime execution cache: %w", repairErr), ref)
+			return
+		}
+		flusher.append("retrying managed runtime update\n")
+		flusher.flush()
+		err = s.updater.RunUpdate(ctx, spec.CacheUpdateCommand(), flusher.append)
+		flusher.flush()
+		if err != nil {
+			s.finishFailed(job, ctx, fmt.Errorf("update runtime after cache repair: %w", err), ref)
+			return
+		}
 	}
 
 	s.setStatus(job, dto.AgentUpdateJobStatusRefreshing)

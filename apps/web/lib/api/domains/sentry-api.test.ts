@@ -4,7 +4,7 @@ vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "http://api.test" }),
 }));
 
-import { copySentryInstances } from "./sentry-api";
+import { copySentryInstances, searchSentryIssues } from "./sentry-api";
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -35,5 +35,40 @@ describe("copySentryInstances", () => {
     expect(String(url)).toBe("http://api.test/api/v1/sentry/config/copy?workspace_id=ws-source");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({ targetWorkspaceId: "ws-target" });
+  });
+});
+
+describe("searchSentryIssues", () => {
+  it("serializes multiple project slugs as repeated projectSlug query params", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ issues: [], isLast: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await searchSentryIssues("ws-1", "instance-a", {
+      orgSlug: "acme",
+      projectSlugs: ["frontend", "backend"],
+    });
+
+    const [url] = fetchSpy.mock.calls.at(-1) ?? [];
+    const params = new URL(String(url)).searchParams;
+    expect(params.getAll("projectSlug")).toEqual(["frontend", "backend"]);
+  });
+
+  it("omits projectSlug entirely when no project is selected", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ issues: [], isLast: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await searchSentryIssues("ws-1", "instance-a", { orgSlug: "acme" });
+
+    const [url] = fetchSpy.mock.calls.at(-1) ?? [];
+    const params = new URL(String(url)).searchParams;
+    expect(params.getAll("projectSlug")).toEqual([]);
   });
 });

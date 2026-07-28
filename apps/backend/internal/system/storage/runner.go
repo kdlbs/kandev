@@ -32,6 +32,7 @@ type RunnerConfig struct {
 	Store     RunStore
 	Providers []CleanupProvider
 	Overview  OverviewInvalidator
+	Force     bool
 	NewID     func() string
 	Now       func() time.Time
 }
@@ -41,6 +42,7 @@ type Runner struct {
 	store     RunStore
 	providers []CleanupProvider
 	overview  OverviewInvalidator
+	force     bool
 	newID     func() string
 	now       func() time.Time
 }
@@ -48,10 +50,11 @@ type Runner struct {
 const terminalTransitionTimeout = 5 * time.Second
 
 type BusyError struct {
-	Resources []activity.Kind
+	Resources      []activity.BusyResource `json:"busy_resources"`
+	ForceAvailable bool                    `json:"force_available"`
 }
 
-func (e *BusyError) Error() string { return "storage maintenance is busy" }
+func (e *BusyError) Error() string { return "storage cleanup is blocked by active Kandev work" }
 
 func NewRunner(config RunnerConfig) *Runner {
 	newID := config.NewID
@@ -64,7 +67,7 @@ func NewRunner(config RunnerConfig) *Runner {
 	}
 	return &Runner{
 		activity: config.Activity, store: config.Store, providers: config.Providers,
-		overview: config.Overview, newID: newID, now: now,
+		overview: config.Overview, force: config.Force, newID: newID, now: now,
 	}
 }
 
@@ -78,7 +81,7 @@ func (r *Runner) Run(
 		return MaintenanceRun{}, err
 	}
 	quietPeriod := quietPeriodForTrigger(trigger, settings)
-	lease, busy, err := r.activity.TryAcquireMaintenance(ctx, quietPeriod)
+	lease, busy, err := r.acquireMaintenance(ctx, quietPeriod, trigger)
 	if errors.Is(err, activity.ErrBusy) {
 		result := marshalRunResult(map[string]any{"busy_resources": busy})
 		run, transitionErr := r.transitionRun(ctx, run.ID, RunStateSkippedBusy, result, "host resources are busy")
@@ -86,7 +89,10 @@ func (r *Runner) Run(
 			return MaintenanceRun{}, transitionErr
 		}
 		if trigger == RunTriggerManual {
-			return run, &BusyError{Resources: busy}
+			return run, &BusyError{
+				Resources:      activity.BusyResourcesForKinds(busy),
+				ForceAvailable: forceAvailable(busy),
+			}
 		}
 		return run, nil
 	}
@@ -107,6 +113,26 @@ func (r *Runner) Run(
 	}
 	result, runErr := r.runProviders(lease.Context())
 	return r.finishRun(ctx, run.ID, lease.Context(), result, runErr)
+}
+
+func (r *Runner) acquireMaintenance(
+	ctx context.Context,
+	quietPeriod time.Duration,
+	trigger RunTrigger,
+) (*activity.MaintenanceLease, []activity.Kind, error) {
+	if r.force && trigger == RunTriggerManual {
+		return r.activity.TryAcquireMaintenanceForce(ctx)
+	}
+	return r.activity.TryAcquireMaintenance(ctx, quietPeriod)
+}
+
+func forceAvailable(kinds []activity.Kind) bool {
+	for _, kind := range kinds {
+		if kind == activity.KindMaintenanceRunning {
+			return false
+		}
+	}
+	return len(kinds) > 0
 }
 
 func quietPeriodForTrigger(trigger RunTrigger, settings StorageMaintenanceSettings) time.Duration {

@@ -259,6 +259,17 @@ export type StorageRunState =
   | "cancelled"
   | "skipped_busy";
 
+export interface StorageBusyResource {
+  kind: string;
+  label: string;
+}
+
+export interface StorageBusyResponse {
+  error: string;
+  busy_resources: StorageBusyResource[];
+  force_available: boolean;
+}
+
 export interface StorageMaintenanceRun {
   id: string;
   trigger: "scheduled" | "manual" | "analysis";

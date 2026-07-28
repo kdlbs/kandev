@@ -219,7 +219,7 @@ export async function listSentryProjects(
 
 function appendFilter(search: URLSearchParams, filter: SentrySearchFilter): void {
   search.set("orgSlug", filter.orgSlug);
-  if (filter.projectSlug) search.set("projectSlug", filter.projectSlug);
+  for (const projectSlug of filter.projectSlugs ?? []) search.append("projectSlug", projectSlug);
   if (filter.environment) search.set("environment", filter.environment);
   if (filter.query) search.set("query", filter.query);
   if (filter.statsPeriod) search.set("statsPeriod", filter.statsPeriod);

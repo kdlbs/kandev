@@ -71,6 +71,119 @@ func setupLiveResumeTestFixture(repo *mockRepository) {
 	}
 }
 
+func TestResumeSession_PersistsStartingBeforeLaunch(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			if !req.StartAgent {
+				return nil, errors.New("resume launch did not retain startup ownership")
+			}
+			current, err := repo.GetTaskSession(ctx, "sess-1")
+			if err != nil {
+				return nil, err
+			}
+			if current.State != models.TaskSessionStateStarting {
+				return nil, fmt.Errorf("session state at launch = %s, want %s", current.State, models.TaskSessionStateStarting)
+			}
+			return &LaunchAgentResponse{AgentExecutionID: "exec-new", Status: v1.AgentStatusStarting}, nil
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+		t.Fatalf("ResumeSession: %v", err)
+	}
+}
+
+func TestResumeSession_RollsBackStartingWhenLaunchFails(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+
+	launchErr := errors.New("credential broker rejected launch")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(ctx context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			current, err := repo.GetTaskSession(ctx, "sess-1")
+			if err != nil {
+				return nil, err
+			}
+			if current.State != models.TaskSessionStateStarting {
+				return nil, fmt.Errorf("session state at launch = %s, want %s", current.State, models.TaskSessionStateStarting)
+			}
+			return nil, launchErr
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeSession error = %v, want %v", err, launchErr)
+	}
+	current := repo.sessions["sess-1"]
+	if current.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state after failed launch = %s, want %s", current.State, models.TaskSessionStateFailed)
+	}
+	if !strings.Contains(current.ErrorMessage, launchErr.Error()) {
+		t.Fatalf("session error = %q, want launch error", current.ErrorMessage)
+	}
+}
+
+func TestRollbackResumeStateAfterLaunchFailure_SkipsTransitionAfterConcurrentStateChange(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateCancelled
+
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	exec.SetOnSessionStateTransition(func(
+		context.Context,
+		string,
+		string,
+		models.TaskSessionState,
+		string,
+		func(),
+	) (bool, models.TaskSessionState, error) {
+		t.Fatal("state transition must not run after a concurrent state change")
+		return false, models.TaskSessionStateCancelled, nil
+	})
+
+	exec.rollbackResumeStateAfterLaunchFailure(
+		context.Background(),
+		"task-1",
+		"sess-1",
+		models.TaskSessionStateFailed,
+		errors.New("launch failed"),
+	)
+	if got := repo.sessions["sess-1"].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("session state = %s, want %s", got, models.TaskSessionStateCancelled)
+	}
+}
+
+func TestResumeSession_RollsBackStartingOnLiveAlreadyRunningRace(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	var runningChecks int
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, fmt.Errorf("%w: session %q", lifecycle.ErrAgentAlreadyRunning, req.SessionID)
+		},
+		isAgentRunningForSessionFunc: func(_ context.Context, _ string) bool {
+			runningChecks++
+			return runningChecks > 1
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if !errors.Is(err, ErrExecutionAlreadyRunning) {
+		t.Fatalf("ResumeSession error = %v, want ErrExecutionAlreadyRunning", err)
+	}
+	if repo.sessions["sess-1"].State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state after live race = %s, want %s", repo.sessions["sess-1"].State, models.TaskSessionStateWaitingForInput)
+	}
+}
+
 func TestResumeSession_PassesResolvedTaskSessionMCPModeToAgentManager(t *testing.T) {
 	tests := []struct {
 		name         string
