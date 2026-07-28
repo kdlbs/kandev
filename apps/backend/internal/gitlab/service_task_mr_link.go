@@ -113,8 +113,10 @@ func splitRemoteURLIdentity(remoteURL string) (scheme, hostname, path string, ok
 	hostname = remoteHost(parsed)
 	if strings.EqualFold(parsed.Scheme, sshScheme) {
 		// SSH transport ports (e.g. ssh://git@host:2222/...) are unrelated to
-		// the GitLab web origin's port, so compare hostname only.
-		hostname = parsed.Hostname()
+		// the GitLab web origin's port, so compare hostname only. Bracket
+		// IPv6 literals so the synthesized origin stays a valid URL (an
+		// unbracketed "https://::1" is not).
+		hostname = bracketedHostname(parsed.Hostname())
 	}
 	return parsed.Scheme, hostname, parsed.Path, true
 }
@@ -142,10 +144,16 @@ func remoteHost(parsed *url.URL) string {
 	if port := parsed.Port(); port != "" {
 		return net.JoinHostPort(hostname, port)
 	}
-	if strings.Contains(hostname, ":") {
-		return "[" + hostname + "]"
+	return bracketedHostname(hostname)
+}
+
+// bracketedHostname wraps an IPv6 literal in brackets (as required for a
+// valid URL host) and returns other hostnames unchanged.
+func bracketedHostname(hostname string) string {
+	if hostname == "" || !strings.Contains(hostname, ":") {
+		return hostname
 	}
-	return hostname
+	return "[" + hostname + "]"
 }
 
 // AssociateExistingMRByURL validates a workspace-owned task/repository pair,

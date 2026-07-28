@@ -242,6 +242,35 @@ func TestAssociateExistingMRByURLAcceptsScpStyleRemoteWithBracketedIPv6Host(t *t
 	}
 }
 
+func TestAssociateExistingMRByURLAcceptsSSHURLRemoteWithIPv6Host(t *testing.T) {
+	const host = "https://[::1]"
+	tests := []struct {
+		name      string
+		remoteURL string
+	}{
+		{name: "no port", remoteURL: "ssh://git@[::1]/clients/socodevi/laravel/co-up.git"},
+		{name: "explicit non-web port", remoteURL: "ssh://git@[::1]:2222/clients/socodevi/laravel/co-up.git"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, store, client := newTaskMRLinkService(t, host)
+			seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+			setTaskMRRepositoryRemoteURL(t, store, "repo-1", tt.remoteURL)
+			client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+				IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+				State: "opened", CreatedAt: time.Now().UTC(),
+			})
+
+			if _, err := svc.AssociateExistingMRByURL(
+				context.Background(), "ws-1", "task-1", "repo-1",
+				host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+			); err != nil {
+				t.Fatalf("AssociateExistingMRByURL: %v", err)
+			}
+		})
+	}
+}
+
 func TestAssociateExistingMRByURLAcceptsRepositoryIdentityWithSameHostDifferentScheme(t *testing.T) {
 	const host = "http://gitlab.internal.test:8080"
 	svc, store, client := newTaskMRLinkService(t, host)
