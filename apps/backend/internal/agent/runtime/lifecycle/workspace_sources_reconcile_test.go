@@ -148,11 +148,29 @@ func TestReconcileWorkspaceRepositories_RejectsFileAsRepositoryPath(t *testing.T
 	}
 }
 
-// "." and ".." survive a filepath.Base round-trip, so they need rejecting here
-// rather than deeper in the owned-link helpers.
+func TestIsWorkspaceEntryName(t *testing.T) {
+	accepted := []string{"api", "libs", "my-service", "repo.git"}
+	rejected := []string{"", ".", "..", "/", `\`, "C:", "a/b", `a\b`, string(filepath.Separator)}
+
+	for _, name := range accepted {
+		if !isWorkspaceEntryName(name) {
+			t.Errorf("isWorkspaceEntryName(%q) = false, want true", name)
+		}
+	}
+	for _, name := range rejected {
+		if isWorkspaceEntryName(name) {
+			t.Errorf("isWorkspaceEntryName(%q) = true, want false", name)
+		}
+	}
+}
+
+// ".", "..", and a bare filesystem or volume root all survive a filepath.Base
+// round-trip, so they need rejecting here rather than deeper in the owned-link
+// helpers. Joining any of them resolves back to the root itself instead of to
+// an entry below it.
 func TestReconcileWorkspaceRepositories_RejectsTraversalRepoName(t *testing.T) {
 	root, source := t.TempDir(), t.TempDir()
-	for _, name := range []string{".", ".."} {
+	for _, name := range []string{".", "..", "/", `\`, "C:", string(filepath.Separator)} {
 		if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: name, RepositoryPath: source}}); err == nil {
 			t.Fatalf("RepoName %q was accepted", name)
 		}

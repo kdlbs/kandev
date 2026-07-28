@@ -76,7 +76,16 @@ func reconcileWorkspaceRepositories(root string, repositories []WorkspaceReposit
 // they are rejected explicitly here rather than deeper in the worktree helpers,
 // which would surface them as a confusing "owned link entry already exists".
 func isWorkspaceEntryName(name string) bool {
-	return name != "" && filepath.Base(name) == name && name != "." && name != ".."
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	if filepath.Base(name) != name {
+		return false
+	}
+	// A bare root survives the Base round-trip too — filepath.Base("/") is "/"
+	// on Unix and filepath.Base(`\`) is `\` on Windows — and joining it resolves
+	// back to the root itself rather than to an entry below it.
+	return name != "/" && name != string(filepath.Separator) && filepath.VolumeName(name) == ""
 }
 
 // sameDirectory reports whether two paths name the same directory on disk.
