@@ -6,6 +6,9 @@ import (
 	"os"
 	"path/filepath"
 
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -42,7 +45,7 @@ func reconcileWorkspaceSources(_ context.Context, root string, folders []Workspa
 // by index, because a host-materialized multi-repo local task roots the
 // workspace at ~/.kandev/tasks/<taskDir> — there repositories[0] is a real
 // sibling and must keep its link.
-func reconcileWorkspaceRepositories(root string, repositories []WorkspaceRepositorySpec) error {
+func reconcileWorkspaceRepositories(root string, repositories []WorkspaceRepositorySpec, log *logger.Logger) error {
 	if len(repositories) == 0 {
 		return nil
 	}
@@ -54,10 +57,7 @@ func reconcileWorkspaceRepositories(root string, repositories []WorkspaceReposit
 			return fmt.Errorf("invalid durable workspace repository")
 		}
 		if sameDirectory(root, repository.RepositoryPath) {
-			// Best effort: a self-link planted by an earlier release must not
-			// block the launch when it cannot be removed (open handle, an agent
-			// shell whose cwd is inside it). The next reconcile retries.
-			_, _ = worktree.RemoveSelfReferentialDirectoryLink(root, repository.RepoName)
+			warnSelfReferentialEntry(root, repository.RepoName, log)
 			continue
 		}
 		info, err := os.Stat(repository.RepositoryPath)
@@ -69,6 +69,31 @@ func reconcileWorkspaceRepositories(root string, repositories []WorkspaceReposit
 		}
 	}
 	return nil
+}
+
+// warnSelfReferentialEntry surfaces a link an earlier release planted inside
+// the user's own repository, and deliberately leaves it in place.
+//
+// Kandev writes no ownership marker into user-owned sources, so such an entry
+// cannot be shown to be ours: a user, or the repository itself, may keep a link
+// of the same name and target on purpose, and deleting it would destroy content
+// that is not ours. A stat-then-remove sequence could not close the window
+// between the check and the unlink either — the entry can be swapped for an
+// unrelated empty directory in between, which os.Remove would happily delete.
+// Reporting it costs the user one command and risks nothing.
+func warnSelfReferentialEntry(root, name string, log *logger.Logger) {
+	if log == nil {
+		return
+	}
+	selfLink, err := worktree.IsSelfReferentialDirectoryLink(root, name)
+	if err != nil || !selfLink {
+		return
+	}
+	entry := filepath.Join(root, name)
+	log.Warn("workspace entry links to the workspace root; remove it to stop tools recursing into it",
+		zap.String("entry", entry),
+		zap.String("remove_on_windows", fmt.Sprintf("rmdir %q", entry)),
+		zap.String("remove_on_unix", fmt.Sprintf("rm %q", entry)))
 }
 
 // isWorkspaceEntryName reports whether name is usable as a single entry below

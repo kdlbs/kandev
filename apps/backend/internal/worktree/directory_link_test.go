@@ -68,43 +68,39 @@ func seedOwnedDirectoryLink(t *testing.T, root, name, target string) {
 	}
 }
 
-func TestRemoveSelfReferentialDirectoryLinkRemovesOnlySelfLink(t *testing.T) {
+// The predicate only reports. Every case below additionally asserts that the
+// inspected entry is still on disk afterwards, since it may be a link the user
+// or the repository keeps on purpose.
+func TestIsSelfReferentialDirectoryLinkDetectsSelfLink(t *testing.T) {
 	root := t.TempDir()
-	keep := filepath.Join(root, "keep.txt")
-	if err := os.WriteFile(keep, []byte("one"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 	seedOwnedDirectoryLink(t, root, "self", root)
 
-	removed, err := RemoveSelfReferentialDirectoryLink(root, "self")
-	if err != nil || !removed {
-		t.Fatalf("RemoveSelfReferentialDirectoryLink = %v, %v; want true, nil", removed, err)
+	selfLink, err := IsSelfReferentialDirectoryLink(root, "self")
+	if err != nil || !selfLink {
+		t.Fatalf("IsSelfReferentialDirectoryLink = %v, %v; want true, nil", selfLink, err)
 	}
-	if _, err := os.Lstat(filepath.Join(root, "self")); !os.IsNotExist(err) {
-		t.Fatalf("self link still present: %v", err)
-	}
-	if got, err := os.ReadFile(keep); err != nil || string(got) != "one" {
-		t.Fatalf("target content = %q, %v; removal must not touch the target", got, err)
+	if _, err := os.Lstat(filepath.Join(root, "self")); err != nil {
+		t.Fatalf("entry was removed: %v", err)
 	}
 }
 
-func TestRemoveSelfReferentialDirectoryLinkKeepsForeignLink(t *testing.T) {
+func TestIsSelfReferentialDirectoryLinkIgnoresForeignLink(t *testing.T) {
 	root, target := t.TempDir(), t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "live.txt"), []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	seedOwnedDirectoryLink(t, root, "source", target)
 
-	removed, err := RemoveSelfReferentialDirectoryLink(root, "source")
-	if err != nil || removed {
-		t.Fatalf("RemoveSelfReferentialDirectoryLink = %v, %v; want false, nil", removed, err)
+	selfLink, err := IsSelfReferentialDirectoryLink(root, "source")
+	if err != nil || selfLink {
+		t.Fatalf("IsSelfReferentialDirectoryLink = %v, %v; want false, nil", selfLink, err)
 	}
 	if got, err := os.ReadFile(filepath.Join(root, "source", "live.txt")); err != nil || string(got) != "one" {
 		t.Fatalf("read through kept link = %q, %v", got, err)
 	}
 }
 
-func TestRemoveSelfReferentialDirectoryLinkKeepsRealDirectory(t *testing.T) {
+func TestIsSelfReferentialDirectoryLinkIgnoresRealDirectory(t *testing.T) {
 	root := t.TempDir()
 	real := filepath.Join(root, "api")
 	if err := os.Mkdir(real, 0o755); err != nil {
@@ -114,19 +110,19 @@ func TestRemoveSelfReferentialDirectoryLinkKeepsRealDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	removed, err := RemoveSelfReferentialDirectoryLink(root, "api")
-	if err != nil || removed {
-		t.Fatalf("RemoveSelfReferentialDirectoryLink = %v, %v; want false, nil", removed, err)
+	selfLink, err := IsSelfReferentialDirectoryLink(root, "api")
+	if err != nil || selfLink {
+		t.Fatalf("IsSelfReferentialDirectoryLink = %v, %v; want false, nil", selfLink, err)
 	}
 	if got, err := os.ReadFile(filepath.Join(real, "live.txt")); err != nil || string(got) != "one" {
-		t.Fatalf("real directory content = %q, %v; a real directory must never be removed", got, err)
+		t.Fatalf("real directory content = %q, %v", got, err)
 	}
 }
 
-func TestRemoveSelfReferentialDirectoryLinkIgnoresMissingEntry(t *testing.T) {
-	removed, err := RemoveSelfReferentialDirectoryLink(t.TempDir(), "absent")
-	if err != nil || removed {
-		t.Fatalf("RemoveSelfReferentialDirectoryLink = %v, %v; want false, nil", removed, err)
+func TestIsSelfReferentialDirectoryLinkIgnoresMissingEntry(t *testing.T) {
+	selfLink, err := IsSelfReferentialDirectoryLink(t.TempDir(), "absent")
+	if err != nil || selfLink {
+		t.Fatalf("IsSelfReferentialDirectoryLink = %v, %v; want false, nil", selfLink, err)
 	}
 }
 

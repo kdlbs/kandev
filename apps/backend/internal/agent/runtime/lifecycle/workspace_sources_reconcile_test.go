@@ -20,7 +20,7 @@ func TestReconcileWorkspaceSources_RejectsMissingFolderTarget(t *testing.T) {
 func TestReconcileWorkspaceRepositories_RecreatesMissingOwnedLink(t *testing.T) {
 	root, source := t.TempDir(), t.TempDir()
 	writeMarker(t, source)
-	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: source}}); err != nil {
+	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: source}}, nil); err != nil {
 		t.Fatalf("reconcileWorkspaceRepositories: %v", err)
 	}
 	// Read through the link instead of comparing os.Readlink output: Go
@@ -32,7 +32,7 @@ func TestReconcileWorkspaceRepositories_RecreatesMissingOwnedLink(t *testing.T) 
 	if err := os.Remove(filepath.Join(root, "api")); err != nil {
 		t.Fatal(err)
 	}
-	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: source}}); err != nil {
+	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: source}}, nil); err != nil {
 		t.Fatalf("reconcile after reset: %v", err)
 	}
 }
@@ -55,7 +55,7 @@ func TestReconcileWorkspaceRepositories_SkipsRepositoryThatIsWorkspaceRoot(t *te
 	root := t.TempDir()
 	marker := writeMarker(t, root)
 
-	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: root}}); err != nil {
+	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: root}}, nil); err != nil {
 		t.Fatalf("reconcileWorkspaceRepositories: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(root, "api")); !os.IsNotExist(err) {
@@ -66,23 +66,24 @@ func TestReconcileWorkspaceRepositories_SkipsRepositoryThatIsWorkspaceRoot(t *te
 	}
 }
 
-// EnsureOwnedDirectoryLink accepts a matching existing link forever, so a
-// self-link planted by an earlier release is only cleared by the guard.
-func TestReconcileWorkspaceRepositories_RemovesPreExistingSelfLink(t *testing.T) {
+// A self-link planted by an earlier release is reported, never deleted: it
+// cannot be shown to be Kandev-owned, so removing it could destroy a link the
+// user or the repository keeps on purpose. Reconciliation must still succeed.
+func TestReconcileWorkspaceRepositories_PreservesPreExistingSelfLink(t *testing.T) {
 	root := t.TempDir()
 	marker := writeMarker(t, root)
 	if _, err := worktree.CreateOwnedDirectoryLink(root, "api", root); err != nil {
 		t.Fatalf("seed self link: %v", err)
 	}
 
-	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: root}}); err != nil {
+	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: root}}, nil); err != nil {
 		t.Fatalf("reconcileWorkspaceRepositories: %v", err)
 	}
-	if _, err := os.Lstat(filepath.Join(root, "api")); !os.IsNotExist(err) {
-		t.Fatalf("pre-existing self link survived: %v", err)
+	if _, err := os.Lstat(filepath.Join(root, "api")); err != nil {
+		t.Fatalf("pre-existing self link was removed: %v", err)
 	}
 	if got, err := os.ReadFile(marker); err != nil || string(got) != "one" {
-		t.Fatalf("workspace root content = %q, %v; removal must not touch the target", got, err)
+		t.Fatalf("workspace root content = %q, %v", got, err)
 	}
 }
 
@@ -94,7 +95,7 @@ func TestReconcileWorkspaceRepositories_LinksSiblingWhenPrimaryIsWorkspaceRoot(t
 	err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{
 		{RepoName: "api", RepositoryPath: root},
 		{RepoName: "libs", RepositoryPath: sibling},
-	})
+	}, nil)
 	if err != nil {
 		t.Fatalf("reconcileWorkspaceRepositories: %v", err)
 	}
@@ -122,7 +123,7 @@ func TestReconcileWorkspaceRepositories_LocalLaunchRequestPlantsNoSelfLink(t *te
 
 	// launchResolveWorkspacePath returns req.RepositoryPath when WorkspacePath
 	// is empty and the executor is not worktree-backed.
-	if err := reconcileWorkspaceRepositories(repo, workspaceRepositorySpecsFromLaunch(req)); err != nil {
+	if err := reconcileWorkspaceRepositories(repo, workspaceRepositorySpecsFromLaunch(req), nil); err != nil {
 		t.Fatalf("reconcileWorkspaceRepositories: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(repo, req.RepoName)); !os.IsNotExist(err) {
@@ -143,7 +144,7 @@ func TestReconcileWorkspaceRepositories_RejectsFileAsRepositoryPath(t *testing.T
 		t.Fatal(err)
 	}
 
-	err := reconcileWorkspaceRepositories(file, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: file}})
+	err := reconcileWorkspaceRepositories(file, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: file}}, nil)
 	if err == nil {
 		t.Fatal("a regular file was accepted as both workspace root and repository")
 	}
@@ -182,7 +183,7 @@ func TestIsWorkspaceEntryName(t *testing.T) {
 func TestReconcileWorkspaceRepositories_RejectsTraversalRepoName(t *testing.T) {
 	root, source := t.TempDir(), t.TempDir()
 	for _, name := range []string{".", "..", "/", string(filepath.Separator)} {
-		if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: name, RepositoryPath: source}}); err == nil {
+		if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: name, RepositoryPath: source}}, nil); err == nil {
 			t.Fatalf("RepoName %q was accepted", name)
 		}
 	}
@@ -196,7 +197,7 @@ func TestReconcileWorkspaceRepositories_LinksPrimaryWhenRootIsTaskDirectory(t *t
 	primary := t.TempDir()
 	writeMarker(t, primary)
 
-	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: primary}}); err != nil {
+	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: primary}}, nil); err != nil {
 		t.Fatalf("reconcileWorkspaceRepositories: %v", err)
 	}
 	if got, err := os.ReadFile(filepath.Join(root, "api", "live.txt")); err != nil || string(got) != "one" {

@@ -472,7 +472,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		return nil, err
 	}
 	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
-		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories); err != nil {
+		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger); err != nil {
 			return nil, err
 		}
 	}

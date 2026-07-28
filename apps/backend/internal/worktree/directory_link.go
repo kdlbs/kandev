@@ -116,18 +116,18 @@ func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
 	return created, err == nil, err
 }
 
-// RemoveSelfReferentialDirectoryLink removes root/name when — and only when —
-// that entry is a platform directory link whose canonical target is root
-// itself. Releases before the launch-path guard planted such a link inside the
-// user's own repository for local-executor tasks, and EnsureOwnedDirectoryLink
-// treats it as a valid existing link forever, so it never self-corrects.
+// IsSelfReferentialDirectoryLink reports whether root/name is a platform
+// directory link whose target is root itself — the shape an earlier release
+// planted inside a user's own repository for local-executor tasks, and which
+// EnsureOwnedDirectoryLink then accepts as valid forever.
 //
-// Removal is os.Remove, never os.RemoveAll. On Windows RemoveDirectory unlinks
-// the junction and leaves the target untouched; on Unix unlink removes the
-// symlink only. If the entry has meanwhile become a real directory with
-// content, os.Remove fails with ENOTEMPTY rather than deleting the user's
-// repository. Returns true only when a self-referential link was removed.
-func RemoveSelfReferentialDirectoryLink(root, name string) (bool, error) {
+// It deliberately only reports. Such an entry cannot be shown to be
+// Kandev-owned: Kandev writes no ownership marker into user-owned sources, and
+// a user (or the repository itself) may keep a link of the same name and target
+// on purpose, so removing it could destroy content that is not ours. Nor could
+// a stat-then-remove sequence close the window between the check and the
+// unlink. Callers surface it and leave removal to the user.
+func IsSelfReferentialDirectoryLink(root, name string) (bool, error) {
 	if !isOwnedDirectoryLinkPath(root, name) {
 		return false, fmt.Errorf("invalid owned link path")
 	}
@@ -145,22 +145,15 @@ func RemoveSelfReferentialDirectoryLink(root, name string) (bool, error) {
 	if !isPlatformDirectoryLink(info, link) {
 		return false, nil
 	}
-	selfReferential, err := isSelfReferentialDirectoryLink(root, link)
-	if err != nil || !selfReferential {
-		return false, err
-	}
-	if err := os.Remove(link); err != nil {
-		return false, fmt.Errorf("remove self-referential owned link: %w", err)
-	}
-	return true, nil
+	return linkTargetsRoot(root, link)
 }
 
-// isSelfReferentialDirectoryLink compares filesystem identity, not resolved
-// path text. filepath.EvalSymlinks does not traverse a Windows junction — it
-// returns the link's own normalized path — so a path comparison never matches.
-// os.Stat follows a junction and a Unix symlink alike, and os.SameFile then
-// compares volume and file index, which also absorbs 8.3 short paths and case.
-func isSelfReferentialDirectoryLink(root, link string) (bool, error) {
+// linkTargetsRoot compares filesystem identity, not resolved path text.
+// filepath.EvalSymlinks does not traverse a Windows junction — it returns the
+// link's own normalized path — so a path comparison never matches. os.Stat
+// follows a junction and a Unix symlink alike, and os.SameFile then compares
+// volume and file index, which also absorbs 8.3 short paths and case.
+func linkTargetsRoot(root, link string) (bool, error) {
 	linkInfo, err := os.Stat(link)
 	if err != nil {
 		return false, fmt.Errorf("resolve owned link: %w", err)
