@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"context"
 	"fmt"
 	"os"
 
@@ -30,11 +31,14 @@ func Run(args []string, build BuildInfo) int {
 		fmt.Print(cli.Help())
 		return 0
 	}
+	// Root context for the launcher process; bounds the backend health probe so
+	// an unresponsive backend cannot hang the launcher indefinitely.
+	ctx := context.Background()
 	switch opts.Command {
 	case CommandStart:
-		return runStart(opts)
+		return runStart(ctx, opts)
 	case CommandRun:
-		return runInstalled(opts)
+		return runInstalled(ctx, opts)
 	}
 	fmt.Fprintf(os.Stderr, "[kandev] native launcher command %q is not implemented yet\n", opts.Command)
 	return 1

@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,7 +20,7 @@ var (
 	}
 )
 
-func runStart(opts Options) int {
+func runStart(ctx context.Context, opts Options) int {
 	backendPort, err := resolvePorts(opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -42,7 +43,7 @@ func runStart(opts Options) int {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
-	return launchManaged(managedAppConfig{
+	return launchManaged(ctx, managedAppConfig{
 		Header:     "start mode: using local build",
 		Mode:       "start",
 		Backend:    self,
@@ -77,7 +78,7 @@ func resolveLogLevel(opts Options) string {
 	}
 }
 
-func runManagedApp(cfg managedAppConfig) int {
+func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	ignoreBrokenPipeSignal()
 	logStartup(cfg.Header, cfg.Ports, resolveDatabasePath(), cfg.LogLevel)
 	setLauncherShutdownDebug(cfg.Opts.Debug || os.Getenv("KANDEV_SHUTDOWN_DEBUG") == "1")
@@ -94,7 +95,7 @@ func runManagedApp(cfg managedAppConfig) int {
 	}
 	shutdownDebugf("runManagedApp backend launched")
 	fmt.Println("[kandev] starting backend...")
-	if err := waitForHealthFn(cfg.Ports.BackendURL, backend, healthTimeout(healthTimeoutReleaseMS), dumpLogs); err != nil {
+	if err := waitForHealthFn(ctx, cfg.Ports.BackendURL, backend, healthTimeout(healthTimeoutReleaseMS), dumpLogs); err != nil {
 		supervisor.shutdown("backend health failure")
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1

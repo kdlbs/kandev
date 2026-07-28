@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"context"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -21,13 +22,13 @@ func TestRunStartUsesSelfExecutableAndBackendCWD(t *testing.T) {
 	}
 
 	var got managedAppConfig
-	launchManaged = func(cfg managedAppConfig) int {
+	launchManaged = func(_ context.Context, cfg managedAppConfig) int {
 		got = cfg
 		return 42
 	}
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 
-	code := runStart(Options{Command: CommandStart, BackendPort: 48123, Headless: true})
+	code := runStart(context.Background(), Options{Command: CommandStart, BackendPort: 48123, Headless: true})
 	if code != 42 {
 		t.Fatalf("runStart() = %d, want 42", code)
 	}
@@ -83,13 +84,13 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	attachSignalsFn = func(_ *processSupervisor) {
 		events = append(events, "attach-signals")
 	}
-	waitForHealthFn = func(_ string, _ childState, _ time.Duration, _ func()) error {
+	waitForHealthFn = func(_ context.Context, _ string, _ childState, _ time.Duration, _ func()) error {
 		events = append(events, "wait-health")
 		return nil
 	}
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 
-	code := runManagedApp(managedAppConfig{
+	code := runManagedApp(context.Background(), managedAppConfig{
 		Header:     "test",
 		Mode:       "start",
 		Backend:    "kandev",

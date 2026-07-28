@@ -1,12 +1,13 @@
 package launcher
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
-func runInstalled(opts Options) int {
+func runInstalled(ctx context.Context, opts Options) int {
 	backendPort, err := resolvePorts(opts)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
@@ -32,7 +33,7 @@ func runInstalled(opts Options) int {
 	if releaseTag == "" {
 		releaseTag = "(" + bundle.Source + ")"
 	}
-	return launchManaged(managedAppConfig{
+	return launchManaged(ctx, managedAppConfig{
 		Header:     "release: " + releaseTag,
 		Mode:       "run",
 		Backend:    bundle.Launcher,
