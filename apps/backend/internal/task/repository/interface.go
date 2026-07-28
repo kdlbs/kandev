@@ -7,6 +7,7 @@ import (
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -15,6 +16,7 @@ var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
+var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {

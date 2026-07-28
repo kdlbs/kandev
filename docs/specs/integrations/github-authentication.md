@@ -1,7 +1,7 @@
 ---
 status: draft
 created: 2026-07-19
-amended: 2026-07-21
+amended: 2026-07-28
 owner: Kandev
 ---
 
@@ -43,14 +43,33 @@ automation under different GitHub Apps without operating separate Kandev deploym
 - User-triggered mutations prefer the workspace's verified personal connection, then a human
   PAT/CLI automation connection, then the App installation. The UI always identifies the effective
   actor and never labels an App mutation as human-attributed.
-- Background watches, cleanup, repository discovery, workflow sync, managed agent git transport,
-  and agent-initiated GitHub operations always use the workspace automation connection. Personal
-  credentials are never exposed to agents or executors.
-- Managed executors receive task/repository/generation-bound broker leases. App installation tokens
-  are minted for the requested repository and cached only in memory. PAT/CLI tokens retain their
-  provider-granted scope once delivered to a trusted agent subprocess.
+- Background watches, cleanup, repository discovery, and workflow sync always use the workspace
+  automation connection. Personal credentials are never exposed to agents or executors.
+- Task Git credential routing is a separate workspace policy. **Managed workspace credentials**
+  gives attached GitHub repositories task/repository/generation-bound broker leases from the
+  workspace automation connection. **Inherit executor Git credentials** injects no GitHub broker
+  helper or `gh` shim: Local and Worktree tasks use host-visible Git/SSH credentials, while remote
+  tasks use credentials configured in that executor.
+- For Kandev-managed GitHub checkouts used by Local and Worktree tasks, the selected task policy
+  also controls the persisted `origin` transport. Managed routing uses canonical GitHub HTTPS.
+  Executor inheritance uses the host's detected `gh` clone protocol, including SSH, and reconciles
+  an existing managed checkout when the policy changes. This makes Git conditional includes based
+  on `remote.*.url` observe the same transport the task uses. Kandev never rewrites the remote of a
+  repository registered as a user-managed local checkout.
+- Under managed routing, App installation tokens are minted for the requested repository and cached
+  only in memory. PAT/CLI tokens retain their provider-granted scope once delivered to a trusted
+  agent subprocess. GitHub HTTPS and the broker-aware `gh` shim fail closed rather than consulting
+  another ambient helper after a managed-helper failure.
+- Kandev composes the indexed `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` /
+  `GIT_CONFIG_VALUE_<n>` protocol across host, executor, profile, task, and agentctl boundaries.
+  Unrelated entries such as hooks, notes, safe-directory, and URL-rewrite settings survive in their
+  original order; later Kandev credential entries affect only their intended GitHub credential
+  keys. An already-forwarded suffix is not duplicated.
 - Explicit executor-profile `GITHUB_TOKEN` or `GH_TOKEN` values remain unmanaged operator overrides
-  and take precedence over the workspace broker.
+  and take precedence over the workspace broker when managed routing is selected.
+- Every successful task launch or resume records a non-secret session snapshot of the selected
+  policy, effective credential source, known method and actor, transport, executor, and capture
+  time. Inherited and profile-token actors are labeled runtime-selected instead of being probed.
 - The unpublished `KANDEV_GITHUB_APP_*` configuration introduced on this branch is removed. Setting
   those variables does not create or configure a registration; operators use the guided import
   flow for an App they already own.
@@ -75,12 +94,18 @@ The workspace UI explains that an App is recommended for background jobs and man
 it does not claim agents can only use the selected method. Explicit executor credentials and other
 unmanaged tools remain outside Kandev's workspace credential contract.
 
+The automation method and task Git credential policy are independent. Selecting a named `gh`
+account does not inherit the host's Git configuration: in managed mode Kandev resolves that exact
+host/login and brokers its token to the task. Users who want traditional host or executor behavior
+select **Inherit executor Git credentials** explicitly.
+
 ## Identity And Routing
 
 | Purpose | First choice | Fallback | Attribution |
 | --- | --- | --- | --- |
 | Background reads and writes | Workspace automation | None | Automation principal |
-| Managed agent git and GitHub access | Workspace automation | None | Automation principal |
+| Managed task git and `gh` access | Workspace automation | Explicit profile token | Automation principal, or runtime-selected override |
+| Inherited task Git access | Executor-visible Git/SSH credentials | None | Runtime-selected |
 | `My GitHub` reads | Personal connection | Human PAT/CLI automation | Human principal |
 | User-triggered mutation | Personal connection | Human PAT/CLI, then App installation | Effective principal shown in UI |
 
@@ -154,6 +179,34 @@ One row per configured workspace automation identity. Existing fields remain, wi
 For an App connection, `installation_id`, verified account login/type, and
 `app_registration_id` must all be present. PAT/CLI/legacy rows must have no registration ID.
 
+### `github_workspace_settings`
+
+The non-secret operational settings row adds `task_git_credentials_mode`, with allowed values:
+
+| Value | Behavior |
+| --- | --- |
+| `managed` | Default. Inject the workspace broker contract for attached GitHub repositories unless an explicit executor-profile token overrides it. |
+| `executor` | Inject no Kandev GitHub helper or `gh` shim; use credentials available where the selected executor runs. |
+
+Missing or invalid persisted values normalize to `managed`. Workspace-settings copy includes this
+policy because it is operational configuration, not authentication material.
+
+### Task-session credential snapshot
+
+After a successful launch or resume, task-session metadata contains a versioned
+`git_credential_snapshot` with:
+
+- selected policy (`managed` or `executor`);
+- effective source (`workspace`, `executor_profile`, or `executor`);
+- workspace method when known (`pat`, `gh_cli`, `github_app_installation`, or
+  `legacy_shared`);
+- a known human/App actor label, or `runtime_selected` when Kandev does not inspect the credential;
+- transport (`managed_https`, `profile_token`, or `executor_selected`), executor type, and capture
+  timestamp.
+
+The snapshot contains no token, lease, helper path, credential-file path, or SSH key detail. A
+failed launch/resume does not replace the last successful snapshot.
+
 ### `github_user_connections`
 
 One optional personal identity per `(workspace_id, user_id)`. Add required
@@ -212,6 +265,10 @@ before exposing registration management.
 
 - `GET /api/v1/github/status?workspace_id=<id>` returns automation, personal identity, effective
   actors, App registration metadata, capabilities, missing permissions, and migration state.
+- `GET /api/v1/github/workspace-settings?workspace_id=<id>` returns repository scope, saved
+  preferences, and `task_git_credentials_mode`.
+- `PUT /api/v1/github/workspace-settings` accepts a partial
+  `task_git_credentials_mode` update and rejects unknown values without changing the prior policy.
 - `GET /api/v1/github/auth/gh-cli/accounts?workspace_id=<id>` lists exact local host/login choices.
 - `PUT /api/v1/github/workspace-connection?workspace_id=<id>` configures validated PAT or named CLI
   auth. App connections can only be committed by the verified installation callback.
@@ -266,6 +323,17 @@ post-signature processing failures produce `failing`; a later valid successful d
   connections matching both registration ID and installation ID.
 - Disconnect removes workspace-owned secrets and leaves the reusable registration untouched.
 
+### Task Git credential resolution
+
+- Missing settings start at `managed`.
+- `managed + explicit profile GITHUB_TOKEN/GH_TOKEN -> executor_profile`.
+- `managed + attached GitHub repository + active workspace connection -> workspace broker`.
+- `executor -> executor-visible credentials`, regardless of PAT/CLI/App automation method.
+- Initial launch and resume run the same resolution. A successful operation replaces the session
+  snapshot; a failed operation leaves the previous snapshot unchanged.
+- Changing the workspace policy affects new launches and the next resume, not an already-running
+  process.
+
 ## Permissions And Security
 
 - Registration list/create/import/delete requires registration-manager authority plus access to the
@@ -279,12 +347,22 @@ post-signature processing failures produce `failing`; a later valid successful d
 - Runtime and token-cache keys include registration ID, registration generation, installation ID,
   workspace ID, and repository scope as applicable. No lookup may fall back to another
   registration or workspace.
+- Named GitHub CLI bearer tokens remain memory-only and are re-resolved from the exact selected
+  host/login after at most five minutes. Connection-generation invalidation remains immediate.
 - Public base URL validation requires a canonical HTTPS origin with no credentials, query, or
   fragment and rejects loopback, private, link-local, or non-globally-routable DNS results. Kandev
   does not fetch the supplied URL as validation.
 - App private keys, client secrets, webhook secrets, personal tokens, and live installation tokens
   never enter executor environments. Only brokered PAT/CLI tokens or repository-restricted
-  installation tokens reach the trusted child operation.
+  installation tokens reach a managed trusted child operation; explicit executor-profile
+  `GITHUB_TOKEN`/`GH_TOKEN` values are an unmanaged exception and can reach that child instead.
+- Managed helper configuration resets the inherited GitHub HTTPS helper chain, disables terminal
+  prompts, and activates Kandev's `agentctl`/`gh` tool directory only for broker-enabled task
+  instances. It does not claim to prevent a host-authority agent from manually switching a remote
+  to SSH or invoking another credential-bearing tool.
+- Indexed Git configuration is validated and composed as a single ordered block at environment
+  merge boundaries. Kandev never replaces a complete inherited block merely by assigning its own
+  `GIT_CONFIG_COUNT`; managed helper reset semantics are expressed as later Git config entries.
 
 ## Failure Modes
 
@@ -299,6 +377,16 @@ post-signature processing failures produce `failing`; a later valid successful d
   after structured status and multi-account flags. Genuine discovery failures are shown as errors,
   not as an empty account list. A CLI without named-token support may resolve only the active
   account; selecting another stored login fails with guidance to activate it or upgrade the CLI.
+- If the managed `agentctl` helper, broker, or `gh` shim is unavailable, the command fails with a
+  managed-credential error and does not fall through to another HTTPS helper or interactive prompt.
+- If any environment source supplies a malformed or unreasonably large indexed Git configuration,
+  task environment preparation fails with a sanitized configuration error rather than silently
+  truncating, partially merging, or executing a different block.
+- If executor inheritance is selected but no usable credential exists in that executor, Git/SSH
+  reports its normal authentication failure. Kandev does not probe or guess the actor.
+- If Kandev cannot reconcile a managed checkout's `origin` with the selected task policy, Local and
+  Worktree preparation fails before the agent starts instead of silently using the other policy's
+  transport.
 - Deleting a registration with any workspace or personal reference returns
   `github_app_registration_in_use` with a non-secret binding count.
 - Changing workspace auth while a flow is open makes the stale callback fail without reverting the
@@ -306,10 +394,11 @@ post-signature processing failures produce `failing`; a later valid successful d
 
 ## Persistence Guarantees
 
-Registrations, workspace/personal bindings, credential generations, health, auth flows, and webhook
-dedupe survive restart. Installation tokens, App JWTs, CLI-derived tokens, and broker lease plaintext
-remain memory-only. Active encrypted-bundle pointers are crash consistent; orphan inactive bundles
-are reconciled after restart. Restart rebuilds runtime clients independently for every valid stored
+Registrations, workspace/personal bindings, task Git credential policy, credential generations,
+health, auth flows, webhook dedupe, and successful task-session credential snapshots survive
+restart. Installation tokens, App JWTs, CLI-derived tokens, and broker lease plaintext remain
+memory-only. Active encrypted-bundle pointers are crash consistent; orphan inactive bundles are
+reconciled after restart. Restart rebuilds runtime clients independently for every valid stored
 registration and never creates a global default.
 
 ## UX And Mobile Contract
@@ -317,6 +406,11 @@ registration and never creates a global default.
 - Workspace GitHub settings lead with the active automation identity and a **Change connection**
   command. The method chooser uses a menu/list with PAT, GitHub CLI, and GitHub App descriptions,
   not a segmented tab control.
+- Method descriptions state where the credential is stored/resolved and how managed tasks receive
+  it. A separate **Task Git credentials** setting visibly explains **Managed workspace
+  credentials** and **Inherit executor Git credentials**, including local/Worktree versus remote
+  behavior and explicit profile-token precedence. An information icon provides the complete
+  per-method delivery explanation as supplementary help.
 - GitHub App selection first explains when to use it and the sharing/isolation trade-off, then lists
   known registrations and actions to **Add existing App** or **Create new App**.
 - The import guide provides copyable callback, setup, and webhook URLs; required permissions/events;
@@ -331,6 +425,10 @@ registration and never creates a global default.
   uses a single-column sheet/page, one scroll owner, safe-area padding, 44px targets, no fixed footer,
   and no horizontal overflow. External GitHub navigation is deliberate and returns to the same
   workspace settings route.
+- The Changes panel branch disclosure includes the active session's launch-time Git credential
+  snapshot. Desktop supports hover and keyboard focus; coarse-pointer/mobile users open the same
+  information in a 44px-target drawer. Unknown inherited/profile actors are explicitly labeled
+  runtime-selected.
 
 ## Scenarios
 
@@ -356,6 +454,35 @@ registration and never creates a global default.
 - **GIVEN** a PAT or named CLI workspace, **WHEN** an agent uses the managed credential helper,
   **THEN** it receives that workspace's automation token and the UI does not promise provider-side
   repository narrowing.
+- **GIVEN** a named CLI workspace in managed mode, **WHEN** a task launches, **THEN** Kandev resolves
+  the selected host/login, makes both managed `git` and `gh` available in standalone and remote
+  runtimes, and does not depend on the host's currently active CLI account.
+- **GIVEN** a workspace selects executor inheritance, **WHEN** a Local/Worktree or remote task
+  launches, **THEN** Kandev injects no broker helper/shim and the task uses host-visible or
+  executor-configured credentials respectively.
+- **GIVEN** the host `gh` clone protocol is SSH and a Kandev-managed GitHub checkout currently has
+  an HTTPS `origin`, **WHEN** the workspace selects executor inheritance and launches a Local or
+  Worktree task, **THEN** Kandev changes that managed checkout's `origin` to the canonical SSH URL
+  before task preparation so matching Git conditional includes apply.
+- **GIVEN** a Kandev-managed GitHub checkout currently has an SSH `origin`, **WHEN** the workspace
+  selects managed credentials and launches a Local or Worktree task, **THEN** Kandev changes that
+  managed checkout's `origin` to canonical HTTPS before task preparation.
+- **GIVEN** a repository is registered from a user-managed local checkout, **WHEN** either task Git
+  credential policy is selected, **THEN** Kandev leaves its configured `origin` unchanged.
+- **GIVEN** managed mode and an explicit executor-profile GitHub token, **WHEN** a task launches,
+  **THEN** the profile token wins and the session disclosure labels its actor runtime-selected.
+- **GIVEN** a managed helper cannot execute or redeem its lease, **WHEN** Git requests GitHub HTTPS
+  credentials, **THEN** the command fails without falling through to a personal helper or prompt.
+- **GIVEN** the host or executor exports indexed Git config for `core.hooksPath` and
+  `notes.augment.mergeStrategy`, **WHEN** Kandev appends its managed GitHub helper configuration,
+  **THEN** the agent receives one contiguous block containing the original entries first and the
+  Kandev entries afterward, and a real Git commit still runs the configured hook.
+- **GIVEN** Docker or a remote control process already contains the same task Git config suffix,
+  **WHEN** that suffix is forwarded again while creating or configuring an agent instance,
+  **THEN** Kandev emits it once while retaining executor-added `safe.directory` and URL rewrites.
+- **GIVEN** a workspace policy or automation connection changes after launch, **WHEN** the user
+  views the running session, **THEN** the Changes disclosure still shows its launch snapshot; a
+  successful resume records and shows the newly resolved contract.
 - **GIVEN** an authenticated host GitHub CLI without structured status or named-token flags,
   **WHEN** an operator selects its sole account, **THEN** Kandev discovers and validates that
   account without requiring a CLI upgrade.
@@ -365,6 +492,9 @@ registration and never creates a global default.
   exposing the token.
 - **GIVEN** desktop and mobile viewports, **WHEN** users complete every App flow, **THEN** actions and
   disclosures remain usable without clipping, overlap, or desktop-only capability.
+- **GIVEN** desktop fine-pointer and mobile coarse-pointer task views, **WHEN** the branch
+  disclosure is opened, **THEN** both show the same credential policy, method, actor truth, and
+  transport without horizontal overflow.
 
 ## Success Criteria
 
@@ -374,6 +504,11 @@ registration and never creates a global default.
 - Secret scans find no PAT, private key, client secret, webhook secret, personal token, refresh
   token, or live installation token in logs, API snapshots, redirects, process arguments, or
   executor environments.
+- Standalone, container, and remote task tests prove the managed helper is discoverable only for
+  broker-enabled instances, while executor inheritance receives no Kandev GitHub helper/shim.
+- A real Git subprocess test proves that host/executor indexed hooks and notes config survive
+  managed credential injection, and focused tests prove ordered composition and overlap handling
+  across standalone, container, and remote launch shapes.
 
 ## Out Of Scope
 
@@ -384,11 +519,21 @@ registration and never creates a global default.
 - GitHub Enterprise Server, enterprise-owned Apps, or hosts other than `github.com`.
 - Kandev multi-user login, workspace membership, or RBAC implementation.
 - Publishing Apps to GitHub Marketplace.
+- Discovering or verifying the actor behind inherited credential managers, SSH agents, or explicit
+  profile tokens.
+- Preventing a host-authority agent from manually selecting another Git transport outside
+  Kandev-injected managed HTTPS and `gh` commands.
 
 ## Implementation Plan
 
-See [the implementation plan](../../plans/github-authentication/plan.md).
+See [the original authentication implementation plan](../../plans/github-authentication/plan.md)
+and the
+[task Git credential policy follow-up plan](../../plans/task-git-credential-policy/plan.md), plus
+the
+[executor clone transport repair plan](../../plans/github-executor-clone-transport/plan.md).
 
 ## Decision
 
-See [ADR-2026-07-21-workspace-selectable-github-app-registrations](../../decisions/2026-07-21-workspace-selectable-github-app-registrations.md).
+See [ADR-2026-07-21-workspace-selectable-github-app-registrations](../../decisions/2026-07-21-workspace-selectable-github-app-registrations.md)
+and
+[ADR-2026-07-27-task-git-credential-policy](../../decisions/2026-07-27-task-git-credential-policy.md).

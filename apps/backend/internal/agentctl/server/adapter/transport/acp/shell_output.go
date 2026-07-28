@@ -28,7 +28,7 @@ func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
 	}
 	output := ensureShellOutput(payload)
 	if normalized.hasStdout {
-		output.Stdout = stripLeadingCommandEcho(payload.Command, normalized.stdout)
+		output.Stdout = stripLeadingCommandEcho(payload.Command, payload.WorkDir, normalized.stdout)
 		output.StdoutTruncated = normalized.stdoutTruncated
 	}
 	if normalized.hasStderr {
@@ -56,8 +56,8 @@ func applyFinalShellResult(payload *streams.ShellExecPayload, result any) {
 // Used for final/terminal results, where the buffer is known to be complete:
 // a stdout consisting of nothing but the echoed command commits to an empty
 // result rather than leaving the redundant echo visible.
-func stripLeadingCommandEcho(command, stdout string) string {
-	return stripCommandEcho(command, stdout, true)
+func stripLeadingCommandEcho(command, workDir, stdout string) string {
+	return stripCommandEcho(command, workDir, stdout, true)
 }
 
 // stripPendingCommandEcho is the live-update counterpart of
@@ -67,18 +67,54 @@ func stripLeadingCommandEcho(command, stdout string) string {
 // currently equals nothing but the echo is left untouched - the separator or
 // real output may still be in flight - instead of collapsing to empty and
 // orphaning a later chunk's leading newline.
-func stripPendingCommandEcho(command, stdout string) string {
-	return stripCommandEcho(command, stdout, false)
+func stripPendingCommandEcho(command, workDir, stdout string) string {
+	return stripCommandEcho(command, workDir, stdout, false)
 }
 
-func stripCommandEcho(command, stdout string, commitExactMatch bool) string {
+func stripCommandEcho(command, workDir, stdout string, commitExactMatch bool) string {
 	if command == "" || stdout == "" {
 		return stdout
 	}
-	rest, ok := strings.CutPrefix(stdout, "$ "+command)
-	if !ok {
+	if rest, ok := strings.CutPrefix(stdout, "$ "+command); ok {
+		return finishCommandEchoStrip(rest, stdout, commitExactMatch)
+	}
+	return stripCommandEchoWithWorkDir(command, workDir, stdout, commitExactMatch)
+}
+
+// stripCommandEchoWithWorkDir is stripCommandEcho's fallback for providers
+// that resolve a relative file-path argument in the command to an absolute
+// (workDir-joined) one before actually invoking the real terminal, while the
+// tool call's reported "command" field - the same text the chat header
+// renders - keeps the original relative form. The captured echo line then no
+// longer matches literally. Retry against just the first echoed line with
+// the workDir prefix collapsed back out, so real output later in stdout
+// (which may legitimately contain workDir-prefixed paths of its own) is
+// never touched.
+func stripCommandEchoWithWorkDir(command, workDir, stdout string, commitExactMatch bool) string {
+	if workDir == "" {
 		return stdout
 	}
+	// workDir's trailing slashes are collapsed to exactly one first: a
+	// provider can report cwd already "/"-terminated (e.g. "/repo/"), and
+	// the root directory "/" is inherently "/"-terminated. Appending "/"
+	// unconditionally would search for a doubled separator ("/repo//" or
+	// "//") that the actually-joined path never contains, silently
+	// declining to strip a real echo.
+	firstLine, remainder, hasMore := cutFirstLine(stdout)
+	workDirPrefix := strings.TrimRight(workDir, "/") + "/"
+	if strings.ReplaceAll(firstLine, workDirPrefix, "") != "$ "+command {
+		return stdout
+	}
+	if !hasMore {
+		if !commitExactMatch {
+			return stdout
+		}
+		return ""
+	}
+	return remainder
+}
+
+func finishCommandEchoStrip(rest, stdout string, commitExactMatch bool) string {
 	if rest == "" && !commitExactMatch {
 		return stdout
 	}
@@ -86,6 +122,16 @@ func stripCommandEcho(command, stdout string, commitExactMatch bool) string {
 		return trimmed
 	}
 	return strings.TrimPrefix(rest, "\n")
+}
+
+// cutFirstLine splits s at its first newline, reporting whether one was
+// found. The returned line excludes both the newline and any preceding "\r".
+func cutFirstLine(s string) (line, remainder string, hasMore bool) {
+	idx := strings.IndexByte(s, '\n')
+	if idx < 0 {
+		return s, "", false
+	}
+	return strings.TrimSuffix(s[:idx], "\r"), s[idx+1:], true
 }
 
 // NormalizeShellToolUpdate merges live and final ACP shell result fields into
@@ -153,9 +199,9 @@ func (n *Normalizer) NormalizeShellToolUpdate(
 			// A definitive completion signal arrived, and Stdout hasn't
 			// already been committed-stripped this call: commit now, even
 			// if the buffer is nothing but the echo.
-			shell.Output.Stdout = stripLeadingCommandEcho(shell.Command, shell.Output.Stdout)
+			shell.Output.Stdout = stripLeadingCommandEcho(shell.Command, shell.WorkDir, shell.Output.Stdout)
 		case !isFinal:
-			shell.Output.Stdout = stripPendingCommandEcho(shell.Command, shell.Output.Stdout)
+			shell.Output.Stdout = stripPendingCommandEcho(shell.Command, shell.WorkDir, shell.Output.Stdout)
 		}
 	}
 

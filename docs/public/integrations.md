@@ -92,6 +92,28 @@ backend actions for another attached repository. PAT/CLI `gh` commands still rec
 bearer grant described above. Explicit executor-profile tokens bypass these managed guarantees and
 must be scoped and rotated independently.
 
+### Choose task Git credentials
+
+The **Task Git credentials** setting is separate from the workspace automation connection. It
+controls how GitHub HTTPS and `gh` authenticate *inside newly launched task processes*:
+
+- **Managed workspace credentials** (the default) uses the selected workspace PAT, named GitHub
+  CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. The task
+  receives neither the stored PAT nor an App private key. An executor-profile `GH_TOKEN` or
+  `GITHUB_TOKEN` deliberately takes precedence for that task.
+- **Inherit executor Git credentials** does not install Kandev's broker helper or `gh` shim. Local
+  and Worktree tasks use credentials already visible to the host Git process (including SSH).
+  Docker, SSH, and cloud tasks use only credentials intentionally configured in that executor.
+  For Kandev-managed GitHub checkouts, Local and Worktree preparation also updates `origin` to the
+  host's configured `gh` clone protocol. Selecting SSH therefore lets Git conditional includes that
+  match `remote.*.url` apply; switching back to managed credentials restores the canonical HTTPS
+  origin. Repositories you registered from an existing local checkout are never rewritten.
+
+Selecting a GitHub CLI workspace connection does not implicitly select host Git credentials; use
+the explicit inheritance mode when that is the intended boundary. The Changes panel's branch
+details show the non-secret identity and delivery route captured for a successfully launched
+session.
+
 ### Use a GitHub App
 
 Choose a GitHub App when automation should not depend on one person's long-lived credential, when

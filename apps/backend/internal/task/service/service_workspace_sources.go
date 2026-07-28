@@ -41,6 +41,7 @@ type AttachWorkspaceSourcesRequest struct {
 type AttachWorkspaceSourcesResult struct {
 	Task          *models.Task
 	WorkspacePath string
+	WorktreePath  string
 	SessionIDs    []string
 }
 
@@ -49,6 +50,7 @@ type AttachWorkspaceSourcesResult struct {
 // authoritative: callers must not perform fallible hydration after this point.
 type WorkspaceSourceMaterializationResult struct {
 	WorkspacePath string
+	WorktreePath  string
 	SessionIDs    []string
 }
 
@@ -445,6 +447,7 @@ func (s *Service) commitWorkspaceSourceBatch(ctx context.Context, task *models.T
 	}
 	if materialized != nil {
 		result.WorkspacePath = materialized.WorkspacePath
+		result.WorktreePath = materialized.WorktreePath
 		result.SessionIDs = materialized.SessionIDs
 	}
 	s.publishTaskEvent(context.WithoutCancel(ctx), events.TaskUpdated, result.Task, nil)

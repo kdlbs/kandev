@@ -774,3 +774,113 @@ func messageFilterFromProto(p *pluginv1.MessageFilter) MessageFilter {
 		Types:      p.GetTypes(),
 	}
 }
+
+// ── Write inputs (ADR 0043 phase 2: api_write) ────────────────────────────
+//
+// These mirror kandev.plugin.v1.CreateTaskRequest/UpdateTaskRequest/
+// CreateCommentRequest. Optional/nullable fields use *string so "leave
+// unchanged" (nil) is distinguishable from "set to empty" ("") — matching the
+// proto `optional` on the wire. The server stamps write provenance
+// (source = "plugin:<id>") itself; there is no field for a plugin to set it.
+
+// CreateTaskInput is the Go-native mirror of
+// kandev.plugin.v1.CreateTaskRequest. WorkspaceID/WorkflowID may be left empty
+// to accept the host's defaults (the single workspace, and that workspace's
+// first workflow); the host returns a gRPC InvalidArgument when a default
+// cannot be resolved unambiguously.
+type CreateTaskInput struct {
+	WorkspaceID    string
+	WorkflowID     string
+	WorkflowStepID *string
+	Title          string
+	Description    string
+	ParentID       *string
+	// StartAgent asks the host to auto-launch an agent on the created task,
+	// mirroring the REST/MCP create_task start_agent flag. Best-effort: a
+	// launch failure does not fail task creation.
+	StartAgent bool
+}
+
+func (in CreateTaskInput) toProto() *pluginv1.CreateTaskRequest {
+	return &pluginv1.CreateTaskRequest{
+		WorkspaceId:    in.WorkspaceID,
+		WorkflowId:     in.WorkflowID,
+		WorkflowStepId: in.WorkflowStepID,
+		Title:          in.Title,
+		Description:    in.Description,
+		ParentId:       in.ParentID,
+		StartAgent:     in.StartAgent,
+	}
+}
+
+func createTaskInputFromProto(p *pluginv1.CreateTaskRequest) CreateTaskInput {
+	if p == nil {
+		return CreateTaskInput{}
+	}
+	return CreateTaskInput{
+		WorkspaceID:    p.GetWorkspaceId(),
+		WorkflowID:     p.GetWorkflowId(),
+		WorkflowStepID: p.WorkflowStepId,
+		Title:          p.GetTitle(),
+		Description:    p.GetDescription(),
+		ParentID:       p.ParentId,
+		StartAgent:     p.GetStartAgent(),
+	}
+}
+
+// UpdateTaskInput is the Go-native mirror of
+// kandev.plugin.v1.UpdateTaskRequest. Every field except ID is optional: a nil
+// pointer leaves that field untouched, a non-nil pointer overwrites it. The
+// conservative field surface (title/description/state/workflow_step_id) is the
+// documented plugin-writable mask.
+type UpdateTaskInput struct {
+	ID             string
+	Title          *string
+	Description    *string
+	State          *string
+	WorkflowStepID *string
+}
+
+func (in UpdateTaskInput) toProto() *pluginv1.UpdateTaskRequest {
+	return &pluginv1.UpdateTaskRequest{
+		Id:             in.ID,
+		Title:          in.Title,
+		Description:    in.Description,
+		State:          in.State,
+		WorkflowStepId: in.WorkflowStepID,
+	}
+}
+
+func updateTaskInputFromProto(p *pluginv1.UpdateTaskRequest) UpdateTaskInput {
+	if p == nil {
+		return UpdateTaskInput{}
+	}
+	return UpdateTaskInput{
+		ID:             p.GetId(),
+		Title:          p.Title,
+		Description:    p.Description,
+		State:          p.State,
+		WorkflowStepID: p.WorkflowStepId,
+	}
+}
+
+// MessageDispatch is the Go-native mirror of
+// kandev.plugin.v1.SendMessageResponse — the result of delivering a prompt to a
+// task session. Status is "queued" (the session was running and the message
+// was queued for its next turn), "sent" (delivered to an idle/resumed session),
+// or "started" (the session was launched with it as the first prompt).
+type MessageDispatch struct {
+	SessionID string
+	Status    string
+}
+
+func (d MessageDispatch) toProto() *pluginv1.SendMessageResponse {
+	return &pluginv1.SendMessageResponse{SessionId: d.SessionID, Status: d.Status}
+}
+
+func messageDispatchFromProto(p *pluginv1.SendMessageResponse) *MessageDispatch {
+	if p == nil {
+		return nil
+	}
+	return &MessageDispatch{SessionID: p.GetSessionId(), Status: p.GetStatus()}
+}

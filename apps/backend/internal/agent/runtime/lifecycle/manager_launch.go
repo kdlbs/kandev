@@ -19,9 +19,11 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/gitconfigenv"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 const legacyExecutorTypeLocalPC = "local_pc"
@@ -467,7 +469,7 @@ func invalidScratchPathID(id string) bool {
 
 // launchPrepareRequest copies the launch request, sets the resolved workspace path,
 // populates metadata from the request fields, and injects profile environment variables.
-func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentProfileInfo, workspacePath string) (LaunchRequest, string) {
+func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentProfileInfo, workspacePath string) (LaunchRequest, string, error) {
 	executionID := uuid.New().String()
 	reqWithWorktree := *req
 	reqWithWorktree.WorkspacePath = workspacePath
@@ -496,22 +498,27 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 			reqWithWorktree.Env["AGENTCTL_AUTO_APPROVE_PERMISSIONS"] = "true"
 		}
 	}
-	mergeRouteOverrideEnv(&reqWithWorktree)
-	return reqWithWorktree, executionID
+	if err := mergeRouteOverrideEnv(&reqWithWorktree); err != nil {
+		return LaunchRequest{}, "", err
+	}
+	return reqWithWorktree, executionID, nil
 }
 
 // mergeRouteOverrideEnv preserves legacy model-only routing overlays.
 // Concrete execution profiles own their complete environment.
-func mergeRouteOverrideEnv(req *LaunchRequest) {
+func mergeRouteOverrideEnv(req *LaunchRequest) error {
 	if req == nil || hasConcreteRouteExecutionProfile(req) || req.RouteOverride == nil || len(req.RouteOverride.Env) == 0 {
-		return
+		return nil
 	}
 	if req.Env == nil {
 		req.Env = make(map[string]string, len(req.RouteOverride.Env))
 	}
-	for k, v := range req.RouteOverride.Env {
-		req.Env[k] = v
+	merged, err := gitconfigenv.Merge(req.Env, req.RouteOverride.Env)
+	if err != nil {
+		return fmt.Errorf("compose legacy route environment: %w", err)
 	}
+	req.Env = merged
+	return nil
 }
 
 // newProgressCallback builds a PrepareProgressCallback that publishes progress events for a task/session.
@@ -896,6 +903,7 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		activityLease.SetKind(activity.KindExecutionPreparing)
 		execution, launchErr := m.launchInternal(ctx, req)
 		if launchErr == nil && req.StartAgent {
+			m.markAgentStartPending(execution)
 			m.trackActivity(executionActivityKey(execution.ID), activityLease)
 			transferredActivity = true
 		}
@@ -930,9 +938,24 @@ func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecuti
 		if err != nil {
 			return nil, err
 		}
+		m.markAgentStartPending(execution)
 		m.trackActivity(executionActivityKey(execution.ID), activityLease)
 	}
 	return execution, nil
+}
+
+// markAgentStartPending distinguishes a launch that owns an imminent agent
+// start from a workspace-only execution. It happens synchronously before
+// Launch returns so a concurrent resume cannot mistake the registered runtime
+// for stale state while StartAgentProcess is waiting for agentctl readiness.
+func (m *Manager) markAgentStartPending(execution *AgentExecution) {
+	if execution == nil {
+		return
+	}
+	_ = m.executionStore.WithLock(execution.ID, func(current *AgentExecution) {
+		current.Status = v1.AgentStatusStarting
+		current.StartedAt = time.Now()
+	})
 }
 
 // promoteWorkspaceExecution populates the agent command fields on a
@@ -1069,7 +1092,11 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 
 	// 5 & 6. Prepare the request copy with metadata and profile env
-	reqWithWorktree, executionID := m.launchPrepareRequest(req, profileInfo, workspacePath)
+	reqWithWorktree, executionID, err := m.launchPrepareRequest(req, profileInfo, workspacePath)
+	if err != nil {
+		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
+		return nil, err
+	}
 
 	// 6b. Deploy per-profile skills + custom prompt (ADR 0005 Wave A).
 	// Best-effort: a deploy failure is logged but does not abort the launch

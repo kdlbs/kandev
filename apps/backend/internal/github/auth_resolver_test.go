@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -286,6 +287,39 @@ func TestCredentialResolverNamedCLIUsesSelectedLogin(t *testing.T) {
 	}
 	if resolved.Principal.Source != ConnectionSourceGHCLI {
 		t.Fatalf("principal = %+v", resolved.Principal)
+	}
+}
+
+func TestCredentialResolverNamedCLIRefreshesAfterFiveMinutes(t *testing.T) {
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	connections := &fakeConnectionReader{workspaces: map[string]*WorkspaceConnection{
+		"work": {WorkspaceID: "work", Source: ConnectionSourceGHCLI, GitHubHost: "github.com", Login: "work-user", Status: ConnectionStatusActive, CredentialGeneration: 2},
+	}}
+	resolver := NewCredentialResolver(connections, nil)
+	resolver.now = func() time.Time { return now }
+	calls := 0
+	resolver.ghToken = func(_ context.Context, _, _ string) (string, error) {
+		calls++
+		return fmt.Sprintf("cli-token-%d", calls), nil
+	}
+	request := ResolveCredentialRequest{WorkspaceID: "work", Purpose: CredentialPurposeAutomation}
+
+	first, err := resolver.Resolve(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(4*time.Minute + 59*time.Second)
+	stillCached, err := resolver.Resolve(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	refreshed, err := resolver.Resolve(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 2 || first.credential != stillCached.credential || refreshed.credential == first.credential {
+		t.Fatalf("calls=%d credentials=%q/%q/%q", calls, first.credential, stillCached.credential, refreshed.credential)
 	}
 }
 

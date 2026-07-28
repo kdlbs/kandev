@@ -1,6 +1,6 @@
 # ADR-2026-07-23-post-commit-hook-aware-verification: Post-Commit Hook-Aware Verification
 
-**Status:** accepted
+**Status:** superseded by [Single-Session Model Switching](2026-07-26-single-session-model-switching.md)
 **Date:** 2026-07-23
 **Area:** workflow
 

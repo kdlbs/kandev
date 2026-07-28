@@ -789,6 +789,82 @@ func TestRunner_CancelStopsInferenceAndKeepsRunCancelled(t *testing.T) {
 	}
 }
 
+// TestRunner_failSkipsCanceledCause reproduces CI flake where cancel raced
+// CancelRun: inference errors wrapped with %v lost context.Canceled, so fail()
+// called FailRun before CancelRun and left the row terminal-failed. fail must
+// treat a cancelled run context as cancel even when the cause chain is broken.
+func TestRunner_failSkipsCanceledCause(t *testing.T) {
+	runner, store, _ := newBlockingHarness(t, okResponse("a.go", 2))
+	runner.Stop() // no live pass; we call fail directly
+
+	run, err := store.CreateRun(context.Background(), taskservice.CreateRunRequest{
+		TaskID: "task-fail-cancel",
+	})
+	if err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := store.MarkRunRunning(context.Background(), run.ID); err != nil {
+		t.Fatalf("MarkRunRunning: %v", err)
+	}
+
+	// Broken wrapper: historical reviewBatches path used %v and dropped Canceled.
+	broken := fmt.Errorf("%w: %v", ErrExecutionFailed, context.Canceled)
+	if errors.Is(broken, context.Canceled) {
+		t.Fatal("precondition: broken wrapper must not preserve context.Canceled")
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = runner.fail(ctx, run.ID, broken, time.Now())
+
+	if got := store.statusOf(run.ID); got == models.ReviewRunFailed {
+		t.Fatalf("fail must not mark a cancelled run failed, got %q", got)
+	}
+	if failure, ok := store.lastFailure(); ok {
+		t.Fatalf("fail must not record FailRun on cancel, got %#v", failure)
+	}
+}
+
+func singleBatchPlan() BatchPlan {
+	return BatchPlan{Batches: [][]ChangedFile{{{Path: "a.go", Diff: "@@ -1 +1,2 @@\n x\n+y\n"}}}}
+}
+
+// reviewBatches must keep context.Canceled reachable through its %w wrapper so
+// fail() can leave a user cancel as cancelled. Reverting the inference wrapper
+// to %v would drop it and break this contract.
+func TestRunner_reviewBatchesPreservesCanceled(t *testing.T) {
+	runner := NewRunner(RunnerDeps{
+		Store:     newFakeStore(),
+		Resolver:  NewResolver(nil, &fakeUtility{found: true, enabled: true, agentID: "a", model: "m"}, nil),
+		Changes:   &fakeChangeSource{},
+		Inference: &fakeInference{err: fmt.Errorf("inference aborted: %w", context.Canceled)},
+		Prompts:   &fakePrompts{},
+		Sessions:  &fakeSessions{sessionID: "sess-1"},
+		Logger:    testLogger(t),
+	})
+
+	_, err := runner.reviewBatches(context.Background(), singleBatchPlan(),
+		ReviewerIdentity{Model: "m"}, "sess-1", PromptContext{})
+	if !errors.Is(err, ErrExecutionFailed) {
+		t.Fatalf("expected ErrExecutionFailed in the chain, got %v", err)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("reviewBatches must keep context.Canceled reachable, got %v", err)
+	}
+}
+
+// reviewBatches must keep the underlying parse error reachable through its %w
+// wrapper on the unparseable-response path.
+func TestRunner_reviewBatchesPreservesParseError(t *testing.T) {
+	h := newRunnerHarness(t, map[string]any{}, []string{"no findings here at all"})
+
+	_, err := h.runner.reviewBatches(context.Background(), singleBatchPlan(),
+		ReviewerIdentity{Model: "m"}, "sess-1", PromptContext{})
+	if !errors.Is(err, ErrUnparseableResponse) {
+		t.Fatalf("expected ErrUnparseableResponse in the chain, got %v", err)
+	}
+}
+
 // TestRunner_ConcurrentLaunchesCreateOneRun covers the race where the DB check
 // and the in-memory claim were not atomic, leaving the loser's pending run row
 // orphaned with no goroutine behind it.

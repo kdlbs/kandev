@@ -890,39 +890,43 @@ type UpdateIssueWatchRequest struct {
 // --- Workspace GitHub scope/settings ---
 
 const (
-	RepoScopeModeAll   = "all"
-	RepoScopeModeOrgs  = "orgs"
-	RepoScopeModeRepos = "repos"
+	RepoScopeModeAll               = "all"
+	RepoScopeModeOrgs              = "orgs"
+	RepoScopeModeRepos             = "repos"
+	TaskGitCredentialsModeManaged  = "managed"
+	TaskGitCredentialsModeExecutor = "executor"
 )
 
 // WorkspaceSettings stores per-workspace GitHub operational settings.
 // Authentication is stored separately and is intentionally not copied with
 // these operational settings.
 type WorkspaceSettings struct {
-	WorkspaceID         string          `json:"workspace_id" db:"workspace_id"`
-	RepoScopeMode       string          `json:"repo_scope_mode" db:"repo_scope_mode"`
-	RepoScopeOrgs       []string        `json:"repo_scope_orgs" db:"-"`
-	RepoScopeRepos      []RepoFilter    `json:"repo_scope_repos" db:"-"`
-	RepoScopeOrgsJSON   string          `json:"-" db:"repo_scope_orgs"`
-	RepoScopeReposJSON  string          `json:"-" db:"repo_scope_repos"`
-	SavedPresets        json.RawMessage `json:"saved_presets,omitempty" db:"saved_presets"`
-	DefaultQueryPresets json.RawMessage `json:"default_query_presets,omitempty" db:"default_query_presets"`
-	CreatedAt           time.Time       `json:"created_at" db:"created_at"`
-	UpdatedAt           time.Time       `json:"updated_at" db:"updated_at"`
+	WorkspaceID            string          `json:"workspace_id" db:"workspace_id"`
+	TaskGitCredentialsMode string          `json:"task_git_credentials_mode" db:"task_git_credentials_mode"`
+	RepoScopeMode          string          `json:"repo_scope_mode" db:"repo_scope_mode"`
+	RepoScopeOrgs          []string        `json:"repo_scope_orgs" db:"-"`
+	RepoScopeRepos         []RepoFilter    `json:"repo_scope_repos" db:"-"`
+	RepoScopeOrgsJSON      string          `json:"-" db:"repo_scope_orgs"`
+	RepoScopeReposJSON     string          `json:"-" db:"repo_scope_repos"`
+	SavedPresets           json.RawMessage `json:"saved_presets,omitempty" db:"saved_presets"`
+	DefaultQueryPresets    json.RawMessage `json:"default_query_presets,omitempty" db:"default_query_presets"`
+	CreatedAt              time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt              time.Time       `json:"updated_at" db:"updated_at"`
 }
 
 // UpdateWorkspaceSettingsRequest replaces the workspace GitHub scope and/or
 // preference blobs. Nil blobs leave values unchanged; explicit JSON null clears
 // default query presets back to built-ins.
 type UpdateWorkspaceSettingsRequest struct {
-	WorkspaceID         string           `json:"workspace_id"`
-	RepoScopeMode       *string          `json:"repo_scope_mode,omitempty"`
-	RepoScopeOrgs       *[]string        `json:"repo_scope_orgs,omitempty"`
-	RepoScopeRepos      *[]RepoFilter    `json:"repo_scope_repos,omitempty"`
-	SavedPresets        *json.RawMessage `json:"saved_presets,omitempty"`
-	DefaultQueryPresets *json.RawMessage `json:"default_query_presets,omitempty"`
-	SavedPresetsSet     bool             `json:"-"`
-	DefaultQueriesSet   bool             `json:"-"`
+	WorkspaceID            string           `json:"workspace_id"`
+	TaskGitCredentialsMode *string          `json:"task_git_credentials_mode,omitempty"`
+	RepoScopeMode          *string          `json:"repo_scope_mode,omitempty"`
+	RepoScopeOrgs          *[]string        `json:"repo_scope_orgs,omitempty"`
+	RepoScopeRepos         *[]RepoFilter    `json:"repo_scope_repos,omitempty"`
+	SavedPresets           *json.RawMessage `json:"saved_presets,omitempty"`
+	DefaultQueryPresets    *json.RawMessage `json:"default_query_presets,omitempty"`
+	SavedPresetsSet        bool             `json:"-"`
+	DefaultQueriesSet      bool             `json:"-"`
 }
 
 func (r *UpdateWorkspaceSettingsRequest) UnmarshalJSON(data []byte) error {

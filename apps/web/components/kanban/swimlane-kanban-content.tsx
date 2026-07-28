@@ -26,6 +26,7 @@ import { getKanbanColumnGridTemplate } from "./kanban-grid-template";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { countAdmittedTasks } from "@/lib/kanban/wip-limit";
 import {
   type KanbanExternalLinkAvailability,
   useKanbanExternalLinkAvailability,
@@ -277,7 +278,7 @@ function MobileKanbanLayout({
   const taskCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const step of steps) {
-      counts[step.id] = tasks.filter((t) => t.workflowStepId === step.id).length;
+      counts[step.id] = countAdmittedTasks(tasks.filter((task) => task.workflowStepId === step.id));
     }
     return counts;
   }, [steps, tasks]);

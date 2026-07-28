@@ -13,20 +13,18 @@ service Plugin {
 }
 
 // Implemented by KANDEV (served back over the go-plugin broker).
-// Reads (§5) are capability-gated server-side by an inline per-resource
-// check at the start of each handler — there is no unary interceptor
-// enforcing this centrally. The deferred write RPCs below currently return
-// gRPC Unimplemented unconditionally, regardless of the caller's declared
-// capabilities, until their handlers land.
+// Reads (§5) and writes are capability-gated server-side by an inline
+// per-resource check at the start of each handler — there is no unary
+// interceptor enforcing this centrally.
 //
 // Host data API (ADR 0043): the read/write data RPCs below live on this same
 // `service Host` rather than a separate `service HostData`. They reuse the
 // single broker connection; splitting into a second service would only
 // duplicate that for no benefit. Reads require manifest capability
 // `api_read:<resource>`; writes require `api_write:<resource>` (e.g.
-// `api_read:tasks`, `api_write:comments`). An undeclared capability on a read
-// RPC returns gRPC PermissionDenied with `capability 'api_read:tasks' not
-// declared`.
+// `api_read:tasks`, `api_write:comments`). An undeclared capability returns
+// gRPC PermissionDenied with `capability 'api_read:tasks' not declared` (or
+// `api_write:tasks`, etc.).
 //
 // DTOs below are a HAND-DEFINED public contract: the backend maps internal
 // models → these messages explicitly, never generates them from domain
@@ -91,13 +89,17 @@ service Host {
   // its own API key. FailedPrecondition when no utility agent is configured.
   rpc InvokeUtilityAgent(InvokeUtilityAgentRequest) returns (InvokeUtilityAgentResponse);
 
-  // Writes — capability api_write:<resource>. Declared now for a stable
-  // contract; handlers land in a later phase (not implemented by this RPC
-  // addition). Route through service methods so the corresponding task.*
-  // events fire — the whole reason not to let plugins write the DB.
+  // Writes — capability api_write:<resource>. Route through the first-party
+  // service layer so events fire and WS clients update — the whole reason not
+  // to let plugins write the DB. CreateTask/UpdateTask require api_write:tasks
+  // and go through the task service (task.* events; kandev stamps
+  // source = "plugin:<id>" on created rows, a plugin cannot set it). SendMessage
+  // requires api_write:messages and delivers a prompt to a task session through
+  // the orchestrator — the same delivery path message_task uses (queue when the
+  // session is running, resume/start it otherwise).
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
-  rpc CreateComment(CreateCommentRequest) returns (CreateCommentResponse);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
 }
 
 message Event {
@@ -440,7 +442,7 @@ message InvokeUtilityAgentResponse {
   string text = 1;
 }
 
-// ── Writes (phase 2; api_write) ──────────────────────────────────────────────
+// ── Writes (api_write) ───────────────────────────────────────────────────────
 message CreateTaskRequest {
   string workspace_id = 1;
   string workflow_id = 2;
@@ -464,17 +466,18 @@ message UpdateTaskRequest {
 message UpdateTaskResponse {
   Task task = 1;
 }
-message Comment {
-  string id = 1;
-  string task_id = 2;
-  string body = 3;
-  string source = 4; // "plugin:<id>"
-  string created_at = 5;
-}
-message CreateCommentRequest {
+// SendMessage delivers a prompt to a task session (api_write:messages). The
+// server records a user message stamped source = "plugin:<id>" and dispatches
+// it through the orchestrator, resolving session_id (empty → the task's primary
+// session) and handling session state: a running session queues the message;
+// an idle/completed session is resumed and prompted; a never-started session is
+// launched with it as the first prompt.
+message SendMessageRequest {
   string task_id = 1;
-  string body = 2;
+  string session_id = 2; // empty → the task's primary session
+  string text = 3;
 }
-message CreateCommentResponse {
-  Comment comment = 1;
+message SendMessageResponse {
+  string session_id = 1; // the session the message was delivered to
+  string status = 2;     // "queued" | "sent" | "started"
 }

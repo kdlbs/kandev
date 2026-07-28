@@ -155,10 +155,10 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 	// Auto-start: always for run-mode (the user never sees the task, so no
 	// kanban drag triggers it); otherwise honour the workflow step's
 	// auto_start_agent on_enter setting.
-	if !isRunMode && !s.shouldAutoStartStep(ctx, a.WorkflowStepID) {
+	if !isRunMode && (task.QueuedForStepID != "" || !s.shouldAutoStartStep(ctx, task.WorkflowStepID)) {
 		return
 	}
-	s.autoStartAutomationTask(ctx, a, task, workflowStepID)
+	s.autoStartAutomationTask(ctx, a, task, task.WorkflowStepID)
 }
 
 func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Automation, task *models.Task, workflowStepID string) {

@@ -91,6 +91,36 @@ func TestStepAgentProfileID_CreateAndGet(t *testing.T) {
 	}
 }
 
+func TestDeleteStep_ClearsQueuedTaskDestinationAndDeferredLaunch(t *testing.T) {
+	repo, db := setupTestRepoWithDB(t)
+	ctx := context.Background()
+	if _, err := db.Exec(`CREATE TABLE tasks (
+		id TEXT PRIMARY KEY, queued_for_step_id TEXT, queued_at TIMESTAMP,
+		wip_admitted BOOLEAN, metadata TEXT, updated_at TIMESTAMP
+	)`); err != nil {
+		t.Fatalf("create tasks table: %v", err)
+	}
+	step := &models.WorkflowStep{WorkflowID: "wf-test", Name: "Queued", Position: 0}
+	if err := repo.CreateStep(ctx, step); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO tasks (id, queued_for_step_id, wip_admitted, metadata) VALUES ('queued', ?, 0, ?)`, step.ID, `{"deferred_launch":{"agent_profile_id":"agent"}}`); err != nil {
+		t.Fatalf("insert queued task: %v", err)
+	}
+	if err := repo.DeleteStep(ctx, step.ID); err != nil {
+		t.Fatalf("delete step: %v", err)
+	}
+	var queuedFor string
+	var admitted bool
+	var metadata string
+	if err := db.QueryRow(`SELECT queued_for_step_id, wip_admitted, metadata FROM tasks WHERE id = 'queued'`).Scan(&queuedFor, &admitted, &metadata); err != nil {
+		t.Fatalf("reload queued task: %v", err)
+	}
+	if queuedFor != "" || !admitted || metadata != `{}` {
+		t.Fatalf("cleanup result: queue=%q admitted=%t metadata=%q", queuedFor, admitted, metadata)
+	}
+}
+
 func TestWorkflowStepWIPFields_CreateUpdateAndGet(t *testing.T) {
 	repo := setupTestRepo(t)
 	ctx := context.Background()

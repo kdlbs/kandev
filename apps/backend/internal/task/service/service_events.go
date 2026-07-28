@@ -50,6 +50,13 @@ func (s *Service) PublishTaskUpdated(ctx context.Context, task *models.Task, old
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil, oldWorkflowIDs...)
 }
 
+// PublishTaskQueuePromoted notifies subscribers that a queued task has been
+// admitted to its destination step. The event is distinct from task.updated so
+// orchestration can launch deferred work exactly when capacity is granted.
+func (s *Service) PublishTaskQueuePromoted(ctx context.Context, task *models.Task) {
+	s.publishTaskEvent(ctx, events.TaskQueuePromoted, task, nil)
+}
+
 // PublishWorkspaceSourcesAdopted publishes the session refresh boundary after
 // a runtime has adopted the materialized workspace. Materializers must call it
 // only after agentctl adoption succeeds; protocol handlers never publish an
@@ -350,9 +357,16 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		"state":            string(task.State),
 		"priority":         task.Priority,
 		"position":         task.Position,
+		"wip_admitted":     task.WIPAdmitted,
 		"created_at":       task.CreatedAt.Format(time.RFC3339),
 		"updated_at":       task.UpdatedAt.Format(time.RFC3339),
 		"is_ephemeral":     task.IsEphemeral,
+	}
+	data["queued_for_step_id"] = task.QueuedForStepID
+	if task.QueuedAt != nil {
+		data["queued_at"] = task.QueuedAt.Format(time.RFC3339)
+	} else {
+		data["queued_at"] = nil
 	}
 
 	activity = s.addTaskSessionEventFieldsWithActivity(ctx, task.ID, data, activity)

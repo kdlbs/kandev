@@ -111,10 +111,6 @@ fi
 pass "Same-repository trusted review isolates App credentials in the protected environment"
 
 for harness_file in \
-  .agents/agents/pr-poller.md \
-  .codex/agents/pr-poller.toml \
-  .cursor/agents/pr-poller.md \
-  .opencode/agents/pr-poller.md \
   .agents/skills/pr-fixup/SKILL.md \
   .agents/skills/planner-orchestration/SKILL.md; do
   if ! grep -q 'OpenCode App.*trusted_producer=true\|trusted_producer=true.*OpenCode App\|OpenCode producer.*trusted_producer=true' "$ROOT_DIR/$harness_file"; then

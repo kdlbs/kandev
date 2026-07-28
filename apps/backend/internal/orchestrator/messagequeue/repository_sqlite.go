@@ -109,6 +109,49 @@ func (r *sqliteRepository) Insert(ctx context.Context, msg *QueuedMessage, maxPe
 	return tx.Commit()
 }
 
+func (r *sqliteRepository) Restore(ctx context.Context, msg *QueuedMessage, maxPerSession int) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin restore tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if maxPerSession > 0 {
+		var count int
+		if err := tx.GetContext(ctx, &count, r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), msg.SessionID); err != nil {
+			return fmt.Errorf("count: %w", err)
+		}
+		if count >= maxPerSession {
+			return ErrQueueFull
+		}
+	}
+	if msg.ID == "" {
+		msg.ID = uuid.New().String()
+	}
+	if msg.QueuedAt.IsZero() {
+		msg.QueuedAt = time.Now().UTC()
+	}
+	attachmentsJSON, err := marshalAttachments(msg.Attachments)
+	if err != nil {
+		return err
+	}
+	metadataJSON, err := marshalMetadata(msg.Metadata)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO queued_messages
+			(id, session_id, task_id, position, content, model, plan_mode, attachments_json, metadata_json, queued_at, queued_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`),
+		msg.ID, msg.SessionID, msg.TaskID, msg.Position, msg.Content, msg.Model,
+		boolToInt(msg.PlanMode), attachmentsJSON, metadataJSON, msg.QueuedAt, msg.QueuedBy,
+	); err != nil {
+		return fmt.Errorf("restore queued_messages: %w", err)
+	}
+	return tx.Commit()
+}
+
 func (r *sqliteRepository) AppendOrInsertTail(ctx context.Context, sessionID, taskID, content, model, queuedBy string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, bool, error) {
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {

@@ -24,6 +24,7 @@ import {
   textToHtml,
   handleEditorPaste,
 } from "./tiptap-helpers";
+import type { ImagePasteIssue } from "./clipboard-attachments";
 import { CodeBlockView } from "./tiptap-code-block-view";
 import { DynamicPlaceholder, updateDynamicPlaceholder } from "./tiptap-dynamic-placeholder";
 import { EntityReferenceNode } from "./tiptap-entity-reference-extension";
@@ -65,7 +66,7 @@ type UseTipTapEditorOptions = {
   onFocus?: () => void;
   onBlur?: () => void;
   sessionId: string | null;
-  onImagePaste?: (files: File[]) => void;
+  onImagePaste?: (files: File[], issue?: ImagePasteIssue) => void;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   mentionSuggestion: any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -185,7 +186,7 @@ function buildEditorProps(args: {
   className: string | undefined;
   onFocus: (() => void) | undefined;
   onBlur: (() => void) | undefined;
-  onImagePasteRef: React.RefObject<((files: File[]) => void) | undefined>;
+  onImagePasteRef: React.RefObject<((files: File[], issue?: ImagePasteIssue) => void) | undefined>;
 }) {
   return {
     attributes: {

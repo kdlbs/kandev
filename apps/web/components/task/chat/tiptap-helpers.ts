@@ -3,6 +3,7 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import { isEntityReference } from "@/lib/entity-references/message-references";
 import { formatSlashCommandLabel, normalizeSlashCommandName } from "./tiptap-slash-command-utils";
 import type { SlashCommand } from "./slash-command-types";
+import { readClipboardAttachments, type ImagePasteIssue } from "./clipboard-attachments";
 
 // ── JSON node types ─────────────────────────────────────────────────
 
@@ -287,17 +288,6 @@ export function parseCodeFences(text: string): FenceSegment[] {
 
 // ── Paste handler ───────────────────────────────────────────────────
 
-function extractFiles(items: DataTransferItemList): File[] {
-  const files: File[] = [];
-  for (const item of items) {
-    if (item.kind === "file") {
-      const file = item.getAsFile();
-      if (file) files.push(file);
-    }
-  }
-  return files;
-}
-
 function segmentToNodes(
   seg: FenceSegment,
   schema: import("@tiptap/pm/model").Schema,
@@ -332,21 +322,26 @@ function insertCodeFenceNodes(
 export function handleEditorPaste(
   view: import("@tiptap/pm/view").EditorView,
   event: ClipboardEvent,
-  onImagePasteRef: React.RefObject<((files: File[]) => void) | undefined>,
+  onImagePasteRef: React.RefObject<((files: File[], issue?: ImagePasteIssue) => void) | undefined>,
 ): boolean {
   // 1. File paste (images and other files)
-  const items = event.clipboardData?.items;
-  if (items) {
-    const files = extractFiles(items);
+  const clipboardData = event.clipboardData;
+  if (clipboardData) {
+    const { files, issue } = readClipboardAttachments(clipboardData);
     if (files.length > 0) {
       event.preventDefault();
       onImagePasteRef.current?.(files);
       return true;
     }
+    if (issue) {
+      event.preventDefault();
+      onImagePasteRef.current?.([], issue);
+      return true;
+    }
   }
 
   // 2. Markdown code fence paste
-  const text = event.clipboardData?.getData("text/plain");
+  const text = clipboardData?.getData("text/plain");
   if (text && text.includes("```")) {
     const segments = parseCodeFences(text);
     if (segments.some((s) => s.type === "code")) {

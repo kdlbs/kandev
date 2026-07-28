@@ -192,7 +192,7 @@ func (s *Service) buildDeploymentAppRuntimeWithClient(
 		personalAuth: personal,
 		webhookAuth: NewAppRegistrationWebhookService(
 			registrationID, config.WebhookSecret, connectionStore,
-			&installationRepositorySettingsUpdater{service: s}, personalRepo,
+			&installationRepositorySettingsUpdater{service: s}, personalRepo, s.eventBus,
 			GitHubWebhookReconciliation{Installations: appClient, Personal: personal},
 		),
 	}, nil

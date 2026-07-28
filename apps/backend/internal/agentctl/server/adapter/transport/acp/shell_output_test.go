@@ -365,6 +365,192 @@ func TestNormalizeShellToolResultStripsLeadingCommandEcho(t *testing.T) {
 	}
 }
 
+// TestNormalizeShellToolResultStripsLeadingCommandEchoWithWorkDirResolvedPath
+// is a regression for a real-world report: PR #1898's fix only strips the
+// echo when the captured terminal line matches the tool call's reported
+// "command" byte-for-byte. Some providers resolve a relative file-path
+// argument to an absolute one (workDir-joined) before actually invoking the
+// real terminal, while the "command" field reported on the tool call - the
+// same text the chat header renders - keeps the original relative form.
+// The literal prefix match then never fires, and the full echoed line
+// (with the resolved absolute path) leaks into the persisted Output.
+func TestNormalizeShellToolResultStripsLeadingCommandEchoWithWorkDirResolvedPath(t *testing.T) {
+	t.Parallel()
+
+	command := `grep -n "^const STRATEGY\|STRATEGY =" apps/web/components/task/chat/message-list.tsx`
+	workDir := "/home/clem/.kandev/tasks/new-message-line_0vc/kdlbs-kandev"
+	absolutePath := workDir + "/apps/web/components/task/chat/message-list.tsx"
+	resolvedCommand := strings.Replace(command, "apps/web/components/task/chat/message-list.tsx", absolutePath, 1)
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeToolResult(payload, "$ "+resolvedCommand+"\n24:const STRATEGY = \"native\";\n")
+
+	require.Equal(t, "24:const STRATEGY = \"native\";\n", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithWorkDirResolvedPath
+// covers the same workDir-resolved-path mismatch on the live-update path
+// (terminal_output plus a terminal_exit completion, no rawOutput).
+func TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithWorkDirResolvedPath(t *testing.T) {
+	t.Parallel()
+
+	command := "cat notes.txt"
+	workDir := "/repo"
+	resolvedCommand := "cat /repo/notes.txt"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{
+			"terminal_output": map[string]any{"data": "$ " + resolvedCommand + "\nhello\n"},
+			"terminal_exit":   map[string]any{"exit_code": float64(0)},
+		},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, "hello\n", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolUpdateWorkDirFallbackDefersPendingEchoWithoutNewline
+// covers the pending (non-final) counterpart of the workDir fallback: a
+// buffer that is exactly the resolved echo with no trailing newline yet
+// must be left untouched, since the real output (or even just the
+// separator newline) may still be in flight.
+func TestNormalizeShellToolUpdateWorkDirFallbackDefersPendingEchoWithoutNewline(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "cat notes.txt", "cwd": "/repo"},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output": map[string]any{"data": "$ cat /repo/notes.txt"}},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, "$ cat /repo/notes.txt", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolUpdateWorkDirFallbackCommitsPendingEchoWithNewline
+// covers the fallback's other pending-path branch: once a trailing newline
+// confirms the echo line is complete (hasMore == true), the strip commits
+// immediately even though commitExactMatch is false - the same behavior
+// finishCommandEchoStrip already applies once its literal-match "rest"
+// carries a newline.
+func TestNormalizeShellToolUpdateWorkDirFallbackCommitsPendingEchoWithNewline(t *testing.T) {
+	t.Parallel()
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": "cat notes.txt", "cwd": "/repo"},
+	})
+
+	normalizer.NormalizeShellToolUpdate(
+		payload,
+		map[string]any{"terminal_output": map[string]any{"data": "$ cat /repo/notes.txt\n"}},
+		nil,
+		nil,
+	)
+
+	require.Equal(t, "", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolResultWorkDirFallbackNeverCorruptsNearMissOutput is a
+// safety regression for the workDir-collapse fallback added alongside the
+// above test: ReplaceAll(firstLine, workDirPrefix, "") strips every
+// occurrence of that prefix from the echoed line, including one embedded in
+// a quoted argument that isn't a resolved file path (e.g. a grep pattern
+// that happens to contain workDir-looking text). If the collapsed line
+// still doesn't reconstruct "$ "+command exactly - because the real
+// terminal echo genuinely differs (different args, or the workDir text was
+// incidental rather than a resolved path) - the fallback must leave stdout
+// untouched rather than mangling legitimate output.
+func TestNormalizeShellToolResultWorkDirFallbackNeverCorruptsNearMissOutput(t *testing.T) {
+	t.Parallel()
+
+	command := `grep -n "/repo/notes" apps/foo.txt`
+	workDir := "/repo"
+	// The real terminal echo resolves the file argument to an absolute path
+	// (workDir-joined) AND happens to also carry a coincidental "/repo/"
+	// substring inside the quoted pattern - unrelated to path resolution.
+	// Collapsing every "/repo/" occurrence therefore also eats the pattern's
+	// own "/repo/" text, so the result can never exactly reconstruct
+	// "$ "+command: the fallback must decline to strip rather than guess.
+	stdout := `$ grep -n "/repo/notes" /repo/apps/foo.txt` + "\n1:a match\n"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeToolResult(payload, stdout)
+
+	require.Equal(t, stdout, payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolResultStripsLeadingCommandEchoWithTrailingSlashWorkDir
+// is a regression for a Codex review finding on this PR: a provider can
+// report "cwd" already "/"-terminated (e.g. "/repo/"). Appending "/"
+// unconditionally would then search for "/repo//" - a doubled separator
+// the actually-joined path ("/repo/notes.txt") never contains - silently
+// declining to strip a real echo.
+func TestNormalizeShellToolResultStripsLeadingCommandEchoWithTrailingSlashWorkDir(t *testing.T) {
+	t.Parallel()
+
+	command := "cat notes.txt"
+	workDir := "/repo/"
+	resolvedCommand := "cat /repo/notes.txt"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeToolResult(payload, "$ "+resolvedCommand+"\nhello\n")
+
+	require.Equal(t, "hello\n", payload.ShellExec().Output.Stdout)
+}
+
+// TestNormalizeShellToolResultStripsLeadingCommandEchoWithRootWorkDir covers
+// the same Codex finding's other reported case: the root directory "/" is
+// itself already "/"-terminated, so the joined path is single- not
+// double-slashed ("/notes.txt", not "//notes.txt").
+func TestNormalizeShellToolResultStripsLeadingCommandEchoWithRootWorkDir(t *testing.T) {
+	t.Parallel()
+
+	command := "cat notes.txt"
+	workDir := "/"
+	resolvedCommand := "cat /notes.txt"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeToolResult(payload, "$ "+resolvedCommand+"\nhello\n")
+
+	require.Equal(t, "hello\n", payload.ShellExec().Output.Stdout)
+}
+
 func TestNormalizeShellToolUpdateStripsLeadingCommandEchoFromLiveOutput(t *testing.T) {
 	t.Parallel()
 

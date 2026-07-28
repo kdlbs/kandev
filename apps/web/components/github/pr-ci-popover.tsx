@@ -540,10 +540,12 @@ export function PRCIPopover({
   pr,
   enabled,
   onOpenDetailPanel,
+  refreshTaskPR,
 }: {
   pr: TaskPR;
   enabled: boolean;
   onOpenDetailPanel?: () => void;
+  refreshTaskPR?: () => void;
 }) {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const { status: ghStatus } = useGitHubStatus(workspaceId);
@@ -552,6 +554,7 @@ export function PRCIPopover({
     workspaceId,
     pr,
     enabled && !authLost,
+    refreshTaskPR,
   );
   const onAddAsContext = useAddCheckToContext(pr);
 

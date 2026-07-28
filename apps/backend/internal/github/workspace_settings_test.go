@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestStore_GitHubWorkspaceSettingsRoundTrip(t *testing.T) {
@@ -44,6 +45,90 @@ func TestStore_GitHubWorkspaceSettingsRoundTrip(t *testing.T) {
 	}
 	if string(got.DefaultQueryPresets) != string(input.DefaultQueryPresets) {
 		t.Fatalf("default query presets = %s, want %s", got.DefaultQueryPresets, input.DefaultQueryPresets)
+	}
+}
+
+func TestTaskGitCredentialModeDefaultsManaged(t *testing.T) {
+	store := newTestStore(t)
+	settings, err := store.GetWorkspaceSettings(context.Background(), "ws-credential-mode")
+	if err != nil {
+		t.Fatalf("GetWorkspaceSettings() error = %v", err)
+	}
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatalf("marshal workspace settings: %v", err)
+	}
+	if !strings.Contains(string(raw), `"task_git_credentials_mode":"managed"`) {
+		t.Fatalf("settings JSON = %s, want managed task Git credential mode", raw)
+	}
+}
+
+func TestDescribeTaskGitCredentialPolicyUsesConnectionIdentity(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	installationID := int64(42)
+	for _, tc := range []struct {
+		name   string
+		conn   WorkspaceConnection
+		method string
+		actor  string
+	}{
+		{
+			name: "PAT", conn: WorkspaceConnection{WorkspaceID: "ws-pat", Source: ConnectionSourcePAT, GitHubHost: defaultGitHubHost, Login: "alice", Status: ConnectionStatusActive},
+			method: "pat", actor: "alice",
+		},
+		{
+			name: "GitHub App", conn: WorkspaceConnection{WorkspaceID: "ws-app", Source: ConnectionSourceGitHubAppInstallation, GitHubHost: defaultGitHubHost, InstallationID: &installationID, InstallationAccountLogin: "acme-bot", InstallationAccountType: "Organization", AppRegistrationID: "app-1", Status: ConnectionStatusActive},
+			method: "github_app_installation", actor: "acme-bot",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := store.db.ExecContext(ctx, `INSERT INTO workspaces (id) VALUES (?)`, tc.conn.WorkspaceID); err != nil {
+				t.Fatalf("create workspace: %v", err)
+			}
+			if tc.conn.AppRegistrationID != "" {
+				registration := newAppRegistration(tc.conn.AppRegistrationID, 99, "Acme automation", time.Now().UTC())
+				if err := store.InsertAppRegistration(ctx, registration); err != nil {
+					t.Fatalf("create app registration: %v", err)
+				}
+			}
+			if err := store.UpsertWorkspaceConnection(ctx, &tc.conn); err != nil {
+				t.Fatalf("UpsertWorkspaceConnection() error = %v", err)
+			}
+			svc := newWorkspaceAuthenticatedTestService(t, NewMockClient(), store, tc.conn.WorkspaceID)
+			policy, err := svc.DescribeTaskGitCredentialPolicy(ctx, tc.conn.WorkspaceID)
+			if err != nil {
+				t.Fatalf("DescribeTaskGitCredentialPolicy() error = %v", err)
+			}
+			if policy.Mode != TaskGitCredentialsModeManaged || policy.WorkspaceMethod != tc.method || policy.WorkspaceActor != tc.actor {
+				t.Fatalf("policy = %+v", policy)
+			}
+		})
+	}
+}
+
+func TestService_UpdateWorkspaceSettings_TaskGitCredentialMode(t *testing.T) {
+	store := newTestStore(t)
+	svc := newWorkspaceAuthenticatedTestService(t, NewMockClient(), store, "ws-credential-mode")
+	executor := TaskGitCredentialsModeExecutor
+	updated, err := svc.UpdateWorkspaceSettings(context.Background(), &UpdateWorkspaceSettingsRequest{
+		WorkspaceID:            "ws-credential-mode",
+		TaskGitCredentialsMode: &executor,
+	})
+	if err != nil {
+		t.Fatalf("UpdateWorkspaceSettings() error = %v", err)
+	}
+	if got := updated.TaskGitCredentialsMode; got != TaskGitCredentialsModeExecutor {
+		t.Fatalf("TaskGitCredentialsMode = %q, want executor", got)
+	}
+
+	invalid := "host"
+	_, err = svc.UpdateWorkspaceSettings(context.Background(), &UpdateWorkspaceSettingsRequest{
+		WorkspaceID:            "ws-credential-mode",
+		TaskGitCredentialsMode: &invalid,
+	})
+	if !errors.Is(err, ErrWorkspaceSettingsValidation) {
+		t.Fatalf("UpdateWorkspaceSettings() error = %v, want validation error", err)
 	}
 }
 

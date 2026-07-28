@@ -20,6 +20,14 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -29,6 +37,8 @@ import {
 } from "@kandev/ui/dropdown-menu";
 import { PanelHeaderBarSplit } from "./panel-primitives";
 import { BaseBranchPicker } from "./base-branch-picker";
+import type { GitCredentialDisplay } from "./changes-git-credential-display";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 
 type PerRepoStatus = {
   repository_name: string;
@@ -208,6 +218,7 @@ function BranchHoverCard({
   taskId,
   onRenameBranch,
   isRenaming,
+  credentialDisplay,
 }: {
   displayBranch: string;
   baseBranchDisplay: string;
@@ -218,50 +229,79 @@ function BranchHoverCard({
   taskId: string | null;
   onRenameBranch?: (newName: string, repo: string) => Promise<RenameBranchResult>;
   isRenaming: boolean;
+  credentialDisplay: GitCredentialDisplay | null;
 }) {
+  const usesTouchDrawer = useTouchDrawer();
+  const [open, setOpen] = useState(false);
   const isMulti = rows && rows.length > 0;
   const headerLabel = isMulti ? "Your branches:" : "Your code lives in:";
   const trailerLabel = "comparing against:";
-  return (
-    <HoverCard openDelay={200} closeDelay={100}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          className="flex items-center justify-center size-5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors cursor-default"
-        >
-          <IconGitBranch className="h-3.5 w-3.5" />
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent forceMount side="bottom" align="end" className="w-auto p-3">
-        <div className="flex flex-col gap-2.5 text-xs">
-          <div className="flex items-center justify-between gap-6">
-            <span className="text-muted-foreground/60">{headerLabel}</span>
-            <span className="text-muted-foreground/60">{trailerLabel}</span>
-          </div>
-          {isMulti ? (
-            <div className="flex flex-col gap-1.5">
-              {rows!.map((row) => (
-                <BranchRowView
-                  key={row.repoLabel ?? row.branch}
-                  {...row}
-                  taskId={taskId}
-                  onRenameBranch={onRenameBranch}
-                  isRenaming={isRenaming}
-                />
-              ))}
-            </div>
-          ) : (
+  const trigger = (
+    <button
+      type="button"
+      className="flex items-center justify-center size-5 rounded hover:bg-muted/60 text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+      aria-label="Show branch and Git credential details"
+    >
+      <IconGitBranch className="h-3.5 w-3.5" />
+    </button>
+  );
+  const content = (
+    <div className="flex flex-col gap-2.5 text-xs">
+      <div className="flex items-center justify-between gap-6">
+        <span className="text-muted-foreground/60">{headerLabel}</span>
+        <span className="text-muted-foreground/60">{trailerLabel}</span>
+      </div>
+      {isMulti ? (
+        <div className="flex flex-col gap-1.5">
+          {rows!.map((row) => (
             <BranchRowView
-              repoLabel={null}
-              branch={displayBranch}
-              baseBranch={baseBranchDisplay}
-              repositoryName=""
+              key={row.repoLabel ?? row.branch}
+              {...row}
               taskId={taskId}
               onRenameBranch={onRenameBranch}
               isRenaming={isRenaming}
             />
-          )}
+          ))}
         </div>
+      ) : (
+        <BranchRowView
+          repoLabel={null}
+          branch={displayBranch}
+          baseBranch={baseBranchDisplay}
+          repositoryName=""
+          taskId={taskId}
+          onRenameBranch={onRenameBranch}
+          isRenaming={isRenaming}
+        />
+      )}
+      {credentialDisplay && (
+        <div className="border-t pt-2 text-muted-foreground" data-testid="changes-git-credential">
+          <p className="font-medium text-foreground">{credentialDisplay.source}</p>
+          <p>{credentialDisplay.detail}</p>
+          <p>{credentialDisplay.transport}</p>
+        </div>
+      )}
+    </div>
+  );
+  if (usesTouchDrawer) {
+    return (
+      <Drawer open={open} onOpenChange={setOpen}>
+        <DrawerTrigger asChild>{trigger}</DrawerTrigger>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>Branch details</DrawerTitle>
+            <DrawerDescription>Branch comparison and task Git credentials.</DrawerDescription>
+          </DrawerHeader>
+          <div className="px-4 pb-6">{content}</div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+  return (
+    <HoverCard openDelay={200} closeDelay={100}>
+      <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+      <HoverCardContent forceMount side="bottom" align="end" className="w-auto p-3">
+        {content}
       </HoverCardContent>
     </HoverCard>
   );
@@ -517,6 +557,7 @@ export function ChangesPanelHeader({
   repoDisplayName,
   taskId,
   onRenameBranch,
+  credentialDisplay,
 }: {
   hasChanges: boolean;
   hasCommits: boolean;
@@ -540,6 +581,7 @@ export function ChangesPanelHeader({
   onRepoRebase: (repo: string) => void;
   onRepoMerge: (repo: string) => void;
   onRenameBranch?: (newName: string, repo: string) => Promise<RenameBranchResult>;
+  credentialDisplay: GitCredentialDisplay | null;
   repoDisplayName?: (repositoryName: string) => string | undefined;
   /** Active task id; piped into the base-branch picker so it can resolve
    *  the right task_repositories row to PATCH. Null while task data is
@@ -574,6 +616,7 @@ export function ChangesPanelHeader({
               taskId={taskId}
               onRenameBranch={onRenameBranch}
               isRenaming={loadingOperation === "rename_branch"}
+              credentialDisplay={credentialDisplay}
             />
           )}
           <PullDropdown

@@ -72,6 +72,13 @@ type InferenceAgent interface {
 	InferenceConfig() *InferenceConfig
 }
 
+// ManagedNPMRuntimeAgent is an optional capability for built-in agents whose
+// ACP runtime is resolved through npm. Package names and ACP arguments are
+// defined by the agent implementation rather than caller-provided input.
+type ManagedNPMRuntimeAgent interface {
+	ManagedNPMRuntime() ManagedNPMRuntimeSpec
+}
+
 // PassthroughAgent is an optional capability for agents that support CLI passthrough mode.
 type PassthroughAgent interface {
 	PassthroughConfig() PassthroughConfig

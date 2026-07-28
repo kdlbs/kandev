@@ -4,6 +4,12 @@
 > [ADR-2026-07-21-workspace-selectable-github-app-registrations](2026-07-21-workspace-selectable-github-app-registrations.md):
 > Kandev stores multiple App registrations and every workspace explicitly selects one registration
 > and installation. The automation and personal identity boundaries remain unchanged.
+>
+> Amended by
+> [ADR-2026-07-27-task-git-credential-policy](2026-07-27-task-git-credential-policy.md):
+> workspace automation identity and task Git credential routing are separate settings. Background
+> automation still uses the workspace connection; tasks may explicitly inherit executor
+> credentials instead of receiving the managed broker contract.
 
 - Status: accepted
 - Date: 2026-07-19
@@ -40,7 +46,8 @@ GitHub authentication has three ownership layers and is resolved by purpose:
    creating separate registrations provides independent root credentials and bot identities.
 2. **Workspace-owned automation connection.** Each workspace selects exactly one automation source:
    PAT, a named `gh` CLI host/login, a verified App installation, or the temporary
-   `legacy_shared` migration source. Background work and agents always use this identity.
+   `legacy_shared` migration source. Background work and managed-mode task agents use this
+   identity; executor-inherited tasks deliberately use executor-visible Git credentials instead.
 3. **User-owned personal connection within a workspace.** At most one verified App user connection
    exists per `(workspace_id, user_id)`. It provides authenticated-viewer semantics and human
    attribution. It is never injected into an agent. The current runtime uses `default-user`; future

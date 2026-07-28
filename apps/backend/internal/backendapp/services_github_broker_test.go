@@ -23,6 +23,13 @@ func (s *fakeGitHubCredentialLeaseService) IssueGitHubCredentialLease(
 	return &githubpkg.CredentialLease{Token: "lease-token"}, nil
 }
 
+func (*fakeGitHubCredentialLeaseService) DescribeTaskGitCredentialPolicy(
+	context.Context,
+	string,
+) (githubpkg.TaskGitCredentialPolicy, error) {
+	return githubpkg.TaskGitCredentialPolicy{Mode: githubpkg.TaskGitCredentialsModeManaged}, nil
+}
+
 func TestGitHubExecutorCredentialLeaseAdapterMapsScope(t *testing.T) {
 	service := &fakeGitHubCredentialLeaseService{}
 	adapter := githubExecutorCredentialLeaseAdapter{service: service}

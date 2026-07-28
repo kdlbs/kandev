@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -8,10 +8,14 @@ vi.mock("@/components/editors/external-vcs-file-link", () => ({
   ExternalVcsFileLink: (props: Record<string, unknown>) => (
     <span data-testid="external-vcs-file-link-props" data-props={JSON.stringify(props)} />
   ),
+  ExternalVcsFileMenuItem: (props: Record<string, unknown>) => (
+    <span data-testid="external-vcs-file-menu-item-props" data-props={JSON.stringify(props)} />
+  ),
 }));
 
 vi.mock("@/components/editors/file-actions-dropdown", () => ({
   FileActionsDropdown: () => <span data-testid="file-actions-dropdown" />,
+  FileActionsMenuItems: () => <span data-testid="file-actions-menu-items" />,
 }));
 
 vi.mock("@/hooks/use-global-view-mode", () => ({
@@ -71,10 +75,14 @@ describe("FileDiffToolbar", () => {
       size: "xs",
     });
     expect(screen.getByTestId("file-actions-dropdown")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copy diff" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /More actions for/ })).toBeNull();
   });
 
-  it("uses the 44px touch action in the mobile diff drawer", () => {
+  it("replaces the mobile icon strip with one labelled actions menu", () => {
     mocks.isMobile = true;
+    const onToggleExpandUnchanged = vi.fn();
+    const onToggleWordWrap = vi.fn();
     render(
       <TooltipProvider>
         <FileDiffToolbar
@@ -85,12 +93,38 @@ describe("FileDiffToolbar", () => {
           wordWrap={false}
           expandUnchanged={false}
           onDiscard={vi.fn()}
-          onToggleExpandUnchanged={vi.fn()}
-          onToggleWordWrap={vi.fn()}
+          onToggleExpandUnchanged={onToggleExpandUnchanged}
+          onToggleWordWrap={onToggleWordWrap}
         />
       </TooltipProvider>,
     );
 
-    expect(externalLinkProps().size).toBe("touch");
+    expect(screen.queryByRole("button", { name: "Copy diff" })).toBeNull();
+    expect(screen.queryByTestId("file-actions-dropdown")).toBeNull();
+
+    const trigger = screen.getByRole("button", { name: "More actions for src/app.ts" });
+    expect(trigger.className).toContain("size-11");
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+
+    const menu = screen.getByTestId("review-file-actions-menu");
+    expect(menu).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Copy diff" })).toBeTruthy();
+    const expand = screen.getByRole("menuitemcheckbox", { name: "Expand unchanged lines" });
+    const wrap = screen.getByRole("menuitemcheckbox", { name: "Wrap long lines" });
+    expect(expand.getAttribute("aria-checked")).toBe("false");
+    expect(wrap.getAttribute("aria-checked")).toBe("false");
+    expect(screen.queryByRole("menuitem", { name: /Switch to unified view/ })).toBeNull();
+    expect(screen.getByTestId("external-vcs-file-menu-item-props")).toBeTruthy();
+    expect(screen.getByTestId("file-actions-menu-items")).toBeTruthy();
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    expect(screen.queryByTestId("review-file-actions-menu")).toBeNull();
+
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Expand unchanged lines" }));
+    expect(onToggleExpandUnchanged).toHaveBeenCalledOnce();
   });
 });

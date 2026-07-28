@@ -155,6 +155,80 @@ func (f *fakeMessageDataSource) ListMessagesForPlugin(
 	return f.messages, nil
 }
 
+// fakeTaskWriter records CreateTask/UpdateTask inputs and returns canned
+// tasks, standing in for the backendapp adapter over internal/task/service.
+type fakeTaskWriter struct {
+	lastCreate  TaskCreateInput
+	lastUpdate  TaskUpdateInput
+	createCalls int
+	updateCalls int
+	created     *taskmodels.Task
+	updated     *taskmodels.Task
+	createErr   error
+	updateErr   error
+}
+
+func (f *fakeTaskWriter) CreateTask(_ context.Context, in TaskCreateInput) (*taskmodels.Task, error) {
+	f.createCalls++
+	f.lastCreate = in
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
+	if f.created != nil {
+		return f.created, nil
+	}
+	return &taskmodels.Task{ID: "task-created", WorkspaceID: in.WorkspaceID, WorkflowID: in.WorkflowID, Title: in.Title}, nil
+}
+
+func (f *fakeTaskWriter) UpdateTask(_ context.Context, in TaskUpdateInput) (*taskmodels.Task, error) {
+	f.updateCalls++
+	f.lastUpdate = in
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
+	if f.updated != nil {
+		return f.updated, nil
+	}
+	return &taskmodels.Task{ID: in.ID, Title: "updated"}, nil
+}
+
+// fakeMessenger records SendMessage calls, standing in for the backendapp
+// adapter over the task service + orchestrator delivery path.
+type fakeMessenger struct {
+	calls       int
+	lastTaskID  string
+	lastSession string
+	lastText    string
+	lastSource  string
+	result      PluginMessageResult
+	err         error
+}
+
+func (f *fakeMessenger) SendMessage(_ context.Context, taskID, sessionID, text, source string) (PluginMessageResult, error) {
+	f.calls++
+	f.lastTaskID, f.lastSession, f.lastText, f.lastSource = taskID, sessionID, text, source
+	if f.err != nil {
+		return PluginMessageResult{}, f.err
+	}
+	if f.result == (PluginMessageResult{}) {
+		return PluginMessageResult{SessionID: "session-x", Status: "sent"}, nil
+	}
+	return f.result, nil
+}
+
+// fakeTaskStarter records StartTask calls behind CreateTask's start_agent.
+type fakeTaskStarter struct {
+	calls  int
+	lastID string
+	err    error
+}
+
+func (f *fakeTaskStarter) StartTask(_ context.Context, taskID string) error {
+	f.calls++
+	f.lastID = taskID
+	return f.err
+}
+
 // testDataHost bundles a pluginHost with every fake it was wired from, so
 // tests can both drive Host calls and assert against the fakes' recorded
 // state.
@@ -168,6 +242,9 @@ type testDataHost struct {
 	messages   *fakeMessageDataSource
 	utilAgents *fakeUtilityAgentSource
 	utilRun    *fakeUtilityRunner
+	taskWriter *fakeTaskWriter
+	messenger  *fakeMessenger
+	starter    *fakeTaskStarter
 }
 
 // newTestDataHost builds a fully-wired pluginHost (every Host data API
@@ -183,6 +260,9 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		messages:   &fakeMessageDataSource{},
 		utilAgents: &fakeUtilityAgentSource{},
 		utilRun:    &fakeUtilityRunner{text: "ok"},
+		taskWriter: &fakeTaskWriter{},
+		messenger:  &fakeMessenger{},
+		starter:    &fakeTaskStarter{},
 	}
 	d.host = &pluginHost{
 		pluginID:         "p1",
@@ -193,9 +273,13 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		agentProfiles:    d.profiles,
 		sessionCodeStats: d.codeStats,
 		messageData:      d.messages,
+		taskWriter:       d.taskWriter,
 		configs:          &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
 		utilityDeps: func() (utilityAgentSource, utilityRunner) {
 			return d.utilAgents, d.utilRun
+		},
+		writeDeps: func() (taskMessenger, taskStarter) {
+			return d.messenger, d.starter
 		},
 	}
 	return d

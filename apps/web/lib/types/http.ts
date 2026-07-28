@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- HTTP DTO definitions intentionally co-locate protocol shapes. */
+
 import type { ExecutorType } from "./executor";
 import type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
 import type { UserSettings } from "./http-user-settings";
@@ -307,6 +309,9 @@ export type Task = ActiveSubagentCountFields & {
   description: string;
   state: TaskState;
   priority: number;
+  wip_admitted?: boolean;
+  queued_for_step_id?: string;
+  queued_at?: string | null;
   repositories?: TaskRepository[];
   workspace_folders?: WorkspaceFolder[];
   primary_session_id?: SessionId | null;

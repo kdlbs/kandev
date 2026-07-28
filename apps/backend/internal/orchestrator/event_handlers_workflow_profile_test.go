@@ -18,7 +18,7 @@ import (
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
-func TestAutoStartStepPrompt_CreatedUnassignedProjectSessionUsesOfficeContext(t *testing.T) {
+func TestAutoStartStepPrompt_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-office", "session-office", models.TaskSessionStateCreated)
@@ -72,10 +72,14 @@ func TestAutoStartStepPrompt_CreatedUnassignedProjectSessionUsesOfficeContext(t 
 	)
 	prompt := spoofedReference + "\n\n" +
 		sysprompt.InjectOfficeContext("wrong-task", "wrong-session", "Do the work")
-	if err := svc.autoStartStepPrompt(ctx, "task-office", session, step, prompt, false, false); err != nil {
-		t.Fatalf("autoStartStepPrompt: %v", err)
+	err = svc.autoStartStepPrompt(ctx, "task-office", session, step, prompt, false, false)
+	if err == nil || !strings.Contains(err.Error(), "office tasks must be started through Office") {
+		t.Fatalf("autoStartStepPrompt error = %v, want Office scheduler guard", err)
 	}
 
+	// recordAutoStartMessage persists the first-turn message before
+	// StartCreatedSession enforces the Office scheduler guard. Verify that the
+	// message still has canonical Office context even though launch is rejected.
 	if len(messages.userMessages) != 1 {
 		t.Fatalf("expected one recorded first-turn message, got %d", len(messages.userMessages))
 	}

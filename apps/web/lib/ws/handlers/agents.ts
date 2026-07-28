@@ -90,6 +90,16 @@ export function registerAgentsHandlers(store: StoreApi<AppState>): WsHandlers {
     "agent.install.finished": (message) => {
       store.getState().upsertInstallJob(message.payload);
     },
+    "agent.update.started": (message) => {
+      store.getState().upsertAgentUpdateJob(message.payload);
+    },
+    "agent.update.output": (message) => {
+      const { agent_name, job_id, chunk } = message.payload;
+      store.getState().appendAgentUpdateOutput(agent_name, job_id, chunk);
+    },
+    "agent.update.finished": (message) => {
+      store.getState().upsertAgentUpdateJob(message.payload);
+    },
     "agent.updated": (message) => {
       store.setState((state) => ({
         ...state,

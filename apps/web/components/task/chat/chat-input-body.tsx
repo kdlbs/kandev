@@ -10,6 +10,7 @@ import { ChatInputToolbar } from "./chat-input-toolbar";
 import { ContextZone } from "./context-items/context-zone";
 import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
+import type { ImagePasteIssue } from "./clipboard-attachments";
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
@@ -32,7 +33,7 @@ export type ChatInputEditorAreaProps = {
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled: boolean;
-  addFiles: (files: File[]) => Promise<void>;
+  addFiles: (files: File[], issue?: ImagePasteIssue) => Promise<void>;
   fileInputRef: React.RefObject<HTMLInputElement | null>;
   showRequestChangesTooltip: boolean;
   hideSessionsDropdown?: boolean;

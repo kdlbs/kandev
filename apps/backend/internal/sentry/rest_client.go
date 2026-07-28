@@ -385,6 +385,13 @@ func (c *RESTClient) searchIssues(
 	if filter.OrgSlug == "" {
 		return nil, &APIError{StatusCode: http.StatusBadRequest, Message: "orgSlug required"}
 	}
+	if len(filter.ProjectSlugs) > 1 {
+		// One Sentry request is scoped to at most one project (see
+		// issuesSearchPath). A watch polling several projects issues one
+		// request per slug — see Service.CheckIssueWatch — instead of
+		// reaching this method with more than one.
+		return nil, &APIError{StatusCode: http.StatusBadRequest, Message: "searchIssues: at most one project slug per request"}
+	}
 	q := url.Values{}
 	if limit > 0 {
 		q.Set("per_page", strconv.Itoa(limit))
@@ -406,7 +413,7 @@ func (c *RESTClient) searchIssues(
 		q.Set("query", built)
 	}
 	var nodes []issueNode
-	resp, err := c.do(ctx, issuesSearchPath(filter.OrgSlug, filter.ProjectSlug), q, &nodes)
+	resp, err := c.do(ctx, issuesSearchPath(filter.OrgSlug, projectSlugForRequest(filter)), q, &nodes)
 	if err != nil {
 		return nil, err
 	}
@@ -438,6 +445,16 @@ func issuesSearchPath(orgSlug, projectSlug string) string {
 	return "/projects/" + url.PathEscape(orgSlug) + "/" + url.PathEscape(projectSlug) + "/issues/"
 }
 
+// projectSlugForRequest returns the sole project slug to scope a single
+// Sentry request to, or "" for the org-wide fallback. searchIssues already
+// rejects more than one entry, so this is just an ergonomic accessor.
+func projectSlugForRequest(f SearchFilter) string {
+	if len(f.ProjectSlugs) == 0 {
+		return ""
+	}
+	return f.ProjectSlugs[0]
+}
+
 // buildIssueQueryString assembles Sentry's search-bar syntax from a
 // SearchFilter. Multiple levels use Sentry's IN-filter bracket syntax
 // (`level:[error, fatal]`), which matches any of the listed values; a single
@@ -445,9 +462,22 @@ func issuesSearchPath(orgSlug, projectSlug string) string {
 // form in Sentry search, so statuses are emitted as plain `is:bar` tokens;
 // watch filters are limited to a single status (enforced by
 // validateFilterStatuses) because two `is:` tokens would AND-combine and match
-// nothing.
+// nothing. StatsPeriod is translated into an `age:` token — see
+// statsPeriodAgeToken's doc comment for why that translation, not the
+// `statsPeriod` query param set separately in searchIssues, is what actually
+// restricts which issues come back.
+//
+// The free-text Query is parenthesized whenever it is combined with another
+// token below. Sentry's search grammar ANDs implicitly-adjacent terms tighter
+// than an explicit `OR`, so an unparenthesized query containing `OR` (e.g.
+// `foo OR bar`) would bind the level/status/age tokens to only the adjacent
+// branch — `foo OR bar age:-24h` parses as `foo OR (bar age:-24h)`, so an old
+// `foo` issue still matches despite the configured age window. Wrapping in
+// parens groups the whole user query before it is ANDed against the
+// structured filters. A standalone query (nothing else to combine with) is
+// left unwrapped since parenthesizing it would be a no-op.
 func buildIssueQueryString(f SearchFilter) string {
-	parts := make([]string, 0, 4)
+	parts := make([]string, 0, 5)
 	levels := make([]string, 0, len(f.Levels))
 	for _, lvl := range f.Levels {
 		if lvl = strings.TrimSpace(lvl); lvl != "" {
@@ -472,10 +502,72 @@ func buildIssueQueryString(f SearchFilter) string {
 		}
 		parts = append(parts, "is:"+st)
 	}
+	age := statsPeriodAgeToken(f.StatsPeriod)
 	if q := strings.TrimSpace(f.Query); q != "" {
+		if len(parts) > 0 || age != "" {
+			q = "(" + q + ")"
+		}
 		parts = append(parts, q)
 	}
+	if age != "" {
+		parts = append(parts, age)
+	}
 	return strings.Join(parts, " ")
+}
+
+// statsPeriodPattern matches Sentry's relative-duration syntax: an integer
+// followed by h(ours)/d(ays)/w(eeks) — the same units Sentry's `age:` search
+// token and this integration's StatsPeriod values (1h, 24h, 7d, 14d, 30d) use.
+var statsPeriodPattern = regexp.MustCompile(`^[1-9]\d*[hdw]$`)
+
+// maxStatsPeriodUnits bounds the numeric component parseStatsPeriodUnits
+// accepts. 3650 weeks is ~2.2e18 ns, comfortably under the ~9.2e18 ns
+// ceiling time.Duration's int64 nanoseconds can hold even for the largest
+// unit (weeks) — see mock_client.go's parseStatsPeriod, which multiplies
+// this out into a duration and would otherwise silently wrap on overflow.
+// The bound comfortably covers every real value (the UI offers at most 30)
+// while keeping the REST `age:` token and the mock's duration math
+// rejecting the exact same out-of-range input, so a StatsPeriod that's
+// nonsensical in one path can't still pass as a valid filter in the other.
+const maxStatsPeriodUnits = 3650
+
+// parseStatsPeriodUnits validates period against Sentry's relative-duration
+// syntax and the shared accepted range, returning the numeric component and
+// unit byte ('h'/'d'/'w') on success. statsPeriodAgeToken below and
+// mock_client.go's parseStatsPeriod both build on this so the real REST
+// client and the mock that backs E2E tests accept or reject the exact same
+// input.
+func parseStatsPeriodUnits(period string) (n int, unit byte, ok bool) {
+	period = strings.TrimSpace(period)
+	if !statsPeriodPattern.MatchString(period) {
+		return 0, 0, false
+	}
+	n, err := strconv.Atoi(period[:len(period)-1])
+	if err != nil || n <= 0 || n > maxStatsPeriodUnits {
+		return 0, 0, false
+	}
+	return n, period[len(period)-1], true
+}
+
+// statsPeriodAgeToken translates a StatsPeriod value into Sentry's
+// `age:-<period>` search token, which restricts results to issues first seen
+// within that window. Returns "" for empty, unrecognized, or out-of-range
+// input, leaving the query unfiltered by age exactly as before this
+// translation existed.
+//
+// This exists because Sentry's `statsPeriod` query param (set separately in
+// searchIssues) does NOT filter which issues an issue search returns — it
+// only sizes the per-issue event-count stats window returned alongside each
+// result (https://github.com/getsentry/sentry/issues/36375). Both the issue
+// browser and issue watches expose StatsPeriod as "how far back to look for
+// matching issues"; without this translation a watch configured for e.g. the
+// last 24h silently matches (and creates tasks for) issues of any age.
+func statsPeriodAgeToken(period string) string {
+	period = strings.TrimSpace(period)
+	if _, _, ok := parseStatsPeriodUnits(period); !ok {
+		return ""
+	}
+	return "age:-" + period
 }
 
 // nextCursorRe extracts the cursor from a Sentry Link header entry of the form

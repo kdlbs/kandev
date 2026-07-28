@@ -34,7 +34,8 @@ TASK: Add validation to the workspace import endpoint.
 RULES: apps/backend/AGENTS.md
 FILES: handler, service, repository, existing tests
 PATTERN: nearest import/export endpoint and its tests
-VERIFY: targeted Go test, then /verify if shared behavior changed
+VERIFY: targeted Go test; add only the exact E2E or integration command named
+by the task file. Do not schedule broad `/verify` automatically.
 ```
 
 For failed checks:

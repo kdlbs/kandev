@@ -59,6 +59,7 @@ func TestClassify_ProviderRules(t *testing.T) {
 		{"claude auth", "claude-acp", "you are not authenticated", CodeAuthRequired},
 		{"claude model", "claude-acp", "model claude-foo not found here", CodeModelUnavailable},
 		{"codex quota", "codex-acp", "insufficient_quota for project", CodeQuotaLimited},
+		{"codex usage limit", "codex-acp", `{"codexErrorInfo":"usageLimitExceeded"}`, CodeQuotaLimited},
 		{"codex rate", "codex-acp", "rate_limit_exceeded", CodeRateLimited},
 		{"codex apikey", "codex-acp", "invalid api key provided", CodeMissingCredentials},
 		{"opencode auth", "opencode-acp", "Unauthorized request", CodeAuthRequired},

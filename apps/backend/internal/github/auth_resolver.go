@@ -71,6 +71,11 @@ type credentialCacheEpoch struct {
 	workspace uint64
 }
 
+type credentialCacheEntry struct {
+	resolved *ResolvedCredential
+	cachedAt time.Time
+}
+
 // CredentialResolver owns credential selection for all GitHub operations.
 // Its cache is keyed by workspace and generation so replacement or revocation
 // cannot reuse a client created for another principal.
@@ -86,7 +91,7 @@ type CredentialResolver struct {
 	now         func() time.Time
 
 	mu              sync.Mutex
-	cache           map[credentialCacheKey]*ResolvedCredential
+	cache           map[credentialCacheKey]credentialCacheEntry
 	allEpoch        uint64
 	workspaceEpochs map[string]uint64
 }
@@ -103,7 +108,7 @@ func NewCredentialResolver(connections workspaceConnectionReader, secrets authSe
 		},
 		ghToken:         ResolveGHAccountToken,
 		now:             time.Now,
-		cache:           make(map[credentialCacheKey]*ResolvedCredential),
+		cache:           make(map[credentialCacheKey]credentialCacheEntry),
 		workspaceEpochs: make(map[string]uint64),
 	}
 }
@@ -443,10 +448,15 @@ func (r *CredentialResolver) resolveLegacy(
 func (r *CredentialResolver) cached(key credentialCacheKey) *ResolvedCredential {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	resolved := r.cache[key]
-	if resolved == nil {
+	entry, ok := r.cache[key]
+	if !ok || entry.resolved == nil {
 		return nil
 	}
+	if key.source == ConnectionSourceGHCLI && !entry.cachedAt.Add(credentialCacheRefreshMargin).After(r.now()) {
+		delete(r.cache, key)
+		return nil
+	}
+	resolved := entry.resolved
 	if !resolved.ExpiresAt.IsZero() && !resolved.ExpiresAt.After(r.now().Add(credentialCacheRefreshMargin)) {
 		delete(r.cache, key)
 		return nil
@@ -469,7 +479,7 @@ func (r *CredentialResolver) storeCached(
 			delete(r.cache, existing)
 		}
 	}
-	r.cache[key] = cloneResolvedCredential(resolved)
+	r.cache[key] = credentialCacheEntry{resolved: cloneResolvedCredential(resolved), cachedAt: r.now()}
 	return true
 }
 

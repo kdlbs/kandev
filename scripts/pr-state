@@ -21,7 +21,7 @@
 #       current_head_sha, evidence_head_sha, exact_current_head_reviews,
 #       trusted_default_producer_exact_current_head_reviews,
 #       blocked_exact_current_head_reviews, blocked_exact_current_head_review_count,
-#       active_changes_requested, active_changes_requested_count }
+#       active_changes_requested, active_changes_requested_count, trusted_producer }
 #   - issue_comments: [{ author, body, created_at, url }]
 #   - errors: [{ source, message }]
 #
@@ -43,7 +43,8 @@
 #       current_head_sha, evidence_head_sha, exact_current_head_reviews,
 #       trusted_default_producer_exact_current_head_reviews,
 #       blocked_exact_current_head_reviews, blocked_exact_current_head_review_count,
-#       active_changes_requested, active_changes_requested_count }
+#       active_changes_requested, active_changes_requested_count, trusted_producer }
+#   - actionable_issue_comment_count: <N>
 #   - summary_notes: [<short human-readable notes>]
 #   - errors: [{ source, message }]
 #

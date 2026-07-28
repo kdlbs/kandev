@@ -132,6 +132,7 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 	}
 
 	loginCommand := buildLoginCommandDTO(ag)
+	runtimeUpdate := c.buildRuntimeUpdateDTO(ag, availability.Available)
 
 	return dto.AvailableAgentDTO{
 		Name:               ag.ID(),
@@ -148,8 +149,36 @@ func (c *Controller) buildAvailableAgentDTO(ctx context.Context, ag agents.Agent
 		PermissionSettings: permissionSettings,
 		PassthroughConfig:  passthroughConfig,
 		LoginCommand:       loginCommand,
+		RuntimeUpdate:      runtimeUpdate,
 		UpdatedAt:          now,
 	}
+}
+
+func (c *Controller) buildRuntimeUpdateDTO(ag agents.Agent, available bool) *dto.RuntimeUpdateDTO {
+	if !available {
+		return nil
+	}
+	managed, ok := ag.(agents.ManagedNPMRuntimeAgent)
+	if !ok {
+		return nil
+	}
+	spec := managed.ManagedNPMRuntime()
+	if spec.Package == "" {
+		return nil
+	}
+	item := &dto.RuntimeUpdateDTO{Supported: true, Package: spec.Package}
+	if c.runtimeUpdater != nil {
+		if caps, found := c.runtimeUpdater.CurrentCapabilities(ag.ID()); found {
+			item.CurrentVersion = caps.AgentVersion
+		}
+		return item
+	}
+	if c.hostUtility != nil {
+		if caps, found := c.hostUtility.Get(ag.ID()); found {
+			item.CurrentVersion = caps.AgentVersion
+		}
+	}
+	return item
 }
 
 // buildLoginCommandDTO surfaces the interactive login command for agents that

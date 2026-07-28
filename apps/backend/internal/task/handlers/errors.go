@@ -17,6 +17,10 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusNotFound, gin.H{"error": fallback})
 		return
 	}
+	if errors.Is(err, service.ErrWIPLimitExceeded) {
+		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
 	if isValidationError(err) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return

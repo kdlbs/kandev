@@ -1267,6 +1267,8 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1285,6 +1287,27 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	}
 	if status.Entries[0].Content != "hello" {
 		t.Fatalf("expected queued content to be preserved, got %q", status.Entries[0].Content)
+	}
+	if status.Entries[0].Metadata[metaKeyUserMessageRecorded] != true {
+		t.Fatalf("expected requeued transient prompt to retain recorded-user-message metadata, got %#v", status.Entries[0].Metadata)
+	}
+
+	secondPromptDone := make(chan struct{})
+	agentMgr.mu.Lock()
+	agentMgr.promptErr = nil
+	agentMgr.promptDone = secondPromptDone
+	agentMgr.capturedPrompts = agentMgr.capturedPrompts[:0]
+	agentMgr.capturedPromptCalls = agentMgr.capturedPromptCalls[:0]
+	agentMgr.mu.Unlock()
+
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+	select {
+	case <-secondPromptDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("boot-ready drain did not dispatch the transiently requeued prompt")
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("expected boot-ready drain to reuse the existing user message, got %d", len(messages.userMessages))
 	}
 }
 
@@ -2489,60 +2512,6 @@ func TestHandleAgentStartFailed(t *testing.T) {
 	})
 }
 
-func TestHandleResumeFailure(t *testing.T) {
-	ctx := context.Background()
-
-	t.Run("clears resume token and sets WAITING_FOR_INPUT", func(t *testing.T) {
-		repo := setupTestRepo(t)
-		now := time.Now().UTC()
-		seedSession(t, repo, "t1", "s1", "step1")
-
-		// Add executor running with resume token
-		_ = repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
-			ID: "er1", SessionID: "s1", TaskID: "t1", ResumeToken: "acp-session-old",
-			CreatedAt: now, UpdatedAt: now,
-		})
-
-		taskRepo := newMockTaskRepo()
-		seedMockTaskState(taskRepo, "t1", v1.TaskStateInProgress)
-		svc := createTestService(repo, newMockStepGetter(), taskRepo)
-
-		result := svc.handleResumeFailure(ctx, watcher.AgentEventData{
-			TaskID:           "t1",
-			SessionID:        "s1",
-			AgentExecutionID: "exec-1",
-			ErrorMessage:     "resume failed: session expired",
-		})
-
-		if !result {
-			t.Error("expected handleResumeFailure to return true")
-		}
-
-		// Verify resume token was cleared
-		running, err := repo.GetExecutorRunningBySessionID(ctx, "s1")
-		if err != nil {
-			t.Fatalf("failed to get executor running: %v", err)
-		}
-		if running.ResumeToken != "" {
-			t.Errorf("expected empty resume token, got %q", running.ResumeToken)
-		}
-
-		// Verify session state
-		session, err := repo.GetTaskSession(ctx, "s1")
-		if err != nil {
-			t.Fatalf("failed to get session: %v", err)
-		}
-		if session.State != models.TaskSessionStateWaitingForInput {
-			t.Errorf("expected session state %q, got %q", models.TaskSessionStateWaitingForInput, session.State)
-		}
-
-		// Verify task moved to REVIEW
-		if state, ok := taskRepo.updatedStates["t1"]; !ok || state != v1.TaskStateReview {
-			t.Errorf("expected task state %q, got %q (ok=%v)", v1.TaskStateReview, state, ok)
-		}
-	})
-}
-
 func TestHandleAgentFailed_RecoverableWithSession(t *testing.T) {
 	ctx := context.Background()
 
@@ -2579,7 +2548,7 @@ func TestHandleAgentFailed_RecoverableWithSession(t *testing.T) {
 		}
 	})
 
-	t.Run("routes to resume failure when resume token exists and init not completed", func(t *testing.T) {
+	t.Run("retains resume token when ACP fails before initialization", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		now := time.Now().UTC()
 		seedSession(t, repo, "t1", "s1", "step1")
@@ -2600,13 +2569,14 @@ func TestHandleAgentFailed_RecoverableWithSession(t *testing.T) {
 			ErrorMessage:     "resume failed",
 		})
 
-		// Resume token should be cleared
+		// A pre-ACP failure is retryable; only explicit fresh-start recovery clears
+		// the provider-native session identity.
 		running, err := repo.GetExecutorRunningBySessionID(ctx, "s1")
 		if err != nil {
 			t.Fatalf("failed to get executor running: %v", err)
 		}
-		if running.ResumeToken != "" {
-			t.Errorf("expected resume token to be cleared, got %q", running.ResumeToken)
+		if running.ResumeToken != "acp-session-old" {
+			t.Errorf("expected resume token to be retained, got %q", running.ResumeToken)
 		}
 
 		// Session should be WAITING_FOR_INPUT

@@ -2,11 +2,13 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // WatcherDispatchCoordinator owns the cross-integration pipeline that turns
@@ -357,8 +359,13 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 
 	task, err := c.getTaskCreator().CreateIssueTask(ctx, req)
 	if err != nil {
-		c.logger.Error("watcher dispatch: create issue task failed",
-			zap.String("source", src.Name()), zap.Error(err))
+		if errors.Is(err, workflowmodels.ErrWIPLimitExceeded) {
+			c.logger.Info("watcher dispatch: workflow step at capacity; deferring issue task",
+				zap.String("source", src.Name()), zap.String("workflow_step_id", req.WorkflowStepID), zap.Error(err))
+		} else {
+			c.logger.Error("watcher dispatch: create issue task failed",
+				zap.String("source", src.Name()), zap.Error(err))
+		}
 		src.Release(ctx, evt)
 		return
 	}
@@ -379,12 +386,16 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 		zap.String("source", src.Name()),
 		zap.String("task_id", task.ID))
 
-	if !c.shouldAutoStart(ctx, req.WorkflowStepID) {
+	stepID := task.WorkflowStepID
+	if stepID == "" {
+		stepID = req.WorkflowStepID
+	}
+	if task.QueuedForStepID != "" || !c.shouldAutoStart(ctx, stepID) {
 		return
 	}
 
 	params := src.AutoStartParams(evt)
-	if err := c.startTask.Start(ctx, task.ID, req.WorkflowStepID, task.Description, params); err != nil {
+	if err := c.startTask.Start(ctx, task.ID, stepID, task.Description, params); err != nil {
 		c.logger.Error("watcher dispatch: auto-start failed",
 			zap.String("source", src.Name()),
 			zap.String("task_id", task.ID),

@@ -39,7 +39,7 @@ export function StepWipControls({
           <Label htmlFor={`${step.id}-wip-limit`} className="text-xs font-medium">
             WIP limit
           </Label>
-          <HelpTip text="Maximum tasks allowed in this step at once. Use 0 for unlimited." />
+          <HelpTip text="Maximum admitted (active) tasks in this step. Overflow stays visible in a queue. Use 0 for unlimited." />
         </div>
         <Input
           id={`${step.id}-wip-limit`}
@@ -66,7 +66,7 @@ export function StepWipControls({
           <Label htmlFor={pullFromSelectID} className="text-xs font-medium">
             Pull from
           </Label>
-          <HelpTip text="Optional feeder step to pull work from when this step has capacity." />
+          <HelpTip text="Optional feeder step to pull queued work from when this step has capacity." />
         </div>
         <Select
           value={pullFromValue}
@@ -100,6 +100,10 @@ export function StepWipControls({
           </SelectContent>
         </Select>
       </div>
+      <p className="text-xs text-muted-foreground sm:col-span-2">
+        WIP limits active work, not visibility. Overflow remains on the board until capacity opens;
+        if a selected feeder is also full, new task creation is rejected.
+      </p>
     </div>
   );
 }

@@ -85,11 +85,12 @@ type ContextWindowData struct {
 // EventHandlers contains callbacks for different event types
 type EventHandlers struct {
 	// Task events
-	OnTaskCreated      func(ctx context.Context, data TaskEventData)
-	OnTaskUpdated      func(ctx context.Context, data TaskEventData)
-	OnTaskStateChanged func(ctx context.Context, data TaskEventData)
-	OnTaskDeleted      func(ctx context.Context, data TaskEventData)
-	OnTaskMoved        func(ctx context.Context, data TaskMovedEventData)
+	OnTaskCreated       func(ctx context.Context, data TaskEventData)
+	OnTaskUpdated       func(ctx context.Context, data TaskEventData)
+	OnTaskQueuePromoted func(ctx context.Context, data TaskEventData)
+	OnTaskStateChanged  func(ctx context.Context, data TaskEventData)
+	OnTaskDeleted       func(ctx context.Context, data TaskEventData)
+	OnTaskMoved         func(ctx context.Context, data TaskMovedEventData)
 
 	// Agent events
 	OnAgentStarted      func(ctx context.Context, data AgentEventData)
@@ -265,6 +266,17 @@ func (w *Watcher) subscribeToTaskEvents() error {
 		if err != nil {
 			w.logger.Error("Failed to subscribe to task moved event",
 				zap.String("subject", events.TaskMoved),
+				zap.String("queue", w.queue),
+				zap.Error(err))
+			return err
+		}
+		w.subscriptions = append(w.subscriptions, sub)
+	}
+	if w.handlers.OnTaskQueuePromoted != nil {
+		sub, err := w.eventBus.QueueSubscribe(events.TaskQueuePromoted, w.queue, w.createTaskEventHandler(w.handlers.OnTaskQueuePromoted))
+		if err != nil {
+			w.logger.Error("Failed to subscribe to task queue promotion events",
+				zap.String("subject", events.TaskQueuePromoted),
 				zap.String("queue", w.queue),
 				zap.Error(err))
 			return err

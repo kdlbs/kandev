@@ -70,6 +70,22 @@ Choose this for a deliberate multi-pass delivery process. It is excessive for sm
 
 Choose this for a local first-pass review. For repository-provider watch automation, use the relevant integration instead.
 
+### GitHub review watches and WIP limits
+
+A GitHub Review Watch creates each matching pull request in its configured
+workflow step. If that step has a WIP limit, admission is atomic and overflow
+is still visible: queued tasks remain on the board without starting an agent or
+consuming an admitted slot. With a configured feeder, overflow is placed there
+and tagged for the review step; without one, it remains queued in the review
+step. If the feeder is also full, creation is deferred for a later poll and its
+temporary watch reservation is released.
+
+If the target step has `auto_start_agent` on entry and `move_to_next` on turn
+completion, the task remains in the target step during agent startup and active
+review. `agent.boot_ready` only makes the session ready; the first real turn
+completion performs the configured move once. Use a human-gate transition when
+reviews must wait for approval instead of advancing automatically.
+
 ## Build a custom workflow
 
 Choose **Add Workflow**, give it a name, select **Custom**, and save it. Expand each step to edit its behavior. Reorder steps by dragging them; transition actions that say “next” or “previous” follow the saved position order.
@@ -88,10 +104,10 @@ Workflow-level settings include the name and default agent profile. A step can o
 | Show in command panel | Includes tasks in this step in the command panel. |
 | Auto-archive | Archives eligible tasks after the configured number of hours. `0` disables it; the background sweep runs every five minutes and uses task `updated_at`, so timing is approximate. |
 | Wait for agent completion signal | With an `on_turn_complete` transition, waits for the agent to call `step_complete_kandev`. A halt without the signal leaves the task on the current step; retry or reconnect the agent, or move the task through the normal workflow UI. Without this setting, a normal turn end counts as completion. Default is off. |
-| WIP limit | Maximum active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. A full target rejects manual and automated moves. |
-| Pull from | Optional feeder step. When a WIP-limited step is vacated, Kandev moves candidates from the feeder until capacity is full. Self-references, cross-workflow references, and pull cycles are rejected. |
+| WIP limit | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited; visible overflow is queued. A full target rejects manual moves. |
+| Pull from | Optional one-hop feeder step. When capacity opens, Kandev promotes queued destination work first, then feeder work. A full feeder rejects new overflow creation. |
 
-Pull candidates are selected by board position, then priority, creation time, and ID. A candidate that cannot be moved is skipped. Pulling only runs when the receiving step has both a positive WIP limit and a feeder.
+Pull candidates are selected by board position, then priority, queue time, creation time, and ID. A candidate that cannot be moved is skipped. Pulling runs for every limited step; a feeder is only needed for overflow created outside the destination step.
 
 ## Events and actions
 
@@ -137,7 +153,7 @@ A task may contain several repositories, but a workflow step is not bound to one
 
 - **Task starts in the wrong column:** confirm exactly one Start step, save the workflow, and check whether the creator supplied an explicit `workflow_step_id`.
 - **Agent does not start:** verify the effective workflow/step agent profile, its health, executor profile, repository access, and the `auto_start_agent` entry action.
-- **Task stays after a turn:** check for an absent transition, a pending clarification, the explicit-completion toggle, a full WIP target, or an invalid target left by an older definition.
+- **Task stays after a turn:** check for an absent transition, a pending clarification, the explicit-completion toggle, a queued WIP card waiting for capacity, or an invalid target left by an older definition.
 - **Task cannot be dragged:** the destination may disallow manual moves, be at its WIP limit, or the task may have a starting/running session.
 - **Auto-archive looks late:** the sweep cadence is five minutes and task updates extend the age check.
 - **Synced workflow is read-only:** edit its repository definition and run Sync now, or remove the sync configuration to release all synced workflows as editable manual workflows.

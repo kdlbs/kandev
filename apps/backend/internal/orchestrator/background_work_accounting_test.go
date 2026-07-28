@@ -1046,8 +1046,14 @@ func TestStopSessionPathPublishesStateAndTeardownActivityClears(t *testing.T) {
 	if stateClears != 1 || activityClears != 1 {
 		t.Fatalf("session.stop clear cardinality: state=%d activity=%d, want 1/1", stateClears, activityClears)
 	}
-	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
-		t.Fatalf("task aggregate cleanup publications = %v, want [%s]", taskEvents.activityTaskIDs, taskID)
+	// Two task-aggregate recomputes: the teardown activity clear, plus the
+	// republish when the session leaves RUNNING (republishTaskActivityOnSettle),
+	// which corrects a task aggregate that a detached record would otherwise leave
+	// stuck at generating.
+	if len(taskEvents.activityTaskIDs) != 2 ||
+		taskEvents.activityTaskIDs[0] != taskID ||
+		taskEvents.activityTaskIDs[1] != taskID {
+		t.Fatalf("task aggregate cleanup publications = %v, want [%s %s]", taskEvents.activityTaskIDs, taskID, taskID)
 	}
 	if svc.hasBackgroundTask(sessionID, "tool-stop-path") {
 		t.Fatal("session.stop teardown retained owned background work")
@@ -1104,10 +1110,14 @@ func TestExecutionTerminalEvents_ReconcileMissingBackgroundCompletion(t *testing
 			if got := countActivityClears(recorded); got != 1 {
 				t.Fatalf("terminal session activity clears = %d, want exactly one", got)
 			}
-			if len(taskEvents.activityTaskIDs) != 2 ||
+			// Three task-aggregate recomputes: the retirement activity clear, the
+			// reconciled background completion, plus the settle republish when the
+			// session leaves RUNNING (republishTaskActivityOnSettle).
+			if len(taskEvents.activityTaskIDs) != 3 ||
 				taskEvents.activityTaskIDs[0] != taskID ||
-				taskEvents.activityTaskIDs[1] != taskID {
-				t.Fatalf("terminal task recomputes = %v, want [%s %s]", taskEvents.activityTaskIDs, taskID, taskID)
+				taskEvents.activityTaskIDs[1] != taskID ||
+				taskEvents.activityTaskIDs[2] != taskID {
+				t.Fatalf("terminal task recomputes = %v, want [%s %s %s]", taskEvents.activityTaskIDs, taskID, taskID, taskID)
 			}
 			waitForStopCall(t, agentManager)
 		})
@@ -1145,8 +1155,16 @@ func TestTransientFailurePreservesBackgroundRegistration(t *testing.T) {
 	if !svc.hasBackgroundTask("s1", "tool-transient") {
 		t.Fatal("transient failure cleaned background registration before retry teardown")
 	}
-	if got := countActivityClears(recorded); got != 0 || len(taskEvents.activityTaskIDs) != 0 {
-		t.Fatalf("transient cleanup publications: session=%d task=%v", got, taskEvents.activityTaskIDs)
+	// The transient path keeps the background registration and never clears the
+	// session-level activity (no session activity_changed clear). It does park the
+	// session in WAITING_FOR_INPUT, so the task aggregate is republished once
+	// (republishTaskActivityOnSettle) to reflect the calm, non-generating retry
+	// state on the sidebar/board.
+	if got := countActivityClears(recorded); got != 0 {
+		t.Fatalf("transient cleanup must not clear session activity, got %d", got)
+	}
+	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != "t1" {
+		t.Fatalf("transient park must republish task aggregate once, got %v", taskEvents.activityTaskIDs)
 	}
 }
 

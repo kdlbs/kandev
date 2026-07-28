@@ -81,6 +81,10 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*CreateResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	agentEnv, err := config.CollectAgentEnvWithError(req.Env)
+	if err != nil {
+		return nil, fmt.Errorf("prepare agent environment: %w", err)
+	}
 
 	id := req.ID
 	if id == "" {
@@ -109,7 +113,7 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		AgentCommand:           agentCmd,
 		WorkDir:                req.WorkspacePath,
 		AutoStart:              &autoStart,
-		Env:                    config.CollectAgentEnv(req.Env),
+		Env:                    agentEnv,
 		AutoApprovePermissions: req.AutoApprovePermissions,
 		AgentType:              req.AgentType,
 		McpServers:             mcpServers,

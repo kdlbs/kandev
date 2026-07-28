@@ -81,13 +81,13 @@ func newBranchMaterializer(repo branchMaterializerRepo, mgr *worktree.Manager, l
 // Designed to be idempotent: the worktree manager's reuse path catches a
 // rerun for the same (session, repo, branch_slug) triple and returns the
 // existing worktree.
-func (b *branchMaterializer) MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) error {
+func (b *branchMaterializer) MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*taskservice.BranchMaterializationResult, error) {
 	materialization, err := b.materializeUnfinalized(ctx, taskID, taskRepositoryID)
 	if err != nil || materialization == nil {
-		return err
+		return nil, err
 	}
-	b.finalize(materialization, ctx)
-	return nil
+	taskRoot := b.finalize(materialization, ctx)
+	return &taskservice.BranchMaterializationResult{WorktreePath: materialization.worktree.Path, TaskWorkspacePath: taskRoot}, nil
 }
 
 // materializeUnfinalized creates the worktree but deliberately does not
@@ -118,8 +118,8 @@ func (b *branchMaterializer) materializeUnfinalized(ctx context.Context, taskID,
 	return &branchMaterialization{environment: env, session: session, worktree: wt, repositoryID: req.RepositoryID, slug: slug, taskID: taskID}, nil
 }
 
-func (b *branchMaterializer) finalize(materialization *branchMaterialization, ctx context.Context) {
-	b.finalizeMaterialize(ctx, materialization.environment, materialization.session, materialization.worktree, materialization.repositoryID, materialization.slug, materialization.taskID)
+func (b *branchMaterializer) finalize(materialization *branchMaterialization, ctx context.Context) string {
+	return b.finalizeMaterialize(ctx, materialization.environment, materialization.session, materialization.worktree, materialization.repositoryID, materialization.slug, materialization.taskID)
 }
 
 // prepareMaterializeRequest builds the worktree.CreateRequest plus the
@@ -189,7 +189,7 @@ func (b *branchMaterializer) finalizeMaterialize(
 	session *models.TaskSession,
 	wt *worktree.Worktree,
 	repositoryID, slug, taskID string,
-) {
+) string {
 	taskRoot := b.promoteWorkspacePathIfNeeded(ctx, env, wt.Path)
 	b.notifyAgentctlRescan(ctx, session, taskRoot)
 	if b.rescanner != nil {
@@ -204,6 +204,7 @@ func (b *branchMaterializer) finalizeMaterialize(
 			TaskWorkspacePath: taskRoot,
 		})
 	}
+	return taskRoot
 }
 
 // promoteWorkspacePathIfNeeded switches task_environments.workspace_path

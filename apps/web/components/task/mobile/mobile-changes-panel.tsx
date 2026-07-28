@@ -117,6 +117,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           onRenameBranch={data.git.renameBranch}
           repoDisplayName={data.repoDisplayName}
           taskId={data.activeTaskId}
+          credentialDisplay={data.gitCredentialDisplay}
         />
         <ChangesPanelBody {...bodyProps} />
       </PanelRoot>

@@ -218,8 +218,11 @@ func TestMessageScopingBlocksForeignSession(t *testing.T) {
 	}
 }
 
-// TestPlanAndWalkthroughScoping covers the plan/walkthrough services, which
-// carry their own task authorizer seam (wired to the task service).
+// TestPlanAndWalkthroughScoping covers the plan/walkthrough/review services,
+// which each carry their own task authorizer seam (wired to the task service).
+// Exercises the assembled path AuthorizeTaskAccess → SetTaskAuthorizer →
+// service, so all three stay uniformly covered: a foreign owner is denied with
+// ErrTaskNotFound and the real owner passes the gate.
 func TestPlanAndWalkthroughScoping(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedScopedWorkspaces(t, repo)
@@ -246,6 +249,32 @@ func TestPlanAndWalkthroughScoping(t *testing.T) {
 	}
 	if err := wt.DeleteWalkthrough(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
 		t.Fatalf("foreign walkthrough delete: %v", err)
+	}
+
+	review := NewReviewService(repo, nil, log)
+	review.SetTaskAuthorizer(svc.AuthorizeTaskAccess)
+	if _, _, err := review.PublishFindings(ctxAs("user-a"), PublishFindingsRequest{
+		TaskID:   "task-b",
+		Findings: []ReviewFindingInput{validFindingInput()},
+	}); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign review publish: %v", err)
+	}
+	// Owner passes the gate and the finding is actually persisted.
+	if _, findings, err := review.PublishFindings(ctxAs("user-b"), PublishFindingsRequest{
+		TaskID:   "task-b",
+		Findings: []ReviewFindingInput{validFindingInput()},
+	}); err != nil {
+		t.Fatalf("owner review publish must pass the auth gate: %v", err)
+	} else if len(findings) != 1 {
+		t.Fatalf("owner review publish should return the stored finding, got %d", len(findings))
+	}
+	// Confirm the write landed in the repository, not just the returned slice.
+	persisted, err := repo.ListTaskReviewFindings(context.Background(), "task-b")
+	if err != nil {
+		t.Fatalf("list persisted review findings: %v", err)
+	}
+	if len(persisted) != 1 {
+		t.Fatalf("owner review publish should persist exactly one finding, got %d", len(persisted))
 	}
 }
 

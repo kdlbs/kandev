@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	usermodels "github.com/kandev/kandev/internal/user/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -39,6 +40,9 @@ var taskScanColumns = []taskScanColumn{
 	{name: "state"},
 	{name: "priority"},
 	{name: "position"},
+	{name: "wip_admitted"},
+	{name: "queued_for_step_id"},
+	{name: "queued_at"},
 	{name: "metadata"},
 	{name: "is_ephemeral"},
 	{name: "parent_id"},
@@ -139,52 +143,230 @@ func runnerProjection(alias string) string {
 // (ADR 0005 Wave F); when the request carries AssigneeAgentProfileID we
 // upsert a 'runner' row in workflow_step_participants instead.
 func (r *Repository) CreateTask(ctx context.Context, task *models.Task) error {
-	if task.ID == "" {
-		task.ID = uuid.New().String()
+	if task.WorkflowStepID != "" && task.QueuedForStepID == "" && !task.IsEphemeral {
+		task.WIPAdmitted = true
+		delete(task.Metadata, models.MetaKeyDeferredLaunch)
 	}
-	now := time.Now().UTC()
-	task.CreatedAt = now
-	task.UpdatedAt = now
+	return r.createTask(ctx, task, "", 0)
+}
 
-	metadata, err := json.Marshal(task.Metadata)
+// CreateTaskIfWorkflowStepHasCapacity atomically admits a task into a
+// WIP-limited workflow step. The occupancy check and insert share one writer
+// transaction, so concurrent watcher events cannot overfill the step.
+func (r *Repository) CreateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID string, limit int) error {
+	if limit <= 0 {
+		return r.CreateTask(ctx, task)
+	}
+	task.WIPAdmitted = true
+	task.QueuedForStepID = ""
+	task.QueuedAt = nil
+	return r.createTask(ctx, task, targetStepID, limit)
+}
+
+// CreateTaskWithWorkflowStepAdmission persists a task according to the
+// destination step's WIP state. Overflow is either kept visibly queued in the
+// destination or placed in the configured feeder for one-hop promotion.
+func (r *Repository) CreateTaskWithWorkflowStepAdmission(
+	ctx context.Context,
+	task *models.Task,
+	targetStepID string,
+	targetLimit int,
+	feederStepID string,
+	feederLimit int,
+) error {
+	if task.IsEphemeral || targetStepID == "" || targetLimit <= 0 {
+		task.WIPAdmitted = !task.IsEphemeral
+		task.QueuedForStepID = ""
+		task.QueuedAt = nil
+		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		return r.CreateTask(ctx, task)
+	}
+
+	if err := r.prepareTaskForCreate(task); err != nil {
+		return err
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
-		metadata = []byte("{}")
+		return err
 	}
-	if task.Labels == "" {
-		task.Labels = "[]"
+	defer func() { _ = tx.Rollback() }()
+
+	if err := r.lockWorkflowStepsForAdmission(ctx, tx, targetStepID, feederStepID); err != nil {
+		return err
 	}
-	// Office migrations enforce a CHECK constraint on priority; default
-	// the empty zero value to 'medium' to match the column DEFAULT.
-	if task.Priority == "" {
-		task.Priority = "medium"
+	targetOccupants, err := r.countAdmittedInTx(ctx, tx, targetStepID, "")
+	if err != nil {
+		return err
+	}
+	if err := r.applyAdmissionPlacement(ctx, tx, task, targetStepID, targetLimit, feederStepID, feederLimit, targetOccupants); err != nil {
+		return err
+	}
+
+	if err := r.insertTaskTx(ctx, tx, task); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) applyAdmissionPlacement(
+	ctx context.Context,
+	tx *sql.Tx,
+	task *models.Task,
+	targetStepID string,
+	targetLimit int,
+	feederStepID string,
+	feederLimit int,
+	targetOccupants int,
+) error {
+	switch {
+	case targetOccupants < targetLimit:
+		task.WorkflowStepID = targetStepID
+		task.WIPAdmitted = true
+		task.QueuedForStepID = ""
+		task.QueuedAt = nil
+		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+	case feederStepID == "":
+		task.WorkflowStepID = targetStepID
+		task.WIPAdmitted = false
+		task.QueuedForStepID = targetStepID
+		task.QueuedAt = &task.CreatedAt
+	case feederStepID == targetStepID:
+		return wfmodels.NewWIPLimitError(targetStepID, targetLimit, targetOccupants)
+	default:
+		feederOccupants, err := r.countAdmittedInTx(ctx, tx, feederStepID, "")
+		if err != nil {
+			return err
+		}
+		if feederLimit > 0 && feederOccupants >= feederLimit {
+			return wfmodels.NewWIPLimitError(feederStepID, feederLimit, feederOccupants)
+		}
+		task.WorkflowStepID = feederStepID
+		task.WIPAdmitted = true
+		task.QueuedForStepID = targetStepID
+		task.QueuedAt = &task.CreatedAt
+	}
+	return nil
+}
+
+func (r *Repository) createTask(ctx context.Context, task *models.Task, targetStepID string, limit int) error {
+	if err := r.prepareTaskForCreate(task); err != nil {
+		return err
 	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }()
 
-	_, err = tx.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, is_ephemeral, parent_id, created_at, updated_at, origin, project_id, labels, identifier)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.IsEphemeral, task.ParentID, task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier)
-	if err != nil {
+	if err := r.ensureWorkflowStepCapacity(ctx, tx, targetStepID, limit); err != nil {
+		return err
+	}
+
+	if err := r.insertTaskTx(ctx, tx, task); err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("failed to rollback task insert: %w", rollbackErr)
 		}
 		return err
 	}
 
+	return tx.Commit()
+}
+
+func (r *Repository) prepareTaskForCreate(task *models.Task) error {
+	if task.ID == "" {
+		task.ID = uuid.New().String()
+	}
+	now := time.Now().UTC()
+	task.CreatedAt = now
+	task.UpdatedAt = now
+	if task.Metadata == nil {
+		task.Metadata = map[string]interface{}{}
+	}
+	if task.Labels == "" {
+		task.Labels = "[]"
+	}
+	if task.Priority == "" {
+		task.Priority = "medium"
+	}
+	return nil
+}
+
+func (r *Repository) insertTaskTx(ctx context.Context, tx *sql.Tx, task *models.Task) error {
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, created_at, updated_at, origin, project_id, labels, identifier)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), task.ID, task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, task.WIPAdmitted, task.QueuedForStepID, task.QueuedAt, string(metadata), task.IsEphemeral, task.ParentID, task.CreatedAt, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier)
+	if err != nil {
+		return err
+	}
 	if task.AssigneeAgentProfileID != "" && task.WorkflowStepID != "" {
-		if err := upsertRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
-			if rbErr := tx.Rollback(); rbErr != nil {
-				return fmt.Errorf("failed to rollback after runner write: %w", rbErr)
-			}
+		return upsertRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID)
+	}
+	return nil
+}
+
+func (r *Repository) lockWorkflowStepsForAdmission(ctx context.Context, tx *sql.Tx, targetStepID, feederStepID string) error {
+	ids := []string{targetStepID}
+	if feederStepID != "" && feederStepID != targetStepID {
+		ids = append(ids, feederStepID)
+	}
+	if ids[0] > ids[len(ids)-1] && len(ids) == 2 {
+		ids[0], ids[1] = ids[1], ids[0]
+	}
+	for _, id := range ids {
+		if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, id); err != nil {
 			return err
 		}
 	}
+	return nil
+}
 
-	return tx.Commit()
+func (r *Repository) countAdmittedInTx(ctx context.Context, tx *sql.Tx, stepID, excludeTaskID string) (int, error) {
+	query := `SELECT COUNT(*) FROM tasks WHERE workflow_step_id = ? AND wip_admitted = 1 AND archived_at IS NULL AND is_ephemeral = 0`
+	args := []interface{}{stepID}
+	if excludeTaskID != "" {
+		query += " AND id != ?"
+		args = append(args, excludeTaskID)
+	}
+	var count int
+	err := tx.QueryRowContext(ctx, r.db.Rebind(query), args...).Scan(&count)
+	return count, err
+}
+
+func (r *Repository) ensureWorkflowStepCapacity(ctx context.Context, tx *sql.Tx, targetStepID string, limit int) error {
+	if limit <= 0 {
+		return nil
+	}
+	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
+		return err
+	}
+	var occupants int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*) FROM tasks
+		WHERE workflow_step_id = ?
+		  AND wip_admitted = 1
+		  AND archived_at IS NULL
+		  AND is_ephemeral = 0
+	`), targetStepID).Scan(&occupants); err != nil {
+		return err
+	}
+	if occupants >= limit {
+		return wfmodels.NewWIPLimitError(targetStepID, limit, occupants)
+	}
+	return nil
+}
+
+func lockWorkflowStepForCapacity(ctx context.Context, tx *sql.Tx, driver string, rebind func(string) string, stepID string) error {
+	if !dialect.IsPostgres(driver) {
+		return nil
+	}
+	var lockedID string
+	return tx.QueryRowContext(ctx, rebind(`SELECT id FROM workflow_steps WHERE id = ? FOR UPDATE`), stepID).Scan(&lockedID)
 }
 
 // upsertRunnerInTx writes (or replaces) a 'runner' participant row for
@@ -268,9 +450,9 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	defer func() { _ = tx.Rollback() }()
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
-	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
+	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, task.WIPAdmitted, task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
 	if err != nil {
 		return err
 	}
@@ -286,6 +468,56 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 
 	return tx.Commit()
 }
+
+// RemoveTaskMetadataKey removes one metadata key without replacing concurrent
+// task fields. It returns whether the key was present and removed.
+func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error) {
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks SET metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY[?]::text[])::text, updated_at = ?
+			WHERE id = ? AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?) IS NOT NULL
+		`
+	} else {
+		query = `
+			UPDATE tasks SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?), updated_at = ?
+			WHERE id = ? AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NOT NULL
+		`
+	}
+	path := jsonPath(key)
+	if dialect.IsPostgres(r.db.DriverName()) {
+		path = key
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, time.Now().UTC(), taskID, path)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
+// SetTaskMetadataKey updates one metadata key without replacing concurrent
+// task fields. It is used to restore a deferred launch after a failed launch.
+func (r *Repository) SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE tasks SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ? WHERE id = ?`
+	} else {
+		query = `UPDATE tasks SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ?`
+	}
+	path := key
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		path = jsonPath(key)
+	}
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(query), path, string(payload), time.Now().UTC(), taskID)
+	return err
+}
+
+func jsonPath(key string) string { return "$." + key }
 
 // DetachTask clears only the hierarchy fields involved in detachment. Keeping
 // this as a targeted update prevents concurrent task edits from being replaced
@@ -367,10 +599,15 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
+		return err
+	}
+
 	var occupants int
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT COUNT(*) FROM tasks
 		WHERE workflow_step_id = ?
+		  AND wip_admitted = 1
 		  AND id != ?
 		  AND archived_at IS NULL
 		  AND is_ephemeral = 0
@@ -378,13 +615,13 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		return err
 	}
 	if occupants >= limit {
-		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d already occupied", targetStepID, limit)
+		return wfmodels.NewWIPLimitError(targetStepID, limit, occupants)
 	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
 		WHERE id = ?
-	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
+	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, task.WIPAdmitted, task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID)
 	if err != nil {
 		return err
 	}
@@ -396,6 +633,72 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		return err
 	}
 	return tx.Commit()
+}
+
+// PromoteQueuedTaskIfWorkflowStepHasCapacity atomically claims a queued task
+// for a destination step. The queue marker is part of the UPDATE predicate so
+// concurrent reconcilers cannot promote the same row twice.
+func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
+	ctx context.Context,
+	task *models.Task,
+	fromStepID,
+	destinationStepID string,
+	limit int,
+) (bool, error) {
+	task.UpdatedAt = time.Now().UTC()
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, destinationStepID); err != nil {
+		return false, err
+	}
+	if limit > 0 {
+		var occupants int
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT COUNT(*) FROM tasks
+			WHERE workflow_step_id = ?
+			  AND wip_admitted = 1
+			  AND id != ?
+			  AND archived_at IS NULL
+			  AND is_ephemeral = 0
+		`), destinationStepID, task.ID).Scan(&occupants); err != nil {
+			return false, err
+		}
+		if occupants >= limit {
+			return false, nil
+		}
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+		WHERE id = ?
+		  AND workflow_step_id = ?
+		  AND (queued_for_step_id = ? OR queued_for_step_id = '' OR queued_for_step_id IS NULL)
+		  AND archived_at IS NULL
+		  AND is_ephemeral = 0
+	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, task.WIPAdmitted, task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID, fromStepID, destinationStepID)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return false, nil
+	}
+	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // DeleteTask deletes a task by ID
@@ -450,14 +753,15 @@ func (r *Repository) CountTasksByWorkflowStep(ctx context.Context, stepID string
 	return count, nil
 }
 
-// CountTasksByWorkflowStepExcludingTask returns active, visible occupants in
-// a workflow step, excluding the task currently being moved.
+// CountTasksByWorkflowStepExcludingTask returns active, admitted WIP occupants
+// in a workflow step, excluding the task currently being moved.
 func (r *Repository) CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error) {
 	var count int
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT COUNT(*) FROM tasks
 		WHERE workflow_step_id = ?
 		  AND id != ?
+		  AND wip_admitted = 1
 		  AND archived_at IS NULL
 		  AND is_ephemeral = 0
 	`), stepID, excludeTaskID).Scan(&count)
@@ -465,6 +769,20 @@ func (r *Repository) CountTasksByWorkflowStepExcludingTask(ctx context.Context, 
 		return 0, err
 	}
 	return count, nil
+}
+
+// CountAdmittedTasksByWorkflowStep returns the active WIP occupants of a
+// workflow step, excluding visible queued overflow cards.
+func (r *Repository) CountAdmittedTasksByWorkflowStep(ctx context.Context, stepID string) (int, error) {
+	var count int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT COUNT(*) FROM tasks
+		WHERE workflow_step_id = ?
+		  AND wip_admitted = 1
+		  AND archived_at IS NULL
+		  AND is_ephemeral = 0
+	`), stepID).Scan(&count)
+	return count, err
 }
 
 // NextPullCandidate returns the next active, visible task from a feeder step.
@@ -500,6 +818,7 @@ func (r *Repository) NextPullCandidateExcluding(ctx context.Context, stepID stri
 			WHERE t.workflow_step_id = ?
 			  AND t.archived_at IS NULL
 			  AND t.is_ephemeral = 0
+			  AND (t.queued_for_step_id = '' OR t.queued_for_step_id IS NULL)
 			  `+excludeClause+`
 			ORDER BY
 			  t.position ASC,
@@ -515,6 +834,54 @@ func (r *Repository) NextPullCandidateExcluding(ctx context.Context, stepID stri
 			  t.id ASC
 			LIMIT 1
 		`), args...)
+	task, err := r.scanSingleTask(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return task, err
+}
+
+// NextQueuedTaskForStepExcluding returns the next task queued for destination
+// from a feeder. Empty queue destinations preserve legacy feeder pull behavior.
+func (r *Repository) NextQueuedTaskForStepExcluding(ctx context.Context, feederStepID, destinationStepID string, excludeTaskIDs []string) (*models.Task, error) {
+	args := []any{feederStepID, destinationStepID}
+	excludeClause := ""
+	if len(excludeTaskIDs) > 0 {
+		placeholders := make([]string, 0, len(excludeTaskIDs))
+		for _, id := range excludeTaskIDs {
+			if id == "" {
+				continue
+			}
+			placeholders = append(placeholders, "?")
+			args = append(args, id)
+		}
+		if len(placeholders) > 0 {
+			excludeClause = " AND t.id NOT IN (" + strings.Join(placeholders, ", ") + ")"
+		}
+	}
+	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE t.workflow_step_id = ?
+		  AND t.archived_at IS NULL
+		  AND t.is_ephemeral = 0
+		  AND (t.queued_for_step_id = '' OR t.queued_for_step_id IS NULL OR t.queued_for_step_id = ?)
+		  `+excludeClause+`
+		ORDER BY
+		  t.position ASC,
+		  CASE LOWER(COALESCE(t.priority, ''))
+		    WHEN 'critical' THEN 0
+		    WHEN 'high' THEN 1
+		    WHEN 'medium' THEN 2
+		    WHEN 'low' THEN 3
+		    WHEN 'none' THEN 4
+		    ELSE 4
+		  END ASC,
+		  COALESCE(t.queued_at, t.created_at) ASC,
+		  t.created_at ASC,
+		  t.id ASC
+		LIMIT 1
+	`), args...)
 	task, err := r.scanSingleTask(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -638,6 +1005,23 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 	}
 	defer func() { _ = rows.Close() }()
 
+	return r.scanTasks(rows)
+}
+
+// ListQueuedTasks returns non-archived, non-ephemeral tasks that are waiting
+// for admission into a workflow step. It is used by startup reconciliation.
+func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE t.queued_for_step_id IS NOT NULL AND t.queued_for_step_id != ''
+		  AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		ORDER BY t.queued_at ASC, t.created_at ASC, t.id ASC
+	`))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
 	return r.scanTasks(rows)
 }
 
@@ -896,10 +1280,12 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	task := &models.Task{}
 	var metadata string
 	var archivedAt sql.NullTime
+	var queuedAt sql.NullTime
 	var identifier sql.NullString
 	err := row.Scan(
 		&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
 		&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
+		&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 		&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt, &task.ArchivedByCascadeID,
 		&task.CreatedAt, &task.UpdatedAt,
 		&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
@@ -910,6 +1296,9 @@ func (r *Repository) scanSingleTask(row *sql.Row) (*models.Task, error) {
 	}
 	if archivedAt.Valid {
 		task.ArchivedAt = &archivedAt.Time
+	}
+	if queuedAt.Valid {
+		task.QueuedAt = &queuedAt.Time
 	}
 	if identifier.Valid {
 		task.Identifier = identifier.String
@@ -925,10 +1314,12 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		task := &models.Task{}
 		var metadata string
 		var archivedAt sql.NullTime
+		var queuedAt sql.NullTime
 		var identifier sql.NullString
 		err := rows.Scan(
 			&task.ID, &task.WorkspaceID, &task.WorkflowID, &task.WorkflowStepID,
 			&task.Title, &task.Description, &task.State, &task.Priority, &task.Position,
+			&task.WIPAdmitted, &task.QueuedForStepID, &queuedAt,
 			&metadata, &task.IsEphemeral, &task.ParentID, &archivedAt, &task.ArchivedByCascadeID,
 			&task.CreatedAt, &task.UpdatedAt,
 			&task.AssigneeAgentProfileID, &task.Origin, &task.ProjectID,
@@ -939,6 +1330,9 @@ func (r *Repository) scanTasks(rows *sql.Rows) ([]*models.Task, error) {
 		}
 		if archivedAt.Valid {
 			task.ArchivedAt = &archivedAt.Time
+		}
+		if queuedAt.Valid {
+			task.QueuedAt = &queuedAt.Time
 		}
 		if identifier.Valid {
 			task.Identifier = identifier.String

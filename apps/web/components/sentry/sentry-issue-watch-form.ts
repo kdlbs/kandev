@@ -23,7 +23,7 @@ export interface FormState {
   /** The Sentry instance to poll. Required; immutable after create. */
   sentryInstanceId: string;
   orgSlug: string;
-  projectSlug: string;
+  projectSlugs: string[];
   environment: string;
   levels: SentryLevel[];
   statuses: SentryStatus[];
@@ -48,7 +48,7 @@ export function makeEmptyForm(workspaceId: string): FormState {
     workspaceId,
     sentryInstanceId: "",
     orgSlug: "",
-    projectSlug: "",
+    projectSlugs: [],
     environment: "",
     levels: ["fatal", "error"],
     statuses: ["unresolved"],
@@ -73,7 +73,7 @@ export function formStateFromWatch(w: SentryIssueWatch): FormState {
     workspaceId: w.workspaceId,
     sentryInstanceId: w.sentryInstanceId ?? "",
     orgSlug: f.orgSlug ?? "",
-    projectSlug: f.projectSlug ?? "",
+    projectSlugs: f.projectSlugs ?? [],
     environment: f.environment ?? "",
     levels: f.levels ?? [],
     statuses: f.statuses ?? [],
@@ -132,7 +132,10 @@ export function orgSelectItems(orgs: string[], current: string): SelectItemSpec[
   return items;
 }
 
-export function projectSelectItems(projects: SentryProject[], current: string): SelectItemSpec[] {
+export function projectMultiSelectItems(
+  projects: SentryProject[],
+  current: string[],
+): SelectItemSpec[] {
   const items: SelectItemSpec[] = [];
   const seen = new Set<string>();
   for (const p of projects) {
@@ -140,8 +143,13 @@ export function projectSelectItems(projects: SentryProject[], current: string): 
     seen.add(p.slug);
     items.push({ id: p.slug, label: `${p.name} (${p.slug})` });
   }
-  if (current && !seen.has(current)) {
-    items.push({ id: current, label: current });
+  // Include currently-selected slugs even if the token can no longer see them
+  // (editing an old watch, or a project since renamed/removed) so the picker
+  // still shows the saved selection.
+  for (const slug of current) {
+    if (!slug || seen.has(slug)) continue;
+    seen.add(slug);
+    items.push({ id: slug, label: slug });
   }
   return items;
 }
@@ -156,7 +164,7 @@ export function isWatchFormReady(
     !!form.workspaceId &&
     (!requiresInstance || !!form.sentryInstanceId) &&
     !!form.orgSlug.trim() &&
-    !!form.projectSlug.trim() &&
+    form.projectSlugs.length > 0 &&
     !!form.workflowId &&
     !!form.workflowStepId &&
     !!form.prompt.trim() &&
@@ -170,7 +178,7 @@ export function isWatchFormReady(
 export function buildFilterPayload(form: FormState): SentrySearchFilter {
   return {
     orgSlug: form.orgSlug.trim(),
-    projectSlug: form.projectSlug.trim() || undefined,
+    projectSlugs: form.projectSlugs.length > 0 ? form.projectSlugs : undefined,
     environment: form.environment.trim() || undefined,
     levels: form.levels.length > 0 ? form.levels : undefined,
     statuses: form.statuses.length > 0 ? form.statuses : undefined,

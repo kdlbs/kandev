@@ -34,6 +34,7 @@ import type { MentionItem } from "@/hooks/use-inline-mention";
 import type { SlashCommand } from "./slash-command-types";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import { useEntityReferenceComposer } from "./use-entity-reference-composer";
+import type { ImagePasteIssue } from "./clipboard-attachments";
 
 export type { TipTapInputHandle } from "./use-tiptap-editor";
 
@@ -58,7 +59,7 @@ type TipTapInputProps = {
   onAddContextFile?: (file: ContextFile) => void;
   onToggleContextFile?: (file: ContextFile) => void;
   planContextEnabled?: boolean;
-  onImagePaste?: (files: File[]) => void;
+  onImagePaste?: (files: File[], issue?: ImagePasteIssue) => void;
   onPlanModeChange?: (enabled: boolean) => void;
 };
 

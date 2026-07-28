@@ -863,7 +863,32 @@ func (r *Repository) ClearStepReferences(ctx context.Context, workflowID, stepID
 
 // DeleteStep deletes a workflow step by ID.
 func (r *Repository) DeleteStep(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflow_steps WHERE id = ?`), id)
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	cleanupQuery := `
+		UPDATE tasks
+		SET queued_for_step_id = '', queued_at = NULL, wip_admitted = 1, metadata = `
+	if dialect.IsPostgres(r.db.DriverName()) {
+		cleanupQuery += `(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY['deferred_launch']::text[])::text`
+	} else {
+		cleanupQuery += `json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.deferred_launch')`
+	}
+	cleanupQuery += `, updated_at = ? WHERE queued_for_step_id = ?`
+	var taskTableExists bool
+	if dialect.IsPostgres(r.db.DriverName()) {
+		_ = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'tasks')`).Scan(&taskTableExists)
+	} else {
+		_ = tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tasks')`).Scan(&taskTableExists)
+	}
+	if taskTableExists {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(cleanupQuery), time.Now().UTC(), id); err != nil {
+			return err
+		}
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflow_steps WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -872,7 +897,7 @@ func (r *Repository) DeleteStep(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("workflow step not found: %s", id)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ListStepsByWorkflow returns all workflow steps for a workflow.

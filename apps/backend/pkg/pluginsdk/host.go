@@ -105,9 +105,10 @@ type Host interface {
 	// RPCs (capability api_read:repositories).
 	Repositories() RepositoryReader
 
-	// Messages returns the reader for the Host data API's message RPC
-	// (capability api_read:messages). It reads historical user/agent
-	// conversation content; kandev-injected system blocks are stripped.
+	// Messages returns the accessor for the Host data API's message RPCs.
+	// List (capability api_read:messages) reads historical user/agent
+	// conversation content; Send (capability api_write:messages) delivers a
+	// prompt to a task session.
 	Messages() MessageReader
 
 	// InvokeUtilityAgent runs a one-shot, non-interactive completion using
@@ -118,16 +119,28 @@ type Host interface {
 	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
 }
 
-// TaskReader is the read-only accessor behind Host.Tasks(), mirroring the
-// Host data API's ListTasks/GetTask RPCs (ADR 0043). Write methods
-// (CreateTask/UpdateTask) are deferred to a later phase and intentionally
-// not part of this interface yet.
+// TaskReader is the accessor behind Host.Tasks(), mirroring the Host data
+// API's ListTasks/GetTask/CreateTask/UpdateTask RPCs (ADR 0043). Reads
+// (List/Get) require api_read:tasks; writes (Create/Update) require
+// api_write:tasks — the two capabilities gate independently, so a plugin may
+// declare one without the other. (The name is kept for source stability with
+// already-shipped read-only plugins; the interface now also writes.)
 type TaskReader interface {
 	// List returns tasks matching filter, newest page first per page.
 	List(ctx context.Context, filter TaskFilter, page Page) ([]Task, *PageInfo, error)
 
 	// Get returns a single task by id.
 	Get(ctx context.Context, id string) (*Task, error)
+
+	// Create creates a task through kandev's task service (so task.* events
+	// fire and WS clients update) and returns the created task. Requires
+	// api_write:tasks.
+	Create(ctx context.Context, in CreateTaskInput) (*Task, error)
+
+	// Update mutates a conservative field surface of an existing task
+	// (title/description/state/workflow_step_id) and returns the updated task.
+	// Requires api_write:tasks.
+	Update(ctx context.Context, in UpdateTaskInput) (*Task, error)
 }
 
 // SessionReader is the read-only accessor behind Host.Sessions(), mirroring
@@ -171,12 +184,22 @@ type RepositoryReader interface {
 	List(ctx context.Context, workspaceID string, page Page) ([]Repository, *PageInfo, error)
 }
 
-// MessageReader is the read-only accessor behind Host.Messages(), mirroring
-// the Host data API's ListMessages RPC. It reads historical conversation
-// content filtered by session, task, and/or time range.
+// MessageReader is the accessor behind Host.Messages(), mirroring the Host
+// data API's ListMessages/SendMessage RPCs. List (api_read:messages) reads
+// historical conversation content filtered by session, task, and/or time
+// range; Send (api_write:messages) delivers a prompt to a task session. The
+// two capabilities gate independently. (The name is kept for source stability
+// with already-shipped read-only plugins; the interface now also writes.)
 type MessageReader interface {
 	// List returns messages matching filter, oldest first within a page.
 	List(ctx context.Context, filter MessageFilter, page Page) ([]Message, *PageInfo, error)
+
+	// Send delivers text as a prompt to a task session through kandev's
+	// orchestrator (the same delivery path message_task uses), recording a
+	// user message stamped "plugin:<id>". sessionID may be empty to target the
+	// task's primary session. Returns the target session and a dispatch status
+	// ("queued" | "sent" | "started"). Requires api_write:messages.
+	Send(ctx context.Context, taskID, sessionID, text string) (*MessageDispatch, error)
 }
 
 // newHostClient wraps a *grpc.ClientConn (dialed over the go-plugin broker)
@@ -337,6 +360,30 @@ func (r grpcTaskReader) Get(ctx context.Context, id string) (*Task, error) {
 	return &task, nil
 }
 
+func (r grpcTaskReader) Create(ctx context.Context, in CreateTaskInput) (*Task, error) {
+	resp, err := r.client.CreateTask(ctx, in.toProto())
+	if err != nil {
+		return nil, err
+	}
+	task, err := taskFromProto(resp.GetTask())
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
+func (r grpcTaskReader) Update(ctx context.Context, in UpdateTaskInput) (*Task, error) {
+	resp, err := r.client.UpdateTask(ctx, in.toProto())
+	if err != nil {
+		return nil, err
+	}
+	task, err := taskFromProto(resp.GetTask())
+	if err != nil {
+		return nil, err
+	}
+	return &task, nil
+}
+
 // grpcSessionReader implements SessionReader on the plugin side.
 type grpcSessionReader struct {
 	client pluginv1.HostClient
@@ -429,6 +476,14 @@ func (r grpcMessageReader) List(ctx context.Context, filter MessageFilter, page 
 		return nil, nil, err
 	}
 	return messagesFromProto(resp.GetMessages()), pageInfoFromProto(resp.GetPageInfo()), nil
+}
+
+func (r grpcMessageReader) Send(ctx context.Context, taskID, sessionID, text string) (*MessageDispatch, error) {
+	resp, err := r.client.SendMessage(ctx, &pluginv1.SendMessageRequest{TaskId: taskID, SessionId: sessionID, Text: text})
+	if err != nil {
+		return nil, err
+	}
+	return messageDispatchFromProto(resp), nil
 }
 
 // registerHostServer registers a grpc server that dispatches
@@ -674,6 +729,57 @@ func (s *grpcHostServer) ListMessages(ctx context.Context, req *pluginv1.ListMes
 	return &pluginv1.ListMessagesResponse{Messages: messagesToProto(messages), PageInfo: pageInfo.toProto()}, nil
 }
 
+// ── Host data API writes (ADR 0043) ─────────────────────────────────────
+//
+// Each dispatches to the injected impl's writer accessor (impl.Tasks() for
+// Create/Update, impl.Messages() for SendMessage) and converts native<->proto
+// at the boundary. Capability gating (api_write:<resource>) and the real
+// service-layer calls live in the kandev-side impl, exactly like the reads
+// above. The nil checks are defense-in-depth for the trust boundary: the
+// in-tree Host never returns (nil, nil) on success, but a custom or test Host
+// might, and a plugin should get a gRPC error rather than a server panic.
+
+func (s *grpcHostServer) CreateTask(ctx context.Context, req *pluginv1.CreateTaskRequest) (*pluginv1.CreateTaskResponse, error) {
+	task, err := s.impl.Tasks().Create(ctx, createTaskInputFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, status.Error(codes.Internal, "CreateTask returned nil task")
+	}
+	protoTask, err := task.toProto()
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.CreateTaskResponse{Task: protoTask}, nil
+}
+
+func (s *grpcHostServer) UpdateTask(ctx context.Context, req *pluginv1.UpdateTaskRequest) (*pluginv1.UpdateTaskResponse, error) {
+	task, err := s.impl.Tasks().Update(ctx, updateTaskInputFromProto(req))
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, status.Error(codes.Internal, "UpdateTask returned nil task")
+	}
+	protoTask, err := task.toProto()
+	if err != nil {
+		return nil, err
+	}
+	return &pluginv1.UpdateTaskResponse{Task: protoTask}, nil
+}
+
+func (s *grpcHostServer) SendMessage(ctx context.Context, req *pluginv1.SendMessageRequest) (*pluginv1.SendMessageResponse, error) {
+	dispatch, err := s.impl.Messages().Send(ctx, req.GetTaskId(), req.GetSessionId(), req.GetText())
+	if err != nil {
+		return nil, err
+	}
+	if dispatch == nil {
+		return nil, status.Error(codes.Internal, "SendMessage returned nil dispatch")
+	}
+	return dispatch.toProto(), nil
+}
+
 var _ pluginv1.HostServer = (*grpcHostServer)(nil)
 
 // UnimplementedHostData is an embeddable default for the Host data API
@@ -722,6 +828,14 @@ func (unimplementedTaskReader) Get(context.Context, string) (*Task, error) {
 	return nil, errUnimplementedHostData("tasks")
 }
 
+func (unimplementedTaskReader) Create(context.Context, CreateTaskInput) (*Task, error) {
+	return nil, errUnimplementedHostData("tasks")
+}
+
+func (unimplementedTaskReader) Update(context.Context, UpdateTaskInput) (*Task, error) {
+	return nil, errUnimplementedHostData("tasks")
+}
+
 type unimplementedSessionReader struct{}
 
 func (unimplementedSessionReader) List(context.Context, SessionFilter, Page) ([]Session, *PageInfo, error) {
@@ -764,4 +878,8 @@ type unimplementedMessageReader struct{}
 
 func (unimplementedMessageReader) List(context.Context, MessageFilter, Page) ([]Message, *PageInfo, error) {
 	return nil, nil, errUnimplementedHostData("messages")
+}
+
+func (unimplementedMessageReader) Send(context.Context, string, string, string) (*MessageDispatch, error) {
+	return nil, errUnimplementedHostData("messages")
 }

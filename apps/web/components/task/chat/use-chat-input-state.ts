@@ -25,6 +25,12 @@ import {
   MAX_TOTAL_SIZE,
   type FileAttachment,
 } from "./file-attachment";
+import {
+  useAttachmentCountFeedback,
+  useAttachmentFileFeedback,
+  useAttachmentTotalSizeFeedback,
+  useUnreadablePastedImageFeedback,
+} from "./use-attachment-file-feedback";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
 import type { DiffComment } from "@/lib/diff/types";
 import type {
@@ -33,6 +39,7 @@ import type {
   MessageAttachment,
 } from "./chat-input-container";
 import type { TipTapInputHandle } from "./tiptap-input";
+import type { ImagePasteIssue } from "./clipboard-attachments";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
@@ -203,6 +210,10 @@ function useAttachments(sessionId: string | null) {
   const [attachments, setAttachments] = useState<FileAttachment[]>(() =>
     sessionId ? getChatDraftAttachments(sessionId).map(restoreAttachmentPreview) : [],
   );
+  const warnAttachmentCountLimit = useAttachmentCountFeedback();
+  const rejectOversizedFile = useAttachmentFileFeedback();
+  const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
+  const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
   const attachmentsRef = useRef(attachments);
   const prevSessionIdRef = useRef(sessionId);
   const prevPersistSessionIdRef = useRef(sessionId);
@@ -232,23 +243,42 @@ function useAttachments(sessionId: string | null) {
   }, [attachments, sessionId]);
 
   const addFiles = useCallback(
-    async (files: File[]) => {
-      if (attachments.length >= MAX_FILES) {
-        console.warn(`Maximum ${MAX_FILES} files allowed`);
+    async (files: File[], issue?: ImagePasteIssue) => {
+      if (issue === "unreadable-image") {
+        warnUnreadablePastedImage();
         return;
       }
-      const currentTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
+      if (attachments.length >= MAX_FILES) {
+        warnAttachmentCountLimit();
+        return;
+      }
+      let acceptedCount = attachments.length;
+      let acceptedTotalSize = attachments.reduce((sum, att) => sum + att.size, 0);
       for (const file of files) {
-        if (attachments.length >= MAX_FILES) break;
-        if (currentTotalSize + file.size > MAX_TOTAL_SIZE) {
-          console.warn("Total attachment size limit exceeded");
+        if (acceptedCount >= MAX_FILES) {
+          warnAttachmentCountLimit();
+          break;
+        }
+        if (rejectOversizedFile(file)) continue;
+        if (acceptedTotalSize + file.size > MAX_TOTAL_SIZE) {
+          warnAttachmentTotalSizeLimit();
           break;
         }
         const attachment = await processFile(file);
-        if (attachment) setAttachments((prev) => [...prev, attachment]);
+        if (attachment) {
+          acceptedCount += 1;
+          acceptedTotalSize += attachment.size;
+          setAttachments((prev) => [...prev, attachment]);
+        }
       }
     },
-    [attachments],
+    [
+      attachments,
+      rejectOversizedFile,
+      warnAttachmentCountLimit,
+      warnAttachmentTotalSizeLimit,
+      warnUnreadablePastedImage,
+    ],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {

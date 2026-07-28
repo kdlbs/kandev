@@ -121,6 +121,10 @@ type TaskEventPublisher interface {
 	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
 }
 
+type taskQueuePromotionPublisher interface {
+	PublishTaskQueuePromoted(ctx context.Context, task *models.Task)
+}
+
 // WorkflowStepGetter retrieves workflow step information for prompt building.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
@@ -641,8 +645,14 @@ func NewService(
 		return nil
 	})
 	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
-	exec.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
-		return s.setSessionStarting(ctx, taskID, session, promoteTask)
+	exec.SetOnSessionStarting(func(
+		ctx context.Context,
+		taskID string,
+		session *models.TaskSession,
+		expectedState models.TaskSessionState,
+		promoteTask bool,
+	) error {
+		return s.setSessionStarting(ctx, taskID, session, expectedState, promoteTask)
 	})
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
@@ -671,6 +681,7 @@ func NewService(
 		OnGitEvent:             s.handleGitEvent,
 		OnContextWindowUpdated: s.handleContextWindowUpdated,
 		OnTaskMoved:            s.handleTaskMoved,
+		OnTaskQueuePromoted:    s.handleTaskQueuePromoted,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, cfg.QueueGroup, log)
 
@@ -727,6 +738,11 @@ func (s *Service) EnsureRepositoryCloned(ctx context.Context, repository *models
 // for executor git and gh operations.
 func (s *Service) SetGitHubCredentialBroker(issuer executor.GitHubCredentialLeaseIssuer, endpoint string) {
 	s.executor.SetGitHubCredentialBroker(issuer, endpoint)
+}
+
+// SetTaskGitCredentialPolicyResolver configures non-secret workspace policy lookup.
+func (s *Service) SetTaskGitCredentialPolicyResolver(resolver executor.TaskGitCredentialPolicyResolver) {
+	s.executor.SetTaskGitCredentialPolicyResolver(resolver)
 }
 
 // SetTurnService sets the turn service for tracking conversation turns.
@@ -845,6 +861,15 @@ func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task, old
 	s.taskEvents.PublishTaskUpdated(ctx, task, oldWorkflowIDs...)
 }
 
+func (s *Service) publishTaskQueuePromoted(ctx context.Context, task *models.Task) {
+	if s.taskEvents == nil || task == nil {
+		return
+	}
+	if publisher, ok := s.taskEvents.(taskQueuePromotionPublisher); ok {
+		publisher.PublishTaskQueuePromoted(ctx, task)
+	}
+}
+
 func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {
 	if s.taskEvents == nil || task == nil {
 		return
@@ -961,7 +986,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)
@@ -1309,6 +1334,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// This does NOT launch any agent processes — sessions are recovered lazily
 	// when the user opens them (via task.session.status → task.session.resume).
 	s.reconcileSessionsOnStartup(ctx)
+	if s.workflowStore != nil {
+		s.workflowStore.ReconcileQueuedTasks(ctx)
+	}
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -1356,6 +1384,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// Subscribe to ADR-0015 step-completion signals (out-of-band path:
 	// signal arrives after turn-end).
 	s.subscribeStepCompletionEvents()
+
+	// Reconcile queued tasks when WIP limits or feeder settings change.
+	s.subscribeWorkflowQueueEvents()
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil

@@ -6,6 +6,7 @@ import {
   listSentryProjects,
 } from "@/lib/api/domains/sentry-api";
 import type { SentryConfig, SentryIssueWatch } from "@/lib/types/sentry";
+import type * as SentryIssueWatchMultiselectModule from "./sentry-issue-watch-multiselect";
 import { SentryIssueWatchDialog } from "./sentry-issue-watch-dialog";
 
 const { WORKSPACE_ID } = vi.hoisted(() => ({ WORKSPACE_ID: "ws-1" }));
@@ -30,10 +31,14 @@ vi.mock("@/components/settings/profile-edit/script-editor", () => ({
   ScriptEditor: () => null,
   computeEditorHeight: () => 0,
 }));
-vi.mock("./sentry-issue-watch-multiselect", () => ({
-  LevelMultiSelect: () => null,
-  StatusMultiSelect: () => null,
-}));
+vi.mock("./sentry-issue-watch-multiselect", async (importOriginal) => {
+  const actual = await importOriginal<typeof SentryIssueWatchMultiselectModule>();
+  return {
+    ...actual,
+    LevelMultiSelect: () => null,
+    StatusMultiSelect: () => null,
+  };
+});
 vi.mock("./sentry-issue-watch-throttle-field", () => ({ MaxInflightTasksField: () => null }));
 vi.mock("@/lib/api/domains/sentry-api", () => ({
   listSentryInstances: vi.fn(),
@@ -42,6 +47,8 @@ vi.mock("@/lib/api/domains/sentry-api", () => ({
 }));
 
 const PRIMARY_INSTANCE_ID = "instance-a";
+const FRONTEND_OPTION = "Frontend (frontend)";
+const SENTRY_INSTANCE_FIELD = "Sentry instance";
 
 function sentryInstance(id: string, name: string): SentryConfig {
   return {
@@ -66,7 +73,7 @@ function legacyUnboundWatch(): SentryIssueWatch {
     workflowStepId: "step-1",
     repositoryId: "",
     baseBranch: "",
-    filter: { orgSlug: "acme", projectSlug: "frontend" },
+    filter: { orgSlug: "acme", projectSlugs: ["frontend"] },
     agentProfileId: "",
     executorProfileId: "",
     prompt: "Handle the issue.",
@@ -133,20 +140,64 @@ describe("SentryIssueWatchDialog", () => {
       expect(listSentryInstances).toHaveBeenCalledWith(WORKSPACE_ID);
     });
 
-    await choose("Sentry instance", "Production");
+    await choose(SENTRY_INSTANCE_FIELD, "Production");
     await waitFor(() => {
       expect(listSentryOrganizations).toHaveBeenCalledWith(WORKSPACE_ID, PRIMARY_INSTANCE_ID);
       expect(listSentryProjects).toHaveBeenCalledWith(WORKSPACE_ID, PRIMARY_INSTANCE_ID);
     });
 
-    await choose("Sentry instance", "Self-hosted");
+    await choose(SENTRY_INSTANCE_FIELD, "Self-hosted");
 
     fireEvent.click(selectTrigger("Organization slug"));
     expect(screen.queryByRole("option", { name: "acme" })).toBeNull();
     fireEvent.keyDown(document, { key: "Escape" });
 
     fireEvent.click(selectTrigger("Project slug"));
-    expect(screen.queryByRole("option", { name: "Frontend (frontend)" })).toBeNull();
+    expect(screen.queryByRole("option", { name: FRONTEND_OPTION })).toBeNull();
+  });
+
+  it("allows selecting multiple projects for a single Sentry watcher", async () => {
+    vi.mocked(listSentryProjects).mockResolvedValue({
+      projects: [
+        { id: "frontend", slug: "frontend", name: "Frontend", orgSlug: "acme" },
+        { id: "backend", slug: "backend", name: "Backend", orgSlug: "acme" },
+      ],
+    });
+
+    render(
+      <SentryIssueWatchDialog
+        open
+        onOpenChange={vi.fn()}
+        watch={null}
+        workspaceId={WORKSPACE_ID}
+        onCreate={vi.fn()}
+        onUpdate={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(listSentryInstances).toHaveBeenCalledWith(WORKSPACE_ID);
+    });
+    await choose(SENTRY_INSTANCE_FIELD, "Production");
+    await waitFor(() => {
+      expect(listSentryProjects).toHaveBeenCalledWith(WORKSPACE_ID, PRIMARY_INSTANCE_ID);
+    });
+
+    fireEvent.click(selectTrigger("Project slug"));
+    fireEvent.click(await screen.findByRole("option", { name: FRONTEND_OPTION }));
+    fireEvent.click(await screen.findByRole("option", { name: "Backend (backend)" }));
+
+    expect(screen.getByTestId("sentry-watch-project-trigger").textContent).toContain(
+      "2 projects selected",
+    );
+
+    // Deselecting one falls back to showing the sole remaining project's name.
+    fireEvent.click(screen.getByRole("option", { name: FRONTEND_OPTION }));
+    await waitFor(() => {
+      expect(screen.getByTestId("sentry-watch-project-trigger").textContent).toContain(
+        "Backend (backend)",
+      );
+    });
   });
 
   it("permits mutable updates to a legacy unbound watch while its instance remains immutable", async () => {
@@ -166,6 +217,6 @@ describe("SentryIssueWatchDialog", () => {
         false,
       );
     });
-    expect(selectTrigger("Sentry instance").disabled).toBe(true);
+    expect(selectTrigger(SENTRY_INSTANCE_FIELD).disabled).toBe(true);
   });
 });

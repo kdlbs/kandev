@@ -216,7 +216,7 @@ test.describe("Workspace GitHub App onboarding", () => {
     await connection.getByLabel("Name in Kandev").fill("Existing company App");
     await connection.getByLabel("GitHub App slug").fill("company-kandev");
     await connection.getByLabel("GitHub owner login").fill("acme");
-    await connection.getByLabel("App ID").fill("404");
+    await connection.getByRole("textbox", { name: "App ID" }).fill("404");
     await connection.getByLabel("Client ID").fill("Iv1.client-id");
     await connection.getByLabel("Client secret").fill("client-secret-value");
     await connection.getByLabel("Webhook secret").fill("webhook-secret-value");

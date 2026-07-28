@@ -18,12 +18,20 @@ Prefer this shape inside skills:
 If <condition>, do <action>. Why: <short reason>. Verify with <command/output>.
 ```
 
+## Pre-PR Validation Policy
+
+When task files define exact unit, integration, and E2E commands and two
+configured PR AI reviewers provide semantic review, make those task commands
+the only default local pre-PR validation. Do not add generic local simplify,
+QA, code/security review, or broad verification passes. Run an extra local gate
+only on explicit user request or to remediate a PR/CI finding.
+
 ## Placement Rules
 
 - PR/CI/review-thread behavior belongs in `.agents/skills/pr-fixup/SKILL.md`.
 - PR creation/body/push behavior belongs in `.agents/skills/pr/SKILL.md` or `.agents/skills/push/SKILL.md`.
 - Full repo verification belongs in `.agents/skills/verify/SKILL.md`.
-- TDD/test-level guidance belongs in `.agents/skills/tdd/SKILL.md` or `.agents/agents/test-engineer.md`.
+- TDD/test-level guidance belongs in `.agents/skills/tdd/SKILL.md`.
 - E2E commands and flake triage belong in `.agents/skills/e2e/SKILL.md`.
 - Runtime debugging belongs in `.agents/skills/debug/`.
 - Backend/frontend conventions belong in the closest scoped `AGENTS.md`.

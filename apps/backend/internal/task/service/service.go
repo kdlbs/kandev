@@ -100,7 +100,16 @@ type BranchMaterializer interface {
 	// task_repositories row. Best-effort: when no active session exists yet
 	// the implementation may choose to no-op and let the next session launch
 	// create the worktree via the standard multi-repo prepare path.
-	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) error
+	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*BranchMaterializationResult, error)
+}
+
+// BranchMaterializationResult describes the live worktree created for a
+// branch attachment. A nil result with a nil error means materialization was
+// intentionally deferred until the next session launch; callers must check
+// for a nil result rather than empty path fields.
+type BranchMaterializationResult struct {
+	WorktreePath      string
+	TaskWorkspacePath string
 }
 
 // GitArchiveCapture captures git state (commits, cumulative diff) when a task is archived.
@@ -145,6 +154,7 @@ type StartStepResolver interface {
 
 var (
 	ErrActiveTaskSessions        = errors.New("active agent sessions exist")
+	ErrWIPLimitExceeded          = wfmodels.ErrWIPLimitExceeded
 	ErrInvalidRepositorySettings = errors.New("invalid repository settings")
 	ErrInvalidExecutorConfig     = errors.New("invalid executor config")
 	// Workspace-source sentinels are the service boundary consumed by the HTTP

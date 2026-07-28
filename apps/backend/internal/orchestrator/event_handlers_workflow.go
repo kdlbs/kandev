@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -255,36 +256,28 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
 	}
-	if err := s.validateTransitionWIPLimit(ctx, task, targetStep); err != nil {
-		s.logger.Warn("workflow transition rejected by WIP limit",
-			zap.String("task_id", taskID),
-			zap.String("to_step_id", toStepID),
-			zap.Error(err))
-		s.setSessionWaitingForInput(ctx, taskID, sessionID)
-		return
-	}
-
-	// Process on_exit actions for the step we're leaving (before the step change).
-	// Freshly load the session since the caller may not have it (legacy path).
-	exitSession, exitErr := s.repo.GetTaskSession(ctx, sessionID)
-	if exitErr != nil {
-		s.logger.Warn("failed to load session for on_exit",
-			zap.String("session_id", sessionID), zap.Error(exitErr))
-	} else {
-		s.processOnExit(ctx, taskID, exitSession, fromStep)
-	}
-
-	// Update the task's workflow step
+	// Atomically admit the target step before exit side effects. A capacity
+	// rejection must leave both the task and its source-step session state intact.
 	task.WorkflowStepID = toStepID
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
-		s.logger.Error("failed to move task to next workflow step",
+	if err := s.updateTransitionTaskWithCapacity(ctx, task, targetStep); err != nil {
+		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
 			zap.String("to_step", targetStep.Name),
 			zap.Error(err))
 		s.setSessionWaitingForInput(ctx, taskID, sessionID)
 		return
+	}
+
+	// Process on_exit only after the transition is durably admitted. Freshly
+	// load the session since the caller may not have it (legacy path).
+	exitSession, exitErr := s.repo.GetTaskSession(ctx, sessionID)
+	if exitErr != nil {
+		s.logger.Warn("failed to load session for on_exit",
+			zap.String("session_id", sessionID), zap.Error(exitErr))
+	} else {
+		s.processOnExit(ctx, taskID, exitSession, fromStep)
 	}
 
 	// Publish task updated event via the task service so the payload carries
@@ -346,22 +339,25 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 	}
 }
 
-func (s *Service) validateTransitionWIPLimit(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
-	if targetStep == nil || targetStep.WIPLimit <= 0 || task.WorkflowStepID == targetStep.ID {
-		return nil
+func (s *Service) updateTransitionTaskWithCapacity(
+	ctx context.Context,
+	task *models.Task,
+	targetStep *wfmodels.WorkflowStep,
+) error {
+	if targetStep == nil || targetStep.WIPLimit <= 0 {
+		return s.repo.UpdateTask(ctx, task)
 	}
-	limitsRepo, ok := s.repo.(workflowMoveLimitsRepository)
+	limitedRepo, ok := s.repo.(workflowLimitedMoveRepository)
 	if !ok {
 		return fmt.Errorf("WIP limit cannot be checked for workflow step %s", targetStep.ID)
 	}
-	occupants, err := limitsRepo.CountTasksByWorkflowStepExcludingTask(ctx, targetStep.ID, task.ID)
-	if err != nil {
-		return fmt.Errorf("count target workflow step tasks: %w", err)
-	}
-	if occupants >= targetStep.WIPLimit {
-		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d already occupied", targetStep.ID, targetStep.WIPLimit)
-	}
-	return nil
+	return limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(
+		ctx,
+		task,
+		targetStep.ID,
+		task.ID,
+		targetStep.WIPLimit,
+	)
 }
 
 // handleTaskMoved handles manual task step changes (drag-and-drop, stepper "Move here").
@@ -395,27 +391,45 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 // If the target step has auto_start_agent, it creates a session and starts the agent
 // using agent/executor profile IDs from the task's metadata.
 func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.TaskMovedEventData) {
-	// Load the target step to check auto-start and plan mode flags
-	step, err := s.workflowStepGetter.GetStep(ctx, data.ToStepID)
+	s.autoStartTaskForStep(ctx, data.TaskID, data.ToStepID, "task.moved")
+}
+
+func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.TaskEventData) {
+	task, err := s.repo.GetTask(ctx, data.TaskID)
 	if err != nil {
-		s.logger.Warn("task.moved: failed to load target step",
-			zap.String("task_id", data.TaskID),
-			zap.String("to_step_id", data.ToStepID),
+		s.logger.Warn("task.queue_promoted: failed to load task", zap.String("task_id", data.TaskID), zap.Error(err))
+		return
+	}
+	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, "task.queue_promoted")
+}
+
+func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn(eventName+": failed to load task for auto-start",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if task == nil || task.QueuedForStepID != "" {
+		return
+	}
+	if s.launchDeferredTask(ctx, task, eventName) {
+		return
+	}
+
+	// Load the target step to check auto-start and plan mode flags
+	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil {
+		s.logger.Warn(eventName+": failed to load target step",
+			zap.String("task_id", taskID),
+			zap.String("to_step_id", stepID),
 			zap.Error(err))
 		return
 	}
 	if step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
-		s.logger.Debug("task.moved: no session and target step has no auto-start",
-			zap.String("task_id", data.TaskID),
-			zap.String("to_step_id", data.ToStepID))
-		return
-	}
-
-	task, err := s.repo.GetTask(ctx, data.TaskID)
-	if err != nil {
-		s.logger.Warn("task.moved: failed to load task for auto-start",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
+		s.logger.Debug(eventName+": target step has no auto-start",
+			zap.String("task_id", taskID),
+			zap.String("to_step_id", stepID))
 		return
 	}
 
@@ -428,9 +442,9 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 	executorProfileID, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
-	s.logger.Info("task.moved: starting task (no session, auto-start step)",
-		zap.String("task_id", data.TaskID),
-		zap.String("to_step_id", data.ToStepID),
+	s.logger.Info(eventName+": starting task (no session, auto-start step)",
+		zap.String("task_id", taskID),
+		zap.String("to_step_id", stepID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.String("executor_id", executorID),
 		zap.String("executor_profile_id", executorProfileID),
@@ -443,13 +457,105 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		if workflowAgentProfileID != "" {
 			startAgentProfileID = ""
 		}
-		_, err := s.StartTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
+		_, err := s.StartTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, stepID, planMode, true, nil)
 		if err != nil {
-			s.logger.Error("task.moved: failed to auto-start task",
-				zap.String("task_id", data.TaskID),
+			s.logger.Error(eventName+": failed to auto-start task",
+				zap.String("task_id", taskID),
 				zap.Error(err))
 		}
 	}()
+}
+
+func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string) bool {
+	if task.Metadata == nil {
+		return false
+	}
+	raw, ok := task.Metadata[models.MetaKeyDeferredLaunch]
+	if !ok {
+		return false
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return false
+	}
+	var intent struct {
+		Intent            string                 `json:"intent"`
+		AgentProfileID    string                 `json:"agent_profile_id"`
+		ExecutorID        string                 `json:"executor_id"`
+		ExecutorProfileID string                 `json:"executor_profile_id"`
+		Prompt            string                 `json:"prompt"`
+		PlanMode          bool                   `json:"plan_mode"`
+		Attachments       []v1.MessageAttachment `json:"attachments"`
+	}
+	if err := json.Unmarshal(encoded, &intent); err != nil || intent.AgentProfileID == "" {
+		s.logger.Warn(eventName+": invalid deferred launch intent", zap.String("task_id", task.ID), zap.Error(err))
+		return true
+	}
+	launchIntent := IntentStart
+	if intent.Intent == "prepare" {
+		launchIntent = IntentPrepare
+	}
+	go func() {
+		launchCtx := context.WithoutCancel(ctx)
+		metadataClaimed, claimOK := s.claimDeferredLaunch(launchCtx, task.ID, eventName)
+		if !claimOK {
+			return
+		}
+		_, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
+			TaskID: task.ID, Intent: launchIntent, AgentProfileID: intent.AgentProfileID,
+			ExecutorID: intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
+			WorkflowStepID: task.WorkflowStepID, Prompt: intent.Prompt,
+			PlanMode: intent.PlanMode, Attachments: intent.Attachments, LaunchWorkspace: true,
+		})
+		if launchErr != nil {
+			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
+			s.restoreDeferredLaunch(launchCtx, task.ID, raw, eventName, metadataClaimed)
+			return
+		}
+		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		if metadataClaimed {
+			task.UpdatedAt = time.Now().UTC()
+			s.publishTaskUpdated(launchCtx, task)
+			return
+		}
+		task.UpdatedAt = time.Now().UTC()
+		if updateErr := s.repo.UpdateTask(launchCtx, task); updateErr == nil {
+			s.publishTaskUpdated(launchCtx, task)
+		}
+	}()
+	return true
+}
+
+func (s *Service) claimDeferredLaunch(ctx context.Context, taskID, eventName string) (bool, bool) {
+	remover, ok := s.repo.(interface {
+		RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
+	})
+	if !ok {
+		return false, true
+	}
+	claimed, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch)
+	if err != nil || !claimed {
+		if err != nil {
+			s.logger.Warn(eventName+": failed to claim deferred launch", zap.String("task_id", taskID), zap.Error(err))
+		}
+		return false, false
+	}
+	return true, true
+}
+
+func (s *Service) restoreDeferredLaunch(ctx context.Context, taskID string, raw interface{}, eventName string, claimed bool) {
+	if !claimed {
+		return
+	}
+	setter, ok := s.repo.(interface {
+		SetTaskMetadataKey(context.Context, string, string, interface{}) error
+	})
+	if !ok {
+		return
+	}
+	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch, raw); err != nil {
+		s.logger.Warn(eventName+": failed to restore deferred launch intent", zap.String("task_id", taskID), zap.Error(err))
+	}
 }
 
 // handleTaskMovedWithSession handles the case where a task with an existing session

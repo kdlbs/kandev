@@ -22,6 +22,7 @@ Users can arrange and save the desktop task workbench only while a task is open,
 - Removing Terminal from the effective default prevents the default terminal panel and its backing user shell from being created when a fresh task environment is first opened.
 - Applying a layout preserves every configured reusable panel regardless of whether the task has repositories. Panels without applicable content remain available and show their normal empty state.
 - A changed default applies to task environments that have no saved task-specific layout and to an explicit Reset Layout action. It does not overwrite an existing task-specific layout merely because the setting changed.
+- Switching between tasks whose sessions share one task environment atomically replaces task-owned Agent tabs in their existing group. The handoff preserves the live split tree and proportions instead of briefly emptying the group or rebuilding the environment layout.
 - The existing workbench layout menu continues to apply built-in and custom profiles and save the current workbench as a custom profile. Profile mutations from either surface remain consistent after the user-settings response is received.
 - Layout-profile editing is usable with pointer, keyboard, and touch input. On narrow settings viewports, profile management and all editor commands remain reachable without horizontal page scrolling.
 - Layout profiles configure the desktop Dockview workbench only. Mobile and tablet task-detail layouts retain their existing behavior.
@@ -69,6 +70,7 @@ The frontend treats the returned settings payload as authoritative after each su
 - Custom profiles and the selected custom default survive browser and Kandev restarts through backend user settings and are portable across the user's devices.
 - An unsaved editor draft does not survive navigation or restart.
 - Per-task layout state continues to use its existing environment-scoped persistence and is not made portable by this feature.
+- A task handoff within the same environment does not persist an intermediate panel-removal state or change the root split orientation.
 
 ## Scenarios
 
@@ -80,6 +82,7 @@ The frontend treats the returned settings payload as authoritative after each su
 - **GIVEN** a default profile without Terminal and a task environment with no saved layout, **WHEN** the user first opens that task, **THEN** the workbench has no Terminal tab and no default user shell is created.
 - **GIVEN** an existing task with a task-specific layout, **WHEN** the user changes the default profile and returns to that task, **THEN** the task-specific layout is unchanged.
 - **GIVEN** an existing task with a task-specific layout, **WHEN** the user chooses Reset Layout, **THEN** the latest effective default profile replaces that task's layout.
+- **GIVEN** two tasks whose active sessions share one task environment and a desktop workbench with Agent in the center and Files or Changes above Terminal on the right, **WHEN** the user switches between those tasks, **THEN** the incoming Agent replaces the outgoing Agent in the same group, the right column remains vertically split, the root remains horizontally split, and the same geometry survives reload.
 - **GIVEN** a custom default profile, **WHEN** the user deletes it and confirms, **THEN** the built-in Default becomes effective.
 - **GIVEN** a profile draft with Agent removed, duplicate reusable panels, or an empty group, **WHEN** the user attempts to save, **THEN** saving is blocked and the invalid locations are identified.
 - **GIVEN** a backend save failure, **WHEN** the user saves a profile edit, **THEN** the draft remains available and the previous persisted layout stays selected.

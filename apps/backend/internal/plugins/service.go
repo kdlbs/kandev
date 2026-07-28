@@ -94,10 +94,18 @@ type Service struct {
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
+	taskWriter       taskWriter
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
 	utilityAgents utilityAgentSource
 	utilityRunner utilityRunner
+
+	// Host data API write dependencies wired late via SetWriteDeps (ADR
+	// 0043): the task-message delivery path and the orchestrator task-starter,
+	// both constructed after boot-active plugins spawn (see writeDeps on
+	// pluginHost). Mutex-guarded against the concurrent hostForPlugin reads.
+	messenger   taskMessenger
+	taskStarter taskStarter
 
 	// authLogin establishes an authenticated browser session for an external
 	// identity an auth-capable plugin asserts via its webhook response
@@ -222,6 +230,7 @@ func (s *Service) SetDataSources(
 	agentProfiles agentProfileDataSource,
 	sessionCodeStats sessionCodeStatsSource,
 	messages messageDataSource,
+	taskWrites taskWriter,
 ) {
 	s.taskData = tasks
 	s.workflows = workflows
@@ -229,6 +238,33 @@ func (s *Service) SetDataSources(
 	s.agentProfiles = agentProfiles
 	s.sessionCodeStats = sessionCodeStats
 	s.messageData = messages
+	s.taskWriter = taskWrites
+}
+
+// SetWriteDeps wires the Host data API's late write dependencies (ADR 0043
+// phase 2): the task-message delivery path behind the SendMessage RPC
+// (api_write:messages) and the orchestrator task-starter behind CreateTask's
+// start_agent flag. Wired LATE (not in SetDataSources) because the orchestrator
+// is constructed after StartActivePlugins has spawned boot-active plugins, so
+// hosts read these live via writeDependencies rather than snapshotting them —
+// the write here is mutex-guarded against those concurrent reads. Either
+// argument may be nil (feature-gated off), in which case the corresponding
+// write path returns Unimplemented / is a best-effort no-op.
+func (s *Service) SetWriteDeps(messenger taskMessenger, starter taskStarter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.messenger = messenger
+	s.taskStarter = starter
+}
+
+// writeDependencies returns the currently-wired task messenger and task
+// starter. Read live (not snapshotted at hostForPlugin time) so a plugin
+// spawned before SetWriteDeps still resolves them once it is called. Guarded by
+// s.mu against the SetWriteDeps write.
+func (s *Service) writeDependencies() (taskMessenger, taskStarter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.messenger, s.taskStarter
 }
 
 // SetUtilityAgent wires the dependencies behind Host.InvokeUtilityAgent
@@ -373,7 +409,9 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		agentProfiles:    s.agentProfiles,
 		sessionCodeStats: s.sessionCodeStats,
 		messageData:      s.messageData,
+		taskWriter:       s.taskWriter,
 		utilityDeps:      s.utilityAgentDeps,
+		writeDeps:        s.writeDependencies,
 	}
 }
 

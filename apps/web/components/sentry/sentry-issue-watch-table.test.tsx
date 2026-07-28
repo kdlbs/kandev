@@ -13,7 +13,7 @@ function watch(over: Partial<SentryIssueWatch>): SentryIssueWatch {
     workflowStepId: "step",
     repositoryId: "",
     baseBranch: "",
-    filter: { orgSlug: "acme", projectSlug: "web" },
+    filter: { orgSlug: "acme", projectSlugs: ["web"] },
     agentProfileId: "ap",
     executorProfileId: "",
     prompt: "",
@@ -87,5 +87,12 @@ describe("SentryIssueWatchTable", () => {
     expect(screen.getByTestId("sentry-watch-row-w2").getAttribute("data-settings-dirty")).toBe(
       "false",
     );
+  });
+
+  it("renders a comma-joined project list in the filter summary for a multi-project watch", () => {
+    renderTable([
+      watch({ id: "w1", filter: { orgSlug: "acme", projectSlugs: ["frontend", "backend"] } }),
+    ]);
+    expect(screen.getByText("org:acme · project:frontend,backend")).toBeTruthy();
   });
 });

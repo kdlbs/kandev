@@ -125,6 +125,7 @@ type JobStore struct {
 	hub         JobBroadcaster
 	log         *zap.Logger
 	onSuccess   func(agentName string) // invoked when a job succeeds (used to invalidate discovery)
+	maintenance *maintenanceCoordinator
 }
 
 // JobBroadcaster is the subset of the gateway Broadcaster we need.
@@ -133,7 +134,12 @@ type JobBroadcaster interface {
 }
 
 // NewJobStore returns a fresh job store wired to the given broadcaster.
-func NewJobStore(hub JobBroadcaster, log *zap.Logger, onSuccess func(string)) *JobStore {
+func NewJobStore(
+	hub JobBroadcaster,
+	log *zap.Logger,
+	onSuccess func(string),
+	maintenance *maintenanceCoordinator,
+) *JobStore {
 	return &JobStore{
 		jobs:        make(map[string]*InstallJob),
 		activeByAgt: make(map[string]*InstallJob),
@@ -141,18 +147,19 @@ func NewJobStore(hub JobBroadcaster, log *zap.Logger, onSuccess func(string)) *J
 		hub:         hub,
 		log:         log,
 		onSuccess:   onSuccess,
+		maintenance: maintenance,
 	}
 }
 
 // Enqueue starts (or returns an existing) install job for the named agent
 // running the given hard-coded script. The script is supplied by the agent
 // type, not by the request — no user-supplied shell input.
-func (s *JobStore) Enqueue(agentName, script string) *InstallJob {
+func (s *JobStore) Enqueue(agentName, script string) (*InstallJob, error) {
 	s.mu.Lock()
 	// Idempotent: a running/queued job for this agent reuses the same job_id.
 	if existing, ok := s.activeByAgt[agentName]; ok {
 		s.mu.Unlock()
-		return existing
+		return existing, nil
 	}
 	job := &InstallJob{
 		ID:        uuid.NewString(),
@@ -161,13 +168,27 @@ func (s *JobStore) Enqueue(agentName, script string) *InstallJob {
 		Output:    newRingBuffer(jobOutputRingSize),
 		StartedAt: time.Now().UTC(),
 	}
+	ref := MaintenanceJobRef{JobID: job.ID, Kind: MaintenanceKindInstall}
+	if s.maintenance != nil {
+		active, claimed, err := s.maintenance.claim(agentName, MaintenanceKindInstall, job.ID)
+		if err != nil {
+			s.mu.Unlock()
+			return nil, err
+		}
+		if !claimed {
+			existing := s.jobs[active.JobID]
+			s.mu.Unlock()
+			return existing, nil
+		}
+		ref = active
+	}
 	s.jobs[job.ID] = job
 	s.activeByAgt[agentName] = job
 	s.mu.Unlock()
 
 	s.broadcast(ws.ActionAgentInstallStarted, job.snapshot())
-	go s.run(job, script)
-	return job
+	go s.run(job, script, ref)
+	return job, nil
 }
 
 // Get returns a snapshot of the job by ID. ok=false if not found.
@@ -193,7 +214,7 @@ func (s *JobStore) ListAll() []dto.InstallJobDTO {
 	return out
 }
 
-func (s *JobStore) run(job *InstallJob, script string) {
+func (s *JobStore) run(job *InstallJob, script string, ref MaintenanceJobRef) {
 	// Bound parallel installs: queued jobs wait here until a slot frees up.
 	s.semaphore <- struct{}{}
 	defer func() { <-s.semaphore }()
@@ -228,9 +249,14 @@ func (s *JobStore) run(job *InstallJob, script string) {
 			job.ExitCode = &exit
 		}
 	}
+	// Release the shared maintenance claim before its local active entry. This
+	// keeps a concurrent retry from observing no local job while the shared
+	// coordinator still points at this completed job.
+	if s.maintenance != nil {
+		s.maintenance.release(job.AgentName, ref)
+	}
 	// Free the per-agent slot before notifying so a retry/auto-rescan
-	// triggered from onSuccess or the WS broadcast starts a fresh job
-	// instead of being deduped against this finished one.
+	// triggered from onSuccess or the WS broadcast starts a fresh job.
 	delete(s.activeByAgt, job.AgentName)
 	jobID := job.ID
 	s.mu.Unlock()

@@ -9,19 +9,22 @@ const methods = [
   {
     value: "pat" as const,
     label: "Personal access token",
-    description: "Simple and portable, but automation is attributed to your personal account.",
+    description:
+      "Stored encrypted by Kandev. Workspace automation and managed task GitHub HTTPS/gh act as your account.",
     icon: IconKey,
   },
   {
     value: "cli" as const,
     label: "GitHub CLI account",
-    description: "Reuse one named account already authenticated on this Kandev host.",
+    description:
+      "Resolved from one named host account when needed. Managed tasks receive a scoped brokered identity; host Git is not inherited unless selected below.",
     icon: IconTerminal2,
   },
   {
     value: "app" as const,
     label: "GitHub App",
-    description: "Isolated, short-lived credentials with explicit repository access.",
+    description:
+      "Stored App credentials mint short-lived installation tokens. Managed tasks receive a scoped brokered App identity for allowed repositories.",
     icon: IconBrandGithub,
   },
 ];

@@ -20,11 +20,12 @@ func TestCopyWorkspaceSettingsToWorkspace_CopiesSettings(t *testing.T) {
 	const src, dst = "ws-src", "ws-dst"
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
-		WorkspaceID:         src,
-		RepoScopeMode:       RepoScopeModeRepos,
-		RepoScopeRepos:      []RepoFilter{{Owner: "kdlbs", Name: "kandev"}},
-		SavedPresets:        []byte(`[{"id":"p1","kind":"pr","label":"Mine"}]`),
-		DefaultQueryPresets: []byte(`{"pr":[],"issue":[]}`),
+		WorkspaceID:            src,
+		TaskGitCredentialsMode: TaskGitCredentialsModeExecutor,
+		RepoScopeMode:          RepoScopeModeRepos,
+		RepoScopeRepos:         []RepoFilter{{Owner: "kdlbs", Name: "kandev"}},
+		SavedPresets:           []byte(`[{"id":"p1","kind":"pr","label":"Mine"}]`),
+		DefaultQueryPresets:    []byte(`{"pr":[],"issue":[]}`),
 	}); err != nil {
 		t.Fatalf("seed source: %v", err)
 	}
@@ -41,6 +42,9 @@ func TestCopyWorkspaceSettingsToWorkspace_CopiesSettings(t *testing.T) {
 	}
 	if got.WorkspaceID != dst || got.RepoScopeMode != RepoScopeModeRepos {
 		t.Errorf("copied settings identity/scope mismatch: %+v", got)
+	}
+	if got.TaskGitCredentialsMode != TaskGitCredentialsModeExecutor {
+		t.Errorf("task Git credential mode not copied: %q", got.TaskGitCredentialsMode)
 	}
 	if len(got.RepoScopeRepos) != 1 || got.RepoScopeRepos[0].Owner != "kdlbs" ||
 		got.RepoScopeRepos[0].Name != "kandev" {

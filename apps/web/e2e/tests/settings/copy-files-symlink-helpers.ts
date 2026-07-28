@@ -11,7 +11,19 @@ export async function configureSymlinkAndCreateTask(options: {
 }) {
   const { page, apiClient, seedData, title } = options;
   await page.goto(`/settings/workspace/${seedData.workspaceId}/repositories`);
-  await page.getByRole("button", { name: "Edit" }).first().click();
+  await expect(page.getByRole("button", { name: "Add Local Repository" })).toBeVisible();
+
+  const repositoriesResponse = await apiClient.rawRequest(
+    "GET",
+    `/api/v1/workspaces/${seedData.workspaceId}/repositories`,
+  );
+  expect(repositoriesResponse.ok).toBe(true);
+  const { repositories } = (await repositoriesResponse.json()) as {
+    repositories: Array<{ id: string; name: string }>;
+  };
+  const repository = repositories.find(({ id }) => id === seedData.repositoryId);
+  if (!repository) throw new Error("seed repository missing from workspace repository list");
+  await page.getByRole("heading", { name: repository.name, exact: true }).click();
 
   const input = page.getByTestId(`copy-files-input-${seedData.repositoryId}`);
   await expect(input).toBeVisible();

@@ -1,227 +1,112 @@
 ---
 name: fix
-description: Fix bugs and issues — reproduce, find root cause, minimal fix with regression test. Use when something is broken.
+description: Diagnose a bug, update its behavioral spec, create reviewable fix plan and task files, then implement with TDD after user approval.
 ---
 
 # Fix
 
-Systematic bug fixing: reproduce the problem, find the root cause, apply a minimal fix with a regression test.
+Use the same durable, reviewable workflow as feature work. Diagnose first, then
+produce the spec amendment, fix plan, and task files before changing production
+code. The user can review those artifacts, switch the main session to a cheaper
+model, and explicitly authorize native subagents for parallel-safe tasks.
 
-## Planner Entry
+## Core Flow
 
-For small, clear bugs, the planner performs the bounded reproduction,
-root-cause trace, TDD fix, and focused checks directly. It does not delegate
-first-pass logs, sessions, call-path mapping, or reproduction just because the
-issue is unfamiliar. Delegate only a concrete post-triage question requiring
-independent evidence, or a broad, large, or cross-component fix. A diagnostic
-worker may own an explicitly named regression test but not production edits; a
-patch worker owns the minimal production change and targeted verification.
-Apply `/planner-orchestration` risk routing: for PR delivery, obtain qualifying
-current-head PR AI semantic evidence, always run final `verify`, and use local
-QA/review/security agents only for exceptional routes. Workers do not spawn.
-
-## Available skills and subagents
-
-- **`/tdd`** — Use for implementing the fix with a regression test (Red-Green-Refactor).
-- **`/e2e`** — Use when the bug is in a user-facing flow and needs a Playwright regression test.
-- **`/verify`** — After targeted checks pass, the planner commits through hooks
-  and launches this post-commit gate before push.
-- **`/record`** — The planner uses this when the worker reports a durable architectural decision.
-
-## What a fix produces (and what it doesn't)
-
-The artifacts for a bug fix are:
-- A regression test that fails before the fix and passes after.
-- The minimal code change.
-- A clear commit message capturing the root cause.
-- **An ADR (via `/record decision`) IF the fix encoded a new project-wide convention** (e.g., "GC code must fail-closed", "all repo deletes must be transactional"). Most fixes don't need one.
-- **An update to the related feature spec IF the bug exposed a requirement gap** (see Phase 5).
-
-A bug fix does **not** produce a spec. Specs describe product features; bugs are corrections to existing features and are tracked in tests + commits.
-
----
-
-## Before anything else: create the pipeline
-
-Create these tasks immediately (use your task/todo tracking tool if available):
-
-0. **Read the issue + view attachments** — When the bug originates from an issue tracker, fetch the canonical issue and view every image attachment before hypothesizing
-1. **Reproduce the bug** — Write a test or find a reliable reproduction case
-2. **Find the root cause** — Trace the code path, narrow the scope, state the cause clearly
-3. **Fix with TDD** — Minimal fix with regression test, no surrounding refactors
-4. **Review and verify** — Planner obtains PR-first semantic evidence,
-   mandatory final verification, and only exceptional local gates; assigns remediation
-5. **Record** — Planner updates durable artifacts when worker evidence exposes a requirement or architecture gap
-
-Then start with task 0 when the bug is issue-sourced, otherwise task 1. Mark each task in_progress when you begin it and completed when you finish it. Do not skip ahead — fixing without reading the source issue (when one exists) or reproducing leads to patches that don't address the real problem. Fixing without understanding the root cause leads to whack-a-mole.
-
----
-
-## Phase 0: Read the issue + view attachments
-
-Mark task 0 as in_progress (skip this phase if there is no issue tracker source — e.g. a locally discovered bug with no linked issue).
-
-When the bug originates from an issue tracker, fetch the **canonical issue** and view **every image attachment** before hypothesizing. Handed-down restatements (Kandev task/subtask text, Slack paste, PR description) are leads only — verify against the source.
-
-```bash
-gh issue view <N> --repo <owner/repo> --json title,body,comments
-curl -sL "https://github.com/user-attachments/assets/<id>" -o /tmp/issue-<N>-<n>.png   # then Read the local file
+```text
+Evidence -> Root cause -> Spec amendment -> Fix plan + tasks -> User approval/model switch -> TDD implementation -> PR AI review
 ```
 
-- **Transcribe exact strings from screenshots** into the repro (paths, error messages, UI labels). Screenshots often hold details missing from the text summary.
-- **Mine structured issue-template fields** (OS, install mode, clean-state, version) to constrain repro conditions.
-- **Video attachments** cannot be Read as stills — note their presence and rely on the issue text/comments for motion-specific details.
+Do not patch production code before the planning checkpoint unless the user
+explicitly opts out of the workflow.
 
-Mark task 0 as completed.
+## Phase 0: Evidence And Root Cause
 
----
+When a bug originates from an issue tracker, read the canonical issue and every
+image attachment before hypothesizing. Reproduce with existing tests, a
+read-only trace, or a minimal throwaway repro. Do not add production code during
+this phase.
 
-## Phase 1: Reproduce
+State the root cause before planning:
 
-Mark task 1 as in_progress.
+- what is actually wrong, not only the symptom;
+- why it happens and under which conditions;
+- the smallest reliable reproduction; and
+- the intended regression-test level and path.
 
-Before anything else, reproduce the bug reliably:
+If the problem cannot be reproduced or the cause remains unclear, stop and ask
+the user rather than guessing at a fix.
 
-- **If the diagnosis packet explicitly owns a test path:** write and run the
-  minimal failing regression test at the appropriate level, then return its red
-  result with the evidence and root cause.
-- **If it does not own a test path:** use existing tests, manual or
-  non-mutating runtime evidence, or read-only tracing. Do not edit tests or
-  production. Return concrete reproduction evidence plus the proposed
-  regression-test scenario and path for the Phase 3 patch worker.
+## Phase 1: Fix Specification
 
-If it can't be reproduced, use test-only assertions/instrumentation only when
-the test path is owned; otherwise use non-mutating runtime evidence — don't
-guess at a fix.
-Find the minimal reproduction case: strip away everything that isn't needed to trigger the bug.
+Before implementation, find the affected durable spec under
+`docs/specs/<slug>/spec.md` and amend its behavior or GIVEN/WHEN/THEN scenario
+to cover the regression. If no relevant spec exists, create a concise repair
+spec at `docs/specs/<fix-slug>/spec.md` that states the broken behavior, desired
+behavior, regression scenario, out-of-scope work, and any relevant contract or
+persistence constraint.
 
-For flaky Playwright failures, do not stop after one clean focused run. Use the
-`/e2e` flake reproduction flow: run the exact CI shard in
-`ghcr.io/kdlbs/kandev-ci:runtime-latest` with `CI=true`, then add resource
-limits such as `--cpus=2 --memory=4g --memory-swap=4g` and repeat the failing
-test or full spec file. Preserve nearby test ordering when a single-test repeat
-passes, and inspect `error-context.md` from the failed repeat before fixing.
+This spec is the reviewable expected behavior; it is not an incident report.
 
-Mark task 1 as completed.
+## Phase 2: Fix Plan And Task Files
 
----
+Create `docs/plans/<fix-slug>/plan.md` and sibling
+`docs/plans/<fix-slug>/task-<NN>-<short-slug>.md` files before implementation.
+Follow the `/plan` structure, with these fix-specific requirements:
 
-## Phase 2: Find the root cause
+- Link the amended repair spec and state the confirmed root cause.
+- Include the regression test that must fail before the code change and pass
+  afterward.
+- Name exact files, dependencies, acceptance criteria, and targeted commands.
+- Use dependency waves and mark `parallel-safe` only for disjoint tasks with no
+  shared schema, migration, generated contract, lockfile, or package config.
+- Keep `parallelism: sequential` by default in each task; waves are a human
+  decision aid, not authorization to delegate.
 
-Mark task 2 as in_progress.
+## Phase 3: User Review And Model Switch
 
-Don't guess and patch — systematically narrow the scope:
+Before changing production or permanent test code, present:
 
-**Trace the code path:** Follow the data from input to the failure point. Use
-test-only assertions/instrumentation only when the test path is owned;
-otherwise use non-mutating runtime evidence at the midpoint of the call chain.
-Is the data correct there? If yes, the bug is downstream. If no, upstream.
-Repeat until you find the exact line where things go wrong.
+- root-cause summary and reproduction evidence;
+- amended/new spec path;
+- fix plan and task-file paths;
+- task waves, parallel candidates, and exact validation commands; and
+- risks and out-of-scope work.
 
-**Narrow the input:** What's the smallest input that triggers the bug? What's the largest input that succeeds? Strip away everything that isn't needed to trigger it.
+Pause for the user to approve. At that point the user may switch the main
+session to a lower-cost implementation model and may explicitly ask to use
+subagents. Do not infer subagent authorization from the plan.
 
-**Check history (only if it used to work):** If a feature regressed, use `git bisect` to find the commit that broke it. Skip this for bugs that were always present.
+## Phase 4: Implement With TDD
 
-**Before proceeding, state the root cause clearly:**
-- What is the actual cause (not the symptom)?
-- Why does it happen? (e.g., "empty string bypasses validation and reaches the DB layer")
-- Under what conditions? (e.g., "only when the input is whitespace-only")
+Execute approved tasks sequentially by default:
 
-If you can't state this clearly, you haven't found the root cause yet — keep investigating. Present your root cause analysis to the user before fixing.
+1. Mark the task `in_progress`.
+2. Write and run the regression test; confirm it fails for the expected reason.
+3. Implement the minimal fix.
+4. Run the task's exact targeted unit, integration, or E2E command.
+5. Mark the task `done` and update `plan.md` status in the primary session.
 
-Mark task 2 as completed.
+When the user explicitly authorizes subagents, follow
+`/planner-orchestration`: native delegation only, current user-selected model,
+`fork_turns: "none"`, compact task-file handoffs, no recursive spawning, and
+runtime usage-metadata confirmation. Only launch tasks marked parallel-safe.
 
----
+## Phase 5: PR Review
 
-## Phase 3: Fix with TDD
+After all approved task checks pass, commit, push, and open the PR. Do not run
+automatic local simplify, QA, code/security review, or broad verification. The
+two configured PR AI reviewers are the semantic-review gate. Use `/pr-fixup`
+only for CI failures or actionable reviewer findings, rerunning only the
+affected task check after remediation.
 
-Mark task 3 as in_progress.
+## Stop Conditions
 
-Follow `/tdd`:
-1. Preserve or complete the diagnosis regression test; if diagnosis did not
-   own a test path, add the proposed regression test, then confirm the exact
-   bug fails
-2. Write the minimal fix — change only what's necessary, don't refactor surrounding code
-3. Confirm the regression test and targeted verification pass
+Stop and ask the user when the root cause is uncertain, the repair changes an
+architecture/public-contract/persistence/security boundary, the spec and code
+disagree, or the same targeted check fails three times.
 
-Mark task 3 as completed.
+## Final Report
 
----
-
-## Phase 4: Verify
-
-Mark task 4 as in_progress.
-
-This is a planner coordination phase. After the fix implementer reports its
-targeted test results and compact handoff capsule (intent/acceptance; base/head
-SHA when applicable; changed files and entry points; named spec/ADR sections;
-risk tags; exact targeted commands/results; uncertainties), apply
-`/planner-orchestration` risk routing. For PR delivery, defer routine semantic
-review to qualifying exact-current-head PR AI evidence; do not launch local
-`code-review` by default. Use `qa` only for unusually large/complex
-multi-component behavior or an important integration boundary without faithful
-tests. Use `security-auditor` only for high-impact new/changed authz,
-workspace-isolation, secrets, untrusted-execution, or credential-trust
-boundaries, an explicit request, or concrete automated security concerns.
-Commit the accepted fix through `/commit`, then always run final `verify`
-before push with its hook receipt. The planner's acceptance check is not a
-substitute for the required evidence.
-
-Route every finding to a bounded implementer packet. Reuse the same native
-thread when role, change, and file scope remain materially the same; use a new
-thread after major redesign, unrelated scope, stale/noisy context, or when
-independent judgment is needed. Rerun only affected semantic, QA, and security
-gates only when the remediation meets their exceptional route. For a small,
-scope-preserving PR fix, use the finding, focused regression, final Spark
-`verify`, and fresh qualifying exact-head PR AI review. The fix worker only
-reports targeted results, its handoff capsule, and any similar patterns it
-noticed.
-
-Mark task 4 as completed.
-
----
-
-## Phase 5: Record
-
-Mark task 5 as in_progress.
-
-Two questions, in order:
-
-**1. Did the fix expose a requirement gap in an existing spec?**
-
-A bug can mean the spec was wrong, ambiguous, or silent about the scenario that broke. Ask: "If someone re-implemented this feature from the spec alone, would they reproduce this bug?" If yes, the spec is incomplete.
-
-- Find the related spec under `docs/specs/<slug>/spec.md` (check `docs/specs/INDEX.md`).
-- The planner updates it to cover the missing requirement, usually with a new
-  line under **What** or a new GIVEN/WHEN/THEN scenario. The fix worker only
-  reports the gap.
-- If no spec exists yet but should (this category of behavior is feature-shaped and load-bearing), flag it to the user — don't create one unilaterally during a fix.
-- If the bug was in infra, tooling, or behavior not covered by any feature spec, skip — there is nothing to update.
-
-**Do NOT create a new spec for the bug fix itself.** Bugs aren't features.
-
-**2. Did the fix encode a new project-wide convention?**
-
-If the root cause exposed an architectural gap, a non-obvious constraint, or a
-rule that should bind future code, the planner runs `/record decision`. The fix
-worker reports the candidate decision and alternatives; it does not create the
-ADR.
-
-If neither question applies, skip this phase.
-
-Mark task 5 as completed.
-
----
-
-## Stop conditions
-
-- **3 failed fix attempts:** Stop fixing and question the architecture. The bug may be a symptom of a deeper design issue.
-- **Can't reproduce:** Don't guess. Add observability (logging, assertions) and wait for it to happen again.
-- **Fix is larger than expected:** If the minimal fix touches many files, the root cause may be architectural. Discuss with the user before proceeding.
-
-## What not to do
-
-- Don't add try/catch to suppress the error — that hides the bug, it doesn't fix it
-- Don't "fix" by adding defensive checks everywhere — fix the one place that's wrong
-- Don't refactor while fixing — separate commits for separate concerns
-- Don't claim "fixed" without a regression test proving it
+Report the root cause, spec/plan/task paths, approval and model-switch point,
+subagents explicitly authorized (if any), changed files, tests run, and current
+PR-review status.

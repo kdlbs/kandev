@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -36,8 +37,7 @@ func parseMRURLForHost(rawURL, configuredHost string) (string, int, error) {
 	if err != nil {
 		return "", 0, ErrInvalidMRURL
 	}
-	expectedOrigin, err := normalizeHostOrigin(configuredHost)
-	if err != nil || !strings.EqualFold(origin, expectedOrigin) {
+	if !sameConfiguredOrigin(origin, configuredHost) {
 		return "", 0, fmt.Errorf("%w: host does not match workspace connection", ErrInvalidMRURL)
 	}
 	const marker = "/-/merge_requests/"
@@ -56,6 +56,103 @@ func parseMRURLForHost(rawURL, configuredHost string) (string, int, error) {
 		return "", 0, ErrInvalidMRURL
 	}
 	return projectPath, iid, nil
+}
+
+// parseGitLabRemoteURLIdentity extracts a normalized (host origin, project
+// path) pair from a git remote URL, accepting HTTPS, ssh://, and scp-style
+// (git@host:path) forms. SSH remotes are normalized to an HTTPS-style origin
+// so they can be host-compared against a configured GitLab connection host,
+// which is always stored as an HTTP(S) origin. Returns empty strings when the
+// URL cannot be parsed as an owner/repo remote.
+func parseGitLabRemoteURLIdentity(remoteURL string) (host, projectPath string) {
+	const sshScheme = "ssh"
+	remoteURL = strings.TrimSpace(remoteURL)
+	if remoteURL == "" {
+		return "", ""
+	}
+	scheme, hostname, path, ok := splitRemoteURLIdentity(remoteURL)
+	if !ok {
+		return "", ""
+	}
+	scheme = strings.ToLower(scheme)
+	if scheme != mentionHTTPScheme && scheme != mentionHTTPSScheme && scheme != sshScheme {
+		return "", ""
+	}
+	if scheme == sshScheme {
+		scheme = mentionHTTPSScheme
+	}
+	path = strings.TrimSuffix(strings.Trim(strings.TrimSpace(path), "/"), ".git")
+	if hostname == "" || path == "" || !strings.Contains(path, "/") {
+		return "", ""
+	}
+	return scheme + "://" + hostname, path
+}
+
+// splitRemoteURLIdentity resolves the (scheme, hostname, path) triple for
+// either a scp-style shorthand (git@host:path) or a URL-form remote
+// (https://, ssh://, etc). Extracted from parseGitLabRemoteURLIdentity to
+// keep its cyclomatic complexity within the linter budget.
+func splitRemoteURLIdentity(remoteURL string) (scheme, hostname, path string, ok bool) {
+	const sshScheme = "ssh"
+	if strings.Contains(remoteURL, "@") && !strings.Contains(remoteURL, "://") {
+		// scp-style shorthand: git@host:group/sub/project.git (host may be a
+		// bracketed IPv6 literal, e.g. git@[::1]:group/project.git, whose
+		// embedded colons must not be mistaken for the host/path separator).
+		_, rest, _ := strings.Cut(remoteURL, "@")
+		h, p, cutOK := cutSCPHostPath(rest)
+		if !cutOK {
+			return "", "", "", false
+		}
+		return sshScheme, h, p, true
+	}
+	parsed, err := url.Parse(remoteURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", "", "", false
+	}
+	hostname = remoteHost(parsed)
+	if strings.EqualFold(parsed.Scheme, sshScheme) {
+		// SSH transport ports (e.g. ssh://git@host:2222/...) are unrelated to
+		// the GitLab web origin's port, so compare hostname only. Bracket
+		// IPv6 literals so the synthesized origin stays a valid URL (an
+		// unbracketed "https://::1" is not).
+		hostname = bracketedHostname(parsed.Hostname())
+	}
+	return parsed.Scheme, hostname, parsed.Path, true
+}
+
+// cutSCPHostPath splits an scp-style remote's "host:path" segment (the part
+// after "git@"), honoring bracketed IPv6 literals such as
+// "[::1]:group/project.git" whose embedded colons would otherwise be
+// mistaken for the host/path separator by a plain strings.Cut on ":".
+func cutSCPHostPath(rest string) (host, path string, ok bool) {
+	if strings.HasPrefix(rest, "[") {
+		closeIdx := strings.Index(rest, "]")
+		if closeIdx < 0 || closeIdx+1 >= len(rest) || rest[closeIdx+1] != ':' {
+			return "", "", false
+		}
+		return rest[:closeIdx+1], rest[closeIdx+2:], true
+	}
+	return strings.Cut(rest, ":")
+}
+
+func remoteHost(parsed *url.URL) string {
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return ""
+	}
+	if port := parsed.Port(); port != "" {
+		return net.JoinHostPort(hostname, port)
+	}
+	return bracketedHostname(hostname)
+}
+
+// bracketedHostname wraps an IPv6 literal in brackets (as required for a
+// valid URL host) and returns other hostnames unchanged.
+func bracketedHostname(hostname string) string {
+	if hostname == "" || !strings.Contains(hostname, ":") {
+		return hostname
+	}
+	return "[" + hostname + "]"
 }
 
 // AssociateExistingMRByURL validates a workspace-owned task/repository pair,

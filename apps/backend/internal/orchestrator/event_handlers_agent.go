@@ -510,6 +510,7 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	// here would produce the duplicate user message observed when a workflow
 	// auto-start failed transiently and the queue drained on boot_ready.
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
+	userMessageRecorded := alreadyRecorded
 	if s.messageCreator != nil && !alreadyRecorded {
 		turnID := s.getActiveTurnID(queuedMsg.SessionID)
 		if turnID == "" {
@@ -532,6 +533,8 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 				zap.String("session_id", queuedMsg.SessionID),
 				zap.Error(err))
 			// Continue anyway - the prompt should still be sent
+		} else {
+			userMessageRecorded = true
 		}
 	} else if s.messageCreator != nil && alreadyRecorded {
 		s.logger.Debug("skipping CreateUserMessage for queued workflow auto-start; already recorded before queueing",
@@ -575,13 +578,22 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			zap.String("queue_id", queuedMsg.ID),
 			zap.Error(err))
 
-		if isSessionBusyError(err) || isTransientPromptError(err) ||
+		manualRecovery := isManualRecoveryPromptError(err)
+		if isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
 			errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) {
-			s.logger.Warn("queued message execution failed transiently; requeueing",
+			if userMessageRecorded {
+				markQueuedUserMessageRecorded(queuedMsg)
+			}
+			s.logger.Warn("queued message execution failed; requeueing",
 				zap.String("session_id", callerSessionID),
 				zap.String("task_id", queuedMsg.TaskID),
-				zap.String("queue_id", queuedMsg.ID))
-			s.requeueMessage(promptCtx, queuedMsg, "workflow-auto-start-retry")
+				zap.String("queue_id", queuedMsg.ID),
+				zap.Bool("manual_recovery", manualRecovery))
+			if manualRecovery {
+				s.restoreQueuedMessage(promptCtx, queuedMsg)
+			} else {
+				s.requeueMessage(promptCtx, queuedMsg, "workflow-auto-start-retry")
+			}
 			return
 		}
 
@@ -595,6 +607,31 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			zap.String("queue_id", queuedMsg.ID),
 			zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
 	}
+}
+
+func (s *Service) restoreQueuedMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage) {
+	restored, err := s.messageQueue.RestoreMessage(ctx, queuedMsg)
+	if err != nil {
+		s.logger.Error("failed to restore queued message",
+			zap.String("session_id", queuedMsg.SessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(err))
+		return
+	}
+	s.logger.Info("message restored for manual recovery",
+		zap.String("session_id", restored.SessionID),
+		zap.String("task_id", restored.TaskID),
+		zap.String("queue_id", restored.ID),
+		zap.Int64("position", restored.Position))
+	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
+}
+
+func markQueuedUserMessageRecorded(queuedMsg *messagequeue.QueuedMessage) {
+	if queuedMsg.Metadata == nil {
+		queuedMsg.Metadata = make(map[string]interface{})
+	}
+	queuedMsg.Metadata[metaKeyUserMessageRecorded] = true
 }
 
 func metadataWithoutEntityReferences(metadata map[string]interface{}) map[string]interface{} {
@@ -790,25 +827,14 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	)
 
 	// Terminal from here. Finalize run-mode automation runs — every branch
-	// below returns early (resume failure, session-backed recoverable failure,
-	// no-session retry), and run-mode automations need their AutomationRun
-	// flipped + worktree reaped on *every* terminal failure path.
+	// below returns early (session-backed recoverable failure, no-session retry),
+	// and run-mode automations need their AutomationRun flipped + worktree reaped
+	// on *every* terminal failure path.
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
 		errMsg = "agent failed"
 	}
 	s.finalizeAutomationRunIfEphemeral(ctx, data.TaskID, data.SessionID, false, errMsg)
-
-	// Check if the agent was started with a resume token AND session init hadn't completed.
-	// If init completed, this is a normal prompt failure (e.g. agent internal timeout),
-	// not a resume failure — skip the resume cleanup path.
-	if data.SessionID != "" && s.wasResumeAttempt(ctx, data.SessionID) &&
-		!s.agentManager.WasSessionInitialized(data.AgentExecutionID) {
-		if s.handleResumeFailure(ctx, data) {
-			return // Resume token cleared, session set to WAITING_FOR_INPUT
-		}
-		// Fall through to normal failure handling if cleanup failed
-	}
 
 	// Make all agent CLI failures recoverable — let the user choose to resume or start fresh.
 	if data.SessionID != "" {
@@ -998,6 +1024,18 @@ func (s *Service) deleteExecutionTeardownClaimIfExpired(key string, expiresAt ti
 	}
 }
 
+func (s *Service) hasExecutionTeardownOwner(sessionID, executionID string) bool {
+	if sessionID == "" || executionID == "" {
+		return false
+	}
+	value, ok := s.executionTeardownClaims.Load(terminalExecutionKey(sessionID, executionID))
+	if !ok {
+		return false
+	}
+	claim, ok := value.(executionTeardownClaim)
+	return ok && time.Now().Before(claim.expiresAt)
+}
+
 // wasResumeAttempt checks whether the session's last execution used a resume token.
 // If the token is still present in the DB, the agent was started with --resume.
 func (s *Service) wasResumeAttempt(ctx context.Context, sessionID string) bool {
@@ -1009,8 +1047,9 @@ func (s *Service) wasResumeAttempt(ctx context.Context, sessionID string) bool {
 }
 
 // clearResumeToken removes the resume token from the executor running record so
-// the next agent start won't use --resume. Used by both automatic resume failure
-// handling and user-initiated fresh start recovery.
+// the next agent start won't use --resume. It is reserved for explicit
+// user-initiated fresh-start recovery; ordinary ACP startup failures retain the
+// token so the session can be retried.
 //
 // Unconditional clear: passes expectedExecID="" so the narrow update is not
 // CAS-guarded — clearing a token is always intentional regardless of which
@@ -1022,54 +1061,6 @@ func (s *Service) clearResumeToken(ctx context.Context, sessionID string) {
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-}
-
-// handleResumeFailure handles the case where an agent failed while using a resume token.
-// It clears the token so the next attempt starts fresh, and notifies the user.
-//
-// The session is set to WAITING_FOR_INPUT so the user can send a new message
-// (which triggers a fresh agent start without --resume).
-//
-// Returns true to signal that the caller should skip normal failure handling
-// (scheduler retry, FAILED state) since we've handled the state transition ourselves.
-func (s *Service) handleResumeFailure(ctx context.Context, data watcher.AgentEventData) bool {
-	s.logger.Warn("detected resume failure, clearing token for fresh start on next user action",
-		zap.String("task_id", data.TaskID),
-		zap.String("session_id", data.SessionID),
-		zap.String("error", data.ErrorMessage))
-
-	// 1. Clear the resume token so the next attempt won't use --resume.
-	s.clearResumeToken(ctx, data.SessionID)
-
-	// 2. Send a status message about the failed resume.
-	if s.messageCreator != nil {
-		statusMsg := fmt.Sprintf("Previous agent session could not be restored (%s). Send a new message to start a fresh session.", data.ErrorMessage)
-		if err := s.messageCreator.CreateSessionMessage(
-			ctx,
-			data.TaskID,
-			statusMsg,
-			data.SessionID,
-			string(v1.MessageTypeStatus),
-			s.getActiveTurnID(data.SessionID),
-			map[string]interface{}{
-				"variant":       "warning",
-				"resume_failed": true,
-			},
-			false,
-		); err != nil {
-			s.logger.Warn("failed to create resume failure status message",
-				zap.String("task_id", data.TaskID),
-				zap.Error(err))
-		}
-	}
-
-	// 3. Set session to WAITING_FOR_INPUT (not FAILED) so the user can interact.
-	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false)
-
-	// 4. Ensure task is in REVIEW state unless another session is still working.
-	s.writeTaskReviewState(ctx, data.TaskID, data.SessionID)
-
-	return true
 }
 
 // handleRecoverableFailure handles agent failures by keeping the session recoverable.
@@ -1357,6 +1348,19 @@ func (s *Service) handleAgentStopped(ctx context.Context, data watcher.AgentEven
 	// own re-drive, which surfaces as an agent.stopped event; clearing the loop
 	// on that self-inflicted stop would abort the retry. The loop is freed on
 	// ready/completed (success), cancel, and exhaustion instead.
+
+	// An explicit teardown owner already decided and persisted the session
+	// state before stopping this exact execution. Treat the resulting stopped
+	// event as an acknowledgement, not a new state decision. Recovery may have
+	// advanced the row to STARTING before the predecessor's delayed stop event
+	// arrives, while the replacement is not yet visible in the runtime store.
+	if s.hasExecutionTeardownOwner(data.SessionID, data.AgentExecutionID) {
+		s.logger.Info("ignoring agent.stopped for explicitly owned teardown",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		return
+	}
 
 	// Drop stopped events that belong to a previous (rotated) execution. The
 	// session might already be running a fresh resume cycle; flipping its state

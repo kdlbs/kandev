@@ -23,17 +23,29 @@ type FileActionsDropdownProps = {
   /** Session ID override — defaults to activeSessionId from store */
   sessionId?: string;
   /** Button size variant */
-  size?: "sm" | "xs";
+  size?: "sm" | "xs" | "touch";
   /** Optional toast callback after copy */
   onCopied?: () => void;
 };
 
-export function FileActionsDropdown({
+type FileActionsMenuItemsProps = Pick<
+  FileActionsDropdownProps,
+  "filePath" | "sessionId" | "onCopied"
+>;
+
+function fileActionsButtonClass(size: NonNullable<FileActionsDropdownProps["size"]>): string {
+  if (size === "xs") return "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
+  if (size === "touch") {
+    return "size-11 p-0 cursor-pointer text-muted-foreground hover:text-foreground transition-[scale,color,background-color] active:scale-[0.96]";
+  }
+  return "h-8 w-8 p-0 cursor-pointer text-muted-foreground hover:text-foreground";
+}
+
+function useFileActions({
   filePath,
   sessionId: sessionIdProp,
-  size = "xs",
   onCopied,
-}: FileActionsDropdownProps) {
+}: FileActionsMenuItemsProps) {
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = sessionIdProp ?? storeSessionId ?? null;
   const worktreePath = useAppStore((state) => {
@@ -80,11 +92,59 @@ export function FileActionsDropdown({
     void openFolder.open();
   }, [openFolder]);
 
-  const btnClass =
-    size === "xs"
-      ? "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100"
-      : "h-8 w-8 p-0 cursor-pointer text-muted-foreground hover:text-foreground";
+  return {
+    defaultEditorId,
+    enabledEditors,
+    handleCopyPath,
+    handleOpenFolder,
+    handleOpenInEditor,
+  };
+}
 
+export function FileActionsMenuItems(props: FileActionsMenuItemsProps) {
+  const { defaultEditorId, enabledEditors, handleCopyPath, handleOpenFolder, handleOpenInEditor } =
+    useFileActions(props);
+
+  return (
+    <>
+      {enabledEditors.map((editor: EditorOption) => (
+        <DropdownMenuItem
+          key={editor.id}
+          className="cursor-pointer text-xs"
+          onSelect={() => handleOpenInEditor(editor.id)}
+        >
+          <IconExternalLink className="h-3.5 w-3.5" />
+          {editor.name}
+          {editor.id === defaultEditorId && (
+            <span className="ml-auto text-[10px] text-muted-foreground">default</span>
+          )}
+        </DropdownMenuItem>
+      ))}
+      {enabledEditors.length === 0 && (
+        <DropdownMenuItem disabled className="text-xs">
+          No editors configured
+        </DropdownMenuItem>
+      )}
+      <DropdownMenuSeparator />
+      <DropdownMenuItem className="cursor-pointer text-xs" onSelect={handleCopyPath}>
+        <IconCopy className="h-3.5 w-3.5" />
+        Copy path
+      </DropdownMenuItem>
+      <DropdownMenuItem className="cursor-pointer text-xs" onSelect={handleOpenFolder}>
+        <IconFolderShare className="h-3.5 w-3.5" />
+        Open folder
+      </DropdownMenuItem>
+    </>
+  );
+}
+
+export function FileActionsDropdown({
+  filePath,
+  sessionId,
+  size = "xs",
+  onCopied,
+}: FileActionsDropdownProps) {
+  const btnClass = fileActionsButtonClass(size);
   const iconClass = size === "xs" ? "h-3.5 w-3.5" : "h-4 w-4";
 
   return (
@@ -100,32 +160,7 @@ export function FileActionsDropdown({
         <TooltipContent>Open with...</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-44">
-        {enabledEditors.map((editor: EditorOption) => (
-          <DropdownMenuItem
-            key={editor.id}
-            className="cursor-pointer text-xs"
-            onClick={() => handleOpenInEditor(editor.id)}
-          >
-            {editor.name}
-            {editor.id === defaultEditorId && (
-              <span className="ml-auto text-[10px] text-muted-foreground">default</span>
-            )}
-          </DropdownMenuItem>
-        ))}
-        {enabledEditors.length === 0 && (
-          <DropdownMenuItem disabled className="text-xs">
-            No editors configured
-          </DropdownMenuItem>
-        )}
-        <DropdownMenuSeparator />
-        <DropdownMenuItem className="cursor-pointer text-xs" onClick={handleCopyPath}>
-          <IconCopy className="h-3.5 w-3.5 mr-1.5" />
-          Copy path
-        </DropdownMenuItem>
-        <DropdownMenuItem className="cursor-pointer text-xs" onClick={handleOpenFolder}>
-          <IconFolderShare className="h-3.5 w-3.5 mr-1.5" />
-          Open folder
-        </DropdownMenuItem>
+        <FileActionsMenuItems filePath={filePath} sessionId={sessionId} onCopied={onCopied} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

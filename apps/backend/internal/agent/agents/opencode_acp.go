@@ -16,16 +16,13 @@ var opencodeACPLogoLight []byte
 //go:embed logos/opencode_dark.svg
 var opencodeACPLogoDark []byte
 
-const (
-	opencodeACPPackage     = "opencode-ai"
-	opencodeACPVersion     = "1.18.4"
-	opencodeACPPackageSpec = opencodeACPPackage + "@" + opencodeACPVersion
-)
+const opencodeACPPackage = "opencode-ai"
 
 var (
-	_ Agent            = (*OpenCodeACP)(nil)
-	_ PassthroughAgent = (*OpenCodeACP)(nil)
-	_ InferenceAgent   = (*OpenCodeACP)(nil)
+	_ Agent                  = (*OpenCodeACP)(nil)
+	_ PassthroughAgent       = (*OpenCodeACP)(nil)
+	_ InferenceAgent         = (*OpenCodeACP)(nil)
+	_ ManagedNPMRuntimeAgent = (*OpenCodeACP)(nil)
 )
 
 // OpenCodeACP is the ACP protocol variant of OpenCode.
@@ -88,13 +85,17 @@ func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error)
 }
 
 func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("opencode", "acp").Build()
+	return a.ManagedNPMRuntime().CachedACPCommand()
+}
+
+func (a *OpenCodeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
+	return ManagedNPMRuntimeSpec{Package: opencodeACPPackage, ACPArgs: []string{"acp"}}
 }
 
 func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:             Cmd("opencode", "acp").Build(),
+		Cmd:             a.ManagedNPMRuntime().CachedACPCommand(),
 		WorkingDir:      "{workspace}",
 		Env:             map[string]string{},
 		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -132,7 +133,7 @@ func (a *OpenCodeACP) RemoteAuth() *RemoteAuth {
 }
 
 func (a *OpenCodeACP) InstallScript() string {
-	return "npm install -g " + opencodeACPPackageSpec
+	return "npm install -g " + opencodeACPPackage
 }
 
 func (a *OpenCodeACP) BillingType() usage.BillingType { return defaultBillingType() }
@@ -145,6 +146,6 @@ func (a *OpenCodeACP) PermissionSettings() map[string]PermissionSetting {
 func (a *OpenCodeACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("opencode", "acp"),
+		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
 	}
 }

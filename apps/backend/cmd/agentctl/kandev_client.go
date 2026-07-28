@@ -30,7 +30,9 @@ func newKandevClient() (*kandevClient, error) {
 	apiURL := normalizeKandevAPIURL(os.Getenv("KANDEV_API_URL"))
 	apiKey := os.Getenv("KANDEV_API_KEY")
 	if apiURL == "" || apiKey == "" {
-		return nil, fmt.Errorf("KANDEV_API_URL and KANDEV_API_KEY must be set")
+		return nil, fmt.Errorf(
+			"KANDEV_API_URL and KANDEV_API_KEY are injected automatically for Office runs; regular task sessions should use their Kandev MCP tools",
+		)
 	}
 	return &kandevClient{
 		apiURL:      apiURL,

@@ -8,6 +8,7 @@ const (
 	TaskStateChanged               = "task.state_changed"
 	TaskDeleted                    = "task.deleted"
 	TaskMoved                      = "task.moved" // Manual step change via MoveTask
+	TaskQueuePromoted              = "task.queue_promoted"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
 )
 
@@ -260,6 +261,8 @@ const (
 	GitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Task CI automation options updated
 	GitHubWatchEvent           = "github.watch.event"             // Watch created/deleted
 	GitHubRateLimitUpdated     = "github.rate_limit.updated"      // GitHub API rate-limit snapshot changed
+	GitHubPushReceived         = "github.push_received"           // Push webhook verified + installation resolved to workspaces
+	GitHubCheckRunCompleted    = "github.check_run_completed"     // Completed check_run webhook resolved to workspaces
 )
 
 // Event types for GitLab integration

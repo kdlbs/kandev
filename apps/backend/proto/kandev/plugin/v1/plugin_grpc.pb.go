@@ -186,7 +186,7 @@ const (
 	Host_InvokeUtilityAgent_FullMethodName   = "/kandev.plugin.v1.Host/InvokeUtilityAgent"
 	Host_CreateTask_FullMethodName           = "/kandev.plugin.v1.Host/CreateTask"
 	Host_UpdateTask_FullMethodName           = "/kandev.plugin.v1.Host/UpdateTask"
-	Host_CreateComment_FullMethodName        = "/kandev.plugin.v1.Host/CreateComment"
+	Host_SendMessage_FullMethodName          = "/kandev.plugin.v1.Host/SendMessage"
 )
 
 // HostClient is the client API for Host service.
@@ -194,20 +194,18 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
 // Implemented by KANDEV (served back over the go-plugin broker).
-// Reads (§5) are capability-gated server-side by an inline per-resource
-// check at the start of each handler — there is no unary interceptor
-// enforcing this centrally. The deferred write RPCs below currently return
-// gRPC Unimplemented unconditionally, regardless of the caller's declared
-// capabilities, until their handlers land.
+// Reads (§5) and writes are capability-gated server-side by an inline
+// per-resource check at the start of each handler — there is no unary
+// interceptor enforcing this centrally.
 //
 // Host data API (ADR 0043): the read/write data RPCs below live on this same
 // `service Host` rather than a separate `service HostData`. They reuse the
 // single broker connection; splitting into a second service would only
 // duplicate that for no benefit. Reads require manifest capability
 // `api_read:<resource>`; writes require `api_write:<resource>` (e.g.
-// `api_read:tasks`, `api_write:comments`). An undeclared capability on a read
-// RPC returns gRPC PermissionDenied with `capability 'api_read:tasks' not
-// declared`.
+// `api_read:tasks`, `api_write:comments`). An undeclared capability returns
+// gRPC PermissionDenied with `capability 'api_read:tasks' not declared` (or
+// `api_write:tasks`, etc.).
 //
 // DTOs below are a HAND-DEFINED public contract: the backend maps internal
 // models → these messages explicitly, never generates them from domain
@@ -265,13 +263,17 @@ type HostClient interface {
 	// > System), so a plugin can delegate a lightweight LLM step without holding
 	// its own API key. FailedPrecondition when no utility agent is configured.
 	InvokeUtilityAgent(ctx context.Context, in *InvokeUtilityAgentRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error)
-	// Writes — capability api_write:<resource>. Declared now for a stable
-	// contract; handlers land in a later phase (not implemented by this RPC
-	// addition). Route through service methods so the corresponding task.*
-	// events fire — the whole reason not to let plugins write the DB.
+	// Writes — capability api_write:<resource>. Route through the first-party
+	// service layer so events fire and WS clients update — the whole reason not
+	// to let plugins write the DB. CreateTask/UpdateTask require api_write:tasks
+	// and go through the task service (task.* events; kandev stamps
+	// source = "plugin:<id>" on created rows, a plugin cannot set it). SendMessage
+	// requires api_write:messages and delivers a prompt to a task session through
+	// the orchestrator — the same delivery path message_task uses (queue when the
+	// session is running, resume/start it otherwise).
 	CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*CreateTaskResponse, error)
 	UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts ...grpc.CallOption) (*UpdateTaskResponse, error)
-	CreateComment(ctx context.Context, in *CreateCommentRequest, opts ...grpc.CallOption) (*CreateCommentResponse, error)
+	SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error)
 }
 
 type hostClient struct {
@@ -512,10 +514,10 @@ func (c *hostClient) UpdateTask(ctx context.Context, in *UpdateTaskRequest, opts
 	return out, nil
 }
 
-func (c *hostClient) CreateComment(ctx context.Context, in *CreateCommentRequest, opts ...grpc.CallOption) (*CreateCommentResponse, error) {
+func (c *hostClient) SendMessage(ctx context.Context, in *SendMessageRequest, opts ...grpc.CallOption) (*SendMessageResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(CreateCommentResponse)
-	err := c.cc.Invoke(ctx, Host_CreateComment_FullMethodName, in, out, cOpts...)
+	out := new(SendMessageResponse)
+	err := c.cc.Invoke(ctx, Host_SendMessage_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -527,20 +529,18 @@ func (c *hostClient) CreateComment(ctx context.Context, in *CreateCommentRequest
 // for forward compatibility.
 //
 // Implemented by KANDEV (served back over the go-plugin broker).
-// Reads (§5) are capability-gated server-side by an inline per-resource
-// check at the start of each handler — there is no unary interceptor
-// enforcing this centrally. The deferred write RPCs below currently return
-// gRPC Unimplemented unconditionally, regardless of the caller's declared
-// capabilities, until their handlers land.
+// Reads (§5) and writes are capability-gated server-side by an inline
+// per-resource check at the start of each handler — there is no unary
+// interceptor enforcing this centrally.
 //
 // Host data API (ADR 0043): the read/write data RPCs below live on this same
 // `service Host` rather than a separate `service HostData`. They reuse the
 // single broker connection; splitting into a second service would only
 // duplicate that for no benefit. Reads require manifest capability
 // `api_read:<resource>`; writes require `api_write:<resource>` (e.g.
-// `api_read:tasks`, `api_write:comments`). An undeclared capability on a read
-// RPC returns gRPC PermissionDenied with `capability 'api_read:tasks' not
-// declared`.
+// `api_read:tasks`, `api_write:comments`). An undeclared capability returns
+// gRPC PermissionDenied with `capability 'api_read:tasks' not declared` (or
+// `api_write:tasks`, etc.).
 //
 // DTOs below are a HAND-DEFINED public contract: the backend maps internal
 // models → these messages explicitly, never generates them from domain
@@ -598,13 +598,17 @@ type HostServer interface {
 	// > System), so a plugin can delegate a lightweight LLM step without holding
 	// its own API key. FailedPrecondition when no utility agent is configured.
 	InvokeUtilityAgent(context.Context, *InvokeUtilityAgentRequest) (*InvokeUtilityAgentResponse, error)
-	// Writes — capability api_write:<resource>. Declared now for a stable
-	// contract; handlers land in a later phase (not implemented by this RPC
-	// addition). Route through service methods so the corresponding task.*
-	// events fire — the whole reason not to let plugins write the DB.
+	// Writes — capability api_write:<resource>. Route through the first-party
+	// service layer so events fire and WS clients update — the whole reason not
+	// to let plugins write the DB. CreateTask/UpdateTask require api_write:tasks
+	// and go through the task service (task.* events; kandev stamps
+	// source = "plugin:<id>" on created rows, a plugin cannot set it). SendMessage
+	// requires api_write:messages and delivers a prompt to a task session through
+	// the orchestrator — the same delivery path message_task uses (queue when the
+	// session is running, resume/start it otherwise).
 	CreateTask(context.Context, *CreateTaskRequest) (*CreateTaskResponse, error)
 	UpdateTask(context.Context, *UpdateTaskRequest) (*UpdateTaskResponse, error)
-	CreateComment(context.Context, *CreateCommentRequest) (*CreateCommentResponse, error)
+	SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error)
 	mustEmbedUnimplementedHostServer()
 }
 
@@ -684,8 +688,8 @@ func (UnimplementedHostServer) CreateTask(context.Context, *CreateTaskRequest) (
 func (UnimplementedHostServer) UpdateTask(context.Context, *UpdateTaskRequest) (*UpdateTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method UpdateTask not implemented")
 }
-func (UnimplementedHostServer) CreateComment(context.Context, *CreateCommentRequest) (*CreateCommentResponse, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method CreateComment not implemented")
+func (UnimplementedHostServer) SendMessage(context.Context, *SendMessageRequest) (*SendMessageResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SendMessage not implemented")
 }
 func (UnimplementedHostServer) mustEmbedUnimplementedHostServer() {}
 func (UnimplementedHostServer) testEmbeddedByValue()              {}
@@ -1122,20 +1126,20 @@ func _Host_UpdateTask_Handler(srv interface{}, ctx context.Context, dec func(int
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Host_CreateComment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateCommentRequest)
+func _Host_SendMessage_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SendMessageRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(HostServer).CreateComment(ctx, in)
+		return srv.(HostServer).SendMessage(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: Host_CreateComment_FullMethodName,
+		FullMethod: Host_SendMessage_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(HostServer).CreateComment(ctx, req.(*CreateCommentRequest))
+		return srv.(HostServer).SendMessage(ctx, req.(*SendMessageRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1240,8 +1244,8 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _Host_UpdateTask_Handler,
 		},
 		{
-			MethodName: "CreateComment",
-			Handler:    _Host_CreateComment_Handler,
+			MethodName: "SendMessage",
+			Handler:    _Host_SendMessage_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

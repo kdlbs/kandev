@@ -463,15 +463,20 @@ func (r *Runner) reviewBatches(ctx context.Context, plan BatchPlan, identity Rev
 	acc := accumulator{}
 	for i, batch := range plan.Batches {
 		if err := ctx.Err(); err != nil {
-			return acc, fmt.Errorf("%w: review cancelled after batch %d", ErrExecutionFailed, i)
+			// Keep context.Canceled / DeadlineExceeded in the chain so fail() can
+			// leave a user cancel as cancelled instead of overwriting it failed.
+			return acc, fmt.Errorf("%w: review cancelled after batch %d: %w", ErrExecutionFailed, i, err)
 		}
 		prompt, err := r.prompts.Build(ctx, batch, promptCtx)
 		if err != nil {
-			return acc, fmt.Errorf("%w: build prompt: %v", ErrExecutionFailed, err)
+			return acc, fmt.Errorf("%w: build prompt: %w", ErrExecutionFailed, err)
 		}
 		result, err := r.inference.Run(ctx, identity, sessionID, prompt)
 		if err != nil {
-			return acc, fmt.Errorf("%w: %v", ErrExecutionFailed, err)
+			// Preserve the inference error chain (esp. context cancellation). Using
+			// %v here used to drop context.Canceled, so fail() marked cancelled runs
+			// as failed when CancelRun lost the race with FailRun.
+			return acc, fmt.Errorf("%w: %w", ErrExecutionFailed, err)
 		}
 		if result == nil {
 			return acc, fmt.Errorf("%w: reviewer returned no result", ErrExecutionFailed)
@@ -483,7 +488,7 @@ func (r *Runner) reviewBatches(ctx context.Context, plan BatchPlan, identity Rev
 		if err != nil {
 			// One unreadable batch fails the run: reporting a partial review as
 			// complete would read as an all-clear for the files we could not parse.
-			return acc, fmt.Errorf("%w: batch %d: %v", ErrUnparseableResponse, i+1, err)
+			return acc, fmt.Errorf("%w: batch %d: %w", ErrUnparseableResponse, i+1, err)
 		}
 		acc.findings = append(acc.findings, parsed.Findings...)
 		acc.rejected += parsed.Rejected
@@ -498,12 +503,17 @@ func (r *Runner) fail(ctx context.Context, runID string, cause error, started ti
 	// An explicit cancel already recorded the terminal state, so re-reporting it
 	// as a failure would only churn the row (and would overwrite it on any store
 	// without a terminal guard). A deadline is different: nobody recorded that.
-	if errors.Is(cause, context.Canceled) && !errors.Is(cause, context.DeadlineExceeded) {
+	// Check both the wrapped cause and the run context: wrappers historically used
+	// %v and dropped context.Canceled from the chain.
+	if isReviewCanceled(cause) || isReviewCanceled(ctx.Err()) {
 		r.logger.Debug("review run unwound after cancellation", zap.String("run_id", runID))
-		return cause
+		if cause != nil {
+			return cause
+		}
+		return ctx.Err()
 	}
 	code := CodeFor(cause)
-	if errors.Is(cause, context.DeadlineExceeded) {
+	if errors.Is(cause, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		code = CodeCancelled
 	}
 	// Persist the failure on a context detached from the (possibly cancelled)
@@ -514,6 +524,13 @@ func (r *Runner) fail(ctx context.Context, runID string, cause error, started ti
 		r.logger.Error("record review run failure", zap.String("run_id", runID), zap.Error(err))
 	}
 	return cause
+}
+
+// isReviewCanceled reports a user/cancel signal (context.Canceled), not a
+// deadline. DeadlineExceeded also satisfies errors.Is(..., Canceled) in some
+// chains, so it is excluded explicitly.
+func isReviewCanceled(err error) bool {
+	return err != nil && errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded)
 }
 
 // anchorFindings attaches the authoritative diff hash and anchor text from the

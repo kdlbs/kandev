@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -50,6 +51,64 @@ func TestClone_PreservesNonDefaultRemoteBranches(t *testing.T) {
 
 	if !gitRefExists(t, targetPath, "refs/remotes/origin/release") {
 		t.Fatal("expected cloned repo to contain origin/release for downstream worktree base branches")
+	}
+}
+
+func TestSetOriginURL(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPath := t.TempDir()
+	runGit(t, repoPath, "init", "--quiet")
+	runGit(t, repoPath, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+
+	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
+	if err := cloner.SetOriginURL(context.Background(), repoPath, "git@github.com:acme/widgets.git"); err != nil {
+		t.Fatalf("SetOriginURL() error = %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin")); got != "git@github.com:acme/widgets.git" {
+		t.Fatalf("origin = %q, want SSH URL", got)
+	}
+
+	if err := cloner.SetOriginURL(context.Background(), "", "https://github.com/acme/widgets.git"); err == nil {
+		t.Fatal("SetOriginURL() error = nil, want missing repository path error")
+	}
+	if err := cloner.SetOriginURL(context.Background(), repoPath, ""); err == nil {
+		t.Fatal("SetOriginURL() error = nil, want missing origin URL error")
+	}
+}
+
+func TestSetOriginURLSerializesConcurrentUpdates(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPath := t.TempDir()
+	runGit(t, repoPath, "init", "--quiet")
+	runGit(t, repoPath, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
+
+	const workers = 32
+	start := make(chan struct{})
+	errs := make(chan error, workers)
+	var group sync.WaitGroup
+	group.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer group.Done()
+			<-start
+			errs <- cloner.SetOriginURL(context.Background(), repoPath, "git@github.com:acme/widgets.git")
+		}()
+	}
+	close(start)
+	group.Wait()
+	close(errs)
+
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent SetOriginURL() error = %v", err)
+		}
 	}
 }
 

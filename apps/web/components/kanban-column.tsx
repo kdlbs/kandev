@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import type { Repository } from "@/lib/types/http";
-import { formatWipCount, isOverWipLimit } from "@/lib/kanban/wip-limit";
+import { countAdmittedTasks, formatWipCount, isOverWipLimit } from "@/lib/kanban/wip-limit";
 
 export interface WorkflowStep {
   id: string;
@@ -79,8 +79,9 @@ export function KanbanColumn({
   // Ordered ids of the cards rendered in this column — the source of truth for
   // shift-click range selection (matches exactly what the user sees).
   const columnTaskIds = useMemo(() => tasks.map((t) => t.id), [tasks]);
-  const overWipLimit = isOverWipLimit(tasks.length, step.wip_limit);
-  const wipCountLabel = formatWipCount(tasks.length, step.wip_limit);
+  const admittedTaskCount = countAdmittedTasks(tasks);
+  const overWipLimit = isOverWipLimit(admittedTaskCount, step.wip_limit);
+  const wipCountLabel = formatWipCount(admittedTaskCount, step.wip_limit);
 
   return (
     <div
@@ -119,7 +120,7 @@ export function KanbanColumn({
         {tasks.map((task) => (
           <KanbanCard
             key={task.id}
-            task={task}
+            task={queuedTaskWithTitle(task, steps, step)}
             workspaceId={activeWorkspaceId}
             externalLinkAvailability={externalLinkAvailability}
             repositoryChips={resolveTaskRepositoryChips(task, repositories)}
@@ -145,4 +146,18 @@ export function KanbanColumn({
       </div>
     </div>
   );
+}
+
+function queuedTaskWithTitle(
+  task: Task,
+  steps: WorkflowStep[] | undefined,
+  step: WorkflowStep,
+): Task {
+  if (!task.queuedForStepId) return task;
+  return {
+    ...task,
+    queuedForStepTitle:
+      steps?.find((candidate) => candidate.id === task.queuedForStepId)?.title ??
+      (task.queuedForStepId === step.id ? step.title : undefined),
+  };
 }

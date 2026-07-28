@@ -64,6 +64,44 @@ func TestNewKandevClient_NormalizesVersionedAPIURL(t *testing.T) {
 	}
 }
 
+func TestNewKandevClient_MissingOfficeContextExplainsTaskModeAlternative(t *testing.T) {
+	captured := setupMockTransport(t, http.StatusOK, `{}`)
+	t.Setenv("KANDEV_API_URL", "")
+	t.Setenv("KANDEV_API_KEY", "")
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe: %v", err)
+	}
+	oldStderr := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() {
+		os.Stderr = oldStderr
+		_ = w.Close()
+	})
+	code := runKandevCLI([]string{"projects", "list"})
+	_ = w.Close()
+	os.Stderr = oldStderr
+	output, readErr := io.ReadAll(r)
+	_ = r.Close()
+	if readErr != nil {
+		t.Fatalf("read stderr: %v", readErr)
+	}
+
+	if code != 1 {
+		t.Fatalf("projects list exit = %d, want 1", code)
+	}
+	if captured.Method != "" {
+		t.Fatalf("server contacted without Office context: %s %s", captured.Method, captured.Path)
+	}
+	if !strings.Contains(string(output), "injected automatically for Office runs") {
+		t.Fatalf("stderr = %q, want Office injection guidance", output)
+	}
+	if !strings.Contains(string(output), "Kandev MCP tools") {
+		t.Fatalf("stderr = %q, want task-mode MCP guidance", output)
+	}
+}
+
 // --- Task Tests ---
 
 func TestTaskGet_CallsCorrectEndpoint(t *testing.T) {

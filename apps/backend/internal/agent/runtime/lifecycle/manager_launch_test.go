@@ -29,6 +29,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // resumeTestAgent is a minimal agent with a BuildCommand that respects the
@@ -129,7 +130,7 @@ func TestBuildAgentCommand_ResumeFlag(t *testing.T) {
 	})
 }
 
-func TestBuildAgentCommand_PreservesPinnedACPBridgeSpecs(t *testing.T) {
+func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 	mgr := newTestManager(t)
 	tests := []struct {
 		name  string
@@ -139,23 +140,33 @@ func TestBuildAgentCommand_PreservesPinnedACPBridgeSpecs(t *testing.T) {
 		{
 			name:  "claude",
 			agent: agents.NewClaudeACP(),
-			want:  "npx -y @agentclientprotocol/claude-agent-acp@0.61.0",
+			want:  "npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp",
 		},
 		{
 			name:  "codex",
 			agent: agents.NewCodexACP(),
-			want:  "npx -y @agentclientprotocol/codex-acp@1.1.5",
+			want:  "npx --yes --prefer-offline @agentclientprotocol/codex-acp",
 		},
 		{
 			name:  "opencode",
 			agent: agents.NewOpenCodeACP(),
-			want:  "opencode acp",
+			want:  "npx --yes --prefer-offline opencode-ai acp",
+		},
+		{
+			name:  "copilot",
+			agent: agents.NewCopilotACP(),
+			want:  "npx --yes --prefer-offline @github/copilot --acp",
+		},
+		{
+			name:  "gemini",
+			agent: agents.NewGemini(),
+			want:  "npx --yes --prefer-offline @google/gemini-cli --acp",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, tt.agent, false)
+			cmds, err := mgr.buildAgentCommand(&LaunchRequest{}, nil, tt.agent, true)
 			require.NoError(t, err)
 			require.Equal(t, tt.want, cmds.initial)
 		})
@@ -543,7 +554,9 @@ func TestConcreteExecutionProfileIgnoresLegacyRouteFlagsAndEnv(t *testing.T) {
 	if len(flags) != 1 || flags[0] != "--profile-flag" {
 		t.Fatalf("flags = %v, want execution profile flags only", flags)
 	}
-	mergeRouteOverrideEnv(req)
+	if err := mergeRouteOverrideEnv(req); err != nil {
+		t.Fatalf("mergeRouteOverrideEnv() error = %v", err)
+	}
 	if req.Env["PROFILE_ENV"] != "profile" {
 		t.Fatalf("PROFILE_ENV = %q, want execution profile value", req.Env["PROFILE_ENV"])
 	}
@@ -565,9 +578,57 @@ func TestLegacyRouteStillAppliesFlagsAndEnv(t *testing.T) {
 	if len(flags) != 2 || flags[1] != "--legacy-route-flag" {
 		t.Fatalf("flags = %v, want legacy route flag appended", flags)
 	}
-	mergeRouteOverrideEnv(req)
+	if err := mergeRouteOverrideEnv(req); err != nil {
+		t.Fatalf("mergeRouteOverrideEnv() error = %v", err)
+	}
 	if req.Env["ROUTE_ONLY"] != "value" {
 		t.Fatalf("legacy route env missing: %v", req.Env)
+	}
+}
+
+func TestLegacyRouteComposesIndexedGitConfig(t *testing.T) {
+	req := &LaunchRequest{
+		Env: map[string]string{
+			"GIT_CONFIG_COUNT":   "1",
+			"GIT_CONFIG_KEY_0":   "core.hooksPath",
+			"GIT_CONFIG_VALUE_0": "/opt/locstat/hooks",
+		},
+		RouteOverride: &RouteOverride{Env: map[string]string{
+			"GIT_CONFIG_COUNT":   "1",
+			"GIT_CONFIG_KEY_0":   gitHubCredentialHelperConfigKey,
+			"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
+		}},
+	}
+
+	if err := mergeRouteOverrideEnv(req); err != nil {
+		t.Fatalf("mergeRouteOverrideEnv() error = %v", err)
+	}
+
+	if got := req.Env["GIT_CONFIG_COUNT"]; got != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 2", got)
+	}
+	if got := req.Env["GIT_CONFIG_KEY_0"]; got != "core.hooksPath" {
+		t.Fatalf("GIT_CONFIG_KEY_0 = %q, want base entry", got)
+	}
+	if got := req.Env["GIT_CONFIG_VALUE_0"]; got != "/opt/locstat/hooks" {
+		t.Fatalf("GIT_CONFIG_VALUE_0 = %q, want base value", got)
+	}
+	if got := req.Env["GIT_CONFIG_KEY_1"]; got != gitHubCredentialHelperConfigKey {
+		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want route entry", got)
+	}
+	if got := req.Env["GIT_CONFIG_VALUE_1"]; got != "!agentctl git-credential" {
+		t.Fatalf("GIT_CONFIG_VALUE_1 = %q, want route value", got)
+	}
+}
+
+func TestLegacyRouteRejectsMalformedIndexedGitConfig(t *testing.T) {
+	req := &LaunchRequest{RouteOverride: &RouteOverride{Env: map[string]string{
+		"GIT_CONFIG_COUNT": "1",
+		"GIT_CONFIG_KEY_0": "core.hooksPath",
+	}}}
+
+	if err := mergeRouteOverrideEnv(req); err == nil {
+		t.Fatal("mergeRouteOverrideEnv() error = nil, want malformed Git config error")
 	}
 }
 
@@ -955,6 +1016,9 @@ func TestLaunchKeepsInitialExecutionActivityAfterReturning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Launch: %v", err)
 	}
+	if execution.Status != v1.AgentStatusStarting {
+		t.Fatalf("execution status after start-owning Launch = %s, want %s", execution.Status, v1.AgentStatusStarting)
+	}
 	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
 	if maintenance != nil {
 		maintenance.Release()
@@ -1029,6 +1093,35 @@ func TestLaunch_PublishesPrepareCompletedAfterRuntimeProgress(t *testing.T) {
 	require.True(t, final.Success)
 	requirePrepareStep(t, final.Steps, "Validate Docker")
 	requirePrepareStep(t, final.Steps, "Waiting for Docker container")
+}
+
+func TestLaunch_PublishesPrepareCompletionOnLegacyRouteEnvError(t *testing.T) {
+	log := newTestLogger()
+	eventBus := &MockEventBusWithTracking{}
+	mgr := NewManager(
+		newTestRegistry(), eventBus, nil,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	cleanupManagerStopCh(t, mgr)
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-route-env-error",
+		SessionID:      "session-route-env-error",
+		AgentProfileID: "profile-1",
+		ExecutorType:   string(models.ExecutorTypeLocal),
+		IsEphemeral:    true,
+		RouteOverride: &RouteOverride{Env: map[string]string{
+			"GIT_CONFIG_COUNT": "1",
+			"GIT_CONFIG_KEY_0": "core.hooksPath",
+		}},
+	})
+	require.ErrorContains(t, err, "compose legacy route environment")
+
+	completed := prepareCompletedPayloads(eventBus)
+	require.Len(t, completed, 1)
+	require.False(t, completed[0].Success)
+	require.Contains(t, completed[0].ErrorMessage, "compose legacy route environment")
 }
 
 func prepareCompletedPayloads(eventBus *MockEventBusWithTracking) []*PrepareCompletedEventPayload {

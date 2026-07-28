@@ -215,6 +215,60 @@ func TestReviewService_PublishFindingsWithExistingRun(t *testing.T) {
 	}
 }
 
+func TestReviewService_PublishFindingsDeniedByTaskAuthorizer(t *testing.T) {
+	svc, eventBus, repo := createTestReviewService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-foreign")
+
+	denied := errors.New("task not found")
+	var authorized string
+	svc.SetTaskAuthorizer(func(_ context.Context, taskID string) error {
+		authorized = taskID
+		return denied
+	})
+
+	_, _, err := svc.PublishFindings(ctx, PublishFindingsRequest{
+		TaskID:   "task-foreign",
+		Findings: []ReviewFindingInput{validFindingInput()},
+	})
+	if !errors.Is(err, denied) {
+		t.Fatalf("expected the authorizer's error, got %v", err)
+	}
+	if authorized != "task-foreign" {
+		t.Fatalf("authorizer must be called with the target task_id, got %q", authorized)
+	}
+	// A denied publish must not store findings or emit any event.
+	if len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatalf("denied publish must not emit events, got %v", eventTypes(eventBus.GetPublishedEvents()))
+	}
+}
+
+func TestReviewService_PublishFindingsAllowedWhenAuthorizerPermits(t *testing.T) {
+	svc, _, repo := createTestReviewService(t)
+	ctx := context.Background()
+	seedTask(t, ctx, repo, "task-reachable")
+
+	var authorized string
+	svc.SetTaskAuthorizer(func(_ context.Context, taskID string) error {
+		authorized = taskID
+		return nil
+	})
+
+	_, findings, err := svc.PublishFindings(ctx, PublishFindingsRequest{
+		TaskID:   "task-reachable",
+		Findings: []ReviewFindingInput{validFindingInput()},
+	})
+	if err != nil {
+		t.Fatalf("PublishFindings: %v", err)
+	}
+	if authorized != "task-reachable" {
+		t.Fatalf("authorizer must be called with the target task_id, got %q", authorized)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected the findings stored, got %d", len(findings))
+	}
+}
+
 func TestReviewService_PublishFindingsCreatesAgentRunWhenRunIDEmpty(t *testing.T) {
 	svc, _, repo := createTestReviewService(t)
 	ctx := context.Background()

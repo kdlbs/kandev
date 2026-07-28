@@ -22,6 +22,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { getKanbanColumnGridTemplate } from "./kanban/kanban-grid-template";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { countAdmittedTasks } from "@/lib/kanban/wip-limit";
 import {
   type KanbanExternalLinkAvailability,
   useKanbanExternalLinkAvailability,
@@ -327,7 +328,7 @@ export function KanbanBoardGrid({
   const taskCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const step of steps) {
-      counts[step.id] = tasks.filter((task) => task.workflowStepId === step.id).length;
+      counts[step.id] = countAdmittedTasks(tasks.filter((task) => task.workflowStepId === step.id));
     }
     return counts;
   }, [steps, tasks]);

@@ -383,11 +383,17 @@ describe("storage maintenance", () => {
   it("starts analysis, selected cleanup, and restore operations", async () => {
     fetchSpy
       .mockResolvedValueOnce(jsonResponse({ job_id: "analysis" }))
-      .mockResolvedValueOnce(jsonResponse({ job_id: "cleanup" }))
-      .mockResolvedValueOnce(jsonResponse({ entry: { id: "restored" } }));
+      .mockResolvedValueOnce(jsonResponse({ job_id: "cleanup" }));
     expect((await analyzeStorage()).job_id).toBe("analysis");
     expect((await runStorageMaintenance(["workspaces"])).job_id).toBe("cleanup");
     expect(JSON.parse(String(lastCall().init?.body))).toEqual({ resources: ["workspaces"] });
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ job_id: "forced-cleanup" }));
+    expect((await runStorageMaintenance(["workspaces"], true)).job_id).toBe("forced-cleanup");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      resources: ["workspaces"],
+      force: true,
+    });
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ entry: { id: "restored" } }));
     expect((await restoreStorageQuarantine("entry-1")).id).toBe("restored");
   });
 });

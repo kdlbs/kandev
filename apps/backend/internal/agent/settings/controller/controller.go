@@ -23,10 +23,13 @@ import (
 func buildCommandString(cmd []string) string {
 	var parts []string
 	for _, arg := range cmd {
-		if strings.ContainsAny(arg, " \t\n\"'`$\\") {
+		switch {
+		case arg == "":
+			parts = append(parts, `""`)
+		case strings.ContainsAny(arg, " \t\n\"'`$\\"):
 			escaped := strings.ReplaceAll(arg, "\"", "\\\"")
 			parts = append(parts, "\""+escaped+"\"")
-		} else {
+		default:
 			parts = append(parts, arg)
 		}
 	}
@@ -57,6 +60,9 @@ type Controller struct {
 	modelCache      *modelfetcher.Cache
 	hostUtility     *hostutility.Manager
 	jobStore        *JobStore
+	updateJobStore  *AgentUpdateJobStore
+	runtimeUpdater  RuntimeUpdater
+	maintenance     *maintenanceCoordinator
 	hub             JobBroadcaster
 	logger          *logger.Logger
 }
@@ -152,6 +158,23 @@ func NewController(repo store.Repository, discoveryRegistry *discovery.Registry,
 // unset simply causes the model endpoints to report "not_configured".
 func (c *Controller) SetHostUtility(h *hostutility.Manager) {
 	c.hostUtility = h
+	if h == nil {
+		c.runtimeUpdater = nil
+		c.updateJobStore = nil
+		return
+	}
+	c.SetRuntimeUpdater(&hostRuntimeUpdater{
+		host:     h,
+		executor: execDirectCommandExecutor{},
+	})
+}
+
+// SetRuntimeUpdater replaces the process/probe boundary used by update jobs.
+// Production wires the host utility implementation; embedders may provide a
+// deterministic implementation without invoking npm.
+func (c *Controller) SetRuntimeUpdater(updater RuntimeUpdater) {
+	c.runtimeUpdater = updater
+	c.initializeUpdateJobStore()
 }
 
 // SetJobBroadcaster initializes the install job store with a WS broadcaster
@@ -163,8 +186,11 @@ func (c *Controller) SetJobBroadcaster(hub JobBroadcaster) {
 	c.hub = hub
 	if hub == nil {
 		c.jobStore = nil
+		c.updateJobStore = nil
+		c.maintenance = nil
 		return
 	}
+	c.maintenance = newMaintenanceCoordinator()
 	c.jobStore = NewJobStore(hub, c.logger.Zap(), func(agentName string) {
 		c.InvalidateDiscoveryCache()
 		// Kick a fresh capability probe immediately so the UI doesn't sit on
@@ -183,7 +209,25 @@ func (c *Controller) SetJobBroadcaster(hub JobBroadcaster) {
 			}()
 		}
 		c.logger.Info("install succeeded", zap.String("agent", agentName))
-	})
+	}, c.maintenance)
+	c.initializeUpdateJobStore()
+}
+
+func (c *Controller) initializeUpdateJobStore() {
+	if c.hub == nil || c.runtimeUpdater == nil {
+		c.updateJobStore = nil
+		return
+	}
+	if c.maintenance == nil {
+		c.maintenance = newMaintenanceCoordinator()
+	}
+	c.updateJobStore = NewAgentUpdateJobStore(
+		c.hub,
+		c.logger.Zap(),
+		c.runtimeUpdater,
+		c.maintenance,
+		c.BroadcastAvailableAgents,
+	)
 }
 
 // BroadcastAvailableAgents fetches the current available-agents snapshot and

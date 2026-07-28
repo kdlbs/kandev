@@ -13,7 +13,7 @@ func TestHTTPGitHubWebhookRoutesByAppRegistration(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	store := &githubWebhookMemoryStore{}
 	webhooks := NewAppRegistrationWebhookService(
-		"registration-work", "work-secret", store, nil, nil,
+		"registration-work", "work-secret", store, nil, nil, nil,
 	)
 	runtime := &githubAppRuntime{
 		registrationID: "registration-work", source: DeploymentAppSourceManaged,

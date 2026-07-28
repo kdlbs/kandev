@@ -128,6 +128,39 @@ func TestHandleWebhook_AppendsJSONLineAndRespondsOK(t *testing.T) {
 	require.Equal(t, "test-hook", recs[0].WebhookKey)
 }
 
+// TestHandleWebhook_WriteKeyRoundTripsHostWrites proves the "write" webhook
+// drives the Host data API write RPCs (CreateTask then SendMessage to the
+// returned task) and records the outcome to write-probe.json.
+func TestHandleWebhook_WriteKeyRoundTripsHostWrites(t *testing.T) {
+	dir := t.TempDir()
+	p := &fixturePlugin{dataDir: dir}
+	host := &fakeHost{createdTaskID: "task-42"}
+	p.SetHost(host)
+
+	resp, err := p.HandleWebhook(context.Background(), &pluginsdk.WebhookRequest{WebhookKey: "write"})
+	require.NoError(t, err)
+	require.Equal(t, "ok", string(resp.Body))
+
+	require.Equal(t, "fixture write probe", host.lastCreateInput.Title)
+	require.Equal(t, "task-42", host.lastSendTask, "the message must target the task the Host returned")
+	require.Equal(t, "fixture probe message", host.lastSendText)
+
+	rec := readSingleJSON[writeProbeRecord](t, filepath.Join(dir, "write-probe.json"))
+	require.Equal(t, "task-42", rec.TaskID)
+	require.Equal(t, "queued", rec.MessageStatus)
+	require.Empty(t, rec.TaskError)
+}
+
+// readSingleJSON reads path and decodes its whole contents as a single T.
+func readSingleJSON[T any](t *testing.T, path string) T {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	require.NoError(t, err)
+	var v T
+	require.NoError(t, json.Unmarshal(data, &v))
+	return v
+}
+
 func TestResolveDataDir_UsesEnvWhenSet(t *testing.T) {
 	t.Setenv("KANDEV_PLUGIN_DATA_DIR", "/tmp/kandev-plugin-e2e-data")
 	require.Equal(t, "/tmp/kandev-plugin-e2e-data", resolveDataDir())
@@ -155,6 +188,42 @@ type fakeHost struct {
 
 	setStateCalls []setStateCall
 	setStateErr   error
+
+	// Host data API write recording (ADR 0043 phase 2).
+	createdTaskID   string
+	lastCreateInput pluginsdk.CreateTaskInput
+	lastSendTask    string
+	lastSendText    string
+}
+
+func (h *fakeHost) Tasks() pluginsdk.TaskReader       { return fakeHostTaskReader{h} }
+func (h *fakeHost) Messages() pluginsdk.MessageReader { return fakeHostMessageReader{h} }
+
+type fakeHostTaskReader struct{ h *fakeHost }
+
+func (fakeHostTaskReader) List(context.Context, pluginsdk.TaskFilter, pluginsdk.Page) ([]pluginsdk.Task, *pluginsdk.PageInfo, error) {
+	return nil, nil, nil
+}
+func (fakeHostTaskReader) Get(context.Context, string) (*pluginsdk.Task, error) { return nil, nil }
+func (fakeHostTaskReader) Update(context.Context, pluginsdk.UpdateTaskInput) (*pluginsdk.Task, error) {
+	return nil, nil
+}
+
+func (r fakeHostTaskReader) Create(_ context.Context, in pluginsdk.CreateTaskInput) (*pluginsdk.Task, error) {
+	r.h.lastCreateInput = in
+	return &pluginsdk.Task{ID: r.h.createdTaskID, Title: in.Title}, nil
+}
+
+type fakeHostMessageReader struct{ h *fakeHost }
+
+func (fakeHostMessageReader) List(context.Context, pluginsdk.MessageFilter, pluginsdk.Page) ([]pluginsdk.Message, *pluginsdk.PageInfo, error) {
+	return nil, nil, nil
+}
+
+func (r fakeHostMessageReader) Send(_ context.Context, taskID, sessionID, text string) (*pluginsdk.MessageDispatch, error) {
+	r.h.lastSendTask = taskID
+	r.h.lastSendText = text
+	return &pluginsdk.MessageDispatch{SessionID: "session-1", Status: "queued"}, nil
 }
 
 func (h *fakeHost) GetState(context.Context, string, string, string) (map[string]any, bool, error) {

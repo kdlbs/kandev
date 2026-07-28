@@ -212,12 +212,11 @@ export function useMonacoWalkthroughRange({
           return;
         }
         const editorDom = editor.getDomNode();
+        setBox(measured.box);
         if (!isWalkthroughAnchorTargetVisible(editorDom, measured.viewportRect)) {
-          setBox(null);
           clearWalkthroughEditorAnchor(anchorKey);
           return;
         }
-        setBox(measured.box);
         setWalkthroughEditorAnchor({
           key: anchorKey,
           taskId,

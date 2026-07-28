@@ -147,6 +147,14 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   const addRepository = drawer.getByRole("button", { name: "Add repository" });
   const addFolder = drawer.getByRole("button", { name: "Add folder" });
   const submit = drawer.getByTestId("add-workspace-sources-submit");
+  // The "Add folder" control is gated on activeTask.primaryExecutorType, which
+  // arrives from a follow-up office.task.updated WS event once the primary
+  // session's executor is bound and can lag the drawer mount on a loaded CI
+  // shard. The drawer re-renders reactively when that field hydrates, so wait
+  // for the button with a generous timeout instead of measuring a not-yet-
+  // rendered button (a null box that otherwise stalls until the suite timeout).
+  await expect(addRepository).toBeVisible();
+  await expect(addFolder).toBeVisible({ timeout: 30_000 });
   const [addRepositoryBox, addFolderBox] = await Promise.all([
     addRepository.boundingBox(),
     addFolder.boundingBox(),

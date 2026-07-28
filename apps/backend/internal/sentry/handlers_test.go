@@ -236,7 +236,7 @@ func TestHTTP_SearchIssues_ForwardsFilter(t *testing.T) {
 	if w := do(router, http.MethodGet, target, ""); w.Code != http.StatusOK {
 		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 	}
-	if seen.OrgSlug != "acme" || seen.ProjectSlug != "fe" || seen.Query != "boom" || seen.StatsPeriod != "24h" {
+	if seen.OrgSlug != "acme" || !sameStrings(seen.ProjectSlugs, []string{"fe"}) || seen.Query != "boom" || seen.StatsPeriod != "24h" {
 		t.Errorf("filter = %+v", seen)
 	}
 	if !sameStrings(seen.Levels, []string{"error", "fatal"}) {
@@ -244,6 +244,27 @@ func TestHTTP_SearchIssues_ForwardsFilter(t *testing.T) {
 	}
 	if !sameStrings(seen.Statuses, []string{"unresolved"}) {
 		t.Errorf("statuses = %v", seen.Statuses)
+	}
+}
+
+// TestHTTP_SearchIssues_RejectsMultipleProjectSlugs pins the P2 fix: Sentry's
+// project-scoped issue-search endpoint (and the browse dialog's single-select
+// UI) only ever deal with one project at a time, so the browse endpoint
+// rejects several repeated `projectSlug` query params with 400 up front
+// instead of forwarding a slice the real REST client would 400 on anyway.
+// The plural filter remains watcher-only (see Service.CheckIssueWatch's
+// per-project fan-out).
+func TestHTTP_SearchIssues_RejectsMultipleProjectSlugs(t *testing.T) {
+	ctrl, router, client := newTestController(t)
+	inst := seedInstance(t, ctrl, "ws-1", "A", "tok")
+	client.searchIssuesFn = func(filter SearchFilter, _ string) (*SearchResult, error) {
+		t.Fatalf("client should not be called with multiple project slugs, got %+v", filter)
+		return nil, nil
+	}
+	target := "/api/v1/sentry/issues?workspace_id=ws-1&instanceId=" + inst.ID +
+		"&orgSlug=acme&projectSlug=frontend&projectSlug=backend"
+	if w := do(router, http.MethodGet, target, ""); w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body=%s", w.Code, w.Body.String())
 	}
 }
 

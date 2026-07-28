@@ -316,6 +316,12 @@ func (r *Repository) runTaskPriorityRecreate() error {
 	// SELECT below can reference it. Errors are swallowed because the
 	// most common cause is "column already exists" on real installs.
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`)
+	// Older priority-migration fixtures predate the WIP queue columns. Add
+	// them before the recreate SELECT so the migration remains compatible with
+	// those schemas as well as with real pre-queue installations.
+	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`)
+	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`)
 
 	for _, stmt := range taskPriorityMigrationStatements() {
 		if _, err := conn.ExecContext(ctx, stmt); err != nil {
@@ -352,6 +358,9 @@ func taskPriorityMigrationStatements() []string {
 			priority TEXT NOT NULL DEFAULT 'medium'
 				CHECK (priority IN ('critical','high','medium','low')),
 			position INTEGER DEFAULT 0,
+			wip_admitted INTEGER NOT NULL DEFAULT 1,
+			queued_for_step_id TEXT NOT NULL DEFAULT '',
+			queued_at TIMESTAMP,
 			metadata TEXT DEFAULT '{}',
 			is_ephemeral INTEGER NOT NULL DEFAULT 0,
 			parent_id TEXT DEFAULT '',
@@ -377,7 +386,7 @@ func taskPriorityMigrationStatements() []string {
 		// recreate dance.
 		`INSERT INTO tasks_priority_new (
 			id, workspace_id, workflow_id, workflow_step_id, title, description,
-			state, priority, position, metadata, is_ephemeral, parent_id,
+			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id,
 			archived_at, archived_by_cascade_id, created_at, updated_at,
 			origin, project_id,
 			labels, identifier,
@@ -386,6 +395,7 @@ func taskPriorityMigrationStatements() []string {
 			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), title, COALESCE(description,''),
 			COALESCE(state,'TODO'), 'medium', COALESCE(position,0),
+			COALESCE(wip_admitted,1), COALESCE(queued_for_step_id,''), queued_at,
 			COALESCE(metadata,'{}'), COALESCE(is_ephemeral,0),
 			COALESCE(parent_id,''), archived_at,
 			COALESCE(archived_by_cascade_id,''),

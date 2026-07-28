@@ -15,18 +15,19 @@ var copilotACPLogoLight []byte
 //go:embed logos/copilot_dark.svg
 var copilotACPLogoDark []byte
 
-const copilotACPPkg = "@github/copilot"
+const copilotACPPackage = "@github/copilot"
 
 // copilotNativeBinary is the standalone CLI installed by the @github/copilot
-// npm package. When present on PATH we run it directly instead of paying the
-// per-launch `npx` registry round-trip.
+// npm package. It remains available for discovery and preflight checks, but
+// ACP launches always use the exact package pin.
 const copilotNativeBinary = "copilot"
 
 var (
-	_ Agent             = (*CopilotACP)(nil)
-	_ PassthroughAgent  = (*CopilotACP)(nil)
-	_ InferenceAgent    = (*CopilotACP)(nil)
-	_ NativeBinaryAgent = (*CopilotACP)(nil)
+	_ Agent                  = (*CopilotACP)(nil)
+	_ PassthroughAgent       = (*CopilotACP)(nil)
+	_ InferenceAgent         = (*CopilotACP)(nil)
+	_ NativeBinaryAgent      = (*CopilotACP)(nil)
+	_ ManagedNPMRuntimeAgent = (*CopilotACP)(nil)
 )
 
 // CopilotACP implements Agent for GitHub Copilot using ACP protocol mode.
@@ -44,7 +45,7 @@ func NewCopilotACP() *CopilotACP {
 				Supported:         true,
 				Label:             "CLI Passthrough",
 				Description:       "Show terminal directly instead of chat interface",
-				PassthroughCmd:    NewCommand("npx", "-y", copilotACPPkg),
+				PassthroughCmd:    NewCommand("npx", "--yes", "--prefer-offline", copilotACPPackage),
 				ModelFlag:         NewParam("--model", "{model}"),
 				IdleTimeout:       3 * time.Second,
 				BufferMaxBytes:    DefaultBufferMaxBytes,
@@ -89,17 +90,18 @@ func (a *CopilotACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) 
 // execution environment. See NativeBinaryAgent.
 func (a *CopilotACP) NativeBinaryName() string { return copilotNativeBinary }
 
-func (a *CopilotACP) BuildCommand(opts CommandOptions) Command {
-	if opts.PreferNativeBinary {
-		return Cmd(copilotNativeBinary, "--acp").Build()
-	}
-	return Cmd("npx", "-y", copilotACPPkg, "--acp").Build()
+func (a *CopilotACP) BuildCommand(CommandOptions) Command {
+	return a.ManagedNPMRuntime().CachedACPCommand()
+}
+
+func (a *CopilotACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
+	return ManagedNPMRuntimeSpec{Package: copilotACPPackage, ACPArgs: []string{"--acp"}}
 }
 
 func (a *CopilotACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:             Cmd("npx", "-y", copilotACPPkg, "--acp").Build(),
+		Cmd:             a.ManagedNPMRuntime().CachedACPCommand(),
 		WorkingDir:      "{workspace}",
 		Env:             map[string]string{},
 		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -126,7 +128,7 @@ func (a *CopilotACP) LoginCommand() *LoginCommand {
 }
 
 func (a *CopilotACP) InstallScript() string {
-	return "npm install -g " + copilotACPPkg
+	return "npm install -g " + copilotACPPackage
 }
 
 func (a *CopilotACP) BillingType() usage.BillingType { return defaultBillingType() }
@@ -186,6 +188,6 @@ var copilotPermSettings = map[string]PermissionSetting{
 func (a *CopilotACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("npx", "-y", copilotACPPkg, "--acp"),
+		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
 	}
 }

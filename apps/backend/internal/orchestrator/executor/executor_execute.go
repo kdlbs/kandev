@@ -438,12 +438,29 @@ func isStopTerminalSessionState(state models.TaskSessionState) bool {
 		state == models.TaskSessionStateCancelled
 }
 
+func allowsSessionStartingRecovery(
+	nextState, expectedState, currentState models.TaskSessionState,
+	promoteTask bool,
+) bool {
+	return !promoteTask &&
+		nextState == models.TaskSessionStateStarting &&
+		currentState == expectedState &&
+		(expectedState == models.TaskSessionStateFailed ||
+			expectedState == models.TaskSessionStateCancelled)
+}
+
 // updateSessionStarting persists a full session-row STARTING transition, using
 // the orchestrator callback when present so task/session runtime state stays
 // serialized with guarded REVIEW reconciliation.
-func (e *Executor) updateSessionStarting(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+func (e *Executor) updateSessionStarting(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	expectedState models.TaskSessionState,
+	promoteTask bool,
+) error {
 	if e.onSessionStarting != nil {
-		return e.onSessionStarting(ctx, taskID, session, promoteTask)
+		return e.onSessionStarting(ctx, taskID, session, expectedState, promoteTask)
 	}
 	current, err := e.repo.GetTaskSession(ctx, session.ID)
 	if err != nil {
@@ -452,15 +469,13 @@ func (e *Executor) updateSessionStarting(ctx context.Context, taskID string, ses
 	if current == nil {
 		return fmt.Errorf("%w: agent session not found: %s", models.ErrTaskSessionNotFound, session.ID)
 	}
-	allowedTerminalRecovery := !promoteTask &&
-		session.State == models.TaskSessionStateStarting &&
-		(current.State == models.TaskSessionStateFailed ||
-			(current.State == models.TaskSessionStateCancelled &&
-				models.IsArchiveCancelReason(current.ErrorMessage)))
+	allowedTerminalRecovery := allowsSessionStartingRecovery(
+		session.State, expectedState, current.State, promoteTask,
+	)
 	if isStopTerminalSessionState(current.State) && !allowedTerminalRecovery {
 		return &SessionStateSupersededError{SessionID: session.ID, State: current.State}
 	}
-	return e.persistSessionFullRowIfCurrentState(ctx, session, current.State)
+	return e.persistSessionFullRowIfCurrentState(ctx, session, expectedState)
 }
 
 func (e *Executor) persistSessionFullRowIfCurrentState(
@@ -1216,6 +1231,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if err := e.configureGitHubCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
 		return nil, execConfig, err
 	}
+	if err := e.applyGitCredentialSnapshot(ctx, req, session); err != nil {
+		return nil, execConfig, err
+	}
 
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree
@@ -1480,11 +1498,12 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 	}
 
 	// Transition session to STARTING
+	expectedState := session.State
 	now := time.Now().UTC()
 	session.State = models.TaskSessionStateStarting
 	session.ErrorMessage = ""
 	session.UpdatedAt = now
-	if err := e.updateSessionStarting(ctx, task.ID, session, true); err != nil {
+	if err := e.updateSessionStarting(ctx, task.ID, session, expectedState, true); err != nil {
 		e.logger.Error("failed to update session state for agent start",
 			zap.String("session_id", session.ID),
 			zap.Error(err))

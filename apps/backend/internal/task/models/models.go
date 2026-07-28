@@ -93,6 +93,7 @@ const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
+	MetaKeyDeferredLaunch    = "deferred_launch"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
 	// Centralised here so the set/read sites can't drift apart.
@@ -131,6 +132,23 @@ const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
 // selector state so task-detail boot hydration does not wait for WebSocket
 // reconnection. It is display metadata and is not replayed to the provider.
 const SessionMetaKeyACPModelState = "acp_model_state"
+
+// SessionMetaKeyGitCredentialSnapshot records the non-secret Git credential
+// routing contract that successfully launched or resumed a session.
+const SessionMetaKeyGitCredentialSnapshot = "git_credential_snapshot"
+
+// GitCredentialSnapshot is launch-time display metadata. It never contains a
+// token, broker lease, helper command, credential file, or SSH key detail.
+type GitCredentialSnapshot struct {
+	Version         int       `json:"version"`
+	Policy          string    `json:"policy"`
+	Source          string    `json:"source"`
+	WorkspaceMethod string    `json:"workspace_method,omitempty"`
+	Actor           string    `json:"actor"`
+	Transport       string    `json:"transport"`
+	ExecutorType    string    `json:"executor_type,omitempty"`
+	CapturedAt      time.Time `json:"captured_at"`
+}
 
 // TurnMetaKeyRuntimeConfigSnapshot stores the immutable effective runtime
 // configuration attributed to one prompt/response turn.
@@ -430,15 +448,21 @@ const (
 
 // Task represents a task in the database
 type Task struct {
-	ID               string                 `json:"id"`
-	WorkspaceID      string                 `json:"workspace_id"`
-	WorkflowID       string                 `json:"workflow_id"`
-	WorkflowStepID   string                 `json:"workflow_step_id"`
-	Title            string                 `json:"title"`
-	Description      string                 `json:"description"`
-	State            v1.TaskState           `json:"state"`
-	Priority         string                 `json:"priority"`
-	Position         int                    `json:"position"` // Order within workflow step
+	ID             string       `json:"id"`
+	WorkspaceID    string       `json:"workspace_id"`
+	WorkflowID     string       `json:"workflow_id"`
+	WorkflowStepID string       `json:"workflow_step_id"`
+	Title          string       `json:"title"`
+	Description    string       `json:"description"`
+	State          v1.TaskState `json:"state"`
+	Priority       string       `json:"priority"`
+	Position       int          `json:"position"` // Order within workflow step
+	// WIPAdmitted indicates whether this task consumes an active slot in its
+	// current workflow step. Queued tasks remain visible but do not consume the
+	// destination step's WIP capacity.
+	WIPAdmitted      bool                   `json:"wip_admitted"`
+	QueuedForStepID  string                 `json:"queued_for_step_id,omitempty"`
+	QueuedAt         *time.Time             `json:"queued_at,omitempty"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"`
 	Repositories     []*TaskRepository      `json:"repositories,omitempty"`
 	WorkspaceFolders []*TaskWorkspaceFolder `json:"workspace_folders,omitempty"`

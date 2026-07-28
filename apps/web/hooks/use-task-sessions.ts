@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { listTaskSessions } from "@/lib/api";
 import type { TaskSession } from "@/lib/types/http";
+import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
 
@@ -85,19 +86,18 @@ export function useTaskSessions(taskId: string | null) {
     void loadSessions(true);
   }, [connectionStatus, isLoaded, isLoading, loadSessions, taskId]);
 
-  useEffect(() => {
-    if (!taskId) return;
-    const refetchOnVisible = () => {
-      if (document.visibilityState !== "visible") return;
+  useForegroundRefresh(
+    () => {
+      if (!taskId) return;
       if (!isLoaded) {
         if (isLoading) void loadSessions(true);
         return;
       }
       void loadSessions(true);
-    };
-    document.addEventListener("visibilitychange", refetchOnVisible);
-    return () => document.removeEventListener("visibilitychange", refetchOnVisible);
-  }, [isLoaded, isLoading, loadSessions, taskId]);
+    },
+    Boolean(taskId),
+    taskId,
+  );
 
   return { sessions, isLoading, isLoaded, loadSessions };
 }

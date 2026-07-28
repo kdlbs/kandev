@@ -139,7 +139,7 @@ function CodeMirrorDeleteButton({ onDelete }: { onDelete?: () => void }) {
           size="sm"
           variant="ghost"
           onClick={onDelete}
-          className="h-8 w-8 p-0 cursor-pointer text-muted-foreground hover:text-destructive"
+          className="h-8 w-8 p-0 cursor-pointer hover:text-destructive"
         >
           <IconTrash className="h-4 w-4" />
         </Button>
@@ -190,7 +190,7 @@ function CodeMirrorMarkdownPreviewButton({ onToggle }: { onToggle: () => void })
           size="sm"
           variant="ghost"
           onClick={onToggle}
-          className="h-8 w-8 p-0 cursor-pointer text-muted-foreground"
+          className="h-8 w-8 p-0 cursor-pointer"
           data-testid="markdown-preview-toggle"
         >
           <IconEye className="h-4 w-4" />

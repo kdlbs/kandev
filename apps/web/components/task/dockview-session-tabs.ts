@@ -21,6 +21,7 @@ import {
   shouldActivateSessionPanel,
   shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
+import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
 
 const debug = createDebugLogger("dockview:session-tabs");
 
@@ -391,29 +392,6 @@ export function resolveInitialPosition(api: DockviewApi): AddPanelOptions["posit
   return undefined;
 }
 
-function ensureSessionPanel(
-  api: DockviewApi,
-  sessionId: string,
-  position: AddPanelOptions["position"],
-  inactive: boolean,
-  createdSet: Set<string>,
-): void {
-  if (api.getPanel(`session:${sessionId}`)) {
-    createdSet.add(sessionId);
-    return;
-  }
-  api.addPanel({
-    id: `session:${sessionId}`,
-    component: "chat",
-    tabComponent: "sessionTab",
-    title: "Agent",
-    params: { sessionId },
-    position,
-    inactive,
-  });
-  createdSet.add(sessionId);
-}
-
 /**
  * Close session panels that no longer belong to the active task.
  *
@@ -434,11 +412,18 @@ export function reconcileRemovedSessionPanels(
   // Snapshot before iterating: closing a panel can mutate `api.panels`
   // synchronously, which would skip elements in a `for...of` over the live
   // array. Matches the pattern in `removeEphemeralPanels`.
-  for (const panel of [...api.panels]) {
-    if (!panel.id.startsWith("session:")) continue;
+  const stalePanels = api.panels.filter((panel) => {
+    if (!panel.id.startsWith("session:")) return false;
     const sid = panel.id.slice("session:".length);
-    if (sid === keepSessionId) continue;
-    if (currentIds.has(sid)) continue;
+    return sid !== keepSessionId && !currentIds.has(sid);
+  });
+
+  if (keepSessionId) {
+    anchorIncomingSessionPanel(api, currentIds, stalePanels, keepSessionId, createdSet);
+  }
+
+  for (const panel of stalePanels) {
+    const sid = panel.id.slice("session:".length);
     try {
       panel.api.close();
       removed.push(panel.id);

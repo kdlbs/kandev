@@ -42,7 +42,7 @@ A profile stores:
 - an MCP policy JSON object;
 - runtime-specific configuration.
 
-Literal environment values are stored with the profile. Use secret references for credentials. Resolved values and copied credential files normally become accessible to the agent and commands in that environment. SSH is narrower: its remote agent process receives only the credential allowlist documented below, not arbitrary profile variables.
+Literal environment values are stored with the profile. Use secret references for credentials. Resolved values and copied credential files normally become accessible to the agent and commands in that environment, including repository setup scripts and the terminal panel's shells. A terminal that is already open keeps the environment it started with; open a new terminal after changing the profile. SSH is narrower: its remote agent process and terminals receive only the credential allowlist documented below, not arbitrary profile variables.
 
 The MCP editor checks only that the value is a JSON object. Its presets cover stdio, HTTP, and SSE transport allowances, server allowlists, and URL rewrites. Test restrictive policies with the actual MCP servers the agent needs; see [Automation and MCP](automation-and-mcp.md).
 
@@ -67,6 +67,14 @@ Two current preparation exceptions are easy to miss:
 - A Worktree task with two or more attached repositories runs each repository's setup script while creating that repository's worktree, but the current multi-repository preparer does not run the executor profile's task-level prepare script.
 
 ## Managed GitHub credentials
+
+The workspace's GitHub connection and the task's Git transport policy are separate. **Managed
+workspace credentials** is the default and provides the broker behavior below. Select **Inherit
+executor Git credentials** in the workspace GitHub settings to leave Git and `gh` to the host or
+selected executor; Kandev then injects no GitHub broker helper or shim. Local and Worktree use
+host-visible Git/SSH credentials, while Docker, SSH, and cloud require executor-configured
+credentials. An explicit executor-profile `GH_TOKEN` or `GITHUB_TOKEN` overrides the managed
+workspace route.
 
 For attached GitHub repositories, Kandev normally gives the task an opaque lease for each
 repository instead of placing the workspace PAT, selected CLI token, or App installation token in

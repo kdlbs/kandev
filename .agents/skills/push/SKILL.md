@@ -1,28 +1,24 @@
 ---
 name: push
-description: Push an already verified and committed branch. With --fixup, return control to the planner for delegated CI and review handling.
+description: Push a committed branch whose task-defined checks passed. With --fixup, continue with CI and review handling in the primary conversation.
 ---
 
 # Push
 
 ## Planner Entry
 
-The planner may push a routine verified commit directly. With `--fixup`, it
-keeps long monitoring on delegated `pr-poller`; delegate delivery only when it
-has a material isolation or coordination benefit.
-
-An explicitly assigned push worker pushes only the already verified and
-committed branch and does not spawn other workers.
+Push the verified commit directly in the primary conversation. With `--fixup`,
+continue with `/pr-fixup` in that same conversation; do not delegate polling or
+delivery.
 
 ## Available skills
 
-- **`/commit`** — Creates the artifact and hook receipt before verification.
-- **`/verify`** — Mandatory post-commit gate for the exact current `HEAD`.
+- **`/commit`** — Creates the artifact after task-defined checks pass.
 - **`/pr-fixup`** — Wait for CI checks and CodeRabbit, Greptile, Claude, OpenCode, and cubic review feedback, fix any failures or valid comments, and push again.
 
 ## Options
 
-- `--fixup` — after pushing, report that the planner should begin the delegated `/pr-fixup` workflow.
+- `--fixup` — after pushing, begin `/pr-fixup` in the same conversation.
 
 > **Note:** This skill only uses `git push`. GitHub CLI dependency is indirect via `/pr-fixup`.
 
@@ -34,12 +30,12 @@ Push the already committed branch to its remote.
 
 **Create a todo/task for each step below and mark them as completed as you go.**
 
-1. **Uncommitted changes:** If there are dirty or staged changes, stop and tell
-   the planner that a new commit and verification run are required first.
+1. **Uncommitted changes:** If there are dirty or staged changes, stop: a new
+   commit and the affected task checks are required first.
 
-2. **Verification evidence:** Require a successful post-commit `verify` result
-   whose reported `HEAD` exactly equals current `HEAD`. If the checkout or
-   commit changed afterward, stop and require fresh verification.
+2. **Task-check evidence:** Require the task-defined unit, integration, and E2E
+   checks affected by this commit to pass. If the checkout or commit changed
+   afterward, rerun only the affected task checks.
 
 3. **Safety check:** Verify the current branch is NOT `main` or `master`. If it is, stop and ask the user — direct pushes to the default branch should go through a PR.
 
@@ -62,5 +58,4 @@ Push the already committed branch to its remote.
 
 5. **Report** the pushed commit hash and branch.
 
-6. **If `--fixup`:** Return the pushed branch state to the planner so it can
-   coordinate `/pr-fixup`. Do not poll, fix, verify, or spawn another worker.
+6. **If `--fixup`:** Continue with `/pr-fixup` in this conversation.

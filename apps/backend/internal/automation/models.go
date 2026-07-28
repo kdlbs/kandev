@@ -22,18 +22,12 @@ const (
 )
 
 const (
-	defaultBranchMain           = "main"
-	exampleRepositoryOwner      = "org/repo"
-	placeholderRepositoryOwner  = "Repository (owner/name)"
-	triggerCategoryGitHub       = "github"
-	triggerDataSourceKey        = "source"
-	triggerDataSourceManual     = "manual"
-	triggerCronHourlyShorthand  = "@hourly"
-	triggerCronHourlyExpression = "0 * * * *"
-	triggerCronDailyShorthand   = "@daily"
-	triggerCronDailyExpression  = "0 0 * * *"
-	triggerCronWeeklyShorthand  = "@weekly"
-	triggerCronWeeklyExpression = "0 0 * * 0"
+	defaultBranchMain          = "main"
+	exampleRepositoryOwner     = "org/repo"
+	placeholderRepositoryOwner = "Repository (owner/name)"
+	triggerCategoryGitHub      = "github"
+	triggerDataSourceKey       = "source"
+	triggerDataSourceManual    = "manual"
 )
 
 // RunStatus tracks the outcome of a trigger firing.
@@ -174,6 +168,7 @@ type GitHubCITriggerConfig struct {
 	Repos       []github.RepoFilter `json:"repos"`
 	Conclusions []string            `json:"conclusions"` // success, failure, etc.
 	CheckNames  []string            `json:"check_names,omitempty"`
+	Branches    []string            `json:"branches,omitempty"` // head-branch glob filter; empty = all
 }
 
 // WebhookTriggerConfig holds configuration for webhook triggers.

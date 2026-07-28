@@ -39,6 +39,15 @@ type dataRecordingHost struct {
 	lastWorkspaceID   string
 	lastWorkflowID    string
 	lastUtilityPrompt string
+
+	createdTask     Task
+	lastCreateInput CreateTaskInput
+	updatedTask     Task
+	lastUpdateInput UpdateTaskInput
+	messageDispatch MessageDispatch
+	lastSendTask    string
+	lastSendSession string
+	lastSendText    string
 }
 
 func (h *dataRecordingHost) GetState(context.Context, string, string, string) (map[string]any, bool, error) {
@@ -93,6 +102,18 @@ func (r dataRecordingTaskReader) Get(_ context.Context, id string) (*Task, error
 	return &task, nil
 }
 
+func (r dataRecordingTaskReader) Create(_ context.Context, in CreateTaskInput) (*Task, error) {
+	r.h.lastCreateInput = in
+	task := r.h.createdTask
+	return &task, nil
+}
+
+func (r dataRecordingTaskReader) Update(_ context.Context, in UpdateTaskInput) (*Task, error) {
+	r.h.lastUpdateInput = in
+	task := r.h.updatedTask
+	return &task, nil
+}
+
 type dataRecordingSessionReader struct{ h *dataRecordingHost }
 
 func (r dataRecordingSessionReader) List(_ context.Context, filter SessionFilter, _ Page) ([]Session, *PageInfo, error) {
@@ -143,6 +164,14 @@ func (r dataRecordingMessageReader) List(_ context.Context, filter MessageFilter
 	return r.h.messages, r.h.messagePage, nil
 }
 
+func (r dataRecordingMessageReader) Send(_ context.Context, taskID, sessionID, text string) (*MessageDispatch, error) {
+	r.h.lastSendTask = taskID
+	r.h.lastSendSession = sessionID
+	r.h.lastSendText = text
+	dispatch := r.h.messageDispatch
+	return &dispatch, nil
+}
+
 func TestHostData_TasksListAndGet(t *testing.T) {
 	impl := &dataRecordingHost{
 		tasks: map[string]Task{
@@ -166,6 +195,49 @@ func TestHostData_TasksListAndGet(t *testing.T) {
 	_, err = host.Tasks().Get(context.Background(), "missing")
 	require.Error(t, err)
 	require.Equal(t, codes.NotFound, status.Code(err))
+}
+
+// TestHostData_TaskWritesAndMessage proves the write RPCs (CreateTask,
+// UpdateTask, SendMessage) round-trip inputs and results through
+// grpcHostClient -> proto -> grpcHostServer, including the optional-pointer
+// fields on the update mask.
+func TestHostData_TaskWritesAndMessage(t *testing.T) {
+	impl := &dataRecordingHost{
+		createdTask:     Task{ID: "task-new", Title: "Investigate crash", State: "TODO"},
+		updatedTask:     Task{ID: "task-1", Title: "Renamed", State: "IN_PROGRESS"},
+		messageDispatch: MessageDispatch{SessionID: "session-1", Status: "queued"},
+	}
+	host := dialHostOverBufconn(t, impl)
+
+	stepID := "step-2"
+	created, err := host.Tasks().Create(context.Background(), CreateTaskInput{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: &stepID,
+		Title: "Investigate crash", Description: "stack trace attached", StartAgent: true,
+	})
+	require.NoError(t, err)
+	require.Equal(t, "task-new", created.ID)
+	require.Equal(t, "ws-1", impl.lastCreateInput.WorkspaceID)
+	require.NotNil(t, impl.lastCreateInput.WorkflowStepID)
+	require.Equal(t, "step-2", *impl.lastCreateInput.WorkflowStepID)
+	require.True(t, impl.lastCreateInput.StartAgent)
+
+	title := "Renamed"
+	state := "IN_PROGRESS"
+	updated, err := host.Tasks().Update(context.Background(), UpdateTaskInput{ID: "task-1", Title: &title, State: &state})
+	require.NoError(t, err)
+	require.Equal(t, "IN_PROGRESS", updated.State)
+	require.Equal(t, "task-1", impl.lastUpdateInput.ID)
+	require.NotNil(t, impl.lastUpdateInput.Title)
+	require.Equal(t, "Renamed", *impl.lastUpdateInput.Title)
+	require.Nil(t, impl.lastUpdateInput.Description, "an unset field must stay nil across the wire")
+
+	dispatch, err := host.Messages().Send(context.Background(), "task-1", "session-1", "rerun the tests")
+	require.NoError(t, err)
+	require.Equal(t, "session-1", dispatch.SessionID)
+	require.Equal(t, "queued", dispatch.Status)
+	require.Equal(t, "task-1", impl.lastSendTask)
+	require.Equal(t, "session-1", impl.lastSendSession)
+	require.Equal(t, "rerun the tests", impl.lastSendText)
 }
 
 func TestHostData_SessionsListAndCodeStats(t *testing.T) {
@@ -282,6 +354,18 @@ func TestHostData_UnimplementedHostData_ReturnsUnimplemented(t *testing.T) {
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 
 	_, _, err = host.Sessions().CodeStats(context.Background(), SessionFilter{}, Page{})
+	require.Error(t, err)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+
+	_, err = host.Tasks().Create(context.Background(), CreateTaskInput{Title: "x"})
+	require.Error(t, err)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+
+	_, err = host.Tasks().Update(context.Background(), UpdateTaskInput{ID: "task-1"})
+	require.Error(t, err)
+	require.Equal(t, codes.Unimplemented, status.Code(err))
+
+	_, err = host.Messages().Send(context.Background(), "task-1", "", "body")
 	require.Error(t, err)
 	require.Equal(t, codes.Unimplemented, status.Code(err))
 }

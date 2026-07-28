@@ -80,18 +80,10 @@ You are a code reviewer. Provide specific, actionable feedback.
 
 Supported fields include `tools`, `disallowedTools`, `model`, `permissionMode`, `mcpServers`, `hooks`, `maxTurns`, `skills`, `initialPrompt`, `memory`, `effort`, `background`, `isolation`, and `color`.
 
-Kandev uses Claude Code's moving `sonnet` and `opus` aliases in source agent
-frontmatter. As of 2026-07-20 these select Sonnet 5 and Opus 4.8. Use `sonnet`
-for implementation, tests, QA, simplification, verification, and polling; use
-`opus` only for architecture, security, and deep code review.
-
-Kandev source agents also set `effort` after `model`:
-
-- `high`: `architect`, `code-review`, `security-auditor`
-- `medium`: `implementer`, `test-engineer`, `qa`, `simplify`
-- `low`: `verify`, `pr-poller`
-
-Keep model tier and effort aligned when adding or updating roles.
+Kandev maintains only the read-only `pr-poller` Claude subagent, using Haiku for
+an explicitly user-authorized PR wait. If the user explicitly requests another
+agent, state its model, reasoning effort, isolation, and additional context cost
+before creating it; do not recreate the former role or model-tier mapping.
 
 Important behavior:
 

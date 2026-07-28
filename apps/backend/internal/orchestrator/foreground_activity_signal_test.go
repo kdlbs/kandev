@@ -911,6 +911,69 @@ func TestForegroundActivitySignal_TurnCompletionIsSessionIsolated(t *testing.T) 
 	}
 }
 
+// TestForegroundActivitySignal_SettleRepublishesTaskAggregate reproduces the
+// stuck-sidebar-spinner bug: on agent completion the turn-activity record is
+// retired (detached) while the session is still RUNNING, so a task-aggregate
+// recompute at that instant reads the detached record's "generating" safe
+// default and caches the task-level activity as generating. The session then
+// settles to WAITING_FOR_INPUT via the state funnel, which must republish the
+// task aggregate so the at-a-glance surfaces (sidebar row, board card) clear.
+func TestForegroundActivitySignal_SettleRepublishesTaskAggregate(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	taskEvents := &recordingTaskEvents{}
+	svc.SetTaskEventPublisher(taskEvents)
+
+	const (
+		taskID    = "task-settle-republish"
+		sessionID = "session-settle-republish"
+	)
+	// RUNNING session with no tracked turn-activity record: the detached state
+	// left behind after retirement, whose foreground activity safely defaults to
+	// generating.
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+		t.Fatalf("untracked RUNNING session must default generating, got %q", got)
+	}
+	taskEvents.activityTaskIDs = nil
+
+	// The session settles out of RUNNING; the funnel must republish the task
+	// aggregate so a stuck generating value is recomputed off the settled list.
+	svc.updateTaskSessionState(t.Context(), taskID, sessionID, models.TaskSessionStateWaitingForInput, "", false)
+
+	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
+		t.Fatalf("settle must republish task aggregate once for %q, got %v", taskID, taskEvents.activityTaskIDs)
+	}
+}
+
+// TestForegroundActivitySignal_NonSettleTransitionDoesNotRepublish guards the
+// settle predicate: transitions that do not leave the generating-capable RUNNING
+// state (e.g. STARTING->RUNNING) must not trigger a task-aggregate republish,
+// so the fix adds no per-frame or startup noise.
+func TestForegroundActivitySignal_NonSettleTransitionDoesNotRepublish(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	taskEvents := &recordingTaskEvents{}
+	svc.SetTaskEventPublisher(taskEvents)
+
+	const (
+		taskID    = "task-nonsettle"
+		sessionID = "session-nonsettle"
+	)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateStarting)
+	taskEvents.activityTaskIDs = nil
+
+	svc.updateTaskSessionState(t.Context(), taskID, sessionID, models.TaskSessionStateRunning, "", false)
+
+	if len(taskEvents.activityTaskIDs) != 0 {
+		t.Fatalf("entering RUNNING must not republish task aggregate, got %v", taskEvents.activityTaskIDs)
+	}
+}
+
 func TestForegroundActivitySignal_DelayedOldProviderIdleCannotYieldSuccessor(t *testing.T) {
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{currentPromptExecutionID: "execution-provider-idle"}

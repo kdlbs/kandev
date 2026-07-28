@@ -3,15 +3,18 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -94,6 +97,8 @@ func TestExecuteQueuedMessage_RequeuesCancelReleaseFailure(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q-cancel",
@@ -118,6 +123,116 @@ func TestExecuteQueuedMessage_RequeuesCancelReleaseFailure(t *testing.T) {
 	}
 	if !reflect.DeepEqual(status.Entries[0].Metadata, queuedMsg.Metadata) {
 		t.Fatalf("expected queued metadata to be preserved, got %#v", status.Entries[0].Metadata)
+	}
+	if status.Entries[0].Metadata[metaKeyUserMessageRecorded] != true {
+		t.Fatalf("expected requeued cancel-release prompt to retain recorded-user-message metadata, got %#v", status.Entries[0].Metadata)
+	}
+
+	secondPromptDone := make(chan struct{})
+	agentMgr.mu.Lock()
+	agentMgr.promptErr = nil
+	agentMgr.promptDone = secondPromptDone
+	agentMgr.capturedPrompts = agentMgr.capturedPrompts[:0]
+	agentMgr.capturedPromptCalls = agentMgr.capturedPromptCalls[:0]
+	agentMgr.mu.Unlock()
+
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+	select {
+	case <-secondPromptDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("boot-ready drain did not dispatch the cancel-release requeued prompt")
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("expected boot-ready drain to reuse the existing user message, got %d", len(messages.userMessages))
+	}
+}
+
+func TestExecuteQueuedMessage_RequeuesUsageLimitForManualResume(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("failed to get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	session.AgentExecutionID = "exec-1"
+	seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-1")
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	firstPromptDone := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptDone:             firstPromptDone,
+		promptErr:              errors.New(`agent error: {"data":{"codexErrorInfo":"usageLimitExceeded"}}`),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	queuedMsg := &messagequeue.QueuedMessage{
+		ID:        "q-usage-limit",
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "continue the interrupted task",
+		QueuedBy:  messagequeue.QueuedByUser,
+	}
+	if _, err := svc.messageQueue.QueueMessage(ctx, "s1", "t1", "later prompt", "", messagequeue.QueuedByUser, false, nil); err != nil {
+		t.Fatalf("queue later prompt: %v", err)
+	}
+
+	svc.markQueuedDispatchInFlight("s1", queuedMsg.ID)
+	svc.executeQueuedMessage("s1", queuedMsg)
+
+	select {
+	case <-firstPromptDone:
+	default:
+		t.Fatal("first prompt did not reach the agent synchronously")
+	}
+
+	queued := svc.messageQueue.GetStatus(ctx, "s1")
+	if queued.Count != 2 {
+		t.Fatalf("expected the usage-limited prompt and later prompt to remain queued, got %d messages", queued.Count)
+	}
+	if queued.Entries[0].Content != queuedMsg.Content {
+		t.Fatalf("expected the usage-limited prompt to retain FIFO priority, got %+v", queued.Entries)
+	}
+	if queued.Entries[0].QueuedBy != messagequeue.QueuedByUser {
+		t.Fatalf("expected the usage-limited prompt to retain its queued_by identity, got %q", queued.Entries[0].QueuedBy)
+	}
+	if queued.Entries[0].Metadata[metaKeyUserMessageRecorded] != true {
+		t.Fatalf("expected retried prompt to skip creating a duplicate user message, metadata=%+v", queued.Entries[0].Metadata)
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("expected one persisted user message before recovery, got %d", len(messages.userMessages))
+	}
+
+	secondPromptDone := make(chan struct{})
+	agentMgr.mu.Lock()
+	agentMgr.promptErr = nil
+	agentMgr.promptDone = secondPromptDone
+	agentMgr.capturedPrompts = agentMgr.capturedPrompts[:0]
+	agentMgr.capturedPromptCalls = agentMgr.capturedPromptCalls[:0]
+	agentMgr.mu.Unlock()
+
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+	select {
+	case <-secondPromptDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("manual resume did not dispatch the preserved prompt")
+	}
+	queued = svc.messageQueue.GetStatus(ctx, "s1")
+	if queued.Count != 1 || queued.Entries[0].Content != "later prompt" {
+		t.Fatalf("expected only the later prompt to remain after manual resume, got %+v", queued.Entries)
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("expected manual resume to reuse the existing user message, got %d", len(messages.userMessages))
 	}
 }
 

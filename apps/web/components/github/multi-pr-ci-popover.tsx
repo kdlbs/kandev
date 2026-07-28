@@ -82,10 +82,12 @@ export function MultiPRCIPopover({
   prs,
   enabled,
   onOpenDetailPanel,
+  refreshTaskPR,
 }: {
   prs: TaskPR[];
   enabled: boolean;
   onOpenDetailPanel?: (pr: TaskPR) => void;
+  refreshTaskPR?: () => void;
 }) {
   // `overrideId` is only set when the user activates a tab. The displayed PR is
   // derived: honour the override while it still exists, otherwise fall back to
@@ -142,6 +144,7 @@ export function MultiPRCIPopover({
           pr={selected}
           enabled={enabled}
           onOpenDetailPanel={onOpenDetailPanel ? () => onOpenDetailPanel(selected) : undefined}
+          refreshTaskPR={refreshTaskPR}
         />
       </div>
     </div>

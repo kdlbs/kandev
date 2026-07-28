@@ -188,7 +188,7 @@ func newRegistrationWebhookService(
 	reconciliation ...GitHubWebhookReconciliation,
 ) *GitHubWebhookService {
 	return NewAppRegistrationWebhookService(
-		registrationID, secret, store, repositories, personal, reconciliation...,
+		registrationID, secret, store, repositories, personal, nil, reconciliation...,
 	)
 }
 
@@ -342,7 +342,7 @@ func TestGitHubWebhookConcurrentDeliveryIsProcessedOncePerRegistration(t *testin
 		t.Fatal(err)
 	}
 	service := NewAppRegistrationWebhookService(
-		"registration-work", "work-secret", store, nil, nil,
+		"registration-work", "work-secret", store, nil, nil, nil,
 	)
 	request := signedWebhookRequest(
 		"work-secret", "delivery-concurrent", "installation",
@@ -391,7 +391,7 @@ func TestGitHubWebhookDeduplicatesInstallationTransition(t *testing.T) {
 		InstallationID: &installationID, Status: ConnectionStatusActive, CredentialGeneration: 2,
 	}
 	store := &githubWebhookMemoryStore{workspaces: map[int64][]*WorkspaceConnection{42: {connection}}}
-	service := NewGitHubWebhookService("webhook-secret", store, nil, nil)
+	service := NewGitHubWebhookService("webhook-secret", store, nil, nil, nil)
 	payload := []byte(`{"action":"suspend","installation":{"id":42}}`)
 	request := signedWebhookRequest("webhook-secret", "delivery-1", "installation", payload)
 
@@ -416,7 +416,7 @@ func TestGitHubWebhookUnsuspendsAndDeletesKnownInstallation(t *testing.T) {
 		InstallationID: &installationID, Status: ConnectionStatusSuspended, CredentialGeneration: 3,
 	}
 	store := &githubWebhookMemoryStore{workspaces: map[int64][]*WorkspaceConnection{42: {connection}}}
-	service := NewGitHubWebhookService("webhook-secret", store, nil, nil)
+	service := NewGitHubWebhookService("webhook-secret", store, nil, nil, nil)
 
 	unsuspend := []byte(`{"action":"unsuspend","installation":{"id":42}}`)
 	if _, err := service.Handle(
@@ -446,7 +446,7 @@ func TestGitHubWebhookLateUnsuspendCannotReactivateDeletedInstallation(t *testin
 		InstallationID: &installationID, Status: ConnectionStatusRevoked, CredentialGeneration: 5,
 	}
 	store := &githubWebhookMemoryStore{workspaces: map[int64][]*WorkspaceConnection{42: {connection}}}
-	service := NewGitHubWebhookService("webhook-secret", store, nil, nil)
+	service := NewGitHubWebhookService("webhook-secret", store, nil, nil, nil)
 	payload := []byte(`{"action":"unsuspend","installation":{"id":42}}`)
 	result, err := service.Handle(
 		context.Background(), signedWebhookRequest("webhook-secret", "delivery-late", "installation", payload),
@@ -472,7 +472,7 @@ func TestGitHubWebhookReconcilesOutOfOrderInstallationEventsWithProvider(t *test
 		ID: 42, AccountLogin: "acme", AccountType: "Organization",
 	}}
 	service := NewGitHubWebhookService(
-		"webhook-secret", store, nil, nil,
+		"webhook-secret", store, nil, nil, nil,
 		GitHubWebhookReconciliation{Installations: verifier},
 	)
 
@@ -496,7 +496,7 @@ func TestGitHubWebhookReconcilesOutOfOrderInstallationEventsWithProvider(t *test
 
 func TestGitHubWebhookUnknownInstallationDoesNotCreateBinding(t *testing.T) {
 	store := &githubWebhookMemoryStore{}
-	service := NewGitHubWebhookService("webhook-secret", store, nil, nil)
+	service := NewGitHubWebhookService("webhook-secret", store, nil, nil, nil)
 	payload := []byte(`{"action":"created","installation":{"id":999}}`)
 	result, err := service.Handle(
 		context.Background(), signedWebhookRequest("webhook-secret", "delivery-2", "installation", payload),
@@ -522,7 +522,7 @@ func TestGitHubWebhookStaleInstallationRowCannotReplacePAT(t *testing.T) {
 		connection.Login = "octocat"
 		connection.CredentialGeneration = 3
 	}
-	service := NewGitHubWebhookService("webhook-secret", store, nil, nil)
+	service := NewGitHubWebhookService("webhook-secret", store, nil, nil, nil)
 	payload := []byte(`{"action":"suspend","installation":{"id":42}}`)
 
 	result, err := service.Handle(
@@ -609,7 +609,7 @@ func TestGitHubWebhookAuthorizationRevocationRemovesExactUsers(t *testing.T) {
 		{WorkspaceID: "workspace-2", UserID: "user-9", GitHubUserID: 11},
 	}}}
 	revoker := &webhookPersonalRevoker{}
-	service := NewGitHubWebhookService("webhook-secret", store, nil, revoker)
+	service := NewGitHubWebhookService("webhook-secret", store, nil, revoker, nil)
 	payload := []byte(`{"action":"revoked","sender":{"id":11,"login":"octocat"}}`)
 	result, err := service.Handle(
 		context.Background(), signedWebhookRequest("webhook-secret", "delivery-4", "github_app_authorization", payload),
@@ -629,7 +629,7 @@ func TestGitHubWebhookLateAuthorizationRevokePreservesVerifiedReconnect(t *testi
 	}}}}
 	reconciler := &webhookPersonalReconciler{}
 	service := NewGitHubWebhookService(
-		"webhook-secret", store, nil, nil,
+		"webhook-secret", store, nil, nil, nil,
 		GitHubWebhookReconciliation{Personal: reconciler},
 	)
 	payload := []byte(`{"action":"revoked","sender":{"id":11}}`)
@@ -651,7 +651,7 @@ func TestGitHubWebhookRetriesFailedDelivery(t *testing.T) {
 		workspaces: map[int64][]*WorkspaceConnection{42: {connection}},
 	}
 	repos := &webhookRepoUpdater{err: errors.New("temporary database failure")}
-	service := NewGitHubWebhookService("webhook-secret", store, repos, nil)
+	service := NewGitHubWebhookService("webhook-secret", store, repos, nil, nil)
 	payload := []byte(`{
 		"action":"added","installation":{"id":42},
 		"repositories_added":[{"id":7,"full_name":"acme/repo"}],"repositories_removed":[]
@@ -685,7 +685,7 @@ func TestGitHubWebhookReclaimsStaleReceivedDelivery(t *testing.T) {
 			ReceivedAt: now.Add(-webhookDeliveryStaleAfter - time.Second),
 		},
 	}}
-	service := NewGitHubWebhookService("webhook-secret", store, nil, nil)
+	service := NewGitHubWebhookService("webhook-secret", store, nil, nil, nil)
 	service.now = func() time.Time { return now }
 	payload := []byte(`{"action":"created","installation":{"id":999}}`)
 	result, err := service.Handle(

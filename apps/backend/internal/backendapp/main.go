@@ -460,6 +460,11 @@ func startAgentInfrastructure(
 	// before any Launch / EnsureWorkspaceExecutionForSession can run.
 	lifecycleMgr.SetExecutorRunningWriter(repos.Task)
 
+	// Lets user shell terminals export the executor profile's env vars, so the
+	// terminal sees the same variables the agent subprocess and the repository
+	// setup script get.
+	lifecycleMgr.SetExecutorProfileReader(repos.Task)
+
 	// Configure quick-chat workspace cleanup
 	if homeDir := cfg.ResolvedHomeDir(); homeDir != "" {
 		quickChatDir := filepath.Join(homeDir, "quick-chat")
@@ -1002,6 +1007,17 @@ func initOfficeServices(
 	// Wire office-owned repositories into the task service for cross-package operations.
 	services.Task.SetBlockerRepository(repos.Office)
 	services.Task.SetCommentRepository(repos.Office)
+
+	// Wire the Host data API's late write dependencies (ADR 0043 phase 2): the
+	// task-message delivery path backs SendMessage (api_write:messages), and
+	// the orchestrator backs CreateTask's start_agent. The orchestrator is
+	// constructed after StartActivePlugins spawns boot-active plugins, so the
+	// plugins service reads these live rather than snapshotting (see
+	// SetWriteDeps).
+	if services.Plugins != nil {
+		messenger := pluginsTaskMessengerAdapter{tasks: services.Task, orch: orchestratorSvc, log: log}
+		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc, log: log})
+	}
 
 	// Build feature-package services and wire all inter-service dependencies.
 	services.OfficeSvcs = buildOfficeFeatureServices(

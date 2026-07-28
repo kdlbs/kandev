@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/robfig/cron/v3"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -100,9 +102,17 @@ func (cs *CronScheduler) evaluate(ctx context.Context) {
 	}
 }
 
-// shouldFire determines if a scheduled trigger is due based on its cron expression.
-// Uses a simplified interval-based approach: parses the cron expression to derive
-// an interval and checks if enough time has passed since last evaluation.
+// shouldFire determines if a scheduled trigger is due based on its cron
+// expression. It computes the next fire time after the trigger's anchor (the
+// last time it was evaluated, or its creation time on first evaluation) in the
+// trigger's configured timezone, and reports whether that time has arrived.
+//
+// This is a true wall-clock schedule, not an interval approximation: pinned
+// expressions ("0 9 * * *"), weekday ranges, and day-of-month schedules all
+// resolve to concrete instants, and the configured timezone (including its DST
+// transitions) is honored. A schedule missed while the scheduler was down
+// fires once on the next tick rather than once per missed occurrence, matching
+// the per-minute dedup key in fire().
 func (cs *CronScheduler) shouldFire(t *AutomationTrigger, now time.Time) bool {
 	var cfg ScheduledTriggerConfig
 	if err := json.Unmarshal(t.Config, &cfg); err != nil {
@@ -114,7 +124,16 @@ func (cs *CronScheduler) shouldFire(t *AutomationTrigger, now time.Time) bool {
 		return false
 	}
 
-	interval, err := parseCronInterval(cfg.CronExpression)
+	// Anchor the next-fire computation to the last evaluation, falling back to
+	// the trigger's creation time so a pinned schedule created mid-day doesn't
+	// fire immediately — its first fire is the next scheduled occurrence after
+	// creation.
+	anchor := t.CreatedAt
+	if t.LastEvaluatedAt != nil {
+		anchor = *t.LastEvaluatedAt
+	}
+
+	next, err := nextCronFire(cfg.CronExpression, cfg.Timezone, anchor)
 	if err != nil {
 		cs.logger.Debug("unparseable cron expression",
 			zap.String("trigger_id", t.ID),
@@ -122,11 +141,7 @@ func (cs *CronScheduler) shouldFire(t *AutomationTrigger, now time.Time) bool {
 			zap.Error(err))
 		return false
 	}
-
-	if t.LastEvaluatedAt == nil {
-		return true
-	}
-	return now.Sub(*t.LastEvaluatedAt) >= interval
+	return !next.After(now)
 }
 
 func (cs *CronScheduler) fire(ctx context.Context, t *AutomationTrigger, now time.Time) {
@@ -144,86 +159,48 @@ func (cs *CronScheduler) fire(ctx context.Context, t *AutomationTrigger, now tim
 	}
 }
 
-// parseCronInterval converts common cron expressions to a duration.
-// Supports standard 5-field cron and shorthand like "@every 5m".
-func parseCronInterval(expr string) (time.Duration, error) {
-	if d, ok := parseCronShorthand(expr); ok {
-		return d, nil
-	}
-	return parseCronFields(expr)
-}
+// cronParser accepts the standard 5-field cron syntax plus the named
+// descriptors (@hourly, @daily, @weekly, @monthly, @yearly) and @every
+// interval shorthand that the automation UI exposes as presets.
+var cronParser = cron.NewParser(
+	cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor,
+)
 
-func parseCronShorthand(expr string) (time.Duration, bool) {
-	// Handle @every shorthand.
-	if len(expr) > 7 && expr[:6] == "@every" {
-		d, err := time.ParseDuration(expr[7:])
-		if err == nil {
-			return d, true
+// nextCronFire computes the next time the given cron expression fires strictly
+// after `after`, interpreted in the given timezone. An empty timezone means
+// UTC, so scheduling is deterministic regardless of the host's local clock.
+//
+// Wall-clock schedules honor the timezone's DST transitions (a "0 9 * * *"
+// daily schedule always fires at 09:00 local, whether that is 13:00 or 14:00
+// UTC). The @every interval shorthand is timezone-independent by nature.
+func nextCronFire(expr, timezone string, after time.Time) (time.Time, error) {
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return time.Time{}, fmt.Errorf("empty cron expression")
+	}
+
+	// Bind the schedule to its timezone. @every is a pure interval and the
+	// parser rejects a CRON_TZ prefix on it, so only wall-clock schedules get
+	// the prefix. An expression that already carries its own TZ/CRON_TZ prefix
+	// is left untouched.
+	if !strings.HasPrefix(expr, "@every") && !hasCronTZPrefix(expr) {
+		tz := timezone
+		if tz == "" {
+			tz = "UTC"
 		}
-	}
-	// Common presets.
-	switch expr {
-	case triggerCronHourlyShorthand, triggerCronHourlyExpression:
-		return time.Hour, true
-	case triggerCronDailyShorthand, triggerCronDailyExpression:
-		return 24 * time.Hour, true
-	case triggerCronWeeklyShorthand, triggerCronWeeklyExpression:
-		return 7 * 24 * time.Hour, true
-	}
-	return 0, false
-}
-
-func parseCronFields(expr string) (time.Duration, error) {
-	fields := splitFields(expr)
-	if len(fields) < 2 {
-		return 0, fmt.Errorf("invalid cron expression: %s", expr)
-	}
-
-	minuteInterval := parseFieldInterval(fields[0], 60)
-	hourInterval := parseFieldInterval(fields[1], 24)
-
-	if minuteInterval > 0 && minuteInterval < 60 {
-		return time.Duration(minuteInterval) * time.Minute, nil
-	}
-	if hourInterval > 0 && hourInterval < 24 {
-		return time.Duration(hourInterval) * time.Hour, nil
-	}
-	return 0, fmt.Errorf("unsupported cron expression (no step interval found): %s", expr)
-}
-
-func splitFields(expr string) []string {
-	var fields []string
-	field := ""
-	for _, c := range expr {
-		if c == ' ' || c == '\t' {
-			if field != "" {
-				fields = append(fields, field)
-				field = ""
-			}
-		} else {
-			field += string(c)
+		if _, err := time.LoadLocation(tz); err != nil {
+			return time.Time{}, fmt.Errorf("invalid timezone %q: %w", tz, err)
 		}
+		expr = "CRON_TZ=" + tz + " " + expr
 	}
-	if field != "" {
-		fields = append(fields, field)
+
+	schedule, err := cronParser.Parse(expr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse cron expression: %w", err)
 	}
-	return fields
+	return schedule.Next(after), nil
 }
 
-// parseFieldInterval extracts the step value from a cron field (e.g., "*/5" → 5).
-func parseFieldInterval(field string, max int) int {
-	for i, c := range field {
-		if c == '/' {
-			val := 0
-			for _, d := range field[i+1:] {
-				if d >= '0' && d <= '9' {
-					val = val*10 + int(d-'0')
-				}
-			}
-			if val > 0 && val <= max {
-				return val
-			}
-		}
-	}
-	return 0
+func hasCronTZPrefix(expr string) bool {
+	return strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=")
 }

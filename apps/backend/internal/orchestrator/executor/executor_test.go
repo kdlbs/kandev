@@ -451,7 +451,13 @@ func TestLaunchPreparedSession_AbortsWhenStartingPersistenceFails(t *testing.T) 
 
 	persistErr := errors.New("session is terminal")
 	executor := newTestExecutor(t, agentManager, repo)
-	executor.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+	executor.SetOnSessionStarting(func(
+		ctx context.Context,
+		taskID string,
+		session *models.TaskSession,
+		expectedState models.TaskSessionState,
+		promoteTask bool,
+	) error {
 		return persistErr
 	})
 
@@ -861,6 +867,66 @@ func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 
 	if !startAgentCalled.Load() {
 		t.Error("Expected StartAgentProcess to be called")
+	}
+}
+
+func TestStartAgentOnExistingWorkspace_CancellationAfterSnapshotWins(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepository()
+	stored := &models.TaskSession{
+		ID:             "session-existing-race",
+		TaskID:         "task-existing-race",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+	}
+	repo.sessions[stored.ID] = stored
+	callerSession := *stored
+
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "exec-existing-race", nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			t.Fatal("agent process must not start after cancellation")
+			return nil
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+
+	var gotExpectedState models.TaskSessionState
+	executor.SetOnSessionStarting(func(
+		ctx context.Context,
+		_ string,
+		next *models.TaskSession,
+		expectedState models.TaskSessionState,
+		_ bool,
+	) error {
+		gotExpectedState = expectedState
+		if err := repo.UpdateTaskSessionState(
+			ctx, stored.ID, models.TaskSessionStateCancelled, "stopped via API",
+		); err != nil {
+			return err
+		}
+		return executor.persistSessionFullRowIfCurrentState(ctx, next, expectedState)
+	})
+
+	_, err := executor.startAgentOnExistingWorkspace(
+		ctx,
+		&v1.Task{ID: stored.TaskID},
+		&callerSession,
+		"",
+		true,
+		"",
+		nil,
+	)
+	if !errors.Is(err, ErrSessionStateSuperseded) {
+		t.Fatalf("startAgentOnExistingWorkspace error = %v, want ErrSessionStateSuperseded", err)
+	}
+	if gotExpectedState != models.TaskSessionStateCreated {
+		t.Fatalf("expected state = %q, want CREATED", gotExpectedState)
+	}
+	if got := repo.sessions[stored.ID].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("stored state = %q, want CANCELLED", got)
 	}
 }
 
@@ -2450,6 +2516,10 @@ func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedForProvider(
 
 func (c *recordingAuthenticatedCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
 
+func (c *recordingAuthenticatedCloner) SetOriginURL(context.Context, string, string) error {
+	return nil
+}
+
 func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_, _, _, _ string) (string, error) {
 	return "", nil
 }
@@ -2574,7 +2644,8 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 			CompletedAt: &completedAt,
 			UpdatedAt:   now,
 		}
-		repo.sessions[session.ID] = session
+		stored := *session
+		repo.sessions[session.ID] = &stored
 
 		if err := executor.persistResumeState(context.Background(), "task-1", session, true); err != nil {
 			t.Fatalf("persistResumeState: %v", err)
@@ -2597,7 +2668,15 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		}
 		repo.sessions[session.ID] = session
 		var gotPromoteTask *bool
-		executor.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+		var gotExpectedState models.TaskSessionState
+		executor.SetOnSessionStarting(func(
+			ctx context.Context,
+			taskID string,
+			session *models.TaskSession,
+			expectedState models.TaskSessionState,
+			promoteTask bool,
+		) error {
+			gotExpectedState = expectedState
 			gotPromoteTask = &promoteTask
 			return repo.UpdateTaskSession(ctx, session)
 		})
@@ -2611,6 +2690,9 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 
 		if gotPromoteTask == nil {
 			t.Fatal("expected onSessionStarting callback")
+		}
+		if gotExpectedState != models.TaskSessionStateWaitingForInput {
+			t.Fatalf("expected source state WAITING_FOR_INPUT, got %s", gotExpectedState)
 		}
 		if *gotPromoteTask {
 			t.Fatal("resume STARTING persistence must defer task promotion until process start succeeds")
@@ -2658,13 +2740,16 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 	})
 }
 
-// TestUpdateSessionStarting_ArchiveCancelledSessionRecovers proves
+// TestUpdateSessionStarting_CancelledSessionRecovers proves
 // updateSessionStarting's fallback path (no onSessionStarting callback
-// wired) mirrors Service.setSessionStarting: an archive-cancelled session
-// (the resume path treats CANCELLED as an expected, resumable terminal
-// state) may recover into STARTING like a Failed session.
-func TestUpdateSessionStarting_ArchiveCancelledSessionRecovers(t *testing.T) {
-	for _, reason := range []string{models.SessionArchiveCancelReason, models.SessionArchiveTreeCancelReason} {
+// wired) mirrors Service.setSessionStarting: a CANCELLED session may recover
+// when CANCELLED was the state observed before the resume launch.
+func TestUpdateSessionStarting_CancelledSessionRecovers(t *testing.T) {
+	for _, reason := range []string{
+		"stopped via API",
+		models.SessionArchiveCancelReason,
+		models.SessionArchiveTreeCancelReason,
+	} {
 		t.Run(reason, func(t *testing.T) {
 			repo := newMockRepository()
 			executor := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -2680,7 +2765,13 @@ func TestUpdateSessionStarting_ArchiveCancelledSessionRecovers(t *testing.T) {
 				State:  models.TaskSessionStateStarting,
 			}
 
-			if err := executor.updateSessionStarting(context.Background(), "task-1", next, false); err != nil {
+			if err := executor.updateSessionStarting(
+				context.Background(),
+				"task-1",
+				next,
+				models.TaskSessionStateCancelled,
+				false,
+			); err != nil {
 				t.Fatalf("updateSessionStarting: %v", err)
 			}
 			if got := repo.sessions["session-1"].State; got != models.TaskSessionStateStarting {
@@ -2690,11 +2781,7 @@ func TestUpdateSessionStarting_ArchiveCancelledSessionRecovers(t *testing.T) {
 	}
 }
 
-// TestUpdateSessionStarting_OrdinaryCancelledSessionStaysRejected is the
-// counterpart to TestUpdateSessionStarting_ArchiveCancelledSessionRecovers:
-// an ordinary/explicit cancellation (no archive-cancel reason) must stay
-// rejected as superseded, never silently promoted back into STARTING.
-func TestUpdateSessionStarting_OrdinaryCancelledSessionStaysRejected(t *testing.T) {
+func TestUpdateSessionStarting_CancellationAfterResumeSnapshotStaysRejected(t *testing.T) {
 	repo := newMockRepository()
 	executor := newTestExecutor(t, &mockAgentManager{}, repo)
 	repo.sessions["session-1"] = &models.TaskSession{
@@ -2708,7 +2795,13 @@ func TestUpdateSessionStarting_OrdinaryCancelledSessionStaysRejected(t *testing.
 		State:  models.TaskSessionStateStarting,
 	}
 
-	err := executor.updateSessionStarting(context.Background(), "task-1", next, false)
+	err := executor.updateSessionStarting(
+		context.Background(),
+		"task-1",
+		next,
+		models.TaskSessionStateWaitingForInput,
+		false,
+	)
 	var superseded *SessionStateSupersededError
 	if !errors.As(err, &superseded) {
 		t.Fatalf("updateSessionStarting error = %v, want SessionStateSupersededError", err)
