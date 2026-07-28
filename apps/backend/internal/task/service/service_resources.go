@@ -754,11 +754,6 @@ func (s *Service) createRepository(
 	if resolveProvider {
 		resolveRepositoryProviderIdentity(repository)
 	}
-	if repository.LocalPath != "" && repository.RemoteURL == "" {
-		if origin := canonicalCloneOrigin(repository.LocalPath); origin != "" {
-			repository.RemoteURL = origin
-		}
-	}
 
 	if err := s.repoEntities.CreateRepository(ctx, repository); err != nil {
 		s.logger.Error("failed to create repository", zap.Error(err))
@@ -777,6 +772,14 @@ func (s *Service) createRepository(
 // self-hosted GitLab/GitHub Enterprise instances still need a populated
 // RemoteURL so downstream identity matching (e.g. GitLab MR-task linking)
 // has something to compare against instead of failing closed.
+//
+// canonicalCloneOrigin is tried first because it produces the exact
+// provider-canonical clone URL (e.g. the ".git"-suffixed GitHub/GitLab.com
+// form) that other code, including test fixtures rewriting Git's clone
+// transport via "insteadOf" config, matches against verbatim. The broader
+// ResolveGitRemoteIdentity-based fallback only runs when canonicalCloneOrigin
+// doesn't recognize the host (e.g. a self-hosted GitLab/GitHub Enterprise
+// instance), since it doesn't guarantee a byte-identical canonical form.
 func resolveRepositoryProviderIdentity(repository *models.Repository) {
 	if repository.LocalPath == "" {
 		return
@@ -793,7 +796,9 @@ func resolveRepositoryProviderIdentity(repository *models.Repository) {
 		}
 	}
 	if repository.RemoteURL == "" {
-		if origin, owner, name := ResolveGitRemoteIdentity(repository.LocalPath); origin != "" && owner != "" && name != "" {
+		if origin := canonicalCloneOrigin(repository.LocalPath); origin != "" {
+			repository.RemoteURL = origin
+		} else if origin, owner, name := ResolveGitRemoteIdentity(repository.LocalPath); origin != "" && owner != "" && name != "" {
 			repository.RemoteURL = origin + "/" + owner + "/" + name
 		}
 	}

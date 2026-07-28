@@ -188,6 +188,52 @@ func TestService_CreateRepositoryResolvesRemoteURLForSelfHostedGitLabOrigin(t *t
 	}
 }
 
+// TestService_CreateRepositoryPrefersCanonicalCloneOriginForKnownProviders
+// is a regression guard: for a local checkout whose origin is a well-known
+// provider host (gitlab.com here), the RemoteURL fallback must resolve to
+// canonicalCloneOrigin's exact ".git"-suffixed canonical form and not the
+// broader ResolveGitRemoteIdentity-based form (which omits the suffix).
+// Other code, including E2E test fixtures that rewrite Git's clone
+// transport via an "insteadOf" config keyed on that exact canonical URL,
+// depends on this byte-identical form to route the clone correctly.
+func TestService_CreateRepositoryPrefersCanonicalCloneOriginForKnownProviders(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	makeRepo(t, repoPath)
+	config := `[core]
+	repositoryformatversion = 0
+[remote "origin"]
+	url = https://gitlab.com/fixture/docker-second-source.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+`
+	if err := os.WriteFile(filepath.Join(repoPath, ".git", "config"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write .git/config: %v", err)
+	}
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID:   "ws-1",
+		Name:          "fixture/docker-second-source",
+		SourceType:    sourceTypeLocal,
+		LocalPath:     repoPath,
+		Provider:      "gitlab",
+		ProviderHost:  "https://gitlab.com",
+		ProviderOwner: "fixture",
+		ProviderName:  "docker-second-source",
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	const wantRemoteURL = "https://gitlab.com/fixture/docker-second-source.git"
+	if created.RemoteURL != wantRemoteURL {
+		t.Fatalf("RemoteURL = %q, want %q", created.RemoteURL, wantRemoteURL)
+	}
+}
+
 // TestService_CreateRepositoryDoesNotOverwriteExplicitRemoteURL ensures the
 // new local-discovery RemoteURL fallback only fills a gap and never clobbers
 // a caller-supplied RemoteURL.
