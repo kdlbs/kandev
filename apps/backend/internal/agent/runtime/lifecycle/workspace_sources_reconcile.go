@@ -33,6 +33,15 @@ func reconcileWorkspaceSources(_ context.Context, root string, folders []Workspa
 	return nil
 }
 
+// reconcileWorkspaceRepositories recreates Kandev-owned repository links below
+// root. A spec whose repository IS the workspace root is skipped: for the local
+// executor the primary repository is the workspace root itself, so linking it
+// would plant a self-referential junction/symlink inside the user's own
+// checkout. This mirrors buildRemoteWorkspaceRepositories, which skips the
+// primary for the same reason. The comparison is by filesystem identity, not
+// by index, because a host-materialized multi-repo local task roots the
+// workspace at ~/.kandev/tasks/<taskDir> — there repositories[0] is a real
+// sibling and must keep its link.
 func reconcileWorkspaceRepositories(root string, repositories []WorkspaceRepositorySpec) error {
 	if len(repositories) == 0 {
 		return nil
@@ -44,6 +53,13 @@ func reconcileWorkspaceRepositories(root string, repositories []WorkspaceReposit
 		if repository.RepoName == "" || filepath.Base(repository.RepoName) != repository.RepoName || repository.RepositoryPath == "" {
 			return fmt.Errorf("invalid durable workspace repository")
 		}
+		if sameDirectory(root, repository.RepositoryPath) {
+			// Best effort: a self-link planted by an earlier release must not
+			// block the launch when it cannot be removed (open handle, an agent
+			// shell whose cwd is inside it). The next reconcile retries.
+			_, _ = worktree.RemoveSelfReferentialDirectoryLink(root, repository.RepoName)
+			continue
+		}
 		info, err := os.Stat(repository.RepositoryPath)
 		if err != nil || !info.IsDir() {
 			return fmt.Errorf("workspace repository %q target is missing: %s", repository.RepoName, repository.RepositoryPath)
@@ -53,6 +69,30 @@ func reconcileWorkspaceRepositories(root string, repositories []WorkspaceReposit
 		}
 	}
 	return nil
+}
+
+// sameDirectory reports whether two paths name the same directory on disk.
+// The comparison is filesystem identity rather than path text: os.Stat follows
+// junctions and Unix symlinks alike, and os.SameFile compares volume and file
+// index, which also absorbs 8.3 short paths and path case. A canonical-path
+// comparison would not do — filepath.EvalSymlinks does not traverse a Windows
+// junction, it returns the link's own path.
+//
+// A path that cannot be stat'ed is not the same directory: the workspace root
+// may not exist yet, and the caller must then fall through to link creation.
+func sameDirectory(left, right string) bool {
+	if left == "" || right == "" {
+		return false
+	}
+	leftInfo, err := os.Stat(left)
+	if err != nil {
+		return false
+	}
+	rightInfo, err := os.Stat(right)
+	if err != nil {
+		return false
+	}
+	return os.SameFile(leftInfo, rightInfo)
 }
 
 func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositorySpec {
