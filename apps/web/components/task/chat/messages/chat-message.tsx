@@ -398,6 +398,7 @@ function UserContextBadges({
 
 type UserMessageAttachment = { type: string; data: string; mime_type: string; name?: string };
 
+/** Renders image previews and file chips attached to a user message. */
 function UserMessageAttachments({
   imageAttachments,
   fileAttachments,

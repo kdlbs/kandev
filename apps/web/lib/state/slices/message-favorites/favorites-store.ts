@@ -13,6 +13,7 @@ function persistSession(state: MessageFavoritesState, sessionId: string): void {
   persistSessionFavorites(sessionId, ids);
 }
 
+/** Session-scoped favorite state with hydration and persistence actions. */
 export const useMessageFavoritesStore = create<MessageFavoritesSlice>()(
   immer<MessageFavoritesSlice>((set) => ({
     ...defaultState,

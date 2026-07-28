@@ -55,6 +55,7 @@ type MessageActionsProps = {
   onToggleFavorite?: () => void;
 };
 
+/** Renders the accessible favorite toggle in a message action row. */
 function FavoriteButton({ isFavorite, onToggle }: { isFavorite: boolean; onToggle: () => void }) {
   return (
     <button
@@ -262,6 +263,7 @@ function MessageTimestamp({ createdAt }: { createdAt: string }) {
   );
 }
 
+/** Selects the message turn and its model-specific usage multiplier. */
 function useMessageTurnAndUsage(message: Message): {
   turn: Turn | null;
   usageMultiplier: string | null;
@@ -327,9 +329,9 @@ type ResolvedMessageActionsProps = {
   onToggleFavorite?: () => void;
 };
 
-// Resolves optional props to their defaults outside of `MessageActions` itself:
-// each defaulted destructured param is a branch for eslint's `complexity`
-// rule, and this component already has enough real branching in its JSX.
+/**
+ * Resolves optional action props before rendering to keep JSX complexity low.
+ */
 function resolveMessageActionsProps(props: MessageActionsProps): ResolvedMessageActionsProps {
   return {
     message: props.message,
@@ -350,6 +352,7 @@ function resolveMessageActionsProps(props: MessageActionsProps): ResolvedMessage
   };
 }
 
+/** Renders available actions and metadata for a chat message. */
 export function MessageActions(props: MessageActionsProps) {
   const {
     message,
