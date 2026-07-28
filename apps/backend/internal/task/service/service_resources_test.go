@@ -131,6 +131,101 @@ func TestService_CreateRepositoryCanonicalizesExplicitLocalPath(t *testing.T) {
 	}
 }
 
+// TestService_CreateRepositoryResolvesRemoteURLForSelfHostedGitLabOrigin
+// covers the bug where a local repository cloned from a self-hosted GitLab
+// instance (e.g. gitlab.example.com, not gitlab.com) got no RemoteURL
+// persisted at creation time: resolveRepositoryProviderIdentity only tagged
+// Provider/ProviderHost/ProviderOwner/ProviderName for the well-known
+// github.com/gitlab.com hosts and never populated RemoteURL at all, so
+// downstream GitLab MR-task-link identity matching had nothing to compare
+// against and rejected every attach attempt for self-hosted repositories.
+func TestService_CreateRepositoryResolvesRemoteURLForSelfHostedGitLabOrigin(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	makeRepo(t, repoPath)
+	config := `[core]
+	repositoryformatversion = 0
+[remote "origin"]
+	url = git@gitlab.example.com:clients/socodevi/laravel/co-up.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+`
+	if err := os.WriteFile(filepath.Join(repoPath, ".git", "config"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write .git/config: %v", err)
+	}
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "co-up",
+		SourceType:  sourceTypeLocal,
+		LocalPath:   repoPath,
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	// ResolveGitRemoteIdentity normalizes scp-style remotes to an ssh://
+	// origin; the GitLab MR-link identity matcher already treats ssh:// and
+	// https:// origins as equivalent for the same host+path.
+	const wantRemoteURL = "ssh://gitlab.example.com/clients/socodevi/laravel/co-up"
+	if created.RemoteURL != wantRemoteURL {
+		t.Fatalf("RemoteURL = %q, want %q", created.RemoteURL, wantRemoteURL)
+	}
+	// Self-hosted hosts are deliberately left untagged: only github.com and
+	// gitlab.com get a durable Provider/ProviderHost identity.
+	if created.Provider != "" {
+		t.Fatalf("Provider = %q, want empty for self-hosted host", created.Provider)
+	}
+	stored, err := repo.GetRepository(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRepository: %v", err)
+	}
+	if stored.RemoteURL != wantRemoteURL {
+		t.Fatalf("stored RemoteURL = %q, want %q", stored.RemoteURL, wantRemoteURL)
+	}
+}
+
+// TestService_CreateRepositoryDoesNotOverwriteExplicitRemoteURL ensures the
+// new local-discovery RemoteURL fallback only fills a gap and never clobbers
+// a caller-supplied RemoteURL.
+func TestService_CreateRepositoryDoesNotOverwriteExplicitRemoteURL(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	repoPath := t.TempDir()
+	makeRepo(t, repoPath)
+	config := `[core]
+	repositoryformatversion = 0
+[remote "origin"]
+	url = git@gitlab.example.com:group/discovered-repo.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+`
+	if err := os.WriteFile(filepath.Join(repoPath, ".git", "config"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write .git/config: %v", err)
+	}
+	const explicitRemoteURL = "https://gitlab.example.com/group/explicit-repo"
+
+	created, err := svc.CreateRepository(ctx, &CreateRepositoryRequest{
+		WorkspaceID: "ws-1",
+		Name:        "explicit-repo",
+		SourceType:  sourceTypeLocal,
+		LocalPath:   repoPath,
+		RemoteURL:   explicitRemoteURL,
+	})
+	if err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if created.RemoteURL != explicitRemoteURL {
+		t.Fatalf("RemoteURL = %q, want unmodified explicit value %q", created.RemoteURL, explicitRemoteURL)
+	}
+}
+
 func TestService_CreateRepositoryRejectsInvalidLocalPathWithoutPersistence(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
