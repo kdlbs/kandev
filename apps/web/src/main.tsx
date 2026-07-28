@@ -9,7 +9,11 @@ import { AppShell } from "./app-shell";
 import { AuthGatedScreen, useAuthGateDecision } from "./auth-gate";
 import { loadBootPayload } from "./boot-payload";
 import type { BootPayload } from "./boot-payload";
+import { RootErrorBoundary, RouteErrorBoundary } from "./app-error-boundary";
 import { SpaRoutes } from "./spa-routes";
+import { installVitePreloadRecovery } from "./vite-preload-recovery";
+
+installVitePreloadRecovery();
 
 const AUTH_ROUTE_PATHS = new Set(["/login", "/setup", "/invite"]);
 
@@ -39,7 +43,9 @@ function AppBody({ payload }: { payload: BootPayload }) {
       <PluginBootBridge plugins={payload.plugins} />
       <PluginModalHost />
       <AppShell>
-        <SpaRoutes routeData={payload.routeData} />
+        <RouteErrorBoundary>
+          <SpaRoutes routeData={payload.routeData} />
+        </RouteErrorBoundary>
       </AppShell>
     </>
   );
@@ -62,7 +68,9 @@ if (!root) {
 void loadBootPayload().then((payload) => {
   createRoot(root).render(
     <StrictMode>
-      <App payload={payload} />
+      <RootErrorBoundary>
+        <App payload={payload} />
+      </RootErrorBoundary>
     </StrictMode>,
   );
 });

@@ -303,11 +303,7 @@ function renderDynamicSettingsRoute(pathname: string) {
     // A plugin-authored settings route registered at exactly this path
     // (registry.registerSettingsRoute) wins over the first-party detail
     // page, so a plugin can fully replace its own settings surface.
-    return (
-      renderPluginSettingsRoute(pathname) ?? (
-        <PluginDetailPage params={Promise.resolve({ pluginId })} />
-      )
-    );
+    return renderPluginSettingsRoute(pathname) ?? <PluginDetailPage pluginId={pluginId} />;
   }
 
   const agentProfile = matchDouble(pathname, /^\/settings\/agents\/([^/]+)\/profiles\/([^/]+)$/);
@@ -326,27 +322,27 @@ function renderDynamicSettingsRoute(pathname: string) {
   );
   if (executorProfile) {
     const [id, profileId] = executorProfile;
-    return <ProfileDetailPage params={Promise.resolve({ id, profileId })} />;
+    return <ProfileDetailPage executorId={id} profileId={profileId} />;
   }
 
   const executorId = matchSingle(pathname, /^\/settings\/executor\/([^/]+)$/);
-  if (executorId) {
-    return <ExecutorEditPage params={Promise.resolve({ id: executorId })} />;
+  if (executorId && executorId !== "new") {
+    return <ExecutorEditPage executorId={executorId} />;
   }
 
   const profileId = matchSingle(pathname, /^\/settings\/executors\/([^/]+)$/);
   if (profileId) {
-    return <ProfileEditPage params={Promise.resolve({ profileId })} />;
+    return <ProfileEditPage profileId={profileId} />;
   }
 
   const executorType = matchSingle(pathname, /^\/settings\/executors\/new\/([^/]+)$/);
   if (executorType) {
-    return <CreateProfilePage params={Promise.resolve({ type: executorType })} />;
+    return <CreateProfilePage executorType={executorType} />;
   }
 
   const sshExecutorId = matchSingle(pathname, /^\/settings\/executors\/ssh\/([^/]+)$/);
   if (sshExecutorId) {
-    return <SSHExecutorPage params={Promise.resolve({ executorId: sshExecutorId })} />;
+    return <SSHExecutorPage executorId={sshExecutorId} />;
   }
 
   return null;
@@ -370,9 +366,9 @@ function renderWorkspaceSettingsRoute(pathname: string) {
   if (workspaceAutomation) {
     const [id, automationId] = workspaceAutomation;
     if (automationId === "new") {
-      return <NewAutomationPage params={Promise.resolve({ id })} />;
+      return <NewAutomationPage workspaceId={id} />;
     }
-    return <AutomationEditorPage params={Promise.resolve({ id, automationId })} />;
+    return <AutomationEditorPage workspaceId={id} automationId={automationId} />;
   }
 
   const workspaceSubpage = matchDouble(
@@ -392,7 +388,7 @@ function renderWorkspaceSettingsRoute(pathname: string) {
 
   const workspaceId = matchSingle(pathname, /^\/settings\/workspace\/([^/]+)$/);
   if (workspaceId) {
-    return <WorkspaceEditPage params={Promise.resolve({ id: workspaceId })} />;
+    return <WorkspaceEditPage workspaceId={workspaceId} />;
   }
 
   return null;

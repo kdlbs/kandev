@@ -81,3 +81,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-26-user-managed-agent-runtime-updates | [User-Managed Agent Runtime Updates](2026-07-26-user-managed-agent-runtime-updates.md) | accepted | backend, frontend, protocol | 2026-07-26 |
 | 2026-07-26-single-session-model-switching | [Single-Session Model Switching](2026-07-26-single-session-model-switching.md) | accepted (amended 2026-07-27) | workflow, infra | 2026-07-26 |
 | 2026-07-27-task-git-credential-policy | [Separate GitHub Automation From Task Git Credential Policy](2026-07-27-task-git-credential-policy.md) | accepted | backend, frontend, security | 2026-07-27 |
+| 2026-07-27-spa-failure-containment-and-deployment-recovery | [SPA Failure Containment and Deployment Recovery](2026-07-27-spa-failure-containment-and-deployment-recovery.md) | accepted | frontend | 2026-07-27 |

@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -29,8 +29,7 @@ type LoadedExecutor = {
   config?: Record<string, string>;
 };
 
-export default function SSHExecutorPage({ params }: { params: Promise<{ executorId: string }> }) {
-  const { executorId } = use(params);
+export default function SSHExecutorPage({ executorId }: { executorId: string }) {
   const { executor, loading, error, reload } = useExecutor(executorId);
 
   if (loading) {

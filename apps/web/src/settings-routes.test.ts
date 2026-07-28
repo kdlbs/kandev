@@ -2,7 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { isValidElement, type ReactElement } from "react";
 import { render, screen } from "@testing-library/react";
 
+import ExecutorEditPage from "@/app/settings/executor/[id]/page";
+import ProfileDetailPage from "@/app/settings/executor/[id]/profile/[profileId]/page";
+import ExecutorCreatePage from "@/app/settings/executor/new/page";
+import ProfileEditPage from "@/app/settings/executors/[profileId]/page";
+import CreateProfilePage from "@/app/settings/executors/new/[type]/page";
+import SSHExecutorPage from "@/app/settings/executors/ssh/[executorId]/page";
 import IntegrationsGitLabPage from "@/app/settings/integrations/gitlab/page";
+import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
+import AutomationEditorPage from "@/app/settings/workspace/[id]/automations/[automationId]/page";
+import NewAutomationPage from "@/app/settings/workspace/[id]/automations/new/page";
+import WorkspaceEditPage from "@/app/settings/workspace/[id]/page";
 import { TaskActionsSettings } from "@/components/settings/general-settings";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
@@ -145,6 +155,84 @@ describe("renderSettingsRoute", () => {
     expect(gitLabRouteWorkspaceId("/settings/workspace/ws-2/integrations/gitlab")).toBe("ws-2");
     expect(gitLabRouteWorkspaceId("/settings/workspace/ws%202/integrations/gitlab")).toBe("ws 2");
   });
+
+  it.each([
+    {
+      pathname: "/settings/plugins/plugin%20one",
+      component: PluginDetailPage,
+      identifiers: { pluginId: "plugin one" },
+    },
+    {
+      pathname: "/settings/executor/executor%20one/profile/profile%20one",
+      component: ProfileDetailPage,
+      identifiers: { executorId: "executor one", profileId: "profile one" },
+    },
+    {
+      pathname: "/settings/executor/executor%20one",
+      component: ExecutorEditPage,
+      identifiers: { executorId: "executor one" },
+    },
+    {
+      pathname: "/settings/executors/profile%20one",
+      component: ProfileEditPage,
+      identifiers: { profileId: "profile one" },
+    },
+    {
+      pathname: "/settings/executors/new/local_docker",
+      component: CreateProfilePage,
+      identifiers: { executorType: "local_docker" },
+    },
+    {
+      pathname: "/settings/executors/ssh/executor%20one",
+      component: SSHExecutorPage,
+      identifiers: { executorId: "executor one" },
+    },
+    {
+      pathname: "/settings/workspace/workspace%20one",
+      component: WorkspaceEditPage,
+      identifiers: { workspaceId: "workspace one" },
+    },
+    {
+      pathname: "/settings/workspace/workspace%20one/automations/new",
+      component: NewAutomationPage,
+      identifiers: { workspaceId: "workspace one" },
+    },
+    {
+      pathname: "/settings/workspace/workspace%20one/automations/automation%20one",
+      component: AutomationEditorPage,
+      identifiers: { workspaceId: "workspace one", automationId: "automation one" },
+    },
+  ])(
+    "passes decoded synchronous identifiers for $pathname",
+    ({ pathname, component, identifiers }) => {
+      const route = renderSettingsRoute(pathname);
+      if (!isValidElement<Record<string, unknown>>(route)) {
+        throw new Error(`expected a route element for ${pathname}`);
+      }
+
+      expect({
+        component: route.type,
+        identifiers: pickProps(route.props, Object.keys(identifiers)),
+        thenableProps: Object.entries(route.props)
+          .filter(([, value]) => isThenable(value))
+          .map(([name]) => name),
+        asyncComponent:
+          typeof route.type === "function" && route.type.constructor.name === "AsyncFunction",
+      }).toEqual({
+        component,
+        identifiers,
+        thenableProps: [],
+        asyncComponent: false,
+      });
+    },
+  );
+
+  it("reserves /settings/executor/new for executor creation", () => {
+    const route = renderSettingsRoute("/settings/executor/new");
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route as ReactElement).type).toBe(ExecutorCreatePage);
+  });
 });
 
 function buildState(
@@ -214,4 +302,17 @@ function gitLabRouteWorkspaceId(pathname: string): string | undefined {
   }
   expect(route.type).toBe(IntegrationsGitLabPage);
   return (route as ReactElement<{ workspaceId?: string }>).props.workspaceId;
+}
+
+function pickProps(props: Record<string, unknown>, names: string[]): Record<string, unknown> {
+  return Object.fromEntries(names.map((name) => [name, props[name]]));
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return (
+    (typeof value === "object" || typeof value === "function") &&
+    value !== null &&
+    "then" in value &&
+    typeof value.then === "function"
+  );
 }
