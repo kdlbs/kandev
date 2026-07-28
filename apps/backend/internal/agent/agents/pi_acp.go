@@ -96,10 +96,12 @@ func (a *PiACP) Runtime() *RuntimeConfig {
 		UserSkillDir:       ".pi/agent/skills",
 		ProjectMCPStrategy: mcpconfig.PiStrategy{},
 		SessionConfig: SessionConfig{
-			// TODO: set SessionDirTemplate once the Pi session dir is
-			// confirmed. Without it, the Docker runtime skips mounting the
-			// session dir, so NativeSessionResume has no persistence across
-			// container restarts.
+			// Verified against pi-acp@0.0.32: the adapter keeps the ACP↔pi
+			// session map in ~/.pi/pi-acp/session-map.json and reads pi's own
+			// transcripts from ~/.pi/agent/sessions (relocatable via
+			// PI_CODING_AGENT_DIR or a sessionDir in ~/.pi/agent/settings.json).
+			// Both halves of session/load live under ~/.pi.
+			SessionDirTemplate:  "{home}/.pi",
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 		},
