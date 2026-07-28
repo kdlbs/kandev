@@ -71,6 +71,10 @@ func reconcileWorkspaceRepositories(root string, repositories []WorkspaceReposit
 	return nil
 }
 
+// selfReferentialEntryWarning is shared with the tests that assert the user is
+// told about a stale entry, so the two cannot drift apart silently.
+const selfReferentialEntryWarning = "workspace entry links to the workspace root; remove that entry to stop tools recursing into it"
+
 // warnSelfReferentialEntry surfaces a link an earlier release planted inside
 // the user's own repository, and deliberately leaves it in place.
 //
@@ -92,7 +96,7 @@ func warnSelfReferentialEntry(root, name string, log *logger.Logger) {
 	// The guidance is deliberately shell-neutral. A ready-to-paste command built
 	// from the entry path would need per-shell escaping, and a path carrying
 	// $(), backticks or %VAR% would otherwise reach a shell that expands it.
-	log.Warn("workspace entry links to the workspace root; remove that entry to stop tools recursing into it",
+	log.Warn(selfReferentialEntryWarning,
 		zap.String("entry", filepath.Join(root, name)),
 		zap.String("note", "the entry is a directory link, not a copy: removing it leaves the repository untouched"))
 }

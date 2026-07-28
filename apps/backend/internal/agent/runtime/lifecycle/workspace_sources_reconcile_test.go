@@ -7,6 +7,11 @@ import (
 	"runtime"
 	"testing"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
+	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -68,15 +73,22 @@ func TestReconcileWorkspaceRepositories_SkipsRepositoryThatIsWorkspaceRoot(t *te
 
 // A self-link planted by an earlier release is reported, never deleted: it
 // cannot be shown to be Kandev-owned, so removing it could destroy a link the
-// user or the repository keeps on purpose. Reconciliation must still succeed.
-func TestReconcileWorkspaceRepositories_PreservesPreExistingSelfLink(t *testing.T) {
+// user or the repository keeps on purpose. Preserving it is only half the
+// contract though — the user has to learn the entry is there — so the warning
+// and its structured entry path are asserted too.
+func TestReconcileWorkspaceRepositories_PreservesAndReportsPreExistingSelfLink(t *testing.T) {
 	root := t.TempDir()
 	marker := writeMarker(t, root)
 	if _, err := worktree.CreateOwnedDirectoryLink(root, "api", root); err != nil {
 		t.Fatalf("seed self link: %v", err)
 	}
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: root}}, nil); err != nil {
+	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: root}}, log); err != nil {
 		t.Fatalf("reconcileWorkspaceRepositories: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(root, "api")); err != nil {
@@ -84,6 +96,32 @@ func TestReconcileWorkspaceRepositories_PreservesPreExistingSelfLink(t *testing.
 	}
 	if got, err := os.ReadFile(marker); err != nil || string(got) != "one" {
 		t.Fatalf("workspace root content = %q, %v", got, err)
+	}
+
+	entries := logs.FilterMessage(selfReferentialEntryWarning).All()
+	if len(entries) != 1 {
+		t.Fatalf("warnings = %d, want 1", len(entries))
+	}
+	if got, want := entries[0].ContextMap()["entry"], filepath.Join(root, "api"); got != want {
+		t.Fatalf("entry = %v, want %v", got, want)
+	}
+}
+
+// A repository that is the workspace root but carries no stale entry must stay
+// silent: there is nothing for the user to clean up.
+func TestReconcileWorkspaceRepositories_DoesNotWarnWithoutSelfLink(t *testing.T) {
+	root := t.TempDir()
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: root}}, log); err != nil {
+		t.Fatalf("reconcileWorkspaceRepositories: %v", err)
+	}
+	if got := logs.FilterMessage(selfReferentialEntryWarning).Len(); got != 0 {
+		t.Fatalf("warnings = %d, want 0", got)
 	}
 }
 
