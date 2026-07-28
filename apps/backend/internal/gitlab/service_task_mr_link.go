@@ -37,8 +37,7 @@ func parseMRURLForHost(rawURL, configuredHost string) (string, int, error) {
 	if err != nil {
 		return "", 0, ErrInvalidMRURL
 	}
-	expectedOrigin, err := normalizeHostOrigin(configuredHost)
-	if err != nil || !strings.EqualFold(origin, expectedOrigin) {
+	if !sameConfiguredOrigin(origin, configuredHost) {
 		return "", 0, fmt.Errorf("%w: host does not match workspace connection", ErrInvalidMRURL)
 	}
 	const marker = "/-/merge_requests/"

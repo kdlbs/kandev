@@ -112,6 +112,22 @@ func sameGitLabHost(left, right string) bool {
 	return strings.EqualFold(hostWithoutDefaultPort(leftURL), hostWithoutDefaultPort(rightURL))
 }
 
+// sameConfiguredOrigin reports whether candidate and configured identify the
+// same GitLab web origin: same scheme, and hosts equal once each side's
+// implicit default port is stripped. Used to validate an incoming MR URL's
+// origin against the workspace's configured GitLab host, so an explicit
+// "https://gitlab.example.com:443" on either side still matches the
+// equivalent unported form.
+func sameConfiguredOrigin(candidate, configured string) bool {
+	candidateURL, candidateErr := validateHost(strings.TrimSpace(candidate))
+	configuredURL, configuredErr := validateHost(strings.TrimSpace(configured))
+	if candidateErr != nil || configuredErr != nil {
+		return false
+	}
+	return strings.EqualFold(candidateURL.Scheme, configuredURL.Scheme) &&
+		strings.EqualFold(hostWithoutDefaultPort(candidateURL), hostWithoutDefaultPort(configuredURL))
+}
+
 // hostWithoutDefaultPort strips a scheme's implicit default port (":443" for
 // https, ":80" for http) so an explicitly-ported origin like
 // "https://gitlab.example.com:443" compares equal to the equivalent

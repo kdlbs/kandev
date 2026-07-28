@@ -113,6 +113,28 @@ func TestAssociateExistingMRByURLCreatesIdempotentWorkspaceScopedLink(t *testing
 	}
 }
 
+func TestAssociateExistingMRByURLAcceptsMRURLWithExplicitDefaultPort(t *testing.T) {
+	// The workspace's configured GitLab host and the incoming MR URL should
+	// match even when only one side spells out the scheme's implicit default
+	// port (":443" for https), since they identify the same web origin.
+	const configuredHost = "https://gitlab.acme.test:443"
+	const mrURLHost = "https://gitlab.acme.test"
+	svc, store, client := newTaskMRLinkService(t, configuredHost)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", configuredHost, "acme/api")
+	client.SeedMR("acme/api", &MR{
+		IID: 21, Title: "MR", WebURL: mrURLHost + "/acme/api/-/merge_requests/21",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		mrURLHost+"/acme/api/-/merge_requests/21",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+}
+
 func TestAssociateExistingMRByURLRejectsWrongHostAndCrossWorkspaceResources(t *testing.T) {
 	const host = "http://gitlab.internal.test"
 	svc, store, client := newTaskMRLinkService(t, host)
