@@ -25,7 +25,7 @@ func TestRemoteExecutorsIgnoreLegacyHostGHTokenSelection(t *testing.T) {
 			if len(remaining) != 1 || remaining[0] != "agent:codex:files:0" {
 				t.Fatalf("remaining methods = %v, want stale gh_cli_token filtered", remaining)
 			}
-			if got := tt.resolve([]string{"agent:codex:files:0"}); len(got) != 1 {
+			if got := tt.resolve([]string{"agent:codex:files:0"}); len(got) != 1 || got[0] != "agent:codex:files:0" {
 				t.Fatalf("resolve without gh_cli_token = %v, want untouched selection", got)
 			}
 		})
