@@ -138,9 +138,9 @@ func sameConfiguredOrigin(candidate, configured string) bool {
 // "https://gitlab.example.com" without one.
 func hostWithoutDefaultPort(u *url.URL) string {
 	switch u.Scheme {
-	case "https":
+	case mentionHTTPSScheme:
 		return strings.TrimSuffix(u.Host, ":443")
-	case "http":
+	case mentionHTTPScheme:
 		return strings.TrimSuffix(u.Host, ":80")
 	default:
 		return u.Host
