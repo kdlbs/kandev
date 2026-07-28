@@ -46,7 +46,7 @@ func (r *SSHExecutor) uploadCredentials(
 		return fmt.Errorf("failed to parse remote_credentials: %w", err)
 	}
 
-	selectedMethodIDs = r.resolveGHToken(selectedMethodIDs, req)
+	selectedMethodIDs = r.resolveGHToken(selectedMethodIDs)
 
 	fileMethods := selectFileMethods(catalog, selectedMethodIDs, r.logger)
 	if len(fileMethods) == 0 {
@@ -133,8 +133,7 @@ func (r *SSHExecutor) runOneAuthSetupScript(
 
 // resolveGHToken filters the retired host-global gh token method from stale
 // profiles. Explicit secret-backed GITHUB_TOKEN values are resolved separately.
-func (r *SSHExecutor) resolveGHToken(ids []string, req *ExecutorCreateRequest) []string {
-	_ = req
+func (r *SSHExecutor) resolveGHToken(ids []string) []string {
 	return removeID(ids, "gh_cli_token")
 }
 
