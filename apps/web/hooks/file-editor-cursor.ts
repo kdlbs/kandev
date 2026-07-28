@@ -89,8 +89,9 @@ function mountedMonacoModelMatches(
   worktreePath: string | null,
   repo?: string,
 ): boolean {
+  if (worktreePath && (modelPath === `/${monacoPath}` || modelPath === monacoPath)) return true;
   if (repo) return editorModelMatches(modelPath, monacoPath, path, repo);
-  if (worktreePath) return modelPath === `/${monacoPath}` || modelPath === monacoPath;
+  if (worktreePath) return false;
   return editorModelMatches(modelPath, monacoPath, path);
 }
 

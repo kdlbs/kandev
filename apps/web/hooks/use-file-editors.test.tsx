@@ -92,6 +92,19 @@ describe("scrollEditorIfMounted", () => {
     expect(consumePendingCursorPosition(APP_PATH, REPO)).toBeUndefined();
   });
 
+  it("scrolls a repo-scoped request in Monaco's worktree-relative model", () => {
+    const editor = createEditor(WORKTREE_APP_PATH);
+    getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
+    setPendingCursorPosition(APP_PATH, 12, 1, REPO);
+
+    expect(scrollEditorIfMounted(APP_PATH, WORKTREE_PATH, 42, 3, REPO)).toBe(true);
+
+    expect(editor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
+    expect(editor.revealLineInCenter).toHaveBeenCalledWith(42);
+    expect(editor.focus).toHaveBeenCalledTimes(1);
+    expect(consumePendingCursorPosition(APP_PATH, REPO)).toBeUndefined();
+  });
+
   it("does not suffix-scroll a repo-scoped request into an unscoped model path", () => {
     const editor = createEditor(WORKTREE_APP_PATH);
     getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
