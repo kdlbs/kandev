@@ -17,7 +17,9 @@ import {
   layoutStructuresMatch,
   getPinnedWidth,
   getRootSplitview,
+  isCenterCandidateGroupId,
   setPinnedTarget,
+  CENTER_GROUP,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
 } from "./layout-manager";
@@ -220,6 +222,31 @@ export function replaceStaleSessionPanels(
   }
 
   addCurrentSessionSiblings(api, keepSessionId, currentSessionIds);
+}
+
+const RESTORED_SESSION_ANCHOR_IDS = ["plan", "pr-detail", "mr-detail"];
+
+function findRestoredSessionGroup(api: DockviewApi): DockviewApi["groups"][number] | undefined {
+  const canonicalCenter = api.groups.find((group) => group.id === CENTER_GROUP);
+  if (canonicalCenter) return canonicalCenter;
+
+  for (const panelId of RESTORED_SESSION_ANCHOR_IDS) {
+    const group = api.getPanel(panelId)?.group;
+    if (group && isCenterCandidateGroupId(group.id)) return group;
+  }
+
+  return api.groups.find((group) => isCenterCandidateGroupId(group.id));
+}
+
+function restoreMissingSessionPanel(api: DockviewApi, sessionId: string): void {
+  if (api.getPanel(`session:${sessionId}`)) return;
+
+  const targetGroup = findRestoredSessionGroup(api);
+  const shouldActivate = !targetGroup || targetGroup.panels.length === 0 || !api.activePanel;
+  const panel = addIncomingSessionPanel(api, sessionId, targetGroup?.id, targetGroup ? 0 : -1, {
+    inactive: !shouldActivate,
+  });
+  if (shouldActivate) panel?.api.setActive();
 }
 
 function addCurrentSessionSiblings(
@@ -494,7 +521,7 @@ function addIncomingSessionPanel(
   outgoingGroupId: string | undefined,
   outgoingIndex: number,
   options: { inactive?: boolean } = {},
-): void {
+): DockviewApi["panels"][number] {
   let position: import("dockview-react").AddPanelOptions["position"];
   if (outgoingGroupId && api.groups.some((g) => g.id === outgoingGroupId)) {
     position =
@@ -504,7 +531,7 @@ function addIncomingSessionPanel(
   } else if (api.getPanel("sidebar")) {
     position = { direction: "right" as const, referencePanel: "sidebar" };
   }
-  api.addPanel({
+  return api.addPanel({
     id: `session:${sessionId}`,
     component: "chat",
     tabComponent: "sessionTab",
@@ -582,6 +609,7 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
       // part of this env's saved state and must NOT be touched.
       // useAutoSessionTab will still no-op if the panel was just added here.
       replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
+      if (activeSessionId) restoreMissingSessionPanel(api, activeSessionId);
       api.layout(safeWidth, safeHeight);
       if (isDebug()) {
         debug("performEnvSwitch: completed via slow path (fromJSON)", {

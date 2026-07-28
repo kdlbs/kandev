@@ -74,6 +74,7 @@ The frontend treats the returned settings payload as authoritative after each su
 - Per-task layout state continues to use its existing environment-scoped persistence and is not made portable by this feature.
 - A saved default right-column geometry adapts to the current workbench width on reload, monitor switch, and return to a wider monitor. A manual right-column width keeps its raw requested width across those events and is only clamped while the current screen cannot accommodate it.
 - A task handoff within the same environment does not persist an intermediate panel-removal state or change the root split orientation.
+- Completing a normal, non-maximized desktop task-layout restore re-establishes a live Agent panel for the active session before the workbench is revealed. If the restored center group is empty, Agent is inserted there and activated; if another valid saved center tab such as Plan is active, that tab remains active.
 
 ## Scenarios
 
@@ -86,6 +87,7 @@ The frontend treats the returned settings payload as authoritative after each su
 - **GIVEN** an existing task with a task-specific layout, **WHEN** the user changes the default profile and returns to that task, **THEN** the task-specific layout is unchanged.
 - **GIVEN** an existing task with a task-specific layout, **WHEN** the user chooses Reset Layout, **THEN** the latest effective default profile replaces that task's layout.
 - **GIVEN** two tasks whose active sessions share one task environment and a desktop workbench with Agent in the center and Files or Changes above Terminal on the right, **WHEN** the user switches between those tasks, **THEN** the incoming Agent replaces the outgoing Agent in the same group, the right column remains vertically split, the root remains horizontally split, and the same geometry survives reload.
+- **GIVEN** a normal desktop task layout restore completes while the active session's Agent panel is absent, **WHEN** the center group is empty, **THEN** the Agent panel is restored into that group and activated before the workbench is shown; when Plan or another valid saved center tab is active, restoring Agent does not steal focus from it, and a deliberately maximized non-Agent group remains unchanged.
 - **GIVEN** a task environment whose right column has never been manually resized, **WHEN** its desktop workbench moves from a large monitor to a laptop-sized workbench and back, **THEN** the Files, Changes, and Terminal column follows the default ratio at each width and returns to the large-workbench ratio.
 - **GIVEN** a task environment whose right column was manually resized through its desktop sash, **WHEN** the workbench moves between large and laptop-sized displays, **THEN** that requested width is restored whenever it fits and is temporarily clamped only to preserve the current screen's minimum center width.
 - **GIVEN** a custom default profile, **WHEN** the user deletes it and confirms, **THEN** the built-in Default becomes effective.

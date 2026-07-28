@@ -160,6 +160,8 @@ test.describe("saved Dockview layouts", () => {
       })
       .toContain(`session:${child.session_id}`);
     expect(await dockviewPanelIds(testPage)).not.toContain(`session:${parent.sessionId}`);
+    await expect(testPage.getByTestId(`session-tab-${child.session_id}`)).toBeVisible();
+    await expect(testPage.getByTestId("watermark-add-panel-btn")).toHaveCount(0);
 
     await expect
       .poll(() => dockviewDefaultTree(testPage, child.session_id!))
@@ -180,6 +182,8 @@ test.describe("saved Dockview layouts", () => {
         rootColumnCount: 2,
         rightColumnPreserved: true,
       });
+    await expect(testPage.getByTestId(`session-tab-${child.session_id}`)).toBeVisible();
+    await expect(testPage.getByTestId("watermark-add-panel-btn")).toHaveCount(0);
   });
 
   test("saved chat-only layouts keep the current task session", async ({
