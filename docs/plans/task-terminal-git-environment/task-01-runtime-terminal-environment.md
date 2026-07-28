@@ -1,7 +1,7 @@
 ---
 id: "01-runtime-terminal-environment"
 title: "Runtime terminal environment propagation"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -54,5 +54,5 @@ launch paths.
 ## Output contract
 
 Report the environment ownership boundary, files changed, focused test output, and any finding
-that requires plan/spec revision. Mark this task `done` and update `plan.md` only after the test
-passes.
+that requires plan/spec revision. Focused and package-level lifecycle, gateway, and process tests
+pass, including the race-enabled regression set.

@@ -677,7 +677,7 @@ func (m *Manager) StartProcess(ctx context.Context, req StartProcessRequest) (*P
 	if m.processRunner == nil {
 		return nil, fmt.Errorf("process runner not available")
 	}
-	return m.processRunner.Start(ctx, req)
+	return m.processRunner.Start(ctx, m.buildProcessRequest(req))
 }
 
 // StopProcess stops a running process by ID.
@@ -1220,8 +1220,7 @@ func (m *Manager) startAgentShell() {
 	if !m.cfg.ShellEnabled {
 		return
 	}
-	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
-	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
+	shellCfg := m.buildShellConfig()
 	shellSession, err := shell.NewSession(shellCfg, m.logger)
 	if err != nil {
 		m.logger.Warn("failed to create shell session", zap.Error(err))
@@ -1229,6 +1228,22 @@ func (m *Manager) startAgentShell() {
 	}
 	m.shell = shellSession
 	m.logger.Info("shell session auto-created")
+}
+
+// buildShellConfig creates the embedded shell configuration with the same
+// effective instance environment used by agent and terminal processes.
+func (m *Manager) buildShellConfig() shell.Config {
+	shellCfg := shell.DefaultConfig(m.cfg.WorkDir)
+	shellCfg.ShellCommand = preferredShellCommand(m.cfg.AgentEnv)
+	shellCfg.Env = mergeAgentEnvIntoShellConfig(m.agentEnvSnapshot(), nil)
+	return shellCfg
+}
+
+// buildProcessRequest applies the instance environment to a task-scoped
+// process request. Explicit request values remain authoritative.
+func (m *Manager) buildProcessRequest(req StartProcessRequest) StartProcessRequest {
+	req.Env = mergeAgentEnvIntoShellConfig(m.agentEnvSnapshot(), req.Env)
+	return req
 }
 
 func preferredShellCommand(env []string) string {

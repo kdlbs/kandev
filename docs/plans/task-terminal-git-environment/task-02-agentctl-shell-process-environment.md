@@ -1,7 +1,7 @@
 ---
 id: "02-agentctl-shell-process-environment"
 title: "Agentctl shell and process environment"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-runtime-terminal-environment"]
 plan: "plan.md"
@@ -51,4 +51,5 @@ Sequential.
 ## Output contract
 
 Report precedence behavior, files changed, focused test output, and any need to revise the
-security contract. Mark this task `done` and update `plan.md` only after the test passes.
+security contract. Explicit request values retain precedence over inherited instance values;
+focused and package-level process tests pass.

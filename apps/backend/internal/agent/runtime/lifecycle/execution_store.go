@@ -106,6 +106,7 @@ func (s *ExecutionStore) Remove(executionID string) {
 	if execution.ContainerID != "" {
 		delete(s.byContainer, execution.ContainerID)
 	}
+	execution.clearRuntimeEnvironment()
 
 	// Remove from primary map
 	delete(s.executions, executionID)

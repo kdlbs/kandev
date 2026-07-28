@@ -86,6 +86,46 @@ func TestManager_BuildFinalCommandLeavesUnsetTempEnvironmentUnset(t *testing.T) 
 	assertNoAgentTempRoot(t, serviceTemp)
 }
 
+func TestManager_StartShellInheritsAgentEnvironment(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir: t.TempDir(),
+		AgentEnv: []string{
+			"KANDEV_GITHUB_CREDENTIAL_BROKER_URL=http://127.0.0.1:9876",
+			"PATH=/tmp/kandev-shim:/usr/bin",
+		},
+	}, newTestLogger(t))
+	cfg := mgr.buildShellConfig()
+	if got := cfg.Env["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"]; got != "http://127.0.0.1:9876" {
+		t.Fatalf("shell broker env = %q, want managed broker URL", got)
+	}
+	if got := cfg.Env["PATH"]; got != "/tmp/kandev-shim:/usr/bin" {
+		t.Fatalf("shell PATH = %q, want shim-first PATH", got)
+	}
+}
+
+func TestManager_StartProcessInheritsAgentEnvironment(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		AgentEnv: []string{
+			"KANDEV_GITHUB_CREDENTIAL_BROKER_URL=http://127.0.0.1:9876",
+			"PATH=/tmp/kandev-shim:/usr/bin",
+		},
+	}, newTestLogger(t))
+	req := mgr.buildProcessRequest(StartProcessRequest{
+		SessionID: "session-1",
+		Command:   "echo ok",
+		Env:       map[string]string{"COMMAND_ONLY": "yes"},
+	})
+	if got := req.Env["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"]; got != "http://127.0.0.1:9876" {
+		t.Fatalf("process broker env = %q, want managed broker URL", got)
+	}
+	if got := req.Env["PATH"]; got != "/tmp/kandev-shim:/usr/bin" {
+		t.Fatalf("process PATH = %q, want shim-first PATH", got)
+	}
+	if got := req.Env["COMMAND_ONLY"]; got != "yes" {
+		t.Fatalf("process explicit env = %q, want yes", got)
+	}
+}
+
 func TestManager_BeginStopWaitsForInFlightAdmission(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{WorkDir: t.TempDir()}, newTestLogger(t))
 	release, err := mgr.admitStart()

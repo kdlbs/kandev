@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/integrations/github-authentication.md
 created: 2026-07-28
-status: draft
+status: completed
 ---
 
 # Implementation Plan: Managed Task Terminal Git Environment
@@ -104,15 +104,15 @@ putting a broker contract into an E2E fixture or browser-visible output.
 
 Wave 1:
 
-- [ ] [Task 01: Runtime terminal environment propagation](task-01-runtime-terminal-environment.md)
+- [x] [Task 01: Runtime terminal environment propagation](task-01-runtime-terminal-environment.md)
 
 Wave 2:
 
-- [ ] [Task 02: Agentctl shell and process inheritance](task-02-agentctl-shell-process-environment.md)
+- [x] [Task 02: Agentctl shell and process inheritance](task-02-agentctl-shell-process-environment.md)
 
 Wave 3:
 
-- [ ] [Task 03: Document and verify terminal Git routing](task-03-document-terminal-git-routing.md)
+- [x] [Task 03: Document and verify terminal Git routing](task-03-document-terminal-git-routing.md)
 
 Execute sequentially in the primary conversation. No task is delegated unless the user explicitly
 authorizes delegation after choosing the implementation model.

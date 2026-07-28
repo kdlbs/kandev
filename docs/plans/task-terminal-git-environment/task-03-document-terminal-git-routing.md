@@ -1,7 +1,7 @@
 ---
 id: "03-document-terminal-git-routing"
 title: "Document terminal Git routing"
-status: pending
+status: done
 wave: 3
 depends_on: ["01-runtime-terminal-environment", "02-agentctl-shell-process-environment"]
 plan: "plan.md"
@@ -48,5 +48,6 @@ Sequential.
 
 ## Output contract
 
-Report documentation changes and validation output. Mark this task `done` and update `plan.md`
-only after both validation commands pass.
+Report documentation changes and validation output. Public executor and developer-tool guidance
+now covers managed terminal routing and reopening live PTYs; both public-doc validation commands
+pass.

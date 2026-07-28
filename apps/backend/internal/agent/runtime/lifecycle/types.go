@@ -53,8 +53,14 @@ type AgentExecution struct {
 	ExitCode             *int
 	ErrorMessage         string
 	Metadata             map[string]interface{}
-	promptGeneration     uint64
-	promptLifecycleMu    sync.Mutex
+	// runtimeEnv is the effective environment used to create the task's
+	// runtime instance. It is kept in memory only so authorized task-scoped
+	// terminals and passthrough processes can inherit the same credentials and
+	// PATH as the agent subprocess without persisting secrets in metadata.
+	runtimeEnv        map[string]string
+	runtimeEnvMu      sync.RWMutex
+	promptGeneration  uint64
+	promptLifecycleMu sync.Mutex
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
@@ -179,6 +185,39 @@ type AgentExecution struct {
 	// Session-level trace span for grouping all operations under one trace
 	sessionSpan   trace.Span
 	sessionSpanMu sync.RWMutex
+}
+
+// setRuntimeEnvironment stores a defensive copy of the effective task runtime
+// environment. Callers must use RuntimeEnvironment when reading it.
+func (e *AgentExecution) setRuntimeEnvironment(env map[string]string) {
+	if e == nil {
+		return
+	}
+	e.runtimeEnvMu.Lock()
+	e.runtimeEnv = cloneStringMap(env)
+	e.runtimeEnvMu.Unlock()
+}
+
+// RuntimeEnvironment returns a defensive copy of the effective task runtime
+// environment. The lifecycle manager only exposes an execution after the
+// caller's task/session ownership check has succeeded.
+func (e *AgentExecution) RuntimeEnvironment() map[string]string {
+	if e == nil {
+		return nil
+	}
+	e.runtimeEnvMu.RLock()
+	env := cloneStringMap(e.runtimeEnv)
+	e.runtimeEnvMu.RUnlock()
+	return env
+}
+
+func (e *AgentExecution) clearRuntimeEnvironment() {
+	if e == nil {
+		return
+	}
+	e.runtimeEnvMu.Lock()
+	e.runtimeEnv = nil
+	e.runtimeEnvMu.Unlock()
 }
 
 func (e *AgentExecution) officeProfileID() string {
