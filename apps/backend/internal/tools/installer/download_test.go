@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -160,6 +161,37 @@ func TestGetDownloadAllowsSlowButProgressingBody(t *testing.T) {
 	if want := chunks * len(payload); len(body) != want {
 		t.Fatalf("body length = %d, want %d", len(body), want)
 	}
+}
+
+// TestStallGuardIgnoresTimeSpentDownstream pins the distinction the guard
+// exists to make: it must bound how long a read blocks, not how long the caller
+// takes to digest what the read returned. Expanding one read's worth of a
+// highly compressed archive onto a slow disk can outlast the stall window
+// without the mirror having gone quiet at all.
+func TestStallGuardIgnoresTimeSpentDownstream(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const timeout = 50 * time.Millisecond
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		guard := newStallGuard(io.NopCloser(strings.NewReader("abcdefghij")), cancel, timeout)
+		buf := make([]byte, 5)
+
+		if _, err := guard.Read(buf); err != nil {
+			t.Fatalf("first read error = %v", err)
+		}
+
+		// The caller is busy downstream, far longer than the stall window.
+		time.Sleep(10 * timeout)
+
+		if _, err := guard.Read(buf); err != nil {
+			t.Fatalf("read after slow downstream processing error = %v, want success", err)
+		}
+		if ctx.Err() != nil {
+			t.Fatalf("guard cancelled a progressing download: %v", ctx.Err())
+		}
+	})
 }
 
 func TestGetDownloadCancelsWithParentContext(t *testing.T) {

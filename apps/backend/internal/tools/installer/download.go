@@ -23,9 +23,8 @@ const (
 	downloadResponseHeaderTimeout = 60 * time.Second
 )
 
-// downloadStallTimeout is the longest gap tolerated between two successful
-// reads from a response body before the download is abandoned. It is a var so
-// tests can shrink it.
+// downloadStallTimeout is the longest a single read from a response body may
+// block before the download is abandoned. It is a var so tests can shrink it.
 var downloadStallTimeout = 2 * time.Minute
 
 // downloadClient is the shared client for tool downloads. Swapped in tests.
@@ -76,9 +75,15 @@ func getDownload(ctx context.Context, url string) (*http.Response, error) {
 //
 // ResponseHeaderTimeout only covers the wait for the status line; once headers
 // are in, a mirror that goes quiet mid-body would leave the read blocked
-// indefinitely. The guard arms a timer at construction and rearms it on every
-// read that returns bytes, so a download is only killed for lack of progress —
-// never for taking a long time while still moving.
+// indefinitely. The guard bounds how long any single read may block, so a
+// download is killed only for lack of progress — never for taking a long time
+// while still moving.
+//
+// The timer is armed around the blocking read alone and stopped as soon as it
+// returns. Wall-clock time the caller then spends downstream — decompressing,
+// untarring, writing to a slow disk — is not the mirror's fault and must not
+// count against it; a highly compressed archive can easily take longer to
+// expand one read's worth of bytes than to fetch the next.
 type stallGuard struct {
 	body    io.ReadCloser
 	cancel  context.CancelFunc
@@ -94,16 +99,18 @@ func newStallGuard(body io.ReadCloser, cancel context.CancelFunc, timeout time.D
 		// Cancelling the request context unblocks the in-flight Read.
 		cancel()
 	})
+	// Created armed; Read owns arming from here on.
+	g.timer.Stop()
 	return g
 }
 
 func (g *stallGuard) Read(p []byte) (int, error) {
+	g.timer.Reset(g.timeout)
 	n, err := g.body.Read(p)
-	if n > 0 {
-		g.timer.Reset(g.timeout)
-	}
+	g.timer.Stop()
+
 	if err != nil && g.stalled.Load() {
-		return n, fmt.Errorf("download stalled: no data received for %s: %w", g.timeout, err)
+		return n, fmt.Errorf("download stalled: read blocked for %s: %w", g.timeout, err)
 	}
 	return n, err
 }
