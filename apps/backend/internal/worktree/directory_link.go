@@ -102,7 +102,7 @@ func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
 		}
 		expected, err := os.Stat(target)
 		if err != nil {
-			return "", false, fmt.Errorf("canonicalize link target: %w", err)
+			return "", false, fmt.Errorf("inspect link target: %w", err)
 		}
 		if !os.SameFile(actual, expected) {
 			return "", false, fmt.Errorf("owned link target mismatch: %s", name)

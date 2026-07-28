@@ -71,7 +71,7 @@ func TestReconcileWorkspaceRepositories_RemovesPreExistingSelfLink(t *testing.T)
 	root := t.TempDir()
 	marker := writeMarker(t, root)
 	if _, err := worktree.CreateOwnedDirectoryLink(root, "api", root); err != nil {
-		t.Skipf("directory link unsupported: %v", err)
+		t.Fatalf("seed self link: %v", err)
 	}
 
 	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: root}}); err != nil {
@@ -129,6 +129,33 @@ func TestReconcileWorkspaceRepositories_LocalLaunchRequestPlantsNoSelfLink(t *te
 	}
 	if got, err := os.ReadFile(marker); err != nil || string(got) != "one" {
 		t.Fatalf("repository content = %q, %v", got, err)
+	}
+}
+
+// A repository path replaced by a regular file must surface as a missing
+// target. Comparing by identity alone would report the file as "already the
+// workspace root" and skip the IsDir validation, letting the launch continue
+// with a workspace path that is not a directory.
+func TestReconcileWorkspaceRepositories_RejectsFileAsRepositoryPath(t *testing.T) {
+	file := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(file, []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := reconcileWorkspaceRepositories(file, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: file}})
+	if err == nil {
+		t.Fatal("a regular file was accepted as both workspace root and repository")
+	}
+}
+
+// "." and ".." survive a filepath.Base round-trip, so they need rejecting here
+// rather than deeper in the owned-link helpers.
+func TestReconcileWorkspaceRepositories_RejectsTraversalRepoName(t *testing.T) {
+	root, source := t.TempDir(), t.TempDir()
+	for _, name := range []string{".", ".."} {
+		if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: name, RepositoryPath: source}}); err == nil {
+			t.Fatalf("RepoName %q was accepted", name)
+		}
 	}
 }
 

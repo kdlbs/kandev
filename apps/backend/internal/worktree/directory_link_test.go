@@ -58,10 +58,13 @@ func TestCreateOwnedDirectoryLinkRejectsSymlinkedControlAncestor(t *testing.T) {
 
 // seedOwnedDirectoryLink plants a link through the production creation path so
 // the test exercises the same reparse point / symlink a real launch produced.
+// Creation failure is fatal, not a skip: a directory junction needs no elevation
+// on Windows and a symlink is always available on the Unix runners, so a failure
+// here is a real regression rather than an unsupported platform.
 func seedOwnedDirectoryLink(t *testing.T, root, name, target string) {
 	t.Helper()
 	if _, err := CreateOwnedDirectoryLink(root, name, target); err != nil {
-		t.Skipf("directory link unsupported: %v", err)
+		t.Fatalf("CreateOwnedDirectoryLink: %v", err)
 	}
 }
 
@@ -138,7 +141,7 @@ func TestEnsureOwnedDirectoryLinkIsIdempotent(t *testing.T) {
 	}
 	first, created, err := EnsureOwnedDirectoryLink(root, "api", target)
 	if err != nil || !created {
-		t.Skipf("directory link unsupported: created=%v err=%v", created, err)
+		t.Fatalf("first EnsureOwnedDirectoryLink: created=%v err=%v", created, err)
 	}
 
 	second, created, err := EnsureOwnedDirectoryLink(root, "api", target)
@@ -160,7 +163,7 @@ func TestEnsureOwnedDirectoryLinkRejectsDifferentTarget(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "tasks", "task-1")
 	target, other := t.TempDir(), t.TempDir()
 	if _, _, err := EnsureOwnedDirectoryLink(root, "api", target); err != nil {
-		t.Skipf("directory link unsupported: %v", err)
+		t.Fatalf("EnsureOwnedDirectoryLink: %v", err)
 	}
 
 	if _, _, err := EnsureOwnedDirectoryLink(root, "api", other); err == nil {

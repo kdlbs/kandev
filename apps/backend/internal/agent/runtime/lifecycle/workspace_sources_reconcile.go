@@ -19,7 +19,7 @@ func reconcileWorkspaceSources(_ context.Context, root string, folders []Workspa
 		return fmt.Errorf("workspace root is required for durable folders")
 	}
 	for _, folder := range folders {
-		if folder.Name == "" || filepath.Base(folder.Name) != folder.Name || folder.LocalPath == "" {
+		if !isWorkspaceEntryName(folder.Name) || folder.LocalPath == "" {
 			return fmt.Errorf("invalid durable workspace folder")
 		}
 		info, err := os.Stat(folder.LocalPath)
@@ -50,7 +50,7 @@ func reconcileWorkspaceRepositories(root string, repositories []WorkspaceReposit
 		return fmt.Errorf("workspace root is required for durable repositories")
 	}
 	for _, repository := range repositories {
-		if repository.RepoName == "" || filepath.Base(repository.RepoName) != repository.RepoName || repository.RepositoryPath == "" {
+		if !isWorkspaceEntryName(repository.RepoName) || repository.RepositoryPath == "" {
 			return fmt.Errorf("invalid durable workspace repository")
 		}
 		if sameDirectory(root, repository.RepositoryPath) {
@@ -71,6 +71,14 @@ func reconcileWorkspaceRepositories(root string, repositories []WorkspaceReposit
 	return nil
 }
 
+// isWorkspaceEntryName reports whether name is usable as a single entry below
+// an owned workspace root. "." and ".." survive a filepath.Base round-trip, so
+// they are rejected explicitly here rather than deeper in the worktree helpers,
+// which would surface them as a confusing "owned link entry already exists".
+func isWorkspaceEntryName(name string) bool {
+	return name != "" && filepath.Base(name) == name && name != "." && name != ".."
+}
+
 // sameDirectory reports whether two paths name the same directory on disk.
 // The comparison is filesystem identity rather than path text: os.Stat follows
 // junctions and Unix symlinks alike, and os.SameFile compares volume and file
@@ -80,16 +88,19 @@ func reconcileWorkspaceRepositories(root string, repositories []WorkspaceReposit
 //
 // A path that cannot be stat'ed is not the same directory: the workspace root
 // may not exist yet, and the caller must then fall through to link creation.
+// Both sides must be directories, so that a repository path replaced by a
+// regular file falls through to the caller's IsDir validation instead of being
+// skipped as "already the root".
 func sameDirectory(left, right string) bool {
 	if left == "" || right == "" {
 		return false
 	}
 	leftInfo, err := os.Stat(left)
-	if err != nil {
+	if err != nil || !leftInfo.IsDir() {
 		return false
 	}
 	rightInfo, err := os.Stat(right)
-	if err != nil {
+	if err != nil || !rightInfo.IsDir() {
 		return false
 	}
 	return os.SameFile(leftInfo, rightInfo)
