@@ -272,9 +272,15 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
   }
   const dv = getDockviewElement(api);
   const parent = dv?.parentElement;
+  let previousViewportWidth = window.innerWidth;
   const ro =
     parent && typeof ResizeObserver !== "undefined"
       ? new ResizeObserver(() => {
+          const viewportWidth = window.innerWidth;
+          if (viewportWidth !== previousViewportWidth) {
+            previousViewportWidth = viewportWidth;
+            refreshAutomaticRightTarget(api);
+          }
           syncDockviewContainerSize(api, parent);
         })
       : null;

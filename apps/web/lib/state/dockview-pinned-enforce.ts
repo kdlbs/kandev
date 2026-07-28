@@ -123,11 +123,7 @@ export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargets
     }
     if (ctx.rightPanelsVisible) {
       const target = resolveRightTarget(api, ctx, sv);
-      if (target > 0) {
-        restoreColumnToTarget(sv, sv.length - 1, target);
-      } else {
-        restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"));
-      }
+      restoreColumnToTarget(sv, sv.length - 1, target);
     }
   } finally {
     enforcing = false;
