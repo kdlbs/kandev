@@ -71,30 +71,9 @@ func parseGitLabRemoteURLIdentity(remoteURL string) (host, projectPath string) {
 	if remoteURL == "" {
 		return "", ""
 	}
-	var scheme, hostname, path string
-	if strings.Contains(remoteURL, "@") && !strings.Contains(remoteURL, "://") {
-		// scp-style shorthand: git@host:group/sub/project.git (host may be a
-		// bracketed IPv6 literal, e.g. git@[::1]:group/project.git, whose
-		// embedded colons must not be mistaken for the host/path separator).
-		_, rest, _ := strings.Cut(remoteURL, "@")
-		h, p, ok := cutSCPHostPath(rest)
-		if !ok {
-			return "", ""
-		}
-		scheme, hostname, path = sshScheme, h, p
-	} else {
-		parsed, err := url.Parse(remoteURL)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return "", ""
-		}
-		scheme, path = parsed.Scheme, parsed.Path
-		if strings.EqualFold(scheme, sshScheme) {
-			// SSH transport ports (e.g. ssh://git@host:2222/...) are unrelated
-			// to the GitLab web origin's port, so compare hostname only.
-			hostname = parsed.Hostname()
-		} else {
-			hostname = remoteHost(parsed)
-		}
+	scheme, hostname, path, ok := splitRemoteURLIdentity(remoteURL)
+	if !ok {
+		return "", ""
 	}
 	scheme = strings.ToLower(scheme)
 	if scheme != mentionHTTPScheme && scheme != mentionHTTPSScheme && scheme != sshScheme {
@@ -108,6 +87,36 @@ func parseGitLabRemoteURLIdentity(remoteURL string) (host, projectPath string) {
 		return "", ""
 	}
 	return scheme + "://" + hostname, path
+}
+
+// splitRemoteURLIdentity resolves the (scheme, hostname, path) triple for
+// either a scp-style shorthand (git@host:path) or a URL-form remote
+// (https://, ssh://, etc). Extracted from parseGitLabRemoteURLIdentity to
+// keep its cyclomatic complexity within the linter budget.
+func splitRemoteURLIdentity(remoteURL string) (scheme, hostname, path string, ok bool) {
+	const sshScheme = "ssh"
+	if strings.Contains(remoteURL, "@") && !strings.Contains(remoteURL, "://") {
+		// scp-style shorthand: git@host:group/sub/project.git (host may be a
+		// bracketed IPv6 literal, e.g. git@[::1]:group/project.git, whose
+		// embedded colons must not be mistaken for the host/path separator).
+		_, rest, _ := strings.Cut(remoteURL, "@")
+		h, p, cutOK := cutSCPHostPath(rest)
+		if !cutOK {
+			return "", "", "", false
+		}
+		return sshScheme, h, p, true
+	}
+	parsed, err := url.Parse(remoteURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", "", "", false
+	}
+	hostname = remoteHost(parsed)
+	if strings.EqualFold(parsed.Scheme, sshScheme) {
+		// SSH transport ports (e.g. ssh://git@host:2222/...) are unrelated to
+		// the GitLab web origin's port, so compare hostname only.
+		hostname = parsed.Hostname()
+	}
+	return parsed.Scheme, hostname, parsed.Path, true
 }
 
 // cutSCPHostPath splits an scp-style remote's "host:path" segment (the part
