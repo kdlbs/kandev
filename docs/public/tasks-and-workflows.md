@@ -296,7 +296,11 @@ To restore a task, open **List**, enable **Show archived**, and choose unarchive
 
 Delete is permanent. If **Also delete _N_ subtasks** is left unchecked, direct children become root tasks. If selected, descendants are deleted. The operation cannot be undone, and executor cleanup follows the same asynchronous, best-effort rules as archive.
 
-When a task still has an agent generating or background work outstanding, the confirmation dialog adds a still-working warning: proceeding discards work that is in progress. Delete always shows this warning; archive shows it only when the archive confirmation is enabled.
+When a task still has a `RUNNING` agent, the confirmation dialog adds a
+still-working warning: proceeding discards work that is in progress. Delete
+always shows this warning; archive shows it only when the archive confirmation
+is enabled. Best-effort detached-work accounting does not independently keep a
+settled task in the still-working state.
 
 ## Troubleshooting
 

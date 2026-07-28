@@ -11,38 +11,11 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// TestPromptTask_BackgroundWorkAcceptsInput is the falsifiable acceptance proof
-// for ADR-0049, driven through
-// the REAL operator entrypoint (PromptTask) rather than checkSessionPromptable
-// in isolation — it reproduces the operator-lockout→fixed transition end to end
-// for both of Claude's background-work wire shapes.
-//
-// The symptom: an operator whose agent launched background work (a Monitor
-// watch or a run_in_background shell) is locked out — PromptTask rejects the
-// next message with ErrAgentPromptInProgress because the session state still
-// reads RUNNING, and the only recovery is a service restart. Both shapes only
-// become recognizable on a tool_call_update (the Monitor registration banner
-// seeds its Generic view; the run_in_background flag and command are streamed
-// after the initial empty tool_call), so this exercises the full producer path:
-// a live stream update → background registration → the prompt gate opening.
-//
-// Why #1600 does not already cover this: the upstream idle-turn completion
-// (#1600) only synthesizes a turn-complete after async content has been idle
-// for a ~5s debounce, and a chatty Monitor re-extends that debounce on every
-// event burst — so the synthetic completion never fires while the watch is
-// active. The monitor case below drives repeated event bursts and asserts the
-// session is STILL RUNNING (the #1600 window is open, not closed) before it
-// sends the mid-burst prompt: without the fine-grained gate, that prompt is
-// rejected even though #1600 is armed. See the RED/GREEN note in the batch plan.
-//
-// Deterministic backend integration harness chosen over Playwright by design:
-// surfacing the fine-grained signal to the web composer is a documented
-// follow-up (Batch 2 — the composer still derives "busy" from state ===
-// RUNNING), so a UI test cannot isolate this fix without a timing-flaky
-// assertion. This harness drives PromptTask against a live-agent mock and
-// asserts the message is forwarded to the agent, which is exactly the
-// acceptance the operator sees.
-func TestPromptTask_BackgroundWorkAcceptsInput(t *testing.T) {
+// TestPromptTask_BackgroundWorkStaysBusy drives the real operator entrypoint
+// for both recognized background-work wire shapes. Accounting remains live,
+// but neither a background shell nor a chatty Monitor can bypass the coarse
+// RUNNING gate.
+func TestPromptTask_BackgroundWorkStaysBusy(t *testing.T) {
 	cases := []struct {
 		name       string
 		toolCallID string
@@ -120,10 +93,8 @@ func TestPromptTask_BackgroundWorkAcceptsInput(t *testing.T) {
 			}
 			emitForegroundIdle(svc, taskID, sessionID)
 
-			// The session is still RUNNING: #1600's synthetic turn-complete has not
-			// fired (the bursts kept its debounce alive), so the durable state alone
-			// would keep the operator locked out. This is the window the
-			// fine-grained gate must open.
+			// The session is still RUNNING, so durable state remains the admission
+			// authority regardless of the private background estimate.
 			refreshed, err := repo.GetTaskSession(context.Background(), sessionID)
 			if err != nil {
 				t.Fatalf("reload session: %v", err)
@@ -132,14 +103,13 @@ func TestPromptTask_BackgroundWorkAcceptsInput(t *testing.T) {
 				t.Fatalf("expected session to remain RUNNING while background work is outstanding, got %s", refreshed.State)
 			}
 
-			// Fixed: the same message now goes through — the session accepts input
-			// while only background work is outstanding, and it is forwarded to the
-			// live agent instead of being dropped as "busy".
-			if _, err := svc.PromptTask(context.Background(), taskID, sessionID, "are you still working?", "", false, nil, false); err != nil {
-				t.Fatalf("session with only background work outstanding must accept input, got: %v", err)
+			if _, err := svc.PromptTask(
+				context.Background(), taskID, sessionID, "are you still working?", "", false, nil, false,
+			); !errors.Is(err, ErrAgentPromptInProgress) {
+				t.Fatalf("RUNNING session with background work must reject input, got: %v", err)
 			}
-			if len(agentMgr.capturedPrompts) != 1 {
-				t.Fatalf("accepted prompt must be forwarded to the agent, captured=%d", len(agentMgr.capturedPrompts))
+			if len(agentMgr.capturedPrompts) != 0 {
+				t.Fatalf("rejected prompt reached the agent, captured=%d", len(agentMgr.capturedPrompts))
 			}
 		})
 	}

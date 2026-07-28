@@ -16,18 +16,13 @@ import (
 // independently. Foreground activity always has precedence; background work is
 // visible only after an explicit foreground-idle boundary.
 //
-// It is the finer-grained signal behind checkSessionPromptable: a session whose
-// foreground turn has yielded to background work should accept a new message
-// even though its DB state still reads RUNNING. The single-scalar session state
-// cannot tell "the foreground agent is generating" from "the foreground turn is
-// idle but a spawned background task (a subagent, a run-in-background shell) is
-// still running", which is how a long background job used to lock the operator
-// out of the conversation.
+// It is a best-effort accounting signal only. ACP providers do not expose
+// background lifecycles consistently enough for this state to relax prompt
+// admission or select an operator-visible activity tier.
 //
-// The absent/zero state means "foreground generating": callers default to the
-// pre-existing behaviour (reject a new prompt while RUNNING) unless a background
-// task has been explicitly registered for the session, so nothing changes for a
-// session that has no background work outstanding.
+// The absent/zero internal state means "foreground generating". A recognized
+// registration plus an explicit idle boundary can move only this private
+// estimate to background.
 type turnActivity struct {
 	mu            sync.Mutex
 	revision      uint64                    // invalidates delayed publications after newer mutations
@@ -821,10 +816,8 @@ func (s *Service) clearTurnActivity(sessionID string) {
 // yielded to an outstanding background task. An untracked session defaults to
 // true, preserving the historical "reject a new prompt while RUNNING" contract.
 //
-// This is a pure predicate: checkSessionPromptable and the DTO/WS serializers
-// call it to *report* promptability. A caller that is about to actually drive a
-// turn on the strength of the answer must use claimForegroundTurn instead, or it
-// races every other prompt reading the same window.
+// This is a pure internal predicate. The coarse admission and serialization
+// seams deliberately do not use it.
 func (s *Service) isForegroundTurnGenerating(sessionID string) bool {
 	ta := s.lockTurnActivity(sessionID, false)
 	if ta == nil {
@@ -845,26 +838,15 @@ func (ta *turnActivity) generatingLocked() bool {
 	return !ta.yielded
 }
 
-// claimForegroundTurn is the check-and-claim half of the background-idle gate.
+// claimForegroundTurn is the retained check-and-claim mechanism for the private
+// background-idle estimate.
 // It atomically verifies the session's foreground turn has yielded to background
 // work and, if so, takes it for the caller by flipping it back to generating —
 // under the same lock, so exactly one caller can win.
 //
-// checkSessionPromptable only *reads* the substate, which leaves a wide
-// check-then-act window in PromptTask: between the gate and the point the turn is
-// finally marked generating sit a session reload, ensureSessionRunning, and an
-// optional (network-bound) model switch. Two prompts arriving in that window —
-// a double-send, or two browser tabs onto the same background-idle session —
-// would both pass the read-only gate and both reach executor.Prompt, starting
-// overlapping turns on one ACP session. Claiming closes that window: the first
-// prompt in wins, and every prompt behind it sees a generating foreground and is
-// rejected with ErrAgentPromptInProgress exactly as it would have been before
-// ADR-0049.
-//
-// The claim is held until agentctl accepts the prompt (beginForegroundDispatch
-// followed by acceptForegroundDispatch — see promptTask in task_operations.go)
-// or it is handed back (releaseForegroundClaim). The returned token binds both
-// operations to this activity record and admission generation.
+// The public coarse gate rejects RUNNING sessions before this is reached.
+// Retaining atomic claims alongside the tracker keeps its former concurrency
+// invariants testable without treating the estimate as a safety signal.
 //
 // Returns nil for an untracked session — no background work is outstanding, so
 // there is nothing to claim and the historical reject-while-RUNNING default
@@ -973,7 +955,7 @@ func (s *Service) beginForegroundDispatch(
 	}
 }
 
-// acceptForegroundDispatch closes a background-idle admission claim after
+// acceptForegroundDispatch closes a retained background-idle claim after
 // agentctl acknowledges the prompt. The cycle itself was already established by
 // beginForegroundDispatch, so pre-callback provider events own the right token.
 func (s *Service) acceptForegroundDispatch(dispatch *foregroundDispatch) bool {
@@ -1139,11 +1121,10 @@ func (s *Service) releaseForegroundClaim(claim *foregroundClaim) bool {
 	return true
 }
 
-// foregroundActivityValue reports the fine-grained busy substate of a session
-// for the operator-facing signal: "generating" when the foreground turn is
-// actively producing output (the default), "background" when it has yielded to
-// outstanding spawned work. Background activity can remain meaningful after the
-// coarse session state settles because detached work can outlive a turn.
+// foregroundActivityValue reports the best-effort internal activity estimate.
+// ACP providers do not expose background work with consistent enough lifecycle
+// semantics for this estimate to control operator-facing admission or busy
+// state. Keep it available for dormant tracking and diagnostics only.
 func (s *Service) foregroundActivityValue(sessionID string) v1.ForegroundActivity {
 	if s.isForegroundTurnGenerating(sessionID) {
 		return v1.ForegroundActivityGenerating
@@ -1151,22 +1132,18 @@ func (s *Service) foregroundActivityValue(sessionID string) v1.ForegroundActivit
 	return v1.ForegroundActivityBackground
 }
 
-// ForegroundActivity exposes the in-memory fine-grained busy substate so the
-// page-load / list serialization layer can stamp it onto a session DTO
-// (ADR-0049). This is the same value that drives the
-// live task_session.activity_changed WS event, read straight from the in-memory
-// tracker — the single source of truth. There is no persisted copy. Callers emit
-// generating only for RUNNING sessions, but may emit background for a settled
-// session while its connected execution still has detached work.
-func (s *Service) ForegroundActivity(sessionID string) v1.ForegroundActivity {
-	return s.foregroundActivityValue(sessionID)
+// ForegroundActivity exposes the conservative operator-facing busy signal.
+// Callers combine it with the durable session state, so every RUNNING session is
+// generating and settled sessions omit the value. The finer-grained tracker is
+// intentionally not a public safety signal while ACP lifecycle reporting is
+// incomplete.
+func (s *Service) ForegroundActivity(_ string) v1.ForegroundActivity {
+	return v1.ForegroundActivityGenerating
 }
 
-// publishForegroundActivityChanged emits the fine-grained busy signal so the
-// web composer and status indicator can distinguish "generating" from "waiting
-// on background work" without a coarse session-state transition. Callers invoke
-// it only when a flip actually happened (the mark/register/complete helpers
-// return that), so it never fires per background frame.
+// publishForegroundActivityChanged emits a conservative refresh when the
+// internal tracker changes. The public value remains generating; the event still
+// carries active_subagent_count for status and diagnostics.
 func (s *Service) publishForegroundActivityChanged(ctx context.Context, taskID, sessionID string) {
 	publicationLock, releasePublication := s.acquireActivityPublicationGuard(sessionID)
 	defer releasePublication()
@@ -1236,10 +1213,14 @@ func (s *Service) publishForegroundActivityNow(
 	if s.eventBus == nil || taskID == "" || sessionID == "" {
 		return
 	}
+	publicValue := value
+	if value != nil {
+		publicValue = string(v1.ForegroundActivityGenerating)
+	}
 	eventData := map[string]interface{}{
 		metaKeyTaskID:           taskID,
 		metaKeySessionID:        sessionID,
-		"foreground_activity":   value,
+		"foreground_activity":   publicValue,
 		"active_subagent_count": activeSubagentCount,
 	}
 	if err := s.eventBus.Publish(ctx, events.TaskSessionActivityChanged,

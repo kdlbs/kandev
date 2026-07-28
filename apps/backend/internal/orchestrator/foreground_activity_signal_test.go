@@ -176,7 +176,7 @@ func TestForegroundActivitySignal_PublishesOnFlips(t *testing.T) {
 	got := activityValues(eb)
 	want := []string{
 		string(v1.ForegroundActivityGenerating),
-		string(v1.ForegroundActivityBackground),
+		string(v1.ForegroundActivityGenerating),
 		string(v1.ForegroundActivityGenerating),
 	}
 	if len(got) != len(want) {
@@ -246,8 +246,8 @@ func TestForegroundActivitySignal_NoPublishWithoutFlip(t *testing.T) {
 	want := []string{
 		string(v1.ForegroundActivityGenerating),
 		string(v1.ForegroundActivityGenerating),
-		string(v1.ForegroundActivityBackground),
-		string(v1.ForegroundActivityBackground),
+		string(v1.ForegroundActivityGenerating),
+		string(v1.ForegroundActivityGenerating),
 		string(v1.ForegroundActivityGenerating),
 	}
 	if len(got) != len(want) {
@@ -276,15 +276,17 @@ func TestForegroundActivitySignal_ClaimReleasePublishesRestoredBackground(t *tes
 	svc.registerBackgroundTask(sessionID, "background-1")
 	svc.markForegroundIdle(sessionID)
 
-	// Admission claims the foreground, but the missing executor row makes
-	// ensureSessionRunning fail before the prompt reaches the agent. Releasing
-	// that claim must tell every client that background-idle was restored.
-	if _, err := svc.PromptTask(context.Background(), taskID, sessionID, "retry", "", false, nil, false); err == nil {
-		t.Fatal("expected prompt preflight to fail without an executor record")
+	claim := svc.claimForegroundTurn(sessionID)
+	if claim == nil {
+		t.Fatal("expected dormant tracker to allow an internal foreground claim")
+	}
+	svc.releaseForegroundClaimOnFailure(context.Background(), taskID, sessionID, claim)
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("released internal claim did not restore background tracking: %q", got)
 	}
 
 	got := activityValues(eb)
-	want := []string{string(v1.ForegroundActivityBackground)}
+	want := []string{string(v1.ForegroundActivityGenerating)}
 	if len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("expected restored background activity broadcast %v, got %v", want, got)
 	}
@@ -320,22 +322,19 @@ func TestForegroundActivitySignal_ModelSwitchPublishesClaimedGenerating(t *testi
 	svc.registerBackgroundTask(sessionID, "background-1")
 	svc.markForegroundIdle(sessionID)
 
-	result, err := svc.PromptTask(context.Background(), taskID, sessionID, "continue", "new-model", false, nil, false)
-	if err != nil {
-		t.Fatalf("model-switch prompt failed: %v", err)
-	}
-	if result == nil || result.StopReason != "model_switched" {
-		t.Fatalf("expected restart-based model switch result, got %#v", result)
+	if _, err := svc.PromptTask(
+		context.Background(), taskID, sessionID, "continue", "new-model", false, nil, false,
+	); !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("model-switch prompt must remain blocked while RUNNING: %v", err)
 	}
 
 	got := activityValues(eb)
-	want := []string{string(v1.ForegroundActivityGenerating)}
-	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("expected claimed foreground activity broadcast %v, got %v", want, got)
+	if len(got) != 0 {
+		t.Fatalf("rejected model-switch prompt published activity: %v", got)
 	}
 }
 
-func TestForegroundActivitySignal_DispatchPublishesBackgroundRegisteredDuringClaim(t *testing.T) {
+func TestForegroundActivitySignal_DispatchPublishesCoarseActivity(t *testing.T) {
 	repo := setupTestRepo(t)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	eb := &recordingEventBus{}
@@ -352,7 +351,7 @@ func TestForegroundActivitySignal_DispatchPublishesBackgroundRegisteredDuringCla
 		t.Fatal("prompt must claim the background-idle turn")
 	}
 	svc.registerBackgroundTask(sessionID, "background-2")
-	if s := svc.ForegroundActivity(sessionID); s != v1.ForegroundActivityGenerating {
+	if s := svc.foregroundActivityValue(sessionID); s != v1.ForegroundActivityGenerating {
 		t.Fatalf("active claim must remain generating, got %q", s)
 	}
 
@@ -362,12 +361,15 @@ func TestForegroundActivitySignal_DispatchPublishesBackgroundRegisteredDuringCla
 	if !svc.markForegroundIdle(sessionID) {
 		t.Fatal("foreground idle must expose work registered during admission")
 	}
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("precondition: private activity = %q, want background", got)
+	}
 	svc.publishForegroundActivityChanged(context.Background(), taskID, sessionID)
 
 	got := activityValues(eb)
-	want := []string{string(v1.ForegroundActivityBackground)}
+	want := []string{string(v1.ForegroundActivityGenerating)}
 	if len(got) != len(want) || got[0] != want[0] {
-		t.Fatalf("expected dispatch-time background activity broadcast %v, got %v", want, got)
+		t.Fatalf("expected coarse dispatch-time activity broadcast %v, got %v", want, got)
 	}
 }
 
@@ -489,7 +491,7 @@ func TestForegroundActivitySignal_TurnCompletionPublishesBackgroundExactlyOnce(t
 			tt.act(svc, taskID, sessionID)
 
 			got := activityValues(eb)
-			want := []string{string(v1.ForegroundActivityBackground)}
+			want := []string{string(v1.ForegroundActivityGenerating)}
 			if len(got) != len(want) || got[0] != want[0] {
 				t.Fatalf("expected exactly one session background publication %v, got %v", want, got)
 			}
@@ -602,18 +604,20 @@ func TestForegroundActivitySignal_SamePromptOutputAfterIdleDoesNotInvalidateComp
 			})
 			svc.completeTurnForTaskSession(t.Context(), taskID, sessionID)
 
-			if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+			if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 				t.Fatalf("same-prompt %s made completion stale: got activity %q", tt.outputType, got)
 			}
-			if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
-				t.Fatalf("background-only session must accept immediate input: %v", err)
+			if err := svc.checkSessionPromptable(
+				taskID, sessionID, models.TaskSessionStateRunning,
+			); !errors.Is(err, ErrAgentPromptInProgress) {
+				t.Fatalf("background-only RUNNING session must reject immediate input: %v", err)
 			}
 			got := activityValues(eb)
 			want := []string{
 				string(v1.ForegroundActivityGenerating),
-				string(v1.ForegroundActivityBackground),
 				string(v1.ForegroundActivityGenerating),
-				string(v1.ForegroundActivityBackground),
+				string(v1.ForegroundActivityGenerating),
+				string(v1.ForegroundActivityGenerating),
 			}
 			if len(got) != len(want) {
 				t.Fatalf("activity publications = %v, want exactly %v", got, want)
@@ -676,7 +680,7 @@ func TestForegroundActivitySignal_DetachedLaunchTerminalOutputStaysBackground(t 
 		},
 	})
 
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("terminal launch card must not impersonate foreground output: got %q", got)
 	}
 	if !svc.hasBackgroundTask(sessionID, toolID) {
@@ -684,7 +688,7 @@ func TestForegroundActivitySignal_DetachedLaunchTerminalOutputStaysBackground(t 
 	}
 	if got := activityValues(eb); !slices.Equal(got, []string{
 		string(v1.ForegroundActivityGenerating),
-		string(v1.ForegroundActivityBackground),
+		string(v1.ForegroundActivityGenerating),
 	}) {
 		t.Fatalf("detached launch activity sequence = %v", got)
 	}
@@ -716,7 +720,7 @@ func TestForegroundActivitySignal_SynchronousDispatchFailureReleasesCycleClaim(t
 	); err == nil {
 		t.Fatal("expected synchronous provider dispatch failure")
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("failed dispatch must release its foreground claim, got %q", got)
 	}
 	if retryClaim := svc.claimForegroundTurn(sessionID); retryClaim == nil {
@@ -747,7 +751,7 @@ func TestForegroundActivitySignal_TurnCompletionPreservesFinalBackgroundCompleti
 	})
 
 	got := activityValues(eb)
-	want := []string{string(v1.ForegroundActivityBackground), string(v1.ForegroundActivityGenerating)}
+	want := []string{string(v1.ForegroundActivityGenerating), string(v1.ForegroundActivityGenerating)}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("expected completion and final-background publications %v, got %v", want, got)
 	}
@@ -785,7 +789,7 @@ func TestForegroundActivitySignal_DelayedOldCompletionCannotYieldSuccessor(t *te
 	// has already claimed and begun generating in the same session.
 	svc.completeTurnForSession(t.Context(), sessionID)
 
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("delayed old completion yielded successor foreground: got %q", got)
 	}
 	if got := activityValues(eb); len(got) != 0 {
@@ -826,7 +830,7 @@ func TestForegroundActivitySignal_OldCompletionBeforeSuccessorLeavesSuccessorCom
 	// the successor is current and must expose the still-running background task.
 	svc.completeTurnForSession(t.Context(), sessionID)
 
-	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityBackground) {
+	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityGenerating) {
 		t.Fatalf("current successor completion must publish background once, got %v", got)
 	}
 	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
@@ -851,7 +855,7 @@ func TestForegroundActivitySignal_TaskLookupFailureDoesNotConsumeCompletionYield
 	svc.repo = &failOnceGetTaskSessionRepo{repoStore: baseRepo, err: errors.New("transient lookup failure")}
 
 	svc.completeTurnForSession(t.Context(), sessionID)
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("failed identity lookup must not consume transition, got %q", got)
 	}
 	if got := activityValues(eb); len(got) != 0 {
@@ -859,7 +863,7 @@ func TestForegroundActivitySignal_TaskLookupFailureDoesNotConsumeCompletionYield
 	}
 
 	svc.completeTurnForSession(t.Context(), sessionID)
-	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityBackground) {
+	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityGenerating) {
 		t.Fatalf("retry must publish preserved background transition once, got %v", got)
 	}
 	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {
@@ -888,13 +892,13 @@ func TestForegroundActivitySignal_TurnCompletionIsSessionIsolated(t *testing.T) 
 
 	svc.completeTurnForSession(t.Context(), sessionA)
 
-	if got := svc.ForegroundActivity(sessionA); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionA); got != v1.ForegroundActivityBackground {
 		t.Fatalf("completed session A must become background, got %q", got)
 	}
-	if got := svc.ForegroundActivity(sessionB); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue(sessionB); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("completion for session A mutated session B: got %q", got)
 	}
-	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityBackground) {
+	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityGenerating) {
 		t.Fatalf("expected one session A background event, got %v", got)
 	}
 	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskA {
@@ -934,7 +938,7 @@ func TestForegroundActivitySignal_SettleRepublishesTaskAggregate(t *testing.T) {
 	// left behind after retirement, whose foreground activity safely defaults to
 	// generating.
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("untracked RUNNING session must default generating, got %q", got)
 	}
 	taskEvents.activityTaskIDs = nil
@@ -1014,7 +1018,7 @@ func TestForegroundActivitySignal_DelayedOldProviderIdleCannotYieldSuccessor(t *
 		},
 	})
 
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("delayed old provider idle yielded successor foreground: got %q", got)
 	}
 	if got := activityValues(eb); len(got) != 0 {
@@ -1035,10 +1039,10 @@ func TestForegroundActivitySignal_DelayedOldProviderIdleCannotYieldSuccessor(t *
 			PromptGeneration: 2,
 		},
 	})
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("current provider idle must yield promptly, got %q", got)
 	}
-	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityBackground) {
+	if got := activityValues(eb); len(got) != 1 || got[0] != string(v1.ForegroundActivityGenerating) {
 		t.Fatalf("current provider idle must publish background once, got %v", got)
 	}
 	if len(taskEvents.activityTaskIDs) != 1 || taskEvents.activityTaskIDs[0] != taskID {

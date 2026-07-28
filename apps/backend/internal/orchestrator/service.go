@@ -459,8 +459,8 @@ type Service struct {
 	// foregroundActivity tracks, per session, whether the open turn is actively
 	// generating in the foreground or only waiting on a spawned background task
 	// (subagent / run-in-background shell). Keyed sessionID -> *turnActivity;
-	// see turn_activity.go. Consulted by checkSessionPromptable so a session
-	// that kicked off background work still accepts operator input.
+	// see turn_activity.go. This is best-effort accounting state and does not
+	// relax the coarse RUNNING admission policy.
 	// foregroundActivityMu protects record identity: lookups lock the selected
 	// record before releasing it, and execution teardown uses the same order
 	// before detaching an unused record.
@@ -1130,8 +1130,8 @@ func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) 
 
 func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
 	// Foreground ownership ends with the turn, but detached background work can
-	// outlive it. Preserve those registrations and expose them as background-idle;
-	// full cleanup belongs to execution/session teardown paths.
+	// outlive it. Preserve those registrations for accounting; full cleanup
+	// belongs to execution/session teardown paths.
 	s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldTurnCompletion)
 
 	if s.turnService == nil {

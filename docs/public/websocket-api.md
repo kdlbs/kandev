@@ -702,14 +702,16 @@ system.job.update
 
 Current lifecycle code broadcasts `session.turn.started` and `session.turn.completed` globally even though their payloads identify a session. `task.subscribe` does not change this global routing.
 
-`session.activity_changed` carries `task_id`, `session_id`, `foreground_activity`,
-and `active_subagent_count`. The activity is `generating`, `background`, or
-`null`; the count is always an integer and is zero when no adapter-attested
-subagent is live for that session. Task lifecycle notifications expose the same count
-aggregated across
-the task's sessions as `active_subagent_count`. Count-only changes may emit
-`session.activity_changed` and `task.updated` even when the foreground activity
-and coarse lifecycle state do not change.
+`session.activity_changed` carries `task_id`, `session_id`,
+`foreground_activity`, and `active_subagent_count`. The activity is
+`generating` while the session is `RUNNING` and otherwise clears with the
+coarse lifecycle; background-work accounting does not expose a separate
+activity tier. The count is always an integer and is zero when no
+adapter-attested subagent is live for that session. Task lifecycle
+notifications expose the same count aggregated across the task's sessions as
+`active_subagent_count`. Count-only changes may emit
+`session.activity_changed` and `task.updated` even when the coarse lifecycle
+state does not change.
 
 Office workspace notifications are also global; clients filter on `workspace_id`:
 

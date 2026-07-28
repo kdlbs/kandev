@@ -2975,8 +2975,9 @@ func (s *Service) loadPromptableSession(ctx context.Context, taskID, sessionID s
 	return session, nil
 }
 
-// claimForegroundForPrompt closes the gap between reading a RUNNING session's
-// background-idle substate and dispatching its next prompt.
+// claimForegroundForPrompt retains the tracker-side claim mechanism for a
+// future protocol-backed policy. The current admission gate rejects RUNNING
+// sessions before this helper is reached.
 func (s *Service) claimForegroundForPrompt(taskID, sessionID string, session *models.TaskSession) (*foregroundClaim, error) {
 	if session.State != models.TaskSessionStateRunning {
 		return nil, nil
@@ -3175,20 +3176,10 @@ func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.
 		models.TaskSessionStateIdle:
 		return nil
 	case models.TaskSessionStateRunning:
-		// Narrow the busy signal: a session that kicked off background work and
-		// is otherwise idle in the foreground should still accept a new message
-		// rather than reporting "running" and dropping it.
-		//
-		// This is a *read*, not a claim — DrainQueuedMessage and the STARTING wait
-		// both call it without going on to drive a turn themselves. PromptTask,
-		// which does, follows a passing read with claimForegroundTurn to close the
-		// check-then-act window against a second concurrent prompt.
-		if !s.isForegroundTurnGenerating(sessionID) {
-			s.logger.Debug("accepting prompt: foreground turn idle, only background work outstanding",
-				zap.String("task_id", taskID),
-				zap.String("session_id", sessionID))
-			return nil
-		}
+		// ACP providers do not expose background work with consistent identity,
+		// nesting, or terminal semantics. Fail closed while the durable session
+		// is RUNNING instead of using the best-effort tracker as an admission
+		// signal.
 		s.logger.Warn("rejected prompt while agent is already running",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),

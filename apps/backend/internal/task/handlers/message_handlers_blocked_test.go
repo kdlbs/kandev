@@ -644,8 +644,8 @@ func TestWSAddMessageFailsWhenSessionReloadAfterOnTurnStartFails(t *testing.T) {
 	assert.Empty(t, orch.getForwardedSession())
 }
 
-// fgActivityOrchestrator is a minimal OrchestratorService whose ForegroundActivity
-// is configurable, for testing the ADR-0049 message-add gate.
+// fgActivityOrchestrator retains a configurable legacy activity value to prove
+// message admission ignores it.
 type fgActivityOrchestrator struct {
 	activity v1.ForegroundActivity
 }
@@ -697,11 +697,10 @@ func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {
 		wantPrompt   bool
 	}{
 		{
-			name:         "running background dispatches prompt",
+			name:         "running background is rejected",
 			state:        models.TaskSessionStateRunning,
 			activity:     v1.ForegroundActivityBackground,
-			wantResponse: ws.MessageTypeResponse,
-			wantPrompt:   true,
+			wantResponse: ws.MessageTypeError,
 		},
 		{
 			name:         "running generating is rejected",
@@ -772,11 +771,9 @@ func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {
 	}
 }
 
-// TestErrorForBlockedMessageSession_BackgroundIdleAccepts is the ADR-0049
-// message-add gate: a RUNNING session whose foreground turn has yielded to
-// background work must NOT be blocked at the message.add layer (it flows on to
-// PromptTask), while a foreground-generating RUNNING session stays blocked.
-func TestErrorForBlockedMessageSession_BackgroundIdleAccepts(t *testing.T) {
+// TestErrorForBlockedMessageSession_RunningAlwaysBlocks proves a legacy
+// fine-grained value cannot bypass the coarse message-add gate.
+func TestErrorForBlockedMessageSession_RunningAlwaysBlocks(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	require.NoError(t, err)
 	msg := &ws.Message{ID: "1", Action: ws.ActionMessageAdd}
@@ -788,7 +785,7 @@ func TestErrorForBlockedMessageSession_BackgroundIdleAccepts(t *testing.T) {
 		wantBlock bool
 	}{
 		{"running + generating is blocked", v1.ForegroundActivityGenerating, models.TaskSessionStateRunning, true},
-		{"running + background is accepted", v1.ForegroundActivityBackground, models.TaskSessionStateRunning, false},
+		{"running + background is blocked", v1.ForegroundActivityBackground, models.TaskSessionStateRunning, true},
 		{"waiting is accepted regardless", v1.ForegroundActivityGenerating, models.TaskSessionStateWaitingForInput, false},
 		{"failed stays blocked", v1.ForegroundActivityBackground, models.TaskSessionStateFailed, true},
 	}

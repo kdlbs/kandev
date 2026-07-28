@@ -12,16 +12,9 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// ADR-0049 narrowed the busy gate so a RUNNING session whose foreground turn has
-// yielded to background work accepts a new prompt. checkSessionPromptable only
-// *reads* that substate, though, and PromptTask does real work between the read
-// and the point the turn is marked generating (session reload, ensureSessionRunning,
-// an optionally network-bound model switch). Two prompts arriving in that window —
-// a double-send, or two tabs on the same session — would both pass the read and
-// both reach executor.Prompt, starting overlapping turns on one ACP session.
-//
-// claimForegroundTurn closes the window: the check and the claim happen under one
-// lock, so exactly one caller wins.
+// ADR-0049 introduced tracker-side admission claims. The coarse policy no
+// longer reaches them from operator prompt admission, but the dormant mechanism
+// remains race-safe for a future protocol-backed design.
 
 // TestClaimForegroundTurn_OnlyOneConcurrentPromptWins is the regression test for
 // that race. Every claim but one must lose, no matter how many race in at once.
@@ -179,18 +172,18 @@ func TestPromptTask_ConcurrentPromptsIntoBackgroundIdleStartOneTurn(t *testing.T
 	start.Done()
 	done.Wait()
 
-	if accepted != 1 {
-		t.Fatalf("exactly one concurrent prompt may open a turn, got %d accepted (%d rejected busy)", accepted, rejectedBusy)
+	if accepted != 0 {
+		t.Fatalf("no concurrent prompt may enter a RUNNING turn, got %d accepted", accepted)
 	}
-	if rejectedBusy != prompters-1 {
-		t.Fatalf("every prompt that lost the claim must be rejected with ErrAgentPromptInProgress, got %d of %d", rejectedBusy, prompters-1)
+	if rejectedBusy != prompters {
+		t.Fatalf("every prompt must be rejected with ErrAgentPromptInProgress, got %d of %d", rejectedBusy, prompters)
 	}
 	// The decisive assertion: only one turn was actually started on the agent.
 	agentMgr.mu.Lock()
 	captured := len(agentMgr.capturedPrompts)
 	agentMgr.mu.Unlock()
-	if captured != 1 {
-		t.Fatalf("overlapping turns reached the agent: %d prompts forwarded, want exactly 1", captured)
+	if captured != 0 {
+		t.Fatalf("RUNNING-session prompts reached the agent: %d forwarded, want 0", captured)
 	}
 }
 
@@ -216,10 +209,10 @@ func TestPromptTask_SupersededQueuedDispatchReleasesForegroundClaim(t *testing.T
 	_, err := svc.promptTask(
 		context.Background(), taskID, sessionID, "queued prompt", "", false, nil, false, "stale-entry",
 	)
-	if !errors.Is(err, errQueuedDispatchSuperseded) {
-		t.Fatalf("a dispatch without the current ownership token must be superseded, got: %v", err)
+	if !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("a queued dispatch into a RUNNING session must be rejected, got: %v", err)
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("a superseded dispatch must restore the background-idle gate, got %q", got)
 	}
 	if svc.claimForegroundTurn(sessionID) == nil {
@@ -336,7 +329,7 @@ func TestReleaseForegroundClaim_FailedPromptReopensTheGate(t *testing.T) {
 	if claim == nil {
 		t.Fatal("the first prompt must win the claim")
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("a claimed turn reads as generating, got %q", got)
 	}
 
@@ -347,7 +340,7 @@ func TestReleaseForegroundClaim_FailedPromptReopensTheGate(t *testing.T) {
 
 	// Background work is still outstanding, so the session is background-idle again
 	// and the operator can retry.
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("a released claim must return the turn to background-idle, got %q", got)
 	}
 	if svc.claimForegroundTurn(sessionID) == nil {
@@ -377,7 +370,7 @@ func TestReleaseForegroundClaim_DoesNotReopenGateWithoutBackgroundWork(t *testin
 		t.Fatal("with no background work outstanding the release must not reopen the gate")
 	}
 
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("with no background work outstanding the turn must read as generating, got %q", got)
 	}
 }
@@ -444,7 +437,7 @@ func TestForegroundDispatch_FailedDispatchRollsBackForRetry(t *testing.T) {
 	if restored := <-rollbackDone; !restored {
 		t.Fatal("an unobserved synchronous dispatch failure must restore background-idle")
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("failed dispatch must reopen immediate input, got %q", got)
 	}
 
@@ -464,7 +457,7 @@ func TestForegroundDispatch_FailedDispatchRollsBackForRetry(t *testing.T) {
 		t.Fatal("accepting a retry does not expose background work before foreground idle")
 	}
 	svc.markForegroundIdle(sessionID)
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("accepted retry must retain its own completion/idle identity, got %q", got)
 	}
 }
@@ -503,7 +496,7 @@ func TestForegroundDispatch_StaleRollbackCannotClobberRetry(t *testing.T) {
 	if !svc.markForegroundIdle(sessionID) {
 		t.Fatal("retry's current idle event must expose its background work")
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("stale rollback clobbered retry activity: got %q", got)
 	}
 }
@@ -516,13 +509,13 @@ func TestForegroundDispatch_ClaimlessRollbackRestoresOnlyExactUnobservedStart(t 
 		svc.registerBackgroundTask(sessionID, "background-1")
 		svc.markForegroundIdle(sessionID)
 		dispatch := svc.beginForegroundDispatch(sessionID, nil)
-		if dispatch == nil || svc.ForegroundActivity(sessionID) != v1.ForegroundActivityGenerating {
+		if dispatch == nil || svc.foregroundActivityValue(sessionID) != v1.ForegroundActivityGenerating {
 			t.Fatal("begin must atomically establish claimless successor ownership")
 		}
 		if !svc.rollbackForegroundDispatch(dispatch) {
 			t.Fatal("exact unobserved failure must restore prior background idle")
 		}
-		if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 			t.Fatalf("rollback restored %q, want background", got)
 		}
 	})
@@ -538,7 +531,7 @@ func TestForegroundDispatch_ClaimlessRollbackRestoresOnlyExactUnobservedStart(t 
 		if svc.rollbackForegroundDispatch(dispatch) {
 			t.Fatal("provider-observed cycle must not roll back")
 		}
-		if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+		if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 			t.Fatalf("provider output lost successor ownership: got %q", got)
 		}
 	})
@@ -560,7 +553,7 @@ func TestForegroundDispatch_ClaimlessRollbackRestoresOnlyExactUnobservedStart(t 
 		if svc.rollbackForegroundDispatch(first) {
 			t.Fatal("stale failure token must not restore over retry")
 		}
-		if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+		if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 			t.Fatalf("stale rollback displaced retry: got %q", got)
 		}
 	})

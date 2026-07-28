@@ -456,10 +456,8 @@ func (s *Service) handleStreamingEventKind(
 // handleMessageStreamingEvent handles streaming message events for real-time text updates.
 // It creates a new message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	// Streamed foreground output means the agent is actively generating again,
-	// even if a background task is still outstanding — narrows the busy signal.
-	// Only genuine output flips the state: an empty/invalid frame is discarded by
-	// handleStreamingEventKind, so it must not spuriously reclose the prompt gate.
+	// Keep the private ownership estimate current for accounting. Only genuine
+	// output flips it; empty/invalid frames are discarded below.
 	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
@@ -471,9 +469,8 @@ func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *life
 // handleThinkingStreamingEvent handles streaming thinking events for real-time reasoning updates.
 // It creates a new thinking message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleThinkingStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
-	// Streamed foreground reasoning means the agent is actively generating again.
-	// Only genuine output flips the state — an empty/invalid frame is discarded
-	// downstream, so it must not spuriously reclose the prompt gate.
+	// Keep the private ownership estimate current for accounting. Empty/invalid
+	// frames are discarded downstream.
 	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
@@ -514,10 +511,8 @@ func (s *Service) handleToolUpdateEvent(ctx context.Context, payload *lifecycle.
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
 
-	// Background-work bookkeeping for the finer-grained busy signal runs
-	// regardless of message persistence — mirrors handleToolCallEvent — so a
-	// run-in-background shell or Monitor watch still drives the prompt gate even
-	// when no messageCreator is wired (tests, minimal configs).
+	// Background-work bookkeeping runs regardless of message persistence so
+	// accounting remains available even when no messageCreator is wired.
 	s.trackBackgroundToolUpdate(ctx, payload, ownership)
 
 	s.persistToolUpdateMessage(ctx, payload)
@@ -593,9 +588,9 @@ func (s *Service) persistToolUpdateMessage(ctx context.Context, payload *lifecyc
 	}
 }
 
-// trackBackgroundToolUpdate maintains the fine-grained busy signal's background
-// hold from a top-level tool_call_update: a terminal status clears the hold and
-// the first recognizable non-terminal frame registers it. Child tool calls
+// trackBackgroundToolUpdate maintains best-effort background accounting from a
+// top-level tool_call_update: a terminal status clears the hold and the first
+// recognizable non-terminal frame registers it. Child tool calls
 // (ParentToolCallID set) are a subagent's own internal work, not a new
 // background task, so they never touch the hold.
 func (s *Service) trackBackgroundToolUpdate(
@@ -1099,8 +1094,8 @@ func (s *Service) publishTaskSessionStateChanged(
 		}
 	}
 	var foregroundActivity interface{}
-	if nextState == models.TaskSessionStateRunning || nextState == models.TaskSessionStateWaitingForInput {
-		foregroundActivity = string(s.foregroundActivityValue(sessionID))
+	if nextState == models.TaskSessionStateRunning {
+		foregroundActivity = string(s.ForegroundActivity(sessionID))
 	}
 	eventData := map[string]interface{}{
 		metaKeyTaskID:            taskID,
@@ -1111,9 +1106,9 @@ func (s *Service) publishTaskSessionStateChanged(
 		metaKeyAgentProfileID:    agentProfileID,
 		"agent_profile_snapshot": session.AgentProfileSnapshot,
 		"is_passthrough":         session.IsPassthrough,
-		// Carry activity only while the session can own foreground/background
-		// work. Every other state gets an explicit null so partial client-store
-		// merges clear a previously-live substate during session.stop/teardown.
+		// Carry activity only while the durable session is RUNNING. Every other
+		// state gets an explicit null so partial client-store merges clear a
+		// previously-live busy signal during settlement or teardown.
 		"foreground_activity":   foregroundActivity,
 		"active_subagent_count": s.ActiveSubagentCount(sessionID),
 	}
