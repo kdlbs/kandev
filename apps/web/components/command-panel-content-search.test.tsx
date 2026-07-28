@@ -150,6 +150,17 @@ describe("CommandPanelView task content search mode", () => {
     expect((screen.getByRole("combobox") as HTMLInputElement).value).toBe("needle");
   });
 
+  it("uses an uncluttered segmented control for palette modes", () => {
+    render(<CommandPanelView {...viewProps()} />);
+
+    const switcher = screen.getByRole("tablist", { name: "Command palette mode" });
+    expect(switcher.querySelector("kbd")).toBeNull();
+    expect(switcher.querySelectorAll("svg")).toHaveLength(3);
+    expect(screen.getByTestId("command-panel-scope-indicator").getAttribute("data-scope")).toBe(
+      "search-content",
+    );
+  });
+
   it("cycles palette scopes with Tab and Shift+Tab", () => {
     const onScopeChange = vi.fn();
     const props = viewProps({ onScopeChange });

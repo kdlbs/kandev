@@ -106,6 +106,13 @@ test("@search searches all task repositories and opens the selected match", asyn
   await expect(filesTab).toHaveAttribute("aria-selected", "true");
   await expect(input).toHaveValue(SEARCH_TERM);
 
+  const fileQuery = path.basename(sharedPath);
+  await input.fill(fileQuery);
+  const fileMatches = dialog.locator("[cmdk-item]").filter({ hasText: fileQuery });
+  await expect(fileMatches).toHaveCount(2, { timeout: 10_000 });
+  await expect(fileMatches.filter({ hasText: EXTRA_REPOSITORY_NAME })).toHaveCount(1);
+
+  await input.fill(SEARCH_TERM);
   await testPage.keyboard.press("Tab");
   await expect(contentsTab).toHaveAttribute("aria-selected", "true");
   await expect(groups).toHaveCount(2, { timeout: 15_000 });

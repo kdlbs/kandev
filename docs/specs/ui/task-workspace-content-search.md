@@ -21,10 +21,15 @@ repositories.
   precedence over that surface's local find shortcut. It prevents the browser's
   default search action.
 - The command palette visibly exposes **Commands**, **Files**, and **Contents**
-  as peer modes, with each mode's direct shortcut shown beside its label.
+  as peer modes in a segmented switcher. Each mode's direct shortcut remains
+  discoverable from its tooltip without crowding the switcher.
 - Clicking a mode or pressing **Tab** / **Shift+Tab** switches among those modes
   without discarding the current query. The existing **Cmd/Ctrl+Shift+K**
   shortcut still opens file-name and path search directly.
+- File-name and path search covers every repository materialized for the active
+  task. Multi-repository results use task-root-relative, repository-prefixed
+  paths so same-named files remain distinguishable and open in the correct
+  repository.
 - Search covers every repository materialized for the active task session.
   Tracked files and untracked, non-ignored files are eligible; ignored files,
   directories, and workspace metadata are not.
@@ -114,6 +119,9 @@ workspace file-name search contracts are unchanged.
 - **GIVEN** a task with two repositories containing the same search term,
   **WHEN** the user searches, **THEN** both repositories have clearly separated
   result groups with repository-relative paths.
+- **GIVEN** a task with two repositories containing matching file names,
+  **WHEN** the user searches in **Files** mode, **THEN** matching paths from both
+  repositories appear with their repository prefixes.
 - **GIVEN** two repositories with the same relative path, **WHEN** the user
   selects the result from the second repository, **THEN** Kandev opens the
   second repository's file at the returned line and column.

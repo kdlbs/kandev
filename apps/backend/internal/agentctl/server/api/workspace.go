@@ -235,7 +235,7 @@ func (s *Server) handleFileSearch(c *gin.Context) {
 		}
 	}
 
-	files := s.procMgr.GetWorkspaceTracker().SearchFiles(query, limit)
+	files := s.procMgr.SearchWorkspaceFiles(query, limit)
 
 	c.JSON(200, types.FileSearchResponse{Files: files})
 }

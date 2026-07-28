@@ -928,6 +928,53 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 // SearchFiles searches for files matching the query string.
 // It uses fuzzy matching with scoring based on how well the query matches.
 func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
+	wt.mu.RLock()
+	paths := make([]string, 0, len(wt.currentFiles.Files))
+	for _, file := range wt.currentFiles.Files {
+		paths = append(paths, file.Path)
+	}
+	wt.mu.RUnlock()
+
+	return searchFilePaths(paths, query, limit)
+}
+
+// SearchWorkspaceFiles searches every repository represented by the manager.
+// Multi-repo results retain their task-root-relative repository prefix so
+// existing file consumers can open the returned path without extra metadata.
+func (m *Manager) SearchWorkspaceFiles(query string, limit int) []string {
+	root, repositories := m.snapshotTrackers()
+	if len(repositories) == 0 {
+		if root == nil {
+			return []string{}
+		}
+		return root.SearchFiles(query, limit)
+	}
+
+	paths := make([]string, 0)
+	if root != nil && root.RepositoryName() != "" {
+		paths = appendTrackerFilePaths(paths, root)
+	}
+	for _, tracker := range repositories {
+		paths = appendTrackerFilePaths(paths, tracker)
+	}
+	return searchFilePaths(paths, query, limit)
+}
+
+func appendTrackerFilePaths(paths []string, tracker *WorkspaceTracker) []string {
+	tracker.mu.RLock()
+	defer tracker.mu.RUnlock()
+	repository := tracker.RepositoryName()
+	for _, file := range tracker.currentFiles.Files {
+		path := file.Path
+		if repository != "" {
+			path = filepath.ToSlash(filepath.Join(repository, path))
+		}
+		paths = append(paths, path)
+	}
+	return paths
+}
+
+func searchFilePaths(paths []string, query string, limit int) []string {
 	if query == "" {
 		return []string{}
 	}
@@ -938,12 +985,7 @@ func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
 	query = strings.ToLower(query)
 	var matches []scoredMatch
 
-	wt.mu.RLock()
-	files := wt.currentFiles.Files
-	wt.mu.RUnlock()
-
-	for _, file := range files {
-		path := file.Path
+	for _, path := range paths {
 		if isRootOwnershipMarkerPath(path) {
 			continue
 		}
