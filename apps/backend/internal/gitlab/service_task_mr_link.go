@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"strconv"
 	"strings"
@@ -84,7 +85,7 @@ func parseGitLabRemoteURLIdentity(remoteURL string) (host, projectPath string) {
 		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 			return "", ""
 		}
-		scheme, hostname, path = parsed.Scheme, parsed.Host, parsed.Path
+		scheme, hostname, path = parsed.Scheme, remoteHost(parsed), parsed.Path
 	}
 	scheme = strings.ToLower(scheme)
 	if scheme != mentionHTTPScheme && scheme != mentionHTTPSScheme && scheme != sshScheme {
@@ -98,6 +99,20 @@ func parseGitLabRemoteURLIdentity(remoteURL string) (host, projectPath string) {
 		return "", ""
 	}
 	return scheme + "://" + hostname, path
+}
+
+func remoteHost(parsed *url.URL) string {
+	hostname := parsed.Hostname()
+	if hostname == "" {
+		return ""
+	}
+	if port := parsed.Port(); port != "" {
+		return net.JoinHostPort(hostname, port)
+	}
+	if strings.Contains(hostname, ":") {
+		return "[" + hostname + "]"
+	}
+	return hostname
 }
 
 // AssociateExistingMRByURL validates a workspace-owned task/repository pair,

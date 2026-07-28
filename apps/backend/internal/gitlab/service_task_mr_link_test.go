@@ -161,7 +161,6 @@ func TestAssociateExistingMRByURLRejectsRepositoryIdentityMismatch(t *testing.T)
 		repositoryHost string
 		repositoryPath string
 	}{
-		{name: "same hostname with HTTPS origin", repositoryHost: "https://gitlab.internal.test:8080", repositoryPath: "group/subgroup/project"},
 		{name: "different GitLab host", repositoryHost: "http://other.internal.test:8080", repositoryPath: "group/subgroup/project"},
 		{name: "different subgroup project", repositoryHost: host, repositoryPath: "group/other/project"},
 		{name: "unknown legacy host", repositoryHost: "", repositoryPath: "group/subgroup/project"},
@@ -205,6 +204,24 @@ func TestAssociateExistingMRByURLAcceptsExactSelfManagedHTTPSRepositoryIdentity(
 	}
 }
 
+func TestAssociateExistingMRByURLAcceptsRepositoryIdentityWithSameHostDifferentScheme(t *testing.T) {
+	const host = "http://gitlab.internal.test:8080"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", "https://gitlab.internal.test:8080", "group/subgroup/project")
+	client.SeedMR("group/subgroup/project", &MR{
+		IID: 12, Title: "MR", WebURL: host + "/group/subgroup/project/-/merge_requests/12",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/group/subgroup/project/-/merge_requests/12",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+}
+
 func TestAssociateExistingMRByURLAcceptsRemoteURLWhenDurableIdentityEmpty(t *testing.T) {
 	// Reproduces the reported bug: a self-hosted GitLab repository added as a
 	// local clone never gets a durable provider identity (only github.com and
@@ -219,6 +236,7 @@ func TestAssociateExistingMRByURLAcceptsRemoteURLWhenDurableIdentityEmpty(t *tes
 		{name: "https remote without .git suffix", remoteURL: host + "/clients/socodevi/laravel/co-up"},
 		{name: "https remote with trailing slash", remoteURL: host + "/clients/socodevi/laravel/co-up/"},
 		{name: "https remote with different case", remoteURL: "https://GitLab.SavoirFaireLinux.com/Clients/Socodevi/Laravel/Co-Up.git"},
+		{name: "http remote for https workspace host", remoteURL: "http://gitlab.savoirfairelinux.com/clients/socodevi/laravel/co-up.git"},
 		{name: "ssh url remote", remoteURL: "ssh://git@gitlab.savoirfairelinux.com/clients/socodevi/laravel/co-up.git"},
 		{name: "scp-style remote", remoteURL: "git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/co-up.git"},
 	}

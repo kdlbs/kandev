@@ -95,11 +95,17 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 		}
 	}
 	for _, c := range candidates {
-		if strings.EqualFold(c.host, wantHost) && strings.EqualFold(c.project, wantProject) {
+		if sameGitLabHost(c.host, wantHost) && strings.EqualFold(c.project, wantProject) {
 			return nil
 		}
 	}
 	return ErrTaskMRRepositoryMismatch
+}
+
+func sameGitLabHost(left, right string) bool {
+	leftURL, leftErr := validateHost(strings.TrimSpace(left))
+	rightURL, rightErr := validateHost(strings.TrimSpace(right))
+	return leftErr == nil && rightErr == nil && strings.EqualFold(leftURL.Host, rightURL.Host)
 }
 
 // ResolveTaskMRRepository validates an explicit repository or infers the sole
