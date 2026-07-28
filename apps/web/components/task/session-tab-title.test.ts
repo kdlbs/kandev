@@ -3,6 +3,7 @@ import { resolveSessionTabTitle } from "./session-tab-title";
 
 const SPARK_MODEL_ID = "gpt-5.3-codex-spark";
 const SPARK_MODEL_NAME = "GPT-5.3-Codex-Spark";
+const DEFAULT_MODEL_ID = "mock-default";
 const PROFILE_LABEL = "GPT-5.5 (medium)";
 
 const baseArgs = {
@@ -55,7 +56,7 @@ describe("resolveSessionTabTitle", () => {
     expect(
       resolveSessionTabTitle({
         ...baseArgs,
-        currentModelId: "mock-default",
+        currentModelId: DEFAULT_MODEL_ID,
         configOptions: [
           {
             type: "select",
@@ -63,7 +64,28 @@ describe("resolveSessionTabTitle", () => {
             name: "Model",
             currentValue: SPARK_MODEL_ID,
             options: [
-              { value: "mock-default", name: "Mock Default" },
+              { value: DEFAULT_MODEL_ID, name: "Mock Default" },
+              { value: SPARK_MODEL_ID, name: SPARK_MODEL_NAME },
+            ],
+          },
+        ],
+      }),
+    ).toBe(SPARK_MODEL_NAME);
+  });
+
+  it("prefers a provider-updated model config over a stale active model", () => {
+    expect(
+      resolveSessionTabTitle({
+        ...baseArgs,
+        activeModelId: DEFAULT_MODEL_ID,
+        configOptions: [
+          {
+            type: "select",
+            id: "model",
+            name: "Model",
+            currentValue: SPARK_MODEL_ID,
+            options: [
+              { value: DEFAULT_MODEL_ID, name: "Mock Default" },
               { value: SPARK_MODEL_ID, name: SPARK_MODEL_NAME },
             ],
           },
@@ -85,7 +107,7 @@ describe("resolveSessionTabTitle fallbacks", () => {
             type: "select",
             id: "model",
             name: "Model",
-            currentValue: "gpt-5.5",
+            currentValue: SPARK_MODEL_ID,
             options: [
               { value: "gpt-5.5", name: "GPT-5.5" },
               { value: SPARK_MODEL_ID, name: SPARK_MODEL_NAME },

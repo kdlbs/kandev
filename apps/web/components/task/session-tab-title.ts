@@ -45,8 +45,8 @@ export function resolveSessionTabTitle(args: ResolveSessionTabTitleArgs): string
   const modelConfig = args.configOptions.find(isModelConfigOption);
   const currentModelId = modelConfig?.currentValue || args.currentModelId;
   return (
-    resolveModelTitle(args, args.activeModelId) ??
     resolveModelTitle(args, currentModelId) ??
+    resolveModelTitle(args, args.activeModelId) ??
     args.agentLabel ??
     resolveModelTitle(args, args.snapshotModel)
   );
