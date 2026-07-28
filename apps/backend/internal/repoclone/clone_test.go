@@ -74,6 +74,9 @@ func TestSetOriginURL(t *testing.T) {
 	if err := cloner.SetOriginURL(context.Background(), "", "https://github.com/acme/widgets.git"); err == nil {
 		t.Fatal("SetOriginURL() error = nil, want missing repository path error")
 	}
+	if err := cloner.SetOriginURL(context.Background(), repoPath, ""); err == nil {
+		t.Fatal("SetOriginURL() error = nil, want missing origin URL error")
+	}
 }
 
 func TestSetOriginURLSerializesConcurrentUpdates(t *testing.T) {
