@@ -677,7 +677,6 @@ func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models
 			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 		}
 		s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil, oldWorkflowID)
-		s.publishTaskEvent(ctx, events.TaskQueuePromoted, candidate, nil)
 		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
 		return true
 	}

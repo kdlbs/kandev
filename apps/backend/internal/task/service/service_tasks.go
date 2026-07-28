@@ -170,7 +170,7 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	s.pullTasksFromNewFeederWork(ctx, task.WorkflowID, task.WorkflowStepID)
 	if refreshed, err := s.tasks.GetTask(ctx, task.ID); err != nil {
 		s.logger.Warn("failed to refresh task after feeder pull", zap.String("task_id", task.ID), zap.Error(err))
-	} else {
+	} else if refreshed != nil {
 		refreshed.Repositories = task.Repositories
 		task = refreshed
 	}
@@ -191,7 +191,7 @@ func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, fe
 		return
 	}
 	for _, step := range steps {
-		if step != nil && step.WorkflowID == workflowID && step.PullFromStepID == feederStepID {
+		if step != nil && step.PullFromStepID == feederStepID {
 			s.pullNextTaskOnVacate(ctx, step.ID, "")
 		}
 	}

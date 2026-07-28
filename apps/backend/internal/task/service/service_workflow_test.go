@@ -574,13 +574,20 @@ func TestService_MoveTaskPullsNextFeederTaskOnVacate(t *testing.T) {
 	}
 
 	movedEvents := 0
+	queuePromotedEvents := 0
 	for _, event := range eventBus.GetPublishedEvents() {
 		if event.Type == events.TaskMoved {
 			movedEvents++
 		}
+		if event.Type == events.TaskQueuePromoted {
+			queuePromotedEvents++
+		}
 	}
 	if movedEvents != 2 {
 		t.Fatalf("task.moved events = %d, want 2", movedEvents)
+	}
+	if queuePromotedEvents != 0 {
+		t.Fatalf("feeder promotion queue-promoted events = %d, want 0", queuePromotedEvents)
 	}
 }
 
