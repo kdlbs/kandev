@@ -36,12 +36,24 @@ type workflowLimitedMoveRepository interface {
 	UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error
 }
 
+type workflowQueuedTaskPromoter interface {
+	PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, fromStepID, destinationStepID string, limit int) (bool, error)
+}
+
 type workflowPullRepository interface {
 	NextPullCandidateExcluding(ctx context.Context, stepID string, excludeTaskIDs []string) (*models.Task, error)
 }
 
+type workflowQueuedPullRepository interface {
+	NextQueuedTaskForStepExcluding(ctx context.Context, feederStepID, destinationStepID string, excludeTaskIDs []string) (*models.Task, error)
+}
+
 type workflowStepTaskLister interface {
 	ListTasksByWorkflowStep(ctx context.Context, workflowStepID string) ([]*models.Task, error)
+}
+
+type queuedTaskLister interface {
+	ListQueuedTasks(ctx context.Context) ([]*models.Task, error)
 }
 
 // workflowStore implements engine.TransitionStore by delegating to the
@@ -210,11 +222,11 @@ func (s *workflowStore) pullNextTaskOnVacate(ctx context.Context, vacatedStepID,
 		return
 	}
 	occupants, ok := s.currentWIPOccupants(ctx, limitsRepo, vacatedStep.ID)
-	if !ok || occupants >= vacatedStep.WIPLimit {
+	if !ok || (vacatedStep.WIPLimit > 0 && occupants >= vacatedStep.WIPLimit) {
 		return
 	}
 	skipped := map[string]struct{}{excludeTaskID: {}}
-	for occupants < vacatedStep.WIPLimit {
+	for vacatedStep.WIPLimit <= 0 || occupants < vacatedStep.WIPLimit {
 		pulled := s.pullOneFeederTask(ctx, pullRepo, limitedRepo, vacatedStep, occupants, skipped)
 		if !pulled {
 			return
@@ -223,12 +235,38 @@ func (s *workflowStore) pullNextTaskOnVacate(ctx context.Context, vacatedStepID,
 	}
 }
 
+// ReconcileQueuedTasks repairs persisted queues after a restart and after
+// workflow-step configuration changes. The destination marker makes this
+// bounded to the set of steps that actually have work waiting.
+func (s *workflowStore) ReconcileQueuedTasks(ctx context.Context) {
+	lister, ok := s.repo.(queuedTaskLister)
+	if !ok {
+		return
+	}
+	queued, err := lister.ListQueuedTasks(ctx)
+	if err != nil {
+		s.logger.Warn("failed to list queued tasks for reconciliation", zap.Error(err))
+		return
+	}
+	seen := make(map[string]struct{}, len(queued))
+	for _, task := range queued {
+		if task == nil || task.QueuedForStepID == "" {
+			continue
+		}
+		if _, exists := seen[task.QueuedForStepID]; exists {
+			continue
+		}
+		seen[task.QueuedForStepID] = struct{}{}
+		s.pullNextTaskOnVacate(ctx, task.QueuedForStepID, "")
+	}
+}
+
 func (s *workflowStore) pullEnabledStep(ctx context.Context, vacatedStepID string) *wfmodels.WorkflowStep {
 	if s.workflowStepGetter == nil || vacatedStepID == "" {
 		return nil
 	}
 	vacatedStep, err := s.workflowStepGetter.GetStep(ctx, vacatedStepID)
-	if err != nil || vacatedStep == nil || vacatedStep.WIPLimit <= 0 {
+	if err != nil || vacatedStep == nil {
 		return nil
 	}
 	if vacatedStep.PullFromStepID == vacatedStep.ID {
@@ -287,20 +325,7 @@ func (s *workflowStore) pullOneFeederTask(
 	skipped map[string]struct{},
 ) bool {
 	if candidate := s.nextQueuedSameStepTask(ctx, vacatedStep.ID, skipped); candidate != nil {
-		candidate.WIPAdmitted = true
-		candidate.QueuedForStepID = ""
-		candidate.QueuedAt = nil
-		candidate.Position = position
-		candidate.UpdatedAt = time.Now().UTC()
-		if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, vacatedStep.ID, candidate.ID, vacatedStep.WIPLimit); err != nil {
-			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
-			return false
-		}
-		s.publishTaskUpdated(ctx, candidate)
-		if s.publishTaskPromoted != nil {
-			s.publishTaskPromoted(ctx, candidate)
-		}
-		return true
+		return s.promoteSameStepTask(ctx, candidate, vacatedStep, position, skipped, pullRepo, limitedRepo)
 	}
 	if vacatedStep.PullFromStepID == "" {
 		return false
@@ -309,7 +334,13 @@ func (s *workflowStore) pullOneFeederTask(
 		return false
 	}
 	for {
-		candidate, err := pullRepo.NextPullCandidateExcluding(ctx, vacatedStep.PullFromStepID, skippedTaskIDs(skipped))
+		var candidate *models.Task
+		var err error
+		if queuedRepo, ok := s.repo.(workflowQueuedPullRepository); ok {
+			candidate, err = queuedRepo.NextQueuedTaskForStepExcluding(ctx, vacatedStep.PullFromStepID, vacatedStep.ID, skippedTaskIDs(skipped))
+		} else {
+			candidate, err = pullRepo.NextPullCandidateExcluding(ctx, vacatedStep.PullFromStepID, skippedTaskIDs(skipped))
+		}
 		if err != nil {
 			s.logger.Warn("cannot pull feeder task: failed to select candidate",
 				zap.String("step_id", vacatedStep.ID), zap.Error(err))
@@ -328,7 +359,17 @@ func (s *workflowStore) pullOneFeederTask(
 		candidate.WorkflowStepID = vacatedStep.ID
 		candidate.Position = position
 		candidate.UpdatedAt = time.Now().UTC()
-		if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, vacatedStep.ID, candidate.ID, vacatedStep.WIPLimit); err != nil {
+		if promoter, ok := s.repo.(workflowQueuedTaskPromoter); ok {
+			claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, candidate, fromStepID, vacatedStep.ID, vacatedStep.WIPLimit)
+			if err != nil {
+				s.logger.Warn("failed to promote feeder task", zap.String("task_id", candidate.ID), zap.Error(err))
+				return false
+			}
+			if !claimed {
+				skipped[candidate.ID] = struct{}{}
+				continue
+			}
+		} else if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, vacatedStep.ID, candidate.ID, vacatedStep.WIPLimit); err != nil {
 			skipped[candidate.ID] = struct{}{}
 			s.logger.Warn("skipping feeder task that could not be pulled",
 				zap.String("task_id", candidate.ID), zap.Error(err))
@@ -342,6 +383,32 @@ func (s *workflowStore) pullOneFeederTask(
 		s.publishTaskMoved(ctx, candidate, fromWorkflowID, fromStepID, vacatedStep.ID, sessionID)
 		return true
 	}
+}
+
+func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *models.Task, step *wfmodels.WorkflowStep, position int, skipped map[string]struct{}, pullRepo workflowPullRepository, limitedRepo workflowLimitedMoveRepository) bool {
+	fromStepID := candidate.WorkflowStepID
+	candidate.WIPAdmitted = true
+	candidate.QueuedForStepID = ""
+	candidate.QueuedAt = nil
+	candidate.Position = position
+	candidate.UpdatedAt = time.Now().UTC()
+	if promoter, ok := s.repo.(workflowQueuedTaskPromoter); ok {
+		claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, candidate, fromStepID, step.ID, step.WIPLimit)
+		if err != nil {
+			return false
+		}
+		if !claimed {
+			skipped[candidate.ID] = struct{}{}
+			return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
+		}
+	} else if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, step.ID, candidate.ID, step.WIPLimit); err != nil {
+		return false
+	}
+	s.publishTaskUpdated(ctx, candidate)
+	if s.publishTaskPromoted != nil {
+		s.publishTaskPromoted(ctx, candidate)
+	}
+	return true
 }
 
 func (s *workflowStore) nextQueuedSameStepTask(ctx context.Context, stepID string, skipped map[string]struct{}) *models.Task {
@@ -371,6 +438,23 @@ func (s *workflowStore) nextQueuedSameStepTask(ctx context.Context, stepID strin
 func queuedTaskBefore(left, right *models.Task) bool {
 	if left.Position != right.Position {
 		return left.Position < right.Position
+	}
+	priority := func(value string) int {
+		switch value {
+		case "critical":
+			return 0
+		case "high":
+			return 1
+		case "medium":
+			return 2
+		case "low":
+			return 3
+		default:
+			return 4
+		}
+	}
+	if priority(left.Priority) != priority(right.Priority) {
+		return priority(left.Priority) < priority(right.Priority)
 	}
 	if left.QueuedAt != nil && right.QueuedAt != nil && !left.QueuedAt.Equal(*right.QueuedAt) {
 		return left.QueuedAt.Before(*right.QueuedAt)

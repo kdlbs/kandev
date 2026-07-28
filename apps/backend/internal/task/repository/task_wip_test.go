@@ -21,6 +21,10 @@ type workflowStepAdmissionCreator interface {
 	CreateTaskWithWorkflowStepAdmission(context.Context, *models.Task, string, int, string, int) error
 }
 
+type queuedTaskPromoter interface {
+	PromoteQueuedTaskIfWorkflowStepHasCapacity(context.Context, *models.Task, string, string, int) (bool, error)
+}
+
 func TestUpdateTaskIfWorkflowStepHasCapacity_ReturnsTypedWIPError(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
@@ -209,5 +213,45 @@ func TestCreateTaskWithWorkflowStepAdmission_UsesFeederAndStopsAtFullFeeder(t *t
 	}
 	if _, err := repo.GetTask(ctx, blocked.ID); !errors.Is(err, ErrTaskNotFound) {
 		t.Fatalf("blocked task lookup error=%v, want task not found", err)
+	}
+}
+
+func TestPromoteQueuedTaskIfWorkflowStepHasCapacity_ClaimsOnce(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	promoter, ok := any(repo).(queuedTaskPromoter)
+	if !ok {
+		t.Fatal("task repository does not implement atomic queued-task promotion")
+	}
+	ctx := context.Background()
+	queued := &models.Task{
+		ID: "queued-once", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "feeder", Title: "Queued", State: v1.TaskStateCreated,
+		WIPAdmitted: true, QueuedForStepID: "target",
+	}
+	if err := repo.CreateTask(ctx, queued); err != nil {
+		t.Fatalf("create queued task: %v", err)
+	}
+	queued.WorkflowID = "wip-workflow"
+	queued.WorkflowStepID = "target"
+	queued.QueuedForStepID = ""
+	queued.QueuedAt = nil
+	first, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, queued, "feeder", "target", 1)
+	if err != nil || !first {
+		t.Fatalf("first promotion claimed=%t err=%v, want claim", first, err)
+	}
+	second, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, queued, "feeder", "target", 1)
+	if err != nil {
+		t.Fatalf("second promotion: %v", err)
+	}
+	if second {
+		t.Fatal("second promotion claimed the already-promoted task")
+	}
+	got, err := repo.GetTask(ctx, queued.ID)
+	if err != nil {
+		t.Fatalf("reload promoted task: %v", err)
+	}
+	if got.WorkflowStepID != "target" || got.QueuedForStepID != "" || !got.WIPAdmitted {
+		t.Fatalf("promoted task state: step=%q queue=%q admitted=%t", got.WorkflowStepID, got.QueuedForStepID, got.WIPAdmitted)
 	}
 }

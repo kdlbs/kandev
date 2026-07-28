@@ -22,4 +22,13 @@ describe("WIP limit display helpers", () => {
       countAdmittedTasks([{ id: "active" }, { id: "queued", queuedForStepId: "step-1" }]),
     ).toBe(1);
   });
+
+  it("counts feeder-resident tasks as admitted when they target another step", () => {
+    expect(
+      countAdmittedTasks([
+        { id: "feeder-active", wipAdmitted: true, queuedForStepId: "destination" },
+        { id: "destination-queued", wipAdmitted: false, queuedForStepId: "destination" },
+      ]),
+    ).toBe(1);
+  });
 });

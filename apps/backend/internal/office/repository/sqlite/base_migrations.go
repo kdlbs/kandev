@@ -316,6 +316,12 @@ func (r *Repository) runTaskPriorityRecreate() error {
 	// SELECT below can reference it. Errors are swallowed because the
 	// most common cause is "column already exists" on real installs.
 	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN archived_by_cascade_id TEXT DEFAULT ''`)
+	// Older priority-migration fixtures predate the WIP queue columns. Add
+	// them before the recreate SELECT so the migration remains compatible with
+	// those schemas as well as with real pre-queue installations.
+	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`)
+	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT NOT NULL DEFAULT ''`)
+	_, _ = conn.ExecContext(ctx, `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`)
 
 	for _, stmt := range taskPriorityMigrationStatements() {
 		if _, err := conn.ExecContext(ctx, stmt); err != nil {

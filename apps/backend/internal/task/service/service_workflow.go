@@ -378,6 +378,9 @@ type MoveTaskResult struct {
 // MoveTaskOptions controls non-default move behavior for trusted callers.
 type MoveTaskOptions struct {
 	AllowActivePrimarySession bool
+	// PreserveDeferredLaunch keeps the deferred launch intent when an internal
+	// queue promotion changes workflow steps. Manual moves still clear it.
+	PreserveDeferredLaunch bool
 }
 
 type workflowMoveLimitsRepository interface {
@@ -390,6 +393,10 @@ type workflowAdmittedCountRepository interface {
 
 type workflowLimitedMoveRepository interface {
 	UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error
+}
+
+type workflowQueuedTaskPromoter interface {
+	PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, fromStepID, destinationStepID string, limit int) (bool, error)
 }
 
 type workflowPullRepository interface {
@@ -441,7 +448,9 @@ func (s *Service) MoveTaskWithOptions(
 		task.WIPAdmitted = true
 		task.QueuedForStepID = ""
 		task.QueuedAt = nil
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		if !opts.PreserveDeferredLaunch {
+			delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		}
 	}
 	if err := s.syncTaskStateForWorkflowMove(ctx, task, oldStepID, workflowStepID); err != nil {
 		return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
@@ -542,11 +551,11 @@ func (s *Service) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, exclu
 		return
 	}
 	occupants, ok := s.currentAdmittedOccupants(ctx, vacatedStep.ID)
-	if !ok || occupants >= vacatedStep.WIPLimit {
+	if !ok || (vacatedStep.WIPLimit > 0 && occupants >= vacatedStep.WIPLimit) {
 		return
 	}
 	skipped := map[string]struct{}{excludeTaskID: {}}
-	for occupants < vacatedStep.WIPLimit {
+	for vacatedStep.WIPLimit <= 0 || occupants < vacatedStep.WIPLimit {
 		pulled := s.promoteNextQueuedTask(ctx, vacatedStep, occupants, skipped)
 		if !pulled {
 			return
@@ -560,7 +569,7 @@ func (s *Service) reconcilableStep(ctx context.Context, vacatedStepID string) *w
 		return nil
 	}
 	vacatedStep, err := s.workflowStepGetter.GetStep(ctx, vacatedStepID)
-	if err != nil || vacatedStep == nil || vacatedStep.WIPLimit <= 0 {
+	if err != nil || vacatedStep == nil {
 		return nil
 	}
 	return vacatedStep
@@ -595,34 +604,103 @@ func (s *Service) promoteNextQueuedTask(ctx context.Context, targetStep *wfmodel
 	if err != nil || candidate == nil {
 		return false
 	}
-	if candidate.WorkflowStepID == targetStep.ID {
-		candidate.WIPAdmitted = true
-		candidate.QueuedForStepID = ""
-		candidate.QueuedAt = nil
-		candidate.Position = position
-		var updateErr error
-		if limitedRepo, ok := s.tasks.(workflowLimitedMoveRepository); ok && targetStep.WIPLimit > 0 {
-			updateErr = limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, targetStep.ID, candidate.ID, targetStep.WIPLimit)
-		} else {
-			updateErr = s.tasks.UpdateTask(ctx, candidate)
-		}
-		if updateErr != nil {
-			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(updateErr))
-			return false
-		}
-		s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil)
-		s.publishTaskEvent(ctx, events.TaskQueuePromoted, candidate, nil)
-		return true
+	fromStepID := candidate.WorkflowStepID
+	oldWorkflowID := candidate.WorkflowID
+	if fromStepID != targetStep.ID && s.feederCandidateBlocked(ctx, candidate.ID) {
+		skipped[candidate.ID] = struct{}{}
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
+	if candidate.WorkflowStepID == targetStep.ID {
+		return s.promoteSameStepQueuedTask(ctx, candidate, fromStepID, targetStep, position, skipped)
+	}
+	return s.promoteFeederQueuedTask(ctx, candidate, fromStepID, oldWorkflowID, targetStep, position, skipped)
+}
+
+func (s *Service) promoteSameStepQueuedTask(ctx context.Context, candidate *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {
 	candidate.WIPAdmitted = true
 	candidate.QueuedForStepID = ""
 	candidate.QueuedAt = nil
-	if _, err := s.MoveTask(ctx, candidate.ID, targetStep.WorkflowID, targetStep.ID, position); err != nil {
+	candidate.Position = position
+	supported, claimed, err := promoteQueuedTaskAtomically(ctx, s.tasks, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
+	if supported {
+		return s.finishAtomicQueuedPromotion(ctx, candidate, targetStep, position, skipped, claimed, err)
+	} else if limitedRepo, ok := s.tasks.(workflowLimitedMoveRepository); ok && targetStep.WIPLimit > 0 {
+		if err := limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, targetStep.ID, candidate.ID, targetStep.WIPLimit); err != nil {
+			return false
+		}
+	} else if err := s.tasks.UpdateTask(ctx, candidate); err != nil {
+		return false
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil)
+	s.publishTaskEvent(ctx, events.TaskQueuePromoted, candidate, nil)
+	return true
+}
+
+func (s *Service) finishAtomicQueuedPromotion(ctx context.Context, candidate *models.Task, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}, claimed bool, err error) bool {
+	if err != nil {
+		s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
+		return false
+	}
+	if !claimed {
+		skipped[candidate.ID] = struct{}{}
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil)
+	s.publishTaskEvent(ctx, events.TaskQueuePromoted, candidate, nil)
+	return true
+}
+
+func promoteQueuedTaskAtomically(ctx context.Context, tasks interface{}, task *models.Task, fromStepID, destinationStepID string, limit int) (bool, bool, error) {
+	promoter, ok := tasks.(workflowQueuedTaskPromoter)
+	if !ok {
+		return false, false, nil
+	}
+	claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, task, fromStepID, destinationStepID, limit)
+	return true, claimed, err
+}
+
+func (s *Service) promoteFeederQueuedTask(ctx context.Context, candidate *models.Task, fromStepID, oldWorkflowID string, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {
+	candidate.WIPAdmitted = true
+	candidate.QueuedForStepID = ""
+	candidate.QueuedAt = nil
+	candidate.Position = position
+	candidate.WorkflowID = targetStep.WorkflowID
+	candidate.WorkflowStepID = targetStep.ID
+	if promoter, ok := s.tasks.(workflowQueuedTaskPromoter); ok {
+		claimed, err := promoter.PromoteQueuedTaskIfWorkflowStepHasCapacity(ctx, candidate, fromStepID, targetStep.ID, targetStep.WIPLimit)
+		if err != nil {
+			s.logger.Warn("failed to promote feeder queued task", zap.String("task_id", candidate.ID), zap.Error(err))
+			return false
+		}
+		if !claimed {
+			skipped[candidate.ID] = struct{}{}
+			return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+		}
+		s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil, oldWorkflowID)
+		s.publishTaskEvent(ctx, events.TaskQueuePromoted, candidate, nil)
+		s.publishTaskMovedEvent(ctx, candidate, oldWorkflowID, fromStepID, targetStep.ID, "")
+		return true
+	}
+	if _, err := s.MoveTaskWithOptions(ctx, candidate.ID, targetStep.WorkflowID, targetStep.ID, position, MoveTaskOptions{PreserveDeferredLaunch: true}); err != nil {
 		skipped[candidate.ID] = struct{}{}
 		s.logger.Warn("skipping queued task that could not be promoted", zap.String("task_id", candidate.ID), zap.String("to_step_id", targetStep.ID), zap.Error(err))
 		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
 	}
 	return true
+}
+
+func (s *Service) feederCandidateBlocked(ctx context.Context, taskID string) bool {
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("skipping feeder task after active session lookup failed", zap.String("task_id", taskID), zap.Error(err))
+		return true
+	}
+	for _, session := range sessions {
+		if isSessionMoveBlocked(session.State) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) nextQueuedCandidate(ctx context.Context, targetStep *wfmodels.WorkflowStep, skipped map[string]struct{}) (*models.Task, error) {

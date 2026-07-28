@@ -497,6 +497,10 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 	}
 	go func() {
 		launchCtx := context.WithoutCancel(ctx)
+		metadataClaimed, claimOK := s.claimDeferredLaunch(launchCtx, task.ID, eventName)
+		if !claimOK {
+			return
+		}
 		_, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
 			TaskID: task.ID, Intent: launchIntent, AgentProfileID: intent.AgentProfileID,
 			ExecutorID: intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
@@ -505,15 +509,53 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		})
 		if launchErr != nil {
 			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
+			s.restoreDeferredLaunch(launchCtx, task.ID, raw, eventName, metadataClaimed)
 			return
 		}
 		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		if metadataClaimed {
+			task.UpdatedAt = time.Now().UTC()
+			s.publishTaskUpdated(launchCtx, task)
+			return
+		}
 		task.UpdatedAt = time.Now().UTC()
 		if updateErr := s.repo.UpdateTask(launchCtx, task); updateErr == nil {
 			s.publishTaskUpdated(launchCtx, task)
 		}
 	}()
 	return true
+}
+
+func (s *Service) claimDeferredLaunch(ctx context.Context, taskID, eventName string) (bool, bool) {
+	remover, ok := s.repo.(interface {
+		RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
+	})
+	if !ok {
+		return false, true
+	}
+	claimed, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch)
+	if err != nil || !claimed {
+		if err != nil {
+			s.logger.Warn(eventName+": failed to claim deferred launch", zap.String("task_id", taskID), zap.Error(err))
+		}
+		return false, false
+	}
+	return true, true
+}
+
+func (s *Service) restoreDeferredLaunch(ctx context.Context, taskID string, raw interface{}, eventName string, claimed bool) {
+	if !claimed {
+		return
+	}
+	setter, ok := s.repo.(interface {
+		SetTaskMetadataKey(context.Context, string, string, interface{}) error
+	})
+	if !ok {
+		return
+	}
+	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch, raw); err != nil {
+		s.logger.Warn(eventName+": failed to restore deferred launch intent", zap.String("task_id", taskID), zap.Error(err))
+	}
 }
 
 // handleTaskMovedWithSession handles the case where a task with an existing session

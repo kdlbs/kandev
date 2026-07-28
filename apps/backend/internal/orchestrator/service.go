@@ -1334,6 +1334,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// This does NOT launch any agent processes — sessions are recovered lazily
 	// when the user opens them (via task.session.status → task.session.resume).
 	s.reconcileSessionsOnStartup(ctx)
+	if s.workflowStore != nil {
+		s.workflowStore.ReconcileQueuedTasks(ctx)
+	}
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -1381,6 +1384,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// Subscribe to ADR-0015 step-completion signals (out-of-band path:
 	// signal arrives after turn-end).
 	s.subscribeStepCompletionEvents()
+
+	// Reconcile queued tasks when WIP limits or feeder settings change.
+	s.subscribeWorkflowQueueEvents()
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil

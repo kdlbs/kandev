@@ -469,6 +469,52 @@ func (r *Repository) UpdateTask(ctx context.Context, task *models.Task) error {
 	return tx.Commit()
 }
 
+// RemoveTaskMetadataKey removes one metadata key without replacing concurrent
+// task fields. It returns whether the key was present and removed.
+func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error) {
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks SET metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY[?]::text[])::text, updated_at = ?
+			WHERE id = ? AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?) IS NOT NULL
+		`
+	} else {
+		query = `
+			UPDATE tasks SET metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?), updated_at = ?
+			WHERE id = ? AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) IS NOT NULL
+		`
+	}
+	path := jsonPath(key)
+	if dialect.IsPostgres(r.db.DriverName()) {
+		path = key
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), path, time.Now().UTC(), taskID, path)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows > 0, err
+}
+
+// SetTaskMetadataKey updates one metadata key without replacing concurrent
+// task fields. It is used to restore a deferred launch after a failed launch.
+func (r *Repository) SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	var query string
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `UPDATE tasks SET metadata = jsonb_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ARRAY[?]::text[], ?::jsonb, true)::text, updated_at = ? WHERE id = ?`
+	} else {
+		query = `UPDATE tasks SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ?`
+	}
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(query), key, string(payload), time.Now().UTC(), taskID)
+	return err
+}
+
+func jsonPath(key string) string { return "$." + key }
+
 // DetachTask clears only the hierarchy fields involved in detachment. Keeping
 // this as a targeted update prevents concurrent task edits from being replaced
 // by a stale full-row write.
@@ -583,6 +629,72 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		return err
 	}
 	return tx.Commit()
+}
+
+// PromoteQueuedTaskIfWorkflowStepHasCapacity atomically claims a queued task
+// for a destination step. The queue marker is part of the UPDATE predicate so
+// concurrent reconcilers cannot promote the same row twice.
+func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
+	ctx context.Context,
+	task *models.Task,
+	fromStepID,
+	destinationStepID string,
+	limit int,
+) (bool, error) {
+	task.UpdatedAt = time.Now().UTC()
+	metadata, err := json.Marshal(task.Metadata)
+	if err != nil {
+		metadata = []byte("{}")
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, destinationStepID); err != nil {
+		return false, err
+	}
+	if limit > 0 {
+		var occupants int
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT COUNT(*) FROM tasks
+			WHERE workflow_step_id = ?
+			  AND wip_admitted = 1
+			  AND id != ?
+			  AND archived_at IS NULL
+			  AND is_ephemeral = 0
+		`), destinationStepID, task.ID).Scan(&occupants); err != nil {
+			return false, err
+		}
+		if occupants >= limit {
+			return false, nil
+		}
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = ?, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?
+		WHERE id = ?
+		  AND workflow_step_id = ?
+		  AND (queued_for_step_id = ? OR queued_for_step_id = '' OR queued_for_step_id IS NULL)
+		  AND archived_at IS NULL
+		  AND is_ephemeral = 0
+	`), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, task.WIPAdmitted, task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.ID, fromStepID, destinationStepID)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return false, nil
+	}
+	if err := syncRunnerInTx(ctx, tx, task.WorkflowStepID, task.ID, task.AssigneeAgentProfileID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // DeleteTask deletes a task by ID
@@ -889,6 +1001,23 @@ func (r *Repository) ListTasksByWorkflowStep(ctx context.Context, workflowStepID
 	}
 	defer func() { _ = rows.Close() }()
 
+	return r.scanTasks(rows)
+}
+
+// ListQueuedTasks returns non-archived, non-ephemeral tasks that are waiting
+// for admission into a workflow step. It is used by startup reconciliation.
+func (r *Repository) ListQueuedTasks(ctx context.Context) ([]*models.Task, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE t.queued_for_step_id IS NOT NULL AND t.queued_for_step_id != ''
+		  AND t.archived_at IS NULL AND t.is_ephemeral = 0
+		ORDER BY t.queued_at ASC, t.created_at ASC, t.id ASC
+	`))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
 	return r.scanTasks(rows)
 }
 
