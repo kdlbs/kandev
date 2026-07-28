@@ -12,6 +12,26 @@ import {
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
 } from "./local-storage";
+import {
+  loadSessionFavorites,
+  persistSessionFavorites,
+} from "./state/slices/message-favorites/persistence";
+
+describe("message favorites storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("clears a session's favorites via cleanupTaskStorage but leaves other sessions intact", () => {
+    persistSessionFavorites("session-a", ["msg-1"]);
+    persistSessionFavorites("session-b", ["msg-2"]);
+
+    cleanupTaskStorage("task-a", ["session-a"]);
+
+    expect(loadSessionFavorites("session-a")).toEqual([]);
+    expect(loadSessionFavorites("session-b")).toEqual(["msg-2"]);
+  });
+});
 
 describe("PR merged banner dismissal storage", () => {
   beforeEach(() => {

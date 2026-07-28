@@ -10,6 +10,7 @@ import {
   IconChevronRight,
   IconEyeCode,
   IconInfoCircle,
+  IconStar,
 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/lib/utils";
@@ -50,7 +51,30 @@ type MessageActionsProps = {
   onNavigateNext?: () => void;
   hasPrev?: boolean;
   hasNext?: boolean;
+  isFavorite?: boolean;
+  onToggleFavorite?: () => void;
 };
+
+function FavoriteButton({ isFavorite, onToggle }: { isFavorite: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={isFavorite}
+      className={cn(
+        ACTION_BUTTON_SIZE,
+        ACTION_BUTTON_HOVER,
+        ACTION_BUTTON_TRANSITION,
+        "cursor-pointer",
+        isFavorite && "text-yellow-500",
+      )}
+      title={isFavorite ? "Remove from favorites" : "Mark as favorite"}
+      aria-label={isFavorite ? "Remove message from favorites" : "Mark message as favorite"}
+    >
+      <IconStar className={cn("h-full w-full", isFavorite && "fill-yellow-500")} />
+    </button>
+  );
+}
 
 function CopyButton({ copied, onCopy }: { copied: boolean; onCopy: () => void }) {
   return (
@@ -238,6 +262,30 @@ function MessageTimestamp({ createdAt }: { createdAt: string }) {
   );
 }
 
+function useMessageTurnAndUsage(message: Message): {
+  turn: Turn | null;
+  usageMultiplier: string | null;
+} {
+  return useAppStore(
+    useShallow((state) => {
+      const turnId = message.turn_id;
+      const turn =
+        turnId && message.session_id
+          ? (state.turns.bySession[message.session_id]?.find((item) => item.id === turnId) ?? null)
+          : null;
+      if (!message.session_id) return { turn, usageMultiplier: null };
+      const sessionModels = state.sessionModels.bySessionId[message.session_id];
+      const metadataModel = (message.metadata?.model ?? turn?.metadata?.model) as
+        | string
+        | undefined;
+      const modelId = metadataModel ?? sessionModels?.currentModelId;
+      const usageMultiplier =
+        sessionModels?.models.find((model) => model.modelId === modelId)?.usageMultiplier ?? null;
+      return { turn, usageMultiplier };
+    }),
+  );
+}
+
 function MessageMetaInfo({
   showModel,
   sessionConfigText,
@@ -261,40 +309,67 @@ function MessageMetaInfo({
   );
 }
 
-export function MessageActions({
-  message,
-  showCopy = true,
-  showTimestamp = true,
-  showRawToggle = true,
-  hasHiddenPrompts = false,
-  showNavigation = false,
-  showModel = false,
-  isRawView = false,
-  onToggleRaw,
-  onNavigatePrev,
-  onNavigateNext,
-  hasPrev = false,
-  hasNext = false,
-}: MessageActionsProps) {
+type ResolvedMessageActionsProps = {
+  message: Message;
+  showCopy: boolean;
+  showTimestamp: boolean;
+  showRawToggle: boolean;
+  hasHiddenPrompts: boolean;
+  showNavigation: boolean;
+  showModel: boolean;
+  isRawView: boolean;
+  onToggleRaw?: () => void;
+  onNavigatePrev?: () => void;
+  onNavigateNext?: () => void;
+  hasPrev: boolean;
+  hasNext: boolean;
+  isFavorite: boolean;
+  onToggleFavorite?: () => void;
+};
+
+// Resolves optional props to their defaults outside of `MessageActions` itself:
+// each defaulted destructured param is a branch for eslint's `complexity`
+// rule, and this component already has enough real branching in its JSX.
+function resolveMessageActionsProps(props: MessageActionsProps): ResolvedMessageActionsProps {
+  return {
+    message: props.message,
+    showCopy: props.showCopy ?? true,
+    showTimestamp: props.showTimestamp ?? true,
+    showRawToggle: props.showRawToggle ?? true,
+    hasHiddenPrompts: props.hasHiddenPrompts ?? false,
+    showNavigation: props.showNavigation ?? false,
+    showModel: props.showModel ?? false,
+    isRawView: props.isRawView ?? false,
+    onToggleRaw: props.onToggleRaw,
+    onNavigatePrev: props.onNavigatePrev,
+    onNavigateNext: props.onNavigateNext,
+    hasPrev: props.hasPrev ?? false,
+    hasNext: props.hasNext ?? false,
+    isFavorite: props.isFavorite ?? false,
+    onToggleFavorite: props.onToggleFavorite,
+  };
+}
+
+export function MessageActions(props: MessageActionsProps) {
+  const {
+    message,
+    showCopy,
+    showTimestamp,
+    showRawToggle,
+    hasHiddenPrompts,
+    showNavigation,
+    showModel,
+    isRawView,
+    onToggleRaw,
+    onNavigatePrev,
+    onNavigateNext,
+    hasPrev,
+    hasNext,
+    isFavorite,
+    onToggleFavorite,
+  } = resolveMessageActionsProps(props);
   const { copied, copy } = useCopyToClipboard();
-  const { turn, usageMultiplier } = useAppStore(
-    useShallow((state) => {
-      const turnId = message.turn_id;
-      const turn =
-        turnId && message.session_id
-          ? (state.turns.bySession[message.session_id]?.find((item) => item.id === turnId) ?? null)
-          : null;
-      if (!message.session_id) return { turn, usageMultiplier: null };
-      const sessionModels = state.sessionModels.bySessionId[message.session_id];
-      const metadataModel = (message.metadata?.model ?? turn?.metadata?.model) as
-        | string
-        | undefined;
-      const modelId = metadataModel ?? sessionModels?.currentModelId;
-      const usageMultiplier =
-        sessionModels?.models.find((model) => model.modelId === modelId)?.usageMultiplier ?? null;
-      return { turn, usageMultiplier };
-    }),
-  );
+  const { turn, usageMultiplier } = useMessageTurnAndUsage(message);
   const sessionConfigText = formatMessageSessionConfig(message.metadata, turn?.metadata);
   const handleCopy = async () => {
     await copy(message.content);
@@ -319,6 +394,7 @@ export function MessageActions({
         />
       )}
       <MessageDebugDialog message={message} turn={turn} usageMultiplier={usageMultiplier} />
+      {onToggleFavorite && <FavoriteButton isFavorite={isFavorite} onToggle={onToggleFavorite} />}
       <MessageMetaInfo
         showModel={showModel}
         sessionConfigText={sessionConfigText}

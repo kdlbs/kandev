@@ -671,6 +671,7 @@ export function cleanupTaskStorage(
     removeSessionStorage(`${ACTIVE_TAB_KEY}.${sessionId}`);
     removeSessionStorage(`kandev.contextFiles.${sessionId}`);
     removeSessionStorage(`kandev.comments.${sessionId}`);
+    removeSessionStorage(`kandev.messageFavorites.${sessionId}`);
   }
 }
 
