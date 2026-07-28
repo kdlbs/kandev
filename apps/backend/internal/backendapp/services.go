@@ -318,6 +318,12 @@ func (a *workflowStepGetterAdapter) GetNextStepByPosition(ctx context.Context, b
 	return a.svc.GetNextStepByPosition(ctx, boardID, currentPosition)
 }
 
+// ListStepsByWorkflow lets task admission find WIP-limited steps that pull
+// newly-created work from a feeder step.
+func (a *workflowStepGetterAdapter) ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*wfmodels.WorkflowStep, error) {
+	return a.svc.ListStepsByWorkflow(ctx, workflowID)
+}
+
 // startStepResolverAdapter adapts workflow service to task service's StartStepResolver interface.
 type startStepResolverAdapter struct {
 	svc *workflowservice.Service

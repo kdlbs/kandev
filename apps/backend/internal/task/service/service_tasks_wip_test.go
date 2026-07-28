@@ -112,6 +112,35 @@ func TestCreateTask_UnlimitedWIPStepPreservesCreation(t *testing.T) {
 	}
 }
 
+func TestCreateTask_PullsUnstartedFeederTaskIntoAvailableWIPStep(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedWIPWorkflow(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"waiting-step": {ID: "waiting-step", WorkflowID: "wip-workflow", Name: "Waiting"},
+		"review-step":  {ID: "review-step", WorkflowID: "wip-workflow", Name: "Review", WIPLimit: 2, PullFromStepID: "waiting-step"},
+	}})
+
+	created, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow", WorkflowStepID: "waiting-step",
+		Title: "Unstarted review task",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if created.WorkflowStepID != "review-step" {
+		t.Fatalf("returned workflow step = %q, want review-step", created.WorkflowStepID)
+	}
+
+	stored, err := repo.GetTask(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if stored.WorkflowStepID != "review-step" {
+		t.Fatalf("workflow step = %q, want review-step", stored.WorkflowStepID)
+	}
+}
+
 func seedWIPWorkflow(t *testing.T, ctx context.Context, repo interface {
 	CreateWorkspace(context.Context, *models.Workspace) error
 	CreateWorkflow(context.Context, *models.Workflow) error

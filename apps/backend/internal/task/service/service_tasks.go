@@ -167,9 +167,34 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	}
 
 	s.publishTaskEvent(ctx, events.TaskCreated, task, nil)
+	s.pullTasksFromNewFeederWork(ctx, task.WorkflowID, task.WorkflowStepID)
+	if refreshed, err := s.tasks.GetTask(ctx, task.ID); err != nil {
+		s.logger.Warn("failed to refresh task after feeder pull", zap.String("task_id", task.ID), zap.Error(err))
+	} else {
+		refreshed.Repositories = task.Repositories
+		task = refreshed
+	}
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return task, nil
+}
+
+func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, feederStepID string) {
+	stepLister, ok := s.workflowStepGetter.(workflowStepLister)
+	if !ok || workflowID == "" || feederStepID == "" {
+		return
+	}
+	steps, err := stepLister.ListStepsByWorkflow(ctx, workflowID)
+	if err != nil {
+		s.logger.Warn("failed to list workflow steps after feeder task creation",
+			zap.String("workflow_id", workflowID), zap.Error(err))
+		return
+	}
+	for _, step := range steps {
+		if step != nil && step.WorkflowID == workflowID && step.PullFromStepID == feederStepID {
+			s.pullNextTaskOnVacate(ctx, step.ID, "")
+		}
+	}
 }
 
 func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task) error {

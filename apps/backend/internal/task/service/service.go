@@ -139,6 +139,12 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 }
 
+// workflowStepLister is an optional extension used to find WIP steps that
+// pull work from a feeder when new work arrives in that feeder.
+type workflowStepLister interface {
+	ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*wfmodels.WorkflowStep, error)
+}
+
 // PRTaskResolver resolves which tasks are associated with a GitHub PR number.
 // Implemented by the github service; injected so the task service can surface a
 // task by its PR number in search without coupling to the github schema.
