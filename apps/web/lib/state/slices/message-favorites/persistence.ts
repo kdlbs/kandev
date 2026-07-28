@@ -13,7 +13,8 @@ export function persistSessionFavorites(sessionId: string, messageIds: string[])
 
 /** Loads the favorite message IDs previously stored for a session. */
 export function loadSessionFavorites(sessionId: string): string[] {
-  return getSessionStorage<string[]>(`${STORAGE_PREFIX}${sessionId}`, []);
+  const value = getSessionStorage<string[]>(`${STORAGE_PREFIX}${sessionId}`, []);
+  return Array.isArray(value) && value.every((id) => typeof id === "string") ? value : [];
 }
 
 /** Removes all persisted favorite message IDs for a session. */

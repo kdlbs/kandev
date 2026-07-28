@@ -95,6 +95,9 @@ describe("MessageActions favorite toggle", () => {
     fireEvent.click(star);
 
     expect(onToggleFavorite).toHaveBeenCalledTimes(1);
+
+    expect(star.className).toMatch(/\bmin-h-11\b/);
+    expect(star.className).toMatch(/\bmin-w-11\b/);
   });
 
   it("shows a filled star and 'remove from favorites' label when isFavorite is true", () => {

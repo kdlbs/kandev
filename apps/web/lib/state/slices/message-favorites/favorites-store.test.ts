@@ -60,6 +60,15 @@ describe("message favorites store", () => {
     expect(state.bySession[SESSION_ID]).toEqual({ "msg-1": true, "msg-2": true });
   });
 
+  it("ignores malformed persisted favorites", () => {
+    window.sessionStorage.setItem(
+      `${MESSAGE_FAVORITES_STORAGE_PREFIX}${SESSION_ID}`,
+      JSON.stringify("stale"),
+    );
+
+    expect(loadSessionFavorites(SESSION_ID)).toEqual([]);
+  });
+
   it("hydrating is a no-op once a session already has favorites in state", () => {
     useMessageFavoritesStore.getState().toggleFavorite(SESSION_ID, "msg-1");
     window.sessionStorage.setItem(
@@ -70,5 +79,25 @@ describe("message favorites store", () => {
     useMessageFavoritesStore.getState().hydrateSession(SESSION_ID);
 
     expect(useMessageFavoritesStore.getState().bySession[SESSION_ID]).toEqual({ "msg-1": true });
+  });
+
+  it("ignores a malformed persisted value instead of crashing on hydrate", () => {
+    window.sessionStorage.setItem(
+      `${MESSAGE_FAVORITES_STORAGE_PREFIX}${SESSION_ID}`,
+      JSON.stringify("stale"),
+    );
+
+    expect(() => useMessageFavoritesStore.getState().hydrateSession(SESSION_ID)).not.toThrow();
+    expect(useMessageFavoritesStore.getState().bySession[SESSION_ID]).toBeUndefined();
+  });
+
+  it("ignores a persisted array containing non-string entries", () => {
+    window.sessionStorage.setItem(
+      `${MESSAGE_FAVORITES_STORAGE_PREFIX}${SESSION_ID}`,
+      JSON.stringify(["msg-1", 42]),
+    );
+
+    expect(() => useMessageFavoritesStore.getState().hydrateSession(SESSION_ID)).not.toThrow();
+    expect(useMessageFavoritesStore.getState().bySession[SESSION_ID]).toBeUndefined();
   });
 });

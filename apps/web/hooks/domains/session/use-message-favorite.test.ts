@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import { useMessageFavorite } from "./use-message-favorite";
-import { useMessageFavoritesStore } from "@/lib/state/slices/message-favorites";
+import {
+  useMessageFavoritesStore,
+  persistSessionFavorites,
+} from "@/lib/state/slices/message-favorites";
 
 const SESSION_ID = "session-hook-1";
 
@@ -24,7 +27,8 @@ describe("useMessageFavorite", () => {
   });
 
   it("hydrates a previously-favorited message from sessionStorage", () => {
-    useMessageFavoritesStore.getState().toggleFavorite(SESSION_ID, "msg-2");
+    persistSessionFavorites(SESSION_ID, ["msg-2"]);
+    useMessageFavoritesStore.setState({ bySession: {} });
 
     const { result } = renderHook(() => useMessageFavorite(SESSION_ID, "msg-2"));
 
