@@ -41,16 +41,39 @@ describe("resolveSessionTabTitle", () => {
     ).toBe(SPARK_MODEL_NAME);
   });
 
-  it("keeps the saved profile label when ACP reports its baseline model", () => {
+  it("uses the authoritative current model over the saved profile label", () => {
     expect(
       resolveSessionTabTitle({
         ...baseArgs,
         currentModelId: SPARK_MODEL_ID,
         modelOptions: [{ id: SPARK_MODEL_ID, name: SPARK_MODEL_NAME }],
       }),
-    ).toBe(PROFILE_LABEL);
+    ).toBe(SPARK_MODEL_NAME);
   });
 
+  it("uses the live model config value when the generic current model is stale", () => {
+    expect(
+      resolveSessionTabTitle({
+        ...baseArgs,
+        currentModelId: "mock-default",
+        configOptions: [
+          {
+            type: "select",
+            id: "model",
+            name: "Model",
+            currentValue: SPARK_MODEL_ID,
+            options: [
+              { value: "mock-default", name: "Mock Default" },
+              { value: SPARK_MODEL_ID, name: SPARK_MODEL_NAME },
+            ],
+          },
+        ],
+      }),
+    ).toBe(SPARK_MODEL_NAME);
+  });
+});
+
+describe("resolveSessionTabTitle fallbacks", () => {
   it("includes non-model config selections in the title", () => {
     expect(
       resolveSessionTabTitle({

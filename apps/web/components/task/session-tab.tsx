@@ -366,6 +366,17 @@ function SessionTabBody({
  * Custom dockview tab for session panels.
  * Shows agent logo, index badge, and star for primary; right-click for lifecycle actions.
  */
+function useSessionTabTitleSync(api: IDockviewPanelHeaderProps["api"], tabTitle: string | null) {
+  useEffect(() => {
+    const syncTitle = () => {
+      if (tabTitle && api.title !== tabTitle) api.setTitle(tabTitle);
+    };
+    syncTitle();
+    const disposable = api.onDidTitleChange(syncTitle);
+    return () => disposable.dispose();
+  }, [tabTitle, api]);
+}
+
 export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const sessionId = api.id.startsWith("session:") ? api.id.slice("session:".length) : undefined;
@@ -389,9 +400,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
 
-  useEffect(() => {
-    if (tabTitle && api.title !== tabTitle) api.setTitle(tabTitle);
-  }, [tabTitle, api]);
+  useSessionTabTitleSync(api, tabTitle);
 
   const showMultiSessionBadges = sessionCount > 1;
   // Multi-session tab close means delete, not hide-only. Running/starting sessions are
