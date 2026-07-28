@@ -448,7 +448,8 @@ function UserMessageContent({
               {fileAttachments.map((att, index) => (
                 <span
                   key={`file-${index}`}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground"
+                  data-testid="message-file-attachment"
+                  className="inline-flex self-start items-center gap-1.5 rounded-full bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground"
                 >
                   <IconFile size={12} />
                   {att.name || "Attachment"}
