@@ -124,6 +124,62 @@ func TestImproveKandevWorkflowIndexMigratesFormerBroadIndex(t *testing.T) {
 	}
 }
 
+func TestImproveKandevWorkflowIndexReconcilesLegacyDuplicates(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "improve-kandev-duplicates.db")
+	openRepo := func() (*Repository, *sqlx.DB) {
+		t.Helper()
+		dbConn, err := db.OpenSQLite(dbPath)
+		if err != nil {
+			t.Fatalf("open sqlite: %v", err)
+		}
+		sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+		repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
+		if err != nil {
+			_ = sqlxDB.Close()
+			t.Fatalf("new repo: %v", err)
+		}
+		return repo, sqlxDB
+	}
+
+	repo, sqlxDB := openRepo()
+	workspaceID := "ws-improve-kandev-duplicates"
+	seedWorkspace(t, repo, workspaceID)
+	if _, err := sqlxDB.Exec(`DROP INDEX IF EXISTS uniq_improve_kandev_workflows`); err != nil {
+		t.Fatalf("drop improve kandev index: %v", err)
+	}
+	ctx := context.Background()
+	for _, id := range []string{"wf-legacy-first", "wf-legacy-second"} {
+		if err := repo.CreateWorkflow(ctx, &models.Workflow{
+			ID:                 id,
+			WorkspaceID:        workspaceID,
+			Name:               "Improve Kandev",
+			WorkflowTemplateID: strptr("improve-kandev"),
+			Hidden:             true,
+		}); err != nil {
+			t.Fatalf("create legacy duplicate %q: %v", id, err)
+		}
+	}
+	if err := sqlxDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	repo, sqlxDB = openRepo()
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	workflows, err := repo.ListWorkflows(ctx, workspaceID, true)
+	if err != nil {
+		t.Fatalf("list reconciled workflows: %v", err)
+	}
+	var matchingTemplates int
+	for _, workflow := range workflows {
+		if workflow.WorkflowTemplateID != nil && *workflow.WorkflowTemplateID == "improve-kandev" {
+			matchingTemplates++
+		}
+	}
+	if matchingTemplates != 1 {
+		t.Fatalf("improve-kandev workflow template rows = %d, want 1", matchingTemplates)
+	}
+}
+
 func TestDeleteRepositoryIfUnreferenced_PreservesTaskAdoptedRepository(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

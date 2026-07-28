@@ -74,6 +74,42 @@ func TestPostgresExecutorRunningLocalPIDMigration(t *testing.T) {
 	}
 }
 
+func TestPostgresImproveKandevWorkflowIndexMigration(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	if _, err := db.Exec(`DROP INDEX IF EXISTS uniq_improve_kandev_workflows`); err != nil {
+		t.Fatalf("drop improve kandev index: %v", err)
+	}
+	now := time.Now().UTC()
+	for _, id := range []string{"wf-pg-improve-first", "wf-pg-improve-second"} {
+		if _, err := db.Exec(db.Rebind(`
+			INSERT INTO workflows (id, workspace_id, workflow_template_id, name, hidden, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?)
+		`), id, "ws-pg-improve-kandev", "improve-kandev", "Improve Kandev", 1, now, now); err != nil {
+			t.Fatalf("seed legacy workflow %q: %v", id, err)
+		}
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("migrate legacy postgres workflow duplicates: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay postgres improve kandev migration: %v", err)
+	}
+	var count int
+	if err := db.QueryRow(db.Rebind(`
+		SELECT COUNT(*) FROM workflows
+		WHERE workspace_id = ? AND workflow_template_id = ? AND hidden = ?
+	`), "ws-pg-improve-kandev", "improve-kandev", 1).Scan(&count); err != nil {
+		t.Fatalf("count reconciled workflows: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("improve-kandev workflow template rows = %d, want 1", count)
+	}
+}
+
 func TestPostgresExecutionProfileMigration(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)
