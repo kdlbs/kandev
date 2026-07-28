@@ -9,4 +9,8 @@ describe("getKanbanColumnGridTemplate", () => {
   it("uses the same readable minimum for a single desktop lane", () => {
     expect(getKanbanColumnGridTemplate(1)).toBe("repeat(1, minmax(280px, 1fr))");
   });
+
+  it("returns a valid empty grid for zero lanes", () => {
+    expect(getKanbanColumnGridTemplate(0)).toBe("repeat(0, minmax(280px, 1fr))");
+  });
 });
