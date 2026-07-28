@@ -192,6 +192,10 @@ test.describe("Code walkthrough", () => {
     const nextNavigation = await card.getByTestId("walkthrough-navigation").boundingBox();
     if (!nextNavigation) throw new Error("walkthrough navigation missing after step change");
     expect(Math.abs(nextNavigation.y - initialNavigation.y)).toBeLessThan(1);
+    const viewport = testPage.viewportSize();
+    if (viewport) {
+      expect(nextNavigation.y + nextNavigation.height).toBeLessThanOrEqual(viewport.height);
+    }
     await expectStep(3, "WALKTHROUGH_CHANGE_B");
     await expectStep(4, "WALKTHROUGH_CHANGE_C");
     await expectStep(5, "WALKTHROUGH_UNCHANGED");
