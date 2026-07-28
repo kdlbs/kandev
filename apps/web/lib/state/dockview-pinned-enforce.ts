@@ -72,6 +72,17 @@ export type EnforcePinnedTargetsCtx = {
   envId?: string | null;
 };
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolveRightTarget(api: DockviewApi, ctx: EnforcePinnedTargetsCtx, sv: any): number {
+  const sidebarWidth = ctx.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
+  const manual = getManualRightWidth(ctx.envId ?? null);
+  return (
+    manual ??
+    getPinnedTarget("right") ??
+    resolveResponsiveRightWidth(measureDockviewGridWidth(api), sidebarWidth, null)
+  );
+}
+
 /**
  * Snap the pinned columns back to their recorded targets.
  *
@@ -114,13 +125,7 @@ export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargets
       restoreColumnToTarget(sv, 0, clamped);
     }
     if (ctx.rightPanelsVisible) {
-      const sidebarWidth = ctx.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
-      const manual = getManualRightWidth(ctx.envId ?? null);
-      const target = resolveResponsiveRightWidth(
-        measureDockviewGridWidth(api),
-        sidebarWidth,
-        manual,
-      );
+      const target = resolveRightTarget(api, ctx, sv);
       if (target > 0) {
         restoreColumnToTarget(sv, sv.length - 1, target);
       } else {

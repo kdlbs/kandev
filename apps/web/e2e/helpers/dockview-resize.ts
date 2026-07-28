@@ -182,9 +182,7 @@ export async function resizeColumnViaSplitview(
       const idx = col === "sidebar" ? 0 : sv.length - 1;
       const sash =
         col === "right"
-          ? document.querySelectorAll<HTMLElement>(".dv-sash")[
-              document.querySelectorAll(".dv-sash").length - 1
-            ]
+          ? (sv.sashes?.[sv.sashes.length - 1]?.container as HTMLElement | undefined)
           : null;
       sash?.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true }));
       sv.resizeView(idx, target);

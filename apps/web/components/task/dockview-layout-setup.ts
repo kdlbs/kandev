@@ -5,6 +5,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getRootSplitview } from "@/lib/state/dockview-layout-builders";
 import {
   computeRightMaxPx,
+  getPinnedTarget,
   LAYOUT_PINNED_MIN_PX,
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
@@ -58,6 +59,17 @@ let rightSashDragging = false;
 
 function hasPinnedRightColumn(api: DockviewReadyEvent["api"]): boolean {
   return api.groups.some((group) => [RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP].includes(group.id));
+}
+
+function refreshAutomaticRightTarget(api: DockviewReadyEvent["api"]): void {
+  const store = useDockviewStore.getState();
+  if (!hasPinnedRightColumn(api) || getManualRightWidth(store.currentLayoutEnvId) !== null) return;
+  const sv = getRootSplitview(api);
+  const sidebarWidth = store.sidebarVisible && sv?.length >= 3 ? sv.getViewSize(0) : 0;
+  setPinnedTarget(
+    "right",
+    resolveResponsiveRightWidth(measureDockviewGridWidth(api), sidebarWidth, null),
+  );
 }
 
 function isPinnedRightSash(api: DockviewReadyEvent["api"], target: EventTarget | null): boolean {
@@ -121,12 +133,11 @@ function enforcePinnedTargets(api: DockviewReadyEvent["api"], allowDuringRestore
       const maximumWidth = applyRightConstraints(api);
       const sidebarWidth = store.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
       const measuredWidth = measureDockviewGridWidth(api);
-      const target = resolveResponsiveRightWidth(
-        measuredWidth,
-        sidebarWidth,
-        getManualRightWidth(store.currentLayoutEnvId),
-      );
-      setPinnedTarget("right", target);
+      const manualRightWidth = getManualRightWidth(store.currentLayoutEnvId);
+      const target =
+        manualRightWidth ??
+        getPinnedTarget("right") ??
+        resolveResponsiveRightWidth(measuredWidth, sidebarWidth, null);
       restoreColumnToTarget(sv, sv.length - 1, target, maximumWidth);
     }
   } finally {
@@ -269,8 +280,11 @@ export function setupContainerResizeSync(api: DockviewReadyEvent["api"]): () => 
       : null;
   if (ro && parent) ro.observe(parent);
   const onWindowResize = (): void => {
-    const currentParent = getDockviewElement(api)?.parentElement;
-    if (currentParent) syncDockviewContainerSize(api, currentParent);
+    requestAnimationFrame(() => {
+      refreshAutomaticRightTarget(api);
+      const currentParent = getDockviewElement(api)?.parentElement;
+      if (currentParent) syncDockviewContainerSize(api, currentParent);
+    });
   };
   window.addEventListener("resize", onWindowResize);
   return () => {
