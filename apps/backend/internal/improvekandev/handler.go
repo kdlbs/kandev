@@ -387,30 +387,56 @@ func (h *Handler) ensureWorkflow(
 	name string,
 	description string,
 ) (*taskmodels.Workflow, error) {
-	for _, w := range existing {
-		if w.WorkflowTemplateID != nil && *w.WorkflowTemplateID == templateID {
-			// Heal records created before the workflow honored Hidden on insert.
-			// Best-effort: a DB failure here must not block the caller from getting
-			// their workflow ID, since the workflow itself is already usable.
-			if !w.Hidden {
-				if err := h.taskSvc.SetWorkflowHidden(ctx, w.ID, true); err != nil {
-					h.log.Warn("improve-kandev: failed to heal hidden flag on stale record",
-						zap.String("workflow_id", w.ID), zap.Error(err))
-				} else {
-					w.Hidden = true
-				}
-			}
-			return w, nil
-		}
+	if workflow := h.findAndHealWorkflow(ctx, existing, templateID); workflow != nil {
+		return workflow, nil
 	}
 	tmplID := templateID
-	return h.taskSvc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
+	created, err := h.taskSvc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
 		WorkspaceID:        workspaceID,
 		Name:               name,
 		Description:        description,
 		WorkflowTemplateID: &tmplID,
 		Hidden:             true,
 	})
+	if err == nil {
+		return created, nil
+	}
+
+	// A concurrent bootstrap may have inserted the same template after the
+	// initial snapshot. Re-read after a uniqueness failure and converge on the
+	// row that won the race instead of surfacing a transient 500.
+	latest, listErr := h.taskSvc.ListWorkflows(ctx, workspaceID, true)
+	if listErr == nil {
+		if workflow := h.findAndHealWorkflow(ctx, latest, templateID); workflow != nil {
+			return workflow, nil
+		}
+	}
+	return nil, err
+}
+
+func (h *Handler) findAndHealWorkflow(
+	ctx context.Context,
+	workflows []*taskmodels.Workflow,
+	templateID string,
+) *taskmodels.Workflow {
+	for _, workflow := range workflows {
+		if workflow.WorkflowTemplateID == nil || *workflow.WorkflowTemplateID != templateID {
+			continue
+		}
+		// Heal records created before the workflow honored Hidden on insert.
+		// Best-effort: a DB failure here must not block the caller from getting
+		// their workflow ID, since the workflow itself is already usable.
+		if !workflow.Hidden {
+			if err := h.taskSvc.SetWorkflowHidden(ctx, workflow.ID, true); err != nil {
+				h.log.Warn("improve-kandev: failed to heal hidden flag on stale record",
+					zap.String("workflow_id", workflow.ID), zap.Error(err))
+			} else {
+				workflow.Hidden = true
+			}
+		}
+		return workflow
+	}
+	return nil
 }
 
 // FrontendLogRequest is the JSON body for POST /bundle/frontend-log.

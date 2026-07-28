@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/improve-kandev/spec.md
 created: 2026-07-27
-status: in_progress
+status: done
 ---
 
 # Implementation Plan: Improve Kandev Dialog and Issue Reporting
@@ -168,41 +168,11 @@ skip spec/plan/task creation. See
 
 ---
 
-## Continuation Snapshot
+## Completion Snapshot
 
-Do not restart or discard the current uncommitted implementation. Resume from
-these facts:
-
-- Backend template, bootstrap response wiring, loader contract tests, frontend
-  API type, intro preference, issue tab/notice, EMU scoping, mobile menu entry,
-  and desktop/mobile E2E test drafts already exist in the worktree.
-- Confirmed passing:
-  - `cd apps/backend && go test ./config/workflows -run
-    'TestLoadTemplates_(ExpectedTemplateIDs|HiddenFlag|ReportKandevIssuePromptContract)'
-    -count=1` — 3 tests.
-  - `cd apps/backend && go test ./internal/improvekandev
-    ./config/workflows -count=1` — 43 tests.
-  - `cd apps/web && pnpm run typecheck`.
-  - `cd apps && pnpm --filter @kandev/web test -- --run
-    components/improve-kandev-dialog-helpers.test.ts` — 5 tests.
-  - Focused desktop Playwright: dismissal persistence and issue-workflow task
-    creation — both passed against a rebuilt production bundle.
-- Known continuation work:
-  - add the real bootstrap integration test;
-  - add pure frontend model/helper tests before refactoring the partial UI;
-  - resolve ESLint warnings in `CreateModeView` (complexity and nested
-    ternaries) and `MobileMenuSheet` (function length);
-  - rebuild after the mobile menu entry change and rerun the mobile spec;
-  - run the complete Improve Kandev desktop spec, not only the two focused
-    scenarios;
-  - execute the explicit repository verification and commit task.
-- The first mobile test attempt correctly proved the desktop sidebar control is
-  hidden on phones. The revised test now uses **Open menu** →
-  `mobile-improve-kandev-button`; that product entry was added afterward and
-  has not yet been rebuilt or verified.
-- This worktree initially lacked `apps/node_modules`. A filtered frozen install
-  for `@kandev/web...` succeeded after pruning the pnpm store; disk capacity was
-  nearly exhausted, so check `df -h .` before a full install/build.
+The implementation, focused tests, desktop/mobile E2E coverage, repository
+verification, review fixes, and merge-conflict resolution are complete. The PR
+is the authoritative record for the final commit and CI results.
 
 ---
 

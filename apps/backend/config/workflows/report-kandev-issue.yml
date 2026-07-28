@@ -51,6 +51,9 @@ steps:
       continue with a new issue.
 
       STEP 4: PREVIEW AND CONFIRM
+      If STEP 1 classified this as a security vulnerability, skip STEP 4 and
+      STEP 5 entirely. Point the user to the private security-advisory link
+      from the repository configuration and stop.
       Draft a title and body whose headings and answers follow the matching
       repository issue template. Show the complete public text to the user and
       use `ask_user_question_kandev` to obtain explicit publication approval.

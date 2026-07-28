@@ -37,6 +37,35 @@ func seedWorkspace(t *testing.T, repo *Repository, id string) {
 	}
 }
 
+func strptr(value string) *string { return &value }
+
+func TestCreateWorkflowRejectsDuplicateHiddenTemplatePerWorkspace(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-template-unique")
+
+	first := &models.Workflow{
+		ID:                 "wf-template-first",
+		WorkspaceID:        "ws-template-unique",
+		Name:               "Improve Kandev",
+		WorkflowTemplateID: strptr("improve-kandev"),
+		Hidden:             true,
+	}
+	if err := repo.CreateWorkflow(ctx, first); err != nil {
+		t.Fatalf("create first template workflow: %v", err)
+	}
+	duplicate := &models.Workflow{
+		ID:                 "wf-template-duplicate",
+		WorkspaceID:        first.WorkspaceID,
+		Name:               first.Name,
+		WorkflowTemplateID: strptr("improve-kandev"),
+		Hidden:             true,
+	}
+	if err := repo.CreateWorkflow(ctx, duplicate); err == nil {
+		t.Fatal("duplicate hidden template workflow was accepted")
+	}
+}
+
 func TestDeleteRepositoryIfUnreferenced_PreservesTaskAdoptedRepository(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

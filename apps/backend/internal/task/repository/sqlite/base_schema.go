@@ -82,6 +82,11 @@ func (r *Repository) ensureWorkspaceIndexes() error {
 	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_workflows_workspace_id ON workflows(workspace_id)`); err != nil {
 		return err
 	}
+	if _, err := r.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_workflows_workspace_template_hidden
+		ON workflows(workspace_id, workflow_template_id, hidden)
+		WHERE workflow_template_id <> ''`); err != nil {
+		return err
+	}
 	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived ON tasks(workspace_id, archived_at)`); err != nil {
 		return err
 	}

@@ -47,6 +47,9 @@ function bootstrapBlockedReason(bootstrap: BootstrapState): string | null {
   if (bootstrap.kind === "loading" || bootstrap.kind === "idle") {
     return "Preparing kandev repository…";
   }
+  if (bootstrap.kind === "error") {
+    return "Bootstrap failed — close and reopen to retry.";
+  }
   return null;
 }
 

@@ -57,17 +57,16 @@ Task 04.
 - Mobile exemplar:
   `apps/web/components/kanban/mobile-menu-sheet.tsx`.
 
-## Existing partial work to resume
+## Completed implementation notes
 
 - The response type, dual step loading, intro checkbox/local-storage behavior,
   issue tab/notice, workflow switching, EMU scoping, and mobile utility entry
   are already present.
 - Frontend typecheck and existing description-helper tests passed before the
   final mobile-menu edit.
-- Add failing pure-helper tests first, then extract current inline decisions.
-  Resolve these known ESLint warnings rather than suppressing them:
-  `CreateModeView` complexity/nested ternaries and `MobileMenuSheet` function
-  length.
+- Pure model tests were added before extraction, and the known ESLint
+  complexity, nested-ternary, and line-length warnings were resolved without
+  suppressions.
 
 ## Recorded implementation and verification
 
@@ -97,6 +96,10 @@ browser coverage.
 - Local-storage access can throw in restricted browser contexts.
 
 ## Output contract
+
+The shared dialog persists the intro preference safely, switches between the
+implementation and report-only workflows, and is reachable through the native
+mobile menu without stacked overlays.
 
 Update this task and `plan.md`, list the helper behavior proven test-first,
 record exact unit/typecheck/lint results, and note any remaining rendered

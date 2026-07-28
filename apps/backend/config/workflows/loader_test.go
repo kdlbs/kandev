@@ -256,6 +256,8 @@ func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
 		"gh issue create",
 		"sensitive",
 		"duplicate",
+		"skip STEP 4",
+		"security-advisory",
 	} {
 		if !strings.Contains(step.Prompt, required) {
 			t.Errorf("issue prompt must contain %q", required)

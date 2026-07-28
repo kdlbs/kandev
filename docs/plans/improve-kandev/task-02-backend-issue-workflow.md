@@ -24,7 +24,7 @@ spec: "../../specs/improve-kandev/spec.md"
 
 ```bash
 cd apps/backend && go test ./config/workflows -run 'TestLoadTemplates_(ExpectedTemplateIDs|HiddenFlag|ReportKandevIssuePromptContract)' -count=1
-cd apps/backend && go test ./internal/improvekandev -run 'TestHTTPBootstrap.*Workflows' -count=1
+cd apps/backend && go test ./internal/integration -run TestImproveKandevBootstrapCreatesBothHiddenWorkflowsIdempotently -count=1
 ```
 
 ## Files likely touched
@@ -68,6 +68,10 @@ Sequential. The response contract is consumed by Tasks 03 and 04.
   blocks.
 
 ## Output contract
+
+The bootstrap response contains stable, distinct implementation and issue
+workflow IDs; both persisted workflows are hidden and the issue workflow has a
+single auto-starting step.
 
 ## Recorded verification
 

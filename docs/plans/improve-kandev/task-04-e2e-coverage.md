@@ -47,16 +47,15 @@ build.
 - Plan: **E2E Tests** and **Continuation Snapshot**.
 - Existing fixture APIs in `apps/web/e2e/helpers/api-client.ts`.
 
-## Existing partial work to resume
+## Completed implementation notes
 
 - Desktop tests for persistence, issue task workflow, and revised EMU behavior
   are already drafted. The focused persistence and issue-submission tests
   passed individually.
 - The mobile spec is drafted. Its initial sidebar-based path failed because the
   desktop footer is hidden on phones; the test now uses the mobile menu.
-- The mobile utility entry was added after that failure and has not been
-  rebuilt or rerun. Run the normal desktop command first so the mobile
-  `--no-build` command cannot use stale assets.
+- The mobile utility entry was rebuilt and verified after the initial sidebar
+  path was corrected to use the native mobile menu.
 
 ## Recorded verification
 
@@ -77,6 +76,9 @@ commit.
   drawer-to-dialog handoff races.
 
 ## Output contract
+
+The desktop and mobile Playwright suites prove the shared flow, touch-target
+requirements, report-only workflow, and mobile containment behavior.
 
 Update this task and `plan.md`, report both exact commands and outcomes, include
 fresh failure-artifact paths if any, and state whether rendered mobile
