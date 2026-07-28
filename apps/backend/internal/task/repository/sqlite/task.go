@@ -509,7 +509,11 @@ func (r *Repository) SetTaskMetadataKey(ctx context.Context, taskID, key string,
 	} else {
 		query = `UPDATE tasks SET metadata = json_set(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?, json(?)), updated_at = ? WHERE id = ?`
 	}
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(query), key, string(payload), time.Now().UTC(), taskID)
+	path := key
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		path = jsonPath(key)
+	}
+	_, err = r.db.ExecContext(ctx, r.db.Rebind(query), path, string(payload), time.Now().UTC(), taskID)
 	return err
 }
 

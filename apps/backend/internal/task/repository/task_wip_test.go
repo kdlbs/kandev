@@ -255,3 +255,35 @@ func TestPromoteQueuedTaskIfWorkflowStepHasCapacity_ClaimsOnce(t *testing.T) {
 		t.Fatalf("promoted task state: step=%q queue=%q admitted=%t", got.WorkflowStepID, got.QueuedForStepID, got.WIPAdmitted)
 	}
 }
+
+func TestTaskMetadataKeyHelpersRoundTripNestedValue(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+	task := &models.Task{ID: "metadata-task", WorkspaceID: "metadata-workspace", Title: "Metadata"}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if err := repo.SetTaskMetadataKey(ctx, task.ID, models.MetaKeyDeferredLaunch, map[string]string{"agent_profile_id": "agent"}); err != nil {
+		t.Fatalf("set metadata key: %v", err)
+	}
+	got, err := repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload metadata task: %v", err)
+	}
+	intent, ok := got.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	if !ok || intent["agent_profile_id"] != "agent" {
+		t.Fatalf("metadata intent = %#v, want nested agent profile", got.Metadata[models.MetaKeyDeferredLaunch])
+	}
+	removed, err := repo.RemoveTaskMetadataKey(ctx, task.ID, models.MetaKeyDeferredLaunch)
+	if err != nil || !removed {
+		t.Fatalf("remove metadata key removed=%t err=%v", removed, err)
+	}
+	got, err = repo.GetTask(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("reload after metadata removal: %v", err)
+	}
+	if _, exists := got.Metadata[models.MetaKeyDeferredLaunch]; exists {
+		t.Fatalf("deferred launch metadata still present: %#v", got.Metadata)
+	}
+}
