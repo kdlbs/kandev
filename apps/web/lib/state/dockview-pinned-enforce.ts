@@ -75,12 +75,9 @@ export type EnforcePinnedTargetsCtx = {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function resolveRightTarget(api: DockviewApi, ctx: EnforcePinnedTargetsCtx, sv: any): number {
   const sidebarWidth = ctx.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
-  const manual = getManualRightWidth(ctx.envId ?? null);
-  return (
-    manual ??
-    getPinnedTarget("right") ??
-    resolveResponsiveRightWidth(measureDockviewGridWidth(api), sidebarWidth, null)
-  );
+  const persistedTarget =
+    getManualRightWidth(ctx.envId ?? null) ?? getPinnedTarget("right") ?? null;
+  return resolveResponsiveRightWidth(measureDockviewGridWidth(api), sidebarWidth, persistedTarget);
 }
 
 /**
