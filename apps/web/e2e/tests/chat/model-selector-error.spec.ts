@@ -201,7 +201,7 @@ test.describe("Chat model selector — persistence", () => {
     await expect
       .poll(async () => {
         const { sessions } = await apiClient.listTaskSessions(task.id);
-        const metadata = sessions[0]?.metadata;
+        const metadata = sessions.find((item) => item.id === task.session_id)?.metadata;
         const runtime = metadata?.runtime_config as { model?: string } | undefined;
         const selector = metadata?.acp_model_state as
           | {

@@ -362,10 +362,7 @@ function SessionTabBody({
   return <SessionTabTriggerContent props={props} {...contentProps} />;
 }
 
-/**
- * Custom dockview tab for session panels.
- * Shows agent logo, index badge, and star for primary; right-click for lifecycle actions.
- */
+/** Keeps the Dockview panel title synchronized when Dockview restores a stale title. */
 function useSessionTabTitleSync(api: IDockviewPanelHeaderProps["api"], tabTitle: string | null) {
   useEffect(() => {
     const syncTitle = () => {
@@ -377,6 +374,10 @@ function useSessionTabTitleSync(api: IDockviewPanelHeaderProps["api"], tabTitle:
   }, [tabTitle, api]);
 }
 
+/**
+ * Custom dockview tab for session panels.
+ * Shows agent logo, index badge, and star for primary; right-click for lifecycle actions.
+ */
 export function SessionTab(props: IDockviewPanelHeaderProps) {
   const { api, containerApi } = props;
   const sessionId = api.id.startsWith("session:") ? api.id.slice("session:".length) : undefined;
