@@ -27,8 +27,9 @@ test.describe("Task creation", () => {
     await kanban.goto();
     await kanban.createTaskButton.first().click();
 
-    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
-    await expect(testPage.getByTestId("workflow-selector-trigger")).toHaveCount(0);
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("workflow-selector-trigger")).toHaveCount(0);
   });
 
   test("dialog pre-selects repository, branch, and agent profile from seed data", async ({
