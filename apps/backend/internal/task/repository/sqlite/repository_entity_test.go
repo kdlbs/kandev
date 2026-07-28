@@ -96,6 +96,9 @@ func TestImproveKandevWorkflowIndexMigratesFormerBroadIndex(t *testing.T) {
 
 	repo, sqlxDB := openRepo()
 	seedWorkspace(t, repo, "ws-improve-kandev-index-replay")
+	if _, err := sqlxDB.Exec(`DROP INDEX IF EXISTS uniq_improve_kandev_workflows`); err != nil {
+		t.Fatalf("drop scoped index: %v", err)
+	}
 	if _, err := sqlxDB.Exec(`DROP INDEX IF EXISTS uniq_workflows_workspace_template_hidden`); err != nil {
 		t.Fatalf("drop index: %v", err)
 	}
@@ -110,6 +113,18 @@ func TestImproveKandevWorkflowIndexMigratesFormerBroadIndex(t *testing.T) {
 
 	repo, sqlxDB = openRepo()
 	t.Cleanup(func() { _ = sqlxDB.Close() })
+	for indexName, want := range map[string]int{
+		"uniq_workflows_workspace_template_hidden": 0,
+		"uniq_improve_kandev_workflows":            1,
+	} {
+		var got int
+		if err := sqlxDB.Get(&got, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, indexName); err != nil {
+			t.Fatalf("count %s: %v", indexName, err)
+		}
+		if got != want {
+			t.Errorf("%s count = %d, want %d", indexName, got, want)
+		}
+	}
 	ctx := context.Background()
 	for _, id := range []string{"wf-replay-first", "wf-replay-second"} {
 		if err := repo.CreateWorkflow(ctx, &models.Workflow{

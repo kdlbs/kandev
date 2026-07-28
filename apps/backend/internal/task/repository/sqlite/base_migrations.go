@@ -200,6 +200,9 @@ func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
 	if err != nil {
 		return fmt.Errorf("begin improve kandev workflow migration: %w", err)
 	}
+	// Keep this template list synchronized with every hidden Improve Kandev
+	// workflow bootstrapped by internal/improvekandev. Add new IDs to both this
+	// reconciliation query and the partial-index predicate below.
 	if _, err := tx.Exec(`
 		UPDATE workflows
 		SET workflow_template_id = ''
