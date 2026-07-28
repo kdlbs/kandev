@@ -258,7 +258,7 @@ export function WalkthroughStepInner({
       className={cn(
         "flex max-h-[calc(100dvh-2rem)] flex-col rounded-xl border border-border border-l-2 border-primary/60 bg-card shadow-lg sm:max-h-[min(78vh,720px)]",
         isFloating &&
-          "h-[calc(100dvh-1rem-var(--app-status-bar-height))] overflow-hidden sm:h-[min(78vh,720px)]",
+          "h-[calc(100dvh-1rem-var(--app-status-bar-height)-env(safe-area-inset-bottom,0px))] overflow-hidden sm:h-[min(78vh,720px)]",
       )}
     >
       <StepHeader

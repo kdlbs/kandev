@@ -113,6 +113,7 @@ test.describe("Mobile code walkthrough", () => {
     expect(Math.abs(nextNavigation.y - initialNavigation.y)).toBeLessThan(1);
     const viewport = testPage.viewportSize();
     if (!viewport) throw new Error("walkthrough viewport unavailable");
+    expect(nextNavigation.y).toBeGreaterThanOrEqual(0);
     expect(nextNavigation.y + nextNavigation.height).toBeLessThanOrEqual(viewport.height);
   });
 

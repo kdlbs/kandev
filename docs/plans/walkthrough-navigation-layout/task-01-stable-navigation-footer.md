@@ -23,8 +23,11 @@ spec: "../../specs/walkthrough-navigation-layout/spec.md"
 ## Verification
 
 ```sh
-cd apps/web && pnpm e2e:run tests/review/walkthrough.spec.ts
-cd apps/web && pnpm e2e:run tests/review/mobile-walkthrough.spec.ts -- --project=mobile-chrome
+(
+  cd apps/web
+  pnpm e2e:run tests/review/walkthrough.spec.ts
+  pnpm e2e:run tests/review/mobile-walkthrough.spec.ts -- --project=mobile-chrome
+)
 ```
 
 ## Files likely touched
@@ -55,3 +58,12 @@ together.
 Report the failing regression-test evidence, implementation files, focused
 desktop/mobile E2E results, visual verification, risks, and updated task/plan
 status.
+
+## Completion record
+
+- Desktop and `mobile-chrome` walkthrough E2E passed with stable navigation
+  geometry assertions.
+- Fresh synthetic desktop and mobile captures confirmed the footer is visible,
+  reachable, and does not overlap the viewport edge.
+- The remaining risk is browser-specific safe-area behavior; the floating
+  surface reserves `safe-area-inset-bottom` for the navigation footer.
