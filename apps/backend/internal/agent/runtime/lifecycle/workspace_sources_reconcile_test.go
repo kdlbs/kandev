@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kandev/kandev/internal/worktree"
@@ -150,7 +151,16 @@ func TestReconcileWorkspaceRepositories_RejectsFileAsRepositoryPath(t *testing.T
 
 func TestIsWorkspaceEntryName(t *testing.T) {
 	accepted := []string{"api", "libs", "my-service", "repo.git"}
-	rejected := []string{"", ".", "..", "/", `\`, "C:", "a/b", `a\b`, string(filepath.Separator)}
+	rejected := []string{"", ".", "..", "/", "a/b", string(filepath.Separator)}
+
+	// A backslash separates path elements only on Windows, and only there does a
+	// drive letter prefix a path. On Unix all three are ordinary characters in a
+	// legal single-component name, so the expectation flips with the platform.
+	if runtime.GOOS == "windows" {
+		rejected = append(rejected, `\`, "C:", `a\b`)
+	} else {
+		accepted = append(accepted, `\`, "C:", `a\b`)
+	}
 
 	for _, name := range accepted {
 		if !isWorkspaceEntryName(name) {
@@ -164,13 +174,14 @@ func TestIsWorkspaceEntryName(t *testing.T) {
 	}
 }
 
-// ".", "..", and a bare filesystem or volume root all survive a filepath.Base
-// round-trip, so they need rejecting here rather than deeper in the owned-link
-// helpers. Joining any of them resolves back to the root itself instead of to
-// an entry below it.
+// ".", ".." and a bare filesystem root all survive a filepath.Base round-trip,
+// so they need rejecting here rather than deeper in the owned-link helpers:
+// joining any of them resolves back to the root itself instead of to an entry
+// below it. Only names invalid on every platform belong here — the
+// Windows-specific ones are covered by TestIsWorkspaceEntryName.
 func TestReconcileWorkspaceRepositories_RejectsTraversalRepoName(t *testing.T) {
 	root, source := t.TempDir(), t.TempDir()
-	for _, name := range []string{".", "..", "/", `\`, "C:", string(filepath.Separator)} {
+	for _, name := range []string{".", "..", "/", string(filepath.Separator)} {
 		if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: name, RepositoryPath: source}}); err == nil {
 			t.Fatalf("RepoName %q was accepted", name)
 		}
