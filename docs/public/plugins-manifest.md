@@ -205,6 +205,12 @@ area. The table below groups every subject defined in
 e.g. `shell.output.<sessionId>`, `git.event.<sessionId>` — subscribe to the
 literal wildcard segment count that matches, e.g. `shell.output.*`).
 
+A delivered event's `event_type` (`pluginsdk.Event.EventType`) is the
+**concrete subject it was published on**, i.e. the same string your pattern
+matched — so a plugin subscribed to `shell.output.*` reads the session id off
+`event_type` as its last segment. For an unsuffixed subject that string is
+just the subject itself (`task.created`).
+
 | Domain | Events |
 |---|---|
 | Tasks | `task.created`, `task.updated`, `task.state_changed`, `task.deleted`, `task.moved`, `task.tree_hold_created`, `task.tree_hold_released` |

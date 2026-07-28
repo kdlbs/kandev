@@ -306,20 +306,36 @@ func (d *Deliverer) resubscribe(w *pluginWorker, rec PluginRecord) {
 
 // makeHandler builds the bus.EventHandler that turns a matching event into
 // a Delivery and enqueues it on w. pattern is re-checked against the
-// concrete event type via manifest.MatchSubject — the same matcher plugin
-// capabilities use elsewhere — so delivery is governed by one wildcard
-// semantics regardless of the underlying EventBus's own subscription
-// matching behavior.
+// concrete subject the event was published on via manifest.MatchSubject —
+// the same matcher plugin capabilities use elsewhere — so delivery is
+// governed by one wildcard semantics regardless of the underlying
+// EventBus's own subscription matching behavior (the memory/NATS buses also
+// honor NATS' multi-segment ">" wildcard, which manifest patterns do not).
+//
+// The re-check reads bus.Event.EffectiveSubject(), NOT event.Type: per-session
+// and per-run events are published on a suffixed subject
+// ("shell.output.<sessionId>") while event.Type stays the bare constant
+// ("shell.output"). Matching the pattern against Type made every such
+// subject undeliverable — a 3-segment pattern subscribed successfully but
+// then failed the re-check on segment count, and a 2-segment pattern passed
+// the re-check but never subscribed to the 3-segment subject.
+//
+// The concrete subject is also what the plugin receives as
+// pluginsdk.Event.EventType (documented in the proto as "bus subject"), so a
+// plugin subscribed to "shell.output.*" can read the session id off it. For
+// every unsuffixed subject the subject and the type are identical, so
+// existing 2-segment subscriptions see exactly what they saw before.
 func (d *Deliverer) makeHandler(w *pluginWorker, pattern string) bus.EventHandler {
 	return func(_ context.Context, event *bus.Event) error {
-		if !manifest.MatchSubject(pattern, event.Type) {
+		subject := event.EffectiveSubject()
+		if !manifest.MatchSubject(pattern, subject) {
 			return nil
 		}
 
 		payload, err := dataToMap(event.Data)
 		if err != nil {
 			d.log.Error("plugin delivery: failed to convert event payload",
-				zap.String("plugin_id", w.id), zap.String("event_type", event.Type), zap.Error(err))
+				zap.String("plugin_id", w.id), zap.String("event_type", subject), zap.Error(err))
 			return nil
 		}
 
@@ -327,7 +343,7 @@ func (d *Deliverer) makeHandler(w *pluginWorker, pattern string) bus.EventHandle
 			PluginID: w.id,
 			Event: &pluginsdk.Event{
 				EventID:     uuid.New().String(),
-				EventType:   event.Type,
+				EventType:   subject,
 				OccurredAt:  d.nowFn().UTC().Format(time.RFC3339),
 				WorkspaceID: workspaceIDFromData(event.Data),
 				Payload:     payload,

@@ -70,8 +70,15 @@ func NewNATSEventBus(cfg config.NATSConfig, log *logger.Logger) (*NATSEventBus, 
 	return bus, nil
 }
 
-// Publish sends an event to a subject
+// Publish sends an event to a subject.
+//
+// The concrete subject is stamped onto event.Subject before marshaling so it
+// survives the wire hop — see Event.Subject.
 func (b *NATSEventBus) Publish(ctx context.Context, subject string, event *Event) error {
+	if event != nil {
+		event.Subject = subject
+	}
+
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to marshal event: %w", err)
@@ -131,6 +138,11 @@ func (b *NATSEventBus) createMsgHandler(handler EventHandler) nats.MsgHandler {
 			)
 			return
 		}
+
+		// The delivering subject is authoritative on the receive side (a
+		// wildcard subscription resolves to the concrete subject here), so
+		// prefer it over whatever the publisher marshaled.
+		event.Subject = msg.Subject
 
 		ctx := context.Background()
 		if err := handler(ctx, &event); err != nil {
