@@ -5,10 +5,10 @@ import type { LayoutPanel } from "./types";
 //
 // Ratio applied to dockview width to compute initial defaults when no user
 // override exists. The left app sidebar now sits outside dockview, so the
-// right pane needs a larger dockview-relative ratio to preserve the old
-// laptop proportions after the app sidebar consumes horizontal space.
+// right pane uses a slightly narrower dockview-relative ratio to leave more
+// room for the main task surface on laptop-sized screens.
 export const LAYOUT_SIDEBAR_RATIO = 2.5 / 10;
-export const LAYOUT_RIGHT_RATIO = 1 / 3;
+export const LAYOUT_RIGHT_RATIO = 3 / 10;
 
 // Well-known group/panel IDs
 export const SIDEBAR_GROUP = "group-sidebar";
