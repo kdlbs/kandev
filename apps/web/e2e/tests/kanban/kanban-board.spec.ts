@@ -89,7 +89,7 @@ test.describe("Kanban board", () => {
     await card.click();
     await expect(testPage.getByTestId("task-preview-panel")).toBeVisible({ timeout: 10_000 });
     await expect(search).toBeHidden({ timeout: 5_000 });
-    await expect(stageNavigator).toBeVisible();
+    await expect(stageNavigator).toHaveCount(0);
 
     // Closing the preview restores the full kanban width and brings the
     // search back.

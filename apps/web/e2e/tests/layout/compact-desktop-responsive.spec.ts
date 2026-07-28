@@ -80,8 +80,7 @@ test.describe("compact desktop responsive layout", () => {
     const desktopLayout = testPage.getByTestId("desktop-kanban-layout");
     await expect(desktopLayout).toHaveCount(1);
     await expect(desktopLayout).toBeVisible();
-    const stageNavigator = testPage.getByTestId("desktop-kanban-stage-navigator");
-    await expect(stageNavigator).toBeVisible();
+    await expect(testPage.getByTestId("desktop-kanban-stage-navigator")).toHaveCount(0);
     await expect(testPage.getByTestId("tablet-kanban-layout")).toHaveCount(0);
     await expect(testPage.getByTestId("mobile-kanban-layout")).toHaveCount(0);
     await expect(testPage.getByRole("button", { name: "Open menu" })).toHaveCount(0);
@@ -98,9 +97,13 @@ test.describe("compact desktop responsive layout", () => {
     expect(firstColumnBox).not.toBeNull();
     expect(firstColumnBox!.width).toBeGreaterThanOrEqual(280);
 
+    const scrollWindow = testPage.getByTestId("desktop-kanban-scroll-window");
+    await expect(scrollWindow).toBeVisible();
+    await scrollWindow.evaluate((element) => {
+      element.scrollLeft = element.scrollWidth;
+    });
     const lastStep = seedData.steps.at(-1);
     expect(lastStep).toBeDefined();
-    await testPage.getByTestId(`desktop-kanban-stage-${lastStep!.id}`).click();
     await expect(kanban.columnByStepId(lastStep!.id)).toBeInViewport();
 
     const relationship = kanban.taskCard(child.id).getByTestId("task-parent-relationship");
@@ -120,10 +123,10 @@ test.describe("compact desktop responsive layout", () => {
       .toBe(true);
 
     await testPage.setViewportSize({ width: 1600, height: 800 });
-    await expect(stageNavigator).toBeHidden();
+    await expect(testPage.getByTestId("desktop-kanban-stage-navigator")).toHaveCount(0);
 
     await testPage.setViewportSize({ width: 700, height: 800 });
     await expect(testPage.getByTestId("tablet-kanban-layout")).toBeVisible();
-    await expect(stageNavigator).toHaveCount(0);
+    await expect(testPage.getByTestId("desktop-kanban-stage-navigator")).toHaveCount(0);
   });
 });

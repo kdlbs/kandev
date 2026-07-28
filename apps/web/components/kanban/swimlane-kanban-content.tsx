@@ -432,28 +432,11 @@ function DesktopKanbanLayout({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
-  activeIndex,
-  onIndexChange,
-}: SharedKanbanLayoutProps & {
-  activeIndex: number;
-  onIndexChange: (index: number) => void;
-}) {
+}: SharedKanbanLayoutProps) {
   const getTasksForStep = useTasksByStep(tasks);
-  const taskCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const step of steps) {
-      counts[step.id] = tasks.filter((task) => task.workflowStepId === step.id).length;
-    }
-    return counts;
-  }, [steps, tasks]);
 
   return (
-    <AdaptiveDesktopKanban
-      steps={steps}
-      taskCounts={taskCounts}
-      activeIndex={activeIndex}
-      onActiveIndexChange={onIndexChange}
-    >
+    <AdaptiveDesktopKanban steps={steps}>
       {steps.map((step) => (
         <KanbanColumn
           key={step.id}
@@ -515,13 +498,7 @@ function renderKanbanLayout({
   if (isTablet) {
     return <TabletKanbanLayout {...sharedProps} />;
   }
-  return (
-    <DesktopKanbanLayout
-      {...sharedProps}
-      activeIndex={activeIndex}
-      onIndexChange={setActiveIndex}
-    />
-  );
+  return <DesktopKanbanLayout {...sharedProps} />;
 }
 
 export function SwimlaneKanbanContent({
