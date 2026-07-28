@@ -6,6 +6,7 @@ const mockMarkSessionRead = vi.fn();
 const mockUpdateSessionReadCursor = vi.fn();
 
 type MockState = {
+  userSettings: { unreadDivider: boolean };
   taskSessions: { items: Record<string, TaskSession> };
   updateSessionReadCursor: typeof mockUpdateSessionReadCursor;
 };
@@ -41,6 +42,7 @@ afterEach(cleanup);
 beforeEach(() => {
   vi.clearAllMocks();
   mockState = {
+    userSettings: { unreadDivider: true },
     taskSessions: { items: {} },
     updateSessionReadCursor: mockUpdateSessionReadCursor,
   };
@@ -56,6 +58,17 @@ describe("useSessionReadTracking", () => {
     expect(mockMarkSessionRead).not.toHaveBeenCalled();
   });
 
+  it("returns null and does not mark the session read when the user disables the divider", async () => {
+    mockState.userSettings.unreadDivider = false;
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    const { result } = renderHook(() => useSessionReadTracking("session-1", true, "m2"));
+
+    expect(result.current).toBeNull();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockMarkSessionRead).not.toHaveBeenCalled();
+  });
   it("does not capture an anchor before the session record has loaded into the store, capturing correctly once it does", async () => {
     // Session absent entirely (still fetching) — must not treat this the
     // same as "loaded, and legitimately has no prior cursor" (see the

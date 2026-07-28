@@ -82,6 +82,7 @@ function buildBehaviorSettings(state: AppState, payload: UserSettingsUpdatedPayl
     chatSubmitKey: (payload.chat_submit_key as "enter" | "cmd_enter") ?? "cmd_enter",
     reviewAutoMarkOnScroll: payload.review_auto_mark_on_scroll ?? true,
     confirmTaskArchive: payload.confirm_task_archive ?? true,
+    unreadDivider: payload.unread_divider ?? true,
     mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(
       payload.mcp_task_agent_profile_default,
     ),

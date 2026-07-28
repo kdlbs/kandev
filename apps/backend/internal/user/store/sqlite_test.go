@@ -92,6 +92,30 @@ func TestScanUserSettingsConfirmTaskArchiveDefault(t *testing.T) {
 	}
 }
 
+func TestScanUserSettingsUnreadDividerDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "empty settings enable the divider", raw: `{}`, want: true},
+		{name: "missing setting enables the divider", raw: `{"chat_submit_key":"enter"}`, want: true},
+		{name: "explicit false disables the divider", raw: `{"unread_divider":false}`, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.UnreadDivider != tt.want {
+				t.Fatalf("UnreadDivider = %v, want %v", settings.UnreadDivider, tt.want)
+			}
+		})
+	}
+}
+
 func TestScanUserSettingsMCPTaskAgentProfileDefault(t *testing.T) {
 	tests := []struct {
 		name string

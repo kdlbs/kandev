@@ -184,6 +184,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
+  const unreadDividerEnabled = useAppStore((state) => state.userSettings.unreadDivider);
   // The Slack-style read cursor advances to the newest message actually
   // represented in groupedItems (not the raw backend `messages` list) so it
   // always names a message findUnreadDividerItemId can find among the same

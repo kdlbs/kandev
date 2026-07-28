@@ -22,8 +22,8 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 		t.Errorf("env = %q, want %q (no selector env vars set)", env, EnvProd)
 	}
 	// Prod writes each registered feature flag with its safe shipped default.
-	if count != 5 {
-		t.Errorf("ApplyProfile wrote %d vars in prod; want 5", count)
+	if count != 4 {
+		t.Errorf("ApplyProfile wrote %d vars in prod; want 4", count)
 	}
 	if v := os.Getenv("KANDEV_FEATURES_OFFICE"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_OFFICE = %q after prod ApplyProfile; want %q", v, "false")

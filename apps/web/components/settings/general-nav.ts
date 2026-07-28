@@ -56,7 +56,7 @@ export const GENERAL_NAV_ITEMS: GeneralNavItem[] = [
   {
     href: "/settings/general/task-actions",
     label: "Task Actions",
-    description: "MCP task defaults and archive safeguards",
+    description: "MCP task defaults, archive safeguards, and transcript preferences",
     icon: IconArchive,
   },
 ];

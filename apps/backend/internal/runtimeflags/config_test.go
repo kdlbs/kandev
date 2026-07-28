@@ -91,7 +91,6 @@ func TestOptionsFromConfigParsesClaudeBackgroundPromptHandoffEnv(t *testing.T) {
 		t.Fatal("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF TRUE parsed false, want true")
 	}
 }
-
 func TestValuesFromConfigIncludesPlugins(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Features.Plugins = true
@@ -164,7 +163,6 @@ func TestApplyStatesToConfigSetsClaudeBackgroundPromptHandoff(t *testing.T) {
 		t.Fatal("ApplyStatesToConfig did not set Features.ClaudeBackgroundPromptHandoff = true")
 	}
 }
-
 func TestApplyStatesToConfigMarksImpliedDebugEnvAsApplied(t *testing.T) {
 	for _, name := range []string{
 		"KANDEV_DEBUG_PPROF_ENABLED",

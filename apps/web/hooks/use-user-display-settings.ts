@@ -88,6 +88,7 @@ function carryForwardAppStatusSettings(current: DisplaySettings) {
 function carryForwardTaskActionSettings(current: DisplaySettings) {
   return {
     confirmTaskArchive: current.confirmTaskArchive ?? true,
+    unreadDivider: current.unreadDivider ?? true,
     mcpTaskAgentProfileDefault: current.mcpTaskAgentProfileDefault ?? "current_task",
   };
 }

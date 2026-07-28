@@ -247,6 +247,7 @@ function mapEditorBehaviorFields(
     chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
     confirmTaskArchive: s.confirm_task_archive ?? true,
+    unreadDivider: s.unread_divider ?? true,
     mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(s.mcp_task_agent_profile_default),
     showReleaseNotification: s.show_release_notification ?? true,
     releaseNotesLastSeenVersion: (s.release_notes_last_seen_version as string) || null,

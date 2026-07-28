@@ -456,6 +456,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"chatSubmitKey":               defaultString(settings.ChatSubmitKey, "cmd_enter"),
 		"reviewAutoMarkOnScroll":      settings.ReviewAutoMarkOnScroll,
 		"confirmTaskArchive":          settings.ConfirmTaskArchive,
+		"unreadDivider":               settings.UnreadDivider,
 		"mcpTaskAgentProfileDefault":  usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"showReleaseNotification":     settings.ShowReleaseNotification,
 		"releaseNotesLastSeenVersion": nullString(settings.ReleaseNotesLastSeenVersion),

@@ -180,6 +180,7 @@ export type UserSettingsState = {
   chatSubmitKey: "enter" | "cmd_enter";
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;
+  unreadDivider: boolean;
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;

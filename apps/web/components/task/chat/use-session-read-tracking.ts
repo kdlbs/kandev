@@ -51,6 +51,7 @@ export function useSessionReadTracking(
 ): string | null {
   const store = useAppStoreApi();
   const updateSessionReadCursor = useAppStore((state) => state.updateSessionReadCursor);
+  const unreadDividerEnabled = useAppStore((state) => state.userSettings.unreadDivider);
   // Reactive (not store.getState()) so a session that hasn't loaded into the
   // store yet at mount — e.g. mobile, where isVisible defaults to true from
   // the very first render (see TaskChatPanelProps), unlike the dockview host

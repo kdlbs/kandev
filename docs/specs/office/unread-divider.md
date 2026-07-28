@@ -19,6 +19,12 @@ UI alone.
 
 ## What
 
+- Each user can enable or disable the divider from **Settings > General > Task
+  Actions > Unread Messages**. It defaults **on** and takes effect immediately:
+  when disabled, the frontend does not compute or render a divider, the message
+  list performs its normal scroll behavior, and `useSessionReadTracking` does
+  not dispatch `POST /task-sessions/:id/mark-read`; existing
+  `last_read_message_id` values remain stored for a future re-enable.
 - Each `task_sessions` row carries one `last_read_message_id` column — the
   ID of the newest message the session has "seen." This is **session-global,
   not per-user or per-device**: kandev tasks do not currently model multiple

@@ -30,6 +30,7 @@ type UserSettingsDTO struct {
 	ChatSubmitKey               string                              `json:"chat_submit_key"`
 	ReviewAutoMarkOnScroll      bool                                `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive          bool                                `json:"confirm_task_archive"`
+	UnreadDivider               bool                                `json:"unread_divider"`
 	MCPTaskAgentProfileDefault  string                              `json:"mcp_task_agent_profile_default"`
 	ShowReleaseNotification     bool                                `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion string                              `json:"release_notes_last_seen_version"`
@@ -90,6 +91,7 @@ type UpdateUserSettingsRequest struct {
 	ChatSubmitKey               *string                            `json:"chat_submit_key,omitempty"`
 	ReviewAutoMarkOnScroll      *bool                              `json:"review_auto_mark_on_scroll,omitempty"`
 	ConfirmTaskArchive          *bool                              `json:"confirm_task_archive,omitempty"`
+	UnreadDivider               *bool                              `json:"unread_divider,omitempty"`
 	MCPTaskAgentProfileDefault  *string                            `json:"mcp_task_agent_profile_default,omitempty"`
 	ShowReleaseNotification     *bool                              `json:"show_release_notification,omitempty"`
 	ReleaseNotesLastSeenVersion *string                            `json:"release_notes_last_seen_version,omitempty"`
@@ -211,6 +213,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ChatSubmitKey:               settings.ChatSubmitKey,
 		ReviewAutoMarkOnScroll:      settings.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:          settings.ConfirmTaskArchive,
+		UnreadDivider:               settings.UnreadDivider,
 		MCPTaskAgentProfileDefault:  models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		ShowReleaseNotification:     settings.ShowReleaseNotification,
 		ReleaseNotesLastSeenVersion: settings.ReleaseNotesLastSeenVersion,

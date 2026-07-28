@@ -58,6 +58,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		ChatSubmitKey:               req.ChatSubmitKey,
 		ReviewAutoMarkOnScroll:      req.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:          req.ConfirmTaskArchive,
+		UnreadDivider:               req.UnreadDivider,
 		MCPTaskAgentProfileDefault:  req.MCPTaskAgentProfileDefault,
 		ShowReleaseNotification:     req.ShowReleaseNotification,
 		ReleaseNotesLastSeenVersion: req.ReleaseNotesLastSeenVersion,

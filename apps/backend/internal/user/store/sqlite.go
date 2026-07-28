@@ -456,6 +456,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"chat_submit_key":                 settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":      settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":            settings.ConfirmTaskArchive,
+		"unread_divider":                  settings.UnreadDivider,
 		"mcp_task_agent_profile_default":  models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_release_notification":       settings.ShowReleaseNotification,
 		"release_notes_last_seen_version": settings.ReleaseNotesLastSeenVersion,
@@ -575,6 +576,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ShowReleaseNotification = true
 		settings.ReviewAutoMarkOnScroll = true
 		settings.ConfirmTaskArchive = true
+		settings.UnreadDivider = true
 		settings.MCPTaskAgentProfileDefault = models.MCPTaskAgentProfileDefaultCurrentTask
 		settings.ChatSubmitKey = "cmd_enter"
 		settings.KeyboardShortcuts = map[string]interface{}{}
@@ -601,6 +603,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ChatSubmitKey               string                              `json:"chat_submit_key"`
 		ReviewAutoMarkOnScroll      *bool                               `json:"review_auto_mark_on_scroll"`
 		ConfirmTaskArchive          *bool                               `json:"confirm_task_archive"`
+		UnreadDivider               *bool                               `json:"unread_divider"`
 		MCPTaskAgentProfileDefault  string                              `json:"mcp_task_agent_profile_default"`
 		ShowReleaseNotification     *bool                               `json:"show_release_notification"`
 		ReleaseNotesLastSeenVersion string                              `json:"release_notes_last_seen_version"`
@@ -658,6 +661,11 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ConfirmTaskArchive = *payload.ConfirmTaskArchive
 	} else {
 		settings.ConfirmTaskArchive = true
+	}
+	if payload.UnreadDivider != nil {
+		settings.UnreadDivider = *payload.UnreadDivider
+	} else {
+		settings.UnreadDivider = true
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowReleaseNotification != nil {
