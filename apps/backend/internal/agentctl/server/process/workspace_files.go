@@ -865,12 +865,14 @@ func calculateSHA256(content string) string {
 // scoredMatch holds a file path, repository identity, and match score for sorting.
 type scoredMatch struct {
 	path           string
+	matchPath      string
 	repositoryName string
 	score          int
 }
 
 type fileSearchCandidate struct {
 	path           string
+	matchPath      string
 	repositoryName string
 }
 
@@ -937,7 +939,10 @@ func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
 	wt.mu.RLock()
 	candidates := make([]fileSearchCandidate, 0, len(wt.currentFiles.Files))
 	for _, file := range wt.currentFiles.Files {
-		candidates = append(candidates, fileSearchCandidate{path: file.Path})
+		candidates = append(candidates, fileSearchCandidate{
+			path:      file.Path,
+			matchPath: file.Path,
+		})
 	}
 	wt.mu.RUnlock()
 
@@ -986,6 +991,7 @@ func appendTrackerFileSearchCandidates(
 		}
 		candidates = append(candidates, fileSearchCandidate{
 			path:           path,
+			matchPath:      file.Path,
 			repositoryName: repository,
 		})
 	}
@@ -1011,7 +1017,11 @@ func searchFileCandidates(
 		if isRootOwnershipMarkerPath(candidate.path) {
 			continue
 		}
-		lowerPath := strings.ToLower(candidate.path)
+		matchPath := candidate.matchPath
+		if matchPath == "" {
+			matchPath = candidate.path
+		}
+		lowerPath := strings.ToLower(matchPath)
 		name := filepath.Base(lowerPath)
 
 		score := 0
@@ -1029,6 +1039,7 @@ func searchFileCandidates(
 		if score > 0 {
 			matches = append(matches, scoredMatch{
 				path:           candidate.path,
+				matchPath:      matchPath,
 				repositoryName: candidate.repositoryName,
 				score:          score,
 			})
@@ -1041,7 +1052,7 @@ func searchFileCandidates(
 			return matches[i].score > matches[j].score
 		}
 		// Secondary sort by path length (shorter paths first)
-		return len(matches[i].path) < len(matches[j].path)
+		return len(matches[i].matchPath) < len(matches[j].matchPath)
 	})
 
 	// Return top limit results

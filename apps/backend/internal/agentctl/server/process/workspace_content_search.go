@@ -22,14 +22,22 @@ const (
 	workspaceContentSearchPreviewRunes  = 300
 	workspaceContentSearchReadBuffer    = 32 * 1024
 	workspaceContentContiguousScoreBase = 1_000_000_000
+	workspaceContentSearchCancelRunes   = 1_024
+	workspaceContentSearchFuzzyMaxSteps = 250_000
 )
 
 // ErrContentSearchQueryTooLong indicates that the query exceeds the public limit.
 var ErrContentSearchQueryTooLong = errors.New("content search query exceeds 200 characters")
 
+var errContentSearchFuzzyWorkLimit = errors.New("content search fuzzy work limit reached")
+
 type contentLineMatch struct {
 	score     int
 	positions []int
+}
+
+type contentSearchFuzzyWork struct {
+	steps int
 }
 
 type scoredContentSearchResult struct {
@@ -221,7 +229,10 @@ func (wt *WorkspaceTracker) searchContentFile(
 		}
 		lineBytes = bytes.TrimSuffix(lineBytes, []byte{'\r'})
 		lineRunes := []rune(string(lineBytes))
-		match, ok := bestContentLineMatch(lineRunes, query)
+		match, ok, err := bestContentLineMatch(ctx, lineRunes, query)
+		if err != nil {
+			return nil, err
+		}
 		if !ok {
 			continue
 		}
@@ -234,25 +245,41 @@ func (wt *WorkspaceTracker) searchContentFile(
 	return ranked, nil
 }
 
-func bestContentLineMatch(line, query []rune) (contentLineMatch, bool) {
+func bestContentLineMatch(
+	ctx context.Context,
+	line, query []rune,
+) (contentLineMatch, bool, error) {
 	if len(query) == 0 || len(line) < len(query) {
-		return contentLineMatch{}, false
+		return contentLineMatch{}, false, nil
+	}
+	if err := ctx.Err(); err != nil {
+		return contentLineMatch{}, false, err
 	}
 	foldedLine := foldRunes(line)
-	if match, ok := bestContiguousContentMatch(line, foldedLine, query); ok {
-		return match, true
+	match, ok, err := bestContiguousContentMatch(ctx, line, foldedLine, query)
+	if err != nil {
+		return contentLineMatch{}, false, err
 	}
-	return bestSubsequenceContentMatch(line, foldedLine, query)
+	if ok {
+		return match, true, nil
+	}
+	return bestSubsequenceContentMatch(ctx, line, foldedLine, query)
 }
 
 func bestContiguousContentMatch(
+	ctx context.Context,
 	line, foldedLine, query []rune,
-) (contentLineMatch, bool) {
+) (contentLineMatch, bool, error) {
 	bestStart, bestScore := 0, 0
 	found := false
 	queryIndex := 0
 	prefixes := contentSearchPrefixTable(query)
 	for lineIndex, item := range foldedLine {
+		if lineIndex%workspaceContentSearchCancelRunes == 0 {
+			if err := ctx.Err(); err != nil {
+				return contentLineMatch{}, false, err
+			}
+		}
 		for queryIndex > 0 && item != query[queryIndex] {
 			queryIndex = prefixes[queryIndex-1]
 		}
@@ -273,21 +300,38 @@ func bestContiguousContentMatch(
 		queryIndex = prefixes[queryIndex-1]
 	}
 	if !found {
-		return contentLineMatch{}, false
+		return contentLineMatch{}, false, nil
 	}
 	return contentLineMatch{
 		score:     bestScore,
 		positions: contiguousPositions(bestStart, len(query)),
-	}, true
+	}, true, nil
 }
 
 func bestSubsequenceContentMatch(
+	ctx context.Context,
 	line, foldedLine, query []rune,
-) (contentLineMatch, bool) {
+) (contentLineMatch, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return contentLineMatch{}, false, err
+	}
 	best := contentLineMatch{}
 	found := false
+	work := contentSearchFuzzyWork{}
 	for cursor := 0; cursor < len(foldedLine); {
-		positions, ok := nextSubsequenceContentPositions(foldedLine, query, cursor)
+		positions, ok, err := nextSubsequenceContentPositions(
+			ctx,
+			foldedLine,
+			query,
+			cursor,
+			&work,
+		)
+		if errors.Is(err, errContentSearchFuzzyWorkLimit) {
+			break
+		}
+		if err != nil {
+			return contentLineMatch{}, false, err
+		}
 		if !ok {
 			break
 		}
@@ -298,17 +342,22 @@ func bestSubsequenceContentMatch(
 		}
 		cursor = positions[0] + 1
 	}
-	return best, found
+	return best, found, nil
 }
 
 func nextSubsequenceContentPositions(
+	ctx context.Context,
 	line, query []rune,
 	start int,
-) ([]int, bool) {
+	work *contentSearchFuzzyWork,
+) ([]int, bool, error) {
 	positions := make([]int, 0, len(query))
 	queryIndex := 0
 	end := -1
 	for position := start; position < len(line); position++ {
+		if err := work.consume(ctx); err != nil {
+			return nil, false, err
+		}
 		if line[position] != query[queryIndex] {
 			continue
 		}
@@ -319,11 +368,14 @@ func nextSubsequenceContentPositions(
 		}
 	}
 	if end < 0 {
-		return nil, false
+		return nil, false, nil
 	}
 	positions = positions[:len(query)]
 	queryIndex = len(query) - 1
 	for position := end; position >= start; position-- {
+		if err := work.consume(ctx); err != nil {
+			return nil, false, err
+		}
 		if line[position] != query[queryIndex] {
 			continue
 		}
@@ -333,7 +385,23 @@ func nextSubsequenceContentPositions(
 			break
 		}
 	}
-	return positions, true
+	return positions, true, nil
+}
+
+func (work *contentSearchFuzzyWork) consume(ctx context.Context) error {
+	if work.steps >= workspaceContentSearchFuzzyMaxSteps {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return errContentSearchFuzzyWorkLimit
+	}
+	if work.steps%workspaceContentSearchCancelRunes == 0 {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+	}
+	work.steps++
+	return nil
 }
 
 func scoreSubsequenceContentMatch(line []rune, positions []int) int {

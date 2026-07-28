@@ -49,11 +49,17 @@ func TestContentSearchAlwaysRanksContiguousAboveSubsequence(t *testing.T) {
 	exactLine := []rune(strings.Repeat("x", 1_100_000) + "needle")
 	fuzzyLine := []rune("n_e_e_d_l_e")
 
-	exact, ok := bestContentLineMatch(exactLine, query)
+	exact, ok, err := bestContentLineMatch(context.Background(), exactLine, query)
+	if err != nil {
+		t.Fatalf("bestContentLineMatch returned error: %v", err)
+	}
 	if !ok {
 		t.Fatal("long-line contiguous match was not found")
 	}
-	fuzzy, ok := bestContentLineMatch(fuzzyLine, query)
+	fuzzy, ok, err := bestContentLineMatch(context.Background(), fuzzyLine, query)
+	if err != nil {
+		t.Fatalf("bestContentLineMatch returned error: %v", err)
+	}
 	if !ok {
 		t.Fatal("subsequence match was not found")
 	}
@@ -64,13 +70,74 @@ func TestContentSearchAlwaysRanksContiguousAboveSubsequence(t *testing.T) {
 
 func TestBestSubsequenceContentMatchChoosesTightestOverlappingCandidate(t *testing.T) {
 	line := []rune("a___aa")
-	match, ok := bestSubsequenceContentMatch(line, foldRunes(line), foldRunes([]rune("aa")))
+	match, ok, err := bestSubsequenceContentMatch(
+		context.Background(),
+		line,
+		foldRunes(line),
+		foldRunes([]rune("aa")),
+	)
+	if err != nil {
+		t.Fatalf("bestSubsequenceContentMatch returned error: %v", err)
+	}
 	if !ok {
 		t.Fatal("subsequence match was not found")
 	}
 	if got := match.positions; len(got) != 2 || got[0] != 4 || got[1] != 5 {
 		t.Fatalf("positions = %v, want tightest overlapping match [4 5]", got)
 	}
+}
+
+func TestBestSubsequenceContentMatchChecksCancellationDuringMatching(t *testing.T) {
+	base, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	ctx := &cancelOnErrCheckContext{
+		Context:         base,
+		cancel:          cancel,
+		checksRemaining: 2,
+	}
+	line := []rune(strings.Repeat("a_", 2_000))
+
+	_, _, err := bestSubsequenceContentMatch(
+		ctx,
+		line,
+		foldRunes(line),
+		foldRunes([]rune("aa")),
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("bestSubsequenceContentMatch error = %v, want context.Canceled", err)
+	}
+}
+
+func TestBestSubsequenceContentMatchBoundsPathologicalLongLineWork(t *testing.T) {
+	const expectedFuzzyWorkLimit = 250_000
+	line := []rune(strings.Repeat("x", expectedFuzzyWorkLimit+1) + "a_b")
+
+	_, ok, err := bestSubsequenceContentMatch(
+		context.Background(),
+		line,
+		foldRunes(line),
+		foldRunes([]rune("ab")),
+	)
+	if err != nil {
+		t.Fatalf("bestSubsequenceContentMatch returned error: %v", err)
+	}
+	if ok {
+		t.Fatal("fuzzy match beyond the bounded work limit should be skipped")
+	}
+}
+
+type cancelOnErrCheckContext struct {
+	context.Context
+	cancel          context.CancelFunc
+	checksRemaining int
+}
+
+func (ctx *cancelOnErrCheckContext) Err() error {
+	ctx.checksRemaining--
+	if ctx.checksRemaining <= 0 {
+		ctx.cancel()
+	}
+	return ctx.Context.Err()
 }
 
 func TestWorkspaceTrackerSearchContentUsesGitFileSetAndSkipsUnsafeOrBinaryFiles(t *testing.T) {
