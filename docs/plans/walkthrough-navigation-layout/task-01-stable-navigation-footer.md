@@ -24,6 +24,7 @@ spec: "../../specs/walkthrough-navigation-layout/spec.md"
 
 ```sh
 (
+  set -e
   cd apps/web
   pnpm e2e:run tests/review/walkthrough.spec.ts
   pnpm e2e:run tests/review/mobile-walkthrough.spec.ts -- --project=mobile-chrome
