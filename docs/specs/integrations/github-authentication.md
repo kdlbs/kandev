@@ -60,6 +60,11 @@ automation under different GitHub Apps without operating separate Kandev deploym
   only in memory. PAT/CLI tokens retain their provider-granted scope once delivered to a trusted
   agent subprocess. GitHub HTTPS and the broker-aware `gh` shim fail closed rather than consulting
   another ambient helper after a managed-helper failure.
+- Under managed routing, every authorized task execution surface receives the same current
+  task-scoped Git environment: the agent subprocess, terminal shells, passthrough-agent PTYs, and
+  task-scoped command processes. This includes the broker contract, managed indexed Git
+  configuration, and the `agentctl`/`gh` shim-first `PATH`; it does not grant access to a browser
+  client, an unrelated host shell, or another workspace's task environment.
 - Kandev composes the indexed `GIT_CONFIG_COUNT` / `GIT_CONFIG_KEY_<n>` /
   `GIT_CONFIG_VALUE_<n>` protocol across host, executor, profile, task, and agentctl boundaries.
   Unrelated entries such as hooks, notes, safe-directory, and URL-rewrite settings survive in their
@@ -360,6 +365,9 @@ post-signature processing failures produce `failing`; a later valid successful d
   prompts, and activates Kandev's `agentctl`/`gh` tool directory only for broker-enabled task
   instances. It does not claim to prevent a host-authority agent from manually switching a remote
   to SSH or invoking another credential-bearing tool.
+- The effective task Git environment is runtime-only. It is copied only after the existing
+  task/session or task-environment ownership check, is never persisted in task metadata or terminal
+  records, and is never written to logs, errors, browser payloads, or process arguments.
 - Indexed Git configuration is validated and composed as a single ordered block at environment
   merge boundaries. Kandev never replaces a complete inherited block merely by assigning its own
   `GIT_CONFIG_COUNT`; managed helper reset semantics are expressed as later Git config entries.
@@ -379,6 +387,9 @@ post-signature processing failures produce `failing`; a later valid successful d
   account; selecting another stored login fails with guidance to activate it or upgrade the CLI.
 - If the managed `agentctl` helper, broker, or `gh` shim is unavailable, the command fails with a
   managed-credential error and does not fall through to another HTTPS helper or interactive prompt.
+- If an authorized task terminal, passthrough PTY, or task-scoped command cannot receive its
+  effective managed Git environment, Kandev fails that process start before it runs the requested
+  command. It does not silently fall back to an ambient credential helper or host `gh` login.
 - If any environment source supplies a malformed or unreasonably large indexed Git configuration,
   task environment preparation fails with a sanitized configuration error rather than silently
   truncating, partially merging, or executing a different block.
@@ -457,6 +468,12 @@ registration and never creates a global default.
 - **GIVEN** a named CLI workspace in managed mode, **WHEN** a task launches, **THEN** Kandev resolves
   the selected host/login, makes both managed `git` and `gh` available in standalone and remote
   runtimes, and does not depend on the host's currently active CLI account.
+- **GIVEN** an authorized user opens a terminal, uses a passthrough-agent PTY, or starts a
+  task-scoped command in a managed task, **WHEN** it accesses an attached GitHub repository,
+  **THEN** it receives the same task-scoped broker helper and `gh` shim environment as the agent
+  subprocess.
+- **GIVEN** an unauthorised user or a terminal for another task environment, **WHEN** it attempts to
+  open a terminal or start a process, **THEN** it cannot receive the managed task Git environment.
 - **GIVEN** a workspace selects executor inheritance, **WHEN** a Local/Worktree or remote task
   launches, **THEN** Kandev injects no broker helper/shim and the task uses host-visible or
   executor-configured credentials respectively.
@@ -505,7 +522,8 @@ registration and never creates a global default.
   token, or live installation token in logs, API snapshots, redirects, process arguments, or
   executor environments.
 - Standalone, container, and remote task tests prove the managed helper is discoverable only for
-  broker-enabled instances, while executor inheritance receives no Kandev GitHub helper/shim.
+  broker-enabled instances and their authorized task terminals/processes, while executor
+  inheritance receives no Kandev GitHub helper/shim.
 - A real Git subprocess test proves that host/executor indexed hooks and notes config survive
   managed credential injection, and focused tests prove ordered composition and overlap handling
   across standalone, container, and remote launch shapes.
@@ -530,7 +548,8 @@ See [the original authentication implementation plan](../../plans/github-authent
 and the
 [task Git credential policy follow-up plan](../../plans/task-git-credential-policy/plan.md), plus
 the
-[executor clone transport repair plan](../../plans/github-executor-clone-transport/plan.md).
+[executor clone transport repair plan](../../plans/github-executor-clone-transport/plan.md), and
+the [managed task terminal environment plan](../../plans/task-terminal-git-environment/plan.md).
 
 ## Decision
 

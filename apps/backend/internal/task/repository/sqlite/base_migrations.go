@@ -175,6 +175,9 @@ func (r *Repository) runMigrations() error {
 	// file path it was synced from.
 	r.migrate.Apply("workflows.source", `ALTER TABLE workflows ADD COLUMN source TEXT NOT NULL DEFAULT 'manual'`)
 	r.migrate.Apply("workflows.source_path", `ALTER TABLE workflows ADD COLUMN source_path TEXT NOT NULL DEFAULT ''`)
+	if err := r.ensureImproveKandevWorkflowTemplateUniqueness(); err != nil {
+		return err
+	}
 
 	// Native code review — indexes for the task_review_* tables. Declared here
 	// rather than in initTaskReviewSchema because schema init is a no-op on an
@@ -190,6 +193,55 @@ func (r *Repository) runMigrations() error {
 	// repo hasn't run yet.
 	r.ensureRunnerProjectionTables()
 
+	return nil
+}
+
+// ensureImproveKandevWorkflowTemplateUniqueness removes the broad index from
+// the initial implementation, reconciles legacy bootstrap duplicates, then
+// enforces uniqueness only for the two hidden workflows created by this flow.
+func (r *Repository) ensureImproveKandevWorkflowTemplateUniqueness() error {
+	tx, err := r.db.Beginx()
+	if err != nil {
+		return fmt.Errorf("begin improve kandev workflow migration: %w", err)
+	}
+	// Keep this template list synchronized with every hidden Improve Kandev
+	// workflow bootstrapped by internal/improvekandev. Add new IDs to both this
+	// reconciliation query and the partial-index predicate below.
+	if _, err := tx.Exec(`
+		UPDATE workflows
+		SET workflow_template_id = ''
+		WHERE id IN (
+			SELECT duplicate.id
+			FROM workflows AS duplicate
+			WHERE duplicate.workflow_template_id IN ('improve-kandev', 'report-kandev-issue')
+				AND EXISTS (
+					SELECT 1
+					FROM workflows AS canonical
+					WHERE canonical.workspace_id = duplicate.workspace_id
+						AND canonical.workflow_template_id = duplicate.workflow_template_id
+						AND canonical.hidden = duplicate.hidden
+						AND (
+							canonical.created_at < duplicate.created_at
+							OR (canonical.created_at = duplicate.created_at AND canonical.id < duplicate.id)
+						)
+				)
+		)`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("reconcile improve kandev workflow duplicates: %w", err)
+	}
+	if _, err := tx.Exec(`DROP INDEX IF EXISTS uniq_workflows_workspace_template_hidden`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("drop broad workflow template index: %w", err)
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_improve_kandev_workflows
+		ON workflows(workspace_id, workflow_template_id, hidden)
+		WHERE workflow_template_id IN ('improve-kandev', 'report-kandev-issue')`); err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("create improve kandev workflow index: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit improve kandev workflow migration: %w", err)
+	}
 	return nil
 }
 

@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/workflow/models"
@@ -168,14 +169,15 @@ func TestLoadTemplates_ExpectedTemplateIDs(t *testing.T) {
 	}
 
 	expected := map[string]bool{
-		"simple":         false,
-		"standard":       false,
-		"architecture":   false,
-		"pr-review":      false,
-		"feature-dev":    false,
-		"improve-kandev": false,
-		"office-default": false,
-		"routine":        false,
+		"simple":              false,
+		"standard":            false,
+		"architecture":        false,
+		"pr-review":           false,
+		"feature-dev":         false,
+		"improve-kandev":      false,
+		"report-kandev-issue": false,
+		"office-default":      false,
+		"routine":             false,
 	}
 
 	for _, tmpl := range templates {
@@ -205,7 +207,7 @@ func TestLoadTemplates_HiddenFlag(t *testing.T) {
 		hiddenByID[tmpl.ID] = tmpl.Hidden
 	}
 
-	for _, id := range []string{"improve-kandev", "office-default", "routine"} {
+	for _, id := range []string{"improve-kandev", "report-kandev-issue", "office-default", "routine"} {
 		if !hiddenByID[id] {
 			t.Errorf("expected template %q to be hidden", id)
 		}
@@ -213,6 +215,52 @@ func TestLoadTemplates_HiddenFlag(t *testing.T) {
 	for _, id := range []string{"simple", "standard", "architecture", "pr-review", "feature-dev"} {
 		if hiddenByID[id] {
 			t.Errorf("template %q must not be hidden", id)
+		}
+	}
+}
+
+func TestLoadTemplates_ReportKandevIssuePromptContract(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+
+	var report *models.WorkflowTemplate
+	for _, tmpl := range templates {
+		if tmpl.ID == "report-kandev-issue" {
+			report = tmpl
+			break
+		}
+	}
+	if report == nil {
+		t.Fatal("report-kandev-issue template not found")
+	}
+	if !report.Hidden {
+		t.Error("report-kandev-issue must be hidden")
+	}
+	if len(report.Steps) != 1 {
+		t.Fatalf("report-kandev-issue steps = %d, want 1", len(report.Steps))
+	}
+
+	step := report.Steps[0]
+	if !step.IsStartStep {
+		t.Error("issue step must be the start step")
+	}
+	if len(step.Events.OnEnter) != 1 ||
+		step.Events.OnEnter[0].Type != models.OnEnterAutoStartAgent {
+		t.Errorf("issue step on_enter = %+v, want auto_start_agent", step.Events.OnEnter)
+	}
+	for _, required := range []string{
+		"ask_user_question_kandev",
+		".github/ISSUE_TEMPLATE",
+		"gh issue create",
+		"sensitive",
+		"duplicate",
+		"skip STEP 4",
+		"security-advisory",
+	} {
+		if !strings.Contains(step.Prompt, required) {
+			t.Errorf("issue prompt must contain %q", required)
 		}
 	}
 }

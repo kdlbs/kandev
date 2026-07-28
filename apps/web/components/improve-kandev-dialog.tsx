@@ -4,6 +4,7 @@ import Link from "@/components/routing/app-link";
 import { useCallback, useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
+import { Checkbox } from "@kandev/ui/checkbox";
 import { IconAlertTriangle, IconStethoscope, IconCheck } from "@tabler/icons-react";
 
 import { useToast } from "@/components/toast-provider";
@@ -15,6 +16,12 @@ import { fetchSystemHealth } from "@/lib/api/domains/health-api";
 import type { Task } from "@/lib/types/http";
 import { buildImproveKandevDescription } from "./improve-kandev-dialog-helpers";
 import { CreateModeView, type BootstrapState } from "./improve-kandev-dialog-create";
+import {
+  initialImproveKandevMode,
+  getImproveKandevBrowserStorage,
+  readImproveKandevSkipIntro,
+  writeImproveKandevSkipIntro,
+} from "./improve-kandev-dialog-model";
 
 type ImproveKandevDialogProps = {
   open: boolean;
@@ -32,7 +39,8 @@ type AuthState =
 
 export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
   const { open, onOpenChange, workspaceId, onSuccess } = props;
-  const [mode, setMode] = useState<Mode>("intro");
+  const [mode, setMode] = useState<Mode>(() => initialImproveKandevMode(readSkipIntro()));
+  const [skipIntro, setSkipIntro] = useState(() => readSkipIntro());
   const [auth, setAuth] = useState<AuthState>({ kind: "checking" });
   const [bootstrap, setBootstrap] = useState<BootstrapState>({ kind: "idle" });
   const [captureLogs, setCaptureLogs] = useState(true);
@@ -43,7 +51,8 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
   useEffect(() => {
     if (open) return;
     /* eslint-disable react-hooks/set-state-in-effect */
-    setMode("intro");
+    setMode(initialImproveKandevMode(readSkipIntro()));
+    setSkipIntro(readSkipIntro());
     setAuth({ kind: "checking" });
     setBootstrap({ kind: "idle" });
     setCaptureLogs(true);
@@ -51,7 +60,13 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
   }, [open]);
 
   useGitHubAuthCheck(open, workspaceId, setAuth);
-  useBootstrapKandev(mode, workspaceId, setBootstrap);
+  useBootstrapKandev(open, mode, workspaceId, setBootstrap);
+  useEffect(() => {
+    if (!open || mode !== "create" || auth.kind !== "missing") return;
+    // A saved intro preference must not bypass the GitHub-auth recovery UI.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMode("intro");
+  }, [auth.kind, mode, open]);
 
   const handleSuccess = useCallback(
     (task: Task) => {
@@ -80,13 +95,14 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
         setCaptureLogs={setCaptureLogs}
         transformDescription={transformDescription}
         onTaskCreated={handleSuccess}
+        externalBlockedReason={auth.kind === "checking" ? "Checking GitHub authentication…" : null}
       />
     );
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <IconStethoscope className="h-5 w-5" />
@@ -95,6 +111,11 @@ export function ImproveKandevDialog(props: ImproveKandevDialogProps) {
         </DialogHeader>
         <IntroBody
           auth={auth}
+          skipIntro={skipIntro}
+          onSkipIntroChange={(checked) => {
+            setSkipIntro(checked);
+            writeImproveKandevSkipIntro(getImproveKandevBrowserStorage(), checked);
+          }}
           onCancel={() => onOpenChange(false)}
           onProceed={() => setMode("create")}
         />
@@ -137,6 +158,7 @@ function useGitHubAuthCheck(
 }
 
 function useBootstrapKandev(
+  open: boolean,
   mode: Mode,
   workspaceId: string | null,
   setBootstrap: (s: BootstrapState) => void,
@@ -144,36 +166,28 @@ function useBootstrapKandev(
   const { toast } = useToast();
   const setRepositories = useAppStore((state) => state.setRepositories);
   useEffect(() => {
-    if (mode !== "create" || !workspaceId) return;
+    if (!open || mode !== "create" || !workspaceId) return;
     let cancelled = false;
     setBootstrap({ kind: "loading" });
     (async () => {
       try {
         const data = await bootstrapImproveKandev(workspaceId);
-        // Surface the EMU fork-restriction case before any further setup so
-        // the user sees a clear error and can't submit a contribution that
-        // would only fail at the PR step.
-        if (data.fork_status === "blocked_emu") {
-          if (cancelled) return;
-          const message = data.fork_message || "Your account cannot fork kdlbs/kandev.";
-          setBootstrap({ kind: "blocked", message });
-          toast({
-            title: "Cannot contribute from this account",
-            description: message,
-            variant: "error",
-          });
-          return;
-        }
         // Refresh the workspace repository list so the newly-created kandev
         // repo is in the store; otherwise the locked repo dropdown can't
         // resolve a label for the bootstrapped repository_id.
-        const [stepsRes, reposRes] = await Promise.all([
+        const [stepsRes, issueStepsRes, reposRes] = await Promise.all([
           listWorkflowSteps(data.workflow_id),
+          listWorkflowSteps(data.issue_workflow_id),
           listRepositories(workspaceId, undefined, { cache: "no-store" }),
         ]);
         if (cancelled) return;
         setRepositories(workspaceId, reposRes.repositories);
-        setBootstrap({ kind: "ready", data, steps: stepsRes.steps });
+        setBootstrap({
+          kind: "ready",
+          data,
+          steps: stepsRes.steps,
+          issueSteps: issueStepsRes.steps,
+        });
       } catch (err) {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : "Bootstrap failed";
@@ -188,22 +202,34 @@ function useBootstrapKandev(
     return () => {
       cancelled = true;
     };
-  }, [mode, workspaceId, setBootstrap, setRepositories, toast]);
+  }, [open, mode, workspaceId, setBootstrap, setRepositories, toast]);
 }
 
 function IntroBody({
   auth,
+  skipIntro,
+  onSkipIntroChange,
   onCancel,
   onProceed,
 }: {
   auth: AuthState;
+  skipIntro: boolean;
+  onSkipIntroChange: (checked: boolean) => void;
   onCancel: () => void;
   onProceed: () => void;
 }) {
   if (auth.kind === "missing") {
     return <GhAuthMissing auth={auth} onCancel={onCancel} />;
   }
-  return <IntroExplanation auth={auth} onCancel={onCancel} onProceed={onProceed} />;
+  return (
+    <IntroExplanation
+      auth={auth}
+      skipIntro={skipIntro}
+      onSkipIntroChange={onSkipIntroChange}
+      onCancel={onCancel}
+      onProceed={onProceed}
+    />
+  );
 }
 
 function GhAuthMissing({
@@ -241,10 +267,14 @@ function GhAuthMissing({
 
 function IntroExplanation({
   auth,
+  skipIntro,
+  onSkipIntroChange,
   onCancel,
   onProceed,
 }: {
   auth: AuthState;
+  skipIntro: boolean;
+  onSkipIntroChange: (checked: boolean) => void;
   onCancel: () => void;
   onProceed: () => void;
 }) {
@@ -274,6 +304,16 @@ function IntroExplanation({
           account and opens a PR from your fork, credited to you
         </IntroBullet>
       </ul>
+      <label
+        className="flex min-h-12 cursor-pointer items-center gap-2 text-sm text-muted-foreground"
+        data-testid="improve-kandev-skip-intro"
+      >
+        <Checkbox
+          checked={skipIntro}
+          onCheckedChange={(checked) => onSkipIntroChange(checked === true)}
+        />
+        Do not show this again
+      </label>
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={onCancel} className="cursor-pointer">
           Cancel
@@ -298,4 +338,12 @@ function IntroBullet({ children }: { children: React.ReactNode }) {
       <span>{children}</span>
     </li>
   );
+}
+
+function readSkipIntro(): boolean {
+  try {
+    return readImproveKandevSkipIntro(globalThis.localStorage);
+  } catch {
+    return false;
+  }
 }

@@ -60,4 +60,35 @@ test.describe("Workflow steps", () => {
     await expect(kanban.taskCardByTitle("Step A Task")).toBeVisible();
     await expect(kanban.taskCardByTitle("Step B Task")).toBeVisible();
   });
+
+  test("an unstarted feeder task fills available WIP capacity", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Feeder pull workflow");
+    const waiting = await apiClient.createWorkflowStep(workflow.id, "Waiting", 0, {
+      is_start_step: true,
+    });
+    const review = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
+    await apiClient.updateWorkflowStep(review.id, {
+      wip_limit: 2,
+      pull_from_step_id: waiting.id,
+    });
+
+    await apiClient.createTask(seedData.workspaceId, "Unstarted feeder task", {
+      workflow_id: workflow.id,
+      workflow_step_id: waiting.id,
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      repository_ids: [],
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await expect(kanban.taskCardInColumn("Unstarted feeder task", review.id)).toBeVisible();
+    await expect(kanban.taskCardInColumn("Unstarted feeder task", waiting.id)).toHaveCount(0);
+  });
 });

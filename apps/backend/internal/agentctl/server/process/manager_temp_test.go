@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/shell"
+	"github.com/kandev/kandev/pkg/agent"
 )
 
 func envValue(env []string, key string) string {
@@ -84,6 +86,109 @@ func TestManager_BuildFinalCommandLeavesUnsetTempEnvironmentUnset(t *testing.T) 
 		}
 	}
 	assertNoAgentTempRoot(t, serviceTemp)
+}
+
+func TestManager_StartShellInheritsAgentEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY-backed shell sessions are unsupported on Windows")
+	}
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir:      t.TempDir(),
+		ShellEnabled: true,
+		AgentEnv: []string{
+			"KANDEV_GITHUB_CREDENTIAL_BROKER_URL=http://127.0.0.1:9876",
+			"PATH=/tmp/kandev-shim:/usr/bin",
+		},
+	}, newTestLogger(t))
+	if err := mgr.StartShell(); err != nil {
+		t.Fatalf("StartShell() error = %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.shell.Stop() })
+	cfg := mgr.shell.Config()
+	if got := cfg.Env["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"]; got != "http://127.0.0.1:9876" {
+		t.Fatalf("shell broker env = %q, want managed broker URL", got)
+	}
+	if got := cfg.Env["PATH"]; got != "/tmp/kandev-shim:/usr/bin" {
+		t.Fatalf("shell PATH = %q, want shim-first PATH", got)
+	}
+}
+
+func TestManager_StartProcessInheritsAgentEnvironment(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		AgentEnv: []string{
+			"KANDEV_GITHUB_CREDENTIAL_BROKER_URL=http://127.0.0.1:9876",
+			"PATH=/tmp/kandev-shim:/usr/bin",
+		},
+	}, newTestLogger(t))
+	req, err := mgr.buildProcessRequest(StartProcessRequest{
+		SessionID: "session-1",
+		Command:   "echo ok",
+		Env: map[string]string{
+			"COMMAND_ONLY": "yes",
+			"PATH":         "/request/path",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildProcessRequest() error = %v", err)
+	}
+	if got := req.Env["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"]; got != "http://127.0.0.1:9876" {
+		t.Fatalf("process broker env = %q, want managed broker URL", got)
+	}
+	if got := req.Env["PATH"]; got != "/request/path" {
+		t.Fatalf("process PATH = %q, want explicit request value", got)
+	}
+	if got := req.Env["COMMAND_ONLY"]; got != "yes" {
+		t.Fatalf("process explicit env = %q, want yes", got)
+	}
+}
+
+func TestManager_ProcessEnvironmentMergesIndexedGitConfig(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		AgentEnv: []string{
+			"GIT_CONFIG_COUNT=1",
+			"GIT_CONFIG_KEY_0=credential.helper",
+			"GIT_CONFIG_VALUE_0=!agentctl git-credential",
+		},
+	}, newTestLogger(t))
+	req, err := mgr.buildProcessRequest(StartProcessRequest{
+		SessionID: "session-1",
+		Command:   "echo ok",
+		Env: map[string]string{
+			"GIT_CONFIG_COUNT":   "1",
+			"GIT_CONFIG_KEY_0":   "core.hooksPath",
+			"GIT_CONFIG_VALUE_0": "/tmp/hooks",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildProcessRequest() error = %v", err)
+	}
+	if got := req.Env["GIT_CONFIG_COUNT"]; got != "2" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want merged count 2", got)
+	}
+	if got := req.Env["GIT_CONFIG_KEY_1"]; got != "core.hooksPath" {
+		t.Fatalf("GIT_CONFIG_KEY_1 = %q, want request entry appended", got)
+	}
+}
+
+func TestManager_StartAutoShellDoesNotDeadlockOnEnvironmentSnapshot(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		AgentArgs:    []string{"echo"},
+		ShellEnabled: true,
+		Protocol:     agent.ProtocolACP,
+	}, newTestLogger(t))
+	mgr.adapter = newOneShotStubAdapter()
+	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
+
+	done := make(chan error, 1)
+	go func() { done <- mgr.Start(context.Background()) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Start() error = %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start() deadlocked while creating the auto shell")
+	}
 }
 
 func TestManager_BeginStopWaitsForInFlightAdmission(t *testing.T) {

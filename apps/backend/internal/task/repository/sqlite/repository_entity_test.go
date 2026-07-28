@@ -37,6 +37,164 @@ func seedWorkspace(t *testing.T, repo *Repository, id string) {
 	}
 }
 
+func strptr(value string) *string { return &value }
+
+func TestCreateWorkflowRejectsDuplicateHiddenTemplatePerWorkspace(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-template-unique")
+
+	first := &models.Workflow{
+		ID:                 "wf-template-first",
+		WorkspaceID:        "ws-template-unique",
+		Name:               "Improve Kandev",
+		WorkflowTemplateID: strptr("improve-kandev"),
+		Hidden:             true,
+	}
+	if err := repo.CreateWorkflow(ctx, first); err != nil {
+		t.Fatalf("create first template workflow: %v", err)
+	}
+	duplicate := &models.Workflow{
+		ID:                 "wf-template-duplicate",
+		WorkspaceID:        first.WorkspaceID,
+		Name:               first.Name,
+		WorkflowTemplateID: strptr("improve-kandev"),
+		Hidden:             true,
+	}
+	if err := repo.CreateWorkflow(ctx, duplicate); err == nil {
+		t.Fatal("duplicate hidden template workflow was accepted")
+	}
+	for _, id := range []string{"wf-other-template-first", "wf-other-template-second"} {
+		if err := repo.CreateWorkflow(ctx, &models.Workflow{
+			ID:                 id,
+			WorkspaceID:        first.WorkspaceID,
+			Name:               "Reusable template workflow",
+			WorkflowTemplateID: strptr("reusable-template"),
+			Hidden:             true,
+		}); err != nil {
+			t.Fatalf("create non-Improve-Kandev template workflow %q: %v", id, err)
+		}
+	}
+}
+
+func TestImproveKandevWorkflowIndexMigratesFormerBroadIndex(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "improve-kandev-index-replay.db")
+	openRepo := func() (*Repository, *sqlx.DB) {
+		t.Helper()
+		dbConn, err := db.OpenSQLite(dbPath)
+		if err != nil {
+			t.Fatalf("open sqlite: %v", err)
+		}
+		sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+		repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
+		if err != nil {
+			_ = sqlxDB.Close()
+			t.Fatalf("new repo: %v", err)
+		}
+		return repo, sqlxDB
+	}
+
+	repo, sqlxDB := openRepo()
+	seedWorkspace(t, repo, "ws-improve-kandev-index-replay")
+	if _, err := sqlxDB.Exec(`DROP INDEX IF EXISTS uniq_improve_kandev_workflows`); err != nil {
+		t.Fatalf("drop scoped index: %v", err)
+	}
+	if _, err := sqlxDB.Exec(`DROP INDEX IF EXISTS uniq_workflows_workspace_template_hidden`); err != nil {
+		t.Fatalf("drop index: %v", err)
+	}
+	if _, err := sqlxDB.Exec(`CREATE UNIQUE INDEX uniq_workflows_workspace_template_hidden
+		ON workflows(workspace_id, workflow_template_id, hidden)
+		WHERE workflow_template_id <> ''`); err != nil {
+		t.Fatalf("create former broad index: %v", err)
+	}
+	if err := sqlxDB.Close(); err != nil {
+		t.Fatalf("close first database: %v", err)
+	}
+
+	repo, sqlxDB = openRepo()
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	for indexName, want := range map[string]int{
+		"uniq_workflows_workspace_template_hidden": 0,
+		"uniq_improve_kandev_workflows":            1,
+	} {
+		var got int
+		if err := sqlxDB.Get(&got, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?`, indexName); err != nil {
+			t.Fatalf("count %s: %v", indexName, err)
+		}
+		if got != want {
+			t.Errorf("%s count = %d, want %d", indexName, got, want)
+		}
+	}
+	ctx := context.Background()
+	for _, id := range []string{"wf-replay-first", "wf-replay-second"} {
+		if err := repo.CreateWorkflow(ctx, &models.Workflow{
+			ID:                 id,
+			WorkspaceID:        "ws-improve-kandev-index-replay",
+			Name:               "Reusable template workflow",
+			WorkflowTemplateID: strptr("reusable-template"),
+			Hidden:             true,
+		}); err != nil {
+			t.Fatalf("create non-Improve-Kandev template workflow %q after replay: %v", id, err)
+		}
+	}
+}
+
+func TestImproveKandevWorkflowIndexReconcilesLegacyDuplicates(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "improve-kandev-duplicates.db")
+	openRepo := func() (*Repository, *sqlx.DB) {
+		t.Helper()
+		dbConn, err := db.OpenSQLite(dbPath)
+		if err != nil {
+			t.Fatalf("open sqlite: %v", err)
+		}
+		sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+		repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
+		if err != nil {
+			_ = sqlxDB.Close()
+			t.Fatalf("new repo: %v", err)
+		}
+		return repo, sqlxDB
+	}
+
+	repo, sqlxDB := openRepo()
+	workspaceID := "ws-improve-kandev-duplicates"
+	seedWorkspace(t, repo, workspaceID)
+	if _, err := sqlxDB.Exec(`DROP INDEX IF EXISTS uniq_improve_kandev_workflows`); err != nil {
+		t.Fatalf("drop improve kandev index: %v", err)
+	}
+	ctx := context.Background()
+	for _, id := range []string{"wf-legacy-first", "wf-legacy-second"} {
+		if err := repo.CreateWorkflow(ctx, &models.Workflow{
+			ID:                 id,
+			WorkspaceID:        workspaceID,
+			Name:               "Improve Kandev",
+			WorkflowTemplateID: strptr("improve-kandev"),
+			Hidden:             true,
+		}); err != nil {
+			t.Fatalf("create legacy duplicate %q: %v", id, err)
+		}
+	}
+	if err := sqlxDB.Close(); err != nil {
+		t.Fatalf("close legacy database: %v", err)
+	}
+
+	repo, sqlxDB = openRepo()
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	workflows, err := repo.ListWorkflows(ctx, workspaceID, true)
+	if err != nil {
+		t.Fatalf("list reconciled workflows: %v", err)
+	}
+	var matchingTemplates int
+	for _, workflow := range workflows {
+		if workflow.WorkflowTemplateID != nil && *workflow.WorkflowTemplateID == "improve-kandev" {
+			matchingTemplates++
+		}
+	}
+	if matchingTemplates != 1 {
+		t.Fatalf("improve-kandev workflow template rows = %d, want 1", matchingTemplates)
+	}
+}
+
 func TestDeleteRepositoryIfUnreferenced_PreservesTaskAdoptedRepository(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

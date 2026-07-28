@@ -1094,6 +1094,35 @@ func TestBuildPassthroughEnv_MergesProfileEnvVars(t *testing.T) {
 	}
 }
 
+func TestBuildPassthroughEnvIncludesEffectiveRuntimeEnv(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		TaskID:         "task-1",
+		SessionID:      "session-1",
+		AgentProfileID: "profile-1",
+	}
+	execution.setRuntimeEnvironment(map[string]string{
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "http://127.0.0.1:9876",
+		"GIT_CONFIG_COUNT":                    "1",
+		"GIT_CONFIG_KEY_0":                    "credential.helper",
+		"GIT_CONFIG_VALUE_0":                  "!agentctl git-credential",
+		"PATH":                                "/tmp/kandev-shim:/usr/bin",
+	})
+
+	env := mgr.buildPassthroughEnv(context.Background(), execution, nil)
+	for key, want := range map[string]string{
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "http://127.0.0.1:9876",
+		"GIT_CONFIG_COUNT":                    "1",
+		"GIT_CONFIG_KEY_0":                    "credential.helper",
+		"GIT_CONFIG_VALUE_0":                  "!agentctl git-credential",
+		"PATH":                                "/tmp/kandev-shim:/usr/bin",
+	} {
+		if env[key] != want {
+			t.Fatalf("passthrough env[%q] = %q, want %q (env=%#v)", key, env[key], want, env)
+		}
+	}
+}
+
 func TestBuildInteractiveStartRequestCarriesStripEnv(t *testing.T) {
 	stripEnv := []string{"ACP_BACKEND"}
 	req := buildInteractiveStartRequest(

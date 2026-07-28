@@ -70,6 +70,20 @@ func TestExecutionStore_AddReplaceAfterRemove(t *testing.T) {
 	}
 }
 
+func TestExecutionStore_RemoveClearsRuntimeEnvironment(t *testing.T) {
+	store := NewExecutionStore()
+	execution := &AgentExecution{ID: "exec-1"}
+	execution.setRuntimeEnvironment(map[string]string{"BROKER": "runtime-only"})
+	if err := store.Add(execution); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	store.Remove(execution.ID)
+	if got := execution.RuntimeEnvironment(); got != nil {
+		t.Fatalf("RuntimeEnvironment() after Remove = %#v, want nil", got)
+	}
+}
+
 func TestExecutionStore_AddNoSessionIDAlwaysSucceeds(t *testing.T) {
 	store := NewExecutionStore()
 

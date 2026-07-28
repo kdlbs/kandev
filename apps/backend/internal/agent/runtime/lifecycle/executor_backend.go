@@ -388,7 +388,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		}
 	}
 
-	return &AgentExecution{
+	execution := &AgentExecution{
 		ID:                   ri.InstanceID,
 		TaskID:               req.TaskID,
 		SessionID:            req.SessionID,
@@ -410,4 +410,6 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		historyEnabled:       historyEnabled,
 		promptDoneCh:         make(chan PromptCompletionSignal, 1),
 	}
+	execution.setRuntimeEnvironment(req.Env)
+	return execution
 }

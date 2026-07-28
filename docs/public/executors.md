@@ -99,6 +99,12 @@ the executor before clone or agent startup and require its `204 No Content` read
 Network failures, redirects, proxy routing errors, and broker server errors stop launch instead of
 falling back to another GitHub credential.
 
+A newly opened task terminal and a CLI-passthrough agent tab use the same task-scoped Git and
+GitHub CLI routing as the agent that owns the execution. This applies only after the task
+ownership check and does not change **Inherit executor Git credentials** mode. A terminal that is
+already open keeps the environment from its launch; reopen it after a new session launch, resume,
+or a Git credential-policy change.
+
 ## Worktree
 
 Worktree creates a dedicated host Git worktree and runs the standalone `agentctl` service against it. It separates branches and files between tasks, but the process still has the Kandev user's host permissions, network access, and readable credentials.
