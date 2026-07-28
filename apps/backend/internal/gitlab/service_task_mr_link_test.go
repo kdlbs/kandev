@@ -204,6 +204,44 @@ func TestAssociateExistingMRByURLAcceptsExactSelfManagedHTTPSRepositoryIdentity(
 	}
 }
 
+func TestAssociateExistingMRByURLAcceptsRepositoryIdentityWithExplicitDefaultPort(t *testing.T) {
+	const host = "https://gitlab.internal.test"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	// An explicit default HTTPS port (:443) must compare equal to the
+	// workspace host, which omits it.
+	setTaskMRRepositoryIdentity(t, store, "repo-1", "https://gitlab.internal.test:443", "group/subgroup/project")
+	client.SeedMR("group/subgroup/project", &MR{
+		IID: 13, Title: "MR", WebURL: host + "/group/subgroup/project/-/merge_requests/13",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/group/subgroup/project/-/merge_requests/13",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+}
+
+func TestAssociateExistingMRByURLAcceptsScpStyleRemoteWithBracketedIPv6Host(t *testing.T) {
+	const host = "https://[::1]"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryRemoteURL(t, store, "repo-1", "git@[::1]:clients/socodevi/laravel/co-up.git")
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+}
+
 func TestAssociateExistingMRByURLAcceptsRepositoryIdentityWithSameHostDifferentScheme(t *testing.T) {
 	const host = "http://gitlab.internal.test:8080"
 	svc, store, client := newTaskMRLinkService(t, host)
@@ -239,6 +277,10 @@ func TestAssociateExistingMRByURLAcceptsRemoteURLWhenDurableIdentityEmpty(t *tes
 		{name: "http remote for https workspace host", remoteURL: "http://gitlab.savoirfairelinux.com/clients/socodevi/laravel/co-up.git"},
 		{name: "ssh url remote", remoteURL: "ssh://git@gitlab.savoirfairelinux.com/clients/socodevi/laravel/co-up.git"},
 		{name: "scp-style remote", remoteURL: "git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/co-up.git"},
+		// SSH transport ports (used by hosts that put SSH on a non-standard
+		// port) are unrelated to the GitLab web origin's port and must not
+		// be compared against it.
+		{name: "ssh url remote with explicit non-web port", remoteURL: "ssh://git@gitlab.savoirfairelinux.com:2222/clients/socodevi/laravel/co-up.git"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

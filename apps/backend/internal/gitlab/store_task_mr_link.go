@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -89,8 +90,8 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 			candidates = append(candidates, candidate{host: gotHost, project: gotProject})
 		}
 	}
-	if remoteHost, remoteProject := parseGitLabRemoteURLIdentity(identity.RemoteURL); remoteHost != "" {
-		if gotHost, err := normalizeHostOrigin(remoteHost); err == nil {
+	if remoteURLHost, remoteProject := parseGitLabRemoteURLIdentity(identity.RemoteURL); remoteURLHost != "" {
+		if gotHost, err := normalizeHostOrigin(remoteURLHost); err == nil {
 			candidates = append(candidates, candidate{host: gotHost, project: remoteProject})
 		}
 	}
@@ -105,7 +106,25 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 func sameGitLabHost(left, right string) bool {
 	leftURL, leftErr := validateHost(strings.TrimSpace(left))
 	rightURL, rightErr := validateHost(strings.TrimSpace(right))
-	return leftErr == nil && rightErr == nil && strings.EqualFold(leftURL.Host, rightURL.Host)
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return strings.EqualFold(hostWithoutDefaultPort(leftURL), hostWithoutDefaultPort(rightURL))
+}
+
+// hostWithoutDefaultPort strips a scheme's implicit default port (":443" for
+// https, ":80" for http) so an explicitly-ported origin like
+// "https://gitlab.example.com:443" compares equal to the equivalent
+// "https://gitlab.example.com" without one.
+func hostWithoutDefaultPort(u *url.URL) string {
+	switch u.Scheme {
+	case "https":
+		return strings.TrimSuffix(u.Host, ":443")
+	case "http":
+		return strings.TrimSuffix(u.Host, ":80")
+	default:
+		return u.Host
+	}
 }
 
 // ResolveTaskMRRepository validates an explicit repository or infers the sole

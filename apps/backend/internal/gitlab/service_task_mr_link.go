@@ -73,9 +73,11 @@ func parseGitLabRemoteURLIdentity(remoteURL string) (host, projectPath string) {
 	}
 	var scheme, hostname, path string
 	if strings.Contains(remoteURL, "@") && !strings.Contains(remoteURL, "://") {
-		// scp-style shorthand: git@host:group/sub/project.git
+		// scp-style shorthand: git@host:group/sub/project.git (host may be a
+		// bracketed IPv6 literal, e.g. git@[::1]:group/project.git, whose
+		// embedded colons must not be mistaken for the host/path separator).
 		_, rest, _ := strings.Cut(remoteURL, "@")
-		h, p, ok := strings.Cut(rest, ":")
+		h, p, ok := cutSCPHostPath(rest)
 		if !ok {
 			return "", ""
 		}
@@ -85,7 +87,14 @@ func parseGitLabRemoteURLIdentity(remoteURL string) (host, projectPath string) {
 		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
 			return "", ""
 		}
-		scheme, hostname, path = parsed.Scheme, remoteHost(parsed), parsed.Path
+		scheme, path = parsed.Scheme, parsed.Path
+		if strings.EqualFold(scheme, sshScheme) {
+			// SSH transport ports (e.g. ssh://git@host:2222/...) are unrelated
+			// to the GitLab web origin's port, so compare hostname only.
+			hostname = parsed.Hostname()
+		} else {
+			hostname = remoteHost(parsed)
+		}
 	}
 	scheme = strings.ToLower(scheme)
 	if scheme != mentionHTTPScheme && scheme != mentionHTTPSScheme && scheme != sshScheme {
@@ -99,6 +108,21 @@ func parseGitLabRemoteURLIdentity(remoteURL string) (host, projectPath string) {
 		return "", ""
 	}
 	return scheme + "://" + hostname, path
+}
+
+// cutSCPHostPath splits an scp-style remote's "host:path" segment (the part
+// after "git@"), honoring bracketed IPv6 literals such as
+// "[::1]:group/project.git" whose embedded colons would otherwise be
+// mistaken for the host/path separator by a plain strings.Cut on ":".
+func cutSCPHostPath(rest string) (host, path string, ok bool) {
+	if strings.HasPrefix(rest, "[") {
+		closeIdx := strings.Index(rest, "]")
+		if closeIdx < 0 || closeIdx+1 >= len(rest) || rest[closeIdx+1] != ':' {
+			return "", "", false
+		}
+		return rest[:closeIdx+1], rest[closeIdx+2:], true
+	}
+	return strings.Cut(rest, ":")
 }
 
 func remoteHost(parsed *url.URL) string {
