@@ -12,6 +12,25 @@ const START_ENABLED_TIMEOUT = 30_000;
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
 test.describe("Task creation", () => {
+  test("selects the single visible workflow when hidden workflows are loaded", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.e2eCreateHiddenWorkflow(seedData.workspaceId, "Hidden system workflow");
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: "",
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+    await kanban.createTaskButton.first().click();
+
+    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
+    await expect(testPage.getByTestId("workflow-selector-trigger")).toHaveCount(0);
+  });
+
   test("dialog pre-selects repository, branch, and agent profile from seed data", async ({
     testPage,
   }) => {

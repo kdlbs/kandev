@@ -4,10 +4,11 @@ import { computeEffectiveStepId } from "@/components/task-create-dialog-helpers"
 export function computeSingleWorkflowFallbackId(
   selectedWorkflowId: string | null,
   workflowId: string | null,
-  workflows: DialogComputedArgs["workflows"],
+  workflows: Array<{ id: string; hidden?: boolean }>,
 ): string | null {
-  if (selectedWorkflowId || workflowId || workflows.length !== 1) return null;
-  return workflows[0]?.id ?? null;
+  const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
+  if (selectedWorkflowId || workflowId || visibleWorkflows.length !== 1) return null;
+  return visibleWorkflows[0]?.id ?? null;
 }
 
 export function computeSnapshotDefaultStepId(

@@ -42,6 +42,9 @@ the user's own agent picks up immediately — turning every report into a contri
 - The `improve-kandev` workflow is hidden from the workflow management page in
   workspace settings and from the workflow picker in the standard task-create
   dialog. It is reachable only through the Improve Kandev entry point.
+- Hidden workflows do not count as choices in the standard task-create dialog.
+  When the active workspace has exactly one visible workflow, the dialog uses
+  that workflow implicitly and omits the redundant workflow selector.
 - A pre-flight check surfaces `gh auth` status from `/api/v1/system/health` and
   prevents submission with a clear error when GitHub auth is missing.
 
@@ -65,6 +68,11 @@ the user's own agent picks up immediately — turning every report into a contri
 - **GIVEN** the standard task-create dialog or the workspace workflows settings
   page is open, **WHEN** the page lists workflows, **THEN** `improve-kandev`
   does not appear.
+
+- **GIVEN** the active workspace has one visible workflow and one or more hidden
+  workflows, **WHEN** the user opens the standard task-create dialog without an
+  explicit workflow, **THEN** the visible workflow is selected implicitly and
+  the workflow selector does not appear.
 
 - **GIVEN** the user has not configured `gh auth`, **WHEN** they open the
   Improve Kandev dialog, **THEN** the dialog shows a blocking error referencing
