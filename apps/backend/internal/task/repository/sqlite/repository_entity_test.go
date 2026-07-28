@@ -64,6 +64,64 @@ func TestCreateWorkflowRejectsDuplicateHiddenTemplatePerWorkspace(t *testing.T) 
 	if err := repo.CreateWorkflow(ctx, duplicate); err == nil {
 		t.Fatal("duplicate hidden template workflow was accepted")
 	}
+	for _, id := range []string{"wf-other-template-first", "wf-other-template-second"} {
+		if err := repo.CreateWorkflow(ctx, &models.Workflow{
+			ID:                 id,
+			WorkspaceID:        first.WorkspaceID,
+			Name:               "Reusable template workflow",
+			WorkflowTemplateID: strptr("reusable-template"),
+			Hidden:             true,
+		}); err != nil {
+			t.Fatalf("create non-Improve-Kandev template workflow %q: %v", id, err)
+		}
+	}
+}
+
+func TestImproveKandevWorkflowIndexMigratesFormerBroadIndex(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "improve-kandev-index-replay.db")
+	openRepo := func() (*Repository, *sqlx.DB) {
+		t.Helper()
+		dbConn, err := db.OpenSQLite(dbPath)
+		if err != nil {
+			t.Fatalf("open sqlite: %v", err)
+		}
+		sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+		repo, err := NewWithDB(sqlxDB, sqlxDB, nil)
+		if err != nil {
+			_ = sqlxDB.Close()
+			t.Fatalf("new repo: %v", err)
+		}
+		return repo, sqlxDB
+	}
+
+	repo, sqlxDB := openRepo()
+	seedWorkspace(t, repo, "ws-improve-kandev-index-replay")
+	if _, err := sqlxDB.Exec(`DROP INDEX IF EXISTS uniq_workflows_workspace_template_hidden`); err != nil {
+		t.Fatalf("drop index: %v", err)
+	}
+	if _, err := sqlxDB.Exec(`CREATE UNIQUE INDEX uniq_workflows_workspace_template_hidden
+		ON workflows(workspace_id, workflow_template_id, hidden)
+		WHERE workflow_template_id <> ''`); err != nil {
+		t.Fatalf("create former broad index: %v", err)
+	}
+	if err := sqlxDB.Close(); err != nil {
+		t.Fatalf("close first database: %v", err)
+	}
+
+	repo, sqlxDB = openRepo()
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	ctx := context.Background()
+	for _, id := range []string{"wf-replay-first", "wf-replay-second"} {
+		if err := repo.CreateWorkflow(ctx, &models.Workflow{
+			ID:                 id,
+			WorkspaceID:        "ws-improve-kandev-index-replay",
+			Name:               "Reusable template workflow",
+			WorkflowTemplateID: strptr("reusable-template"),
+			Hidden:             true,
+		}); err != nil {
+			t.Fatalf("create non-Improve-Kandev template workflow %q after replay: %v", id, err)
+		}
+	}
 }
 
 func TestDeleteRepositoryIfUnreferenced_PreservesTaskAdoptedRepository(t *testing.T) {

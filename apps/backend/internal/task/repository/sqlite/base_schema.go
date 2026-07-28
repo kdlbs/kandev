@@ -82,9 +82,15 @@ func (r *Repository) ensureWorkspaceIndexes() error {
 	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_workflows_workspace_id ON workflows(workspace_id)`); err != nil {
 		return err
 	}
-	if _, err := r.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_workflows_workspace_template_hidden
+	// Remove the short-lived broad index from the initial Improve Kandev
+	// implementation. It applied to every template-backed workflow, including
+	// system workflows that intentionally reuse a template.
+	if _, err := r.db.Exec(`DROP INDEX IF EXISTS uniq_workflows_workspace_template_hidden`); err != nil {
+		return err
+	}
+	if _, err := r.db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS uniq_improve_kandev_workflows
 		ON workflows(workspace_id, workflow_template_id, hidden)
-		WHERE workflow_template_id <> ''`); err != nil {
+		WHERE workflow_template_id IN ('improve-kandev', 'report-kandev-issue')`); err != nil {
 		return err
 	}
 	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_tasks_workspace_archived ON tasks(workspace_id, archived_at)`); err != nil {
