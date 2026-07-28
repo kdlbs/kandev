@@ -29,7 +29,7 @@ spec: "../../specs/platform/background-work-liveness.md"
 
 ## Files likely touched
 
-- `profiles.yaml`
+- `apps/backend/internal/profiles/profiles.yaml`
 - `apps/backend/internal/common/config/config.go`
 - `apps/backend/internal/runtimeflags/`
 - `apps/backend/internal/backendapp/orchestrator.go`
@@ -60,14 +60,15 @@ one policy and be proven together.
   - Web: 922 files passed; 7,050 tests passed; 4 skipped.
   - CLI: 30 files and 280 tests passed.
   - Backend, web, and harness lint passed.
-- `pnpm e2e:run --host tests/chat/busy-signal.spec.ts` — default-off desktop
+- `cd apps && pnpm --filter @kandev/web e2e:run --host tests/chat/busy-signal.spec.ts`
+  — default-off desktop
   cases passed; the first opt-in run found and drove the persisted provider
   discriminator fix (`agent_name`, not the database UUID in `agent_id`).
-- `pnpm e2e:run --host --no-build tests/chat/busy-signal.spec.ts -- --grep "Claude background prompt handoff experiment"`
+- `cd apps && pnpm --filter @kandev/web e2e:run --host --no-build tests/chat/busy-signal.spec.ts -- --grep "Claude background prompt handoff experiment"`
   — 2 passed.
-- `pnpm e2e:run --host --no-build --project mobile-chrome tests/chat/mobile-busy-signal.spec.ts`
+- `cd apps && pnpm --filter @kandev/web e2e:run --host --no-build --project mobile-chrome tests/chat/mobile-busy-signal.spec.ts`
   — default-off mobile passed; the opt-in test exposed a desktop-keyboard test
   helper mismatch.
-- `pnpm e2e:run --host --no-build --project mobile-chrome tests/chat/mobile-busy-signal.spec.ts -- --grep "background-only work"`
+- `cd apps && pnpm --filter @kandev/web e2e:run --host --no-build --project mobile-chrome tests/chat/mobile-busy-signal.spec.ts -- --grep "background-only work"`
   — 1 passed after switching the mobile flow to touch submission.
 - Public documentation validation passed as part of `make test`.

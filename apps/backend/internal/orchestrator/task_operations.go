@@ -2975,9 +2975,9 @@ func (s *Service) loadPromptableSession(ctx context.Context, taskID, sessionID s
 	return session, nil
 }
 
-// claimForegroundForPrompt retains the tracker-side claim mechanism for a
-// future protocol-backed policy. The current admission gate rejects RUNNING
-// sessions before this helper is reached.
+// claimForegroundForPrompt serializes two callers racing to take the
+// background-idle foreground turn. For non-experiment RUNNING sessions,
+// checkSessionPromptable already rejects the prompt before this helper is reached.
 func (s *Service) claimForegroundForPrompt(taskID, sessionID string, session *models.TaskSession) (*foregroundClaim, error) {
 	if session.State != models.TaskSessionStateRunning {
 		return nil, nil

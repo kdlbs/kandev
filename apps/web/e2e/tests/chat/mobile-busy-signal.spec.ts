@@ -38,7 +38,7 @@ test.describe("Mobile coarse RUNNING busy signal", () => {
     await expect(session.idleInput()).not.toBeVisible();
     await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
 
-    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
     await typeWhileBusy(testPage, editor, "queue this mobile follow-up");
     await testPage.getByTestId("submit-message-button").tap();
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
@@ -89,7 +89,7 @@ test.describe.serial("Mobile Claude background prompt handoff experiment", () =>
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
     await editor.tap();
     await editor.fill("/detached-background 20s");
     await testPage.getByTestId("submit-message-button").tap();

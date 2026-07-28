@@ -64,7 +64,7 @@ test.describe("Coarse RUNNING busy signal", () => {
     await expect(session.idleInput()).not.toBeVisible();
     await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
 
-    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
     await typeWhileBusy(testPage, editor, "queue this follow-up");
     await testPage.getByTestId("submit-message-button").click();
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
@@ -95,7 +95,7 @@ test.describe("Coarse RUNNING busy signal", () => {
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await waitForActiveSessionForegroundActivity(testPage, "generating");
 
-    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
     await typeWhileBusy(testPage, editor, "queue foreground follow-up");
     await testPage.getByTestId("submit-message-button").click();
     await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });

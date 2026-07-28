@@ -99,7 +99,7 @@ func TestActiveSubagentCount_DerivesOnlyLiveSubagentRegistrations(t *testing.T) 
 	}
 }
 
-func TestBackgroundCompletion_IntermediateSubagentPublishesBackground(t *testing.T) {
+func TestBackgroundCompletion_IntermediateSubagentPublishesGenerating(t *testing.T) {
 	repo := setupTestRepo(t)
 	const taskID, sessionID, executionID = "task-intermediate", "session-intermediate", "execution-intermediate"
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
