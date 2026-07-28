@@ -46,7 +46,7 @@ conditional include matching `git@github.com:acme/**` does not activate.
 - In `apps/backend/internal/orchestrator/executor/executor_resume.go`, resolve the workspace task
   Git credential policy before returning an existing provider-backed checkout and after a fresh
   materialization.
-- For GitHub managed checkouts, derive canonical HTTPS in `managed` mode and use
+- For GitHub-managed checkouts, derive canonical HTTPS in `managed` mode and use
   `RepoCloner.BuildCloneURLWithHost` in `executor` mode so the host's startup-detected `gh` clone
   protocol selects SSH or HTTPS.
 - Reconcile only repositories with provider-backed ownership. Preserve the existing

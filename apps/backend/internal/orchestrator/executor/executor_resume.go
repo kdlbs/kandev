@@ -206,11 +206,9 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 			zap.Error(err))
 		return "", err
 	}
-	if err := e.reconcileGitHubCheckoutOrigin(ctx, repo, localPath); err != nil {
-		return "", err
-	}
 
-	// Persist the local path so future launches skip cloning
+	// Persist the local path before reconciliation so a remote-update failure
+	// does not discard a completed clone and force a re-clone on every retry.
 	if e.repoUpdater != nil && localPath != "" {
 		if updateErr := e.repoUpdater.UpdateRepositoryLocalPath(ctx, repo.ID, localPath); updateErr != nil {
 			e.logger.Warn("failed to update repository local path after clone",
@@ -219,6 +217,9 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 				zap.Error(updateErr))
 			// Non-fatal: the clone succeeded, we can use the path
 		}
+	}
+	if err := e.reconcileGitHubCheckoutOrigin(ctx, repo, localPath); err != nil {
+		return "", err
 	}
 
 	// Note: default_branch backfill is intentionally driven from
@@ -258,6 +259,8 @@ func isGitHubRepository(repo *models.Repository) bool {
 	if repo == nil || repo.ProviderOwner == "" || repo.ProviderName == "" {
 		return false
 	}
+	// Provider == "" is treated as GitHub for legacy rows imported before
+	// provider tagging; this matches the clone URL fallback convention.
 	return repo.Provider == "" || strings.EqualFold(repo.Provider, "github")
 }
 

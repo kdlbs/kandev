@@ -153,6 +153,52 @@ func TestEnsureRepoLocalPath_ReturnsOriginUpdateFailure(t *testing.T) {
 	}
 }
 
+func TestEnsureRepoLocalPath_PersistsFreshCloneBeforeOriginFailure(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPath := initGitRepoWithOrigin(t, "https://github.com/acme/widgets.git")
+	updater := &localPathRecordingRepoUpdater{}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
+	})
+	exec.SetRepoCloner(&cloneTransportTestCloner{
+		cloneURL:     "git@github.com:acme/widgets.git",
+		returnPath:   repoPath,
+		setOriginErr: fmt.Errorf("read-only repository"),
+	}, updater)
+
+	err := exec.ensureRepoLocalPath(context.Background(), &models.Repository{
+		ID:            "repo-1",
+		WorkspaceID:   "workspace-1",
+		SourceType:    "provider",
+		Provider:      "github",
+		ProviderOwner: "acme",
+		ProviderName:  "widgets",
+	})
+	if err == nil || !strings.Contains(err.Error(), "read-only repository") {
+		t.Fatalf("ensureRepoLocalPath() error = %v, want origin-update failure", err)
+	}
+	if updater.localPath != repoPath {
+		t.Fatalf("persisted local path = %q, want %q", updater.localPath, repoPath)
+	}
+}
+
+type localPathRecordingRepoUpdater struct {
+	localPath string
+}
+
+func (u *localPathRecordingRepoUpdater) UpdateRepositoryLocalPath(_ context.Context, _, localPath string) error {
+	u.localPath = localPath
+	return nil
+}
+
+func (u *localPathRecordingRepoUpdater) UpdateRepositoryDefaultBranch(context.Context, string, string) error {
+	return nil
+}
+
 type cloneTransportTestCloner struct {
 	cloneURL     string
 	returnPath   string
