@@ -63,7 +63,11 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 		RemoteURL string `db:"remote_url"`
 	}
 	err := s.ro.GetContext(ctx, &identity, `
-		SELECT r.provider, r.provider_host, r.provider_owner, r.provider_name, r.remote_url
+		SELECT COALESCE(r.provider, '') AS provider,
+			COALESCE(r.provider_host, '') AS provider_host,
+			COALESCE(r.provider_owner, '') AS provider_owner,
+			COALESCE(r.provider_name, '') AS provider_name,
+			COALESCE(r.remote_url, '') AS remote_url
 		FROM task_repositories tr
 		JOIN repositories r ON r.id = tr.repository_id
 		JOIN tasks t ON t.id = tr.task_id

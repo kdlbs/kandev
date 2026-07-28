@@ -15,11 +15,11 @@ func seedTaskMRLinkFixture(t *testing.T, store *Store, workspaceID, taskID, repo
 	if _, err := store.db.Exec(`CREATE TABLE IF NOT EXISTS repositories (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,
-		provider TEXT NOT NULL DEFAULT '',
-		provider_host TEXT NOT NULL DEFAULT '',
-		provider_owner TEXT NOT NULL DEFAULT '',
-		provider_name TEXT NOT NULL DEFAULT '',
-		remote_url TEXT NOT NULL DEFAULT ''
+		provider TEXT DEFAULT '',
+		provider_host TEXT DEFAULT '',
+		provider_owner TEXT DEFAULT '',
+		provider_name TEXT DEFAULT '',
+		remote_url TEXT DEFAULT ''
 	); CREATE TABLE IF NOT EXISTS task_repositories (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -64,6 +64,21 @@ func setTaskMRRepositoryRemoteURL(t *testing.T, store *Store, repositoryID, remo
 		`UPDATE repositories SET remote_url = ? WHERE id = ?`, remoteURL, repositoryID,
 	); err != nil {
 		t.Fatalf("set repository remote_url: %v", err)
+	}
+}
+
+// setTaskMRRepositoryIdentityColumnsNull sets every provider identity column
+// (provider, provider_host, provider_owner, provider_name, remote_url) to
+// SQL NULL, mirroring rows persisted before those columns existed or by code
+// paths that never populated them. The production schema declares them
+// nullable, so ValidateTaskMRRepositoryIdentity must tolerate NULL scans.
+func setTaskMRRepositoryIdentityColumnsNull(t *testing.T, store *Store, repositoryID string) {
+	t.Helper()
+	if _, err := store.db.Exec(`UPDATE repositories
+		SET provider = NULL, provider_host = NULL, provider_owner = NULL,
+			provider_name = NULL, remote_url = NULL
+		WHERE id = ?`, repositoryID); err != nil {
+		t.Fatalf("null repository identity columns: %v", err)
 	}
 }
 
@@ -379,6 +394,30 @@ func TestAssociateExistingMRByURLRejectsRemoteURLOnDifferentHost(t *testing.T) {
 	svc, store, client := newTaskMRLinkService(t, host)
 	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
 	setTaskMRRepositoryRemoteURL(t, store, "repo-1", "https://gitlab.other.test/clients/socodevi/laravel/co-up.git")
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	_, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	)
+	if !errors.Is(err, ErrTaskMRRepositoryMismatch) {
+		t.Fatalf("error = %v, want ErrTaskMRRepositoryMismatch", err)
+	}
+}
+
+func TestAssociateExistingMRByURLRejectsRepositoryWithNullIdentityColumns(t *testing.T) {
+	// The production schema declares provider/provider_host/provider_owner/
+	// provider_name/remote_url as nullable columns, so rows can legitimately
+	// have SQL NULL there. ValidateTaskMRRepositoryIdentity must coalesce
+	// those to empty strings and fail closed with the normal mismatch error
+	// instead of an internal scan error.
+	const host = "https://gitlab.savoirfairelinux.com"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentityColumnsNull(t, store, "repo-1")
 	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
 		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
 		State: "opened", CreatedAt: time.Now().UTC(),
