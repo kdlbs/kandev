@@ -76,7 +76,7 @@ test.describe("Workflow steps", () => {
       pull_from_step_id: waiting.id,
     });
 
-    const task = await apiClient.createTask(seedData.workspaceId, "Unstarted feeder task", {
+    await apiClient.createTask(seedData.workspaceId, "Unstarted feeder task", {
       workflow_id: workflow.id,
       workflow_step_id: waiting.id,
     });
@@ -90,6 +90,5 @@ test.describe("Workflow steps", () => {
     await kanban.goto();
     await expect(kanban.taskCardInColumn("Unstarted feeder task", review.id)).toBeVisible();
     await expect(kanban.taskCardInColumn("Unstarted feeder task", waiting.id)).toHaveCount(0);
-    await expect(kanban.taskCard(task.id)).toBeVisible();
   });
 });

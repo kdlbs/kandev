@@ -141,6 +141,33 @@ func TestCreateTask_PullsUnstartedFeederTaskIntoAvailableWIPStep(t *testing.T) {
 	}
 }
 
+func TestCreateTask_FeederTaskStaysWhenWIPStepFull(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	seedWIPWorkflow(t, ctx, repo)
+	svc.SetWorkflowStepGetter(&fakeWorkflowStepGetter{steps: map[string]*wfmodels.WorkflowStep{
+		"waiting-step": {ID: "waiting-step", WorkflowID: "wip-workflow", Name: "Waiting"},
+		"review-step":  {ID: "review-step", WorkflowID: "wip-workflow", Name: "Review", WIPLimit: 1, PullFromStepID: "waiting-step"},
+	}})
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "occupant", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "review-step", WIPAdmitted: true, State: v1.TaskStateCreated,
+	}); err != nil {
+		t.Fatalf("seed occupant: %v", err)
+	}
+
+	created, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow", WorkflowStepID: "waiting-step",
+		Title: "Should stay in feeder",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if created.WorkflowStepID != "waiting-step" {
+		t.Fatalf("step = %q, want waiting-step (WIP full, must not promote)", created.WorkflowStepID)
+	}
+}
+
 func seedWIPWorkflow(t *testing.T, ctx context.Context, repo interface {
 	CreateWorkspace(context.Context, *models.Workspace) error
 	CreateWorkflow(context.Context, *models.Workflow) error
