@@ -12,8 +12,8 @@ spec: "../../specs/ui/adaptive-kanban.md"
 
 ## Acceptance
 
-- Full and compact desktop columns retain the shared readable minimum; a container-measured stage
-  navigator appears only when all steps cannot fit and stays synchronized with the lane window.
+- Full and compact desktop columns retain the shared readable minimum; when all steps cannot fit,
+  the board keeps complete lanes in an internally scrollable, snap-aligned lane window.
 - The new desktop wrapper preserves column DnD, task actions, multi-select, orphan display, preview
   response, and internal scroll ownership without changing phone or tablet composition.
 - Long parent relationships render as contained, truncating hierarchy metadata while session and
@@ -63,9 +63,8 @@ cd apps/web && pnpm e2e:run tests/layout/compact-desktop-responsive.spec.ts test
 ## Risks
 
 - Keep `adaptive-desktop-kanban.tsx` below the frontend component size and complexity limits.
-- Do not reuse workflow-step IDs for navigator droppables; duplicate DnD IDs would make destinations
-  ambiguous.
-- Do not persist the active desktop step or responsive mode.
+- Keep desktop DnD IDs owned only by real lanes; duplicate IDs would make destinations ambiguous.
+- Do not persist responsive mode or horizontal scroll position.
 
 ## Output contract
 

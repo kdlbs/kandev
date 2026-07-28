@@ -32,7 +32,8 @@ and tablet composition, backend contracts, and persisted settings remain unchang
   wrapper and retain the current DnD handlers,
   multi-select handlers, orphan display, per-column vertical scroll, phone layout, and tablet layout.
 - No changes are needed in `apps/web/hooks/use-kanban-layout.ts`: inline and floating preview behavior
-  already changes the Kanban surface width, which the new local measurement observes directly.
+  already changes the Kanban surface width; CSS grid sizing and the lane window contain any resulting
+  horizontal overflow.
 
 ### Card hierarchy
 
