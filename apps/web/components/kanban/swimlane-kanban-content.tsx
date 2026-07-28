@@ -436,10 +436,10 @@ function DesktopKanbanLayout({
   const getTasksForStep = useTasksByStep(tasks);
 
   return (
-    <AdaptiveDesktopKanban steps={steps}>
-      {steps.map((step) => (
+    <AdaptiveDesktopKanban
+      steps={steps}
+      renderColumn={(step) => (
         <KanbanColumn
-          key={step.id}
           step={step}
           tasks={getTasksForStep(step.id)}
           onPreviewTask={onPreviewTask}
@@ -458,8 +458,8 @@ function DesktopKanbanLayout({
           isMultiSelectMode={isMultiSelectMode}
           externalLinkAvailability={externalLinkAvailability}
         />
-      ))}
-    </AdaptiveDesktopKanban>
+      )}
+    />
   );
 }
 

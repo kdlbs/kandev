@@ -1,17 +1,15 @@
 "use client";
 
-import { Children, useMemo, type ReactNode } from "react";
+import type { ReactNode } from "react";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { getKanbanColumnGridTemplate } from "./kanban-grid-template";
 
 type AdaptiveDesktopKanbanProps = {
   steps: WorkflowStep[];
-  children: ReactNode;
+  renderColumn: (step: WorkflowStep) => ReactNode;
 };
 
-export function AdaptiveDesktopKanban({ steps, children }: AdaptiveDesktopKanbanProps) {
-  const columns = useMemo(() => Children.toArray(children), [children]);
-
+export function AdaptiveDesktopKanban({ steps, renderColumn }: AdaptiveDesktopKanbanProps) {
   return (
     <div data-testid="desktop-kanban-layout" className="h-full min-w-0">
       <div
@@ -23,9 +21,9 @@ export function AdaptiveDesktopKanban({ steps, children }: AdaptiveDesktopKanban
           className="grid h-full min-w-full gap-0"
           style={{ gridTemplateColumns: getKanbanColumnGridTemplate(steps.length) }}
         >
-          {columns.map((column, index) => (
-            <div key={steps[index]?.id ?? index} className="min-w-0 snap-start">
-              {column}
+          {steps.map((step) => (
+            <div key={step.id} className="min-w-0 snap-start">
+              {renderColumn(step)}
             </div>
           ))}
         </div>

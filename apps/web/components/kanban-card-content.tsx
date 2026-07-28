@@ -234,7 +234,6 @@ function hasCardBadges(task: Task): boolean {
     (task.sessionCount && task.sessionCount > 1) ||
     task.reviewStatus === "changes_requested" ||
     task.reviewStatus === "pending" ||
-    task.parentTaskId ||
     task.queuedForStepId,
   );
 }
