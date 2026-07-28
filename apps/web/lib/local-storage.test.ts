@@ -3,11 +3,14 @@ import {
   cleanupTaskStorage,
   clearGlobalSidebarWidth,
   getGlobalSidebarWidth,
+  getManualRightWidth,
   getOpenFileTabs,
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
   restoreAttachmentPreview,
   setGlobalSidebarWidth,
+  setManualRightWidth,
+  clearManualRightWidth,
   setOpenFileTabs,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
@@ -104,6 +107,29 @@ describe("global sidebar width storage", () => {
     setGlobalSidebarWidth(320);
     cleanupTaskStorage("task-a", []);
     expect(getGlobalSidebarWidth()).toBe(320);
+  });
+});
+
+describe("manual right width storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("keeps a rounded width scoped to its environment", () => {
+    setManualRightWidth("env-a", 421.6);
+
+    expect(getManualRightWidth("env-a")).toBe(422);
+    expect(getManualRightWidth("env-b")).toBeNull();
+  });
+
+  it("ignores invalid widths and can clear a preference", () => {
+    setManualRightWidth("env-a", 0);
+    setManualRightWidth("env-a", Number.NaN);
+    expect(getManualRightWidth("env-a")).toBeNull();
+
+    setManualRightWidth("env-a", 320);
+    clearManualRightWidth("env-a");
+    expect(getManualRightWidth("env-a")).toBeNull();
   });
 });
 

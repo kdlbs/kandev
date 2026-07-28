@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/task-layout-profiles.md
 created: 2026-07-28
-status: draft
+status: completed
 ---
 
 # Implementation Plan: Responsive Dockview Right-Column Width
@@ -81,7 +81,7 @@ tests are the rendered verification for this desktop-only path.
 
 Wave 1 (sequential):
 
-- [ ] [task-01-responsive-right-width](task-01-responsive-right-width.md)
+- [x] [task-01-responsive-right-width](task-01-responsive-right-width.md)
 
 ## Verification
 

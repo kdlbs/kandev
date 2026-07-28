@@ -8,7 +8,7 @@
  * "slow path" (full layout rebuild via fromJSON).
  */
 import type { DockviewApi, SerializedDockview } from "dockview-react";
-import { getEnvLayout } from "@/lib/local-storage";
+import { getEnvLayout, getManualRightWidth } from "@/lib/local-storage";
 import { applyLayoutFixups } from "./dockview-layout-builders";
 import { isLayoutShapeHealthy } from "./dockview-layout-health";
 import {
@@ -21,6 +21,7 @@ import {
   RIGHT_TOP_GROUP,
   RIGHT_BOTTOM_GROUP,
 } from "./layout-manager";
+import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import type { LayoutState, LayoutGroupIds } from "./layout-manager";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -341,21 +342,29 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
 
   // Column widths from the outgoing env stay live across the switch because
   // we skipped fromJSON. Apply the target env's widths explicitly:
-  //   - saved layout exists → use its serialized sizes
+  //   - saved layout exists → use responsive defaults (or a manual right width)
   //   - no saved layout (brand-new env) → compute fresh defaults via
   //     getPinnedWidth (ratio-based, clamped to legacy initial cap)
-  applyPinnedColumnSizes(api, saved as SerializedDockview | null, params.safeWidth);
+  applyPinnedColumnSizes(
+    api,
+    saved as SerializedDockview | null,
+    params.safeWidth,
+    getManualRightWidth(newEnvId),
+  );
 
   api.layout(params.safeWidth, params.safeHeight);
-  return applyLayoutFixups(api, savedRightColumnWidth(saved as SerializedDockview | null));
+  return applyLayoutFixups(
+    api,
+    savedRightColumnWidth(saved as SerializedDockview | null),
+    getManualRightWidth(newEnvId),
+  );
 }
 
 /**
- * The per-env saved width of the right column (the last grid-root child) for a
+ * The serialized width of the right column (the last grid-root child) for a
  * default-preset layout, or undefined when the saved layout has no distinct
- * right column. Forwarded to `applyLayoutFixups` so the fixups pass anchors the
- * pinned right target to this stable saved width instead of dockview's
- * transient post-`fromJSON` live size (the dockview-wrong-width drift).
+ * right column. Retained for diagnostics/compatibility only; callers use the
+ * separate manual-width preference for an intentional override.
  *
  * The right column is identified by the presence of RIGHT_TOP_GROUP /
  * RIGHT_BOTTOM_GROUP inside the last grid-root child — NOT by column count.
@@ -404,14 +413,20 @@ function extractSavedColumnSizes(saved: SerializedDockview): number[] | null {
   return root.data.map((child: any) => (typeof child?.size === "number" ? child.size : NaN));
 }
 
-/** Compute the target width for a pinned column from saved sizes or fall
- *  back to the preset's ratio-based default. */
+/** Compute the target width for a pinned column. Right-column geometry from a
+ *  serialized layout is intentionally ignored unless a manual preference exists. */
+// eslint-disable-next-line max-params
 function targetPinnedWidth(
   col: LayoutState["columns"][number],
   index: number,
   savedSizes: number[] | null,
   totalWidth: number,
+  manualRightWidth: number | null,
+  sidebarWidth: number,
 ): number | undefined {
+  if (col.id === "right") {
+    return resolveResponsiveRightWidth(totalWidth, sidebarWidth, manualRightWidth);
+  }
   if (savedSizes && Number.isFinite(savedSizes[index])) return savedSizes[index];
   return getPinnedWidth(col, totalWidth, undefined);
 }
@@ -422,16 +437,20 @@ function targetPinnedWidth(
  * widths bleed into the new env — a brand-new task would open at whatever
  * width the user last dragged the previous task's sidebar/right to.
  */
+// eslint-disable-next-line complexity
 function applyPinnedColumnSizes(
   api: DockviewApi,
   saved: SerializedDockview | null,
   totalWidth: number,
+  manualRightWidth: number | null,
 ): void {
   const sv = getRootSplitview(api);
   if (!sv || sv.length < 2) return;
 
   const savedSizes = saved ? extractSavedColumnSizes(saved) : null;
   const liveLayout = fromDockviewApi(api);
+  const sidebarColumn = liveLayout.columns.find((column) => column.id === "sidebar");
+  const sidebarTarget = sidebarColumn ? getPinnedWidth(sidebarColumn, totalWidth, undefined) : 0;
   if (isDebug()) {
     const savedStr = savedSizes
       ? savedSizes.map((n) => (Number.isFinite(n) ? String(Math.round(n)) : "-")).join(",")
@@ -449,7 +468,7 @@ function applyPinnedColumnSizes(
     const target =
       col.id === "sidebar"
         ? getPinnedWidth(col, totalWidth, undefined)
-        : targetPinnedWidth(col, i, savedSizes, totalWidth);
+        : targetPinnedWidth(col, i, savedSizes, totalWidth, manualRightWidth, sidebarTarget);
     if (typeof target !== "number" || target <= 0) continue;
     try {
       sv.resizeView(i, target);
@@ -570,7 +589,11 @@ export function performEnvSwitch(params: EnvSwitchParams): LayoutGroupIds {
           livePanelIdsAfter: api.panels.map((p) => p.id),
         });
       }
-      return applyLayoutFixups(api, savedRightColumnWidth(saved as SerializedDockview));
+      return applyLayoutFixups(
+        api,
+        savedRightColumnWidth(saved as SerializedDockview),
+        getManualRightWidth(newEnvId),
+      );
     } catch (err) {
       console.warn("performEnvSwitch: fromJSON threw", err);
       debug("performEnvSwitch: fromJSON threw, falling through to default", { newEnvId, err });

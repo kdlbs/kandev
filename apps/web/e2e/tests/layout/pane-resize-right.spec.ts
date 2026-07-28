@@ -30,6 +30,28 @@ test.describe("Right pane resize — container-proportional cap", () => {
     expectApproxWidth(initialWidth, 288, 12);
   });
 
+  test("recomputes automatic width across monitor changes and restores the large-screen ratio", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await openWideTask(testPage, apiClient, seedData, "Responsive right width", {
+      width: 2200,
+      height: 900,
+    });
+    const largeWidth = await getDockviewGroupWidth(testPage, "files");
+    expectApproxWidth(largeWidth, 450, 12);
+
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    await testPage.waitForTimeout(500);
+    const laptopWidth = await getDockviewGroupWidth(testPage, "files");
+    expectApproxWidth(laptopWidth, 288, 12);
+
+    await testPage.setViewportSize({ width: 2200, height: 900 });
+    await testPage.waitForTimeout(500);
+    expectApproxWidth(await getDockviewGroupWidth(testPage, "files"), largeWidth, 12);
+  });
+
   test("resizes past the old 450px hard cap", async ({ testPage, apiClient, seedData }) => {
     await openWideTask(testPage, apiClient, seedData, "Right resize past old cap");
     const actual = await resizeColumnViaSplitview(testPage, "right", 700);

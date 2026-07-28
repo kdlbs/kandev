@@ -247,6 +247,11 @@ export function setFilesPanelScrollPosition(sessionId: string, position: number)
 // discard layouts captured with the now-removed dockview sidebar column.
 const DOCKVIEW_ENV_LAYOUT_PREFIX = "kandev.dockview.env-layout-v3.";
 
+// A serialized Dockview layout is geometry, not evidence of an intentional
+// pixel preference. Keep that preference separately so automatic restores can
+// recompute responsive defaults while genuine sash drags remain per-env.
+const DOCKVIEW_MANUAL_RIGHT_WIDTH_PREFIX = "kandev.dockview.manual-right-width-v1.";
+
 /**
  * Get the saved dockview layout for a task environment.
  * Returns null if not found.
@@ -270,6 +275,27 @@ export function setEnvLayout(envId: string, layout: object): void {
   } catch {
     // Ignore write failures (storage full, blocked, etc.)
   }
+}
+
+export function getManualRightWidth(envId: string | null): number | null {
+  if (!envId) return null;
+  const value = getSessionStorage<number | null>(
+    `${DOCKVIEW_MANUAL_RIGHT_WIDTH_PREFIX}${envId}`,
+    null,
+  );
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : null;
+}
+
+export function setManualRightWidth(envId: string | null, width: number): void {
+  if (!envId || !Number.isFinite(width) || width <= 0) return;
+  setSessionStorage(`${DOCKVIEW_MANUAL_RIGHT_WIDTH_PREFIX}${envId}`, Math.round(width));
+}
+
+export function clearManualRightWidth(envId: string | null): void {
+  if (!envId) return;
+  removeSessionStorage(`${DOCKVIEW_MANUAL_RIGHT_WIDTH_PREFIX}${envId}`);
 }
 
 // --- Dockview global left-sidebar width (localStorage) ---
@@ -655,6 +681,7 @@ export function cleanupTaskStorage(
   for (const envId of envIds) {
     removeEnvMaximizeState(envId);
     removeSessionStorage(`${DOCKVIEW_ENV_LAYOUT_PREFIX}${envId}`);
+    clearManualRightWidth(envId);
   }
 
   // Session-keyed storage — drafts, files panel state, scroll, etc.

@@ -1,7 +1,7 @@
 ---
 id: "01-responsive-right-width"
 title: "Separate responsive and manual right-column widths"
-status: pending
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"

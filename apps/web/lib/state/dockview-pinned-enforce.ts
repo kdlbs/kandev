@@ -20,9 +20,21 @@
  */
 import type { DockviewApi } from "dockview-react";
 import { getRootSplitview, getPinnedTarget, computeSidebarMaxPx } from "./layout-manager";
+import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
+import { getManualRightWidth } from "@/lib/local-storage";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debugWidths = createDebugLogger("dockview:widths");
+
+function measuredLayoutWidth(api: DockviewApi): number | undefined {
+  const domWidth =
+    typeof document !== "undefined"
+      ? document.querySelector<HTMLElement>(".dv-dockview")?.clientWidth
+      : undefined;
+  if (domWidth && domWidth > 0) return domWidth;
+  if (api.width > 0) return api.width;
+  return undefined;
+}
 
 /** Enforcement-in-progress guard to prevent infinite loops when our own
  *  `sv.resizeView` triggers `onDidLayoutChange`. */
@@ -66,6 +78,7 @@ export type EnforcePinnedTargetsCtx = {
   /** Non-null when we are in (or restoring) a maximized-group state; skip
    *  enforcement so we don't fight the 2-column maximize overlay. */
   maximized: boolean;
+  envId?: string | null;
 };
 
 /**
@@ -110,7 +123,14 @@ export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargets
       restoreColumnToTarget(sv, 0, clamped);
     }
     if (ctx.rightPanelsVisible) {
-      restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"));
+      const sidebarWidth = ctx.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
+      const manual = getManualRightWidth(ctx.envId ?? null);
+      const target = resolveResponsiveRightWidth(measuredLayoutWidth(api), sidebarWidth, manual);
+      if (target > 0) {
+        restoreColumnToTarget(sv, sv.length - 1, target);
+      } else {
+        restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"));
+      }
     }
   } finally {
     enforcing = false;

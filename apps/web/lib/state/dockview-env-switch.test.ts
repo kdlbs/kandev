@@ -8,6 +8,7 @@ import type { SerializedDockview } from "dockview-react";
 
 vi.mock("@/lib/local-storage", () => ({
   getEnvLayout: vi.fn(() => null),
+  getManualRightWidth: vi.fn(() => null),
 }));
 
 vi.mock("./dockview-layout-builders", () => ({
