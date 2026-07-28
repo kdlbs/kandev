@@ -1,5 +1,5 @@
 ---
-status: shipped
+status: building
 created: 2026-07-19
 owner: kandev
 ---
@@ -26,6 +26,8 @@ Users can arrange and save the desktop task workbench only while a task is open,
 - The existing workbench layout menu continues to apply built-in and custom profiles and save the current workbench as a custom profile. Profile mutations from either surface remain consistent after the user-settings response is received.
 - Layout-profile editing is usable with pointer, keyboard, and touch input. On narrow settings viewports, profile management and all editor commands remain reachable without horizontal page scrolling.
 - Layout profiles configure the desktop Dockview workbench only. Mobile and tablet task-detail layouts retain their existing behavior.
+- The default right-side workbench column is responsive: its Files, Changes, and Terminal panels resize together from the current desktop workbench width whenever the display changes.
+- A right-column resize performed through the desktop sash is an explicit per-task-environment preference. It persists across reloads and display changes, while still respecting the current screen's safety cap.
 
 ## Data model
 
@@ -45,7 +47,7 @@ The built-in layouts are code-defined templates. A customization is stored in `s
 
 The editor persists the existing declarative `LayoutState`: ordered columns contain ordered groups, groups contain ordered panels and an active panel, and captured tree/size data preserves split placement and proportions. New editor-created profiles use only the reusable panel registry. A legacy profile with an unreadable layout remains listed for rename, duplication, deletion, or default removal, but cannot enter the visual editor or become a new default until replaced with a valid reusable layout.
 
-Task-specific restored layouts remain device-local environment state and take precedence over the user default. They are not copied into or overwritten by layout-profile edits.
+Task-specific restored layouts remain device-local environment state and take precedence over the user default. They are not copied into or overwritten by layout-profile edits. The serialized Dockview layout preserves panel structure and transient geometry. A companion environment-scoped preference stores a raw right-column width only after a genuine user sash drag; legacy layouts and layouts without that preference are responsive defaults rather than manual overrides.
 
 ## API surface
 
@@ -70,6 +72,7 @@ The frontend treats the returned settings payload as authoritative after each su
 - Custom profiles and the selected custom default survive browser and Kandev restarts through backend user settings and are portable across the user's devices.
 - An unsaved editor draft does not survive navigation or restart.
 - Per-task layout state continues to use its existing environment-scoped persistence and is not made portable by this feature.
+- A saved default right-column geometry adapts to the current workbench width on reload, monitor switch, and return to a wider monitor. A manual right-column width keeps its raw requested width across those events and is only clamped while the current screen cannot accommodate it.
 - A task handoff within the same environment does not persist an intermediate panel-removal state or change the root split orientation.
 
 ## Scenarios
@@ -83,6 +86,8 @@ The frontend treats the returned settings payload as authoritative after each su
 - **GIVEN** an existing task with a task-specific layout, **WHEN** the user changes the default profile and returns to that task, **THEN** the task-specific layout is unchanged.
 - **GIVEN** an existing task with a task-specific layout, **WHEN** the user chooses Reset Layout, **THEN** the latest effective default profile replaces that task's layout.
 - **GIVEN** two tasks whose active sessions share one task environment and a desktop workbench with Agent in the center and Files or Changes above Terminal on the right, **WHEN** the user switches between those tasks, **THEN** the incoming Agent replaces the outgoing Agent in the same group, the right column remains vertically split, the root remains horizontally split, and the same geometry survives reload.
+- **GIVEN** a task environment whose right column has never been manually resized, **WHEN** its desktop workbench moves from a large monitor to a laptop-sized workbench and back, **THEN** the Files, Changes, and Terminal column follows the default ratio at each width and returns to the large-workbench ratio.
+- **GIVEN** a task environment whose right column was manually resized through its desktop sash, **WHEN** the workbench moves between large and laptop-sized displays, **THEN** that requested width is restored whenever it fits and is temporarily clamped only to preserve the current screen's minimum center width.
 - **GIVEN** a custom default profile, **WHEN** the user deletes it and confirms, **THEN** the built-in Default becomes effective.
 - **GIVEN** a profile draft with Agent removed, duplicate reusable panels, or an empty group, **WHEN** the user attempts to save, **THEN** saving is blocked and the invalid locations are identified.
 - **GIVEN** a backend save failure, **WHEN** the user saves a profile edit, **THEN** the draft remains available and the previous persisted layout stays selected.
@@ -91,6 +96,7 @@ The frontend treats the returned settings payload as authoritative after each su
 ## Out of scope
 
 - Customizing mobile or tablet task-detail layouts.
+- Changing the global app sidebar width or other layout-profile split proportions.
 - Forcing a changed default onto existing task-specific layouts without Reset Layout.
 - Configuring task-specific panels such as individual files, diffs, commits, pull requests, extra sessions, or extra terminals.
 - Mutating the code-defined built-in definitions; direct edits are persisted as hidden user overrides.
