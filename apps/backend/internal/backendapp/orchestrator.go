@@ -72,6 +72,8 @@ func provideOrchestrator(
 	agentManagerClient := newLifecycleAdapter(lifecycleMgr, agentRegistry, log)
 
 	serviceCfg := orchestrator.DefaultServiceConfig()
+	serviceCfg.ClaudeBackgroundPromptHandoff =
+		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"

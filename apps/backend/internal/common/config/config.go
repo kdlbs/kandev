@@ -397,6 +397,12 @@ type FeaturesConfig struct {
 	// Toggles). Off by default so kandev stays single-user until a deployment
 	// opts in.
 	Auth bool `mapstructure:"auth" json:"auth"`
+
+	// ClaudeBackgroundPromptHandoff gates the high-risk experiment that lets a
+	// claude-acp session accept a successor prompt after an adapter-attested
+	// foreground handoff while background work remains live. It is off in every
+	// embedded profile and must fail closed for every other provider.
+	ClaudeBackgroundPromptHandoff bool `mapstructure:"claude_background_prompt_handoff" json:"claudeBackgroundPromptHandoff"`
 }
 
 // LoggingConfig holds logging configuration.

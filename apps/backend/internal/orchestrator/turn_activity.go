@@ -17,9 +17,10 @@ import (
 // independently. Foreground activity always has precedence; background work is
 // visible only after an explicit foreground-idle boundary.
 //
-// It is a best-effort accounting signal only. ACP providers do not expose
-// background lifecycles consistently enough for this state to relax prompt
-// admission or select an operator-visible activity tier.
+// It is a best-effort accounting signal only. The default admission and public
+// activity contracts never trust it. A high-risk, default-off experiment may
+// use it for persisted Claude Code sessions, whose adapter supplies the
+// recognized lifecycle attestations below.
 //
 // The absent/zero internal state means "foreground generating". A recognized
 // registration plus an explicit idle boundary can move only this private
@@ -817,8 +818,8 @@ func (s *Service) clearTurnActivity(sessionID string) {
 // yielded to an outstanding background task. An untracked session defaults to
 // true, preserving the historical "reject a new prompt while RUNNING" contract.
 //
-// This is a pure internal predicate. The coarse admission and serialization
-// seams deliberately do not use it.
+// This is a pure internal predicate. The coarse default admission and
+// serialization seams deliberately do not use it.
 func (s *Service) isForegroundTurnGenerating(sessionID string) bool {
 	ta := s.lockTurnActivity(sessionID, false)
 	if ta == nil {
@@ -845,9 +846,9 @@ func (ta *turnActivity) generatingLocked() bool {
 // work and, if so, takes it for the caller by flipping it back to generating —
 // under the same lock, so exactly one caller can win.
 //
-// The public coarse gate rejects RUNNING sessions before this is reached.
-// Retaining atomic claims alongside the tracker keeps its former concurrency
-// invariants testable without treating the estimate as a safety signal.
+// The public coarse gate rejects RUNNING sessions before this is reached unless
+// the Claude-only experiment is enabled. Atomic claims preserve serialization
+// for the experimental path.
 //
 // Returns nil for an untracked session — no background work is outstanding, so
 // there is nothing to claim and the historical reject-while-RUNNING default
@@ -1133,18 +1134,50 @@ func (s *Service) foregroundActivityValue(sessionID string) v1.ForegroundActivit
 	return v1.ForegroundActivityBackground
 }
 
-// ForegroundActivity exposes the conservative operator-facing busy signal.
-// Callers combine it with the durable session state, so every RUNNING session is
-// generating and settled sessions omit the value. The finer-grained tracker is
-// intentionally not a public safety signal while ACP lifecycle reporting is
-// incomplete.
-func (s *Service) ForegroundActivity(_ string) v1.ForegroundActivity {
+const (
+	claudeACPProviderID = "claude-acp"
+	mockAgentProviderID = "mock-agent"
+)
+
+// claudeBackgroundPromptHandoffEnabled reports whether sessionID is allowed to
+// use the high-risk fine-grained policy. Provider identity comes from the
+// persisted launch snapshot rather than a client-supplied activity value. A
+// missing session, snapshot, or provider fails closed.
+func (s *Service) claudeBackgroundPromptHandoffEnabled(sessionID string) bool {
+	if !s.config.ClaudeBackgroundPromptHandoff || s.repo == nil || sessionID == "" {
+		return false
+	}
+	session, err := s.repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil || session == nil {
+		return false
+	}
+	return s.claudeBackgroundPromptHandoffEnabledForSession(session)
+}
+
+func (s *Service) claudeBackgroundPromptHandoffEnabledForSession(
+	session *models.TaskSession,
+) bool {
+	if !s.config.ClaudeBackgroundPromptHandoff || session == nil {
+		return false
+	}
+	agentName, _ := session.AgentProfileSnapshot["agent_name"].(string)
+	return agentName == claudeACPProviderID || agentName == mockAgentProviderID
+}
+
+// ForegroundActivity exposes the conservative operator-facing busy signal by
+// default. A deployment that explicitly enables the experiment may expose the
+// private tracker value only for a persisted Claude Code session (or the mock
+// provider used to exercise Claude lifecycle frames in E2E).
+func (s *Service) ForegroundActivity(sessionID string) v1.ForegroundActivity {
+	if s.claudeBackgroundPromptHandoffEnabled(sessionID) {
+		return s.foregroundActivityValue(sessionID)
+	}
 	return v1.ForegroundActivityGenerating
 }
 
-// publishForegroundActivityChanged emits a conservative refresh when the
-// internal tracker changes. The public value remains generating; the event still
-// carries active_subagent_count for status and diagnostics.
+// publishForegroundActivityChanged emits a provider-aware refresh when the
+// internal tracker changes. publishForegroundActivityNow applies the coarse
+// default or the explicitly enabled Claude experiment before broadcasting.
 func (s *Service) publishForegroundActivityChanged(ctx context.Context, taskID, sessionID string) {
 	publicationLock, releasePublication := s.acquireActivityPublicationGuard(sessionID)
 	defer releasePublication()
@@ -1214,20 +1247,10 @@ func (s *Service) publishForegroundActivityNow(
 	if s.eventBus == nil || taskID == "" || sessionID == "" {
 		return
 	}
-	publicValue := value
-	if value != nil {
-		publicValue = string(v1.ForegroundActivityGenerating)
-		if s.repo != nil {
-			if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil &&
-				session != nil && session.State != models.TaskSessionStateRunning {
-				publicValue = nil
-			}
-		}
-	}
 	eventData := map[string]interface{}{
 		metaKeyTaskID:           taskID,
 		metaKeySessionID:        sessionID,
-		"foreground_activity":   publicValue,
+		"foreground_activity":   s.publicForegroundActivityValue(ctx, sessionID, value),
 		"active_subagent_count": activeSubagentCount,
 	}
 	if err := s.eventBus.Publish(ctx, events.TaskSessionActivityChanged,
@@ -1241,6 +1264,32 @@ func (s *Service) publishForegroundActivityNow(
 	// (board card, task list) update live; emits task.updated only when the
 	// task-level three-state value actually changes.
 	s.publishTaskActivityIfChanged(ctx, taskID)
+}
+
+func (s *Service) publicForegroundActivityValue(
+	ctx context.Context,
+	sessionID string,
+	value interface{},
+) interface{} {
+	if value == nil {
+		return nil
+	}
+	publicValue := interface{}(string(v1.ForegroundActivityGenerating))
+	if s.repo == nil {
+		return publicValue
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return publicValue
+	}
+	if s.claudeBackgroundPromptHandoffEnabledForSession(session) &&
+		value == string(v1.ForegroundActivityBackground) {
+		return value
+	}
+	if session.State != models.TaskSessionStateRunning {
+		return nil
+	}
+	return publicValue
 }
 
 // normalizedIsBackgroundTask reports whether the adapter attested a live

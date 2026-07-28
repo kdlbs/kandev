@@ -51,3 +51,58 @@ test.describe("Mobile coarse RUNNING busy signal", () => {
     await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
   });
 });
+
+test.describe.serial("Mobile Claude background prompt handoff experiment", () => {
+  test.describe.configure({ retries: 1 });
+
+  test.beforeAll(async ({ backend }) => {
+    await backend.restart({
+      KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF: "true",
+    });
+  });
+
+  test.afterAll(async ({ backend }) => {
+    await backend.restart();
+  });
+
+  test("background-only work keeps working visible while input sends immediately", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile experimental background handoff",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    await editor.tap();
+    await editor.fill("/detached-background 20s");
+    await testPage.getByTestId("submit-message-button").tap();
+    await expect(session.agentStatus()).toBeVisible({ timeout: 20_000 });
+    await expect(session.idleInput()).toBeVisible({ timeout: 20_000 });
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+
+    await editor.tap();
+    await editor.fill("/slow 2s");
+    await testPage.getByTestId("submit-message-button").tap();
+
+    await expect(testPage.getByText("/slow 2s")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
+    await waitForActiveSessionForegroundActivity(testPage, "generating");
+  });
+});

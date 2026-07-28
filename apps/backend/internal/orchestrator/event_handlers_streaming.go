@@ -1096,6 +1096,10 @@ func (s *Service) publishTaskSessionStateChanged(
 	var foregroundActivity interface{}
 	if nextState == models.TaskSessionStateRunning {
 		foregroundActivity = string(s.ForegroundActivity(sessionID))
+	} else if activity := s.ForegroundActivity(sessionID); activity == v1.ForegroundActivityBackground {
+		// Only the enabled Claude experiment can return background here.
+		// Preserve detached-work visibility as the coarse foreground settles.
+		foregroundActivity = string(activity)
 	}
 	eventData := map[string]interface{}{
 		metaKeyTaskID:            taskID,

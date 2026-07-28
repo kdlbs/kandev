@@ -1,4 +1,4 @@
-# ADR-2026-07-28-coarse-running-busy-signal: Restore Coarse Running Prompt Admission
+# ADR-2026-07-28-coarse-running-busy-signal: Default to Coarse Running Prompt Admission
 
 **Status:** accepted
 **Date:** 2026-07-28
@@ -16,7 +16,7 @@ an event the provider never emits.
 
 ## Decision
 
-Restore the conservative pre-ADR-0049 operator contract:
+Restore the conservative pre-ADR-0049 operator contract as the shipped default:
 
 - Every `RUNNING` session rejects direct prompt admission and routes composer
   input through the existing queued-message path.
@@ -25,23 +25,40 @@ Restore the conservative pre-ADR-0049 operator contract:
 - `session.activity_changed`, `session.state_changed`, boot payloads, REST
   session DTOs, and task aggregates follow the same coarse activity policy.
 - The in-memory background-work tracker and adapter attestations remain in place
-  as dormant accounting infrastructure. They may continue to supply
+  as accounting infrastructure. They may continue to supply
   `active_subagent_count`, but they do not relax admission or select an
-  operator-visible background activity tier.
+  operator-visible background activity tier by default.
 
-Re-enabling fine-grained admission requires a new decision backed by provider
-protocol guarantees and fixtures that cover launch, foreground yield,
-correlation, and accountable terminal completion.
+Retain ADR-0049's complete Claude Code behavior behind the default-off
+`features.claudeBackgroundPromptHandoff` runtime toggle. The exception is
+effective only for `claude-acp` sessions (plus the mock provider in E2E):
+
+- adapter-attested Claude subagents, background shells, and Monitor watches may
+  expose the background activity tier;
+- a generation-matched Claude foreground handoff may admit the next prompt
+  while the durable session remains `RUNNING`; and
+- every other provider remains coarse even when the toggle is enabled.
+
+The toggle is experimental, high risk, restart-required, and off in every
+embedded profile. Missing provider identity fails closed. Its purpose is to let
+designated contributors gather protocol fixtures and refine the behavior
+without changing the release default.
 
 ## Consequences
 
-Prompt admission is safe and consistent across ACP providers, and the composer
-cannot advertise direct input that the coarse lifecycle considers busy. An
-operator may need to queue a follow-up while a held-open foreground turn waits
-on background work. Detached work that outlives a completed foreground turn is
-no longer shown as a distinct background-running tier. Keeping the tracker
-avoids a risky large revert and preserves evidence for a future protocol-backed
-implementation.
+Prompt admission is safe and consistent across ACP providers by default, and
+the composer cannot advertise direct input that the coarse lifecycle considers
+busy. An operator may need to queue a follow-up while a held-open foreground
+turn waits on background work. Detached work that outlives a completed
+foreground turn is not shown as a distinct background-running tier unless the
+Claude experiment is deliberately enabled.
+
+The opt-in path preserves a focused real-world test bed without exposing known
+ACP lifecycle uncertainty to every user. Enabling it accepts the original
+risks: missing, delayed, duplicated, or ID-less Claude lifecycle frames can
+misclassify activity or promptability. The environment variable or persisted
+runtime override provides a kill switch, but it does not make those signals
+authoritative.
 
 ## Alternatives Considered
 
@@ -51,6 +68,7 @@ implementation.
 - **Disable only prompt admission.** Rejected because the UI would still
   advertise direct input or a background state that no longer controls
   admission.
-- **Add a runtime feature toggle.** Rejected for this release because an
-  operator-facing switch would expose behavior known to be unreliable rather
-  than establishing one safe default.
+- **Remove the fine-grained path completely.** Rejected because a default-off,
+  Claude-scoped experiment gives the original contributor a controlled way to
+  reproduce and improve all supported background modes without changing the
+  release default.

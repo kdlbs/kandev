@@ -705,9 +705,13 @@ Current lifecycle code broadcasts `session.turn.started` and `session.turn.compl
 `session.activity_changed` carries `task_id`, `session_id`,
 `foreground_activity`, and `active_subagent_count`. The activity is
 `generating` while the session is `RUNNING` and otherwise clears with the
-coarse lifecycle; background-work accounting does not expose a separate
-activity tier. The count is always an integer and is zero when no
-adapter-attested subagent is live for that session. Task lifecycle
+coarse lifecycle by default; background-work accounting does not expose a
+separate activity tier. When
+`KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF=true`, a persisted Claude
+Code session may instead expose `background` while its foreground has yielded
+and adapter-attested async subagent, background shell, or Monitor work remains
+active. Other providers remain coarse. The count is always an integer and is
+zero when no adapter-attested subagent is live for that session. Task lifecycle
 notifications expose the same count aggregated across the task's sessions as
 `active_subagent_count`. Count-only changes may emit
 `session.activity_changed` and `task.updated` even when the coarse lifecycle

@@ -169,6 +169,43 @@ func TestBackgroundCompletion_SettledSessionClearsActivityForCountOnlyUpdate(t *
 	}
 }
 
+func TestBackgroundCompletion_EnabledClaudeSettledSessionPublishesBackground(t *testing.T) {
+	repo := setupTestRepo(t)
+	const taskID, sessionID, executionID = "task-settled-claude", "session-settled-claude", "execution-settled-claude"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	enableClaudeBackgroundPromptHandoffForTest(t, svc)
+	setSessionAgentNameForTest(t, svc, sessionID, "claude-acp")
+	recorded := &recordingEventBus{}
+	svc.eventBus = recorded
+	svc.registerBackgroundWorkKind(
+		sessionID, "tool-one", executionID, "child-one", streams.BackgroundWorkKindSubagent,
+	)
+	svc.registerBackgroundWorkKind(
+		sessionID, "tool-two", executionID, "child-two", streams.BackgroundWorkKindSubagent,
+	)
+	svc.markForegroundIdle(sessionID)
+
+	publication, changed := svc.completeBackgroundWorkSnapshot(
+		sessionID, executionID, "child-one", string(v1.ForegroundActivityBackground),
+	)
+	if !changed {
+		t.Fatal("intermediate enabled Claude completion must publish the count-only transition")
+	}
+	svc.publishForegroundActivitySnapshot(t.Context(), taskID, sessionID, publication)
+
+	if len(recorded.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(recorded.events))
+	}
+	data, _ := recorded.events[0].event.Data.(map[string]interface{})
+	if got := data["foreground_activity"]; got != string(v1.ForegroundActivityBackground) {
+		t.Fatalf("enabled Claude settled activity = %#v, want background", got)
+	}
+	if got := data["active_subagent_count"]; got != 1 {
+		t.Fatalf("enabled Claude settled active subagent count = %#v, want 1", got)
+	}
+}
+
 func TestBackgroundCompletion_IdentifiedRetiresExactWorkAndDuplicateIsHarmless(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	const taskID, sessionID, executionID = "task-accounting", "session-accounting", "execution-accounting"

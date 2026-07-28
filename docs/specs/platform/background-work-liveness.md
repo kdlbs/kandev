@@ -12,23 +12,33 @@ owner: kandev
 ACP providers do not yet expose a consistent, accountable lifecycle for
 subagents and other background work. Kandev can account for recognized work,
 but that best-effort signal is not reliable enough to decide whether a
-`RUNNING` agent can safely receive another prompt. Prompt admission and
-operator-visible busy state therefore use the durable coarse session lifecycle.
+`RUNNING` agent can safely receive another prompt by default. Prompt admission
+and operator-visible busy state therefore use the durable coarse session
+lifecycle unless a deployment deliberately enables the Claude-only experiment.
 
 ## What
 
 - Every `RUNNING` session is busy, rejects direct prompt admission, and routes
-  composer input through the queued-message path.
+  composer input through the queued-message path by default.
 - Every `RUNNING` session is shown as generating. Background-work accounting
-  does not select a separate operator-visible activity tier.
+  does not select a separate operator-visible activity tier by default.
 - A settled session follows its coarse state and does not remain visually busy
   solely because detached work is still registered.
 - The runtime retains one registration per recognized live subagent and derives
   `active_subagent_count` from those registrations. Background shells and
   Monitor watches may remain internally tracked but do not contribute to the
   subagent count.
-- Adapter attestation is accounting evidence only. It cannot relax prompt
-  admission, irrespective of provider or workload kind.
+- Adapter attestation is accounting evidence only unless the
+  `features.claudeBackgroundPromptHandoff` experiment is enabled for a
+  `claude-acp` session.
+- When that experiment is enabled, all Claude modes covered by ADR-0049 retain
+  their fine-grained behavior: subagents, `run_in_background` shells, and
+  Monitor watches may expose background activity and a generation-matched
+  foreground handoff may admit the next prompt.
+- Non-Claude providers remain coarse even when the experiment is enabled.
+- The experiment is off in every embedded profile, high risk,
+  restart-required, and available through
+  `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF`.
 - Terminal execution teardown retires every tool-ownership and background-work
   entry owned by that execution. It releases the whole session activity record
   when no successor execution or in-flight prompt/dispatch token still owns it.
@@ -36,7 +46,8 @@ operator-visible busy state therefore use the durable coarse session lifecycle.
 ## API surface
 
 - A `RUNNING` session record, boot payload, activity notification, or state
-  notification exposes `foreground_activity=generating`.
+  notification exposes `foreground_activity=generating` by default. An
+  eligible session in the enabled Claude experiment may expose `background`.
 - Settled session records omit `foreground_activity`; task records aggregate
   only coarse running activity.
 - `session.activity_changed` carries `task_id`, `session_id`,
@@ -51,7 +62,7 @@ operator-visible busy state therefore use the durable coarse session lifecycle.
 
 | Coarse state | Prompt admission | Operator activity |
 | --- | --- | --- |
-| `RUNNING` | Queue/reject direct admission | generating |
+| `RUNNING` | Queue/reject by default; enabled Claude handoff may accept | generating by default; enabled Claude may show background |
 | `WAITING_FOR_INPUT`, `COMPLETED`, or `IDLE` | Accept | omitted |
 | `STARTING`, `CREATED`, `FAILED`, or `CANCELLED` | Reject as not promptable | omitted |
 
@@ -61,8 +72,11 @@ the table above.
 
 ## Failure modes
 
-- Missing, delayed, duplicated, or provider-specific background lifecycle
-  frames cannot make a `RUNNING` session promptable.
+- With the experiment off, missing, delayed, duplicated, or provider-specific
+  background lifecycle frames cannot make a `RUNNING` session promptable.
+- With the experiment on, only adapter-attested Claude lifecycle frames can
+  relax the gate. Missing provider identity and every non-Claude provider fail
+  closed.
 - A normalized tool-card shape cannot attest to promptability.
 - Codex child thread/session identity and Claude task notifications may be used
   for presentation or accounting, but neither changes the coarse admission
@@ -81,9 +95,15 @@ truth for prompt admission and operator-visible activity.
 
 ## Scenarios
 
-- **GIVEN** a `RUNNING` session whose tracker reports foreground-idle with
-  recognized background work, **WHEN** the operator submits a prompt, **THEN**
-  Kandev queues the prompt and does not dispatch it concurrently.
+- **GIVEN** the experiment is off and a `RUNNING` session's tracker reports
+  foreground-idle with recognized background work, **WHEN** the operator
+  submits a prompt, **THEN** Kandev queues it.
+- **GIVEN** the experiment is on for a `claude-acp` session and its tracker
+  reports adapter-attested background work plus a generation-matched foreground
+  handoff, **WHEN** the operator submits a prompt, **THEN** Kandev dispatches the
+  successor without queueing it.
+- **GIVEN** the experiment is on for any non-Claude provider, **WHEN** the same
+  tracker-shaped activity is observed, **THEN** Kandev still queues the prompt.
 - **GIVEN** the same session is rendered or freshly reloaded, **WHEN** its
   activity is serialized, **THEN** it is shown as generating rather than
   background-running.
@@ -98,8 +118,6 @@ truth for prompt admission and operator-visible activity.
 
 ## Out of scope
 
-- Fine-grained prompt admission based on ACP background-work inference.
-- A user-facing background-running status tier.
 - Mid-turn steering for agents without concurrent-prompt capability.
 - Reconstructing detached-work liveness after restart.
 - Rendering active subagent counts or individual subagent details in the UI.

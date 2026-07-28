@@ -49,9 +49,10 @@ var (
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	Scheduler  scheduler.SchedulerConfig
-	QueueSize  int
-	QueueGroup string
+	Scheduler                     scheduler.SchedulerConfig
+	QueueSize                     int
+	QueueGroup                    string
+	ClaudeBackgroundPromptHandoff bool
 }
 
 // DefaultServiceConfig returns default configuration

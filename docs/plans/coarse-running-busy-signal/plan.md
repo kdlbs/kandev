@@ -4,14 +4,15 @@ created: 2026-07-28
 status: completed
 ---
 
-# Implementation Plan: Coarse Running Busy Signal
+# Implementation Plan: Coarse Running Default with Claude Experiment
 
 ## Overview
 
-Restore the pre-ADR-0049 admission and display contract at the orchestrator's
-public policy seams while leaving its background-work accounting machinery
-intact. Pin the contract with focused backend tests and desktop/mobile browser
-coverage, then update the public API documentation.
+Restore the pre-ADR-0049 admission and display contract as the default while
+leaving ADR-0049's complete Claude behavior available behind a default-off,
+high-risk runtime flag. Pin both sides of the contract with focused backend
+tests and desktop/mobile browser coverage, then update the public configuration
+and API documentation.
 
 ## Backend
 
@@ -26,13 +27,16 @@ coverage, then update the public API documentation.
 - Update `publishTaskSessionStateChanged` in
   `apps/backend/internal/orchestrator/event_handlers_streaming.go` to use the
   same public policy and omit activity after `RUNNING`.
+- Add `features.claudeBackgroundPromptHandoff` and require both that flag and an
+  exact `claude-acp` provider snapshot before the private tracker can relax
+  admission or expose the background tier. The mock provider follows this path
+  only for E2E coverage.
 
 ## Frontend
 
-No production frontend change is required. The existing composer, activity
-store, and status components already consume the backend's
-`foreground_activity`; the backend will no longer send the disabled
-`background` tier.
+The existing composer, activity store, and status components already consume
+the backend's `foreground_activity`. Add the flag to the shared feature shape;
+the backend remains authoritative for whether a specific session is eligible.
 
 ## Tests
 
@@ -56,6 +60,11 @@ store, and status components already consume the backend's
 - **Scenario:** the same user outcome through the existing mobile composer
   button on Pixel 5.
   **File:** `apps/web/e2e/tests/chat/mobile-busy-signal.spec.ts`.
+- **Scenario:** with the flag explicitly enabled, the complete desktop and
+  mobile Claude-mock suite covers async subagents, detached work, foreground
+  precedence, reload hydration, and touch submission. Backend prompt-entry
+  tests cover every recognized Claude mode, including `run_in_background`
+  shells and Monitor.
 
 No layout, navigation, scroll, or touch composition changes are required. Both
 viewports reuse the shipped session composer and status surfaces.
@@ -63,3 +72,4 @@ viewports reuse the shipped session composer and status surfaces.
 ## Implementation Waves
 
 - [x] [Task 01: Restore coarse running policy](task-01-restore-coarse-running-policy.md)
+- [x] [Task 02: Add Claude experiment flag](task-02-add-claude-experiment-flag.md)

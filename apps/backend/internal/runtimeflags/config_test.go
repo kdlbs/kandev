@@ -2,6 +2,7 @@ package runtimeflags
 
 import (
 	"os"
+	"reflect"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/config"
@@ -80,6 +81,17 @@ func TestOptionsFromConfigParsesUppercaseTruthyEnvForAppStatusBar(t *testing.T) 
 	}
 }
 
+func TestOptionsFromConfigParsesClaudeBackgroundPromptHandoffEnv(t *testing.T) {
+	preserveEnv(t, "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF")
+	t.Setenv("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", "TRUE")
+
+	opts := OptionsFromConfig(&config.Config{})
+
+	if !opts.EnvValues["KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF"] {
+		t.Fatal("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF TRUE parsed false, want true")
+	}
+}
+
 func TestValuesFromConfigIncludesPlugins(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Features.Plugins = true
@@ -122,6 +134,34 @@ func TestValuesFromConfigIncludesAppStatusBar(t *testing.T) {
 
 	if !values["features.appStatusBar"] {
 		t.Fatal("ValuesFromConfig did not surface features.appStatusBar = true")
+	}
+}
+
+func TestValuesFromConfigIncludesClaudeBackgroundPromptHandoff(t *testing.T) {
+	cfg := &config.Config{}
+	field := reflect.ValueOf(&cfg.Features).Elem().FieldByName("ClaudeBackgroundPromptHandoff")
+	if !field.IsValid() {
+		t.Fatal("FeaturesConfig.ClaudeBackgroundPromptHandoff field missing")
+	}
+	field.SetBool(true)
+
+	values := ValuesFromConfig(cfg)
+
+	if !values["features.claudeBackgroundPromptHandoff"] {
+		t.Fatal("ValuesFromConfig did not surface features.claudeBackgroundPromptHandoff = true")
+	}
+}
+
+func TestApplyStatesToConfigSetsClaudeBackgroundPromptHandoff(t *testing.T) {
+	cfg := &config.Config{}
+	ApplyStatesToConfig(cfg, []RuntimeFlagState{{
+		Key:            "features.claudeBackgroundPromptHandoff",
+		EffectiveValue: true,
+	}})
+
+	field := reflect.ValueOf(&cfg.Features).Elem().FieldByName("ClaudeBackgroundPromptHandoff")
+	if !field.IsValid() || !field.Bool() {
+		t.Fatal("ApplyStatesToConfig did not set Features.ClaudeBackgroundPromptHandoff = true")
 	}
 }
 

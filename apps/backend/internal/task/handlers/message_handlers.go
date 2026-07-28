@@ -32,6 +32,10 @@ type OrchestratorService interface {
 	StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) error
 	ProcessOnTurnStart(ctx context.Context, taskID, sessionID string) error
 	StepRequiresCompletionSignal(ctx context.Context, taskID string) bool
+	// ForegroundActivity is already filtered by the orchestrator's runtime flag
+	// and persisted provider identity. Background therefore means this exact
+	// session is eligible for the experimental direct-admission path.
+	ForegroundActivity(sessionID string) v1.ForegroundActivity
 }
 
 // MessageHandlers handles WebSocket requests for messages
@@ -418,9 +422,13 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(primary)}, nil
 }
 
-func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, _ string, state models.TaskSessionState) *ws.Message {
+func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, sessionID string, state models.TaskSessionState) *ws.Message {
 	switch state {
 	case models.TaskSessionStateRunning:
+		if h.orchestrator != nil &&
+			h.orchestrator.ForegroundActivity(sessionID) == v1.ForegroundActivityBackground {
+			return nil
+		}
 		wsErr, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Agent is currently processing. Please wait for the current operation to complete.", nil)
 		return wsErr
 	case models.TaskSessionStateFailed, models.TaskSessionStateCancelled, models.TaskSessionStateCompleted:

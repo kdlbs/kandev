@@ -697,10 +697,11 @@ func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {
 		wantPrompt   bool
 	}{
 		{
-			name:         "running background is rejected",
+			name:         "running eligible background is accepted",
 			state:        models.TaskSessionStateRunning,
 			activity:     v1.ForegroundActivityBackground,
-			wantResponse: ws.MessageTypeError,
+			wantResponse: ws.MessageTypeResponse,
+			wantPrompt:   true,
 		},
 		{
 			name:         "running generating is rejected",
@@ -772,8 +773,10 @@ func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {
 }
 
 // TestErrorForBlockedMessageSession_RunningAlwaysBlocks proves a legacy
-// fine-grained value cannot bypass the coarse message-add gate.
-func TestErrorForBlockedMessageSession_RunningAlwaysBlocks(t *testing.T) {
+// TestErrorForBlockedMessageSession_UsesOrchestratorActivityPolicy proves the
+// transport accepts only the provider/flag-filtered background value returned
+// by the orchestrator while retaining the coarse block for generating turns.
+func TestErrorForBlockedMessageSession_UsesOrchestratorActivityPolicy(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	require.NoError(t, err)
 	msg := &ws.Message{ID: "1", Action: ws.ActionMessageAdd}
@@ -785,7 +788,7 @@ func TestErrorForBlockedMessageSession_RunningAlwaysBlocks(t *testing.T) {
 		wantBlock bool
 	}{
 		{"running + generating is blocked", v1.ForegroundActivityGenerating, models.TaskSessionStateRunning, true},
-		{"running + background is blocked", v1.ForegroundActivityBackground, models.TaskSessionStateRunning, true},
+		{"running + eligible background is accepted", v1.ForegroundActivityBackground, models.TaskSessionStateRunning, false},
 		{"waiting is accepted regardless", v1.ForegroundActivityGenerating, models.TaskSessionStateWaitingForInput, false},
 		{"failed stays blocked", v1.ForegroundActivityBackground, models.TaskSessionStateFailed, true},
 	}

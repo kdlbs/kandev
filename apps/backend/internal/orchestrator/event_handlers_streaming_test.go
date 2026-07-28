@@ -271,6 +271,34 @@ func TestUpdateTaskSessionStatePublishesPersistedUpdatedAt(t *testing.T) {
 	require.Equal(t, session.UpdatedAt.UTC().Format(time.RFC3339Nano), data["updated_at"])
 }
 
+func TestUpdateTaskSessionState_EnabledClaudePublishesSettledBackground(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-state-claude", "session-state-claude", "step1")
+	eb := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	enableClaudeBackgroundPromptHandoffForTest(t, svc)
+	setSessionAgentNameForTest(t, svc, "session-state-claude", "claude-acp")
+	svc.eventBus = eb
+	svc.registerBackgroundTask("session-state-claude", "background-1")
+	svc.markForegroundIdle("session-state-claude")
+
+	svc.updateTaskSessionState(
+		ctx,
+		"task-state-claude",
+		"session-state-claude",
+		models.TaskSessionStateWaitingForInput,
+		"",
+		false,
+	)
+
+	require.Len(t, eb.events, 1)
+	require.Equal(t, events.TaskSessionStateChanged, eb.events[0].subject)
+	data, ok := eb.events[0].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, string(v1.ForegroundActivityBackground), data["foreground_activity"])
+}
+
 func TestTransitionTaskSessionStateReportsAcceptedWrite(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

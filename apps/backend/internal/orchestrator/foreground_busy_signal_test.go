@@ -11,6 +11,30 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func enableClaudeBackgroundPromptHandoffForTest(t *testing.T, svc *Service) {
+	t.Helper()
+	svc.config.ClaudeBackgroundPromptHandoff = true
+}
+
+func setSessionAgentNameForTest(
+	t *testing.T,
+	svc *Service,
+	sessionID, agentName string,
+) {
+	t.Helper()
+	session, err := svc.repo.GetTaskSession(t.Context(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession(%q): %v", sessionID, err)
+	}
+	session.AgentProfileSnapshot = map[string]interface{}{
+		"agent_id":   "persisted-agent-record-id",
+		"agent_name": agentName,
+	}
+	if err := svc.repo.UpdateTaskSession(t.Context(), session); err != nil {
+		t.Fatalf("UpdateTaskSession(%q): %v", sessionID, err)
+	}
+}
+
 func emitForegroundIdle(svc *Service, taskID, sessionID string) {
 	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
 		TaskID: taskID, SessionID: sessionID,
@@ -51,6 +75,59 @@ func TestCheckSessionPromptable_BackgroundTaskRemainsBusy(t *testing.T) {
 	svc.completeBackgroundTask(sessionID, "tool-subagent-1")
 	if err := svc.checkSessionPromptable("task1", sessionID, models.TaskSessionStateRunning); !errors.Is(err, ErrAgentPromptInProgress) {
 		t.Fatalf("after background work completes the RUNNING session must gate input again, got: %v", err)
+	}
+}
+
+func TestCheckSessionPromptable_ClaudeExperimentAcceptsBackgroundIdle(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	enableClaudeBackgroundPromptHandoffForTest(t, svc)
+
+	const taskID = "task-claude-experiment"
+	const sessionID = "session-claude-experiment"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	setSessionAgentNameForTest(t, svc, sessionID, "claude-acp")
+
+	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
+	svc.markForegroundIdle(sessionID)
+
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+		t.Fatalf("enabled Claude activity = %q, want background", got)
+	}
+	if err := svc.checkSessionPromptable(
+		taskID,
+		sessionID,
+		models.TaskSessionStateRunning,
+	); err != nil {
+		t.Fatalf("enabled Claude background-idle session rejected: %v", err)
+	}
+}
+
+func TestCheckSessionPromptable_ClaudeExperimentRejectsNonClaude(t *testing.T) {
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	enableClaudeBackgroundPromptHandoffForTest(t, svc)
+
+	const taskID = "task-codex-experiment"
+	const sessionID = "session-codex-experiment"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	setSessionAgentNameForTest(t, svc, sessionID, "codex-acp")
+
+	// Deliberately forge the private tracker state. Provider gating must remain
+	// a separate fail-closed boundary even if a future normalizer regression
+	// incorrectly attests a non-Claude workload.
+	svc.registerBackgroundTask(sessionID, "tool-subagent-1")
+	svc.markForegroundIdle(sessionID)
+
+	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+		t.Fatalf("enabled non-Claude activity = %q, want generating", got)
+	}
+	if err := svc.checkSessionPromptable(
+		taskID,
+		sessionID,
+		models.TaskSessionStateRunning,
+	); !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("enabled non-Claude background-idle session must remain gated, got: %v", err)
 	}
 }
 

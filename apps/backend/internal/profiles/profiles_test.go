@@ -22,8 +22,8 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 		t.Errorf("env = %q, want %q (no selector env vars set)", env, EnvProd)
 	}
 	// Prod writes each registered feature flag with its safe shipped default.
-	if count != 4 {
-		t.Errorf("ApplyProfile wrote %d vars in prod; want 4", count)
+	if count != 5 {
+		t.Errorf("ApplyProfile wrote %d vars in prod; want 5", count)
 	}
 	if v := os.Getenv("KANDEV_FEATURES_OFFICE"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_OFFICE = %q after prod ApplyProfile; want %q", v, "false")
@@ -36,6 +36,13 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 	}
 	if v := os.Getenv("KANDEV_FEATURES_AUTH"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_AUTH = %q after prod ApplyProfile; want %q", v, "false")
+	}
+	if v := os.Getenv("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF"); v != "false" {
+		t.Errorf(
+			"KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF = %q after prod ApplyProfile; want %q",
+			v,
+			"false",
+		)
 	}
 }
 
@@ -67,6 +74,13 @@ func TestApplyProfile_DevUsesDevelopmentDefaults(t *testing.T) {
 	if v := os.Getenv("KANDEV_FEATURES_AUTH"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_AUTH = %q in dev; want %q", v, "false")
 	}
+	if v := os.Getenv("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF"); v != "false" {
+		t.Errorf(
+			"KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF = %q in dev; want %q",
+			v,
+			"false",
+		)
+	}
 }
 
 // TestApplyProfile_E2EWinsOverDev checks the documented detection
@@ -91,6 +105,13 @@ func TestApplyProfile_E2EWinsOverDev(t *testing.T) {
 	}
 	if v := os.Getenv("AGENTCTL_AUTO_APPROVE_PERMISSIONS"); v != "true" {
 		t.Errorf("AGENTCTL_AUTO_APPROVE_PERMISSIONS = %q in e2e; want %q", v, "true")
+	}
+	if v := os.Getenv("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF"); v != "false" {
+		t.Errorf(
+			"KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF = %q in e2e; want %q",
+			v,
+			"false",
+		)
 	}
 }
 
@@ -154,6 +175,13 @@ func TestFeatureFlagDefaults_LowercasesShortName(t *testing.T) {
 	if _, ok := defaults["app_status_bar"]; !ok {
 		t.Errorf("FeatureFlagDefaults missing %q key; got %#v", "app_status_bar", defaults)
 	}
+	if _, ok := defaults["claude_background_prompt_handoff"]; !ok {
+		t.Errorf(
+			"FeatureFlagDefaults missing %q key; got %#v",
+			"claude_background_prompt_handoff",
+			defaults,
+		)
+	}
 }
 
 func TestMarkApplied_OnlyAllowsKnownDerivedEnvVars(t *testing.T) {
@@ -181,7 +209,15 @@ func TestMarkApplied_OnlyAllowsKnownDerivedEnvVars(t *testing.T) {
 // hell out of whoever debugs it.
 func TestProfilesYAML_ContainsRequiredSections(t *testing.T) {
 	yaml := string(ProfilesYAML())
-	for _, section := range []string{"features:", "mocks:", "debug:", "KANDEV_FEATURES_OFFICE:", "KANDEV_FEATURES_PLUGINS:", "KANDEV_FEATURES_APP_STATUS_BAR:"} {
+	for _, section := range []string{
+		"features:",
+		"mocks:",
+		"debug:",
+		"KANDEV_FEATURES_OFFICE:",
+		"KANDEV_FEATURES_PLUGINS:",
+		"KANDEV_FEATURES_APP_STATUS_BAR:",
+		"KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:",
+	} {
 		if !strings.Contains(yaml, section) {
 			t.Errorf("embedded profiles.yaml missing section/key %q; embed broken or file truncated", section)
 		}

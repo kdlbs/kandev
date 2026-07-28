@@ -9,6 +9,7 @@ export type FeatureFlags = {
   plugins: boolean;
   appStatusBar: boolean;
   auth: boolean;
+  claudeBackgroundPromptHandoff: boolean;
 };
 
 export type FeatureName = keyof FeatureFlags;

@@ -3176,10 +3176,16 @@ func (s *Service) checkSessionPromptable(taskID, sessionID string, state models.
 		models.TaskSessionStateIdle:
 		return nil
 	case models.TaskSessionStateRunning:
-		// ACP providers do not expose background work with consistent identity,
-		// nesting, or terminal semantics. Fail closed while the durable session
-		// is RUNNING instead of using the best-effort tracker as an admission
-		// signal.
+		// The safe default is coarse: every RUNNING session is busy. A
+		// deployment may explicitly opt a persisted Claude Code session into
+		// ADR-0049's adapter-attested background handoff experiment. Every
+		// missing identity and non-Claude provider still fails closed.
+		if s.ForegroundActivity(sessionID) == v1.ForegroundActivityBackground {
+			s.logger.Debug("accepting prompt: enabled Claude foreground handoff is background-idle",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID))
+			return nil
+		}
 		s.logger.Warn("rejected prompt while agent is already running",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
