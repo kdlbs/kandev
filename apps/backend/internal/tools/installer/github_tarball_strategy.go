@@ -140,14 +140,9 @@ func (s *GithubTarballStrategy) expandTemplate(tmpl, target string) string {
 }
 
 func (s *GithubTarballStrategy) download(ctx context.Context, url string) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := getDownload(ctx, url)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
-	}
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return fmt.Errorf("download failed: %w", err)
+		return err
 	}
 	defer func() { _ = resp.Body.Close() }()
 

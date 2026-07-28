@@ -24,16 +24,14 @@ func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
 func stubGithubTarballDownload(t *testing.T, archive []byte) func() int {
 	t.Helper()
 	requestCount := 0
-	originalClient := http.DefaultClient
-	http.DefaultClient = &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+	swapDownloadClient(t, &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
 		requestCount++
 		return &http.Response{
 			StatusCode: http.StatusOK,
 			Body:       io.NopCloser(bytes.NewReader(archive)),
 			Header:     make(http.Header),
 		}, nil
-	})}
-	t.Cleanup(func() { http.DefaultClient = originalClient })
+	})})
 	return func() int { return requestCount }
 }
 
