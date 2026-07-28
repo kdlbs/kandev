@@ -89,11 +89,12 @@ func warnSelfReferentialEntry(root, name string, log *logger.Logger) {
 	if err != nil || !selfLink {
 		return
 	}
-	entry := filepath.Join(root, name)
-	log.Warn("workspace entry links to the workspace root; remove it to stop tools recursing into it",
-		zap.String("entry", entry),
-		zap.String("remove_on_windows", fmt.Sprintf("rmdir %q", entry)),
-		zap.String("remove_on_unix", fmt.Sprintf("rm %q", entry)))
+	// The guidance is deliberately shell-neutral. A ready-to-paste command built
+	// from the entry path would need per-shell escaping, and a path carrying
+	// $(), backticks or %VAR% would otherwise reach a shell that expands it.
+	log.Warn("workspace entry links to the workspace root; remove that entry to stop tools recursing into it",
+		zap.String("entry", filepath.Join(root, name)),
+		zap.String("note", "the entry is a directory link, not a copy: removing it leaves the repository untouched"))
 }
 
 // isWorkspaceEntryName reports whether name is usable as a single entry below
