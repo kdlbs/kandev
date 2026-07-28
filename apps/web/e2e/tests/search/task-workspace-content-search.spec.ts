@@ -25,6 +25,21 @@ function initializeRepository(directory: string, gitEnv: NodeJS.ProcessEnv): Git
   return new GitHelper(directory, gitEnv);
 }
 
+test("@search keeps workspace modes out of non-task routes", async ({ testPage }) => {
+  await testPage.goto("/settings/general");
+
+  const dialog = testPage.getByRole("dialog");
+  await testPage.keyboard.press(`${MODIFIER}+Shift+f`);
+  await expect(dialog).not.toBeVisible();
+  await testPage.keyboard.press(`${MODIFIER}+Shift+k`);
+  await expect(dialog).not.toBeVisible();
+
+  await testPage.keyboard.press(`${MODIFIER}+k`);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("tablist", { name: "Command palette mode" })).toHaveCount(0);
+  await expect(dialog).not.toContainText("Switch mode");
+});
+
 test("@search searches all task repositories and opens the selected match", async ({
   testPage,
   apiClient,
@@ -110,9 +125,26 @@ test("@search searches all task repositories and opens the selected match", asyn
   await input.fill(fileQuery);
   const fileMatches = dialog.locator("[cmdk-item]").filter({ hasText: fileQuery });
   await expect(fileMatches).toHaveCount(2, { timeout: 10_000 });
-  await expect(fileMatches.filter({ hasText: EXTRA_REPOSITORY_NAME })).toHaveCount(1);
+  const fileGroups = dialog.getByTestId("file-search-repo-group");
+  await expect(fileGroups).toHaveCount(2);
+  const extraFileGroup = fileGroups.filter({ hasText: EXTRA_REPOSITORY_NAME });
+  await expect(extraFileGroup).toHaveCount(1);
+  await expect(extraFileGroup.locator("[cmdk-item]").filter({ hasText: fileQuery })).toHaveCount(1);
 
   await input.fill(SEARCH_TERM);
+  await testPage.keyboard.press("Tab");
+  await expect(contentsTab).toHaveAttribute("aria-selected", "true");
+  await expect(input).toBeFocused();
+  await testPage.keyboard.press("Tab");
+  await expect(commandsTab).toHaveAttribute("aria-selected", "true");
+  await testPage.keyboard.press("Shift+Tab");
+  await expect(contentsTab).toHaveAttribute("aria-selected", "true");
+  await expect(input).toBeFocused();
+  await testPage.keyboard.press("Shift+Tab");
+  await expect(filesTab).toHaveAttribute("aria-selected", "true");
+  await expect(dialog).toBeVisible();
+  await expect(input).toBeFocused();
+
   await testPage.keyboard.press("Tab");
   await expect(contentsTab).toHaveAttribute("aria-selected", "true");
   await expect(groups).toHaveCount(2, { timeout: 15_000 });

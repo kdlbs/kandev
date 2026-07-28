@@ -5,11 +5,25 @@ import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides"
 const mockToggleAppSidebar = vi.fn();
 const mockOpenMode = vi.fn();
 let mockShortcuts: StoredShortcutOverrides = {};
+let mockPathname = "/t/task-1";
+let mockActiveTaskId: string | null = "task-1";
+let mockActiveSessionId: string | null = "session-1";
+let mockSessionTaskId: string | null = "task-1";
 
 function buildState() {
   return {
     userSettings: { keyboardShortcuts: mockShortcuts },
     toggleAppSidebar: mockToggleAppSidebar,
+    tasks: {
+      activeTaskId: mockActiveTaskId,
+      activeSessionId: mockActiveSessionId,
+    },
+    taskSessions: {
+      items:
+        mockActiveSessionId && mockSessionTaskId
+          ? { [mockActiveSessionId]: { task_id: mockSessionTaskId } }
+          : {},
+    },
   };
 }
 
@@ -19,6 +33,10 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/lib/commands/command-registry", () => ({
   useCommandPanelOpen: () => ({ openMode: mockOpenMode }),
+}));
+
+vi.mock("@/lib/routing/client-router", () => ({
+  usePathname: () => mockPathname,
 }));
 
 import { useAppShortcuts } from "./use-app-shortcuts";
@@ -61,6 +79,10 @@ describe("useAppShortcuts", () => {
     mockToggleAppSidebar.mockClear();
     mockOpenMode.mockClear();
     mockShortcuts = {};
+    mockPathname = "/t/task-1";
+    mockActiveTaskId = "task-1";
+    mockActiveSessionId = "session-1";
+    mockSessionTaskId = "task-1";
   });
 
   // renderHook attaches a window listener; unmount it between tests so stale
@@ -130,6 +152,16 @@ describe("useAppShortcuts", () => {
 
     expect(mockOpenMode).toHaveBeenCalledWith("search-content");
     expect(event.defaultPrevented).toBe(true);
+  });
+
+  it("does not intercept content search outside an active task workbench", () => {
+    mockPathname = "/";
+    renderHook(() => useAppShortcuts());
+
+    const event = pressContentSearch("ctrlKey");
+
+    expect(mockOpenMode).not.toHaveBeenCalled();
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it("uses a stored content-search override instead of its default", () => {

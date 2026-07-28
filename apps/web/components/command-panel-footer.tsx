@@ -1,6 +1,6 @@
 "use client";
 
-import type { Dispatch, SetStateAction } from "react";
+import { useEffect, type Dispatch, type SetStateAction } from "react";
 import { formatDistanceToNow } from "date-fns";
 import { IconArchive, IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
 import {
@@ -23,8 +23,11 @@ import {
 } from "@/lib/commands/search";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import type { Task } from "@/lib/types/http";
+import type { FileSearchResult } from "@/lib/types/backend";
 import { FileIcon } from "@/components/ui/file-icon";
 import { WorkspaceContentSearch } from "@/components/workspace-content-search";
+import { useRepoDisplayName } from "@/hooks/domains/session/use-repo-display-name";
+import { groupByRepositoryName, isSingleRepoGroup } from "@/lib/group-by-repo";
 import {
   CommandPanelScopeSwitcher,
   getAdjacentCommandPanelScope,
@@ -193,10 +196,11 @@ function CommandsListContent({
       )}
       {search.trim() ? (
         <CommandGroup heading="Commands">
-          {/* cmdk preserves this priority pre-sort when filter scores tie. */}
-          {sortCommandsForSearch(commands, search).map((cmd) => (
-            <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
-          ))}
+          {sortCommandsForSearch(commands, search)
+            .filter((cmd) => scoreCommandSearch(cmd.id, search, getCommandSearchTerms(cmd)) > 0)
+            .map((cmd) => (
+              <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
+            ))}
         </CommandGroup>
       ) : (
         grouped.map(([group, items]) => (
@@ -212,13 +216,21 @@ function CommandsListContent({
 }
 
 type FileSearchContentProps = {
-  files: string[];
+  files: FileSearchResult[];
   isSearching: boolean;
   search: string;
+  sessionId: string | null;
   onSelect: (path: string) => void;
 };
 
-function FileSearchContent({ files, isSearching, search, onSelect }: FileSearchContentProps) {
+function FileSearchContent({
+  files,
+  isSearching,
+  search,
+  sessionId,
+  onSelect,
+}: FileSearchContentProps) {
+  const getRepoDisplayName = useRepoDisplayName(sessionId);
   if (isSearching && files.length === 0) {
     return (
       <div className="flex items-center justify-center py-6">
@@ -228,27 +240,44 @@ function FileSearchContent({ files, isSearching, search, onSelect }: FileSearchC
   }
   if (search.trim() && files.length === 0) return <CommandEmpty>No files found.</CommandEmpty>;
   if (!search.trim()) return <CommandEmpty>Type to search files...</CommandEmpty>;
-  return (
-    <CommandGroup heading="Files" forceMount>
-      {files.map((filePath) => {
-        const fileName = getFileName(filePath);
-        const lastSlash = filePath.lastIndexOf("/");
-        const dir = lastSlash > 0 ? filePath.slice(0, lastSlash) : "";
+
+  const groups = groupByRepositoryName(files, (file) => file.repository_name);
+  const singleRepo = isSingleRepoGroup(groups);
+  return groups.map((group) => (
+    <CommandGroup
+      key={group.repositoryName || "workspace"}
+      heading={
+        singleRepo
+          ? "Files"
+          : (getRepoDisplayName(group.repositoryName) ?? group.repositoryName ?? "Workspace")
+      }
+      forceMount
+      data-testid="file-search-repo-group"
+      data-repository={group.repositoryName}
+    >
+      {group.items.map((file) => {
+        const repositoryPrefix = file.repository_name ? `${file.repository_name}/` : "";
+        const displayPath = file.path.startsWith(repositoryPrefix)
+          ? file.path.slice(repositoryPrefix.length)
+          : file.path;
+        const fileName = getFileName(displayPath);
+        const lastSlash = displayPath.lastIndexOf("/");
+        const dir = lastSlash > 0 ? displayPath.slice(0, lastSlash) : "";
         return (
           <CommandItem
-            key={filePath}
-            value={getFileResultValue(filePath)}
-            onSelect={() => onSelect(filePath)}
+            key={file.path}
+            value={getFileResultValue(file.path)}
+            onSelect={() => onSelect(file.path)}
             forceMount
           >
             <FileIcon fileName={fileName} className="shrink-0" />
-            <span className="font-medium truncate">{fileName}</span>
-            {dir && <span className="text-muted-foreground text-xs truncate ml-1">{dir}</span>}
+            <span className="truncate font-medium">{fileName}</span>
+            {dir && <span className="ml-1 truncate text-xs text-muted-foreground">{dir}</span>}
           </CommandItem>
         );
       })}
     </CommandGroup>
-  );
+  ));
 }
 
 function getInputPlaceholder(mode: CommandPanelMode, inputCommand: CommandItemType | null) {
@@ -275,8 +304,15 @@ function getModeLabel(mode: CommandPanelMode, inputCommand: CommandItemType | nu
   return null;
 }
 
-function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
+function CommandPanelFooter({
+  mode,
+  workspaceSearchAvailable,
+}: {
+  mode: CommandPanelMode;
+  workspaceSearchAvailable: boolean;
+}) {
   const isScopeMode = isCommandPanelScopeMode(mode);
+  const canSwitchScope = workspaceSearchAvailable && isScopeMode;
   return (
     <div className="border-t border-border px-3 py-1.5 flex items-center gap-3 text-[0.6rem] text-muted-foreground">
       {isScopeMode && (
@@ -286,10 +322,12 @@ function CommandPanelFooter({ mode }: { mode: CommandPanelMode }) {
             <Kbd>↓</Kbd>
             <span>Navigate</span>
           </KbdGroup>
-          <KbdGroup>
-            <Kbd>Tab</Kbd>
-            <span>Switch mode</span>
-          </KbdGroup>
+          {canSwitchScope && (
+            <KbdGroup>
+              <Kbd>Tab</Kbd>
+              <span>Switch mode</span>
+            </KbdGroup>
+          )}
         </>
       )}
       <KbdGroup>
@@ -322,13 +360,14 @@ export type CommandPanelViewProps = {
   handleKeyDown: (e: React.KeyboardEvent) => void;
   onScopeChange: (mode: CommandPanelScopeMode) => void;
   goBack: () => void;
-  fileResults: string[];
+  fileResults: FileSearchResult[];
   isSearchingFiles: boolean;
   handleFileSelect: (filePath: string) => void;
   contentResults: WorkspaceContentSearchResult[];
   isSearchingContent: boolean;
   contentSearchError: WorkspaceContentSearchError | null;
   activeSessionId: string | null;
+  workspaceSearchAvailable: boolean;
   handleContentSelect: (result: WorkspaceContentSearchResult) => void;
   commands: CommandItemType[];
   grouped: Array<[string, CommandItemType[]]>;
@@ -348,11 +387,19 @@ function CommandPanelInputHeader({
   handleKeyDown,
   onScopeChange,
   goBack,
+  workspaceSearchAvailable,
 }: CommandPanelViewProps) {
-  const isScopeMode = isCommandPanelScopeMode(mode);
+  const isTopLevelMode = isCommandPanelScopeMode(mode);
+  const canSwitchScope = workspaceSearchAvailable && isTopLevelMode;
   const modeLabel = getModeLabel(mode, inputCommand);
   const onInputKeyDown = (event: React.KeyboardEvent) => {
-    if (isScopeMode && event.key === "Tab" && !event.altKey && !event.ctrlKey && !event.metaKey) {
+    if (
+      canSwitchScope &&
+      event.key === "Tab" &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
       event.preventDefault();
       onScopeChange(getAdjacentCommandPanelScope(mode, event.shiftKey));
       return;
@@ -360,27 +407,25 @@ function CommandPanelInputHeader({
     handleKeyDown(event);
   };
   return (
-    <div className="border-b border-border">
-      <div className="flex items-center [&>[data-slot=command-input-wrapper]]:flex-1">
-        {!isScopeMode && (
-          <button
-            onClick={goBack}
-            tabIndex={-1}
-            className="shrink-0 pl-2 flex min-h-10 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
-          >
-            <span>←</span>
-            <span>{modeLabel}</span>
-            <span className="text-muted-foreground/50">›</span>
-          </button>
-        )}
-        <CommandInput
-          placeholder={getInputPlaceholder(mode, inputCommand)}
-          value={search}
-          onValueChange={setSearch}
-          onKeyDown={onInputKeyDown}
-        />
-      </div>
-      {isScopeMode && <CommandPanelScopeSwitcher mode={mode} onScopeChange={onScopeChange} />}
+    <div className="flex min-h-10 items-center border-b border-border [&>[data-slot=command-input-wrapper]]:min-w-0 [&>[data-slot=command-input-wrapper]]:flex-1 [&>[data-slot=command-input-wrapper]]:pb-1">
+      {!isTopLevelMode && (
+        <button
+          onClick={goBack}
+          tabIndex={-1}
+          className="shrink-0 pl-2 flex min-h-10 cursor-pointer items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <span>←</span>
+          <span>{modeLabel}</span>
+          <span className="text-muted-foreground/50">›</span>
+        </button>
+      )}
+      <CommandInput
+        placeholder={getInputPlaceholder(mode, inputCommand)}
+        value={search}
+        onValueChange={setSearch}
+        onKeyDown={onInputKeyDown}
+      />
+      {canSwitchScope && <CommandPanelScopeSwitcher mode={mode} onScopeChange={onScopeChange} />}
     </div>
   );
 }
@@ -427,6 +472,7 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
           files={fileResults}
           isSearching={isSearchingFiles}
           search={search}
+          sessionId={activeSessionId}
           onSelect={handleFileSelect}
         />
       )}
@@ -451,7 +497,23 @@ function CommandPanelResultList(props: CommandPanelViewProps) {
 }
 
 export function CommandPanelView(props: CommandPanelViewProps) {
-  const { open, setOpen, mode, selectedValue, setSelectedValue } = props;
+  const {
+    open,
+    setOpen,
+    mode,
+    selectedValue,
+    setSelectedValue,
+    workspaceSearchAvailable,
+    onScopeChange,
+  } = props;
+  const workspaceModeUnavailable =
+    !workspaceSearchAvailable && (mode === MODE_SEARCH_FILES || mode === MODE_SEARCH_CONTENT);
+  const renderedProps = workspaceModeUnavailable ? { ...props, mode: MODE_COMMANDS } : props;
+
+  useEffect(() => {
+    if (workspaceModeUnavailable) onScopeChange("commands");
+  }, [onScopeChange, workspaceModeUnavailable]);
+
   return (
     <CommandDialog
       open={open}
@@ -459,8 +521,9 @@ export function CommandPanelView(props: CommandPanelViewProps) {
       overlayClassName="supports-backdrop-filter:backdrop-blur-none!"
     >
       <Command
-        filter={scoreCommandSearch}
-        shouldFilter={mode === MODE_COMMANDS}
+        // Mode changes replace whole group trees. Filtering before render avoids
+        // cmdk's deferred sorter retaining a group after that group unmounts.
+        shouldFilter={false}
         loop
         // cmdk's built-in vim bindings intercept Ctrl/Cmd+K, +P, +J, +N as
         // list-navigation shortcuts and call `event.preventDefault()` on the
@@ -477,9 +540,12 @@ export function CommandPanelView(props: CommandPanelViewProps) {
         value={selectedValue}
         onValueChange={setSelectedValue}
       >
-        <CommandPanelInputHeader {...props} />
-        <CommandPanelResultList {...props} />
-        <CommandPanelFooter mode={mode} />
+        <CommandPanelInputHeader {...renderedProps} />
+        <CommandPanelResultList {...renderedProps} />
+        <CommandPanelFooter
+          mode={renderedProps.mode}
+          workspaceSearchAvailable={workspaceSearchAvailable}
+        />
       </Command>
     </CommandDialog>
   );

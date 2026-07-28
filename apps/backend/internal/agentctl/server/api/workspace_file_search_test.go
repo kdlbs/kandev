@@ -13,10 +13,18 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
-	"github.com/kandev/kandev/internal/agentctl/types/streams"
 )
 
 func TestHandleFileSearchIncludesEveryTaskRepository(t *testing.T) {
+	type result struct {
+		RepositoryName string `json:"repository_name"`
+		Path           string `json:"path"`
+	}
+	type response struct {
+		Files   []string `json:"files"`
+		Results []result `json:"results"`
+	}
+
 	taskRoot := t.TempDir()
 	for _, fixture := range []struct {
 		repository string
@@ -51,6 +59,7 @@ func TestHandleFileSearchIncludesEveryTaskRepository(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	var files []string
+	var results []result
 	for time.Now().Before(deadline) {
 		req := httptest.NewRequest(http.MethodGet, "/api/v1/workspace/search?q=shared", nil)
 		resp := httptest.NewRecorder()
@@ -58,11 +67,12 @@ func TestHandleFileSearchIncludesEveryTaskRepository(t *testing.T) {
 		if resp.Code != http.StatusOK {
 			t.Fatalf("status = %d, want 200: %s", resp.Code, resp.Body.String())
 		}
-		var body streams.FileSearchResponse
+		var body response
 		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 			t.Fatalf("decode response: %v", err)
 		}
 		files = body.Files
+		results = body.Results
 		if len(files) == 2 {
 			break
 		}
@@ -72,5 +82,13 @@ func TestHandleFileSearchIncludesEveryTaskRepository(t *testing.T) {
 	want := []string{"backend/src/shared-search.go", "frontend/src/shared-search.ts"}
 	if !reflect.DeepEqual(files, want) {
 		t.Fatalf("files = %v, want %v", files, want)
+	}
+
+	wantResults := []result{
+		{RepositoryName: "backend", Path: "backend/src/shared-search.go"},
+		{RepositoryName: "frontend", Path: "frontend/src/shared-search.ts"},
+	}
+	if !reflect.DeepEqual(results, wantResults) {
+		t.Fatalf("results = %+v, want %+v", results, wantResults)
 	}
 }

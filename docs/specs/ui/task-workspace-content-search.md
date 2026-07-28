@@ -21,15 +21,21 @@ repositories.
   precedence over that surface's local find shortcut. It prevents the browser's
   default search action.
 - The command palette visibly exposes **Commands**, **Files**, and **Contents**
-  as peer modes in a segmented switcher. Each mode's direct shortcut remains
-  discoverable from its tooltip without crowding the switcher.
+  as low-chrome text tabs beside the search field. The active mode uses a subtle
+  underline, and each mode's direct shortcut remains discoverable from its
+  tooltip without adding a separate selector row.
+- **Files** and **Contents** are available only on the active task-detail route
+  when its selected session belongs to that task. Elsewhere the palette is
+  command-only, does not intercept either workspace-search shortcut, and
+  normalizes a previously open workspace-search palette back to **Commands**.
 - Clicking a mode or pressing **Tab** / **Shift+Tab** switches among those modes
   without discarding the current query. The existing **Cmd/Ctrl+Shift+K**
   shortcut still opens file-name and path search directly.
 - File-name and path search covers every repository materialized for the active
   task. Multi-repository results use task-root-relative, repository-prefixed
   paths so same-named files remain distinguishable and open in the correct
-  repository.
+  repository. The palette groups those matches by repository and shows paths
+  relative to each group.
 - Search covers every repository materialized for the active task session.
   Tracked files and untracked, non-ignored files are eligible; ignored files,
   directories, and workspace metadata are not.
@@ -79,8 +85,11 @@ The request contains `session_id`, `query`, and an optional
 | `preview`         | Searchable source line presented by the palette               |
 | `match_ranges`    | Half-open UTF-16 ranges into `preview`                        |
 
-The backend-to-agentctl HTTP transport exposes the same result shape. Existing
-workspace file-name search contracts are unchanged.
+The backend-to-agentctl HTTP transport exposes the same result shape. Workspace
+file-name search keeps its legacy `files` array and additionally returns
+structured `results` entries containing `repository_name` and the
+task-root-relative `path`, allowing grouping-aware consumers to separate
+repositories without parsing path strings.
 
 ## Permissions and isolation
 
@@ -113,6 +122,10 @@ workspace file-name search contracts are unchanged.
 - **GIVEN** the palette is open with a query, **WHEN** the user clicks another
   top-level mode or presses **Tab**, **THEN** the mode changes, the query remains,
   and the input keeps focus.
+- **GIVEN** the user leaves the active task workbench, **WHEN** the palette is
+  opened or a workspace-search shortcut is pressed, **THEN** only
+  **Commands** is offered and the workspace-search shortcut keeps its native
+  behavior.
 - **GIVEN** a line containing an exact occurrence and another containing only a
   fuzzy subsequence, **WHEN** both match the query, **THEN** the exact occurrence
   ranks first.

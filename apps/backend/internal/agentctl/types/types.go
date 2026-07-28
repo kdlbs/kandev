@@ -43,6 +43,7 @@ type (
 	FileContentRequest             = streams.FileContentRequest
 	FileContentResponse            = streams.FileContentResponse
 	FileSearchRequest              = streams.FileSearchRequest
+	FileSearchResult               = streams.FileSearchResult
 	FileSearchResponse             = streams.FileSearchResponse
 	WorkspaceContentSearchRequest  = streams.WorkspaceContentSearchRequest
 	WorkspaceContentMatchRange     = streams.WorkspaceContentMatchRange

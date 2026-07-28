@@ -5,13 +5,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 type ShortcutRegistration = {
   shortcut: KeyboardShortcut;
   callback: () => void;
+  enabled: boolean;
 };
 
 const registrations: ShortcutRegistration[] = [];
 
 vi.mock("@/hooks/use-keyboard-shortcut", () => ({
-  useKeyboardShortcut: (shortcut: KeyboardShortcut, callback: () => void) => {
-    registrations.push({ shortcut, callback });
+  useKeyboardShortcut: (
+    shortcut: KeyboardShortcut,
+    callback: () => void,
+    options?: { enabled?: boolean },
+  ) => {
+    registrations.push({ shortcut, callback, enabled: options?.enabled ?? true });
   },
 }));
 
@@ -40,6 +45,7 @@ describe("useCommandPanelShortcuts", () => {
       useCommandPanelShortcuts({
         open: true,
         mode: "search-files",
+        workspaceSearchAvailable: true,
         setMode,
         setOpen,
         setSearch,
@@ -51,5 +57,21 @@ describe("useCommandPanelShortcuts", () => {
     expect(setMode).toHaveBeenCalledWith("commands");
     expect(setSearch).toHaveBeenCalledWith("");
     expect(setOpen).toHaveBeenCalledWith(true);
+  });
+
+  it("does not register file search outside an active task workbench", () => {
+    const options = {
+      open: false,
+      mode: "commands" as const,
+      workspaceSearchAvailable: false,
+      setMode: vi.fn(),
+      setOpen: vi.fn(),
+      setSearch: vi.fn(),
+    };
+
+    renderHook(() => useCommandPanelShortcuts(options));
+
+    expect(findShortcut("k", true)?.enabled).toBe(false);
+    expect(findShortcut("k")?.enabled).toBe(true);
   });
 });

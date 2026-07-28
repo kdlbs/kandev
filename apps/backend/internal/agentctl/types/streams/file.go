@@ -159,10 +159,22 @@ type FileSearchRequest struct {
 	Limit int `json:"limit"`
 }
 
+// FileSearchResult identifies a matching file and its repository.
+type FileSearchResult struct {
+	// RepositoryName is empty for single-repository workspaces.
+	RepositoryName string `json:"repository_name,omitempty"`
+
+	// Path is task-root-relative so existing file APIs can open it directly.
+	Path string `json:"path"`
+}
+
 // FileSearchResponse represents a response with matching files.
 type FileSearchResponse struct {
-	// Files is the list of matching file paths.
+	// Files is the legacy list of matching task-root-relative paths.
 	Files []string `json:"files"`
+
+	// Results carries repository identity for grouping-aware consumers.
+	Results []FileSearchResult `json:"results"`
 
 	// Error contains error message if the request failed.
 	Error string `json:"error,omitempty"`

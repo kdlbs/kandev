@@ -363,13 +363,9 @@ func (c *Client) RenameFile(ctx context.Context, oldPath, newPath, repo string) 
 	return &response, nil
 }
 
-// FileSearchResponse represents a response with matching files
-type FileSearchResponse struct {
-	Files []string `json:"files"`
-	Error string   `json:"error,omitempty"`
-}
-
 type (
+	FileSearchResult               = streams.FileSearchResult
+	FileSearchResponse             = streams.FileSearchResponse
 	WorkspaceContentMatchRange     = streams.WorkspaceContentMatchRange
 	WorkspaceContentSearchResult   = streams.WorkspaceContentSearchResult
 	WorkspaceContentSearchResponse = streams.WorkspaceContentSearchResponse

@@ -235,9 +235,13 @@ func (s *Server) handleFileSearch(c *gin.Context) {
 		}
 	}
 
-	files := s.procMgr.SearchWorkspaceFiles(query, limit)
+	results := s.procMgr.SearchWorkspaceFileResults(query, limit)
+	files := make([]string, 0, len(results))
+	for _, result := range results {
+		files = append(files, result.Path)
+	}
 
-	c.JSON(200, types.FileSearchResponse{Files: files})
+	c.JSON(200, types.FileSearchResponse{Files: files, Results: results})
 }
 
 // handleWorkspaceContentSearch searches matching lines across every task repository.

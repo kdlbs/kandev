@@ -11,6 +11,7 @@ type CommandPanelShortcutOptions = {
   open: boolean;
   setOpen: (open: boolean) => void;
   mode: CommandPanelMode;
+  workspaceSearchAvailable: boolean;
   setMode: (mode: CommandPanelMode) => void;
   setSearch: (search: string) => void;
 };
@@ -19,6 +20,7 @@ export function useCommandPanelShortcuts({
   open,
   setOpen,
   mode,
+  workspaceSearchAvailable,
   setMode,
   setSearch,
 }: CommandPanelShortcutOptions) {
@@ -51,5 +53,7 @@ export function useCommandPanelShortcuts({
   useKeyboardShortcut(getShortcut("SEARCH", keyboardShortcuts), openCommands);
   useKeyboardShortcut(getShortcut("COMMAND_PANEL", keyboardShortcuts), openCommands);
   useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, openCommands);
-  useKeyboardShortcut(getShortcut("FILE_SEARCH", keyboardShortcuts), openFileSearch);
+  useKeyboardShortcut(getShortcut("FILE_SEARCH", keyboardShortcuts), openFileSearch, {
+    enabled: workspaceSearchAvailable,
+  });
 }

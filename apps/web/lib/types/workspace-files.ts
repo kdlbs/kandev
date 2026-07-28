@@ -23,8 +23,16 @@ export type FileContentResponse = {
   error?: string;
 };
 
+export type FileSearchResult = {
+  repository_name?: string;
+  /** Task-root-relative path accepted by the workspace file APIs. */
+  path: string;
+};
+
 export type FileSearchResponse = {
   files: string[];
+  /** Structured results for repository-aware consumers. */
+  results?: FileSearchResult[];
   error?: string;
 };
 
