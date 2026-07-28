@@ -134,6 +134,41 @@ func TestBackgroundCompletion_IntermediateSubagentPublishesBackground(t *testing
 	}
 }
 
+func TestBackgroundCompletion_SettledSessionClearsActivityForCountOnlyUpdate(t *testing.T) {
+	repo := setupTestRepo(t)
+	const taskID, sessionID, executionID = "task-settled-intermediate", "session-settled-intermediate", "execution-settled-intermediate"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	recorded := &recordingEventBus{}
+	svc.eventBus = recorded
+	svc.registerBackgroundWorkKind(
+		sessionID, "tool-one", executionID, "child-one", streams.BackgroundWorkKindSubagent,
+	)
+	svc.registerBackgroundWorkKind(
+		sessionID, "tool-two", executionID, "child-two", streams.BackgroundWorkKindSubagent,
+	)
+	svc.markForegroundIdle(sessionID)
+
+	publication, changed := svc.completeBackgroundWorkSnapshot(
+		sessionID, executionID, "child-one", string(v1.ForegroundActivityBackground),
+	)
+	if !changed {
+		t.Fatal("intermediate settled completion must publish the count-only transition")
+	}
+	svc.publishForegroundActivitySnapshot(t.Context(), taskID, sessionID, publication)
+
+	if len(recorded.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(recorded.events))
+	}
+	data, _ := recorded.events[0].event.Data.(map[string]interface{})
+	if got := data["foreground_activity"]; got != nil {
+		t.Fatalf("settled session activity = %#v, want nil", got)
+	}
+	if got := data["active_subagent_count"]; got != 1 {
+		t.Fatalf("settled session active subagent count = %#v, want 1", got)
+	}
+}
+
 func TestBackgroundCompletion_IdentifiedRetiresExactWorkAndDuplicateIsHarmless(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	const taskID, sessionID, executionID = "task-accounting", "session-accounting", "execution-accounting"
@@ -596,8 +631,8 @@ func TestExecutionCleanup_DelayedPublicationCannotOverwriteSuccessorActivity(t *
 		data, _ := record.event.Data.(map[string]interface{})
 		values = append(values, data["foreground_activity"])
 	}
-	if len(values) != 1 || values[0] != string(v1.ForegroundActivityGenerating) {
-		t.Fatalf("activity publications = %#v, want only successor generating", values)
+	if len(values) != 1 || values[0] != nil {
+		t.Fatalf("activity publications = %#v, want only successor clear", values)
 	}
 	if len(taskEvents.activityTaskIDs) != 1 {
 		t.Fatalf("task aggregate publications = %v, want successor only", taskEvents.activityTaskIDs)
@@ -668,7 +703,7 @@ func TestExecutionCleanup_PublicationDeliveryIsOrderedAcrossRecordGenerations(t 
 	}
 	want := []interface{}{
 		nil,
-		string(v1.ForegroundActivityGenerating),
+		nil,
 	}
 	if !slices.Equal(values, want) {
 		t.Fatalf("cross-generation publications = %#v, want %#v", values, want)
@@ -820,8 +855,8 @@ func TestExecutionCleanup_DelayedNullCannotOverwriteClaimlessSuccessorStart(t *t
 			values = append(values, data["foreground_activity"])
 		}
 	}
-	if len(values) != 1 || values[0] != string(v1.ForegroundActivityGenerating) {
-		t.Fatalf("activity publications = %#v, want only successor generating", values)
+	if len(values) != 1 || values[0] != nil {
+		t.Fatalf("activity publications = %#v, want only successor clear", values)
 	}
 }
 
@@ -864,8 +899,8 @@ func TestBackgroundCompletion_IDLessSingletonDelayedNullCannotOverwriteSuccessor
 			values = append(values, data["foreground_activity"])
 		}
 	}
-	if len(values) != 1 || values[0] != string(v1.ForegroundActivityGenerating) {
-		t.Fatalf("activity publications = %#v, want only successor generating", values)
+	if len(values) != 1 || values[0] != nil {
+		t.Fatalf("activity publications = %#v, want only successor clear", values)
 	}
 }
 
@@ -908,8 +943,8 @@ func TestExecutionCleanup_AfterClaimlessBeginCannotCreateSuccessorNull(t *testin
 			values = append(values, data["foreground_activity"])
 		}
 	}
-	if len(values) != 1 || values[0] != string(v1.ForegroundActivityGenerating) {
-		t.Fatalf("activity publications = %#v, want only successor generating", values)
+	if len(values) != 1 || values[0] != nil {
+		t.Fatalf("activity publications = %#v, want only successor clear", values)
 	}
 	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("cleanup after begin displaced successor ownership: got %q", got)
@@ -955,8 +990,8 @@ func TestBackgroundCompletion_AfterClaimlessBeginCannotCreateSuccessorNull(t *te
 			values = append(values, data["foreground_activity"])
 		}
 	}
-	if len(values) != 1 || values[0] != string(v1.ForegroundActivityGenerating) {
-		t.Fatalf("activity publications = %#v, want only successor generating", values)
+	if len(values) != 1 || values[0] != nil {
+		t.Fatalf("activity publications = %#v, want only successor clear", values)
 	}
 	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("completion after begin displaced successor ownership: got %q", got)

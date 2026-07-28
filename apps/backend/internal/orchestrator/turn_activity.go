@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -1216,6 +1217,12 @@ func (s *Service) publishForegroundActivityNow(
 	publicValue := value
 	if value != nil {
 		publicValue = string(v1.ForegroundActivityGenerating)
+		if s.repo != nil {
+			if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil &&
+				session != nil && session.State != models.TaskSessionStateRunning {
+				publicValue = nil
+			}
+		}
 	}
 	eventData := map[string]interface{}{
 		metaKeyTaskID:           taskID,
