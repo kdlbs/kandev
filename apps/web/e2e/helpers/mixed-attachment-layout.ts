@@ -45,7 +45,9 @@ export async function assertMixedAttachmentLayout({
   const fileInput = testPage.locator('input[type="file"]');
   // The chat input appends each change event to React attachment state.
   await fileInput.setInputFiles(imagePath);
-  await expect(testPage.getByText(/Image \(/).first()).toBeVisible({ timeout: 10_000 });
+  const imagePreview = testPage.getByText(/Image \(/);
+  await expect(imagePreview).toHaveCount(1, { timeout: 10_000 });
+  await expect(imagePreview).toBeVisible();
   // This second change event appends the text file, preserving both attachments.
   await fileInput.setInputFiles(textPath);
   await session.sendMessageViaButton("send image and file together");
