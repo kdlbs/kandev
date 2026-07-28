@@ -444,7 +444,7 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("label", opts.Label),
 		zap.String("initial_command", opts.InitialCommand),
 		zap.Int("profile_env_count", len(profileEnv)),
-		zap.Int("runtime_env_count", len(shellEnv)))
+		zap.Int("shell_env_count", len(shellEnv)))
 
 	info, err := interactiveRunner.StartUserShell(
 		c.Request.Context(), scopeID, sessionID, terminalID, workingDir, preferredShell, opts,

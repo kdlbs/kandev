@@ -347,6 +347,9 @@ func TestStartUserShellProcessExportsEffectiveRuntimeEnv(t *testing.T) {
 	)
 	handler := NewTerminalHandler(manager, nil, nil, log)
 	runner := process.NewInteractiveRunner(nil, log, 2*1024*1024)
+	t.Cleanup(func() {
+		_ = runner.StopUserShell(context.Background(), "env-1", "term-1")
+	})
 
 	execution := (&lifecycle.ExecutorInstance{
 		InstanceID:    "exec-1",

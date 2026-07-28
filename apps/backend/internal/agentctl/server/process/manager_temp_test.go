@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -88,6 +89,9 @@ func TestManager_BuildFinalCommandLeavesUnsetTempEnvironmentUnset(t *testing.T) 
 }
 
 func TestManager_StartShellInheritsAgentEnvironment(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PTY-backed shell sessions are unsupported on Windows")
+	}
 	mgr := NewManager(&config.InstanceConfig{
 		WorkDir:      t.TempDir(),
 		ShellEnabled: true,

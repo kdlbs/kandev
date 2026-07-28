@@ -2307,11 +2307,6 @@ func (m *Manager) agentEnvSnapshot() []string {
 
 // mergeAgentEnvIntoShellConfig folds the instance agent env into the shell's
 // override map. Explicit overrides take precedence over the inherited value.
-//
-// With no agent env there is nothing to merge, so the caller's map is returned
-// as-is rather than defensively copied: the sole caller holds cfg by value and
-// immediately assigns the result back to its own cfg.Env, so no alias outlives
-// this call.
 func mergeAgentEnvIntoShellConfig(agentEnv []string, overrides map[string]string) map[string]string {
 	merged, err := mergeAgentEnvIntoShellConfigWithError(agentEnv, overrides)
 	if err != nil {
