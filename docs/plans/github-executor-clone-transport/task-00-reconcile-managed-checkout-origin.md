@@ -81,3 +81,5 @@ conversation.
 - GREEN: the targeted Go command passed six tests across `executor` and `repoclone`.
 - Public docs: `node --test scripts/validate-public-docs.test.mjs` passed 58 tests and
   `node scripts/validate-public-docs.mjs` validated 41 published pages.
+- Review remediation: concurrent origin updates now share the existing per-repository mutex;
+  `TestSetOriginURLSerializesConcurrentUpdates` fails before the lock and passes after it.

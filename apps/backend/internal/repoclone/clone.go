@@ -332,6 +332,10 @@ func (c *Cloner) SetOriginURL(ctx context.Context, repositoryPath, originURL str
 	if strings.TrimSpace(repositoryPath) == "" || strings.TrimSpace(originURL) == "" {
 		return errors.New("repository path and origin URL are required")
 	}
+	mu := c.repoMu(repositoryPath)
+	mu.Lock()
+	defer mu.Unlock()
+
 	cmd := exec.CommandContext(ctx, "git", "-C", repositoryPath, "remote", "set-url", "origin", "--", originURL)
 	configureGitCommand(cmd, nil)
 	if _, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
