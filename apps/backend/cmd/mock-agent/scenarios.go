@@ -898,7 +898,7 @@ func setupWalkthroughFiles(e *emitter, prefix string) bool {
 	}
 	runGitCmd := makeGitRunner(wd)
 
-	fixtures := []string{"walkthrough_a.txt", "walkthrough_b.txt", "walkthrough_c.txt", "walkthrough_base.txt"}
+	fixtures := []string{"walkthrough_a.txt", "walkthrough_b.txt", "walkthrough_c.txt"}
 	_ = runGitCmd(append([]string{"rm", "--force"}, fixtures...)...)
 	_ = runGitCmd("commit", "-m", "cleanup walkthrough fixtures")
 
@@ -911,8 +911,10 @@ func setupWalkthroughFiles(e *emitter, prefix string) bool {
 		"line 1: B\nline 2: BASE\nline 3: BASE\nline 4: WALKTHROUGH_CHANGE_B\nline 5: WALKTHROUGH_CHANGE_B\n")
 	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_c.txt",
 		"line 1: C\nline 2: BASE\n", "line 1: C\nline 2: WALKTHROUGH_CHANGE_C\n")
-	ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_base.txt",
-		"line 1: WALKTHROUGH_UNCHANGED\nline 2: supporting context\n", "")
+	const baseContent = "line 1: WALKTHROUGH_UNCHANGED\nline 2: seeded on main\n"
+	if content, err := os.ReadFile("walkthrough_base.txt"); err != nil || string(content) != baseContent {
+		ok = ok && writeWalkthroughFile(e, runGitCmd, prefix, "walkthrough_base.txt", baseContent, "")
+	}
 	return ok
 }
 
