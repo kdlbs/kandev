@@ -8,6 +8,7 @@ const (
 	TaskStateChanged               = "task.state_changed"
 	TaskDeleted                    = "task.deleted"
 	TaskMoved                      = "task.moved" // Manual step change via MoveTask
+	TaskQueuePromoted              = "task.queue_promoted"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
 )
 

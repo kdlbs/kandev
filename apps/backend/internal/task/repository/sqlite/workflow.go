@@ -16,7 +16,7 @@ import (
 // AddTaskToWorkflow adds a task to a workflow with placement
 func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, workflowStepID string, position int) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET workflow_id = ?, workflow_step_id = ?, position = ?, updated_at = ? WHERE id = ?
+		UPDATE tasks SET workflow_id = ?, workflow_step_id = ?, position = ?, wip_admitted = 1, queued_for_step_id = '', queued_at = NULL, updated_at = ? WHERE id = ?
 	`), workflowID, workflowStepID, position, time.Now().UTC(), taskID)
 	return err
 }
@@ -24,7 +24,7 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 // RemoveTaskFromWorkflow removes a task from a workflow
 func (r *Repository) RemoveTaskFromWorkflow(ctx context.Context, taskID, workflowID string) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE tasks SET workflow_id = '', workflow_step_id = '', position = 0, updated_at = ? WHERE id = ? AND workflow_id = ?
+		UPDATE tasks SET workflow_id = '', workflow_step_id = '', position = 0, wip_admitted = 1, queued_for_step_id = '', queued_at = NULL, updated_at = ? WHERE id = ? AND workflow_id = ?
 	`), time.Now().UTC(), taskID, workflowID)
 	return err
 }

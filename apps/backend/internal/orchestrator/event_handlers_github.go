@@ -360,7 +360,7 @@ func (s *Service) createReviewTask(ctx context.Context, evt *github.NewReviewPRE
 	// Check if the target workflow step has auto_start_agent on_enter action.
 	// If so, start the task (which launches the agent and triggers processOnEnter).
 	// Otherwise, the task sits in the step waiting for user action.
-	if !s.shouldAutoStartStep(ctx, evt.WorkflowStepID) {
+	if task.QueuedForStepID != "" || !s.shouldAutoStartStep(ctx, task.WorkflowStepID) {
 		return
 	}
 	s.autoStartReviewTask(ctx, evt, task)
@@ -487,7 +487,7 @@ func (s *Service) autoStartReviewTask(
 		evt.ExecutorProfileID,
 		"",
 		task.Description,
-		evt.WorkflowStepID,
+		task.WorkflowStepID,
 		false,
 		true,
 		nil,
@@ -1379,7 +1379,7 @@ func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent
 		zap.Int(issueNumberKey, issue.Number),
 		zap.String("repo", repoSlug))
 
-	if !s.shouldAutoStartStep(ctx, evt.WorkflowStepID) {
+	if task.QueuedForStepID != "" || !s.shouldAutoStartStep(ctx, task.WorkflowStepID) {
 		return
 	}
 	s.autoStartIssueTask(ctx, evt, task)
@@ -1477,7 +1477,7 @@ func (s *Service) autoStartIssueTask(
 		evt.ExecutorProfileID,
 		"",
 		task.Description,
-		evt.WorkflowStepID,
+		task.WorkflowStepID,
 		false,
 		true,
 		nil,

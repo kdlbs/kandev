@@ -154,6 +154,14 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 	title := strings.TrimSpace(req.Title)
 	description := strings.TrimSpace(req.Description)
+	var deferredLaunch map[string]interface{}
+	if req.StartAgent {
+		deferredLaunch = map[string]interface{}{
+			"intent": "start", "agent_profile_id": req.AgentProfileID, "executor_id": req.ExecutorID,
+			"executor_profile_id": req.ExecutorProfileID, "prompt": description,
+			"plan_mode": req.PlanMode, "attachments": req.Attachments,
+		}
+	}
 
 	task, err := h.service.CreateTask(ctx, &service.CreateTaskRequest{
 		WorkspaceID:    req.WorkspaceID,
@@ -166,6 +174,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories:   convertToServiceRepos(repos),
 		Position:       req.Position,
 		Metadata:       req.Metadata,
+		DeferredLaunch: deferredLaunch,
 		PlanMode:       req.PlanMode && !req.StartAgent,
 		ParentID:       req.ParentID,
 	})
@@ -182,7 +191,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 	taskDTO := dto.FromTask(task)
 	response := createTaskResponse{TaskDTO: taskDTO}
-	if req.StartAgent && req.AgentProfileID != "" && h.orchestrator != nil {
+	if req.StartAgent && task.QueuedForStepID == "" && req.AgentProfileID != "" && h.orchestrator != nil {
 		launchResp, err := h.launchAgentForNewTask(ctx, taskDTO, req)
 		if err != nil {
 			h.logger.Error("failed to start agent for task", zap.Error(err))

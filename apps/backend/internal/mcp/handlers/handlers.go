@@ -636,6 +636,14 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		return ws.NewError(msg.ID, msg.Action, code, err.Error(), nil)
 	}
 	metadata = mergeMCPMetadata(metadata, workspacePolicy.MetadataBlock())
+	var deferredLaunch map[string]interface{}
+	if startAgent {
+		deferredLaunch = map[string]interface{}{
+			"intent": "start", "agent_profile_id": launchConfig.AgentProfileID,
+			"executor_id": launchConfig.ExecutorID, "executor_profile_id": launchConfig.ExecutorProfileID,
+			"prompt": req.Description,
+		}
+	}
 
 	task, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
 		ParentID:               req.ParentID,
@@ -648,6 +656,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		BlockedBy:              req.BlockedBy,
 		AssigneeAgentProfileID: req.AssigneeAgentProfileID,
 		Metadata:               metadata,
+		DeferredLaunch:         deferredLaunch,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
@@ -671,8 +680,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 	}
 
-	// Auto-start agent session asynchronously only if requested
-	if startAgent && h.sessionLauncher != nil {
+	// Auto-start agent session asynchronously only if requested and admitted.
+	if startAgent && task.QueuedForStepID == "" && h.sessionLauncher != nil {
 		h.launchAutoStartTask(ctx, task, launchConfig)
 	}
 

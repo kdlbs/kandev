@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -22,7 +21,7 @@ func (r fixedStartStepResolver) ResolveFirstStep(context.Context, string) (strin
 	return r.stepID, nil
 }
 
-func TestCreateTask_RejectsFullWIPStepBeforePersistence(t *testing.T) {
+func TestCreateTask_QueuesFullWIPStepWithoutFeeder(t *testing.T) {
 	svc, events, repo := createTestService(t)
 	ctx := context.Background()
 	seedWIPWorkflow(t, ctx, repo)
@@ -36,12 +35,12 @@ func TestCreateTask_RejectsFullWIPStepBeforePersistence(t *testing.T) {
 		t.Fatalf("seed occupant: %v", err)
 	}
 
-	_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	queued, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow", WorkflowStepID: "review-step",
 		Title: "Rejected", Description: "must not persist",
 	})
-	if err == nil || !errors.Is(err, wfmodels.ErrWIPLimitExceeded) {
-		t.Fatalf("error=%v, want typed WIP limit rejection", err)
+	if err != nil {
+		t.Fatalf("error=%v, want queued success", err)
 	}
 	if _, err := repo.GetTask(ctx, "wip-occupant"); err != nil {
 		t.Fatalf("occupant disappeared: %v", err)
@@ -50,11 +49,14 @@ func TestCreateTask_RejectsFullWIPStepBeforePersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list step tasks: %v", err)
 	}
-	if len(tasks) != 1 {
-		t.Fatalf("step task count=%d, want 1", len(tasks))
+	if len(tasks) != 2 {
+		t.Fatalf("step task count=%d, want 2", len(tasks))
 	}
-	if len(events.GetPublishedEvents()) != 0 {
-		t.Fatalf("published events=%d, want none", len(events.GetPublishedEvents()))
+	if queued.WIPAdmitted || queued.QueuedForStepID != "review-step" {
+		t.Fatalf("queued task admission=%v target=%q", queued.WIPAdmitted, queued.QueuedForStepID)
+	}
+	if len(events.GetPublishedEvents()) != 1 {
+		t.Fatalf("published events=%d, want task.created", len(events.GetPublishedEvents()))
 	}
 }
 
@@ -73,12 +75,15 @@ func TestCreateTask_ResolvedStartStepUsesWIPAdmission(t *testing.T) {
 		t.Fatalf("seed occupant: %v", err)
 	}
 
-	_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+	queued, err := svc.CreateTask(ctx, &CreateTaskRequest{
 		WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
 		Title: "Rejected resolved start", Description: "must not persist",
 	})
-	if err == nil || !errors.Is(err, wfmodels.ErrWIPLimitExceeded) {
-		t.Fatalf("error=%v, want typed WIP limit rejection", err)
+	if err != nil {
+		t.Fatalf("error=%v, want queued success", err)
+	}
+	if queued.QueuedForStepID != "review-step" || queued.WIPAdmitted {
+		t.Fatalf("queued task admission=%v target=%q", queued.WIPAdmitted, queued.QueuedForStepID)
 	}
 }
 

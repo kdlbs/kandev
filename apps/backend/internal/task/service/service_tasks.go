@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -81,6 +82,10 @@ type taskEnvironmentOwnerTransferer interface {
 
 type workflowStepCapacityTaskCreator interface {
 	CreateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID string, limit int) error
+}
+
+type workflowStepAdmissionTaskCreator interface {
+	CreateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, targetStepID string, targetLimit int, feederStepID string, feederLimit int) error
 }
 
 // Task operations
@@ -184,11 +189,35 @@ func (s *Service) createTaskWithCapacity(ctx context.Context, task *models.Task)
 	if step.WIPLimit <= 0 {
 		return s.tasks.CreateTask(ctx, task)
 	}
+	if admissionCreator, ok := s.tasks.(workflowStepAdmissionTaskCreator); ok {
+		feederStepID, feederLimit, err := s.resolveAdmissionFeeder(ctx, step)
+		if err != nil {
+			return err
+		}
+		return admissionCreator.CreateTaskWithWorkflowStepAdmission(ctx, task, step.ID, step.WIPLimit, feederStepID, feederLimit)
+	}
 	creator, ok := s.tasks.(workflowStepCapacityTaskCreator)
 	if !ok {
 		return fmt.Errorf("workflow step %s has WIP limit %d but capacity-aware task persistence is unavailable", step.ID, step.WIPLimit)
 	}
 	return creator.CreateTaskIfWorkflowStepHasCapacity(ctx, task, step.ID, step.WIPLimit)
+}
+
+func (s *Service) resolveAdmissionFeeder(ctx context.Context, step *wfmodels.WorkflowStep) (string, int, error) {
+	if step.PullFromStepID == "" {
+		return "", 0, nil
+	}
+	if s.workflowStepGetter == nil {
+		return "", 0, fmt.Errorf("workflow step %s configures feeder %s but workflow step lookup is unavailable", step.ID, step.PullFromStepID)
+	}
+	feeder, err := s.workflowStepGetter.GetStep(ctx, step.PullFromStepID)
+	if err != nil {
+		return "", 0, fmt.Errorf("load feeder workflow step %s: %w", step.PullFromStepID, err)
+	}
+	if feeder == nil || feeder.WorkflowID != step.WorkflowID {
+		return "", 0, fmt.Errorf("workflow step %s has invalid feeder %s", step.ID, step.PullFromStepID)
+	}
+	return feeder.ID, feeder.WIPLimit, nil
 }
 
 // inheritParentRepositories fills req.Repositories from the parent task when a
@@ -350,6 +379,12 @@ func (s *Service) buildTask(req *CreateTaskRequest, workflowStepID string) *mode
 		priority = defaultPriority
 	}
 	metadata := req.Metadata
+	if req.DeferredLaunch != nil {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[models.MetaKeyDeferredLaunch] = req.DeferredLaunch
+	}
 	if wsPath := strings.TrimSpace(req.WorkspacePath); wsPath != "" {
 		if metadata == nil {
 			metadata = make(map[string]interface{})
@@ -1392,6 +1427,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 5. Publish task.updated event so frontend removes from board
 	s.publishTaskEvent(finalizeCtx, events.TaskUpdated, task, nil)
+	s.pullNextTaskOnVacate(finalizeCtx, task.WorkflowStepID, task.ID)
 	s.logger.Info("task archived",
 		zap.String("task_id", id),
 		zap.Duration("duration", time.Since(start)))
@@ -1594,6 +1630,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 		extra = map[string]interface{}{"reason": reason}
 	}
 	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
+	s.pullNextTaskOnVacate(ctx, task.WorkflowStepID, task.ID)
 	s.forgetTaskActivity(id)
 	s.logger.Info("task deleted",
 		zap.String("task_id", id),

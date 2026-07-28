@@ -59,6 +59,9 @@ export type TaskLike = {
   parent_id?: string | null;
   updated_at?: string;
   created_at?: string;
+  wip_admitted?: boolean;
+  queued_for_step_id?: string | null;
+  queued_at?: string | null;
   metadata?: Record<string, unknown> | null;
 };
 
@@ -148,6 +151,9 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     workspaceMode: workspaceModeFromMetadata(source.metadata),
     updatedAt: source.updated_at,
     createdAt: source.created_at,
+    wipAdmitted: source.wip_admitted,
+    queuedForStepId: source.queued_for_step_id,
+    queuedAt: source.queued_at,
     isPRReview: isPRReviewFromMetadata(source.metadata),
     isIssueWatch: isIssueWatchFromMetadata(source.metadata),
     ...issueFieldsFromMetadata(source.metadata),

@@ -78,6 +78,9 @@ export type TaskEventPayload = {
   description?: string;
   state?: TaskState;
   priority?: number;
+  wip_admitted?: boolean;
+  queued_for_step_id?: string | null;
+  queued_at?: string | null;
   position?: number;
   repository_id?: string;
   repositories?: Array<{

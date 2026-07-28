@@ -121,6 +121,10 @@ type TaskEventPublisher interface {
 	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
 }
 
+type taskQueuePromotionPublisher interface {
+	PublishTaskQueuePromoted(ctx context.Context, task *models.Task)
+}
+
 // WorkflowStepGetter retrieves workflow step information for prompt building.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
@@ -677,6 +681,7 @@ func NewService(
 		OnGitEvent:             s.handleGitEvent,
 		OnContextWindowUpdated: s.handleContextWindowUpdated,
 		OnTaskMoved:            s.handleTaskMoved,
+		OnTaskQueuePromoted:    s.handleTaskQueuePromoted,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, cfg.QueueGroup, log)
 
@@ -856,6 +861,15 @@ func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task, old
 	s.taskEvents.PublishTaskUpdated(ctx, task, oldWorkflowIDs...)
 }
 
+func (s *Service) publishTaskQueuePromoted(ctx context.Context, task *models.Task) {
+	if s.taskEvents == nil || task == nil {
+		return
+	}
+	if publisher, ok := s.taskEvents.(taskQueuePromotionPublisher); ok {
+		publisher.PublishTaskQueuePromoted(ctx, task)
+	}
+}
+
 func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {
 	if s.taskEvents == nil || task == nil {
 		return
@@ -972,7 +986,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)

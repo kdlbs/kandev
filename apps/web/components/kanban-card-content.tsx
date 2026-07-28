@@ -173,16 +173,21 @@ function KanbanCardBadges({ task }: { task: Task }) {
     return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
   });
 
-  const showRow =
-    (task.sessionCount && task.sessionCount > 1) ||
-    task.reviewStatus === "changes_requested" ||
-    task.reviewStatus === "pending" ||
-    task.parentTaskId;
+  const showRow = hasCardBadges(task);
 
   if (!showRow) return null;
 
   return (
     <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
+      {task.queuedForStepId && (
+        <Badge
+          variant="secondary"
+          className="text-xs h-5"
+          title={`Queued for ${task.queuedForStepTitle ?? `workflow step ${task.queuedForStepId}`}`}
+        >
+          Queued for {task.queuedForStepTitle ?? "next capacity"}
+        </Badge>
+      )}
       {task.parentTaskId && (
         <Badge variant="outline" className="text-xs h-5 gap-1 max-w-[160px] min-w-0">
           <IconSubtask className="h-3 w-3 shrink-0" />
@@ -209,6 +214,16 @@ function KanbanCardBadges({ task }: { task: Task }) {
         </Badge>
       )}
     </div>
+  );
+}
+
+function hasCardBadges(task: Task): boolean {
+  return Boolean(
+    (task.sessionCount && task.sessionCount > 1) ||
+    task.reviewStatus === "changes_requested" ||
+    task.reviewStatus === "pending" ||
+    task.parentTaskId ||
+    task.queuedForStepId,
   );
 }
 

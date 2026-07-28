@@ -384,6 +384,10 @@ type workflowMoveLimitsRepository interface {
 	CountTasksByWorkflowStepExcludingTask(ctx context.Context, stepID, excludeTaskID string) (int, error)
 }
 
+type workflowAdmittedCountRepository interface {
+	CountAdmittedTasksByWorkflowStep(ctx context.Context, stepID string) (int, error)
+}
+
 type workflowLimitedMoveRepository interface {
 	UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID, excludeTaskID string, limit int) error
 }
@@ -391,6 +395,15 @@ type workflowLimitedMoveRepository interface {
 type workflowPullRepository interface {
 	NextPullCandidateExcluding(ctx context.Context, stepID string, excludeTaskIDs []string) (*models.Task, error)
 }
+
+type workflowQueuedPullRepository interface {
+	NextQueuedTaskForStepExcluding(ctx context.Context, feederStepID, destinationStepID string, excludeTaskIDs []string) (*models.Task, error)
+}
+
+const (
+	priorityMedium = "medium"
+	priorityLow    = "low"
+)
 
 // MoveTask moves a task to a different workflow step and position
 func (s *Service) MoveTask(ctx context.Context, id string, workflowID string, workflowStepID string, position int) (*MoveTaskResult, error) {
@@ -424,6 +437,12 @@ func (s *Service) MoveTaskWithOptions(
 	task.WorkflowID = workflowID
 	task.WorkflowStepID = workflowStepID
 	task.Position = position
+	if stepChanged {
+		task.WIPAdmitted = true
+		task.QueuedForStepID = ""
+		task.QueuedAt = nil
+		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+	}
 	if err := s.syncTaskStateForWorkflowMove(ctx, task, oldStepID, workflowStepID); err != nil {
 		return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
 	}
@@ -518,21 +537,17 @@ func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models
 }
 
 func (s *Service) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {
-	vacatedStep := s.pullEnabledStep(ctx, vacatedStepID)
+	vacatedStep := s.reconcilableStep(ctx, vacatedStepID)
 	if vacatedStep == nil {
 		return
 	}
-	limitsRepo, pullRepo, ok := s.pullRepositories(vacatedStep.ID)
-	if !ok {
-		return
-	}
-	occupants, ok := s.currentWIPOccupants(ctx, limitsRepo, vacatedStep.ID)
+	occupants, ok := s.currentAdmittedOccupants(ctx, vacatedStep.ID)
 	if !ok || occupants >= vacatedStep.WIPLimit {
 		return
 	}
 	skipped := map[string]struct{}{excludeTaskID: {}}
 	for occupants < vacatedStep.WIPLimit {
-		pulled := s.pullOneFeederTask(ctx, pullRepo, vacatedStep, occupants, skipped)
+		pulled := s.promoteNextQueuedTask(ctx, vacatedStep, occupants, skipped)
 		if !pulled {
 			return
 		}
@@ -540,77 +555,162 @@ func (s *Service) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, exclu
 	}
 }
 
-func (s *Service) pullEnabledStep(ctx context.Context, vacatedStepID string) *wfmodels.WorkflowStep {
+func (s *Service) reconcilableStep(ctx context.Context, vacatedStepID string) *wfmodels.WorkflowStep {
 	if s.workflowStepGetter == nil || vacatedStepID == "" {
 		return nil
 	}
 	vacatedStep, err := s.workflowStepGetter.GetStep(ctx, vacatedStepID)
-	if err != nil || vacatedStep == nil || vacatedStep.WIPLimit <= 0 || vacatedStep.PullFromStepID == "" {
-		return nil
-	}
-	if vacatedStep.PullFromStepID == vacatedStep.ID {
+	if err != nil || vacatedStep == nil || vacatedStep.WIPLimit <= 0 {
 		return nil
 	}
 	return vacatedStep
 }
 
-func (s *Service) pullRepositories(stepID string) (workflowMoveLimitsRepository, workflowPullRepository, bool) {
-	limitsRepo, ok := s.tasks.(workflowMoveLimitsRepository)
+func (s *Service) currentAdmittedOccupants(ctx context.Context, stepID string) (int, bool) {
+	limitsRepo, ok := s.tasks.(workflowAdmittedCountRepository)
 	if !ok {
-		s.logger.Warn("cannot pull feeder task: WIP limit repository unavailable",
-			zap.String("step_id", stepID))
-		return nil, nil, false
+		fallback, fallbackOK := s.tasks.(workflowMoveLimitsRepository)
+		if !fallbackOK {
+			s.logger.Warn("cannot reconcile queued task: WIP count repository unavailable", zap.String("step_id", stepID))
+			return 0, false
+		}
+		occupants, err := fallback.CountTasksByWorkflowStepExcludingTask(ctx, stepID, "")
+		if err != nil {
+			s.logger.Warn("cannot reconcile queued task: failed to count step", zap.String("step_id", stepID), zap.Error(err))
+			return 0, false
+		}
+		return occupants, true
 	}
-	pullRepo, ok := s.tasks.(workflowPullRepository)
-	if !ok {
-		s.logger.Warn("cannot pull feeder task: pull repository unavailable",
-			zap.String("step_id", stepID))
-		return nil, nil, false
-	}
-	return limitsRepo, pullRepo, true
-}
-
-func (s *Service) currentWIPOccupants(ctx context.Context, limitsRepo workflowMoveLimitsRepository, stepID string) (int, bool) {
-	occupants, err := limitsRepo.CountTasksByWorkflowStepExcludingTask(ctx, stepID, "")
+	occupants, err := limitsRepo.CountAdmittedTasksByWorkflowStep(ctx, stepID)
 	if err != nil {
-		s.logger.Warn("cannot pull feeder task: failed to count vacated step",
+		s.logger.Warn("cannot reconcile queued task: failed to count step",
 			zap.String("step_id", stepID), zap.Error(err))
 		return 0, false
 	}
 	return occupants, true
 }
 
-func (s *Service) pullOneFeederTask(
-	ctx context.Context,
-	pullRepo workflowPullRepository,
-	vacatedStep *wfmodels.WorkflowStep,
-	position int,
-	skipped map[string]struct{},
-) bool {
-	for {
-		candidate, err := pullRepo.NextPullCandidateExcluding(ctx, vacatedStep.PullFromStepID, skippedTaskIDs(skipped))
-		if err != nil {
-			s.logger.Warn("cannot pull feeder task: failed to select candidate",
-				zap.String("step_id", vacatedStep.ID), zap.Error(err))
+func (s *Service) promoteNextQueuedTask(ctx context.Context, targetStep *wfmodels.WorkflowStep, position int, skipped map[string]struct{}) bool {
+	candidate, err := s.nextQueuedCandidate(ctx, targetStep, skipped)
+	if err != nil || candidate == nil {
+		return false
+	}
+	if candidate.WorkflowStepID == targetStep.ID {
+		candidate.WIPAdmitted = true
+		candidate.QueuedForStepID = ""
+		candidate.QueuedAt = nil
+		candidate.Position = position
+		var updateErr error
+		if limitedRepo, ok := s.tasks.(workflowLimitedMoveRepository); ok && targetStep.WIPLimit > 0 {
+			updateErr = limitedRepo.UpdateTaskIfWorkflowStepHasCapacity(ctx, candidate, targetStep.ID, candidate.ID, targetStep.WIPLimit)
+		} else {
+			updateErr = s.tasks.UpdateTask(ctx, candidate)
+		}
+		if updateErr != nil {
+			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(updateErr))
 			return false
 		}
-		if candidate == nil {
-			return false
+		s.publishTaskEvent(ctx, events.TaskUpdated, candidate, nil)
+		s.publishTaskEvent(ctx, events.TaskQueuePromoted, candidate, nil)
+		return true
+	}
+	candidate.WIPAdmitted = true
+	candidate.QueuedForStepID = ""
+	candidate.QueuedAt = nil
+	if _, err := s.MoveTask(ctx, candidate.ID, targetStep.WorkflowID, targetStep.ID, position); err != nil {
+		skipped[candidate.ID] = struct{}{}
+		s.logger.Warn("skipping queued task that could not be promoted", zap.String("task_id", candidate.ID), zap.String("to_step_id", targetStep.ID), zap.Error(err))
+		return s.promoteNextQueuedTask(ctx, targetStep, position, skipped)
+	}
+	return true
+}
+
+func (s *Service) nextQueuedCandidate(ctx context.Context, targetStep *wfmodels.WorkflowStep, skipped map[string]struct{}) (*models.Task, error) {
+	candidates, err := s.tasks.ListTasksByWorkflowStep(ctx, targetStep.ID)
+	if err != nil {
+		return nil, err
+	}
+	sameStep := findSameStepQueuedCandidate(candidates, targetStep.ID, skipped)
+	feederTask, err := s.nextFeederQueuedCandidate(ctx, targetStep, skipped)
+	if err != nil {
+		return nil, err
+	}
+	if sameStep == nil {
+		return feederTask, nil
+	}
+	if feederTask == nil || queuedTaskBefore(sameStep, feederTask) {
+		return sameStep, nil
+	}
+	return feederTask, nil
+}
+
+func findSameStepQueuedCandidate(candidates []*models.Task, stepID string, skipped map[string]struct{}) *models.Task {
+	var selected *models.Task
+	for _, candidate := range candidates {
+		if candidate == nil || candidate.WIPAdmitted || candidate.QueuedForStepID != stepID {
+			continue
 		}
 		if _, seen := skipped[candidate.ID]; seen {
 			continue
 		}
-		if _, err := s.MoveTask(ctx, candidate.ID, vacatedStep.WorkflowID, vacatedStep.ID, position); err != nil {
-			skipped[candidate.ID] = struct{}{}
-			s.logger.Warn("skipping feeder task that could not be pulled",
-				zap.String("task_id", candidate.ID),
-				zap.String("from_step_id", vacatedStep.PullFromStepID),
-				zap.String("to_step_id", vacatedStep.ID),
-				zap.Error(err))
-			continue
+		if selected == nil || queuedTaskBefore(candidate, selected) {
+			selected = candidate
 		}
-		return true
 	}
+	return selected
+}
+
+func (s *Service) nextFeederQueuedCandidate(
+	ctx context.Context,
+	targetStep *wfmodels.WorkflowStep,
+	skipped map[string]struct{},
+) (*models.Task, error) {
+	if targetStep.PullFromStepID == "" {
+		return nil, nil
+	}
+	excluded := skippedTaskIDs(skipped)
+	if pullRepo, ok := s.tasks.(workflowQueuedPullRepository); ok {
+		candidate, err := pullRepo.NextQueuedTaskForStepExcluding(
+			ctx, targetStep.PullFromStepID, targetStep.ID, excluded,
+		)
+		if err != nil || candidate != nil {
+			return candidate, err
+		}
+	}
+	if legacyPullRepo, ok := s.tasks.(workflowPullRepository); ok {
+		return legacyPullRepo.NextPullCandidateExcluding(ctx, targetStep.PullFromStepID, excluded)
+	}
+	return nil, nil
+}
+
+func queuedTaskBefore(left, right *models.Task) bool {
+	if left.Position != right.Position {
+		return left.Position < right.Position
+	}
+	priority := func(value string) int {
+		switch value {
+		case "critical":
+			return 0
+		case "high":
+			return 1
+		case priorityMedium:
+			return 2
+		case priorityLow:
+			return 3
+		default:
+			return 4
+		}
+	}
+	if priority(left.Priority) != priority(right.Priority) {
+		return priority(left.Priority) < priority(right.Priority)
+	}
+	if left.QueuedAt != nil && right.QueuedAt != nil && !left.QueuedAt.Equal(*right.QueuedAt) {
+		return left.QueuedAt.Before(*right.QueuedAt)
+	}
+	if !left.CreatedAt.Equal(right.CreatedAt) {
+		return left.CreatedAt.Before(right.CreatedAt)
+	}
+	return left.ID < right.ID
 }
 
 func skippedTaskIDs(skipped map[string]struct{}) []string {

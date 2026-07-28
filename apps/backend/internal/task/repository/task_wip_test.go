@@ -17,6 +17,10 @@ type workflowStepCapacityCreator interface {
 	CreateTaskIfWorkflowStepHasCapacity(context.Context, *models.Task, string, int) error
 }
 
+type workflowStepAdmissionCreator interface {
+	CreateTaskWithWorkflowStepAdmission(context.Context, *models.Task, string, int, string, int) error
+}
+
 func TestUpdateTaskIfWorkflowStepHasCapacity_ReturnsTypedWIPError(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()
@@ -95,5 +99,115 @@ func TestCreateTaskIfWorkflowStepHasCapacity_Concurrent(t *testing.T) {
 	}
 	if occupants != 2 {
 		t.Fatalf("occupants=%d, want 2", occupants)
+	}
+}
+
+func TestCreateTaskWithWorkflowStepAdmission_QueuesOverflowInPlace(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+
+	creator, ok := any(repo).(workflowStepAdmissionCreator)
+	if !ok {
+		t.Fatal("task repository does not implement workflow-step admission")
+	}
+
+	ctx := context.Background()
+	const stepID = "wip-step"
+	for i := 0; i < 2; i++ {
+		if err := repo.CreateTask(ctx, &models.Task{
+			ID:             fmt.Sprintf("existing-%d", i),
+			WorkspaceID:    "wip-workspace",
+			WorkflowID:     "wip-workflow",
+			WorkflowStepID: stepID,
+			Title:          "Existing",
+			State:          v1.TaskStateCreated,
+		}); err != nil {
+			t.Fatalf("seed existing task %d: %v", i, err)
+		}
+	}
+
+	for i := 0; i < 5; i++ {
+		task := &models.Task{
+			ID:             fmt.Sprintf("queued-%d", i),
+			WorkspaceID:    "wip-workspace",
+			WorkflowID:     "wip-workflow",
+			WorkflowStepID: stepID,
+			Title:          "Queued",
+			State:          v1.TaskStateCreated,
+		}
+		if err := creator.CreateTaskWithWorkflowStepAdmission(ctx, task, stepID, 2, "", 0); err != nil {
+			t.Fatalf("create overflow task %d: %v", i, err)
+		}
+		if task.WorkflowStepID != stepID {
+			t.Fatalf("task %s moved to step %q", task.ID, task.WorkflowStepID)
+		}
+		if task.WIPAdmitted {
+			t.Fatalf("task %s unexpectedly admitted", task.ID)
+		}
+		if task.QueuedForStepID != stepID {
+			t.Fatalf("task %s queued_for_step_id=%q, want %q", task.ID, task.QueuedForStepID, stepID)
+		}
+	}
+
+	tasks, err := repo.ListTasksByWorkflowStep(ctx, stepID)
+	if err != nil {
+		t.Fatalf("list step tasks: %v", err)
+	}
+	if len(tasks) != 7 {
+		t.Fatalf("resident tasks=%d, want 7", len(tasks))
+	}
+	admitted := 0
+	for _, task := range tasks {
+		if task.WIPAdmitted {
+			admitted++
+		}
+	}
+	if admitted != 2 {
+		t.Fatalf("admitted tasks=%d, want 2", admitted)
+	}
+}
+
+func TestCreateTaskWithWorkflowStepAdmission_UsesFeederAndStopsAtFullFeeder(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+
+	creator, ok := any(repo).(workflowStepAdmissionCreator)
+	if !ok {
+		t.Fatal("task repository does not implement workflow-step admission")
+	}
+	ctx := context.Background()
+
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "target-existing", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "target", Title: "Target", State: v1.TaskStateCreated,
+	}); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	queued := &models.Task{
+		ID: "feeder-queued", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "target", Title: "Feeder queued", State: v1.TaskStateCreated,
+	}
+	if err := creator.CreateTaskWithWorkflowStepAdmission(ctx, queued, "target", 1, "feeder", 0); err != nil {
+		t.Fatalf("create feeder overflow: %v", err)
+	}
+	if queued.WorkflowStepID != "feeder" || queued.QueuedForStepID != "target" || !queued.WIPAdmitted {
+		t.Fatalf("unexpected feeder placement: step=%q queue=%q admitted=%t", queued.WorkflowStepID, queued.QueuedForStepID, queued.WIPAdmitted)
+	}
+
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "feeder-existing", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "feeder", Title: "Feeder", State: v1.TaskStateCreated,
+	}); err != nil {
+		t.Fatalf("seed feeder: %v", err)
+	}
+	blocked := &models.Task{
+		ID: "blocked", WorkspaceID: "wip-workspace", WorkflowID: "wip-workflow",
+		WorkflowStepID: "target", Title: "Blocked", State: v1.TaskStateCreated,
+	}
+	if err := creator.CreateTaskWithWorkflowStepAdmission(ctx, blocked, "target", 1, "feeder", 1); err == nil || !errors.Is(err, wfmodels.ErrWIPLimitExceeded) {
+		t.Fatalf("error=%v, want typed full-feeder conflict", err)
+	}
+	if _, err := repo.GetTask(ctx, blocked.ID); !errors.Is(err, ErrTaskNotFound) {
+		t.Fatalf("blocked task lookup error=%v, want task not found", err)
 	}
 }

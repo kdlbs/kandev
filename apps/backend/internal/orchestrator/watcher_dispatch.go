@@ -386,12 +386,16 @@ func (c *WatcherDispatchCoordinator) Dispatch(ctx context.Context, src WatcherSo
 		zap.String("source", src.Name()),
 		zap.String("task_id", task.ID))
 
-	if !c.shouldAutoStart(ctx, req.WorkflowStepID) {
+	stepID := task.WorkflowStepID
+	if stepID == "" {
+		stepID = req.WorkflowStepID
+	}
+	if task.QueuedForStepID != "" || !c.shouldAutoStart(ctx, stepID) {
 		return
 	}
 
 	params := src.AutoStartParams(evt)
-	if err := c.startTask.Start(ctx, task.ID, req.WorkflowStepID, task.Description, params); err != nil {
+	if err := c.startTask.Start(ctx, task.ID, stepID, task.Description, params); err != nil {
 		c.logger.Error("watcher dispatch: auto-start failed",
 			zap.String("source", src.Name()),
 			zap.String("task_id", task.ID),

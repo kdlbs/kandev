@@ -352,6 +352,9 @@ func taskPriorityMigrationStatements() []string {
 			priority TEXT NOT NULL DEFAULT 'medium'
 				CHECK (priority IN ('critical','high','medium','low')),
 			position INTEGER DEFAULT 0,
+			wip_admitted INTEGER NOT NULL DEFAULT 1,
+			queued_for_step_id TEXT NOT NULL DEFAULT '',
+			queued_at TIMESTAMP,
 			metadata TEXT DEFAULT '{}',
 			is_ephemeral INTEGER NOT NULL DEFAULT 0,
 			parent_id TEXT DEFAULT '',
@@ -377,7 +380,7 @@ func taskPriorityMigrationStatements() []string {
 		// recreate dance.
 		`INSERT INTO tasks_priority_new (
 			id, workspace_id, workflow_id, workflow_step_id, title, description,
-			state, priority, position, metadata, is_ephemeral, parent_id,
+			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id,
 			archived_at, archived_by_cascade_id, created_at, updated_at,
 			origin, project_id,
 			labels, identifier,
@@ -386,6 +389,7 @@ func taskPriorityMigrationStatements() []string {
 			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), title, COALESCE(description,''),
 			COALESCE(state,'TODO'), 'medium', COALESCE(position,0),
+			COALESCE(wip_admitted,1), COALESCE(queued_for_step_id,''), queued_at,
 			COALESCE(metadata,'{}'), COALESCE(is_ephemeral,0),
 			COALESCE(parent_id,''), archived_at,
 			COALESCE(archived_by_cascade_id,''),

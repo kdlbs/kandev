@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -390,27 +391,45 @@ func (s *Service) handleTaskMoved(ctx context.Context, data watcher.TaskMovedEve
 // If the target step has auto_start_agent, it creates a session and starts the agent
 // using agent/executor profile IDs from the task's metadata.
 func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.TaskMovedEventData) {
-	// Load the target step to check auto-start and plan mode flags
-	step, err := s.workflowStepGetter.GetStep(ctx, data.ToStepID)
+	s.autoStartTaskForStep(ctx, data.TaskID, data.ToStepID, "task.moved")
+}
+
+func (s *Service) handleTaskQueuePromoted(ctx context.Context, data watcher.TaskEventData) {
+	task, err := s.repo.GetTask(ctx, data.TaskID)
 	if err != nil {
-		s.logger.Warn("task.moved: failed to load target step",
-			zap.String("task_id", data.TaskID),
-			zap.String("to_step_id", data.ToStepID),
+		s.logger.Warn("task.queue_promoted: failed to load task", zap.String("task_id", data.TaskID), zap.Error(err))
+		return
+	}
+	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, "task.queue_promoted")
+}
+
+func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, eventName string) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Warn(eventName+": failed to load task for auto-start",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	if task == nil || task.QueuedForStepID != "" {
+		return
+	}
+	if s.launchDeferredTask(ctx, task, eventName) {
+		return
+	}
+
+	// Load the target step to check auto-start and plan mode flags
+	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil {
+		s.logger.Warn(eventName+": failed to load target step",
+			zap.String("task_id", taskID),
+			zap.String("to_step_id", stepID),
 			zap.Error(err))
 		return
 	}
 	if step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
-		s.logger.Debug("task.moved: no session and target step has no auto-start",
-			zap.String("task_id", data.TaskID),
-			zap.String("to_step_id", data.ToStepID))
-		return
-	}
-
-	task, err := s.repo.GetTask(ctx, data.TaskID)
-	if err != nil {
-		s.logger.Warn("task.moved: failed to load task for auto-start",
-			zap.String("task_id", data.TaskID),
-			zap.Error(err))
+		s.logger.Debug(eventName+": target step has no auto-start",
+			zap.String("task_id", taskID),
+			zap.String("to_step_id", stepID))
 		return
 	}
 
@@ -423,9 +442,9 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 	executorProfileID, _ := task.Metadata[models.MetaKeyExecutorProfileID].(string)
 	planMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 
-	s.logger.Info("task.moved: starting task (no session, auto-start step)",
-		zap.String("task_id", data.TaskID),
-		zap.String("to_step_id", data.ToStepID),
+	s.logger.Info(eventName+": starting task (no session, auto-start step)",
+		zap.String("task_id", taskID),
+		zap.String("to_step_id", stepID),
 		zap.String("agent_profile_id", agentProfileID),
 		zap.String("executor_id", executorID),
 		zap.String("executor_profile_id", executorProfileID),
@@ -438,13 +457,63 @@ func (s *Service) handleTaskMovedNoSession(ctx context.Context, data watcher.Tas
 		if workflowAgentProfileID != "" {
 			startAgentProfileID = ""
 		}
-		_, err := s.StartTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, data.ToStepID, planMode, true, nil)
+		_, err := s.StartTask(asyncCtx, task.ID, startAgentProfileID, executorID, executorProfileID, "", task.Description, stepID, planMode, true, nil)
 		if err != nil {
-			s.logger.Error("task.moved: failed to auto-start task",
-				zap.String("task_id", data.TaskID),
+			s.logger.Error(eventName+": failed to auto-start task",
+				zap.String("task_id", taskID),
 				zap.Error(err))
 		}
 	}()
+}
+
+func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eventName string) bool {
+	if task.Metadata == nil {
+		return false
+	}
+	raw, ok := task.Metadata[models.MetaKeyDeferredLaunch]
+	if !ok {
+		return false
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return false
+	}
+	var intent struct {
+		Intent            string                 `json:"intent"`
+		AgentProfileID    string                 `json:"agent_profile_id"`
+		ExecutorID        string                 `json:"executor_id"`
+		ExecutorProfileID string                 `json:"executor_profile_id"`
+		Prompt            string                 `json:"prompt"`
+		PlanMode          bool                   `json:"plan_mode"`
+		Attachments       []v1.MessageAttachment `json:"attachments"`
+	}
+	if err := json.Unmarshal(encoded, &intent); err != nil || intent.AgentProfileID == "" {
+		s.logger.Warn(eventName+": invalid deferred launch intent", zap.String("task_id", task.ID), zap.Error(err))
+		return true
+	}
+	launchIntent := IntentStart
+	if intent.Intent == "prepare" {
+		launchIntent = IntentPrepare
+	}
+	go func() {
+		launchCtx := context.WithoutCancel(ctx)
+		_, launchErr := s.LaunchSession(launchCtx, &LaunchSessionRequest{
+			TaskID: task.ID, Intent: launchIntent, AgentProfileID: intent.AgentProfileID,
+			ExecutorID: intent.ExecutorID, ExecutorProfileID: intent.ExecutorProfileID,
+			WorkflowStepID: task.WorkflowStepID, Prompt: intent.Prompt,
+			PlanMode: intent.PlanMode, Attachments: intent.Attachments, LaunchWorkspace: true,
+		})
+		if launchErr != nil {
+			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
+			return
+		}
+		delete(task.Metadata, models.MetaKeyDeferredLaunch)
+		task.UpdatedAt = time.Now().UTC()
+		if updateErr := s.repo.UpdateTask(launchCtx, task); updateErr == nil {
+			s.publishTaskUpdated(launchCtx, task)
+		}
+	}()
+	return true
 }
 
 // handleTaskMovedWithSession handles the case where a task with an existing session
