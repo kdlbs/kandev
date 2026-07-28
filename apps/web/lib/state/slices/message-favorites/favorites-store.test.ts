@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useMessageFavoritesStore } from "./favorites-store";
 import { MESSAGE_FAVORITES_STORAGE_PREFIX, loadSessionFavorites } from "./persistence";
 
@@ -9,6 +9,10 @@ describe("message favorites store", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
     useMessageFavoritesStore.setState({ bySession: {} });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it("starts with no favorites for an unhydrated session", () => {
@@ -60,6 +64,15 @@ describe("message favorites store", () => {
     expect(state.bySession[SESSION_ID]).toEqual({ "msg-1": true, "msg-2": true });
   });
 
+  it("hydrates an empty session from storage only once", () => {
+    const getItem = vi.spyOn(window.sessionStorage, "getItem");
+
+    useMessageFavoritesStore.getState().hydrateSession(SESSION_ID);
+    useMessageFavoritesStore.getState().hydrateSession(SESSION_ID);
+
+    expect(getItem).toHaveBeenCalledTimes(1);
+  });
+
   it("ignores malformed persisted favorites", () => {
     window.sessionStorage.setItem(
       `${MESSAGE_FAVORITES_STORAGE_PREFIX}${SESSION_ID}`,
@@ -88,7 +101,7 @@ describe("message favorites store", () => {
     );
 
     expect(() => useMessageFavoritesStore.getState().hydrateSession(SESSION_ID)).not.toThrow();
-    expect(useMessageFavoritesStore.getState().bySession[SESSION_ID]).toBeUndefined();
+    expect(useMessageFavoritesStore.getState().bySession[SESSION_ID]).toEqual({});
   });
 
   it("ignores a persisted array containing non-string entries", () => {
@@ -98,6 +111,6 @@ describe("message favorites store", () => {
     );
 
     expect(() => useMessageFavoritesStore.getState().hydrateSession(SESSION_ID)).not.toThrow();
-    expect(useMessageFavoritesStore.getState().bySession[SESSION_ID]).toBeUndefined();
+    expect(useMessageFavoritesStore.getState().bySession[SESSION_ID]).toEqual({});
   });
 });

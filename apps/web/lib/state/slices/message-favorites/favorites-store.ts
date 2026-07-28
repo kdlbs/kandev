@@ -21,9 +21,8 @@ export const useMessageFavoritesStore = create<MessageFavoritesSlice>()(
     hydrateSession: (sessionId: string) =>
       set((state) => {
         const existing = state.bySession[sessionId];
-        if (existing && Object.keys(existing).length > 0) return;
+        if (existing) return;
         const ids = loadSessionFavorites(sessionId);
-        if (ids.length === 0) return;
         state.bySession[sessionId] = Object.fromEntries(ids.map((id) => [id, true as const]));
       }),
 

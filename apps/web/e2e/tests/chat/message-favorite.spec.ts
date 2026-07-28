@@ -8,7 +8,7 @@ import { SessionPage } from "../../pages/session-page";
 const SEEDED_MESSAGE = "Favorite toggle regression fixture message";
 
 test.describe("Chat message favorite toggle", () => {
-  test("stars a message, tints its background yellow, and un-stars it back", async ({
+  test("keeps a starred message highlighted after reload and un-stars it", async ({
     testPage,
     apiClient,
     seedData,
@@ -45,6 +45,13 @@ test.describe("Chat message favorite toggle", () => {
     await star.click();
 
     const unstar = highlight.getByRole("button", { name: "Remove message from favorites" });
+    await expect(unstar).toBeVisible();
+    await expect.poll(async () => highlight.getAttribute("class")).toMatch(/yellow/);
+
+    await testPage.reload();
+    await session.waitForLoad();
+
+    await expect(chat.getByText(SEEDED_MESSAGE)).toBeVisible();
     await expect(unstar).toBeVisible();
     await expect.poll(async () => highlight.getAttribute("class")).toMatch(/yellow/);
 
