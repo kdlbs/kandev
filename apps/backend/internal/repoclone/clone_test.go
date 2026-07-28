@@ -53,6 +53,28 @@ func TestClone_PreservesNonDefaultRemoteBranches(t *testing.T) {
 	}
 }
 
+func TestSetOriginURL(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPath := t.TempDir()
+	runGit(t, repoPath, "init", "--quiet")
+	runGit(t, repoPath, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+
+	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
+	if err := cloner.SetOriginURL(context.Background(), repoPath, "git@github.com:acme/widgets.git"); err != nil {
+		t.Fatalf("SetOriginURL() error = %v", err)
+	}
+	if got := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin")); got != "git@github.com:acme/widgets.git" {
+		t.Fatalf("origin = %q, want SSH URL", got)
+	}
+
+	if err := cloner.SetOriginURL(context.Background(), "", "https://github.com/acme/widgets.git"); err == nil {
+		t.Fatal("SetOriginURL() error = nil, want missing repository path error")
+	}
+}
+
 func TestWorkspaceRepoPathIsolatesManagedClones(t *testing.T) {
 	t.Parallel()
 

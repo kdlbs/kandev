@@ -30,6 +30,7 @@ const (
 	gitHubCredentialHelper         = "!agentctl git-credential"
 	defaultGitHubHost              = "github.com"
 	gitLabCredentialHelper         = `!f() { echo "username=oauth2"; echo "password=$GITLAB_TOKEN"; }; f`
+	taskGitCredentialsModeManaged  = "managed"
 	taskGitCredentialsModeExecutor = "executor"
 )
 
@@ -95,7 +96,7 @@ func (e *Executor) applyGitCredentialSnapshot(
 	if req == nil || session == nil {
 		return nil
 	}
-	policy := TaskGitCredentialPolicy{Mode: "managed"}
+	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
 	if e.githubCredentialPolicyResolver != nil {
 		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, req.WorkspaceID)
 		if err != nil {

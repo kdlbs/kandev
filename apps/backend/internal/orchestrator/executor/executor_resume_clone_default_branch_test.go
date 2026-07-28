@@ -399,6 +399,8 @@ func (f *fakeRepoCloner) EnsureWorkspaceClonedForProvider(
 
 func (f *fakeRepoCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
 
+func (f *fakeRepoCloner) SetOriginURL(context.Context, string, string) error { return nil }
+
 func (f *fakeRepoCloner) BuildCloneURLWithHost(_, _, owner, name string) (string, error) {
 	return "https://github.com/" + owner + "/" + name + ".git", nil
 }

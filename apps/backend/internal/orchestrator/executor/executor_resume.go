@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/gitref"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -157,7 +159,7 @@ func (e *Executor) ensureRepoLocalPath(ctx context.Context, repo *models.Reposit
 	}
 	if repo.LocalPath != "" && isLocalGitRepo(repo.LocalPath) &&
 		(e.repoCloner == nil || !e.repoCloner.ShouldRecloneForWorkspace(repo.WorkspaceID, repo.LocalPath)) {
-		return nil
+		return e.reconcileGitHubCheckoutOrigin(ctx, repo, repo.LocalPath)
 	}
 	localPath, cloneErr := e.ensureRepoCloned(ctx, repo)
 	if cloneErr != nil {
@@ -204,6 +206,9 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 			zap.Error(err))
 		return "", err
 	}
+	if err := e.reconcileGitHubCheckoutOrigin(ctx, repo, localPath); err != nil {
+		return "", err
+	}
 
 	// Persist the local path so future launches skip cloning
 	if e.repoUpdater != nil && localPath != "" {
@@ -223,6 +228,61 @@ func (e *Executor) ensureRepoCloned(ctx context.Context, repo *models.Repository
 	// backfill existed).
 
 	return localPath, nil
+}
+
+func (e *Executor) reconcileGitHubCheckoutOrigin(
+	ctx context.Context, repo *models.Repository, localPath string,
+) error {
+	if e.repoCloner == nil || localPath == "" || !isGitHubRepository(repo) {
+		return nil
+	}
+	policy := TaskGitCredentialPolicy{Mode: taskGitCredentialsModeManaged}
+	if e.githubCredentialPolicyResolver != nil {
+		resolved, err := e.githubCredentialPolicyResolver.ResolveTaskGitCredentialPolicy(ctx, repo.WorkspaceID)
+		if err != nil {
+			return fmt.Errorf("resolve task Git credential policy: %w", err)
+		}
+		policy = resolved
+	}
+	originURL, err := gitHubCheckoutOriginURL(repo, policy, e.repoCloner)
+	if err != nil {
+		return err
+	}
+	if err := e.repoCloner.SetOriginURL(ctx, localPath, originURL); err != nil {
+		return fmt.Errorf("set GitHub checkout origin: %w", err)
+	}
+	return nil
+}
+
+func isGitHubRepository(repo *models.Repository) bool {
+	if repo == nil || repo.ProviderOwner == "" || repo.ProviderName == "" {
+		return false
+	}
+	return repo.Provider == "" || strings.EqualFold(repo.Provider, "github")
+}
+
+func gitHubCheckoutOriginURL(
+	repo *models.Repository, policy TaskGitCredentialPolicy, cloner RepoCloner,
+) (string, error) {
+	if policy.Mode == taskGitCredentialsModeExecutor {
+		originURL, err := cloner.BuildCloneURLWithHost(
+			repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName,
+		)
+		if err != nil {
+			return "", fmt.Errorf("build executor GitHub checkout origin: %w", err)
+		}
+		if originURL == "" {
+			return "", errors.New("build executor GitHub checkout origin: empty URL")
+		}
+		return originURL, nil
+	}
+	originURL, err := repoclone.CloneURLWithHost(
+		repo.Provider, repo.ProviderHost, repo.ProviderOwner, repo.ProviderName, repoclone.ProtocolHTTPS,
+	)
+	if err != nil {
+		return "", fmt.Errorf("build managed GitHub checkout origin: %w", err)
+	}
+	return originURL, nil
 }
 
 // EnsureRepositoryCloned is the host-materialization seam for provider-backed

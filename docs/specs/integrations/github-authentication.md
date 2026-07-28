@@ -1,7 +1,7 @@
 ---
 status: draft
 created: 2026-07-19
-amended: 2026-07-27
+amended: 2026-07-28
 owner: Kandev
 ---
 
@@ -50,6 +50,12 @@ automation under different GitHub Apps without operating separate Kandev deploym
   workspace automation connection. **Inherit executor Git credentials** injects no GitHub broker
   helper or `gh` shim: Local and Worktree tasks use host-visible Git/SSH credentials, while remote
   tasks use credentials configured in that executor.
+- For Kandev-managed GitHub checkouts used by Local and Worktree tasks, the selected task policy
+  also controls the persisted `origin` transport. Managed routing uses canonical GitHub HTTPS.
+  Executor inheritance uses the host's detected `gh` clone protocol, including SSH, and reconciles
+  an existing managed checkout when the policy changes. This makes Git conditional includes based
+  on `remote.*.url` observe the same transport the task uses. Kandev never rewrites the remote of a
+  repository registered as a user-managed local checkout.
 - Under managed routing, App installation tokens are minted for the requested repository and cached
   only in memory. PAT/CLI tokens retain their provider-granted scope once delivered to a trusted
   agent subprocess. GitHub HTTPS and the broker-aware `gh` shim fail closed rather than consulting
@@ -378,6 +384,9 @@ post-signature processing failures produce `failing`; a later valid successful d
   truncating, partially merging, or executing a different block.
 - If executor inheritance is selected but no usable credential exists in that executor, Git/SSH
   reports its normal authentication failure. Kandev does not probe or guess the actor.
+- If Kandev cannot reconcile a managed checkout's `origin` with the selected task policy, Local and
+  Worktree preparation fails before the agent starts instead of silently using the other policy's
+  transport.
 - Deleting a registration with any workspace or personal reference returns
   `github_app_registration_in_use` with a non-secret binding count.
 - Changing workspace auth while a flow is open makes the stale callback fail without reverting the
@@ -451,6 +460,15 @@ registration and never creates a global default.
 - **GIVEN** a workspace selects executor inheritance, **WHEN** a Local/Worktree or remote task
   launches, **THEN** Kandev injects no broker helper/shim and the task uses host-visible or
   executor-configured credentials respectively.
+- **GIVEN** the host `gh` clone protocol is SSH and a Kandev-managed GitHub checkout currently has
+  an HTTPS `origin`, **WHEN** the workspace selects executor inheritance and launches a Local or
+  Worktree task, **THEN** Kandev changes that managed checkout's `origin` to the canonical SSH URL
+  before task preparation so matching Git conditional includes apply.
+- **GIVEN** a Kandev-managed GitHub checkout currently has an SSH `origin`, **WHEN** the workspace
+  selects managed credentials and launches a Local or Worktree task, **THEN** Kandev changes that
+  managed checkout's `origin` to canonical HTTPS before task preparation.
+- **GIVEN** a repository is registered from a user-managed local checkout, **WHEN** either task Git
+  credential policy is selected, **THEN** Kandev leaves its configured `origin` unchanged.
 - **GIVEN** managed mode and an explicit executor-profile GitHub token, **WHEN** a task launches,
   **THEN** the profile token wins and the session disclosure labels its actor runtime-selected.
 - **GIVEN** a managed helper cannot execute or redeem its lease, **WHEN** Git requests GitHub HTTPS
@@ -510,7 +528,9 @@ registration and never creates a global default.
 
 See [the original authentication implementation plan](../../plans/github-authentication/plan.md)
 and the
-[task Git credential policy follow-up plan](../../plans/task-git-credential-policy/plan.md).
+[task Git credential policy follow-up plan](../../plans/task-git-credential-policy/plan.md), plus
+the
+[executor clone transport repair plan](../../plans/github-executor-clone-transport/plan.md).
 
 ## Decision
 

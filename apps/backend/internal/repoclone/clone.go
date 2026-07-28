@@ -327,6 +327,19 @@ func (c *Cloner) EnsureWorkspaceClonedForProvider(
 	return c.ensureClonedAtPath(ctx, cloneURL, targetPath, auth)
 }
 
+// SetOriginURL updates a managed checkout's origin without exposing credentials.
+func (c *Cloner) SetOriginURL(ctx context.Context, repositoryPath, originURL string) error {
+	if strings.TrimSpace(repositoryPath) == "" || strings.TrimSpace(originURL) == "" {
+		return errors.New("repository path and origin URL are required")
+	}
+	cmd := exec.CommandContext(ctx, "git", "-C", repositoryPath, "remote", "set-url", "origin", "--", originURL)
+	configureGitCommand(cmd, nil)
+	if _, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
+		return fmt.Errorf("set repository origin: %w", err)
+	}
+	return nil
+}
+
 type cloneAuth struct {
 	origin   string
 	username string
