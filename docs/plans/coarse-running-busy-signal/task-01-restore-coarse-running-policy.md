@@ -21,9 +21,9 @@ spec: "../../specs/platform/background-work-liveness.md"
 
 ## Verification
 
-- `cd apps/backend && go test -run 'TestCheckSessionPromptable_BackgroundTaskRemainsBusy|TestForegroundActivity_ExportedValue|TestForegroundActivitySignal_DispatchPublishesCoarseActivity' ./internal/orchestrator`
-- `cd apps/web && pnpm e2e:run tests/chat/busy-signal.spec.ts -- --grep "held-open background turn remains busy"`
-- `cd apps/web && pnpm e2e:run tests/chat/mobile-busy-signal.spec.ts -- --grep "held-open background turn remains busy"`
+- `make -C apps/backend test`
+- `cd apps && pnpm --filter @kandev/web e2e:run -- tests/chat/busy-signal.spec.ts -- --grep "held-open background turn remains busy"`
+- `cd apps && pnpm --filter @kandev/web e2e:run -- tests/chat/mobile-busy-signal.spec.ts -- --grep "held-open background turn remains busy"`
 - `make fmt`
 - `make typecheck test lint`
 
