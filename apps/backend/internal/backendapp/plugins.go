@@ -52,5 +52,12 @@ func startPluginsSubsystems(ctx context.Context, svc *plugins.Service, eventBus 
 
 	svc.StartActivePlugins(ctx)
 
-	log.Info("Plugins subsystems started (event delivery + active plugin spawn)")
+	// Start the opt-in auto-update poller after the active plugins are spawned,
+	// so its immediate first sweep sees them as StatusActive (only active,
+	// opted-in plugins auto-update).
+	autoUpdatePoller := plugins.NewAutoUpdatePoller(svc, log)
+	autoUpdatePoller.Start(ctx)
+	addCleanup(func() error { autoUpdatePoller.Stop(); return nil })
+
+	log.Info("Plugins subsystems started (event delivery + active plugin spawn + auto-update poller)")
 }

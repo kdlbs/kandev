@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -9,12 +10,99 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // mockEventBus captures published events for assertion.
 type mockEventBus struct {
 	mu     sync.Mutex
 	events []publishedEvent
+}
+
+func TestUpdateTransitionTaskWithCapacity_RejectsFullLimitedStep(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "occupant",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step2",
+		Title:          "Occupant",
+		State:          "TODO",
+		Priority:       "medium",
+	}); err != nil {
+		t.Fatalf("create occupant: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.WorkflowStepID = "step2"
+	target := &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", WIPLimit: 1}
+
+	err = svc.updateTransitionTaskWithCapacity(ctx, task, target)
+	if !errors.Is(err, wfmodels.ErrWIPLimitExceeded) {
+		t.Fatalf("error=%v, want typed WIP rejection", err)
+	}
+	stored, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if stored.WorkflowStepID != "step1" {
+		t.Fatalf("task moved despite full target, got %q", stored.WorkflowStepID)
+	}
+}
+
+func TestExecuteStepTransition_FullTargetLeavesOnExitStateIntact(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.SetSessionMetadataKey(ctx, "s1", "plan_mode", true); err != nil {
+		t.Fatalf("enable plan mode: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID:             "occupant",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step2",
+		Title:          "Occupant",
+		State:          "TODO",
+		Priority:       "medium",
+	}); err != nil {
+		t.Fatalf("create occupant: %v", err)
+	}
+
+	steps := newMockStepGetter()
+	fromStep := &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Source",
+		Events: wfmodels.StepEvents{OnExit: []wfmodels.OnExitAction{{
+			Type: wfmodels.OnExitDisablePlanMode,
+		}}},
+	}
+	steps.steps["step2"] = &wfmodels.WorkflowStep{
+		ID: "step2", WorkflowID: "wf1", Name: "Limited", WIPLimit: 1,
+	}
+	svc := createTestService(repo, steps, newMockTaskRepo())
+
+	svc.executeStepTransition(ctx, "t1", "s1", fromStep, "step2", false)
+
+	task, err := repo.GetTask(ctx, "t1")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if task.WorkflowStepID != "step1" {
+		t.Fatalf("task moved despite full target, got %q", task.WorkflowStepID)
+	}
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+	if enabled, _ := session.Metadata["plan_mode"].(bool); !enabled {
+		t.Fatal("capacity rejection must not run source step's on_exit actions")
+	}
 }
 
 type publishedEvent struct {

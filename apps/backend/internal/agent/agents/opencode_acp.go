@@ -16,12 +16,13 @@ var opencodeACPLogoLight []byte
 //go:embed logos/opencode_dark.svg
 var opencodeACPLogoDark []byte
 
-const opencodeACPPkg = "opencode-ai"
+const opencodeACPPackage = "opencode-ai"
 
 var (
-	_ Agent            = (*OpenCodeACP)(nil)
-	_ PassthroughAgent = (*OpenCodeACP)(nil)
-	_ InferenceAgent   = (*OpenCodeACP)(nil)
+	_ Agent                  = (*OpenCodeACP)(nil)
+	_ PassthroughAgent       = (*OpenCodeACP)(nil)
+	_ InferenceAgent         = (*OpenCodeACP)(nil)
+	_ ManagedNPMRuntimeAgent = (*OpenCodeACP)(nil)
 )
 
 // OpenCodeACP is the ACP protocol variant of OpenCode.
@@ -70,10 +71,10 @@ func (a *OpenCodeACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	// Check for the opencode CLI on PATH. Auth state is surfaced later by
-	// the ACP probe, not by scanning ~/.opencode.
+	// Check for the opencode CLI on PATH. Any installed version is eligible
+	// for the ACP probe; auth and protocol compatibility are surfaced there.
 	result, err := Detect(ctx, WithCommand("opencode"))
-	if err != nil {
+	if err != nil || !result.Available {
 		return result, err
 	}
 	result.SupportsMCP = true
@@ -84,13 +85,17 @@ func (a *OpenCodeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error)
 }
 
 func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("opencode", "acp").Build()
+	return a.ManagedNPMRuntime().CachedACPCommand()
+}
+
+func (a *OpenCodeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
+	return ManagedNPMRuntimeSpec{Package: opencodeACPPackage, ACPArgs: []string{"acp"}}
 }
 
 func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 	canRecover := true
 	return &RuntimeConfig{
-		Cmd:             Cmd("opencode", "acp").Build(),
+		Cmd:             a.ManagedNPMRuntime().CachedACPCommand(),
 		WorkingDir:      "{workspace}",
 		Env:             map[string]string{},
 		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -103,9 +108,10 @@ func (a *OpenCodeACP) Runtime() *RuntimeConfig {
 		// See GH issue #1247.
 		RequiresProcessKill: true,
 		SessionConfig: SessionConfig{
-			NativeSessionResume: true,
-			CanRecover:          &canRecover,
-			SessionDirTemplate:  "{home}/.opencode",
+			NativeSessionResume:         true,
+			NewSessionOnWorkspaceRebind: true,
+			CanRecover:                  &canRecover,
+			SessionDirTemplate:          "{home}/.opencode",
 		},
 	}
 }
@@ -127,7 +133,7 @@ func (a *OpenCodeACP) RemoteAuth() *RemoteAuth {
 }
 
 func (a *OpenCodeACP) InstallScript() string {
-	return "npm install -g " + opencodeACPPkg
+	return "npm install -g " + opencodeACPPackage
 }
 
 func (a *OpenCodeACP) BillingType() usage.BillingType { return defaultBillingType() }
@@ -140,6 +146,6 @@ func (a *OpenCodeACP) PermissionSettings() map[string]PermissionSetting {
 func (a *OpenCodeACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("opencode", "acp"),
+		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
 	}
 }

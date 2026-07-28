@@ -358,17 +358,21 @@ test.describe("Automations settings page", () => {
     await expect(testPage.getByText("No runs yet")).toBeVisible({ timeout: 5_000 });
   });
 
-  test("archived task's run shows Cancelled instead of Running", async ({
+  test("archived task's run shows Archived, cancelled task's run shows Cancelled", async ({
     testPage,
     seedData,
     apiClient,
   }) => {
     // Regression test: an automation-generated task that gets archived
-    // (manually, via auto-archive, or via cascade) before its run is
-    // otherwise finalized used to leave the run stuck at "task_created"
-    // forever, displayed as "Running" and permanently pinned against
-    // max_concurrent_runs. See internal/automation.Store.CountActiveRuns /
-    // ListRuns.
+    // (manually, via auto-archive, via cascade, or by the agent itself)
+    // before its run is otherwise finalized used to leave the run stuck at
+    // "task_created" forever, displayed as "Running" and permanently
+    // pinned against max_concurrent_runs. It also used to be
+    // indistinguishable from a genuine user cancellation (the task's
+    // primary session state going CANCELLED — the signal a real Stop
+    // leaves behind; the task's own state is untouched by a stop), both
+    // showing as "Cancelled". See internal/automation.Store.CountActiveRuns
+    // / ListRuns.
     const automation = await apiClient.seedAutomation({
       workspaceId: seedData.workspaceId,
       name: "Archived Task Run Test",
@@ -381,13 +385,20 @@ test.describe("Automations settings page", () => {
       "Archived Automation Task",
       { workflow_id: seedData.workflowId, workflow_step_id: seedData.startStepId },
     );
+    const cancelledTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Cancelled Automation Task",
+      { workflow_id: seedData.workflowId, workflow_step_id: seedData.startStepId },
+    );
     const openTask = await apiClient.createTask(seedData.workspaceId, "Open Automation Task", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
     await apiClient.seedAutomationRun(automation.id, "task_created", archivedTask.id);
+    await apiClient.seedAutomationRun(automation.id, "task_created", cancelledTask.id);
     await apiClient.seedAutomationRun(automation.id, "task_created", openTask.id);
     await apiClient.archiveTask(archivedTask.id);
+    await apiClient.seedAutomationTaskSession(cancelledTask.id, "CANCELLED");
 
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/automations/${automation.id}`);
     await testPage.getByTestId("automation-editor").waitFor({ state: "visible", timeout: 15_000 });
@@ -401,13 +412,22 @@ test.describe("Automations settings page", () => {
 
     const tbody = testPage.locator("table tbody");
     await tbody.waitFor({ state: "visible", timeout: 5_000 });
-    await expect(tbody.locator("tr")).toHaveCount(2, { timeout: 10_000 });
+    await expect(tbody.locator("tr")).toHaveCount(3, { timeout: 10_000 });
 
-    // The archived task's run is no longer outstanding work.
+    // The archived task's run is no longer outstanding work, and reads
+    // "Archived" rather than being conflated with a real cancellation.
     const archivedRow = testPage.locator("table tbody tr", {
       hasText: archivedTask.id.slice(0, 8),
     });
-    await expect(archivedRow.getByText("Cancelled", { exact: true })).toBeVisible();
+    await expect(archivedRow.getByText("Archived", { exact: true })).toBeVisible();
+
+    // A task whose current (primary) session was genuinely cancelled —
+    // the signal a real Stop leaves behind — reads "Cancelled", distinct
+    // from "Archived".
+    const cancelledRow = testPage.locator("table tbody tr", {
+      hasText: cancelledTask.id.slice(0, 8),
+    });
+    await expect(cancelledRow.getByText("Cancelled", { exact: true })).toBeVisible();
 
     // The still-open task's run is unaffected.
     const openRow = testPage.locator("table tbody tr", { hasText: openTask.id.slice(0, 8) });

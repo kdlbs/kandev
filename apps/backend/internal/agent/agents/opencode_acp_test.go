@@ -1,9 +1,70 @@
 package agents
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 )
+
+func TestOpenCodeACPUsesManagedRuntime(t *testing.T) {
+	a := NewOpenCodeACP()
+	want := []string{"npx", "--yes", "--prefer-offline", "opencode-ai", "acp"}
+
+	if got := a.BuildCommand(CommandOptions{}).Args(); !slices.Equal(got, want) {
+		t.Fatalf("BuildCommand = %#v, want %#v", got, want)
+	}
+	if got := a.Runtime().Cmd.Args(); !slices.Equal(got, want) {
+		t.Fatalf("Runtime Cmd = %#v, want %#v", got, want)
+	}
+	if got := a.InferenceConfig().Command.Args(); !slices.Equal(got, want) {
+		t.Fatalf("Inference Command = %#v, want %#v", got, want)
+	}
+	if got, wantInstall := a.InstallScript(), "npm install -g opencode-ai"; got != wantInstall {
+		t.Fatalf("InstallScript = %q, want %q", got, wantInstall)
+	}
+}
+
+func TestOpenCodeACPDiscoveryRecognizesAuthenticationHelper(t *testing.T) {
+	binaryPath := writeOpenCodeTestBinary(t, "exit 7")
+
+	a := NewOpenCodeACP()
+	result, err := a.IsInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("IsInstalled() error = %v", err)
+	}
+	if !result.Available {
+		t.Fatal("IsInstalled() Available = false, want true")
+	}
+	if result.MatchedPath != binaryPath {
+		t.Fatalf("IsInstalled() MatchedPath = %q, want %q", result.MatchedPath, binaryPath)
+	}
+}
+
+func TestOpenCodeACPDiscoveryDoesNotRunVersionCommand(t *testing.T) {
+	writeOpenCodeTestBinary(t, "exit 7")
+
+	result, err := NewOpenCodeACP().IsInstalled(context.Background())
+	if err != nil {
+		t.Fatalf("IsInstalled() error = %v", err)
+	}
+	if !result.Available {
+		t.Fatal("IsInstalled() Available = false, want true")
+	}
+}
+
+func writeOpenCodeTestBinary(t *testing.T, body string) string {
+	t.Helper()
+	dir := t.TempDir()
+	binaryPath := filepath.Join(dir, "opencode")
+	contents := "#!/bin/sh\n" + body + "\n"
+	if err := os.WriteFile(binaryPath, []byte(contents), 0o755); err != nil {
+		t.Fatalf("write fake opencode: %v", err)
+	}
+	t.Setenv("PATH", dir)
+	return binaryPath
+}
 
 // TestOpenCodeACPRuntime_RequiresProcessKill is the regression test for GH
 // issue #1247: opencode acp keeps its HTTP server + MCP child tree alive

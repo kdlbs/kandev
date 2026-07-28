@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 const mockClearKanbanMulti = vi.fn();
 const mockSetKanbanMultiLoading = vi.fn();
@@ -9,6 +9,8 @@ const mockFetchWorkflowSnapshot = vi.fn();
 type Workflow = { id: string; workspaceId: string; name: string };
 type MockState = {
   connection: { status: string };
+  workspaces: { activeId: string | null };
+  workspaceContextGeneration: number;
   workflows: { items: Workflow[] };
   kanbanMulti: { snapshots: Record<string, unknown>; isLoading: boolean };
   clearKanbanMulti: typeof mockClearKanbanMulti;
@@ -18,6 +20,8 @@ type MockState = {
 
 let mockState: MockState = {
   connection: { status: "connected" },
+  workspaces: { activeId: "ws-A" },
+  workspaceContextGeneration: 0,
   workflows: { items: [] },
   kanbanMulti: { snapshots: {}, isLoading: false },
   clearKanbanMulti: mockClearKanbanMulti,
@@ -41,6 +45,8 @@ function resetMocks(workflows: Workflow[] = []) {
   mockFetchWorkflowSnapshot.mockResolvedValue({ steps: [], tasks: [] });
   mockState = {
     connection: { status: "connected" },
+    workspaces: { activeId: workflows[0]?.workspaceId ?? null },
+    workspaceContextGeneration: 0,
     workflows: { items: workflows },
     kanbanMulti: { snapshots: {}, isLoading: false },
     clearKanbanMulti: mockClearKanbanMulti,
@@ -82,6 +88,23 @@ describe("useAllWorkflowSnapshots — workspace scoping", () => {
     expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
     expect(mockSetKanbanMultiLoading).not.toHaveBeenCalledWith(true);
     expect(mockClearKanbanMulti).not.toHaveBeenCalled();
+  });
+
+  it("refetches boot-hydrated snapshots when the Kandev window regains focus", async () => {
+    mockState.kanbanMulti.snapshots = {
+      "wf-A": { workflowId: "wf-A", workflowName: "A", steps: [], tasks: [] },
+    };
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    expect(mockFetchWorkflowSnapshot).not.toHaveBeenCalled();
+
+    act(() => window.dispatchEvent(new Event("focus")));
+
+    await waitFor(() =>
+      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith("wf-A", {
+        cache: "no-store",
+      }),
+    );
   });
 
   it("clears snapshots when workspaceId changes", async () => {
@@ -150,7 +173,12 @@ describe("useAllWorkflowSnapshots — fetch guards", () => {
     // Switch to workspace B before A's fetch resolves. Wait for B's fetch
     // to settle (positive signal) so the new-gen effect is fully in place.
     mockFetchWorkflowSnapshot.mockResolvedValueOnce({ steps: [], tasks: [] });
-    mockState.workflows = { items: [{ id: "wf-B", workspaceId: "ws-B", name: "B" }] };
+    mockState = {
+      ...mockState,
+      workspaces: { activeId: "ws-B" },
+      workspaceContextGeneration: 1,
+      workflows: { items: [{ id: "wf-B", workspaceId: "ws-B", name: "B" }] },
+    };
     rerender({ workspaceId: "ws-B" });
     await waitFor(() =>
       expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith("wf-B", expect.anything()),
@@ -164,6 +192,33 @@ describe("useAllWorkflowSnapshots — fetch guards", () => {
 
     const writtenIds = mockSetWorkflowSnapshot.mock.calls.map((args) => args[0]);
     expect(writtenIds).not.toContain("wf-A");
+  });
+
+  it("discards an A snapshot after reset activates B but before rerender", async () => {
+    let resolveA: (value: { steps: []; tasks: [] }) => void = () => {};
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveA = resolve;
+        }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+    await waitFor(() =>
+      expect(mockFetchWorkflowSnapshot).toHaveBeenCalledWith("wf-A", expect.anything()),
+    );
+
+    mockState = {
+      ...mockState,
+      workspaces: { activeId: "ws-B" },
+      workspaceContextGeneration: 1,
+      kanbanMulti: { snapshots: {}, isLoading: false },
+    };
+    resolveA({ steps: [], tasks: [] });
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+
+    expect(mockSetWorkflowSnapshot).not.toHaveBeenCalled();
+    expect(mockSetKanbanMultiLoading).not.toHaveBeenLastCalledWith(false);
   });
 });
 

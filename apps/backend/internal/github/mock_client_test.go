@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -240,6 +241,33 @@ func TestMockClient_SubmitReview(t *testing.T) {
 	}
 	if reviews[0].Event != "APPROVE" || reviews[0].Body != "LGTM" {
 		t.Fatalf("unexpected review: %+v", reviews[0])
+	}
+}
+
+func TestMockClient_RequestReviewers_RecordsAndDeduplicatesCaseInsensitively(t *testing.T) {
+	m := NewMockClient()
+	m.AddPR(&PR{
+		RepoOwner: "o",
+		RepoName:  "r",
+		Number:    1,
+		RequestedReviewers: []RequestedReviewer{
+			{Login: "OctoCat", Type: reviewerTypeUser},
+		},
+	})
+
+	if err := m.RequestReviewers(context.Background(), "o", "r", 1, []string{"octocat", "hubot"}); err != nil {
+		t.Fatalf("RequestReviewers: %v", err)
+	}
+	requests := m.RequestedReviews()
+	if len(requests) != 1 || strings.Join(requests[0].Reviewers, ",") != "octocat,hubot" {
+		t.Fatalf("recorded requests = %#v", requests)
+	}
+	pr, err := m.GetPR(context.Background(), "o", "r", 1)
+	if err != nil {
+		t.Fatalf("GetPR: %v", err)
+	}
+	if got := strings.Join([]string{pr.RequestedReviewers[0].Login, pr.RequestedReviewers[1].Login}, ","); got != "OctoCat,hubot" {
+		t.Fatalf("requested reviewers = %q", got)
 	}
 }
 

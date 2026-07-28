@@ -76,6 +76,17 @@ func (a *taskRepositoryAdapter) UpdateTaskStateIfSessionState(
 	return a.svc.UpdateTaskStateIfSessionState(ctx, taskID, sessionID, expectedSessionState, state)
 }
 
+func (a *taskRepositoryAdapter) UpdateTaskStateIfPrimarySessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	return a.svc.UpdateTaskStateIfPrimarySessionState(
+		ctx, taskID, sessionID, expectedSessionState, state,
+	)
+}
+
 // lifecycleAdapter adapts the lifecycle manager as an AgentManagerClient
 type lifecycleAdapter struct {
 	mgr      *lifecycle.Manager
@@ -153,6 +164,9 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 		RepoName:           req.RepoName,
 		BranchSlug:         req.BranchSlug,
 		BranchIdentitySlug: req.BranchIdentitySlug,
+	}
+	for _, f := range req.WorkspaceFolders {
+		launchReq.WorkspaceFolders = append(launchReq.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
 	}
 
 	if req.RouteOverride != nil {
@@ -379,6 +393,17 @@ func (a *lifecycleAdapter) GetSessionAuthMethods(sessionID string) []streams.Aut
 // Attachments (images) are passed to the agent if provided
 func (a *lifecycleAdapter) PromptAgent(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool) (*executor.PromptResult, error) {
 	result, err := a.mgr.PromptAgent(ctx, agentInstanceID, prompt, attachments, dispatchOnly)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
+func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	result, err := a.mgr.PromptAgentWithDispatchCallback(ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched)
 	if err != nil {
 		return nil, err
 	}
@@ -646,6 +671,11 @@ func (w *orchestratorWrapper) ProcessOnTurnStart(ctx context.Context, taskID, se
 // StepRequiresCompletionSignal forwards to the orchestrator service.
 func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
+}
+
+// ForegroundActivity forwards to the orchestrator service (ADR-0049).
+func (w *orchestratorWrapper) ForegroundActivity(sessionID string) v1.ForegroundActivity {
+	return w.svc.ForegroundActivity(sessionID)
 }
 
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface

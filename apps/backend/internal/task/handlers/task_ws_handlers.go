@@ -37,7 +37,9 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	for _, session := range sessions {
-		sessionDTOs = append(sessionDTOs, dto.FromTaskSessionSummary(session))
+		summary := dto.FromTaskSessionSummary(session)
+		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
+		sessionDTOs = append(sessionDTOs, summary)
 	}
 	resp := dto.ListTaskSessionSummariesResponse{
 		Sessions: sessionDTOs,
@@ -169,6 +171,12 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))
+		if errors.Is(err, service.ErrWIPLimitExceeded) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), nil)
+		}
+		if isTaskCreateValidationError(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create task", nil)
 	}
 
@@ -245,6 +253,8 @@ type wsUpdateTaskRequest struct {
 	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position     *int                      `json:"position,omitempty"`
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
+	// ParentID nests the task under another task. "" clears the parent.
+	ParentID *string `json:"parent_id,omitempty"`
 }
 
 func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -298,6 +308,7 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Repositories: convertUpdateRepositories(req.Repositories != nil, repos),
 		Position:     req.Position,
 		Metadata:     req.Metadata,
+		ParentID:     req.ParentID,
 	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))

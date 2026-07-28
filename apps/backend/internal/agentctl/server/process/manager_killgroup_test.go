@@ -208,6 +208,39 @@ func TestWaitForExit_ReapsProcessGroupAfterNaturalLeaderExit(t *testing.T) {
 		"child process %d should be reaped when the leader exits naturally", childPID)
 }
 
+func TestWaitForExit_DoesNotPublishErrorForIntentionalStop(t *testing.T) {
+	log := newTestLogger(t)
+	m := &Manager{
+		logger:    log,
+		updatesCh: make(chan adapter.AgentEvent, 1),
+		doneCh:    make(chan struct{}),
+	}
+	m.status.Store(StatusStopping)
+	m.cmd = fixtureCmd("sleep 30")
+	setProcGroup(m.cmd)
+	require.NoError(t, m.cmd.Start())
+	parentPID := m.cmd.Process.Pid
+	t.Cleanup(func() {
+		_ = killProcessGroup(parentPID)
+	})
+
+	m.wg.Add(1)
+	go m.waitForExit()
+	require.NoError(t, killProcessGroup(parentPID))
+
+	select {
+	case <-m.doneCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for intentionally stopped process")
+	}
+	require.Nil(t, m.ExitError(), "intentional stop must not be recorded as an agent failure")
+	select {
+	case event := <-m.updatesCh:
+		t.Fatalf("intentional stop published event %+v", event)
+	default:
+	}
+}
+
 func TestWaitForProcessExit_TerminatesBeforeParentContextDeadline(t *testing.T) {
 	log, observed := newObservedTestLogger(t)
 

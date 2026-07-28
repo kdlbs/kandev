@@ -1,8 +1,10 @@
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@kandev/ui/accordion";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Spinner } from "@kandev/ui/spinner";
 import { IconChartPie, IconTrash } from "@tabler/icons-react";
 import type { StorageOverviewResponse, StorageQuarantineSummary } from "@/lib/types/system";
+import { formatRelativeTime } from "@/lib/utils";
 import { StorageActionButton } from "./storage-action-button";
 import { formatGigabytes } from "./storage-units";
 
@@ -173,13 +175,15 @@ export function StorageOverviewCard({ overview, disabledReason, onRunGoCache }: 
   if (!overview) {
     return (
       <Card data-testid="storage-overview-card">
-        <CardContent className="py-8 text-sm text-muted-foreground">
+        <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+          <Spinner className="size-4" data-testid="storage-overview-spinner" />
           Loading storage data…
         </CardContent>
       </Card>
     );
   }
   const { summary } = overview;
+  const analyzedAt = new Date(overview.analyzed_at).toLocaleString();
   const cleanupDisabledReason = goCacheDisabledReason(overview, disabledReason);
   const resources = storageResources(overview);
   return (
@@ -193,6 +197,14 @@ export function StorageOverviewCard({ overview, disabledReason, onRunGoCache }: 
           A read-only breakdown of current usage and reclaimable space. Run Analyze occasionally to
           refresh these estimates; it never deletes or moves anything.
         </CardDescription>
+        <time
+          className="text-xs text-muted-foreground"
+          dateTime={overview.analyzed_at}
+          title={analyzedAt}
+          aria-label={`Last analyzed ${analyzedAt}`}
+        >
+          Last analyzed {formatRelativeTime(overview.analyzed_at)}
+        </time>
       </CardHeader>
       <CardContent className="min-w-0">
         <Accordion type="multiple" className="min-w-0">

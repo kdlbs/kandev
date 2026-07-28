@@ -345,6 +345,9 @@ func (h *ProcessHandlers) httpStopProcessByID(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session_id and process_id are required"})
 		return
 	}
+	if h.denySessionAccess(c, sessionID) {
+		return
+	}
 	h.logger.Debug("stop process request (path)",
 		zap.String("session_id", sessionID),
 		zap.String("process_id", processID),
@@ -479,6 +482,22 @@ func resolveScriptCommand(
 	}
 }
 
+// denySessionAccess reports whether the caller may not touch sessionID, having
+// already written the 404 response.
+//
+// The session-keyed routes in this file resolve their execution with a bare
+// in-memory lookup (GetExecutionBySessionID / *BySessionID), which skips the
+// GetOrEnsure* paths where the lifecycle manager runs the per-user check
+// internally — so they have to ask explicitly. Routes that call
+// service.GetTaskSession first are already covered by its scoping.
+func (h *ProcessHandlers) denySessionAccess(c *gin.Context, sessionID string) bool {
+	if err := h.service.AuthorizeSessionAccess(c.Request.Context(), sessionID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
+		return true
+	}
+	return false
+}
+
 func (h *ProcessHandlers) applyIfSessionReady(sessionID string, allowPassthrough bool, apply func() error) error {
 	execution, running := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
 	if !running {
@@ -500,6 +519,9 @@ func (h *ProcessHandlers) applyIfSessionReady(sessionID string, allowPassthrough
 // httpSetSessionMode applies the session mode now or records it for the next launch.
 func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 	sessionID := c.Param("id")
+	if h.denySessionAccess(c, sessionID) {
+		return
+	}
 	var req struct {
 		ModeID string `json:"mode_id"`
 	}
@@ -532,6 +554,9 @@ func (h *ProcessHandlers) httpSetSessionMode(c *gin.Context) {
 // httpSetSessionModel applies the session model now or records it for the next launch.
 func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 	sessionID := c.Param("id")
+	if h.denySessionAccess(c, sessionID) {
+		return
+	}
 	var req struct {
 		ModelID string `json:"model_id"`
 	}
@@ -564,6 +589,9 @@ func (h *ProcessHandlers) httpSetSessionModel(c *gin.Context) {
 // httpSetSessionConfigOption applies an option now or records it for the next launch.
 func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
 	sessionID := c.Param("id")
+	if h.denySessionAccess(c, sessionID) {
+		return
+	}
 	var req struct {
 		ConfigID string `json:"config_id"`
 		Value    string `json:"value"`
@@ -597,6 +625,9 @@ func (h *ProcessHandlers) httpSetSessionConfigOption(c *gin.Context) {
 // httpAuthenticate triggers authentication for a given auth method on a running agent.
 func (h *ProcessHandlers) httpAuthenticate(c *gin.Context) {
 	sessionID := c.Param("id")
+	if h.denySessionAccess(c, sessionID) {
+		return
+	}
 	var req struct {
 		MethodID string `json:"method_id"`
 	}

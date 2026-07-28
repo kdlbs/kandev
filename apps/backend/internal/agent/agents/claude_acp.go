@@ -16,7 +16,7 @@ var claudeACPLogoLight []byte
 //go:embed logos/claude_code_dark.svg
 var claudeACPLogoDark []byte
 
-const claudeACPPkg = "@agentclientprotocol/claude-agent-acp"
+const claudeACPPackage = "@agentclientprotocol/claude-agent-acp"
 
 // claudeACPPermSettings maps the profile DangerouslySkipPermissions toggle to
 // the Claude Code CLI's --dangerously-skip-permissions flag in passthrough mode.
@@ -34,9 +34,10 @@ var claudeACPPermSettings = map[string]PermissionSetting{
 }
 
 var (
-	_ Agent            = (*ClaudeACP)(nil)
-	_ PassthroughAgent = (*ClaudeACP)(nil)
-	_ InferenceAgent   = (*ClaudeACP)(nil)
+	_ Agent                  = (*ClaudeACP)(nil)
+	_ PassthroughAgent       = (*ClaudeACP)(nil)
+	_ InferenceAgent         = (*ClaudeACP)(nil)
+	_ ManagedNPMRuntimeAgent = (*ClaudeACP)(nil)
 )
 
 // ClaudeACP implements Agent for the agentclientprotocol claude-agent-acp package.
@@ -106,7 +107,11 @@ func (a *ClaudeACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *ClaudeACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", claudeACPPkg).Build()
+	return a.ManagedNPMRuntime().CachedACPCommand()
+}
+
+func (a *ClaudeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
+	return ManagedNPMRuntimeSpec{Package: claudeACPPackage}
 }
 
 func (a *ClaudeACP) Runtime() *RuntimeConfig {
@@ -114,7 +119,7 @@ func (a *ClaudeACP) Runtime() *RuntimeConfig {
 	return &RuntimeConfig{
 		Image:       "kandev/multi-agent",
 		Tag:         "latest",
-		Cmd:         Cmd("npx", "-y", claudeACPPkg).Build(),
+		Cmd:         a.ManagedNPMRuntime().CachedACPCommand(),
 		WorkingDir:  "{workspace}",
 		RequiredEnv: []string{}, // Auth via ANTHROPIC_API_KEY or OAuth credentials file (see RemoteAuth)
 		Env: map[string]string{
@@ -169,7 +174,7 @@ func (a *ClaudeACP) LoginCommand() *LoginCommand {
 func (a *ClaudeACP) InstallScript() string {
 	// Install both the user-facing Anthropic CLI (which IsInstalled probes for
 	// and which `claude /login` runs against) and the ACP bridge package.
-	return "npm install -g @anthropic-ai/claude-code " + claudeACPPkg
+	return "npm install -g @anthropic-ai/claude-code " + claudeACPPackage
 }
 
 func (a *ClaudeACP) BillingType() usage.BillingType { return claudeBillingType() }
@@ -182,6 +187,6 @@ func (a *ClaudeACP) PermissionSettings() map[string]PermissionSetting {
 func (a *ClaudeACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("npx", "-y", claudeACPPkg),
+		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
 	}
 }

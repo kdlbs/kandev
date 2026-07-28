@@ -16,12 +16,13 @@ var codexACPLogoLight []byte
 //go:embed logos/codex_dark.svg
 var codexACPLogoDark []byte
 
-const codexACPPkg = "@agentclientprotocol/codex-acp"
+const codexACPPackage = "@agentclientprotocol/codex-acp"
 
 var (
-	_ Agent            = (*CodexACP)(nil)
-	_ PassthroughAgent = (*CodexACP)(nil)
-	_ InferenceAgent   = (*CodexACP)(nil)
+	_ Agent                  = (*CodexACP)(nil)
+	_ PassthroughAgent       = (*CodexACP)(nil)
+	_ InferenceAgent         = (*CodexACP)(nil)
+	_ ManagedNPMRuntimeAgent = (*CodexACP)(nil)
 )
 
 // CodexACP implements Agent for the Agent Client Protocol codex-acp package.
@@ -95,7 +96,11 @@ func (a *CodexACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *CodexACP) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", codexACPPkg).Build()
+	return a.ManagedNPMRuntime().CachedACPCommand()
+}
+
+func (a *CodexACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
+	return ManagedNPMRuntimeSpec{Package: codexACPPackage}
 }
 
 func (a *CodexACP) Runtime() *RuntimeConfig {
@@ -103,7 +108,7 @@ func (a *CodexACP) Runtime() *RuntimeConfig {
 	return &RuntimeConfig{
 		Image:       "kandev/multi-agent",
 		Tag:         "latest",
-		Cmd:         Cmd("npx", "-y", codexACPPkg).Build(),
+		Cmd:         a.ManagedNPMRuntime().CachedACPCommand(),
 		WorkingDir:  "{workspace}",
 		RequiredEnv: []string{"OPENAI_API_KEY"},
 		Env:         map[string]string{},
@@ -162,7 +167,7 @@ func (a *CodexACP) LoginCommand() *LoginCommand {
 // Install both the user-facing OpenAI codex CLI (which `codex login` runs
 // against) and the ACP bridge package used for chat sessions.
 func (a *CodexACP) InstallScript() string {
-	return "npm install -g @openai/codex " + codexACPPkg
+	return "npm install -g @openai/codex " + codexACPPackage
 }
 
 func (a *CodexACP) BillingType() usage.BillingType { return codexBillingType() }
@@ -175,6 +180,6 @@ func (a *CodexACP) PermissionSettings() map[string]PermissionSetting {
 func (a *CodexACP) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("npx", "-y", codexACPPkg),
+		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
 	}
 }

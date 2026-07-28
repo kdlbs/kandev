@@ -77,7 +77,8 @@ test.describe("mobile PR watcher missing branch", () => {
     await expect(
       recovery.getByRole("heading", { name: "Branch is no longer available" }),
     ).toBeVisible();
-    await expect(recovery).toContainText(prBranch);
+    await expect(recovery).toContainText("***");
+    await expect(recovery).not.toContainText(prBranch);
     await expect(
       chat.getByRole("status", { name: /Session failed|Environment setup failed/i }),
     ).toHaveCount(0);

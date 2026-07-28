@@ -12,12 +12,16 @@ type AgentStatusProps = {
   sessionState?: TaskSessionState;
   sessionId: string | null;
   messages?: Message[];
+  isWorking?: boolean;
 };
 
-const STATE_CONFIG: Record<
-  TaskSessionState,
-  { label: string; dynamicLabel?: boolean; icon: "spinner" | "error" | "warning" | null }
-> = {
+type StatusConfig = {
+  label: string;
+  dynamicLabel?: boolean;
+  icon: "spinner" | "error" | "warning" | null;
+};
+
+const STATE_CONFIG: Record<TaskSessionState, StatusConfig> = {
   CREATED: { label: "", icon: null },
   STARTING: { label: "Agent is starting", dynamicLabel: true, icon: "spinner" },
   RUNNING: { label: "Agent is running", icon: "spinner" },
@@ -27,6 +31,24 @@ const STATE_CONFIG: Record<
   FAILED: { label: "Agent has encountered an error", icon: "error" },
   CANCELLED: { label: "", icon: null },
 };
+
+const BACKGROUND_WORK_CONFIG: StatusConfig = {
+  label: "Background work is running",
+  icon: "spinner",
+};
+
+export function resolveAgentStatusConfig(
+  sessionState: TaskSessionState | undefined,
+  isWorking: boolean,
+  hasBackgroundWork = false,
+): StatusConfig | null {
+  // Background work shows through two coarse states (ADR-0049): a RUNNING
+  // session whose foreground turn has yielded, and a WAITING_FOR_INPUT session
+  // holding detached work. Both must read "background", not the coarse label.
+  if (isWorking && sessionState === "WAITING_FOR_INPUT") return BACKGROUND_WORK_CONFIG;
+  if (isWorking && sessionState === "RUNNING" && hasBackgroundWork) return BACKGROUND_WORK_CONFIG;
+  return sessionState ? STATE_CONFIG[sessionState] : null;
+}
 
 /**
  * Format duration in seconds to a human-readable string.
@@ -262,8 +284,16 @@ function useAgentLabel(sessionId: string | null, dynamicLabel?: boolean): string
   return profile ? profile.label.split(" \u2022 ")[0] : null;
 }
 
-export function AgentStatus({ sessionState, sessionId, messages = [] }: AgentStatusProps) {
-  const config = sessionState ? STATE_CONFIG[sessionState] : null;
+export function AgentStatus({
+  sessionState,
+  sessionId,
+  messages = [],
+  isWorking = false,
+}: AgentStatusProps) {
+  const hasBackgroundWork = useAppStore((state) =>
+    sessionId ? state.taskSessions.items[sessionId]?.foreground_activity === "background" : false,
+  );
+  const config = resolveAgentStatusConfig(sessionState, isWorking, hasBackgroundWork);
   const isRunning = config?.icon === "spinner";
   const agentLabel = useAgentLabel(sessionId, config?.dynamicLabel);
 

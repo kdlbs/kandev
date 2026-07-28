@@ -7,16 +7,16 @@ description: Write and run web E2E tests (Playwright) using TDD — locations, p
 
 ## Execution Context
 
-The planner may write or run a quick focused E2E check for small scoped work;
-delegate long, noisy, broad, or parallel E2E work. A worker owns one packet and
-does not spawn workers.
+Write and run E2E coverage directly in the primary conversation. For a
+cost-controlled feature workflow, the user switches that conversation to the
+lower-cost implementation/test model before this phase.
 
 Write E2E tests using TDD (Red-Green-Refactor). Always run the tests you create and watch them fail before implementing.
 
-## Available skills and subagents
+## Related skills
 
 - **`/tdd`** — Follow the Red-Green-Refactor cycle when writing tests.
-- **`/verify`** — The planner launches this separately after targeted E2E tests pass.
+- **`/pr-fixup`** — Use after the PR opens only for CI or reviewer findings.
 - **`/playwright-cli`** — Interactive browser automation. Use to validate features against the dev server before writing tests, and to debug failing tests with `--debug=cli`.
 
 ## Location
@@ -136,6 +136,14 @@ Without this, tests run against stale code and failures are misleading. `make bu
 3. Use `data-testid` attributes for selectors — add them to components as needed
 4. Use page objects for common interactions; create new ones for new pages
 5. For GitHub features, use `apiClient.mockGitHub*()` methods to seed mock data
+
+### Input-modality behavior
+
+For a touch-specific interaction, use Playwright `.tap()` rather than `.click()`
+so the app receives a touch `pointerType`. Run focused mobile specs with
+`-- --project=mobile-chrome`; otherwise Playwright can report no matching tests.
+After the interaction settles, assert the resulting state and exercise a later
+mouse or pen entry when the UI maintains hybrid-device pointer state.
 
 ### Visual alignment regressions
 

@@ -19,8 +19,18 @@ ignore = [
     # Fix: upgrade rand to >= 0.8.6 (semver-breaking; requires coordinating dependents).
     "RUSTSEC-2026-0097",
 
-    # glib 0.18.5 — unsound VariantStrIter::impl_get, Linux-only via webkit2gtk chain.
-    # No known exploit in the wild; will resolve when Tauri migrates to webkit2gtk-4.1
-    # which pulls glib >= 0.20.0.
+    # glib 0.18.5 — unsound VariantStrIter::impl_get, Linux-only via the gtk 0.18
+    # chain that Tauri v2 uses for its Linux backend.
+    #
+    # The advisory's fix version (0.20.0) is not reachable: gtk-rs/gtk3-rs, which
+    # publishes gtk/gdk/webkit2gtk, was archived in March 2024 and will never
+    # release a version depending on glib >= 0.20. Tauri closed its own tracking
+    # issue as not_planned and targets the GTK4 migration at Tauri v3
+    # (tauri-apps/tauri#12564).
+    #
+    # A glib 0.18.6 patch release would fix this for us automatically, since
+    # gtk 0.18.2 depends on glib with a caret requirement. Backport submitted
+    # upstream: gtk-rs/gtk-rs-core#2009, release request #2010. Drop this entry
+    # once 0.18.6 ships.
     "RUSTSEC-2024-0429",
 ]

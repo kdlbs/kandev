@@ -523,10 +523,20 @@ const probeTimeout = 60 * time.Second
 // probe runs an ACP probe against the given instance and translates the result
 // into an AgentCapabilities record suitable for the cache.
 func (m *Manager) probe(ctx context.Context, inst *instance, ia agents.InferenceAgent, refresh bool) AgentCapabilities {
+	return m.probeWithCommand(ctx, inst, ia, refresh, agents.Command{})
+}
+
+func (m *Manager) probeWithCommand(
+	ctx context.Context,
+	inst *instance,
+	ia agents.InferenceAgent,
+	refresh bool,
+	command agents.Command,
+) AgentCapabilities {
 	probeCtx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 
-	req := buildProbeRequest(inst, ia, refresh)
+	req := buildProbeRequest(inst, ia, refresh, command)
 	resp, err := inst.client.Probe(probeCtx, req)
 	now := time.Now()
 	if err != nil {
@@ -600,13 +610,18 @@ func buildProbeRequest(
 	inst *instance,
 	ia agents.InferenceAgent,
 	refresh bool,
+	command agents.Command,
 ) *agentctlutil.ProbeRequest {
 	cfg := ia.InferenceConfig()
+	probeCommand := cfg.Command
+	if !command.IsEmpty() {
+		probeCommand = command
+	}
 	return &agentctlutil.ProbeRequest{
 		AgentID: inst.agentType,
 		Refresh: refresh,
 		InferenceConfig: &agentctlutil.InferenceConfigDTO{
-			Command:   cfg.Command.Args(),
+			Command:   probeCommand.Args(),
 			ModelFlag: cfg.ModelFlag.Args(),
 			WorkDir:   inst.workDir,
 			StripEnv:  agents.StripEnvFor(ia),

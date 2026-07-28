@@ -53,6 +53,7 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
         onRenameBranch={data.git.renameBranch}
         repoDisplayName={data.repoDisplayName}
         taskId={data.activeTaskId}
+        credentialDisplay={data.gitCredentialDisplay}
       />
       <ChangesPanelBody {...buildChangesPanelBodyProps(data, props)} />
     </PanelRoot>

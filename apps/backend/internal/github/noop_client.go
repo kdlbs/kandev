@@ -57,6 +57,10 @@ func (c *NoopClient) ListAccessibleRepos(context.Context, string, int) ([]GitHub
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) HasRepositoryAccess(context.Context, string, string) (bool, error) {
+	return false, ErrNoClient
+}
+
 func (c *NoopClient) ListPRReviews(context.Context, string, string, int) ([]PRReview, error) {
 	return nil, ErrNoClient
 }
@@ -94,6 +98,10 @@ func (c *NoopClient) GetRepoMergeMethods(context.Context, string, string) (RepoM
 }
 
 func (c *NoopClient) SubmitReview(context.Context, string, string, int, string, string) error {
+	return ErrNoClient
+}
+
+func (c *NoopClient) RequestReviewers(context.Context, string, string, int, []string) error {
 	return ErrNoClient
 }
 

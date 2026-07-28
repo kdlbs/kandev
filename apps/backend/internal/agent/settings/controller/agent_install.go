@@ -31,7 +31,10 @@ func (c *Controller) EnqueueInstall(name string) (*dto.InstallJobDTO, error) {
 	if script == "" {
 		return nil, ErrInstallScriptEmpty
 	}
-	job := c.jobStore.Enqueue(name, script)
+	job, err := c.jobStore.Enqueue(name, script)
+	if err != nil {
+		return nil, err
+	}
 	// Get() takes the store mutex, so it's race-free; calling job.snapshot()
 	// directly here would read job.Status without the lock while the spawned
 	// goroutine may be writing it.

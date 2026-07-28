@@ -22,6 +22,10 @@ func (c *Controller) httpListIssueWatches(ctx *gin.Context) {
 		watches, err = c.service.ListIssueWatches(ctx.Request.Context(), workspaceID)
 	}
 	if err != nil {
+		if workspaceDenied(err) {
+			ctx.JSON(http.StatusNotFound, gin.H{"error": "workspace not found"})
+			return
+		}
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

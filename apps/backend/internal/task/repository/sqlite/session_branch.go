@@ -10,7 +10,7 @@ import (
 // on non-archived tasks. Used by the PR watch reconciler.
 func (r *Repository) ListSessionsWithBranches(ctx context.Context) ([]models.SessionBranchInfo, error) {
 	rows, err := r.ro.QueryContext(ctx, `
-		SELECT ts.id, ts.task_id, tsw.worktree_branch
+		SELECT ts.id, ts.task_id, t.workspace_id, tsw.worktree_branch
 		FROM task_sessions ts
 		INNER JOIN tasks t ON t.id = ts.task_id
 		INNER JOIN task_session_worktrees tsw ON tsw.session_id = ts.id
@@ -29,7 +29,7 @@ func (r *Repository) ListSessionsWithBranches(ctx context.Context) ([]models.Ses
 	var result []models.SessionBranchInfo
 	for rows.Next() {
 		var info models.SessionBranchInfo
-		if err := rows.Scan(&info.SessionID, &info.TaskID, &info.Branch); err != nil {
+		if err := rows.Scan(&info.SessionID, &info.TaskID, &info.WorkspaceID, &info.Branch); err != nil {
 			return nil, err
 		}
 		result = append(result, info)

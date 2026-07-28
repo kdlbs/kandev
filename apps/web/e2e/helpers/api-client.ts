@@ -9,6 +9,7 @@ import type {
   MCPTaskAgentProfileDefault,
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
+import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
 import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
 import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type {
@@ -29,6 +30,7 @@ import type {
   SSHTestRequest,
   SSHTestResult,
 } from "../../lib/types/http-ssh";
+import { loadInterimSettingsInterlockToken } from "./interim-settings-interlock";
 
 // --- GitHub Mock Types ---
 
@@ -100,6 +102,39 @@ export type MockCheckRun = {
   html_url?: string;
   started_at?: string;
   completed_at?: string;
+};
+
+export type MockGitHubConnectionStatus = "active" | "invalid" | "suspended" | "revoked";
+
+export type MockGitHubWorkspaceConnection = {
+  source: "pat" | "gh_cli" | "github_app_installation" | "legacy_shared";
+  status: MockGitHubConnectionStatus;
+  login?: string;
+  installation_id?: number;
+  installation_account_login?: string;
+  installation_account_type?: string;
+  app_registration_id?: string;
+  capabilities?: Record<string, boolean>;
+};
+
+export type MockGitHubPersonalConnection = {
+  login: string;
+  status: MockGitHubConnectionStatus;
+  github_user_id?: number;
+  access_expires_at?: string;
+};
+
+export type MockGitHubCLIAccount = {
+  host: string;
+  login: string;
+  active: boolean;
+  state: string;
+};
+
+export type MockGitHubAppRegistration = {
+  id: string;
+  display_name: string;
+  app_id: number;
 };
 
 export type MockGitLabMRSeed = Pick<MockGitLabMR, "iid" | "title"> & Partial<MockGitLabMR>;
@@ -191,6 +226,7 @@ type OptionalAgentTaskOpts = {
   executor_profile_id?: string;
   metadata?: Record<string, unknown>;
   parent_id?: string;
+  workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
   attachments?: MessageAttachmentInput[];
 };
 
@@ -213,6 +249,7 @@ function buildOptionalAgentTaskFields(opts?: OptionalAgentTaskOpts): Record<stri
   setIf(fields, "executor_profile_id", opts.executor_profile_id);
   setIf(fields, "metadata", opts.metadata);
   setIf(fields, "parent_id", opts.parent_id);
+  setIf(fields, "workspace_mode", opts.workspace_mode);
   setIf(fields, "attachments", opts.attachments);
   return fields;
 }
@@ -224,18 +261,24 @@ export class ApiClient {
   constructor(private baseUrl: string) {}
 
   /** Perform an HTTP request and return the raw Response (does not throw on non-2xx). */
-  async rawRequest(method: string, path: string, body?: unknown): Promise<Response> {
+  async rawRequest(
+    method: string,
+    path: string,
+    body?: unknown,
+    options?: Pick<RequestInit, "redirect">,
+  ): Promise<Response> {
     return fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: await this.requestHeaders(method, body),
       body: body ? JSON.stringify(body) : undefined,
+      ...options,
     });
   }
 
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
-      headers: body ? { "Content-Type": "application/json" } : undefined,
+      headers: await this.requestHeaders(method, body),
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -243,6 +286,19 @@ export class ApiClient {
       throw new Error(`API ${method} ${path} failed (${res.status}): ${text}`);
     }
     return res.json() as Promise<T>;
+  }
+
+  private async requestHeaders(
+    method: string,
+    body?: unknown,
+  ): Promise<Record<string, string> | undefined> {
+    const headers: Record<string, string> = body ? { "Content-Type": "application/json" } : {};
+    if (["POST", "PUT", "PATCH", "DELETE"].includes(method.toUpperCase())) {
+      headers["X-Kandev-Interim-Settings-Interlock"] = await loadInterimSettingsInterlockToken(
+        this.baseUrl,
+      );
+    }
+    return Object.keys(headers).length > 0 ? headers : undefined;
   }
 
   private async activeWorkspaceId(): Promise<string | undefined> {
@@ -384,7 +440,17 @@ export class ApiClient {
   }
 
   async listAgents(): Promise<{ agents: Agent[]; total: number }> {
-    return this.request("GET", "/api/v1/agents");
+    const response = await this.request<{ agents: Agent[]; total: number }>(
+      "GET",
+      "/api/v1/agents",
+    );
+    return {
+      ...response,
+      agents: response.agents.map((agent) => ({
+        ...agent,
+        profiles: (agent.profiles ?? []).map(normalizeAgentProfile),
+      })),
+    };
   }
 
   async deleteAgentProfile(profileId: string, force?: boolean): Promise<void> {
@@ -408,10 +474,55 @@ export class ApiClient {
         const wsId = (profile as unknown as { workspace_id?: string }).workspace_id;
         if (wsId) continue;
         if (!keepIds.includes(profile.id)) {
-          await this.deleteAgentProfile(profile.id, true);
+          await this.deleteTestProfile(profile.id);
         }
       }
     }
+  }
+
+  /**
+   * Remove a test-created profile while preserving the production guard that
+   * rejects deleting profiles selected by workspace routing. A preceding
+   * routing E2E spec can leave a test profile selected in another workspace;
+   * clear that test state, then retry the ordinary guarded delete.
+   */
+  private async deleteTestProfile(profileId: string): Promise<void> {
+    const res = await this.rawRequest("DELETE", `/api/v1/agent-profiles/${profileId}?force=true`);
+    if (res.ok) return;
+
+    const body = await res.text();
+    const routingWorkspaces = routingWorkspaceIDs(body);
+    if (res.status !== 409 || routingWorkspaces.length === 0) {
+      throw new Error(
+        `API DELETE /api/v1/agent-profiles/${profileId}?force=true failed (${res.status}): ${body}`,
+      );
+    }
+
+    const clearedRouting = await this.clearRoutingReferences(profileId, routingWorkspaces);
+    if (!clearedRouting) {
+      throw new Error(
+        `API DELETE /api/v1/agent-profiles/${profileId}?force=true failed (${res.status}): ${body}`,
+      );
+    }
+    await this.deleteAgentProfile(profileId, true);
+  }
+
+  private async clearRoutingReferences(
+    profileId: string,
+    workspaceIds: string[],
+  ): Promise<boolean> {
+    let clearedRouting = false;
+    for (const workspaceId of workspaceIds) {
+      const routing = await this.request<WorkspaceRoutingResponse>(
+        "GET",
+        `/api/v1/office/workspaces/${workspaceId}/routing`,
+      );
+      const updatedConfig = removeRoutingProfileReferences(routing.config, profileId);
+      if (!updatedConfig) continue;
+      await this.request("PUT", `/api/v1/office/workspaces/${workspaceId}/routing`, updatedConfig);
+      clearedRouting = true;
+    }
+    return clearedRouting;
   }
 
   async createAgentProfile(
@@ -423,21 +534,21 @@ export class ApiClient {
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
+      command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
     },
-  ): Promise<{
-    id: string;
-    cli_flags: Array<{ description: string; flag: string; enabled: boolean }>;
-  }> {
-    return this.request("POST", `/api/v1/agents/${agentId}/profiles`, {
+  ): Promise<AgentProfile> {
+    const response = await this.request<unknown>("POST", `/api/v1/agents/${agentId}/profiles`, {
       name,
       model: opts.model,
       mode: opts.mode,
       config_options: opts.config_options,
       cli_passthrough: opts.cli_passthrough ?? false,
       cli_flags: opts.cli_flags,
+      command_prefix: opts.command_prefix,
       env_vars: opts.env_vars,
     });
+    return normalizeAgentProfile(response);
   }
 
   async getAgentProfile(profileId: string): Promise<AgentProfile> {
@@ -463,6 +574,7 @@ export class ApiClient {
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
+      command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
     },
   ): Promise<void> {
@@ -509,6 +621,8 @@ export class ApiClient {
       metadata?: Record<string, unknown>;
       /** Parent task ID for subtasks. */
       parent_id?: string;
+      /** Workspace behavior for a child task. */
+      workspace_mode?: "inherit_parent" | "new_workspace" | "shared_group";
       attachments?: MessageAttachmentInput[];
     },
   ): Promise<CreateTaskResponse> {
@@ -701,12 +815,24 @@ export class ApiClient {
     return this.request("GET", "/api/v1/executors");
   }
 
+  /**
+   * Inference-capable agents as the utility/review paths see them. The `id` here
+   * is the registered agent-type id (e.g. "claude-acp"), which is what
+   * `default_utility_agent_id` and a review run expect — not an agent row UUID.
+   */
+  async listInferenceAgents(): Promise<{
+    agents: Array<{ id: string; name: string; models: Array<{ id: string }>; status: string }>;
+  }> {
+    return this.request("GET", "/api/v1/utility/inference-agents");
+  }
+
   async getUserSettings(): Promise<{
     settings: {
       terminal_link_behavior?: string;
       terminal_font_family?: string;
       terminal_font_size?: number;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
+      tasks_list_show_details?: boolean;
       [key: string]: unknown;
     };
   }> {
@@ -729,6 +855,7 @@ export class ApiClient {
     sidebar_views?: unknown[];
     saved_layouts?: unknown[];
     kanban_view_mode?: string;
+    tasks_list_show_details?: boolean;
     tasks_list_sort?: string;
     tasks_list_group?: string;
     task_create_last_used?: TaskCreateLastUsedApi;
@@ -1008,14 +1135,83 @@ export class ApiClient {
 
   async mockGitHubSetUser(username: string): Promise<void> {
     await this.request("PUT", "/api/v1/github/mock/user", { username });
+
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+  }
+
+  async mockGitHubSetWorkspaceConnection(
+    workspaceId: string,
+    connection: MockGitHubWorkspaceConnection,
+  ): Promise<void> {
+    await this.request(
+      "PUT",
+      `/api/v1/github/mock/workspace-connections/${encodeURIComponent(workspaceId)}`,
+      connection,
+    );
+  }
+
+  async mockGitHubDeleteWorkspaceConnection(workspaceId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/github/mock/workspace-connections/${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async mockGitHubSetWorkspaceConnectionStatus(
+    workspaceId: string,
+    status: MockGitHubConnectionStatus,
+  ): Promise<void> {
+    await this.request(
+      "PUT",
+      `/api/v1/github/mock/workspace-connections/${encodeURIComponent(workspaceId)}/status`,
+      { status },
+    );
+  }
+
+  async mockGitHubSetPersonalConnection(
+    workspaceId: string,
+    connection: MockGitHubPersonalConnection,
+  ): Promise<void> {
+    await this.request(
+      "PUT",
+      `/api/v1/github/mock/personal-connections/${encodeURIComponent(workspaceId)}`,
+      connection,
+    );
+  }
+
+  async mockGitHubDeletePersonalConnection(workspaceId: string): Promise<void> {
+    await this.request(
+      "DELETE",
+      `/api/v1/github/mock/personal-connections/${encodeURIComponent(workspaceId)}`,
+    );
+  }
+
+  async mockGitHubSetCLIAccounts(accounts: MockGitHubCLIAccount[]): Promise<void> {
+    await this.request("PUT", "/api/v1/github/mock/cli-accounts", { accounts });
+  }
+
+  async mockGitHubSetAppRegistration(registration: MockGitHubAppRegistration) {
+    return this.request<Record<string, unknown>>(
+      "PUT",
+      `/api/v1/github/mock/app-registrations/${encodeURIComponent(registration.id)}`,
+      { display_name: registration.display_name, app_id: registration.app_id },
+    );
   }
 
   async mockGitHubAddPRs(prs: MockPR[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/prs", { prs });
+    await this.seedMockGitHubRepositoryAccess(prs);
   }
 
   async mockGitHubAddIssues(issues: MockIssue[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/issues", { issues });
+    await this.seedMockGitHubRepositoryAccess(issues);
   }
 
   async mockGitHubAddOrgs(orgs: MockOrg[]): Promise<void> {
@@ -1024,6 +1220,25 @@ export class ApiClient {
 
   async mockGitHubAddRepos(org: string, repos: MockRepo[]): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/repos", { org, repos });
+  }
+
+  private async seedMockGitHubRepositoryAccess(
+    items: Array<{ repo_owner: string; repo_name: string }>,
+  ): Promise<void> {
+    const reposByOwner = new Map<string, Map<string, MockRepo>>();
+    for (const item of items) {
+      const owner = item.repo_owner.trim();
+      const name = item.repo_name.trim();
+      if (!owner || !name) continue;
+      const repos = reposByOwner.get(owner) ?? new Map<string, MockRepo>();
+      repos.set(name, { full_name: `${owner}/${name}`, owner, name });
+      reposByOwner.set(owner, repos);
+    }
+    await Promise.all(
+      Array.from(reposByOwner, ([owner, repos]) =>
+        this.mockGitHubAddRepos(owner, Array.from(repos.values())),
+      ),
+    );
   }
 
   async mockGitHubAddReviews(
@@ -1092,6 +1307,16 @@ export class ApiClient {
       number,
       commits,
     });
+    await this.seedMockGitHubRepositoryAccess([{ repo_owner: owner, repo_name: repo }]);
+
+    // PR commit fixtures predate workspace-scoped GitHub authentication and
+    // expect the shared mock client to be available for provider lookups.
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
   }
 
   async mockGitHubAddBranches(
@@ -1103,6 +1328,15 @@ export class ApiClient {
       owner,
       repo,
       branches,
+    });
+
+    // Branch fixtures predate workspace-scoped GitHub authentication and
+    // expect the shared mock client to be available for provider lookups.
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
     });
   }
 
@@ -1133,6 +1367,7 @@ export class ApiClient {
   }
 
   async associateGitHubTaskPR(data: {
+    workspace_id: string;
     task_id: string;
     repository_id: string;
     pr_url: string;
@@ -1210,6 +1445,7 @@ export class ApiClient {
     }>;
   }): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/pr-feedback", data);
+    await this.seedMockGitHubRepositoryAccess([{ repo_owner: data.owner, repo_name: data.repo }]);
   }
 
   async mockGitHubSetAuthHealth(data: { authenticated: boolean; error?: string }): Promise<void> {
@@ -1469,6 +1705,12 @@ export class ApiClient {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}/messages`);
   }
 
+  async listSessionTurns(sessionId: string): Promise<{
+    turns: Array<{ id: string; completed_at?: string | null }>;
+  }> {
+    return this.request("GET", `/api/v1/task-sessions/${sessionId}/turns`);
+  }
+
   async listTasks(
     workspaceId: string,
   ): Promise<{ tasks: Array<{ id: string; title: string; workflow_step_id?: string }> }> {
@@ -1516,6 +1758,13 @@ export class ApiClient {
       repository_id: string;
       base_branch: string;
       checkout_branch?: string;
+      position: number;
+    }>;
+    workspace_folders?: Array<{
+      id: string;
+      task_id: string;
+      local_path: string;
+      display_name: string;
       position: number;
     }>;
   }> {
@@ -2446,6 +2695,113 @@ export class ApiClient {
       task_id: taskId ?? "",
     });
   }
+
+  /**
+   * Seed a task_sessions row directly via the E2E HTTP endpoint —
+   * deterministic state seeding, not a substitute for driving a real
+   * agent stop/resume cycle. Used to assert on session-state-derived
+   * behavior (e.g. the automation Recent Runs "Cancelled" status, which
+   * is keyed off the task's *primary* session state, not the task's own
+   * state). Only works when KANDEV_MOCK_AGENT is active.
+   */
+  async seedAutomationTaskSession(
+    taskId: string,
+    state: string,
+    isPrimary = true,
+  ): Promise<{ id: string; task_id: string; status: string }> {
+    return this.request("POST", "/api/v1/e2e/task-sessions", {
+      task_id: taskId,
+      state,
+      is_primary: isPrimary,
+    });
+  }
+}
+
+type WorkspaceRoutingResponse = {
+  config: WorkspaceRoutingConfig;
+};
+
+type WorkspaceRoutingConfig = {
+  enabled: boolean;
+  provider_order: string[];
+  default_tier: string;
+  provider_profiles: Record<string, RoutingProviderProfile>;
+  [key: string]: unknown;
+};
+
+type RoutingProviderProfile = {
+  tier_map?: Record<string, string | undefined>;
+  execution_profile_ids?: Record<string, string | undefined>;
+  [key: string]: unknown;
+};
+
+function routingWorkspaceIDs(body: string): string[] {
+  try {
+    const parsed = JSON.parse(body) as { routing_tiers?: Array<{ workspace_id?: unknown }> };
+    return [
+      ...new Set(
+        (parsed.routing_tiers ?? [])
+          .map((tier) => tier.workspace_id)
+          .filter((workspaceId): workspaceId is string => typeof workspaceId === "string"),
+      ),
+    ];
+  } catch {
+    return [];
+  }
+}
+
+function removeRoutingProfileReferences(
+  config: WorkspaceRoutingConfig,
+  profileId: string,
+): WorkspaceRoutingConfig | undefined {
+  let removed = false;
+  const providerProfiles = Object.fromEntries(
+    Object.entries(config.provider_profiles).map(([providerID, providerProfile]) => {
+      const removedTiers = new Set(
+        Object.entries(providerProfile.execution_profile_ids ?? {})
+          .filter(([, executionProfileID]) => executionProfileID === profileId)
+          .map(([tier]) => tier),
+      );
+      if (removedTiers.size === 0) return [providerID, providerProfile];
+
+      removed = true;
+      return [
+        providerID,
+        {
+          ...providerProfile,
+          tier_map: removeRoutingTiers(providerProfile.tier_map, removedTiers),
+          execution_profile_ids: removeRoutingTiers(
+            providerProfile.execution_profile_ids,
+            removedTiers,
+          ),
+        },
+      ];
+    }),
+  );
+  if (!removed) return undefined;
+
+  const updatedConfig = { ...config, provider_profiles: providerProfiles };
+  return {
+    ...updatedConfig,
+    enabled: config.enabled && routingConfigCanStayEnabled(updatedConfig),
+  };
+}
+
+function removeRoutingTiers(
+  mappings: Record<string, string | undefined> | undefined,
+  removedTiers: Set<string>,
+): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(mappings ?? {}).filter(([tier]) => !removedTiers.has(tier)),
+  );
+}
+
+function routingConfigCanStayEnabled(config: WorkspaceRoutingConfig): boolean {
+  return config.provider_order.every(
+    (providerID) =>
+      config.provider_profiles[providerID]?.execution_profile_ids?.[config.default_tier] !==
+      undefined,
+  );
 }
 
 // --- Jira / Linear mock payload types ---

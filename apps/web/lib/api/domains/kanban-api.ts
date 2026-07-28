@@ -5,6 +5,8 @@ import type {
   ListWorkflowsResponse,
   ListTasksResponse,
   CreateTaskResponse,
+  AttachTaskWorkspaceSourcesRequest,
+  AttachTaskWorkspaceSourcesResponse,
   Task,
   MoveTaskResponse,
 } from "@/lib/types/http";
@@ -114,6 +116,8 @@ export async function updateTask(
       repository_id: string;
       base_branch?: string;
     }>;
+    /** Nest under another task. Empty string clears the parent (un-nest). */
+    parent_id?: string;
   },
   options?: ApiRequestOptions,
 ) {
@@ -128,6 +132,21 @@ export async function detachTask(taskId: string, options?: ApiRequestOptions) {
     ...options,
     init: { method: "POST", ...(options?.init ?? {}) },
   });
+}
+
+/** Attach a validated batch of repository and folder sources to an idle task. */
+export async function attachTaskWorkspaceSources(
+  taskId: string,
+  payload: AttachTaskWorkspaceSourcesRequest,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<AttachTaskWorkspaceSourcesResponse>(
+    `/api/v1/tasks/${taskId}/workspace-sources`,
+    {
+      ...options,
+      init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
 }
 
 export async function updateTaskRepositoryBaseBranch(

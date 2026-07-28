@@ -1,16 +1,22 @@
 import { useCallback, type ReactNode } from "react";
 import type { DiffLineAnnotation } from "@pierre/diffs";
 import type { DiffComment } from "@/lib/diff/types";
+import type { TaskReviewFinding } from "@/lib/types/review";
 import { CommentForm } from "./comment-form";
 import { CommentDisplay } from "./comment-display";
 import { HunkActionBar } from "./hunk-action-bar";
 import { WalkthroughStepCard } from "./walkthrough-step-card";
+import { InlineReviewFinding } from "./inline-review-finding";
 
 type AnnotationMetadata = {
-  type: "comment" | "new-comment-form" | "hunk-actions" | "walkthrough-step";
+  type: "comment" | "new-comment-form" | "hunk-actions" | "walkthrough-step" | "review-finding";
   comment?: DiffComment;
   isEditing?: boolean;
   changeBlockId?: string;
+  /** Set when type is "review-finding". */
+  finding?: TaskReviewFinding;
+  /** Explains why an anchored finding is stale, when it is. */
+  findingStaleReason?: string;
 };
 
 type UseAnnotationRendererOpts = {
@@ -46,7 +52,12 @@ export function useAnnotationRenderer(opts: UseAnnotationRendererOpts) {
 
   return useCallback(
     (annotation: DiffLineAnnotation<AnnotationMetadata>): ReactNode => {
-      const { type, comment, isEditing, changeBlockId } = annotation.metadata;
+      const { type, comment, isEditing, changeBlockId, finding, findingStaleReason } =
+        annotation.metadata;
+
+      if (type === "review-finding" && finding) {
+        return <InlineReviewFinding finding={finding} staleReason={findingStaleReason} />;
+      }
 
       if (type === "walkthrough-step") {
         return <WalkthroughStepCard key="walkthrough-step" />;

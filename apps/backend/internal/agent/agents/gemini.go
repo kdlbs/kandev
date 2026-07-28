@@ -15,12 +15,13 @@ var geminiLogoLight []byte
 //go:embed logos/gemini_dark.svg
 var geminiLogoDark []byte
 
-const geminiPkg = "@google/gemini-cli"
+const geminiPackage = "@google/gemini-cli"
 
 var (
-	_ Agent            = (*Gemini)(nil)
-	_ PassthroughAgent = (*Gemini)(nil)
-	_ InferenceAgent   = (*Gemini)(nil)
+	_ Agent                  = (*Gemini)(nil)
+	_ PassthroughAgent       = (*Gemini)(nil)
+	_ InferenceAgent         = (*Gemini)(nil)
+	_ ManagedNPMRuntimeAgent = (*Gemini)(nil)
 )
 
 type Gemini struct {
@@ -35,7 +36,7 @@ func NewGemini() *Gemini {
 				Supported:      true,
 				Label:          "CLI Passthrough",
 				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand("npx", "@google/gemini-cli"),
+				PassthroughCmd: NewCommand("npx", "--yes", "--prefer-offline", geminiPackage),
 				ModelFlag:      NewParam("--model", "{model}"),
 				PromptFlag:     NewParam("--prompt-interactive", "{prompt}"),
 				IdleTimeout:    3 * time.Second,
@@ -77,13 +78,17 @@ func (a *Gemini) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
 }
 
 func (a *Gemini) BuildCommand(opts CommandOptions) Command {
-	return Cmd("npx", "-y", geminiPkg, "--acp").Build()
+	return a.ManagedNPMRuntime().CachedACPCommand()
+}
+
+func (a *Gemini) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
+	return ManagedNPMRuntimeSpec{Package: geminiPackage, ACPArgs: []string{"--acp"}}
 }
 
 func (a *Gemini) Runtime() *RuntimeConfig {
 	canRecover := false
 	return &RuntimeConfig{
-		Cmd:             Cmd("npx", "-y", geminiPkg, "--acp").Build(),
+		Cmd:             a.ManagedNPMRuntime().CachedACPCommand(),
 		WorkingDir:      "{workspace}",
 		Env:             map[string]string{},
 		ResourceLimits:  ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
@@ -127,7 +132,7 @@ func (a *Gemini) LoginCommand() *LoginCommand {
 }
 
 func (a *Gemini) InstallScript() string {
-	return "npm install -g " + geminiPkg
+	return "npm install -g " + geminiPackage
 }
 
 func (a *Gemini) BillingType() usage.BillingType { return defaultBillingType() }
@@ -142,6 +147,6 @@ func (a *Gemini) PermissionSettings() map[string]PermissionSetting {
 func (a *Gemini) InferenceConfig() *InferenceConfig {
 	return &InferenceConfig{
 		Supported: true,
-		Command:   NewCommand("npx", "-y", geminiPkg, "--acp"),
+		Command:   a.ManagedNPMRuntime().CachedACPCommand(),
 	}
 }

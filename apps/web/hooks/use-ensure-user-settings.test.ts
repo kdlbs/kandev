@@ -52,6 +52,7 @@ function makeUnloadedSettings(): UserSettingsState {
     repositoryIds: [],
     tasksListSort: "updated_desc",
     tasksListGroup: "state",
+    tasksListShowDetails: false,
     preferredShell: null,
     shellOptions: [],
     defaultEditorId: null,

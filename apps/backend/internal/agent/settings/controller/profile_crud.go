@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -30,6 +31,9 @@ type CreateProfileRequest struct {
 	// default unless the curated entry specifies Default: true).
 	CLIFlags []dto.CLIFlagDTO
 	EnvVars  []dto.ProfileEnvVarDTO
+	// CommandPrefix is an optional launcher prefix prepended to the agent
+	// command (e.g. "greywall --"). Shell-tokenised at launch time.
+	CommandPrefix string
 }
 
 func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -57,6 +61,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	if err := validateProfileEnvVarDTOs(req.EnvVars); err != nil {
 		return nil, err
 	}
+	if err := validateCommandPrefix(req.CommandPrefix); err != nil {
+		return nil, err
+	}
 	profile := &models.AgentProfile{
 		AgentID:          req.AgentID,
 		Name:             req.Name,
@@ -69,6 +76,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		CLIPassthrough:   req.CLIPassthrough,
 		CLIFlags:         cliFlags,
 		EnvVars:          envVarsFromDTO(req.EnvVars),
+		CommandPrefix:    strings.TrimSpace(req.CommandPrefix),
 		UserModified:     true,
 	}
 	if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
@@ -131,6 +139,9 @@ type UpdateProfileRequest struct {
 	CLIFlags *[]dto.CLIFlagDTO
 	// EnvVars replaces the entire list when non-nil.
 	EnvVars *[]dto.ProfileEnvVarDTO
+	// CommandPrefix replaces the value when non-nil. Nil means "leave
+	// unchanged" — the UI always sends the desired value on save.
+	CommandPrefix *string
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -176,6 +187,12 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 		}
 		profile.EnvVars = envVarsFromDTO(*req.EnvVars)
 	}
+	if req.CommandPrefix != nil {
+		if err := validateCommandPrefix(*req.CommandPrefix); err != nil {
+			return nil, err
+		}
+		profile.CommandPrefix = strings.TrimSpace(*req.CommandPrefix)
+	}
 	profile.UserModified = true
 	if err := c.repo.UpdateAgentProfile(ctx, profile); err != nil {
 		return nil, err
@@ -208,6 +225,18 @@ func validateCLIFlagDTOs(in []dto.CLIFlagDTO) error {
 		if len(tokens) == 0 || tokens[0] == "" {
 			return fmt.Errorf("cli_flags[%d].flag is required", i)
 		}
+	}
+	return nil
+}
+
+// validateCommandPrefix rejects a launcher prefix with malformed shell tokens
+// (unterminated quotes, trailing backslash). An empty/whitespace-only prefix is
+// valid — it means "run the agent command unwrapped". Tokenising here keeps the
+// launch path's cliflags.Tokenise error branch unreachable in practice, so a
+// bad prefix surfaces at save time rather than silently dropping at task start.
+func validateCommandPrefix(prefix string) error {
+	if err := cliflags.ValidateCommandPrefix(prefix); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidCommandPrefix, err)
 	}
 	return nil
 }
@@ -403,6 +432,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
 		EnvVars:          envVarsToDTO(profile.EnvVars),
 		CLIPassthrough:   profile.CLIPassthrough,
+		CommandPrefix:    profile.CommandPrefix,
 		UserModified:     profile.UserModified,
 		WorkspaceID:      profile.WorkspaceID,
 		CreatedAt:        profile.CreatedAt,
@@ -460,6 +490,8 @@ const (
 	reservedProfileEnvVarPrefix = "KANDEV_"
 )
 
+var posixEnvIdentifier = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
 	if len(in) > maxProfileEnvVars {
 		return fmt.Errorf("%w: at most %d entries allowed", ErrInvalidProfileEnvVars, maxProfileEnvVars)
@@ -467,6 +499,9 @@ func validateProfileEnvVarDTOs(in []dto.ProfileEnvVarDTO) error {
 	seen := make(map[string]int, len(in))
 	for i, ev := range in {
 		key := strings.TrimSpace(ev.Key)
+		if key != ev.Key {
+			return fmt.Errorf("%w: env_vars[%d].key must be a POSIX environment identifier", ErrInvalidProfileEnvVars, i)
+		}
 		if err := validateEnvVarKey(key, i, seen); err != nil {
 			return err
 		}
@@ -485,8 +520,8 @@ func validateEnvVarKey(key string, i int, seen map[string]int) error {
 	if len(key) > maxProfileEnvVarKeyLen {
 		return fmt.Errorf("%w: env_vars[%d].key exceeds %d characters", ErrInvalidProfileEnvVars, i, maxProfileEnvVarKeyLen)
 	}
-	if strings.ContainsAny(key, "=\x00") {
-		return fmt.Errorf("%w: env_vars[%d].key must not contain '=' or null bytes", ErrInvalidProfileEnvVars, i)
+	if !posixEnvIdentifier.MatchString(key) {
+		return fmt.Errorf("%w: env_vars[%d].key must be a POSIX environment identifier", ErrInvalidProfileEnvVars, i)
 	}
 	if strings.HasPrefix(key, reservedProfileEnvVarPrefix) || key == reservedProfileEnvVarKey {
 		return fmt.Errorf("%w: env_vars[%d].key %q is reserved", ErrInvalidProfileEnvVars, i, key)

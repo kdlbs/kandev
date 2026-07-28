@@ -76,10 +76,10 @@ The `models.dev` dataset is fetched once per day to a workspace-local disk cache
 
 ### Per-CLI usage shapes (ACP wire)
 
-- **claude-acp**: `result.usage` (camelCase, `cachedRead`/`cachedWriteTokens`), plus `usage_update.cost.amount` in USD which is preferred when present. claude-acp uses logical aliases (`sonnet`, `haiku`); provider-reported cost is the only accurate signal.
+- **claude-acp**: `result.usage` (camelCase, `cachedRead`/`cachedWriteTokens`), plus cumulative `usage_update.cost.amount` in USD; the adapter emits its nonnegative turn delta when present. claude-acp uses logical aliases (`sonnet`, `haiku`); provider-reported cost is the only accurate signal.
 - **opencode-acp**: `result.usage` with `inputTokens`/`outputTokens`/`thoughtTokens` (no cached tokens). Optional `usage_update.cost.amount` (often `0` on BYOK).
 - **gemini**: `result._meta.quota.token_count.{input_tokens, output_tokens}` (snake_case, no cached, no cost).
-- **codex-acp**: cumulative `usage_update.used` only; adapter infers per-turn deltas and flags rows `estimated=true`. Input vs output cannot be split on the wire.
+- **codex-acp**: current context occupancy in `usage_update.used`; adapter uses nonnegative occupancy growth as a per-turn estimate and flags rows `estimated=true`. Input vs output cannot be split on the wire. Compaction or other decreases reset the estimate baseline.
 - **auggie**, **copilot-acp**: not tracked. `_meta.copilotUsage` is a billing multiplier; Copilot `/usage` would require scraping.
 
 ### Disk-runner provider coverage
@@ -93,7 +93,7 @@ The `models.dev` dataset is fetched once per day to a workspace-local disk cache
 
 ### Cost resolution (two-layer lookup)
 
-1. **Provider-reported cost.** If the CLI emits a USD amount on `usage_update`, store `int64(amount * 10000)` hundredths-of-a-cent and skip pricing lookup. Only accurate path for claude-acp.
+1. **Provider-reported cost.** If the CLI emits cumulative USD session cost on `usage_update`, subtract the previously consumed session baseline and store the nonnegative turn delta as `int64(amount * 10000)` hundredths-of-a-cent. Ignore non-USD cost values. This is the only accurate path for claude-acp.
 2. **`models.dev` lookup.** For CLIs reporting tokens but no cost (gemini, opencode BYOK, codex fallback), resolve pricing against the cached dataset.
 
 When both miss (first-boot, no network, model unknown, proprietary id), the row records `cost_subcents=0` and `estimated=true`. UI shows "pricing unavailable". Users can override pricing per model in workspace settings.
@@ -187,7 +187,7 @@ No TTL or retention is applied to `office_cost_events`; rows accumulate for the 
 
 ## Scenarios
 
-- **GIVEN** an ACP agent session processing a turn, **WHEN** the `context_window` event arrives with token counts, **THEN** a cost event is created with the estimated cost looked up from models.dev pricing. The session's cumulative `cost_subcents` is updated.
+- **GIVEN** an ACP agent session processing a turn, **WHEN** its `complete` event carries normalized usage, **THEN** a cost event is created from the provider-reported USD delta or estimated via models.dev pricing. The session's cumulative `cost_subcents` is updated.
 
 - **GIVEN** a model not found in the models.dev dataset and no user override configured, **WHEN** a cost event is recorded, **THEN** token counts are stored but `cost_subcents` is zero. The cost explorer shows "pricing unavailable" for that model.
 

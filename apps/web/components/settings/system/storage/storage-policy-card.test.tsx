@@ -37,6 +37,7 @@ const testIds = {
   dockerBuildCacheUnused: "storage-docker-build-cache-unused-hours",
   dockerImagesUnused: "storage-docker-unused-images-hours",
 };
+const ADOPTION_PATH_TEST_ID = "storage-go-cache-adopt-path";
 
 afterEach(cleanup);
 
@@ -44,12 +45,13 @@ function renderCard(
   pending = false,
   onChange = vi.fn(),
   currentSettings: StorageMaintenanceSettings = settings,
+  savedSettings: StorageMaintenanceSettings = settings,
 ) {
   render(
     <TooltipProvider>
       <StoragePolicyCard
         settings={currentSettings}
-        savedSettings={settings}
+        savedSettings={savedSettings}
         capabilities={capabilities}
         pending={pending}
         onChange={onChange}
@@ -59,6 +61,103 @@ function renderCard(
   );
   return onChange;
 }
+
+describe("External Go cache path", () => {
+  it("hydrates the external cache path from persisted settings", () => {
+    const persistedSettings = {
+      ...settings,
+      go_cache: { ...settings.go_cache, adopted_path: "/var/cache/go-build" },
+    };
+    renderCard(false, vi.fn(), persistedSettings, persistedSettings);
+
+    expect((screen.getByTestId(ADOPTION_PATH_TEST_ID) as HTMLInputElement).value).toBe(
+      "/var/cache/go-build",
+    );
+  });
+
+  it("follows a persisted external cache path change while the input is clean", () => {
+    const firstSettings = {
+      ...settings,
+      go_cache: { ...settings.go_cache, adopted_path: "/var/cache/first" },
+    };
+    const secondSettings = {
+      ...settings,
+      go_cache: { ...settings.go_cache, adopted_path: "/var/cache/second" },
+    };
+    const { rerender } = render(
+      <TooltipProvider>
+        <StoragePolicyCard
+          settings={firstSettings}
+          savedSettings={firstSettings}
+          capabilities={capabilities}
+          pending={false}
+          onChange={vi.fn()}
+          onAdopt={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    rerender(
+      <TooltipProvider>
+        <StoragePolicyCard
+          settings={secondSettings}
+          savedSettings={secondSettings}
+          capabilities={capabilities}
+          pending={false}
+          onChange={vi.fn()}
+          onAdopt={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    expect((screen.getByTestId(ADOPTION_PATH_TEST_ID) as HTMLInputElement).value).toBe(
+      "/var/cache/second",
+    );
+  });
+
+  it("preserves an external cache path being edited during a persisted update", () => {
+    const firstSettings = {
+      ...settings,
+      go_cache: { ...settings.go_cache, adopted_path: "/var/cache/first" },
+    };
+    const secondSettings = {
+      ...settings,
+      go_cache: { ...settings.go_cache, adopted_path: "/var/cache/second" },
+    };
+    const { rerender } = render(
+      <TooltipProvider>
+        <StoragePolicyCard
+          settings={firstSettings}
+          savedSettings={firstSettings}
+          capabilities={capabilities}
+          pending={false}
+          onChange={vi.fn()}
+          onAdopt={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+    fireEvent.change(screen.getByTestId(ADOPTION_PATH_TEST_ID), {
+      target: { value: "/var/cache/draft" },
+    });
+
+    rerender(
+      <TooltipProvider>
+        <StoragePolicyCard
+          settings={secondSettings}
+          savedSettings={secondSettings}
+          capabilities={capabilities}
+          pending={false}
+          onChange={vi.fn()}
+          onAdopt={vi.fn()}
+        />
+      </TooltipProvider>,
+    );
+
+    expect((screen.getByTestId(ADOPTION_PATH_TEST_ID) as HTMLInputElement).value).toBe(
+      "/var/cache/draft",
+    );
+  });
+});
 
 describe("StoragePolicyCard", () => {
   it("edits every Docker cleanup threshold", () => {

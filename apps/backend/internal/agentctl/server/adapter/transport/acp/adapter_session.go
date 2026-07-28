@@ -24,6 +24,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	if conn == nil {
 		return "", fmt.Errorf("adapter not initialized")
 	}
+	priorPromptTurn := a.currentPromptTurn()
 
 	// A fresh session invalidates any pending wakeup keyed to the prior
 	// session. Reset pendingWakeups and cancel the scheduler under one
@@ -31,6 +32,9 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	// a stale entry between the two operations.
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
+	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearPromptHandoffToolTrackingLocked()
+	clear(a.usageBySession)
 	a.wakeup.cancel()
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
@@ -45,6 +49,12 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		McpServers: toACPMcpServers(filteredServers),
 	})
 	if err != nil {
+		// An agent may have emitted provisional usage before returning an RPC
+		// error. Clear at the FIFO boundary so an already queued notification
+		// cannot repopulate the tracker after this failure cleanup.
+		if !a.syncNotifQueueThen(a.clearUsageTrackers) {
+			a.clearUsageTrackers()
+		}
 		span.RecordError(err)
 		if a.maybeEmitAuthRequired(err) {
 			return "", fmt.Errorf("authentication required: %w", err)
@@ -52,9 +62,22 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
+	sessionID := string(resp.SessionId)
+	if !a.syncNotifQueueThen(func() {
+		a.mu.Lock()
+		a.retainConsumedUsageBaselineLocked(sessionID)
+		a.mu.Unlock()
+	}) {
+		a.clearUsageTrackers()
+		barrierErr := context.Cause(a.lifetimeCtx)
+		if barrierErr == nil {
+			barrierErr = context.Canceled
+		}
+		return "", fmt.Errorf("failed to synchronize new session notifications: %w", barrierErr)
+	}
+
 	a.mu.Lock()
-	a.sessionID = string(resp.SessionId)
-	sessionID := a.sessionID
+	a.sessionID = sessionID
 	a.configGeneration++
 	clear(a.contextSamples)
 	// Reset session-scoped model caches before computing the new session's
@@ -67,6 +90,7 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 		a.availableModels = initialModels.AvailableModels
 	}
 	a.mu.Unlock()
+	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
@@ -275,6 +299,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 			zap.String("session_id", sessionID))
 		return fmt.Errorf("agent does not support session loading (LoadSession capability is false)")
 	}
+	priorPromptTurn := a.currentPromptTurn()
 
 	// Loading a different session invalidates any pending wakeup or async turn
 	// finalizer keyed to the prior session — same reset block as NewSession to
@@ -282,6 +307,8 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// accumulating stale pendingWakeups entries across reloads.
 	a.mu.Lock()
 	a.pendingWakeups = make(map[string]*pendingWakeup)
+	a.clearCodexSubagentCorrelationsLocked("")
+	a.clearPromptHandoffToolTrackingLocked()
 	a.wakeup.cancel()
 	a.mu.Unlock()
 	a.cancelAllAsyncTurnCompletes()
@@ -299,6 +326,8 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	// The flag will be cleared when we send the next prompt (see Prompt method).
 	a.mu.Lock()
 	a.isLoadingSession = true
+	a.loadReplayPlan = nil
+	delete(a.usageBySession, sessionID)
 	a.mu.Unlock()
 
 	resp, err := conn.LoadSession(ctx, acp.LoadSessionRequest{
@@ -308,14 +337,39 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	})
 
 	if err != nil {
+		// Notifications sent before the failed RPC response may still be queued
+		// on the adapter worker. Clear replay suppression only at a FIFO barrier,
+		// otherwise those frames can escape as live messages, tools, or plans
+		// after LoadSession returns its error.
+		clearFailedLoad := func() {
+			a.mu.Lock()
+			a.isLoadingSession = false
+			a.loadReplayPlan = nil
+			a.mu.Unlock()
+		}
+		if !a.syncNotifQueueThen(clearFailedLoad) {
+			// Close cancels lifetimeCtx and drops the remaining queue. The
+			// barrier callback will not run in that case, so clean up directly.
+			clearFailedLoad()
+		}
 		span.RecordError(err)
 		return fmt.Errorf("failed to load session: %w", err)
 	}
+
+	// The SDK may finish the load RPC while replay notifications are still
+	// queued in the adapter worker. Keep suppression active until a FIFO barrier
+	// proves every replay frame has been processed, then mark replayed cumulative
+	// usage/cost as the baseline for the first new prompt.
+	a.syncNotifQueue()
 
 	a.mu.Lock()
 	a.sessionID = sessionID
 	a.configGeneration++
 	clear(a.contextSamples)
+	a.consumeUsageBaselineLocked(sessionID)
+	replayPlan := a.loadReplayPlan
+	a.loadReplayPlan = nil
+	a.isLoadingSession = false
 	// Reset session-scoped model caches so a load that lands on a session
 	// without a model surface can't reuse the previous session's data.
 	a.availableModels = nil
@@ -325,6 +379,7 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		a.availableModels = initialModels.AvailableModels
 	}
 	a.mu.Unlock()
+	a.invalidatePromptTurnOwnership(priorPromptTurn)
 	a.attachMgr.SetSessionID(sessionID)
 
 	span.SetAttributes(attribute.String("session_id", sessionID))
@@ -340,17 +395,6 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	if initialModels != nil {
 		a.emitSessionModels(sessionID, initialModels, resp.Meta, resp.ConfigOptions)
 	}
-
-	// Re-emit plan captured during history replay and clear the loading flag.
-	// The ACP SDK guarantees all replay notifications are processed before
-	// LoadSession returns (via notificationWg.Wait), so captured state is complete.
-	// Clearing isLoadingSession here allows post-replay notifications (e.g.
-	// AvailableCommandsUpdate "ready" signals) to pass through normally.
-	a.mu.Lock()
-	replayPlan := a.loadReplayPlan
-	a.loadReplayPlan = nil
-	a.isLoadingSession = false
-	a.mu.Unlock()
 
 	// Any Monitor still tracked at this point was running in pre-restart history
 	// but has no live process to back it now — emit synthetic cancellations so
@@ -1022,7 +1066,7 @@ func (a *Adapter) Authenticate(ctx context.Context, methodID string) error {
 	}
 
 	_, err := conn.Authenticate(ctx, acp.AuthenticateRequest{
-		MethodId: methodID,
+		MethodId: acp.AuthMethodId(methodID),
 	})
 	if err != nil {
 		return fmt.Errorf("authenticate failed: %w", err)

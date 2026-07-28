@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
@@ -513,7 +513,18 @@ export function StoragePolicyCard({
 }: Props) {
   const [dockerDialogOpen, setDockerDialogOpen] = useState(false);
   const [adoptionDialogOpen, setAdoptionDialogOpen] = useState(false);
-  const [adoptionPath, setAdoptionPath] = useState("");
+  const savedAdoptionPath = savedSettings.go_cache.adopted_path;
+  const [adoptionPath, setAdoptionPath] = useState(savedAdoptionPath);
+  const previousSavedAdoptionPath = useRef(savedAdoptionPath);
+
+  useEffect(() => {
+    const previousPath = previousSavedAdoptionPath.current;
+    setAdoptionPath((currentPath) =>
+      currentPath === previousPath ? savedAdoptionPath : currentPath,
+    );
+    previousSavedAdoptionPath.current = savedAdoptionPath;
+  }, [savedAdoptionPath]);
+
   return (
     <section className="min-w-0 space-y-4" data-testid="storage-policy-card">
       <div>

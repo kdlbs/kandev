@@ -52,9 +52,10 @@ func TestResumeSession_RejectsArchivedTask(t *testing.T) {
 func setupLiveResumeTestFixture(repo *mockRepository) {
 	now := time.Now().UTC()
 	repo.tasks["task-1"] = &models.Task{
-		ID:        "task-1",
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:          "task-1",
+		WorkspaceID: "workspace-1",
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 	repo.sessions["sess-1"] = &models.TaskSession{
 		ID:             "sess-1",
@@ -298,7 +299,8 @@ func TestResumeSession_CancelledStateForceCleansUpStaleState(t *testing.T) {
 	}
 	exec := newTestExecutor(t, agentMgr, repo)
 
-	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); err != nil {
+	callerSession := *repo.sessions["sess-1"]
+	if _, err := exec.ResumeSession(context.Background(), &callerSession, true); err != nil {
 		t.Fatalf("expected success, got: %v", err)
 	}
 	if agentMgr.cleanupStaleExecutionCallCount != 1 {
@@ -391,6 +393,9 @@ func TestResumeSession_PropagatesTaskEnvironmentID(t *testing.T) {
 		t.Errorf("TaskEnvironmentID = %q, want %q — without this the lifecycle execution is indexed under empty env_id and GetByTaskEnvironmentID never finds it",
 			capturedReq.TaskEnvironmentID, "env-1")
 	}
+	if capturedReq.WorkspaceID != "workspace-1" {
+		t.Errorf("WorkspaceID = %q, want workspace-1 for resumed credential resolution", capturedReq.WorkspaceID)
+	}
 }
 
 // TestResumeSession_TerminalStateSkipsLivenessProbeOnFallback covers the
@@ -479,6 +484,41 @@ func TestResumeSession_ConcurrentResumeReReadsFreshState(t *testing.T) {
 	if agentMgr.cleanupStaleExecutionCallCount != 0 {
 		t.Errorf("cleanup must NOT be called when a live execution is detected, got %d",
 			agentMgr.cleanupStaleExecutionCallCount)
+	}
+}
+
+// TestResumeSession_CancellationBeforeResumeLockWins exercises the stop/resume
+// race before validateAndLockResume acquires the per-session lock. The resume
+// request observed WAITING_FOR_INPUT, then stop committed CANCELLED before the
+// in-lock re-read. That cancellation must abort the resume before any runtime
+// cleanup or replacement agent launch.
+func TestResumeSession_CancellationBeforeResumeLockWins(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+
+	callerSession := *repo.sessions["sess-1"]
+	repo.sessions["sess-1"].State = models.TaskSessionStateCancelled
+	repo.sessions["sess-1"].ErrorMessage = "stopped via API"
+
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			t.Fatal("LaunchAgent must not be called after a concurrent cancellation")
+			return nil, nil
+		},
+	}
+	exec := newTestExecutor(t, agentMgr, repo)
+
+	_, err := exec.ResumeSession(context.Background(), &callerSession, true)
+	if !errors.Is(err, ErrSessionStateSuperseded) {
+		t.Fatalf("expected ErrSessionStateSuperseded, got: %v", err)
+	}
+	if agentMgr.cleanupStaleExecutionCallCount != 0 {
+		t.Errorf("cleanup must not run after cancellation, got %d calls",
+			agentMgr.cleanupStaleExecutionCallCount)
+	}
+	if agentMgr.launchAgentCallCount != 0 {
+		t.Errorf("LaunchAgent must not run after cancellation, got %d calls",
+			agentMgr.launchAgentCallCount)
 	}
 }
 

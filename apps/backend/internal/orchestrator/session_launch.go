@@ -85,6 +85,14 @@ func ResolveIntent(req *LaunchSessionRequest) SessionIntent {
 
 // LaunchSession is the unified entry point for all session operations.
 func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	// Every intent funnels through here. SessionID is empty when creating, so
+	// that case is carried by the task check alone.
+	if err := s.authorizeTask(ctx, req.TaskID); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeSession(ctx, req.SessionID); err != nil {
+		return nil, err
+	}
 	intent := ResolveIntent(req)
 	req.Prompt = strings.TrimSpace(req.Prompt)
 
@@ -286,6 +294,14 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
 // action is "resume" (retry with existing ACP session) or "fresh_start" (clear token, start fresh).
 func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string) (*LaunchSessionResponse, error) {
+	// Guard before the switch: "fresh_start" clears the resume token, so an
+	// unauthorized call would mutate the session even if the launch failed.
+	if err := s.authorizeSession(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeTask(ctx, taskID); err != nil {
+		return nil, err
+	}
 	switch action {
 	case "fresh_start":
 		s.clearResumeToken(ctx, sessionID)

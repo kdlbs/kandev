@@ -6,6 +6,7 @@ export * from "./domains/kanban-api";
 export * from "./domains/session-api";
 export * from "./domains/workspace-api";
 export * from "./domains/settings-api";
+export * from "./domains/agent-update-api";
 export * from "./domains/process-api";
 export * from "./domains/workflow-api";
 export * from "./domains/workflow-sync-api";

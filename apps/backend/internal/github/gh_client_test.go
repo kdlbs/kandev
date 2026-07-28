@@ -198,6 +198,29 @@ esac
 	}
 }
 
+func TestGHClient_RequestReviewers_UsesGitHubReviewRequestEndpoint(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gh-args.log")
+	ghPath := filepath.Join(binDir, "gh")
+	if err := os.WriteFile(ghPath, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$GH_ARGS_LOG\"\n"), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_LOG", logPath)
+
+	if err := NewGHClient().RequestReviewers(context.Background(), "acme", "widget", 42, []string{"octocat"}); err != nil {
+		t.Fatalf("RequestReviewers: %v", err)
+	}
+	args, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read args: %v", err)
+	}
+	want := "api repos/acme/widget/pulls/42/requested_reviewers -X POST -f reviewers[]=octocat\n"
+	if string(args) != want {
+		t.Fatalf("gh args = %q, want %q", args, want)
+	}
+}
+
 func TestDecodeGHCheckRuns(t *testing.T) {
 	tests := []struct {
 		name      string

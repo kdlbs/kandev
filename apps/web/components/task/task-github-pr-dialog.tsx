@@ -22,6 +22,7 @@ import {
 } from "./task-github-pr-url";
 
 type TaskGitHubPRDialogProps = {
+  workspaceId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   task: TaskPullRequestLinkTarget;
@@ -29,6 +30,7 @@ type TaskGitHubPRDialogProps = {
 };
 
 export function TaskGitHubPRDialog({
+  workspaceId,
   open,
   onOpenChange,
   task,
@@ -52,6 +54,10 @@ export function TaskGitHubPRDialog({
   }, [open]);
 
   const submit = async () => {
+    if (!workspaceId) {
+      setError("Select a workspace before linking a GitHub pull request.");
+      return;
+    }
     if (!input.trim()) {
       setError("Enter a GitHub pull request URL or number.");
       return;
@@ -61,6 +67,7 @@ export function TaskGitHubPRDialog({
     try {
       const payload = pullRequestPayload(input, githubRepos);
       await createTaskPR({
+        workspace_id: workspaceId,
         task_id: task.id,
         pr_url: payload.pr_url,
         ...(payload.repository_id ? { repository_id: payload.repository_id } : {}),

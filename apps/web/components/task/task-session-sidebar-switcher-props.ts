@@ -43,6 +43,7 @@ export function buildTaskSwitcherProps(args: {
     onToggleSubtasks: args.toggleSubtaskCollapsed,
     onSelectTask: args.sidebarActions.handleSelectTask,
     onRenameTask: args.sidebarActions.handleRenameTask,
+    onCreateSubtask: args.sidebarActions.handleCreateSubtask,
     onArchiveTask: args.sidebarActions.handleArchiveTask,
     onDeleteTask: args.sidebarActions.handleDeleteTask,
     onDetachTask: args.sidebarActions.handleDetachTask,

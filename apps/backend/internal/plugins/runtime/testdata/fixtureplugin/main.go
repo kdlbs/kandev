@@ -20,7 +20,10 @@ import (
 //     through its own fake Host implementation.
 //   - HandleWebhook echoes the request body back as the response body,
 //     except webhook key "crash" which exits the process immediately (to
-//     exercise crash detection + restart).
+//     exercise crash detection + restart), and webhook key "write" which
+//     drives the Host data API write RPCs (CreateTask then SendMessage to the
+//     returned task) so a test can observe them arrive at the Host over the
+//     real subprocess transport.
 type fixturePlugin struct {
 	pluginsdk.UnimplementedPlugin
 }
@@ -36,11 +39,37 @@ func (p *fixturePlugin) OnEvent(ctx context.Context, e *pluginsdk.Event) error {
 	})
 }
 
-func (p *fixturePlugin) HandleWebhook(_ context.Context, req *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error) {
+func (p *fixturePlugin) HandleWebhook(ctx context.Context, req *pluginsdk.WebhookRequest) (*pluginsdk.WebhookResponse, error) {
 	if req.WebhookKey == "crash" {
 		os.Exit(1)
 	}
+	if req.WebhookKey == "write" {
+		return p.handleWrite(ctx)
+	}
 	return &pluginsdk.WebhookResponse{Status: 200, Body: req.Body}, nil
+}
+
+// handleWrite exercises the Host data API write RPCs end to end: CreateTask,
+// then SendMessage to the task the Host returns. It responds "ok" on success so
+// the test can assert the round-trip completed; a Host error is surfaced as a
+// 500 with the error text.
+func (p *fixturePlugin) handleWrite(ctx context.Context) (*pluginsdk.WebhookResponse, error) {
+	host := p.Host()
+	if host == nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte("no host")}, nil
+	}
+	task, err := host.Tasks().Create(ctx, pluginsdk.CreateTaskInput{
+		WorkspaceID: "ws-probe",
+		WorkflowID:  "wf-probe",
+		Title:       "fixture write probe",
+	})
+	if err != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
+	}
+	if _, err := host.Messages().Send(ctx, task.ID, "", "fixture probe message"); err != nil {
+		return &pluginsdk.WebhookResponse{Status: 500, Body: []byte(err.Error())}, nil
+	}
+	return &pluginsdk.WebhookResponse{Status: 200, Body: []byte("ok")}, nil
 }
 
 func main() {

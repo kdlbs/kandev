@@ -13,9 +13,9 @@ var ErrSameWorkspace = errors.New("github: source and target workspaces are the 
 
 // CopyWorkspaceSettingsToWorkspace copies the per-workspace GitHub operational
 // settings (repo scope + saved/default query presets) and the workspace's
-// quick-action presets from sourceWorkspaceID to targetWorkspaceID. GitHub
-// authentication is install-wide, so there are no credentials to copy — only the
-// workspace-scoped settings. Watchers are intentionally out of scope.
+// quick-action presets from sourceWorkspaceID to targetWorkspaceID. Workspace
+// automation and personal authentication are intentionally excluded. Watchers
+// are also out of scope.
 func (s *Service) CopyWorkspaceSettingsToWorkspace(ctx context.Context, sourceWorkspaceID, targetWorkspaceID string) (*WorkspaceSettings, error) {
 	sourceWorkspaceID = strings.TrimSpace(sourceWorkspaceID)
 	targetWorkspaceID = strings.TrimSpace(targetWorkspaceID)
@@ -24,6 +24,12 @@ func (s *Service) CopyWorkspaceSettingsToWorkspace(ctx context.Context, sourceWo
 	}
 	if sourceWorkspaceID == targetWorkspaceID {
 		return nil, ErrSameWorkspace
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, sourceWorkspaceID); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, targetWorkspaceID); err != nil {
+		return nil, err
 	}
 	if s.store == nil {
 		return nil, fmt.Errorf("github store not configured")
@@ -34,12 +40,13 @@ func (s *Service) CopyWorkspaceSettingsToWorkspace(ctx context.Context, sourceWo
 		return nil, fmt.Errorf("read source github settings: %w", err)
 	}
 	target := &WorkspaceSettings{
-		WorkspaceID:         targetWorkspaceID,
-		RepoScopeMode:       source.RepoScopeMode,
-		RepoScopeOrgs:       append([]string(nil), source.RepoScopeOrgs...),
-		RepoScopeRepos:      append([]RepoFilter(nil), source.RepoScopeRepos...),
-		SavedPresets:        cloneRawMessage(source.SavedPresets),
-		DefaultQueryPresets: cloneRawMessage(source.DefaultQueryPresets),
+		WorkspaceID:            targetWorkspaceID,
+		TaskGitCredentialsMode: source.TaskGitCredentialsMode,
+		RepoScopeMode:          source.RepoScopeMode,
+		RepoScopeOrgs:          append([]string(nil), source.RepoScopeOrgs...),
+		RepoScopeRepos:         append([]RepoFilter(nil), source.RepoScopeRepos...),
+		SavedPresets:           cloneRawMessage(source.SavedPresets),
+		DefaultQueryPresets:    cloneRawMessage(source.DefaultQueryPresets),
 	}
 	// Copy the action presets before the workspace-settings write. These are two
 	// separate store writes without a shared transaction, so ordering the

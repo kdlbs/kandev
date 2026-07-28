@@ -9,14 +9,14 @@ An executor determines where Kandev creates a task environment and runs `agentct
 
 ## Current support
 
-| Executor | Current status | Workspace | Use it when |
-|---|---|---|---|
-| Worktree | Supported; normal default | Dedicated Git worktree on the Kandev host | Parallel coding on a trusted machine |
-| Local | Supported | The selected checkout, or an explicit folder for a repository-free task | One controlled task must work in that exact folder |
-| Local Docker | Supported when the global Docker runtime is enabled and its daemon is reachable | `/workspace` in a new Docker container | You need a repeatable container boundary |
-| Sprites.dev | Supported, provider-dependent | `/workspace` in a provider sandbox | You need remote compute and accept provider lifecycle/billing |
-| SSH | Available with important repository-setup limitations | A task folder on a trusted SSH host | The task can start in an empty remote folder, or you manage repository materialization separately |
-| Remote Docker | **Not implemented** | None | Do not select or create this type |
+| Executor      | Current status                                                                  | Workspace                                                               | Use it when                                                              |
+| ------------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------ |
+| Worktree      | Supported; normal default                                                       | Dedicated Git worktree on the Kandev host                               | Parallel coding on a trusted machine                                     |
+| Local         | Supported                                                                       | The selected checkout, or an explicit folder for a repository-free task | One controlled task must work in that exact folder                       |
+| Local Docker  | Supported when the global Docker runtime is enabled and its daemon is reachable | `/workspace` in a new Docker container                                  | You need a repeatable container boundary                                 |
+| Sprites.dev   | Supported, provider-dependent                                                   | `/workspace` in a provider sandbox                                      | You need remote compute and accept provider lifecycle/billing            |
+| SSH           | Supported for repository sources on a trusted host                              | A task folder on a trusted SSH host                                     | You need a remote host with SSH, SFTP, forwarding, and clone credentials |
+| Remote Docker | **Not implemented**                                                             | None                                                                    | Do not select or create this type                                        |
 
 `mock_remote` also exists in backend models for tests. It is not a product executor.
 
@@ -42,7 +42,7 @@ A profile stores:
 - an MCP policy JSON object;
 - runtime-specific configuration.
 
-Literal environment values are stored with the profile. Use secret references for credentials. Resolved values and copied credential files normally become accessible to the agent and commands in that environment. SSH is narrower: its remote agent process receives only the credential allowlist documented below, not arbitrary profile variables.
+Literal environment values are stored with the profile. Use secret references for credentials. Resolved values and copied credential files normally become accessible to the agent and commands in that environment, including repository setup scripts and the terminal panel's shells. A terminal that is already open keeps the environment it started with; open a new terminal after changing the profile. SSH is narrower: its remote agent process and terminals receive only the credential allowlist documented below, not arbitrary profile variables.
 
 The MCP editor checks only that the value is a JSON object. Its presets cover stdio, HTTP, and SSE transport allowances, server allowlists, and URL rewrites. Test restrictive policies with the actual MCP servers the agent needs; see [Automation and MCP](automation-and-mcp.md).
 
@@ -52,12 +52,12 @@ Profile edits apply when Kandev provisions a launch, but a Docker container or S
 
 Do not treat the two script fields as universal hooks:
 
-| Runtime | Prepare script | Profile cleanup script |
-|---|---|---|
-| Local / Worktree | Runs on the host during preparation. A failure is shown but is non-fatal, so the agent can still start for diagnosis. | Not executed by the executor runtime. Repository-level worktree cleanup is a separate repository setting. |
-| Local Docker | Runs inside the container before `agentctl`. Failure is logged but `agentctl` still starts. | Not executed. |
-| Sprites | Runs inside a newly created sandbox. Failure aborts the launch and destroys that new sandbox. | Runs, with a 60-second limit, only when a live execution is stopped with a task/session archived or deleted reason; failure does not prevent the subsequent destroy attempt. Plain Stop, **Reset Environment**, and profile-page direct destroy do not run this script. |
-| SSH | **Currently not executed.** | **Currently not executed.** |
+| Runtime          | Prepare script                                                                                                        | Profile cleanup script                                                                                                                                                                                                                                                  |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Local / Worktree | Runs on the host during preparation. A failure is shown but is non-fatal, so the agent can still start for diagnosis. | Not executed by the executor runtime. Repository-level worktree cleanup is a separate repository setting.                                                                                                                                                               |
+| Local Docker     | Runs inside the container before `agentctl`. Failure is logged but `agentctl` still starts.                           | Not executed.                                                                                                                                                                                                                                                           |
+| Sprites          | Runs inside a newly created sandbox. Failure aborts the launch and destroys that new sandbox.                         | Runs, with a 60-second limit, only when a live execution is stopped with a task/session archived or deleted reason; failure does not prevent the subsequent destroy attempt. Plain Stop, **Reset Environment**, and profile-page direct destroy do not run this script. |
+| SSH              | **Currently not executed.**                                                                                           | **Currently not executed.**                                                                                                                                                                                                                                             |
 
 Keep working prepare scripts noninteractive and idempotent. Kandev resolves supported placeholders and appends its managed branch checkout for Docker and Sprites after the user script. A profile cleanup script must never remove paths outside the environment it owns.
 
@@ -65,6 +65,39 @@ Two current preparation exceptions are easy to miss:
 
 - A repository-free Local task bypasses the environment-preparer stage, even when it uses an explicit workspace folder. Its profile prepare script therefore does not run.
 - A Worktree task with two or more attached repositories runs each repository's setup script while creating that repository's worktree, but the current multi-repository preparer does not run the executor profile's task-level prepare script.
+
+## Managed GitHub credentials
+
+The workspace's GitHub connection and the task's Git transport policy are separate. **Managed
+workspace credentials** is the default and provides the broker behavior below. Select **Inherit
+executor Git credentials** in the workspace GitHub settings to leave Git and `gh` to the host or
+selected executor; Kandev then injects no GitHub broker helper or shim. Local and Worktree use
+host-visible Git/SSH credentials, while Docker, SSH, and cloud require executor-configured
+credentials. An explicit executor-profile `GH_TOKEN` or `GITHUB_TOKEN` overrides the managed
+workspace route.
+
+For attached GitHub repositories, Kandev normally gives the task an opaque lease for each
+repository instead of placing the workspace PAT, selected CLI token, or App installation token in
+its ambient environment. Git's credential helper selects the lease whose HTTPS host and path
+exactly match the repository. A broker-aware `gh` shim redeems the primary repository lease for
+each invocation, sets `GH_TOKEN` only on the child `gh` process, and isolates CLI configuration
+from the host.
+
+When the workspace uses a GitHub App, the redeemed installation token is minted for that one
+repository. On a multi-repository task, Git can redeem each repository's lease, but App-backed
+`gh` commands are primary-repository scoped. Run cross-repository GitHub API work through Kandev's
+workspace-aware backend surfaces.
+
+PAT and named-CLI automation tokens cannot be cryptographically reduced after redemption. Exact
+lease matching prevents accidental cross-repository redemption, but the trusted agent subprocess
+receives a bearer token with all scopes and repositories granted by GitHub. An explicit profile
+`GITHUB_TOKEN` or `GH_TOKEN` bypasses managed broker selection entirely and is the operator's
+unmanaged grant. Personal GitHub tokens and App registration private keys never enter executors.
+
+Managed Docker, Sprites, and SSH launches probe the exact credential-resolution route from inside
+the executor before clone or agent startup and require its `204 No Content` readiness response.
+Network failures, redirects, proxy routing errors, and broker server errors stop launch instead of
+falling back to another GitHub credential.
 
 ## Worktree
 
@@ -86,9 +119,19 @@ Use `git worktree list --porcelain` in the source repository when diagnosing sta
 
 ## Local
 
-Local runs directly in the selected checkout. It provides no file isolation: concurrent tasks, the user, and other tools can edit the same files and switch the same branch. A requested branch checkout can fail when the checkout is dirty or has an unfinished merge.
+Local runs directly in the selected checkout. It provides no file isolation: concurrent tasks, the user, and other tools can edit the same files. When sources are attached, Local uses each user-owned repository's current checkout; Kandev does not switch its branch.
 
 Use Local for an intentionally shared checkout, a controlled single task, or a repository-free task with an explicit workspace folder. Prefer Worktree for parallel coding. Stop ends the agent process but does not clean the checkout or undo its changes.
+
+## Workspace sources
+
+An idle, non-archived repository-backed task can add sources from its **Files** panel. Repository sources (saved workspace repository, local Git repository, or remote Git repository) are supported on **Worktree**, **Local/Local PC**, **Local Docker**, **SSH**, and **Sprites**. Worktree materializes Remote Git from Kandev's owned host cache. Docker, SSH, and Sprites clone local Git sources and therefore require a cloneable origin; Worktree and Local/Local PC can use the host repository directly.
+
+Every repository row records a base branch. Worktree, Docker, SSH, and Sprites may also materialize an existing checkout branch for repository rows. Local/Local PC always uses the repository's current checkout and does not offer or perform a branch switch.
+
+Arbitrary folders are supported only on **Worktree** and **Local/Local PC**. They remain live host paths; Kandev links them into its task workspace and never copies, moves, or deletes their contents. Docker and remote executors do not offer folders and reject a forged folder request. Remote Docker remains unavailable because its runtime is not implemented.
+
+Source batches are atomic: if validation, cloning, or runtime adoption fails, Kandev removes the new records and Kandev-owned entries while preserving existing task contents. Persisted attachments are reapplied after reload, relaunch, or **Reset Environment**; a previously attached folder that later disappears is reported instead of silently skipped. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
 ## Local Docker
 
@@ -143,7 +186,7 @@ docker ps -a --filter label=kandev.managed=true
 3. Select that secret for the required `SPRITES_API_TOKEN` profile environment variable.
 4. Review remote credential methods, Git identity, prepare/cleanup scripts, and network policy.
 
-New Sprites profiles initially select the local `gh` CLI token method. Kandev may also copy explicitly selected agent credential files, resolve selected Kandev secrets into agent environment variables, or run an agent auth setup script. Credential upload is best-effort: provisioning can continue while later agent authentication fails. The remote sandbox receives highly sensitive data; use a scoped provider token and least-privilege repository credentials.
+Sprites profiles do not copy the host-active `gh` CLI token. Kandev may copy explicitly selected agent credential files, resolve selected Kandev secrets into agent environment variables, or run an agent auth setup script. A profile-selected GitHub token is an unmanaged override; otherwise an attached GitHub repository uses the workspace credential broker. Set `githubCredentialBroker.publicBaseUrl` (or `KANDEV_GITHUB_CREDENTIAL_BROKER_PUBLIC_BASE_URL`) to an HTTPS Kandev URL reachable from remote executors; this setting is independent of GitHub App registration. Credential upload is best-effort: provisioning can continue while later agent authentication fails. The remote sandbox receives highly sensitive data; use a scoped provider token and least-privilege repository credentials.
 
 Network rules are stored in `sprites_network_policy_rules` as JSON entries with `domain`, `action` (`allow` or `deny`), and optional `include`. Kandev applies them only on fresh sandbox creation, and currently does so after credential upload, prepare, controller startup, and agent-instance creation. Bootstrap traffic can therefore occur before the profile policy is installed. A parse/provider failure is reported as skipped and does not abort launch. Provider semantics remain authoritative; do not treat this late, best-effort step as a security boundary, and test the resulting policy.
 
@@ -181,11 +224,11 @@ Run **Test Connection**, independently verify the observed SHA256 host fingerpri
 
 The profile editor exposes remote shell and agent-readiness checks. Backend/API configuration also recognizes `ssh_workdir_root` (default `~/.kandev`) and `ssh_shell`; the current profile UI exposes `ssh_shell` but not a workdir-root field.
 
-The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can instead use a stored `GITHUB_TOKEN` or the local `gh auth token`. These transfers write sensitive material under the remote user's home and are best-effort—verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
+The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can use an explicitly selected `GITHUB_TOKEN` secret as an unmanaged profile override; Kandev does not copy the host-active `gh` token. These transfers write sensitive material under the remote user's home and are best-effort—verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
-### Current repository limitation
+### Repository sources and cleanup
 
-The SSH runtime currently creates `<workdir-root>/tasks/<task-directory>` and a per-session `.kandev/sessions/<session-id>` directory, but it does **not** clone or otherwise materialize attached repositories. It also ignores the profile prepare and cleanup scripts. Therefore repository-backed coding through SSH is not yet a complete supported path. Use it only when an empty remote task directory is sufficient or when another trusted mechanism places the required content there and you have verified the exact path.
+SSH materializes attached repository sources in the remote task directory. It still ignores profile prepare and cleanup scripts. Ensure the remote host has the required Git credentials and can reach every selected remote; folders cannot be attached to SSH tasks.
 
 The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
 

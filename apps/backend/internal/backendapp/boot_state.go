@@ -8,6 +8,8 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	agentsettingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/auth"
+	"github.com/kandev/kandev/internal/auth/authn"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -25,6 +27,32 @@ const (
 	quickChatSessionKindConfig  = "config"
 )
 
+// ssoProvidersForBoot lists the plugin-contributed external-login options for
+// the pre-auth login screen. Empty unless auth is enabled and the plugins
+// feature is on with at least one active auth-capable plugin declaring
+// auth_providers.
+func ssoProvidersForBoot(p routeParams) []auth.SSOProvider {
+	if p.authSvc == nil || p.authSvc.Mode() == auth.ModeDisabled {
+		return nil
+	}
+	if !p.features.Plugins || p.services == nil || p.services.Plugins == nil {
+		return nil
+	}
+	providers := p.services.Plugins.SSOProviders()
+	if len(providers) == 0 {
+		return nil
+	}
+	out := make([]auth.SSOProvider, 0, len(providers))
+	for _, prov := range providers {
+		out = append(out, auth.SSOProvider{
+			ID:          prov.ID,
+			DisplayName: prov.DisplayName,
+			InitiateURL: prov.InitiateURL,
+		})
+	}
+	return out
+}
+
 func bootInitialState(
 	ctx context.Context,
 	req *http.Request,
@@ -34,6 +62,22 @@ func bootInitialState(
 	builder := bootStateBuilder{p: p}
 	state := map[string]any{
 		"features": p.features,
+	}
+	// The auth block is always present so the SPA knows whether to render the
+	// app, the login page, or the setup wizard. For unauthenticated visitors
+	// on an auth-enabled instance, NO data loaders run — the payload carries
+	// only features + auth.
+	if p.authSvc != nil {
+		var identityPtr *authn.Identity
+		if identity, ok := authn.IdentityFromContext(req.Context()); ok {
+			identityPtr = &identity
+		}
+		authState := p.authSvc.StateFor(ctx, identityPtr)
+		authState.SSOProviders = ssoProvidersForBoot(p)
+		state["auth"] = authState
+		if p.authSvc.Mode() != auth.ModeDisabled && identityPtr == nil {
+			return state
+		}
 	}
 
 	if route.Route == webapp.RouteSettings {
@@ -682,7 +726,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		b.logBootError("get task detail primary session info", err)
 		return taskDTOs(tasks)
 	}
-	pendingActionsBySession, err := b.bootPendingActionsForWaitingPrimarySessions(ctx, primaryInfoByTask)
+	pendingActionsBySession, err := b.bootPendingActionsForInputCapableSessions(ctx, sessionsByTask)
 	if err != nil {
 		b.logBootError("get task detail pending actions", err)
 		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
@@ -707,7 +751,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			sessionCount = &count
 		}
 		info := bootSessionInfo(primaryInfoByTask[task.ID])
-		result = append(result, taskdto.FromTaskWithSessionInfo(
+		dto := taskdto.FromTaskWithSessionInfo(
 			task,
 			primarySessionID,
 			sessionCount,
@@ -719,7 +763,16 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			info.workingDirectory,
 			info.sessionState,
 			bootPendingActionPtr(info.sessionID, pendingActionsBySession),
-		))
+		)
+		dto.TaskPendingAction = bootTaskPendingActionPtr(sessions, pendingActionsBySession)
+		// Stamp the task-level MOST-ACTIVE-WINS activity aggregate so the board
+		// card and task list show the background-running affordance on first paint
+		// / in a second tab, without holding the task's full session set client-side
+		// No-op when no session is running.
+		if b.p.orchestratorSvc != nil {
+			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
+		}
+		result = append(result, dto)
 	}
 	return result
 }
@@ -784,20 +837,47 @@ func bootSessionInfo(session *taskmodels.TaskSession) bootSessionInfoFields {
 	return info
 }
 
-func (b bootStateBuilder) bootPendingActionsForWaitingPrimarySessions(
+func (b bootStateBuilder) bootPendingActionsForInputCapableSessions(
 	ctx context.Context,
-	primaryInfoByTask map[string]*taskmodels.TaskSession,
+	sessionsByTask map[string][]*taskmodels.TaskSession,
 ) (map[string]taskmodels.TaskPendingAction, error) {
-	sessionIDs := make([]string, 0, len(primaryInfoByTask))
-	for _, info := range primaryInfoByTask {
-		if info != nil && info.State == taskmodels.TaskSessionStateWaitingForInput {
-			sessionIDs = append(sessionIDs, info.ID)
+	sessionIDs := make([]string, 0)
+	for _, sessions := range sessionsByTask {
+		for _, session := range sessions {
+			if bootInputCapableSession(session) {
+				sessionIDs = append(sessionIDs, session.ID)
+			}
 		}
 	}
 	if len(sessionIDs) == 0 {
 		return map[string]taskmodels.TaskPendingAction{}, nil
 	}
 	return b.p.taskSvc.GetPendingActionsForSessions(ctx, sessionIDs)
+}
+
+func bootInputCapableSession(session *taskmodels.TaskSession) bool {
+	return session != nil && (session.State == taskmodels.TaskSessionStateRunning || session.State == taskmodels.TaskSessionStateWaitingForInput)
+}
+
+func bootTaskPendingActionPtr(sessions []*taskmodels.TaskSession, actions map[string]taskmodels.TaskPendingAction) *string {
+	var clarification bool
+	for _, session := range sessions {
+		if !bootInputCapableSession(session) {
+			continue
+		}
+		switch actions[session.ID] {
+		case taskmodels.TaskPendingActionPermission:
+			value := string(taskmodels.TaskPendingActionPermission)
+			return &value
+		case taskmodels.TaskPendingActionClarification:
+			clarification = true
+		}
+	}
+	if clarification {
+		value := string(taskmodels.TaskPendingActionClarification)
+		return &value
+	}
+	return nil
 }
 
 func bootPendingActionPtr(
@@ -959,6 +1039,13 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 			continue
 		}
 		dto := taskdto.FromTaskSession(session)
+		// Mirror the in-memory fine-grained busy substate onto a RUNNING session
+		// so a fresh page-load / second tab sees the accept-input +
+		// working-in-background affordance without waiting for a WS flip
+		// (ADR-0049). No-op for non-RUNNING sessions.
+		if b.p.orchestratorSvc != nil {
+			taskdto.EnrichForegroundActivity(&dto, b.p.orchestratorSvc)
+		}
 		sessionItems[session.ID] = dto
 		sessionList = append(sessionList, dto)
 		if session.TaskEnvironmentID != "" {

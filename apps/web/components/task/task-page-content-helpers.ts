@@ -10,7 +10,6 @@ import { issueFieldsFromMetadata } from "@/lib/metadata-utils";
 
 type ACPDebugInfo = {
   sessionId: unknown;
-  title: unknown;
   updatedAt: unknown;
   meta: unknown;
 };
@@ -21,7 +20,6 @@ function readACPDebugInfo(metadata: Record<string, unknown> | null | undefined):
     acp && typeof acp === "object" && !Array.isArray(acp) ? (acp as Record<string, unknown>) : {};
   return {
     sessionId: acpObject.session_id ?? null,
-    title: acpObject.title ?? null,
     updatedAt: acpObject.updated_at ?? null,
     meta: acpObject.meta ?? null,
   };
@@ -70,7 +68,6 @@ export function buildDebugEntries(params: {
     task_id: task?.id ?? null,
     session_id: effectiveSessionId ?? null,
     acp_session_id: acp.sessionId,
-    acp_session_title: acp.title,
     acp_session_updated_at: acp.updatedAt,
     acp_meta: acp.meta,
     task_state: task?.state ?? null,

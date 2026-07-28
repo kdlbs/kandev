@@ -1,6 +1,32 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("GitHub workspace settings", () => {
+  test("saves the explicit task Git credential policy", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await expect(testPage.getByRole("heading", { name: "Task Git credentials" })).toBeVisible();
+
+    await testPage.getByRole("radio", { name: "Inherit executor Git credentials" }).click();
+    await prCapture.screenshot("desktop-task-git-credentials", {
+      caption: "Workspace task Git credential policy",
+    });
+    await testPage.getByTestId("settings-floating-save").getByRole("button").click();
+    await expect(testPage.getByText("Task Git credential settings saved")).toBeVisible({
+      timeout: 10_000,
+    });
+
+    const response = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/github/workspace-settings?workspace_id=${seedData.workspaceId}`,
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ task_git_credentials_mode: "executor" });
+  });
+
   test("repository scope is saved per workspace and filters the GitHub PR list", async ({
     testPage,
     apiClient,

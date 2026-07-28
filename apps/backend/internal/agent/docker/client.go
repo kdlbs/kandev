@@ -8,20 +8,20 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"net"
+	"net/netip"
+	"strconv"
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types/build"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/image"
-	"github.com/docker/docker/api/types/mount"
-	"github.com/docker/docker/client"
-	"github.com/docker/go-connections/nat"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/moby/moby/api/types/container"
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/api/types/network"
+	"github.com/moby/moby/client"
 	"go.uber.org/zap"
 )
 
@@ -72,11 +72,11 @@ type ContainerInfo struct {
 
 // Client wraps the Docker client.
 type containerRemover interface {
-	ContainerRemove(context.Context, string, container.RemoveOptions) error
+	ContainerRemove(context.Context, string, client.ContainerRemoveOptions) (client.ContainerRemoveResult, error)
 }
 
 type imageBuilder interface {
-	ImageBuild(context.Context, io.Reader, build.ImageBuildOptions) (build.ImageBuildResponse, error)
+	ImageBuild(context.Context, io.Reader, client.ImageBuildOptions) (client.ImageBuildResult, error)
 }
 
 type Client struct {
@@ -104,7 +104,7 @@ func NewClient(cfg config.DockerConfig, log *logger.Logger) (*Client, error) {
 		opts = append(opts, client.WithVersion(cfg.APIVersion))
 	}
 
-	cli, err := client.NewClientWithOpts(opts...)
+	cli, err := client.New(opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create docker client: %w", err)
 	}
@@ -141,7 +141,7 @@ func (c *Client) Close() error {
 func (c *Client) PullImage(ctx context.Context, imageName string) error {
 	c.logger.Info("Pulling image", zap.String("image", imageName))
 
-	reader, err := c.cli.ImagePull(ctx, imageName, image.PullOptions{})
+	reader, err := c.cli.ImagePull(ctx, imageName, client.ImagePullOptions{})
 	if err != nil {
 		c.logger.Error("Failed to pull image", zap.String("image", imageName), zap.Error(err))
 		return fmt.Errorf("failed to pull image %s: %w", imageName, err)
@@ -190,7 +190,7 @@ func (c *Client) BuildImage(ctx context.Context, dockerfile string, tag string, 
 		return nil, fmt.Errorf("failed to create build context: %w", err)
 	}
 
-	resp, err := builder.ImageBuild(ctx, buildContext, build.ImageBuildOptions{
+	resp, err := builder.ImageBuild(ctx, buildContext, client.ImageBuildOptions{
 		Tags:       []string{tag},
 		BuildArgs:  buildArgs,
 		Dockerfile: "Dockerfile",
@@ -271,7 +271,10 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 	}
 
 	// Container configuration
-	exposedPorts, portBindings := buildDockerPortBindings(cfg.PortBindings)
+	exposedPorts, portBindings, err := buildDockerPortBindings(cfg.PortBindings)
+	if err != nil {
+		return "", fmt.Errorf("failed to create container %s: %w", cfg.Name, err)
+	}
 	containerCfg := &container.Config{
 		Image:        cfg.Image,
 		Entrypoint:   cfg.Entrypoint,
@@ -294,7 +297,11 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 		},
 	}
 
-	resp, err := c.cli.ContainerCreate(ctx, containerCfg, hostCfg, nil, nil, cfg.Name)
+	resp, err := c.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     containerCfg,
+		HostConfig: hostCfg,
+		Name:       cfg.Name,
+	})
 	if err != nil {
 		c.logger.Error("Failed to create container",
 			zap.String("name", cfg.Name),
@@ -307,28 +314,60 @@ func (c *Client) CreateContainer(ctx context.Context, cfg ContainerConfig) (stri
 	return resp.ID, nil
 }
 
-func buildDockerPortBindings(bindings []PortBindingConfig) (nat.PortSet, nat.PortMap) {
+func buildDockerPortBindings(bindings []PortBindingConfig) (network.PortSet, network.PortMap, error) {
 	if len(bindings) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
-	exposedPorts := nat.PortSet{}
-	portBindings := nat.PortMap{}
+	exposedPorts := network.PortSet{}
+	portBindings := network.PortMap{}
 	for _, binding := range bindings {
-		containerPort := nat.Port(fmt.Sprintf("%d/tcp", binding.ContainerPort))
+		containerPort, err := tcpPort(binding.ContainerPort)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid container port binding: %w", err)
+		}
+		hostIP, err := parseDockerHostIP(binding.HostIP)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid host IP for container port %d: %w", binding.ContainerPort, err)
+		}
 		exposedPorts[containerPort] = struct{}{}
-		portBindings[containerPort] = append(portBindings[containerPort], nat.PortBinding{
-			HostIP:   binding.HostIP,
+		portBindings[containerPort] = append(portBindings[containerPort], network.PortBinding{
+			HostIP:   hostIP,
 			HostPort: binding.HostPort,
 		})
 	}
-	return exposedPorts, portBindings
+	return exposedPorts, portBindings, nil
+}
+
+// tcpPort converts a container port number into the API's opaque TCP port key.
+func tcpPort(port int) (network.Port, error) {
+	if port <= 0 || port > math.MaxUint16 {
+		return network.Port{}, fmt.Errorf("port %d out of range", port)
+	}
+	parsed, ok := network.PortFrom(uint16(port), network.TCP)
+	if !ok {
+		return network.Port{}, fmt.Errorf("port %d is not a valid TCP port", port)
+	}
+	return parsed, nil
+}
+
+// parseDockerHostIP converts a configured host IP into the API's address type.
+// An empty value keeps Docker's "publish on all interfaces" behavior.
+func parseDockerHostIP(hostIP string) (netip.Addr, error) {
+	if hostIP == "" {
+		return netip.Addr{}, nil
+	}
+	addr, err := netip.ParseAddr(hostIP)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("parse host IP %q: %w", hostIP, err)
+	}
+	return addr, nil
 }
 
 // StartContainer starts a container.
 func (c *Client) StartContainer(ctx context.Context, containerID string) error {
 	c.logger.Info("Starting container", zap.String("container_id", containerID))
 
-	err := c.cli.ContainerStart(ctx, containerID, container.StartOptions{})
+	_, err := c.cli.ContainerStart(ctx, containerID, client.ContainerStartOptions{})
 	if err != nil {
 		c.logger.Error("Failed to start container", zap.String("container_id", containerID), zap.Error(err))
 		return fmt.Errorf("failed to start container %s: %w", containerID, err)
@@ -346,7 +385,7 @@ func (c *Client) StopContainer(ctx context.Context, containerID string, timeout 
 	)
 
 	timeoutSeconds := int(timeout.Seconds())
-	err := c.cli.ContainerStop(ctx, containerID, container.StopOptions{
+	_, err := c.cli.ContainerStop(ctx, containerID, client.ContainerStopOptions{
 		Timeout: &timeoutSeconds,
 	})
 	if err != nil {
@@ -365,7 +404,7 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string, force 
 		zap.Bool("force", force),
 	)
 
-	err := c.containerRemover().ContainerRemove(ctx, containerID, container.RemoveOptions{
+	_, err := c.containerRemover().ContainerRemove(ctx, containerID, client.ContainerRemoveOptions{
 		Force:         force,
 		RemoveVolumes: true,
 	})
@@ -392,7 +431,7 @@ func (c *Client) KillContainer(ctx context.Context, containerID string, signal s
 		zap.String("signal", signal),
 	)
 
-	err := c.cli.ContainerKill(ctx, containerID, signal)
+	_, err := c.cli.ContainerKill(ctx, containerID, client.ContainerKillOptions{Signal: signal})
 	if err != nil {
 		c.logger.Error("Failed to kill container", zap.String("container_id", containerID), zap.Error(err))
 		return fmt.Errorf("failed to kill container %s: %w", containerID, err)
@@ -402,47 +441,57 @@ func (c *Client) KillContainer(ctx context.Context, containerID string, signal s
 	return nil
 }
 
+// inspectContainer inspects a container and unwraps the typed response.
+func (c *Client) inspectContainer(ctx context.Context, containerID string) (container.InspectResponse, error) {
+	result, err := c.cli.ContainerInspect(ctx, containerID, client.ContainerInspectOptions{})
+	if err != nil {
+		return container.InspectResponse{}, err
+	}
+	return result.Container, nil
+}
+
 // GetContainerInfo returns information about a container.
 func (c *Client) GetContainerInfo(ctx context.Context, containerID string) (*ContainerInfo, error) {
 	c.logger.Debug("Getting container info", zap.String("container_id", containerID))
 
-	inspect, err := c.cli.ContainerInspect(ctx, containerID)
+	inspect, err := c.inspectContainer(ctx, containerID)
 	if err != nil {
 		c.logger.Error("Failed to inspect container", zap.String("container_id", containerID), zap.Error(err))
 		return nil, fmt.Errorf("failed to inspect container %s: %w", containerID, err)
 	}
 
 	info := &ContainerInfo{
-		ID:       inspect.ID,
-		Name:     inspect.Name,
-		Image:    inspect.Config.Image,
-		State:    inspect.State.Status,
-		Status:   inspect.State.Status,
-		ExitCode: inspect.State.ExitCode,
-		Labels:   inspect.Config.Labels,
+		ID:   inspect.ID,
+		Name: inspect.Name,
 	}
-
-	// Parse timestamps
-	if inspect.State.StartedAt != "" {
-		startedAt, err := time.Parse(time.RFC3339Nano, inspect.State.StartedAt)
-		if err == nil {
-			info.StartedAt = startedAt
-		}
+	if inspect.Config != nil {
+		info.Image = inspect.Config.Image
+		info.Labels = inspect.Config.Labels
 	}
-
-	if inspect.State.FinishedAt != "" {
-		finishedAt, err := time.Parse(time.RFC3339Nano, inspect.State.FinishedAt)
-		if err == nil {
-			info.FinishedAt = finishedAt
-		}
-	}
-
-	// Get health status if available
-	if inspect.State.Health != nil {
-		info.Health = inspect.State.Health.Status
-	}
+	applyContainerState(info, inspect.State)
 
 	return info, nil
+}
+
+// applyContainerState copies the inspected runtime state onto info. The API
+// models State as a pointer, so a missing state leaves the zero values.
+func applyContainerState(info *ContainerInfo, state *container.State) {
+	if state == nil {
+		return
+	}
+	info.State = string(state.Status)
+	info.Status = string(state.Status)
+	info.ExitCode = state.ExitCode
+
+	if startedAt, err := time.Parse(time.RFC3339Nano, state.StartedAt); err == nil {
+		info.StartedAt = startedAt
+	}
+	if finishedAt, err := time.Parse(time.RFC3339Nano, state.FinishedAt); err == nil {
+		info.FinishedAt = finishedAt
+	}
+	if state.Health != nil {
+		info.Health = string(state.Health.Status)
+	}
 }
 
 // IsContainerRunning returns true if the container exists and is in "running" state
@@ -458,7 +507,7 @@ func (c *Client) IsContainerRunning(ctx context.Context, containerID string) (bo
 func (c *Client) GetContainerIP(ctx context.Context, containerID string) (string, error) {
 	c.logger.Debug("Getting container IP", zap.String("container_id", containerID))
 
-	inspect, err := c.cli.ContainerInspect(ctx, containerID)
+	inspect, err := c.inspectContainer(ctx, containerID)
 	if err != nil {
 		c.logger.Error("Failed to inspect container for IP", zap.String("container_id", containerID), zap.Error(err))
 		return "", err
@@ -467,13 +516,15 @@ func (c *Client) GetContainerIP(ctx context.Context, containerID string) (string
 	if inspect.NetworkSettings != nil {
 		// Check available networks for an IP address.
 		for netName, netSettings := range inspect.NetworkSettings.Networks {
-			if netSettings.IPAddress != "" {
-				c.logger.Debug("Found container IP",
-					zap.String("container_id", containerID),
-					zap.String("network", netName),
-					zap.String("ip", netSettings.IPAddress))
-				return netSettings.IPAddress, nil
+			if netSettings == nil || !netSettings.IPAddress.IsValid() {
+				continue
 			}
+			ip := netSettings.IPAddress.String()
+			c.logger.Debug("Found container IP",
+				zap.String("container_id", containerID),
+				zap.String("network", netName),
+				zap.String("ip", ip))
+			return ip, nil
 		}
 	}
 
@@ -486,7 +537,7 @@ func (c *Client) GetContainerHostPort(ctx context.Context, containerID string, c
 		zap.String("container_id", containerID),
 		zap.Int("container_port", containerPort))
 
-	inspect, err := c.cli.ContainerInspect(ctx, containerID)
+	inspect, err := c.inspectContainer(ctx, containerID)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to inspect container %s: %w", containerID, err)
 	}
@@ -494,11 +545,15 @@ func (c *Client) GetContainerHostPort(ctx context.Context, containerID string, c
 		return "", 0, fmt.Errorf("container %s has no published ports", containerID)
 	}
 
-	bindings := inspect.NetworkSettings.Ports[nat.Port(fmt.Sprintf("%d/tcp", containerPort))]
+	port, err := tcpPort(containerPort)
+	if err != nil {
+		return "", 0, fmt.Errorf("container %s: %w", containerID, err)
+	}
+	bindings := inspect.NetworkSettings.Ports[port]
 	if len(bindings) == 0 {
 		return "", 0, fmt.Errorf("container %s port %d/tcp is not published", containerID, containerPort)
 	}
-	hostPort, err := nat.ParsePort(bindings[0].HostPort)
+	hostPort, err := parseHostPort(bindings[0].HostPort)
 	if err != nil {
 		return "", 0, fmt.Errorf("invalid host port for container %s port %d/tcp: %w", containerID, containerPort, err)
 	}
@@ -506,20 +561,32 @@ func (c *Client) GetContainerHostPort(ctx context.Context, containerID string, c
 	return hostIP, hostPort, nil
 }
 
-func normalizeDockerHostIP(hostIP string) string {
-	switch hostIP {
-	case "", "0.0.0.0", "::":
-		return "127.0.0.1"
-	default:
-		return hostIP
+// parseHostPort validates a host-side port number reported by the daemon.
+func parseHostPort(value string) (int, error) {
+	port, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("parse port %q: %w", value, err)
 	}
+	if port < 0 || port > math.MaxUint16 {
+		return 0, fmt.Errorf("port %d out of range", port)
+	}
+	return port, nil
+}
+
+// normalizeDockerHostIP maps an unset or wildcard publish address onto loopback
+// so callers get an address they can actually dial.
+func normalizeDockerHostIP(hostIP netip.Addr) string {
+	if !hostIP.IsValid() || hostIP.IsUnspecified() {
+		return "127.0.0.1"
+	}
+	return hostIP.String()
 }
 
 // GetContainerLabels returns the labels of a container
 func (c *Client) GetContainerLabels(ctx context.Context, containerID string) (map[string]string, error) {
 	c.logger.Debug("Getting container labels", zap.String("container_id", containerID))
 
-	inspect, err := c.cli.ContainerInspect(ctx, containerID)
+	inspect, err := c.inspectContainer(ctx, containerID)
 	if err != nil {
 		c.logger.Error("Failed to inspect container for labels", zap.String("container_id", containerID), zap.Error(err))
 		return nil, err
@@ -540,7 +607,7 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, follo
 		zap.String("tail", tail),
 	)
 
-	opts := container.LogsOptions{
+	opts := client.ContainerLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     follow,
@@ -561,15 +628,17 @@ func (c *Client) GetContainerLogs(ctx context.Context, containerID string, follo
 func (c *Client) WaitContainer(ctx context.Context, containerID string) (int64, error) {
 	c.logger.Info("Waiting for container", zap.String("container_id", containerID))
 
-	statusCh, errCh := c.cli.ContainerWait(ctx, containerID, container.WaitConditionNotRunning)
+	wait := c.cli.ContainerWait(ctx, containerID, client.ContainerWaitOptions{
+		Condition: container.WaitConditionNotRunning,
+	})
 
 	select {
-	case err := <-errCh:
+	case err := <-wait.Error:
 		if err != nil {
 			c.logger.Error("Error waiting for container", zap.String("container_id", containerID), zap.Error(err))
 			return -1, fmt.Errorf("error waiting for container %s: %w", containerID, err)
 		}
-	case status := <-statusCh:
+	case status := <-wait.Result:
 		c.logger.Info("Container exited",
 			zap.String("container_id", containerID),
 			zap.Int64("exit_code", status.StatusCode),
@@ -588,22 +657,22 @@ func (c *Client) ListContainers(ctx context.Context, labels map[string]string) (
 	c.logger.Debug("Listing containers", zap.Any("labels", labels))
 
 	// Build filters from labels
-	filterArgs := filters.NewArgs()
+	listFilters := make(client.Filters)
 	for key, value := range labels {
-		filterArgs.Add("label", fmt.Sprintf("%s=%s", key, value))
+		listFilters.Add("label", fmt.Sprintf("%s=%s", key, value))
 	}
 
-	containers, err := c.cli.ContainerList(ctx, container.ListOptions{
+	result, err := c.cli.ContainerList(ctx, client.ContainerListOptions{
 		All:     true,
-		Filters: filterArgs,
+		Filters: listFilters,
 	})
 	if err != nil {
 		c.logger.Error("Failed to list containers", zap.Error(err))
 		return nil, fmt.Errorf("failed to list containers: %w", err)
 	}
 
-	infos := make([]ContainerInfo, 0, len(containers))
-	for _, ctr := range containers {
+	infos := make([]ContainerInfo, 0, len(result.Items))
+	for _, ctr := range result.Items {
 		name := ""
 		if len(ctr.Names) > 0 {
 			name = ctr.Names[0]
@@ -617,7 +686,7 @@ func (c *Client) ListContainers(ctx context.Context, labels map[string]string) (
 			ID:     ctr.ID,
 			Name:   name,
 			Image:  ctr.Image,
-			State:  ctr.State,
+			State:  string(ctr.State),
 			Status: ctr.Status,
 			Labels: ctr.Labels,
 		}
@@ -632,7 +701,7 @@ func (c *Client) ListContainers(ctx context.Context, labels map[string]string) (
 func (c *Client) Ping(ctx context.Context) error {
 	c.logger.Debug("Pinging Docker daemon")
 
-	_, err := c.cli.Ping(ctx)
+	_, err := c.cli.Ping(ctx, client.PingOptions{})
 	if err != nil {
 		c.logger.Debug("Docker ping failed", zap.Error(err))
 		return fmt.Errorf("docker ping failed: %w", err)
@@ -671,7 +740,10 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 	// Container configuration with stdin attached. Mirror CreateContainer's
 	// handling of ContainerConfig fields — including Entrypoint — so the same
 	// config struct produces consistent container behavior on both paths.
-	exposedPorts, portBindings := buildDockerPortBindings(cfg.PortBindings)
+	exposedPorts, portBindings, err := buildDockerPortBindings(cfg.PortBindings)
+	if err != nil {
+		return "", fmt.Errorf("failed to create interactive container %s: %w", cfg.Name, err)
+	}
 	containerCfg := &container.Config{
 		Image:        cfg.Image,
 		Entrypoint:   cfg.Entrypoint,
@@ -700,7 +772,11 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 		},
 	}
 
-	resp, err := c.cli.ContainerCreate(ctx, containerCfg, hostCfg, nil, nil, cfg.Name)
+	resp, err := c.cli.ContainerCreate(ctx, client.ContainerCreateOptions{
+		Config:     containerCfg,
+		HostConfig: hostCfg,
+		Name:       cfg.Name,
+	})
 	if err != nil {
 		c.logger.Error("Failed to create interactive container",
 			zap.String("name", cfg.Name),
@@ -717,7 +793,7 @@ func (c *Client) CreateContainerInteractive(ctx context.Context, cfg ContainerCo
 func (c *Client) AttachContainer(ctx context.Context, containerID string) (*AttachResult, error) {
 	c.logger.Info("Attaching to container", zap.String("container_id", containerID))
 
-	opts := container.AttachOptions{
+	opts := client.ContainerAttachOptions{
 		Stream: true,
 		Stdin:  true,
 		Stdout: true,

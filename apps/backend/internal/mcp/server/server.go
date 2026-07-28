@@ -371,13 +371,16 @@ func (s *Server) registerTools() {
 		count += 4
 		s.registerWalkthroughTools()
 		count += 3
+		s.registerReviewTools()
+		count++
 		s.registerRelatedTasksTool()
 		count++
 		// Task-mode only: requires a live session to attach the new
 		// (repository, branch) to. External mode has no such context.
 		s.registerAddBranchToTaskTool()
+		s.registerAddWorkspaceSourcesTool()
 		s.registerUpdateRepositoryBaseBranchTool()
-		count += 2
+		count += 3
 		// Task-mode only: ADR 0015 explicit step-completion signal. The
 		// tool targets the current (task, session, step) the MCP server
 		// was bound to, so it has no meaningful semantics outside a task
@@ -637,16 +640,16 @@ func (s *Server) registerAddBranchToTaskTool() {
 		mcp.NewTool("add_branch_to_task_kandev",
 			mcp.WithDescription(`Attach an additional (repository, branch) worktree to an existing task.
 
-Use this when the task should open more than one PR — same repo with different branches, or a second repository entirely. The new branch gets its own worktree under the task directory and behaves like any other multi-repo entry for changes, PRs, and review surfaces.
+Use this when the task should open more than one PR — same repo with different branches, or a second repository entirely. The new branch gets its own sibling worktree under the task directory and behaves like any other multi-repo entry for changes, PRs, and review surfaces. The running agent and terminals keep their current working directory; use the returned worktree_path for the exact new location. task_workspace_path is the promoted task root used by the Files tree.
 
 IMPORTANT:
 - Only works on tasks running the WORKTREE executor. Tasks on docker / sprites / local-pc / SSH / remote_docker reject this tool because sibling worktrees are a git-worktree-specific layout — other executors bind one workspace path per task and the new branch would silently never appear on disk.
-- task_id defaults to your CURRENT task when omitted — pass it explicitly only to target a different task.
+- task_id defaults to your CURRENT task when omitted and must match that task when provided.
 - Repository selection (matches create_task_kandev): pass exactly one of repository_id / repository_url / local_path. For single-repo tasks all three are optional — the service auto-resolves to the task's only repository. Multi-repo tasks must identify the target repo explicitly.
 - checkout_branch is the branch the new worktree will check out. Leave empty to create a fresh feature branch from base_branch.
 - base_branch is optional; defaults to the repository's default_branch.
 - The (task_id, repository_id, base_branch, checkout_branch) tuple must be unique on the task — re-adding the same combination is an error, not a no-op.`),
-			mcp.WithString("task_id", mcp.Description("The task to attach the branch to. Defaults to the current task when omitted.")),
+			mcp.WithString("task_id", mcp.Description("The current task. Defaults to the current task when omitted.")),
 			mcp.WithString("repository_id", mcp.Description("Repository UUID. Optional for single-repo tasks (auto-resolved). Required for multi-repo tasks unless repository_url or local_path is supplied.")),
 			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). Alternative to repository_id when you don't have the UUID handy. The repository is found-or-created in the task's workspace.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Alternative to repository_id for the local worktree flow. The repository is found-or-created in the task's workspace.")),
@@ -657,6 +660,56 @@ IMPORTANT:
 	)
 }
 
+// registerAddWorkspaceSourcesTool attaches a mixed repository/folder batch to
+// the current task. Runtime adoption remains a backend concern; this tool only
+// forwards the documented union unchanged to the shared mutation boundary.
+func (s *Server) registerAddWorkspaceSourcesTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("add_workspace_sources_kandev",
+			mcp.WithDescription("Attach repository and folder workspace sources to an idle task. task_id defaults to the current task."),
+			mcp.WithString(mcpKeyTaskID, mcp.Description("Task to update. Defaults to the current task.")),
+			mcp.WithArray("sources", mcp.Required(), mcp.MinItems(1),
+				mcp.Description("Ordered source objects. Each has kind repository or folder and the documented fields for that kind."),
+				mcp.Items(map[string]any{"type": "object"}),
+			),
+		),
+		s.wrapHandler("add_workspace_sources_kandev", s.addWorkspaceSourcesHandler()),
+	)
+}
+
+func (s *Server) addWorkspaceSourcesHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID := req.GetString(mcpKeyTaskID, "")
+		if taskID == "" {
+			taskID = s.taskID
+		}
+		if taskID == "" {
+			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
+		}
+		// A task-mode MCP server is bound to one live task. Never let an agent
+		// use this mutation tool as a cross-task capability: the backend tunnel
+		// has no authenticated user principal to authorize arbitrary task IDs.
+		if s.taskID == "" || taskID != s.taskID {
+			return mcp.NewToolResultError("task_id is not available in this session"), nil
+		}
+		arguments, ok := req.Params.Arguments.(map[string]interface{})
+		if !ok {
+			return mcp.NewToolResultError("sources is required"), nil
+		}
+		sources, ok := arguments["sources"]
+		if !ok {
+			return mcp.NewToolResultError("sources is required"), nil
+		}
+		payload := map[string]interface{}{mcpKeyTaskID: taskID, "sources": sources}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPAddWorkspaceSources, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID := req.GetString(mcpKeyTaskID, "")
@@ -665,6 +718,12 @@ func (s *Server) addBranchToTaskHandler() server.ToolHandlerFunc {
 		}
 		if taskID == "" {
 			return mcp.NewToolResultError("task_id is required (no current task context to default to)"), nil
+		}
+		// A task-mode MCP server is bound to one live task. Never let an agent
+		// use this mutation tool as a cross-task capability: the backend tunnel
+		// has no authenticated user principal to authorize arbitrary task IDs.
+		if s.taskID == "" || taskID != s.taskID {
+			return mcp.NewToolResultError("task_id is not available in this session"), nil
 		}
 		// Mutual-exclusion gate at the MCP tier so the error names the
 		// agent-facing alias (repository_url) instead of the WS wire field
@@ -885,8 +944,8 @@ Example rejection:
 func (s *Server) registerPlanTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("create_task_plan_kandev",
-			mcp.WithDescription("Create or save a task plan. Use this to save your implementation plan for the current task."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to create a plan for")),
+			mcp.WithDescription("Create or save a task plan. task_id addresses the plan's task: pass your own task ID for your current task, or another task's ID to write that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithString("task_id", mcp.Description("The task ID to create a plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("The plan content in markdown format")),
 			mcp.WithString("title", mcp.Description("Optional title for the plan (default: 'Plan')")),
 		),
@@ -894,15 +953,15 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_task_plan_kandev",
-			mcp.WithDescription("Get the current plan for a task. Use this to retrieve an existing plan, including any user edits."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the plan for")),
+			mcp.WithDescription("Get the current plan for a task, including any user edits. task_id selects the task: pass your own task ID for your current task, or another task's ID to read that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithString("task_id", mcp.Description("The task ID to get the plan for. Defaults to your current task when omitted; pass another task's ID to read it directly.")),
 		),
 		s.wrapHandler("get_task_plan_kandev", s.getTaskPlanHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("update_task_plan_kandev",
-			mcp.WithDescription("Update an existing task plan. Use this to modify the plan during implementation."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to update the plan for")),
+			mcp.WithDescription("Update an existing task plan. task_id selects the task whose plan to modify: your own task by default, or another task's ID to update that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithString("task_id", mcp.Description("The task ID to update the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 			mcp.WithString("content", mcp.Required(), mcp.Description("The updated plan content in markdown format")),
 			mcp.WithString("title", mcp.Description("Optional new title for the plan")),
 		),
@@ -910,8 +969,8 @@ func (s *Server) registerPlanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_task_plan_kandev",
-			mcp.WithDescription("Delete a task plan."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the plan for")),
+			mcp.WithDescription("Delete a task plan. task_id selects the task whose plan to delete: your own task by default, or another task's ID to delete that task's plan (allowed only within your reach — same workspace / task tree; a task outside it is rejected, never silently redirected to your own)."),
+			mcp.WithString("task_id", mcp.Description("The task ID to delete the plan for. Defaults to your current task when omitted; pass another task's ID to target it directly.")),
 		),
 		s.wrapHandler("delete_task_plan_kandev", s.deleteTaskPlanHandler()),
 	)
@@ -935,8 +994,10 @@ func (s *Server) registerWalkthroughTools() {
 					"Use this after producing a change to narrate the diff (what each hunk does and why), "+
 					"or to explain how a part of the codebase works. Order steps to follow the reader's "+
 					"natural path through the code (entry point first, then the call chain). Keep text "+
-					"concise and do not add a 'Justification:' preamble."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to attach the walkthrough to")),
+					"concise and do not add a 'Justification:' preamble. task_id defaults to your current "+
+					"task; pass another task's ID to target it directly, allowed only within your reach "+
+					"(same workspace / task tree)."),
+			mcp.WithString("task_id", mcp.Description("The task ID to attach the walkthrough to. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
 			mcp.WithString("title", mcp.Description("Optional title for the walkthrough (default: 'Walkthrough')")),
 			mcp.WithArray("steps", mcp.Required(),
 				mcp.Description("Ordered list of walkthrough steps, each anchored to a file line or range."),
@@ -947,18 +1008,86 @@ func (s *Server) registerWalkthroughTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("get_walkthrough_kandev",
-			mcp.WithDescription("Get the current code walkthrough for a task, including any steps."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to get the walkthrough for")),
+			mcp.WithDescription("Get the current code walkthrough for a task, including any steps. task_id defaults to your current task; pass another task's ID (within your reach — same workspace / task tree) to read it directly."),
+			mcp.WithString("task_id", mcp.Description("The task ID to get the walkthrough for. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to read it directly.")),
 		),
 		s.wrapHandler("get_walkthrough_kandev", s.getWalkthroughHandler()),
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("delete_walkthrough_kandev",
-			mcp.WithDescription("Delete the code walkthrough for a task."),
-			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID to delete the walkthrough for")),
+			mcp.WithDescription("Delete the code walkthrough for a task. task_id defaults to your current task; pass another task's ID (within your reach — same workspace / task tree) to target it directly."),
+			mcp.WithString("task_id", mcp.Description("The task ID to delete the walkthrough for. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
 		),
 		s.wrapHandler("delete_walkthrough_kandev", s.deleteWalkthroughHandler()),
 	)
+}
+
+// registerReviewTools registers the native code-review publishing tool. An
+// agent uses it to turn its own reading of the diff into anchored findings that
+// render as inline comments in the user's Changes/Review panel, in the same
+// place the built-in review pass writes to.
+func (s *Server) registerReviewTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("publish_review_findings_kandev",
+			mcp.WithDescription(
+				"Publish code-review findings for this task. Each finding anchors a markdown explanation "+
+					"to a file and line range in the task's current changes, and renders as an inline "+
+					"review comment the user can resolve, dismiss, or send back to an agent. Findings are "+
+					"advisory: nothing is applied automatically. Only anchor to files that appear in the "+
+					"task's current changes, and use line numbers from the new version of the file. "+
+					"Report real defects — correctness, security, concurrency, error handling, resource "+
+					"leaks, contract breaks, missing tests — not style or formatting a linter owns. "+
+					"Be honest with severity; marking everything a blocker makes the review useless. "+
+					"Publishing adds to the task's findings; it does not replace earlier ones, except "+
+					"that an unresolved finding with the same file, line range, and title is refreshed. "+
+					"task_id defaults to your current task; pass another task's ID to target it directly, "+
+					"allowed only within your reach (same workspace / task tree)."),
+			mcp.WithString("task_id", mcp.Description("The task ID to attach the findings to. Defaults to your current task when omitted; pass another task's ID (within your reach — same workspace / task tree) to target it directly.")),
+			mcp.WithString("summary", mcp.Description("Optional one-paragraph summary of the review")),
+			mcp.WithArray("findings", mcp.Required(),
+				mcp.Description("Findings to publish, each anchored to a file and line range."),
+				mcp.Items(buildReviewFindingSchemaItem()),
+			),
+		),
+		s.wrapHandler("publish_review_findings_kandev", s.publishReviewFindingsHandler()),
+	)
+}
+
+// buildReviewFindingSchemaItem describes one finding object in the
+// publish_review_findings_kandev tool schema.
+func buildReviewFindingSchemaItem() map[string]any {
+	const typeKey = "type"
+	str := func(desc string) map[string]any {
+		return map[string]any{typeKey: "string", descriptionArg: desc}
+	}
+	num := func(desc string) map[string]any {
+		return map[string]any{typeKey: "integer", descriptionArg: desc}
+	}
+	return map[string]any{
+		typeKey: "object",
+		"properties": map[string]any{
+			"repo": str("Optional repository name; required only in a multi-repository task."),
+			"file": str("Path to a file in the task's current changes, relative to the repo root."),
+			"line": num("1-based start line in the new version of the file."),
+			"line_end": num(
+				"Optional 1-based end line. Use it only when the finding genuinely spans a range.",
+			),
+			"severity": map[string]any{
+				typeKey:        "string",
+				"enum":         []string{"blocker", "major", "minor", "nit"},
+				descriptionArg: "blocker breaks correctness or security; nit is genuinely optional.",
+			},
+			"category": str("Short kebab-case slug for the kind of issue, e.g. correctness, security."),
+			"title":    str("One line naming the specific defect."),
+			"body": str(
+				"Markdown explanation: what is wrong, the input or state that triggers it, and the consequence.",
+			),
+			"suggestion": str(
+				"Optional replacement code. Shown to the user but never applied automatically.",
+			),
+		},
+		"required": []string{"file", "line", "severity", "category", titleArg, "body"},
+	}
 }
 
 // buildWalkthroughStepSchemaItem describes one step object in the

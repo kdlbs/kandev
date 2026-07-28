@@ -13,12 +13,11 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/settings/controller"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
+	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
-
-const queryValueTrue = "true"
 
 var availableAgentsBroadcastTimeout = 10 * time.Second
 
@@ -26,25 +25,27 @@ type Handlers struct {
 	controller *controller.Controller
 	hub        Broadcaster
 	logger     *logger.Logger
+	interlock  gin.HandlerFunc
 }
 
 type Broadcaster interface {
 	Broadcast(msg *ws.Message)
 }
 
-func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logger) *Handlers {
+func NewHandlers(ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) *Handlers {
 	return &Handlers{
 		controller: ctrl,
 		hub:        hub,
 		logger:     log.WithFields(zap.String("component", "agent-settings-handlers")),
+		interlock:  httpmw.InterimSettingsInterlock(interlockToken),
 	}
 }
 
-func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger) {
+func RegisterRoutes(router *gin.Engine, ctrl *controller.Controller, hub Broadcaster, log *logger.Logger, interlockToken string) {
 	// Wire the install job store with the same broadcaster used by other
 	// agent-settings notifications so streaming install events reach the UI.
 	ctrl.SetJobBroadcaster(hub)
-	handlers := NewHandlers(ctrl, hub, log)
+	handlers := NewHandlers(ctrl, hub, log, interlockToken)
 	handlers.registerHTTP(router)
 }
 
@@ -52,24 +53,27 @@ func (h *Handlers) registerHTTP(router *gin.Engine) {
 	api := router.Group("/api/v1")
 	api.GET("/agents/discovery", h.httpDiscoverAgents)
 	api.GET("/agents/available", h.httpListAvailableAgents)
-	api.GET("/agents/usage", h.httpAgentSubscriptionUsage)
 	api.GET("/agents", h.httpListAgents)
-	api.POST("/agents", h.httpCreateAgent)
-	api.POST("/agents/tui", h.httpCreateCustomTUIAgent)
+	api.POST("/agents", h.interlock, h.httpCreateAgent)
+	api.POST("/agents/tui", h.interlock, h.httpCreateCustomTUIAgent)
 	api.GET("/agents/:id", h.httpGetAgent)
-	api.PATCH("/agents/:id", h.httpUpdateAgent)
-	api.DELETE("/agents/:id", h.httpDeleteAgent)
-	api.POST("/agents/:id/profiles", h.httpCreateProfile)
+	api.PATCH("/agents/:id", h.interlock, h.httpUpdateAgent)
+	api.DELETE("/agents/:id", h.interlock, h.httpDeleteAgent)
+	api.POST("/agents/:id/profiles", h.interlock, h.httpCreateProfile)
 	api.GET("/agents/:id/logo", h.httpGetAgentLogo)
 	api.GET("/agent-models/:agentName", h.httpGetAgentModels)
 	api.POST("/agent-command-preview/:agentName", h.httpPreviewAgentCommand)
-	api.POST("/agent-install/:agentName", h.httpInstallAgent)
+	api.POST("/agent-install/:agentName", h.interlock, h.httpInstallAgent)
+	api.GET("/agent-update/:agentName/preview", h.httpPreviewAgentUpdate)
 	api.GET("/agent-install/jobs", h.httpListInstallJobs)
 	api.GET("/agent-install/jobs/:id", h.httpGetInstallJob)
-	api.PATCH("/agent-profiles/:id", h.httpUpdateProfile)
-	api.DELETE("/agent-profiles/:id", h.httpDeleteProfile)
+	api.POST("/agent-update/:agentName", h.interlock, h.httpUpdateAgentRuntime)
+	api.GET("/agent-update/jobs", h.httpListAgentUpdateJobs)
+	api.GET("/agent-update/jobs/:id", h.httpGetAgentUpdateJob)
+	api.PATCH("/agent-profiles/:id", h.interlock, h.httpUpdateProfile)
+	api.DELETE("/agent-profiles/:id", h.interlock, h.httpDeleteProfile)
 	api.GET("/agent-profiles/:id/mcp-config", h.httpGetProfileMcpConfig)
-	api.POST("/agent-profiles/:id/mcp-config", h.httpUpdateProfileMcpConfig)
+	api.POST("/agent-profiles/:id/mcp-config", h.interlock, h.httpUpdateProfileMcpConfig)
 }
 
 func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
@@ -82,11 +86,6 @@ func (h *Handlers) httpDiscoverAgents(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, resp)
 	h.broadcastAvailableAgentsAsync()
-}
-
-func (h *Handlers) httpAgentSubscriptionUsage(c *gin.Context) {
-	fresh := c.Query("fresh") == queryValueTrue || c.Query("fresh") == "1"
-	c.JSON(http.StatusOK, h.controller.SubscriptionUsage(c.Request.Context(), fresh))
 }
 
 func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
@@ -106,27 +105,147 @@ func (h *Handlers) httpListAvailableAgents(c *gin.Context) {
 // Idempotent: a second POST for the same agent while a job is running returns
 // the existing job_id rather than starting a duplicate.
 func (h *Handlers) httpInstallAgent(c *gin.Context) {
+	name, ok := requireAgentName(c)
+	if !ok {
+		return
+	}
+	h.enqueueMaintenance(c, name, "install", func() (any, error) {
+		return h.controller.EnqueueInstall(name)
+	}, classifyInstallError)
+}
+
+func (h *Handlers) httpUpdateAgentRuntime(c *gin.Context) {
+	name, ok := requireAgentName(c)
+	if !ok {
+		return
+	}
+	h.enqueueMaintenance(c, name, "update", func() (any, error) {
+		return h.controller.EnqueueAgentUpdate(name)
+	}, classifyUpdateError)
+}
+
+func (h *Handlers) httpPreviewAgentUpdate(c *gin.Context) {
+	name, ok := requireAgentName(c)
+	if !ok {
+		return
+	}
+	preview, err := h.controller.PreviewAgentUpdate(c.Request.Context(), name)
+	if err == nil {
+		c.JSON(http.StatusOK, preview)
+		return
+	}
+	if status, message, matched := classifyUpdatePreviewError(err); matched {
+		c.JSON(status, gin.H{"error": message})
+		return
+	}
+	h.logger.Error("failed to preview agent runtime update", zap.String("agent", name), zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to preview agent update"})
+}
+
+func requireAgentName(c *gin.Context) (string, bool) {
 	name := strings.TrimSpace(c.Param("agentName"))
 	if name == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "agent name is required"})
+		return "", false
+	}
+	return name, true
+}
+
+func writeMaintenanceConflictIfPresent(c *gin.Context, err error) bool {
+	var conflict *controller.MaintenanceConflictError
+	if !errors.As(err, &conflict) {
+		return false
+	}
+	writeMaintenanceConflict(c, conflict)
+	return true
+}
+
+type maintenanceErrorClassifier func(error) (int, string, bool)
+
+func (h *Handlers) enqueueMaintenance(
+	c *gin.Context,
+	name string,
+	kind string,
+	enqueue func() (any, error),
+	classify maintenanceErrorClassifier,
+) {
+	job, err := enqueue()
+	if err == nil {
+		c.JSON(http.StatusAccepted, job)
 		return
 	}
-	job, err := h.controller.EnqueueInstall(name)
-	if err != nil {
-		switch {
-		case errors.Is(err, controller.ErrAgentNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
-		case errors.Is(err, controller.ErrInstallScriptEmpty):
-			c.JSON(http.StatusBadRequest, gin.H{"error": "agent has no install script"})
-		case errors.Is(err, controller.ErrJobStoreUnavailable):
-			c.JSON(http.StatusServiceUnavailable, gin.H{"error": "install service not ready"})
-		default:
-			h.logger.Error("failed to enqueue install", zap.String("agent", name), zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue install"})
-		}
+	if writeMaintenanceConflictIfPresent(c, err) {
 		return
 	}
-	c.JSON(http.StatusAccepted, job)
+	if status, message, matched := classify(err); matched {
+		c.JSON(status, gin.H{"error": message})
+		return
+	}
+	h.logger.Error("failed to enqueue agent maintenance",
+		zap.String("agent", name), zap.String("kind", kind), zap.Error(err))
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enqueue agent " + kind})
+}
+
+func classifyInstallError(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, controller.ErrAgentNotFound):
+		return http.StatusNotFound, "agent not found", true
+	case errors.Is(err, controller.ErrInstallScriptEmpty):
+		return http.StatusBadRequest, "agent has no install script", true
+	case errors.Is(err, controller.ErrJobStoreUnavailable):
+		return http.StatusServiceUnavailable, "install service not ready", true
+	default:
+		return 0, "", false
+	}
+}
+
+func classifyUpdateError(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, controller.ErrAgentNotFound):
+		return http.StatusNotFound, "agent not found", true
+	case errors.Is(err, controller.ErrRuntimeUpdateUnsupported):
+		return http.StatusBadRequest, "agent runtime update unsupported", true
+	case errors.Is(err, controller.ErrRuntimeUpdaterUnavailable):
+		return http.StatusServiceUnavailable, "agent update service not ready", true
+	default:
+		return 0, "", false
+	}
+}
+
+func classifyUpdatePreviewError(err error) (int, string, bool) {
+	if status, message, matched := classifyUpdateError(err); matched {
+		return status, message, true
+	}
+	if errors.Is(err, controller.ErrRuntimeUpdatePreviewFailed) {
+		return http.StatusBadGateway, "unable to resolve latest runtime version", true
+	}
+	return 0, "", false
+}
+
+func (h *Handlers) httpListAgentUpdateJobs(c *gin.Context) {
+	c.JSON(http.StatusOK, dto.ListAgentUpdateJobsResponse{Jobs: h.controller.ListAgentUpdateJobs()})
+}
+
+func (h *Handlers) httpGetAgentUpdateJob(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
+	if id == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "job id is required"})
+		return
+	}
+	job, ok := h.controller.GetAgentUpdateJob(id)
+	if !ok {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+	c.JSON(http.StatusOK, job)
+}
+
+func writeMaintenanceConflict(c *gin.Context, conflict *controller.MaintenanceConflictError) {
+	c.JSON(http.StatusConflict, gin.H{
+		"error":         conflict.Error(),
+		"active_job_id": conflict.Active.JobID,
+		"active_kind":   conflict.Active.Kind,
+	})
 }
 
 func (h *Handlers) httpListInstallJobs(c *gin.Context) {
@@ -184,11 +303,12 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name     string                 `json:"name"`
-	Model    string                 `json:"model"`
-	Mode     string                 `json:"mode,omitempty"`
-	CLIFlags []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars  []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	Name          string                 `json:"name"`
+	Model         string                 `json:"model"`
+	Mode          string                 `json:"mode,omitempty"`
+	CLIFlags      []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars       []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -208,11 +328,12 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			return
 		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
-			Name:     profile.Name,
-			Model:    profile.Model,
-			Mode:     profile.Mode,
-			CLIFlags: profile.CLIFlags,
-			EnvVars:  profile.EnvVars,
+			Name:          profile.Name,
+			Model:         profile.Model,
+			Mode:          profile.Mode,
+			CLIFlags:      profile.CLIFlags,
+			EnvVars:       profile.EnvVars,
+			CommandPrefix: profile.CommandPrefix,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
@@ -221,6 +342,10 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 		Profiles:    profiles,
 	})
 	if err != nil {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
 		h.logger.Error("failed to create agent", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -373,6 +498,7 @@ type createProfileRequest struct {
 	CLIPassthrough bool                   `json:"cli_passthrough"`
 	CLIFlags       []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars        []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix  string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpCreateProfile(c *gin.Context) {
@@ -396,9 +522,10 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
+		CommandPrefix:  body.CommandPrefix,
 	})
 	if err != nil {
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -425,6 +552,7 @@ type updateProfileRequest struct {
 	CLIPassthrough *bool                   `json:"cli_passthrough,omitempty"`
 	CLIFlags       *[]dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
 	EnvVars        *[]dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix  *string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpUpdateProfile(c *gin.Context) {
@@ -448,13 +576,14 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 		CLIPassthrough: body.CLIPassthrough,
 		CLIFlags:       body.CLIFlags,
 		EnvVars:        body.EnvVars,
+		CommandPrefix:  body.CommandPrefix,
 	})
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
 			c.JSON(http.StatusNotFound, gin.H{"error": "agent profile not found"})
 			return
 		}
-		if errors.Is(err, controller.ErrInvalidProfileEnvVars) {
+		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -472,7 +601,7 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 }
 
 func (h *Handlers) httpDeleteProfile(c *gin.Context) {
-	force := c.Query("force") == queryValueTrue
+	force := c.Query("force") == "true"
 	profile, err := h.controller.DeleteProfile(c.Request.Context(), c.Param("id"), force)
 	if err != nil {
 		if err == controller.ErrAgentProfileNotFound {
@@ -507,6 +636,7 @@ type commandPreviewRequest struct {
 	PermissionSettings map[string]bool  `json:"permission_settings"`
 	CLIPassthrough     bool             `json:"cli_passthrough"`
 	CLIFlags           []dto.CLIFlagDTO `json:"cli_flags"`
+	CommandPrefix      string           `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
@@ -527,6 +657,7 @@ func (h *Handlers) httpPreviewAgentCommand(c *gin.Context) {
 		PermissionSettings: body.PermissionSettings,
 		CLIPassthrough:     body.CLIPassthrough,
 		CLIFlags:           body.CLIFlags,
+		CommandPrefix:      body.CommandPrefix,
 	})
 	if err != nil {
 		h.logger.Error("failed to preview agent command", zap.Error(err))
@@ -574,7 +705,7 @@ func (h *Handlers) httpGetAgentModels(c *gin.Context) {
 	}
 
 	// Check for refresh query parameter
-	refresh := c.Query("refresh") == queryValueTrue
+	refresh := c.Query("refresh") == "true"
 
 	resp, err := h.controller.FetchDynamicModels(c.Request.Context(), agentName, refresh)
 	if err != nil {

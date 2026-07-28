@@ -76,9 +76,16 @@ export function ConnectionStatusItem({ presentation }: { presentation: "bar" | "
             className={`size-1.5 shrink-0 rounded-full ${details.dotClass} ${details.animate ? "animate-pulse" : ""}`}
             aria-hidden="true"
           />
-          <span className={presentation === "bar" ? "sr-only" : "text-foreground"}>
-            {presentation === "bar" ? details.label : details.description}
-          </span>
+          {presentation === "bar" ? (
+            <span className="sr-only">{details.label}</span>
+          ) : (
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                Connection
+              </span>
+              <span className="text-sm font-medium text-foreground">{details.description}</span>
+            </span>
+          )}
         </span>
       </TooltipTrigger>
       <TooltipContent>{details.description}</TooltipContent>

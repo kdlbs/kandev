@@ -81,6 +81,15 @@ type Manager struct {
 	// from agentctl instances through the agent stream.
 	mcpHandler agentctl.MCPHandler
 
+	// sessionAccessCheck enforces per-user workspace scoping on session-scoped
+	// surfaces (opt-in auth). Nil = no scoping. See SetSessionAccessChecker.
+	sessionAccessCheck func(ctx context.Context, sessionID string) error
+
+	// environmentAccessCheck is the environment-keyed sibling of
+	// sessionAccessCheck, used by the terminal environment-shell route which
+	// resolves executions by environment ID. Nil = no scoping.
+	environmentAccessCheck func(ctx context.Context, environmentID string) error
+
 	// singleflight deduplicates concurrent GetOrEnsureExecution calls for the same session
 	ensureExecutionGroup singleflight.Group
 
@@ -109,6 +118,12 @@ type Manager struct {
 	// See SetExecutorRunningWriter and persistence.go. The lifecycle manager is the
 	// only component allowed to write the lifecycle-owned columns of this table.
 	runningWriter ExecutorRunningWriter
+
+	// executorProfileReader resolves the executor profile bound to a task
+	// environment so user shell terminals can be given the same profile env
+	// vars the agent subprocess gets. See executor_profile_env.go. Nil → the
+	// terminal inherits only the backend process environment.
+	executorProfileReader ExecutorProfileReader
 
 	// agentProfileReader resolves the full agent_profiles row (including the
 	// office-enrichment fields added in ADR 0005 Wave A) for the launch-prep
@@ -338,6 +353,59 @@ func (m *Manager) SetMCPHandler(handler agentctl.MCPHandler) {
 	m.mcpHandler = handler
 	// Update the stream manager with the handler
 	m.streamManager.mcpHandler = handler
+}
+
+// SetMCPIdentityScoper installs the per-user scoping hook for in-session MCP
+// tool calls.
+//
+// Unlike the external /mcp endpoint — where the agent presents a personal
+// access token and the auth middleware resolves the identity — MCP requests
+// relayed over an agent's own stream carry no credential. Without this hook
+// they reach the task service with no identity, which that service reads as an
+// internal caller and serves unscoped, so an agent supplying another user's
+// task_id or workflow_id would be given their data.
+//
+// Set once during startup wiring, before agents start making MCP calls. Leave
+// unset to keep dispatch unscoped (single-user instances).
+func (m *Manager) SetMCPIdentityScoper(scoper MCPIdentityScoper) {
+	m.streamManager.mcpIdentityScoper = scoper
+}
+
+// SetSessionAccessChecker installs the per-user session visibility check used
+// by GetOrEnsureExecution and EnsurePassthroughExecution. The checker must
+// return nil for contexts without a request identity (internal callers). Set
+// once during startup wiring, before the HTTP server accepts connections.
+func (m *Manager) SetSessionAccessChecker(check func(ctx context.Context, sessionID string) error) {
+	m.sessionAccessCheck = check
+}
+
+// SetEnvironmentAccessChecker installs the per-user environment visibility
+// check used by GetOrEnsureExecutionForEnvironment (terminal env-shell route).
+func (m *Manager) SetEnvironmentAccessChecker(check func(ctx context.Context, environmentID string) error) {
+	m.environmentAccessCheck = check
+}
+
+// CheckSessionAccess authorizes a session-scoped operation for the ctx
+// identity. Handlers that resolve an execution by a bare in-memory lookup
+// (vscode/port reverse proxies) must call this before serving, since only the
+// GetOrEnsure* paths run the check internally. No-op when no checker is set.
+func (m *Manager) CheckSessionAccess(ctx context.Context, sessionID string) error {
+	if m.sessionAccessCheck == nil {
+		return nil
+	}
+	return m.sessionAccessCheck(ctx, sessionID)
+}
+
+// CheckEnvironmentAccess authorizes an environment-scoped operation for the ctx
+// identity. The environment-keyed sibling of CheckSessionAccess, for handlers
+// that act on a task environment without going through
+// GetOrEnsureExecutionForEnvironment (the user-shell tear-down path).
+// No-op when no checker is set.
+func (m *Manager) CheckEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error {
+	if m.environmentAccessCheck == nil {
+		return nil
+	}
+	return m.environmentAccessCheck(ctx, taskEnvironmentID)
 }
 
 // SetWorkspaceInfoProvider sets the provider for workspace information.

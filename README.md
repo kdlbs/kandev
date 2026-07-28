@@ -70,13 +70,13 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 
 | Agent | Launch |
 |:-------:|:----------:|
-| **Claude Code** | `npx -y @agentclientprotocol/claude-agent-acp` |
-| **Codex** | `npx -y @agentclientprotocol/codex-acp` |
-| **GitHub Copilot** | `npx -y @github/copilot --acp` |
-| **Gemini CLI** | `npx -y @google/gemini-cli --acp` |
+| **Claude Code** | `npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp` |
+| **Codex** | `npx --yes --prefer-offline @agentclientprotocol/codex-acp` |
+| **GitHub Copilot** | `npx --yes --prefer-offline @github/copilot --acp` |
+| **Gemini CLI** | `npx --yes --prefer-offline @google/gemini-cli --acp` |
 | **Amp** | `npx -y amp-acp` |
 | **Auggie** | `npx -y @augmentcode/auggie --acp` |
-| **OpenCode** | `opencode acp` |
+| **OpenCode** | `npx --yes --prefer-offline opencode-ai acp` |
 | **Cursor** | `cursor-agent acp` *(requires Cursor Pro)* |
 | **Devin** | `devin acp` *(install Devin CLI from Devin Desktop or standalone installer)* |
 | **Qwen** | `npx -y @qwen-code/qwen-code --acp` |
@@ -92,6 +92,13 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 | **Grok** | `grok --no-auto-update agent stdio` *(install `npm install -g @xai-official/grok`)* |
 
 > All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
+
+Kandev does not pin the managed npm runtimes for Claude, Codex, OpenCode,
+Copilot, or Gemini. Normal launches can reuse npm's best-effort execution
+cache. To deliberately fetch an upstream release, use **Update agent** in
+**Settings > Agents**; Kandev updates the host runtime and refreshes its
+advertised models and modes for future sessions without restarting active
+sessions. See [Agents and Profiles](docs/public/agents-and-profiles.md#update-a-managed-agent-runtime).
 
 ### Bring your own TUI agents
 

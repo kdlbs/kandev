@@ -40,6 +40,8 @@ type mockAgent struct {
 	mu              sync.Mutex
 }
 
+var _ acp.Agent = (*mockAgent)(nil)
+
 func main() {
 	model := parseModelFlag()
 
@@ -325,6 +327,14 @@ func (a *mockAgent) CloseSession(_ context.Context, req acp.CloseSessionRequest)
 	return acp.CloseSessionResponse{}, nil
 }
 
+// DeleteSession is not supported by the mock agent.
+func (a *mockAgent) DeleteSession(
+	_ context.Context,
+	_ acp.DeleteSessionRequest,
+) (acp.DeleteSessionResponse, error) {
+	return acp.DeleteSessionResponse{}, acp.NewMethodNotFound(acp.AgentMethodSessionDelete)
+}
+
 // ListSessions is not supported by the mock and returns an empty list.
 func (a *mockAgent) ListSessions(_ context.Context, _ acp.ListSessionsRequest) (acp.ListSessionsResponse, error) {
 	return acp.ListSessionsResponse{}, nil
@@ -379,6 +389,10 @@ func mockAvailableCommands() []acp.AvailableCommand {
 	}
 	return []acp.AvailableCommand{
 		{Name: "slow", Description: "Run a slow response (default 5s)", Input: hint("duration (e.g. 10s)")},
+		{Name: "background", Description: "Spawn a subagent and stay foreground-idle (default 8s)", Input: hint("duration (e.g. 8s)")},
+		{Name: "detached-background", Description: "Launch work that outlives the foreground turn (default 8s)", Input: hint("duration (e.g. 8s)")},
+		{Name: "async-subagent-lifecycle", Description: "Replay an async Agent lifecycle (default 20s)", Input: hint("duration (e.g. 20s)")},
+		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
 		{Name: "error", Description: "Simulate an error"},
 		{Name: "overloaded", Description: "Simulate a transient 529 Overloaded error (fails once, then recovers)"},
 		{Name: "thinking", Description: "Emit thinking/reasoning blocks"},

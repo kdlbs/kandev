@@ -127,8 +127,9 @@ export KANDEV_HOME_DIR=/data
 export KANDEV_DOCKER_ENABLED=false
 export KANDEV_LOG_LEVEL=info
 export KANDEV_WEB_DIST_DIR=/app/apps/web/dist
-# Preview mode: only register the mock agent, suppress real agent discovery.
-export KANDEV_MOCK_AGENT=only
+# Preview mode: keep the mock agent while loading the built-in agent catalogue
+# so Settings can show agents that are available to install.
+export KANDEV_MOCK_AGENT=true
 # The preview service runs from /app, so the backend's relative dist probes do
 # not reach the packaged Vite build under /app/apps/web/dist.
 export KANDEV_WEB_DIST_DIR=/app/apps/web/dist

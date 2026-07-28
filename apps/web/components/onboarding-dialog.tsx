@@ -101,6 +101,7 @@ function buildAgentSettings(
           mode: profile.mode ?? aa.model_config.current_mode_id ?? "",
           cli_passthrough: profile.cliPassthrough ?? false,
           cli_flags: profile.cliFlags ?? [],
+          command_prefix: profile.commandPrefix ?? "",
           ...perms,
         },
         dirty: false,
@@ -267,6 +268,7 @@ export function OnboardingDialog({ open, onComplete }: OnboardingDialogProps) {
             ...permissionsToProfilePatch(s.formData),
             cli_passthrough: s.formData.cli_passthrough,
             cli_flags: s.formData.cli_flags,
+            command_prefix: s.formData.command_prefix,
           }),
         ),
     );

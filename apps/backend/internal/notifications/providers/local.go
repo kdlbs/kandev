@@ -28,15 +28,21 @@ func (p *LocalProvider) Send(_ context.Context, message Message) error {
 	if p.hub == nil {
 		return fmt.Errorf("websocket hub not available")
 	}
-	msg, err := ws.NewNotification(ws.ActionSessionWaitingForInput, map[string]interface{}{
-		"task_id":    message.TaskID,
-		"session_id": message.TaskSessionID,
-		"title":      message.Title,
-		"body":       message.Body,
+	msg, err := ws.NewNotification(message.EventType, map[string]interface{}{
+		"task_id":       message.TaskID,
+		"session_id":    message.TaskSessionID,
+		"occurrence_id": message.OccurrenceID,
+		"title":         message.Title,
+		"body":          message.Body,
+		"version":       message.Payload["version"],
+		"url":           message.Payload["url"],
 	})
 	if err != nil {
 		return err
 	}
-	p.hub.BroadcastToUser(message.UserID, msg)
+	msg.ID = message.OccurrenceID
+	if !p.hub.BroadcastToUser(message.UserID, msg) {
+		return ErrNoEligibleSubscriber
+	}
 	return nil
 }

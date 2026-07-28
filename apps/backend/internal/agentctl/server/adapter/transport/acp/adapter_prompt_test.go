@@ -56,6 +56,64 @@ func TestCancelActiveToolCalls_PreservesSubagentTask(t *testing.T) {
 	}
 }
 
+func TestPromptEndSweepsPreserveHandoffBackgroundLineage(t *testing.T) {
+	a := newTestAdapter()
+	parent := streams.NewSubagentTask("Investigate", "keep working", "general-purpose")
+	parent.SetBackgroundWorkIdentity(
+		streams.BackgroundWorkKindSubagent,
+		"subagent-1",
+		false,
+		false,
+	)
+	a.activeToolCalls["subagent-1"] = parent
+	a.activeToolCalls["child-bash-1"] = streams.NewShellExec("sleep 30", "", "child work", 0, false)
+	a.activeToolCalls["monitor-1"] = streams.NewGeneric("Monitor", map[string]any{})
+	a.activeMonitors["session-1"] = map[string]string{"task-1": "monitor-1"}
+	a.trackToolCallLineage("child-bash-1", "subagent-1")
+
+	a.protectActiveBackgroundWorkForHandoff("session-1")
+
+	// This tool belongs to the human successor and should still receive normal
+	// prompt-end cleanup.
+	a.activeToolCalls["successor-bash-1"] = streams.NewShellExec("false", "", "successor work", 0, false)
+	a.cancelPromptEndToolCalls("session-1")
+	a.sweepMonitorsOnPromptEnd("session-1")
+
+	a.mu.RLock()
+	_, parentTracked := a.activeToolCalls["subagent-1"]
+	_, childTracked := a.activeToolCalls["child-bash-1"]
+	_, monitorTracked := a.activeToolCalls["monitor-1"]
+	_, successorTracked := a.activeToolCalls["successor-bash-1"]
+	monitorToolCallID, monitorActive := a.activeMonitors["session-1"]["task-1"]
+	a.mu.RUnlock()
+	if !parentTracked || !childTracked || !monitorTracked {
+		t.Fatalf(
+			"handoff background tracking = parent:%t child:%t monitor:%t, want all true",
+			parentTracked,
+			childTracked,
+			monitorTracked,
+		)
+	}
+	if successorTracked {
+		t.Fatal("successor-owned tool escaped prompt-end cleanup")
+	}
+	if !monitorActive || monitorToolCallID != "monitor-1" {
+		t.Fatalf("predecessor monitor tracking = (%q, %t), want (monitor-1, true)", monitorToolCallID, monitorActive)
+	}
+
+	events := drainEvents(a)
+	if len(events) != 1 ||
+		events[0].ToolCallID != "successor-bash-1" ||
+		events[0].ToolStatus != toolStatusCancelled {
+		t.Fatalf("prompt-end events = %+v, want one cancelled successor tool", events)
+	}
+
+	a.cancelActiveToolCalls("session-1")
+	if len(a.toolCallParents) != 0 || len(a.handoffProtectedToolCalls) != 0 {
+		t.Fatal("explicit session cancellation retained prompt handoff tool ownership")
+	}
+}
+
 func TestBuildPromptContentBlocks_PathModeAttachmentSavesWritableFile(t *testing.T) {
 	a := newTestAdapter()
 	t.Cleanup(func() { _ = a.Close() })

@@ -55,7 +55,7 @@ type TaskRepository interface {
 	// need the archived_at IS NULL guarantee. Returns whether a row was
 	// modified.
 	UpdateTaskStateIfNotArchived(ctx context.Context, taskID string, state v1.TaskState) (bool, error)
-	// UpdateTaskStateIfSessionState additionally pins the owning session's
+	// UpdateTaskStateIfSessionState additionally pins the named session's
 	// current state, closing races with clarification and terminal transitions.
 	UpdateTaskStateIfSessionState(
 		ctx context.Context,

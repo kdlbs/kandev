@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# check-make-shells — assert that apps/backend/Makefile's run/dev/start-debug
+# targets expand to the correct per-shell command line, without running them.
+#
+# The Makefile dispatches on two independent axes:
+#   * EXE suffix   — keyed on $(OS): any Windows build (native cmd/PowerShell
+#                    OR Git Bash) produces kandev.exe.
+#   * shell syntax — keyed on $(OS)$(MSYSTEM): only native cmd/PowerShell uses
+#                    `set VAR=VAL&` + backslash path + no exec; Unix and Git
+#                    Bash/MSYS use POSIX `VAR=val exec`.
+# Git Bash is the trap — it sets OS=Windows_NT yet runs recipes through sh, so
+# it must take the POSIX branch while keeping the .exe suffix. Conflating the
+# two axes (the pre-fix bug) made Git Bash emit `set VAR=VAL&` into bash, where
+# the env var is never exported.
+#
+# Each shell is simulated deterministically with make's OS=/MSYSTEM=
+# command-line overrides, so one host checks the dispatch for all three shells
+# without having to run on each. The harness itself is bash (grep, sed), so it
+# needs a POSIX shell — it runs in the Linux CI job and under Git Bash/WSL
+# locally, not from native cmd.exe/PowerShell. Covers the Make-target dispatch
+# that the backend Go CI jobs don't exercise.
+
+set -euo pipefail
+
+backend_dir="$(cd "$(dirname "$0")/../apps/backend" && pwd)"
+
+status=0
+
+# expect <label> <OS> <MSYSTEM> <target> <expected recipe tail>
+expect() {
+	local label=$1 os=$2 msys=$3 target=$4 want=$5 got
+	# The OS=/MSYSTEM= overrides only steer which branch the Makefile picks;
+	# $(shell ...) still runs under this harness's POSIX shell, and it expands
+	# even under `make -n`. So neutralise the build-stamp probes rather than let
+	# the windows-native case run them: NULL_REDIR=NUL would have sh create a
+	# junk ./NUL, and BUILD_TIME would spawn PowerShell per case. Blanking
+	# NULL_REDIR (rather than passing /dev/null) also dodges Git Bash rewriting
+	# a /dev/null argument to `nul` on its way to native make. None of this
+	# affects the run/dev/start-debug recipes under assertion.
+	got=$(make -C "$backend_dir" OS="$os" MSYSTEM="$msys" NULL_REDIR= BUILD_TIME=simulated -n "$target" 2>/dev/null \
+		| grep -F __backend \
+		| sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]]\{1,\}/ /g' \
+		|| true)
+	if [ "$got" = "$want" ]; then
+		printf 'ok    %-16s %-12s %s\n' "$label" "$target" "$got"
+	else
+		printf 'FAIL  %-16s %-12s\n        want: %s\n        got:  %s\n' \
+			"$label" "$target" "$want" "$got"
+		status=1
+	fi
+}
+
+# Unix — no .exe, POSIX env-prefix + exec.
+expect unix '' '' run         './bin/kandev __backend'
+expect unix '' '' dev         'KANDEV_DEBUG_PPROF_ENABLED=true exec ./bin/kandev __backend'
+expect unix '' '' start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./bin/kandev __backend'
+
+# Native Windows (cmd/PowerShell) — .exe, `set VAR=VAL&`, backslash path, no exec.
+expect windows-native Windows_NT '' run         '"bin\kandev.exe" __backend'
+expect windows-native Windows_NT '' dev         'set KANDEV_DEBUG_PPROF_ENABLED=true& "bin\kandev.exe" __backend'
+expect windows-native Windows_NT '' start-debug 'set KANDEV_DEBUG_PPROF_ENABLED=true& set KANDEV_LOG_LEVEL=debug& "bin\kandev.exe" __backend'
+
+# Git Bash/MSYS — .exe suffix but POSIX syntax (recipes run through sh).
+expect git-bash Windows_NT MINGW64 run         './bin/kandev.exe __backend'
+expect git-bash Windows_NT MINGW64 dev         'KANDEV_DEBUG_PPROF_ENABLED=true exec ./bin/kandev.exe __backend'
+expect git-bash Windows_NT MINGW64 start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./bin/kandev.exe __backend'
+
+# Static guard: no literal /dev/null inside $(shell ...).
+#
+# Unlike a recipe, which only ever runs on a platform its target supports,
+# $(shell ...) expands at parse time on EVERY invocation, through whatever shell
+# make picked. Under native cmd there is no /dev/null: cmd resolves the
+# redirection first, fails on the missing \dev directory, and hands the value to
+# the fallback — so the probe silently returns its default on Windows while
+# every POSIX host looks fine. Use $(NULL_REDIR), which carries the right token
+# per shell. This runs on the Linux CI, where the Windows branch is otherwise
+# never exercised.
+# Fail closed: grep exits 1 for "no matches" but >1 for a real scan error, and
+# swallowing the difference would let an unreadable or moved Makefile report ok.
+grep_status=0
+# `#` starts a comment anywhere in a Makefile line, so the match must not span
+# one: [^#]* keeps a prose mention like `FOO = bar # $(shell x 2>/dev/null)`
+# from failing CI, and cannot reach past a whole-line comment either. It matches
+# empty so a bare `$(shell ...)` in column 0 still counts.
+devnull_hits=$(grep -nE '^[[:space:]]*[^#]*\$\(shell[^#]*/dev/null' \
+	"$backend_dir/../../Makefile" "$backend_dir/Makefile") || grep_status=$?
+if [ "$grep_status" -gt 1 ]; then
+	printf 'FAIL  %-16s unable to scan Makefiles (grep exit %s)\n' "static" "$grep_status"
+	status=1
+elif [ -n "$devnull_hits" ]; then
+	printf 'FAIL  %-16s literal /dev/null inside $(shell ...) — use $(NULL_REDIR)\n' "static"
+	printf '        %s\n' "$devnull_hits"
+	status=1
+else
+	printf 'ok    %-16s %s\n' "static" 'no literal /dev/null inside $(shell ...)'
+fi
+
+if [ "$status" -eq 0 ]; then
+	echo "All Makefile shell-dispatch checks passed (3 shells x 3 targets, plus static guard)."
+fi
+exit "$status"

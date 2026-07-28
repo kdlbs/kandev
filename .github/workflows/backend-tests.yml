@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - "apps/backend/**"
+      # check-make-shells also lints the root Makefile's $(shell ...) probes, so
+      # a change there has to be able to trip it.
+      - "Makefile"
+      - "scripts/check-make-shells"
       - ".github/workflows/backend-tests.yml"
       - "!**/*.md"
       - "!**/*.mdx"
@@ -13,6 +17,8 @@ on:
     branches: [main]
     paths:
       - "apps/backend/**"
+      - "Makefile"
+      - "scripts/check-make-shells"
       - ".github/workflows/backend-tests.yml"
       - "!**/*.md"
       - "!**/*.mdx"
@@ -79,6 +85,13 @@ jobs:
 
       - name: Build
         run: go build -v ./cmd/kandev
+
+      # Assert the run/dev/start-debug targets expand to the right per-shell
+      # command line (native Windows / Git Bash / Unix). The windows-latest job
+      # below compiles Go but never exercises this Make-target dispatch, so a
+      # regression in the OS/MSYSTEM guards would otherwise ship unnoticed.
+      - name: Check Makefile shell dispatch
+        run: make check-make-shells
 
       - name: Resolve base SHA
         shell: bash

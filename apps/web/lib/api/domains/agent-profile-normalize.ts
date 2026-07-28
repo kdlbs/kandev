@@ -22,6 +22,11 @@ function pickBool(raw: RawProfile, camel: string, snake: string, fallback = fals
   return typeof value === "boolean" ? value : fallback;
 }
 
+function pickOptionalString(raw: RawProfile, camel: string, snake: string): string | undefined {
+  const value = raw[camel] ?? raw[snake];
+  return typeof value === "string" ? value : undefined;
+}
+
 function pickFlags(raw: RawProfile): CLIFlag[] {
   const value = raw.cliFlags ?? raw.cli_flags;
   return Array.isArray(value) ? (value as CLIFlag[]) : [];
@@ -60,6 +65,7 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     allowIndexing: pickBool(profile, "allowIndexing", "allow_indexing"),
     autoApprove: pickBool(profile, "autoApprove", "auto_approve"),
     cliFlags: pickFlags(profile),
+    commandPrefix: pickOptionalString(profile, "commandPrefix", "command_prefix"),
     envVars: pickEnvVars(profile),
     cliPassthrough: pickBool(profile, "cliPassthrough", "cli_passthrough"),
     userModified: (profile.userModified ?? profile.user_modified) as boolean | undefined,
@@ -96,6 +102,7 @@ export function toAgentProfilePayload(
   setPayloadField(payload, "allow_indexing", profile.allowIndexing);
   setPayloadField(payload, "auto_approve", profile.autoApprove);
   setPayloadField(payload, "cli_flags", profile.cliFlags);
+  setPayloadField(payload, "command_prefix", profile.commandPrefix);
   setPayloadField(payload, "env_vars", profile.envVars);
   setPayloadField(payload, "cli_passthrough", profile.cliPassthrough);
   setPayloadField(payload, "user_modified", profile.userModified);

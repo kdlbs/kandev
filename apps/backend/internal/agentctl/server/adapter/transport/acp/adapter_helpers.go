@@ -8,10 +8,11 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// derefStr safely dereferences a string pointer, returning empty string if nil.
-func derefStr(s *string) string {
+// derefStr safely dereferences a pointer to a string or named string type,
+// returning empty string if nil.
+func derefStr[T ~string](s *T) string {
 	if s != nil {
-		return *s
+		return string(*s)
 	}
 	return ""
 }

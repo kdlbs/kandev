@@ -69,6 +69,12 @@ func (c *branchProtectionCache) set(key string, bp BranchProtection) {
 	c.m[key] = bp
 }
 
+func (c *branchProtectionCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.m = make(map[string]BranchProtection)
+}
+
 func branchProtectionKey(owner, repo, branch string) string {
 	return owner + "/" + repo + "@" + branch
 }
@@ -89,10 +95,26 @@ type BranchProtectionFetcher interface {
 // Result is cached for branchProtectionCacheTTL. nil never gets cached so a
 // transient error is retried on the next sync.
 func (s *Service) fetchRequiredReviews(ctx context.Context, owner, repo, branch string) *int {
+	return s.fetchRequiredReviewsWithClient(ctx, s.client, "legacy", owner, repo, branch)
+}
+
+func (s *Service) fetchRequiredReviewsForWorkspace(
+	ctx context.Context, workspaceID, owner, repo, branch string,
+) *int {
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
+	if err != nil {
+		return nil
+	}
+	return s.fetchRequiredReviewsWithClient(ctx, resolved.Client, resolved.CacheScope, owner, repo, branch)
+}
+
+func (s *Service) fetchRequiredReviewsWithClient(
+	ctx context.Context, client Client, cacheScope, owner, repo, branch string,
+) *int {
 	if owner == "" || repo == "" || branch == "" {
 		return nil
 	}
-	key := branchProtectionKey(owner, repo, branch)
+	key := scopedCacheKey(cacheScope, branchProtectionKey(owner, repo, branch))
 	if bp, ok := s.protectionCache.get(key); ok {
 		if !bp.HasRule {
 			return nil
@@ -100,7 +122,7 @@ func (s *Service) fetchRequiredReviews(ctx context.Context, owner, repo, branch 
 		n := bp.RequiredApprovingReviewCount
 		return &n
 	}
-	fetcher, ok := s.client.(BranchProtectionFetcher)
+	fetcher, ok := client.(BranchProtectionFetcher)
 	if !ok {
 		return nil
 	}

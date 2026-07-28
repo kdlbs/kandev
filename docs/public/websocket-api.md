@@ -686,6 +686,7 @@ environment.created
 environment.updated
 environment.deleted
 session.state_changed
+session.activity_changed
 session.turn.started
 session.turn.completed
 session.poll_mode_changed
@@ -700,6 +701,15 @@ system.job.update
 ```
 
 Current lifecycle code broadcasts `session.turn.started` and `session.turn.completed` globally even though their payloads identify a session. `task.subscribe` does not change this global routing.
+
+`session.activity_changed` carries `task_id`, `session_id`, `foreground_activity`,
+and `active_subagent_count`. The activity is `generating`, `background`, or
+`null`; the count is always an integer and is zero when no adapter-attested
+subagent is live for that session. Task lifecycle notifications expose the same count
+aggregated across
+the task's sessions as `active_subagent_count`. Count-only changes may emit
+`session.activity_changed` and `task.updated` even when the foreground activity
+and coarse lifecycle state do not change.
 
 Office workspace notifications are also global; clients filter on `workspace_id`:
 
@@ -758,7 +768,10 @@ File changes are batched for up to 100 ms and flushed immediately at 50 entries.
 | Routing key | Action | Notes |
 |-------------|--------|-------|
 | subscribed user | `user.settings.updated` | Requires `user.subscribe`. |
-| subscribed user | `session.waiting_for_input` | Local user notification with task/session/title/body fields; it is not delivered by `session.subscribe`. |
+| subscribed user | `session.turn_finished` | Local user notification for a completed agent turn, with task/session/occurrence/title/body fields; the turn ID is sent as both the envelope `id` and payload `occurrence_id`. It is not delivered by `session.subscribe`. |
+| subscribed user | `session.clarification_requested` | Local user notification for a structured agent question that needs an answer, with task/session/occurrence/title/body fields; the clarification pending ID is sent as both the envelope `id` and payload `occurrence_id`. It is not delivered by `session.subscribe`. |
+| subscribed user | `system.update_available` | Local user notification for a newer Kandev release. Its payload is `{ "version", "url"?, "title", "body", "occurrence_id" }`; `occurrence_id` is the normalized release version/tag and is also the envelope `id`. Subscribe with `user.subscribe`, not `session.subscribe`. |
+| subscribed user | `office.inbox_item` | Local notification for a selected Office inbox event, with title/body fields. |
 | subscribed run | `run.event.appended` | Future events only; there is no replay cursor. |
 | metrics subscribers | `system.metrics.updated` | Live resource snapshot; collection interest follows subscribers. |
 

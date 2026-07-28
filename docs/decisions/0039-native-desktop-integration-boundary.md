@@ -1,6 +1,6 @@
 # 0039: Native Desktop Integration Boundary
 
-**Status:** accepted
+**Status:** accepted (amended 2026-07-24)
 **Date:** 2026-07-15
 **Area:** desktop, frontend, backend, infra
 
@@ -46,13 +46,22 @@ The app checks on startup and periodically, but download/install/restart always 
 confirmation in the existing System > Updates page. The backend is cleanly stopped before updater
 relaunch.
 
-Desktop-owned launches reuse existing notification preferences and events but route waiting-for-
-input and session-failure delivery through the native notifier. They suppress the legacy backend
-shell-command and Web Notification delivery for those same events so one event yields at most one
-native notification. Browser, CLI, and service launches retain their existing channels. Dock
+Desktop-owned launches reuse existing notification preferences and events but
+route selected turn-finished, clarification-requested, update-available, and
+session-failure delivery through the native notifier. The semantic event boundary is
+defined by
+[the semantic notification-event decision](2026-07-24-semantic-notification-events.md).
+Desktop launches suppress the legacy backend shell-command and Web Notification
+delivery for those same events so one event yields at most one native
+notification. Browser, CLI, and service launches retain their existing channels. Dock
 reopen and second-instance activation focus the window but never infer a notification route. The
 upstream desktop notification API cannot correlate desktop body clicks with a custom payload, so
 the app does not navigate from generic focus or activation events.
+
+Native notification permission is requested only by the user-initiated control
+on the existing Notifications settings page. Background events never prompt.
+For update availability, the open SPA retains its in-app indication when native
+permission is denied, unsupported, or delivery fails.
 
 External `http`, `https`, and `mailto` links use a scoped native opener. Loopback app navigation,
 downloads, and blob URLs remain in the WebView.

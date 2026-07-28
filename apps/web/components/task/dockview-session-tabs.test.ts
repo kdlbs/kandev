@@ -12,6 +12,7 @@ import {
 } from "./dockview-session-tabs";
 import { CENTER_GROUP, RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { makeSharedEnvironmentHandoffApi } from "./dockview-session-tabs.test-utils";
 
 type FakePanel = {
   id: string;
@@ -28,6 +29,22 @@ type MoveToOptions = {
 type MoveToCall = {
   panelId: string;
   options: MoveToOptions;
+};
+
+type ReorderingPanel = {
+  id: string;
+  group: ReorderingGroup;
+  api: {
+    close: ReturnType<typeof vi.fn<() => void>>;
+    component: string;
+    moveTo: ReturnType<typeof vi.fn<(options: MoveToOptions) => void>>;
+    setActive: ReturnType<typeof vi.fn<() => void>>;
+  };
+};
+
+type ReorderingGroup = {
+  id: string;
+  panels: ReorderingPanel[];
 };
 
 const KEEP = "keep";
@@ -165,7 +182,89 @@ function expectedMove(panelId: string, index: number): MoveToCall {
   };
 }
 
+/**
+ * Models Dockview 4.13.1's same-group move behavior: moving the active panel
+ * removes it first, which activates a remaining sibling, then reinserts the
+ * moved panel inactive when skipSetActive is true.
+ */
+function makeReorderingAutoSessionApi(): {
+  api: DockviewApi;
+  activePanelId: () => string | null;
+} {
+  const panels: ReorderingPanel[] = [];
+  const group: ReorderingGroup = { id: CENTER_GROUP, panels: [] };
+  let activePanel: ReorderingPanel | null = null;
+
+  const removePanel = (panel: ReorderingPanel) => {
+    const groupIndex = group.panels.indexOf(panel);
+    if (groupIndex !== -1) group.panels.splice(groupIndex, 1);
+    const panelIndex = panels.indexOf(panel);
+    if (panelIndex !== -1) panels.splice(panelIndex, 1);
+    if (activePanel === panel) activePanel = group.panels[0] ?? null;
+  };
+
+  const createPanel = (id: string, component: string): ReorderingPanel => {
+    const panel: ReorderingPanel = {
+      id,
+      group,
+      api: {
+        close: vi.fn(() => removePanel(panel)),
+        component,
+        moveTo: vi.fn((options: MoveToOptions) => {
+          const sourceIndex = group.panels.indexOf(panel);
+          if (sourceIndex !== -1) group.panels.splice(sourceIndex, 1);
+          if (activePanel === panel) activePanel = group.panels[0] ?? null;
+          group.panels.splice(options.index, 0, panel);
+          if (!options.skipSetActive) activePanel = panel;
+        }),
+        setActive: vi.fn(() => {
+          activePanel = panel;
+        }),
+      },
+    };
+    panels.push(panel);
+    group.panels.push(panel);
+    return panel;
+  };
+
+  activePanel = createPanel("chat", "chat");
+  createPanel("plan", "plan");
+
+  const api = {
+    get activePanel() {
+      return activePanel;
+    },
+    panels,
+    groups: [group],
+    getPanel: (id: string) => panels.find((panel) => panel.id === id) ?? null,
+    addPanel: (options: { id: string; component: string; inactive?: boolean }): ReorderingPanel => {
+      const panel = createPanel(options.id, options.component);
+      if (!options.inactive) activePanel = panel;
+      return panel;
+    },
+    removePanel,
+  } as unknown as DockviewApi;
+
+  return { api, activePanelId: () => activePanel?.id ?? null };
+}
+
 describe("reconcileRemovedSessionPanels", () => {
+  it("replaces the outgoing session before its final close can destroy the center group", () => {
+    const { api, events, groupIds } = makeSharedEnvironmentHandoffApi();
+
+    reconcileRemovedSessionPanels(api, new Set<string>(), ["incoming"], "incoming");
+
+    expect({
+      events,
+      groupIds: groupIds(),
+      incomingGroup: api.getPanel("session:incoming")?.group.id ?? null,
+    }).toEqual({
+      events: ["add:session:incoming", "close:session:outgoing"],
+      groupIds: [CENTER_GROUP, RIGHT_TOP_GROUP, "group-right-bottom"],
+      incomingGroup: CENTER_GROUP,
+    });
+  });
+
   it("closes a stale tracked panel that's still live in dockview", () => {
     // createdSet has session-A; A's panel is live; A is no longer in the task's
     // session list, so it must be closed.
@@ -554,6 +653,19 @@ describe("resolveSessionTabSyncTarget", () => {
 });
 
 describe("runAutoSessionTabEffect", () => {
+  it("keeps chat active when replacing its placeholder beside a Plan tab", () => {
+    const sessionId = "session-current";
+    const { api, activePanelId } = makeReorderingAutoSessionApi();
+    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [sessionId]);
+    const refs = makeAutoSessionRefs();
+
+    withDockviewState({ api, preMaximizeLayout: null }, () => {
+      runAutoSessionTabEffect(sessionId, appStore as never, refs as never);
+    });
+
+    expect(activePanelId()).toBe(`session:${sessionId}`);
+  });
+
   it("updates previous refs when panel ensure is skipped for an unhydrated session", () => {
     const api = {
       panels: [{ id: "chat" }],

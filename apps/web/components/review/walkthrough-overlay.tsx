@@ -194,10 +194,11 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
     taskId ? s.walkthroughs.lastSeenUpdatedAtByTaskId[taskId] : undefined,
   );
   const setWalkthrough = useAppStore((s) => s.setWalkthrough);
-  const [open, setOpen] = useState(false);
+  const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [confirmDiscardOpen, setConfirmDiscardOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const { toast } = useToast();
+  const open = taskId !== null && openTaskId === taskId;
 
   useWalkthroughBackfill({ connectionStatus, setWalkthrough, taskId, walkthrough });
 
@@ -220,11 +221,11 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
         if (wt) setWalkthrough(taskId, wt);
       })
       .catch(() => {});
-    setOpen(true);
+    setOpenTaskId(taskId);
   };
   const closeTour = () => {
     clearOpenWalkthroughTaskId(taskId);
-    setOpen(false);
+    setOpenTaskId(null);
   };
   const confirmDiscard = async (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -233,7 +234,7 @@ export function WalkthroughOverlay({ taskId, onSelectFile }: WalkthroughOverlayP
     try {
       await deleteTaskWalkthrough(taskId);
       clearOpenWalkthroughTaskId(taskId);
-      setOpen(false);
+      setOpenTaskId(null);
       setWalkthrough(taskId, null);
       setConfirmDiscardOpen(false);
       toast({ title: "Walkthrough discarded", variant: "success" });

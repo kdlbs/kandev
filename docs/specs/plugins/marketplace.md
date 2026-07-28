@@ -300,13 +300,56 @@ response but stays `enabled`.
   target repo's latest-release manifest `id`, **WHEN** registry CI runs, **THEN** the
   schema/consistency check fails and the PR is blocked.
 
+## Auto-update (opt-in)
+
+Beyond the manual **Update available** affordance, kandev can update installed
+plugins in the background — **off by default, opt-in**. This does not add a new
+install mechanism: an auto-update is exactly the existing verified reinstall of a
+newer catalog `package_url` (`Service.InstallFromURL`), driven automatically
+instead of by a click.
+
+- **Two-tier toggle (Settings > Plugins).** An instance-wide **"Automatically
+  update plugins"** switch sets the default for every installed plugin. Each
+  plugin row also has its own switch that can **override** the default either way.
+  The effective setting is: per-plugin override when set, otherwise the
+  instance-wide default. A row shows an **override** badge and a **Reset** control
+  (clears the override → inherit the default again) whenever an explicit
+  per-plugin value is set. Both tiers persist across restart: the default in the
+  SQLite `plugin_settings` row, the per-plugin override in the plugin's stored
+  record (`auto_update`, carried forward verbatim on upgrade so an auto-update
+  never resets the toggle that triggered it).
+- **Active plugins only.** A background poller (`AutoUpdatePoller`, ~90-minute
+  cadence, plus one sweep shortly after boot) upgrades a plugin only when it is
+  currently **active** *and* opted in *and* the catalog reports
+  `update_available`. **Disabled/errored plugins are never auto-updated** — a
+  disabled plugin stays on its installed version until re-enabled. Eligibility is
+  re-checked immediately before each install, so an operator who disables or
+  opts a plugin out mid-sweep is never overridden by a stale candidate.
+- **Failure handling reuses the install pipeline unchanged.** An upgrade runs the
+  same verified path as a manual update: a package that fails its checksum/extract
+  gate is rejected with the installed version left untouched, and a package that
+  extracts but fails to spawn leaves the plugin in `error` (exactly as a manual
+  update would) rather than being silently reverted to the prior version — kandev
+  does not re-run a superseded release. A single plugin's failure is logged and
+  never aborts the rest of the sweep.
+- **No new surface for the plugin itself.** Auto-update is an operator preference
+  layered over the existing install/lifecycle machinery; the plugin's own state
+  machine (`registered → active → disabled → error`) is unchanged.
+
+API: `GET/PUT /api/plugins/settings` (`{auto_update_default}`) for the
+instance-wide default and `PUT /api/plugins/:id/auto-update` (`{auto_update:
+true|false|null}`) for the per-plugin override. Both sit behind the same
+`Features.Plugins` gate and operator authority as the rest of plugin management.
+
 ## Out of scope
 
 - **Download / usage / install telemetry.** No counters, no "most installed", no
   phone-home. Ranking is GitHub stars only. (Explicit product decision; revisit only
   with opt-in telemetry — see the telemetry direction ADR/plan.)
-- **Automatic background plugin updates.** v1 surfaces **Update available** and
-  requires an explicit click. No auto-update, no update channels.
+- **Update channels / pinning.** Auto-update always tracks a source's latest
+  published version. There are no stable/beta channels, per-plugin version pins,
+  or scheduled maintenance windows — only the opt-in on/off toggles described in
+  "Auto-update (opt-in)" above.
 - **Ratings, reviews, comments, or a paid/commercial plugin tier.**
 - **A hosted web marketplace browse *site*.** GitHub Pages serves the `index.json`
   document; a rich public browsing website is a later phase (the in-app catalog is the

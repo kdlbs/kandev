@@ -18,9 +18,9 @@ const defaultGitHubPollInterval = 60 * time.Second
 // GitHubEvaluator polls GitHub for events matching automation triggers.
 // It handles github_pr, github_push, and github_ci trigger types.
 type GitHubEvaluator struct {
-	svc      *Service
-	ghClient github.Client
-	logger   *logger.Logger
+	svc           *Service
+	githubService *github.Service
+	logger        *logger.Logger
 
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -28,17 +28,17 @@ type GitHubEvaluator struct {
 }
 
 // NewGitHubEvaluator creates a new GitHub trigger evaluator.
-func NewGitHubEvaluator(svc *Service, ghClient github.Client, log *logger.Logger) *GitHubEvaluator {
+func NewGitHubEvaluator(svc *Service, githubService *github.Service, log *logger.Logger) *GitHubEvaluator {
 	return &GitHubEvaluator{
-		svc:      svc,
-		ghClient: ghClient,
-		logger:   log,
+		svc:           svc,
+		githubService: githubService,
+		logger:        log,
 	}
 }
 
 // Start begins the polling loop.
 func (e *GitHubEvaluator) Start(ctx context.Context) {
-	if e.started || e.ghClient == nil {
+	if e.started || e.githubService == nil {
 		return
 	}
 	e.started = true
@@ -83,8 +83,6 @@ func (e *GitHubEvaluator) loop(ctx context.Context) {
 
 func (e *GitHubEvaluator) evaluate(ctx context.Context) {
 	e.evaluatePRTriggers(ctx)
-	e.evaluatePushTriggers(ctx)
-	e.evaluateCITriggers(ctx)
 }
 
 func (e *GitHubEvaluator) evaluatePRTriggers(ctx context.Context) {
@@ -111,11 +109,19 @@ func (e *GitHubEvaluator) checkPRTrigger(ctx context.Context, t *AutomationTrigg
 	if len(repos) == 0 {
 		return // Cannot poll without specific repos
 	}
+	automation, err := e.svc.GetAutomation(ctx, t.AutomationID)
+	if err != nil || automation == nil || automation.WorkspaceID == "" {
+		e.logger.Debug("automation trigger is missing workspace ownership",
+			zap.String("trigger_id", t.ID), zap.Error(err))
+		return
+	}
 
 	for _, repo := range repos {
 		// Use ListReviewRequestedPRs with a custom query scoped to this repo.
 		query := fmt.Sprintf("is:pr is:open repo:%s/%s", repo.Owner, repo.Name)
-		prs, err := e.ghClient.ListReviewRequestedPRs(ctx, "", "", query)
+		prs, err := e.githubService.ListAutomationPRs(
+			ctx, automation.WorkspaceID, repo.Owner, repo.Name, query,
+		)
 		if err != nil {
 			e.logger.Debug("failed to list PRs for automation trigger",
 				zap.String("repo", repo.Owner+"/"+repo.Name),
@@ -162,52 +168,6 @@ func (e *GitHubEvaluator) firePRTrigger(ctx context.Context, t *AutomationTrigge
 	}
 }
 
-func (e *GitHubEvaluator) evaluatePushTriggers(ctx context.Context) {
-	triggers, err := e.svc.Store().ListEnabledTriggersByType(ctx, TriggerTypeGitHubPush)
-	if err != nil {
-		e.logger.Error("failed to list github_push triggers", zap.Error(err))
-		return
-	}
-	for i := range triggers {
-		t := &triggers[i]
-		e.checkPushTrigger(ctx, t)
-	}
-}
-
-func (e *GitHubEvaluator) checkPushTrigger(ctx context.Context, t *AutomationTrigger) {
-	var cfg GitHubPushTriggerConfig
-	if err := json.Unmarshal(t.Config, &cfg); err != nil {
-		return
-	}
-	// Push trigger evaluation requires comparing commit SHAs.
-	// For now, mark as evaluated; full implementation needs commit tracking.
-	now := time.Now().UTC()
-	_ = e.svc.Store().UpdateTriggerEvaluatedAt(ctx, t.ID, now)
-}
-
-func (e *GitHubEvaluator) evaluateCITriggers(ctx context.Context) {
-	triggers, err := e.svc.Store().ListEnabledTriggersByType(ctx, TriggerTypeGitHubCI)
-	if err != nil {
-		e.logger.Error("failed to list github_ci triggers", zap.Error(err))
-		return
-	}
-	for i := range triggers {
-		t := &triggers[i]
-		e.checkCITrigger(ctx, t)
-	}
-}
-
-func (e *GitHubEvaluator) checkCITrigger(ctx context.Context, t *AutomationTrigger) {
-	var cfg GitHubCITriggerConfig
-	if err := json.Unmarshal(t.Config, &cfg); err != nil {
-		return
-	}
-	// CI trigger evaluation requires tracking check run completion.
-	// For now, mark as evaluated; full implementation needs check run tracking.
-	now := time.Now().UTC()
-	_ = e.svc.Store().UpdateTriggerEvaluatedAt(ctx, t.ID, now)
-}
-
 // matchesBranches checks if a branch matches any of the filter patterns.
 // Empty filter means match all.
 func matchesBranches(branch string, filters []string) bool {
@@ -222,14 +182,33 @@ func matchesBranches(branch string, filters []string) bool {
 	return false
 }
 
+// matchesRepo checks if owner/name matches any entry in the repo filter list.
+// An empty list never matches — webhook-driven push/CI triggers cannot act
+// without knowing which repo(s) to scope to.
+func matchesRepo(owner, name string, repos []github.RepoFilter) bool {
+	for _, r := range repos {
+		if r.Owner == owner && r.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // matchesAuthors checks if an author matches the filter list.
 // Empty filter means match all.
 func matchesAuthors(author string, filters []string) bool {
+	return matchesFilterValue(author, filters)
+}
+
+// matchesFilterValue reports whether value equals one of the filters, treating
+// an empty filter list as "match all". Used for exact-string filters such as
+// PR authors, CI conclusions, and CI check names.
+func matchesFilterValue(value string, filters []string) bool {
 	if len(filters) == 0 {
 		return true
 	}
 	for _, f := range filters {
-		if f == author {
+		if f == value {
 			return true
 		}
 	}

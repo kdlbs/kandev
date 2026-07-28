@@ -2,7 +2,11 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ModelConfigSelector } from "@/components/model-config-selector";
+import {
+  configOptionToModelOptions,
+  ModelConfigSelector,
+  type SelectConfigOption,
+} from "@/components/model-config-selector";
 
 afterEach(() => {
   cleanup();
@@ -12,6 +16,7 @@ const effortSectionTestId = "config-option-section-effort";
 const effortTriggerTestId = "config-option-trigger-effort";
 const modelSettingsButtonName = "Model settings";
 const providerModelId = "gpt-5.6-sol";
+const providerModelName = "GPT-5.6-Sol";
 const optionDescription = "Controls how much reasoning the model performs.";
 const effortOptionName = "Reasoning Effort";
 const makeModelOptions = (count: number) =>
@@ -98,6 +103,38 @@ describe("ModelConfigSelector", () => {
 });
 
 describe("ModelConfigSelector filtering", () => {
+  it("deduplicates repeated model ids from provider config", () => {
+    const modelConfig: SelectConfigOption = {
+      type: "select",
+      id: "model",
+      name: "Model",
+      currentValue: providerModelId,
+      category: "model",
+      options: [
+        {
+          value: providerModelId,
+          name: providerModelName,
+          description: "Latest frontier agentic coding model.",
+        },
+        {
+          value: "gpt-5.6-terra",
+          name: "GPT-5.6-Terra",
+          description: "Balanced agentic coding model for everyday work.",
+        },
+        {
+          value: "gpt-5.6-terra",
+          name: "GPT-5.6-Terra",
+          description: "Balanced agentic coding model for everyday work.",
+        },
+      ],
+    };
+
+    expect(configOptionToModelOptions(modelConfig).map((model) => model.id)).toEqual([
+      providerModelId,
+      "gpt-5.6-terra",
+    ]);
+  });
+
   it("hides the model filter when there are five or fewer models", () => {
     render(
       <ModelConfigSelector
@@ -131,7 +168,7 @@ describe("ModelConfigSelector provider descriptions", () => {
   it("shows provider descriptions only inside the selected option submenu", () => {
     render(
       <ModelConfigSelector
-        modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
+        modelOptions={[{ id: providerModelId, name: providerModelName }]}
         currentModel={providerModelId}
         onModelChange={() => {}}
         onConfigChange={() => {}}
@@ -166,7 +203,7 @@ describe("ModelConfigSelector provider descriptions", () => {
     render(
       <TooltipProvider>
         <ModelConfigSelector
-          modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
+          modelOptions={[{ id: providerModelId, name: providerModelName }]}
           currentModel={providerModelId}
           onModelChange={() => {}}
           triggerSummary="changed"
@@ -201,7 +238,7 @@ describe("ModelConfigSelector provider descriptions", () => {
     fireEvent.focus(screen.getByRole("button", { name: modelSettingsButtonName }));
 
     const tooltip = screen.getByRole("tooltip");
-    expect(tooltip.textContent).toContain("Model: GPT-5.6-Sol");
+    expect(tooltip.textContent).toContain(`Model: ${providerModelName}`);
     expect(tooltip.textContent).toContain("Reasoning Effort: Low");
     expect(tooltip.textContent).toContain("Fast Mode: Off");
     expect(tooltip.textContent).not.toContain(optionDescription);
@@ -211,7 +248,7 @@ describe("ModelConfigSelector provider descriptions", () => {
     render(
       <TooltipProvider>
         <ModelConfigSelector
-          modelOptions={[{ id: providerModelId, name: "GPT-5.6-Sol" }]}
+          modelOptions={[{ id: providerModelId, name: providerModelName }]}
           currentModel={providerModelId}
           onModelChange={() => {}}
           configOptions={[

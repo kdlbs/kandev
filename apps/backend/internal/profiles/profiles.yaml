@@ -57,6 +57,16 @@ features:
     dev:  "false"
     e2e:  "true"
 
+  # Opt-in authentication + per-user workspaces. This flag IS the on/off
+  # switch: when on, every visitor must sign in (the first becomes admin via
+  # a setup wizard) and workspaces are private per user. Off everywhere by
+  # default so kandev stays single-user until a deployment opts in. The
+  # dedicated auth e2e project turns it on per-spec via backend.restart(env).
+  KANDEV_FEATURES_AUTH:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

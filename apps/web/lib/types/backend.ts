@@ -9,6 +9,7 @@ export type { OfficeEventType, OfficeEventPayload } from "./office-events";
 
 import type {
   AvailableAgent,
+  ForegroundActivity,
   SavedLayout,
   SidebarViewApi,
   SidebarViewDraftApi,
@@ -89,6 +90,11 @@ export type TaskEventPayload = {
   primary_session_id?: string | null;
   primary_session_state?: TaskSessionState | null;
   primary_session_pending_action?: TaskPendingAction | null;
+  task_pending_action?: TaskPendingAction | null;
+  // Task-level MOST-ACTIVE-WINS activity aggregate across the task's sessions;
+  // absent/null when no session is running.
+  foreground_activity?: ForegroundActivity | null;
+  active_subagent_count?: number;
   session_count?: number | null;
   review_status?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   archived_at?: string | null;
@@ -128,6 +134,25 @@ export type AgentInstallOutputPayload = {
   chunk: string;
 };
 
+export type AgentUpdateJobPayload = {
+  job_id: string;
+  agent_name: string;
+  status: "queued" | "resolving" | "updating" | "refreshing" | "succeeded" | "failed";
+  current_version?: string;
+  target_version?: string;
+  output?: string;
+  error?: string;
+  refresh_error?: string;
+  started_at: string;
+  finished_at?: string;
+};
+
+export type AgentUpdateOutputPayload = {
+  job_id: string;
+  agent_name: string;
+  chunk: string;
+};
+
 export type TerminalOutputPayload = {
   terminalId: string;
   data: string;
@@ -147,6 +172,14 @@ export type DiffUpdatePayload = {
 export type SystemErrorPayload = {
   message: string;
   code?: string;
+};
+
+export type UpdateAvailablePayload = {
+  version: string;
+  url?: string;
+  title: string;
+  body: string;
+  occurrence_id: string;
 };
 
 export type WorkspacePayload = {
@@ -242,11 +275,35 @@ export type TaskSessionStateChangedPayload = {
   review_status?: string;
   // Task environment (for session→environment mapping)
   task_environment_id?: string;
+  // Fine-grained busy substate (see ADR-0049), carried on coarse transitions;
+  // live flips arrive on session.activity_changed.
+  foreground_activity?: ForegroundActivity | null;
+  active_subagent_count?: number;
 };
 
-export type TaskSessionWaitingForInputPayload = {
+/**
+ * Payload for `session.activity_changed` — the fine-grained busy signal
+ * (see ADR-0049). Fires when foreground ownership or detached background
+ * liveness changes, including after the foreground turn settles.
+ */
+export type TaskSessionActivityChangedPayload = {
   task_id: string;
   session_id: string;
+  foreground_activity: ForegroundActivity | null;
+  active_subagent_count: number;
+};
+
+export type TaskSessionNotificationPayload = {
+  task_id: string;
+  session_id: string;
+  occurrence_id: string;
+  title: string;
+  body: string;
+};
+
+export type OfficeInboxItemNotificationPayload = {
+  task_id?: string;
+  session_id?: string;
   title: string;
   body: string;
 };
@@ -335,6 +392,7 @@ export type UserSettingsUpdatedPayload = {
   user_id: string;
   workspace_id: string;
   kanban_view_mode?: string;
+  tasks_list_show_details?: boolean;
   workflow_filter_id?: string;
   repository_ids: string[];
   initial_setup_complete?: boolean;
@@ -448,7 +506,8 @@ export type QueueStatusChangedPayload = {
 };
 
 export type BackendMessageMap = OfficeBackendMessageMap &
-  import("@/lib/types/http").WalkthroughBackendMessageMap & {
+  import("@/lib/types/http").WalkthroughBackendMessageMap &
+  import("@/lib/types/review").ReviewBackendMessageMap & {
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
     "task.created": BackendMessage<"task.created", TaskEventPayload>;
     "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
@@ -470,12 +529,16 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "agent.install.started": BackendMessage<"agent.install.started", AgentInstallJobPayload>;
     "agent.install.output": BackendMessage<"agent.install.output", AgentInstallOutputPayload>;
     "agent.install.finished": BackendMessage<"agent.install.finished", AgentInstallJobPayload>;
+    "agent.update.started": BackendMessage<"agent.update.started", AgentUpdateJobPayload>;
+    "agent.update.output": BackendMessage<"agent.update.output", AgentUpdateOutputPayload>;
+    "agent.update.finished": BackendMessage<"agent.update.finished", AgentUpdateJobPayload>;
     "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
     "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
     "system.error": BackendMessage<"system.error", SystemErrorPayload>;
     "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
     "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
+    "system.update_available": BackendMessage<"system.update_available", UpdateAvailablePayload>;
     "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
     "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
     "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;
@@ -492,16 +555,34 @@ export type BackendMessageMap = OfficeBackendMessageMap &
       "session.state_changed",
       TaskSessionStateChangedPayload
     >;
-    "session.waiting_for_input": BackendMessage<
-      "session.waiting_for_input",
-      TaskSessionWaitingForInputPayload
+    "session.turn_finished": BackendMessage<
+      "session.turn_finished",
+      TaskSessionNotificationPayload
     >;
+    "session.activity_changed": BackendMessage<
+      "session.activity_changed",
+      TaskSessionActivityChangedPayload
+    >;
+    "session.clarification_requested": BackendMessage<
+      "session.clarification_requested",
+      TaskSessionNotificationPayload
+    >;
+    "office.inbox_item": BackendMessage<"office.inbox_item", OfficeInboxItemNotificationPayload>;
     "session.agentctl_starting": BackendMessage<
       "session.agentctl_starting",
       TaskSessionAgentctlPayload
     >;
     "session.agentctl_ready": BackendMessage<"session.agentctl_ready", TaskSessionAgentctlPayload>;
     "session.agentctl_error": BackendMessage<"session.agentctl_error", TaskSessionAgentctlPayload>;
+    "session.workspace_sources.updated": BackendMessage<
+      "session.workspace_sources.updated",
+      {
+        task_id: string;
+        session_id: string;
+        workspace_path: string;
+        adopted_session_ids?: string[];
+      }
+    >;
     "session.turn.started": BackendMessage<"session.turn.started", TurnEventPayload>;
     "session.turn.completed": BackendMessage<"session.turn.completed", TurnEventPayload>;
     "session.available_commands": BackendMessage<

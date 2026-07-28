@@ -21,6 +21,12 @@ var ErrTaskSessionNotFound = errors.New("task session not found")
 // ErrTaskWalkthroughNotFound is returned when no walkthrough record exists.
 var ErrTaskWalkthroughNotFound = errors.New("task walkthrough not found")
 
+// ErrTaskReviewRunNotFound is returned when no code-review run record exists.
+var ErrTaskReviewRunNotFound = errors.New("task review run not found")
+
+// ErrTaskReviewFindingNotFound is returned when no code-review finding record exists.
+var ErrTaskReviewFindingNotFound = errors.New("task review finding not found")
+
 // ErrExecutorNotFound is returned by the executor repository when no
 // executor row exists for the given ID. Callers should use errors.Is to
 // distinguish "row doesn't exist" (404 semantically) from transport-level
@@ -125,6 +131,23 @@ const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
 // selector state so task-detail boot hydration does not wait for WebSocket
 // reconnection. It is display metadata and is not replayed to the provider.
 const SessionMetaKeyACPModelState = "acp_model_state"
+
+// SessionMetaKeyGitCredentialSnapshot records the non-secret Git credential
+// routing contract that successfully launched or resumed a session.
+const SessionMetaKeyGitCredentialSnapshot = "git_credential_snapshot"
+
+// GitCredentialSnapshot is launch-time display metadata. It never contains a
+// token, broker lease, helper command, credential file, or SSH key detail.
+type GitCredentialSnapshot struct {
+	Version         int       `json:"version"`
+	Policy          string    `json:"policy"`
+	Source          string    `json:"source"`
+	WorkspaceMethod string    `json:"workspace_method,omitempty"`
+	Actor           string    `json:"actor"`
+	Transport       string    `json:"transport"`
+	ExecutorType    string    `json:"executor_type,omitempty"`
+	CapturedAt      time.Time `json:"captured_at"`
+}
 
 // TurnMetaKeyRuntimeConfigSnapshot stores the immutable effective runtime
 // configuration attributed to one prompt/response turn.
@@ -424,20 +447,21 @@ const (
 
 // Task represents a task in the database
 type Task struct {
-	ID             string                 `json:"id"`
-	WorkspaceID    string                 `json:"workspace_id"`
-	WorkflowID     string                 `json:"workflow_id"`
-	WorkflowStepID string                 `json:"workflow_step_id"`
-	Title          string                 `json:"title"`
-	Description    string                 `json:"description"`
-	State          v1.TaskState           `json:"state"`
-	Priority       string                 `json:"priority"`
-	Position       int                    `json:"position"` // Order within workflow step
-	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	Repositories   []*TaskRepository      `json:"repositories,omitempty"`
-	IsEphemeral    bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID       string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	ArchivedAt     *time.Time             `json:"archived_at,omitempty"`
+	ID               string                 `json:"id"`
+	WorkspaceID      string                 `json:"workspace_id"`
+	WorkflowID       string                 `json:"workflow_id"`
+	WorkflowStepID   string                 `json:"workflow_step_id"`
+	Title            string                 `json:"title"`
+	Description      string                 `json:"description"`
+	State            v1.TaskState           `json:"state"`
+	Priority         string                 `json:"priority"`
+	Position         int                    `json:"position"` // Order within workflow step
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	Repositories     []*TaskRepository      `json:"repositories,omitempty"`
+	WorkspaceFolders []*TaskWorkspaceFolder `json:"workspace_folders,omitempty"`
+	IsEphemeral      bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID         string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	ArchivedAt       *time.Time             `json:"archived_at,omitempty"`
 	// ArchivedByCascadeID is set when the task was archived as part of an
 	// office task-handoffs cascade (phase 6). UnarchiveTaskByCascade uses
 	// it to scope restoration to exactly the descendants this cascade
@@ -586,6 +610,43 @@ type TaskRepository struct {
 	UpdatedAt      time.Time              `json:"updated_at"`
 }
 
+// TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
+// It stays separate from TaskRepository because folders are not Git sources.
+type TaskWorkspaceFolder struct {
+	ID          string    `json:"id"`
+	TaskID      string    `json:"task_id"`
+	LocalPath   string    `json:"local_path"`
+	DisplayName string    `json:"display_name"`
+	Position    int       `json:"position"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// WorkspaceSourceBatch identifies exactly the durable rows created by one
+// attachment operation, so a later materialization failure can compensate
+// without touching pre-existing sources.
+type WorkspaceSourceBatch struct {
+	TaskID            string                            `json:"task_id"`
+	Sources           []WorkspaceSource                 `json:"sources,omitempty"`
+	RepositoryUpdates []WorkspaceSourceRepositoryUpdate `json:"repository_updates,omitempty"`
+}
+
+// WorkspaceSourceRepositoryUpdate records a legacy association branch derived
+// during workspace-source validation. PreviousBaseBranch permits compensation
+// if later runtime materialization fails.
+type WorkspaceSourceRepositoryUpdate struct {
+	TaskRepositoryID   string `json:"task_repository_id"`
+	BaseBranch         string `json:"base_branch"`
+	PreviousBaseBranch string `json:"previous_base_branch"`
+}
+
+// WorkspaceSource carries exactly one durable source kind. Sources preserve
+// the caller's mixed order for global position allocation.
+type WorkspaceSource struct {
+	Repository *TaskRepository      `json:"repository,omitempty"`
+	Folder     *TaskWorkspaceFolder `json:"folder,omitempty"`
+}
+
 // MessageAuthorType represents who authored a message
 type MessageAuthorType string
 
@@ -661,8 +722,8 @@ const (
 	PermissionStatusExpired PermissionStatus = "expired"
 )
 
-// TaskPendingAction is the compact task-list projection for a primary session
-// blocked on user input.
+// TaskPendingAction is the compact task-list projection for a session blocked
+// on user input.
 type TaskPendingAction string
 
 const (
@@ -806,9 +867,10 @@ type TaskSessionWorktree struct {
 // SessionBranchInfo is a lightweight projection of a session with its worktree branch.
 // Used by the PR watch reconciler to find sessions that may need PR watches.
 type SessionBranchInfo struct {
-	SessionID string
-	TaskID    string
-	Branch    string
+	SessionID   string
+	TaskID      string
+	WorkspaceID string
+	Branch      string
 }
 
 // TaskSession represents a persistent agent execution session for a task.
@@ -1332,6 +1394,157 @@ type WalkthroughStep struct {
 	Line    int    `json:"line"`
 	LineEnd int    `json:"line_end,omitempty"`
 	Text    string `json:"text"`
+}
+
+// ReviewRunStatus is the lifecycle state of a native code-review pass.
+type ReviewRunStatus string
+
+// Review run statuses. A run only leaves pending/running once, and every
+// terminal state is final — an interrupted run is cancelled, never resumed.
+const (
+	ReviewRunPending   ReviewRunStatus = "pending"
+	ReviewRunRunning   ReviewRunStatus = "running"
+	ReviewRunCompleted ReviewRunStatus = "completed"
+	ReviewRunFailed    ReviewRunStatus = "failed"
+	ReviewRunCancelled ReviewRunStatus = "cancelled"
+)
+
+// IsTerminal reports whether the run has finished and cannot change again.
+func (s ReviewRunStatus) IsTerminal() bool {
+	return s == ReviewRunCompleted || s == ReviewRunFailed || s == ReviewRunCancelled
+}
+
+// ReviewRunTrigger records what started a review pass.
+type ReviewRunTrigger string
+
+// Review run triggers.
+const (
+	ReviewTriggerManual       ReviewRunTrigger = "manual"
+	ReviewTriggerWorkflowStep ReviewRunTrigger = "workflow_step"
+	ReviewTriggerAgent        ReviewRunTrigger = "agent"
+)
+
+// ReviewSeverity ranks how much a finding should worry the reader.
+type ReviewSeverity string
+
+// Review severities, most severe first.
+const (
+	ReviewSeverityBlocker ReviewSeverity = "blocker"
+	ReviewSeverityMajor   ReviewSeverity = "major"
+	ReviewSeverityMinor   ReviewSeverity = "minor"
+	ReviewSeverityNit     ReviewSeverity = "nit"
+)
+
+// ValidReviewSeverity reports whether s is a known severity.
+func ValidReviewSeverity(s ReviewSeverity) bool {
+	switch s {
+	case ReviewSeverityBlocker, ReviewSeverityMajor, ReviewSeverityMinor, ReviewSeverityNit:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReviewFindingStatus is the human disposition of a finding. Findings are
+// advisory: the human resolves or dismisses, kandev never does it for them.
+type ReviewFindingStatus string
+
+// Review finding statuses.
+const (
+	ReviewFindingOpen      ReviewFindingStatus = "open"
+	ReviewFindingResolved  ReviewFindingStatus = "resolved"
+	ReviewFindingDismissed ReviewFindingStatus = "dismissed"
+)
+
+// ValidReviewFindingStatus reports whether s is a known finding status.
+func ValidReviewFindingStatus(s ReviewFindingStatus) bool {
+	switch s {
+	case ReviewFindingOpen, ReviewFindingResolved, ReviewFindingDismissed:
+		return true
+	default:
+		return false
+	}
+}
+
+// ReviewAnnotationSide selects which side of the diff a finding anchors to,
+// matching the frontend annotation sides.
+const (
+	ReviewSideAdditions = "additions"
+	ReviewSideDeletions = "deletions"
+)
+
+// TaskReviewRun is one native code-review pass over a task's changed files.
+// A task keeps a bounded history of runs; findings reference the run that
+// produced them so the UI can attribute and supersede them.
+type TaskReviewRun struct {
+	ID              string           `json:"id"`
+	TaskID          string           `json:"task_id"`
+	SessionID       string           `json:"session_id"`
+	Trigger         ReviewRunTrigger `json:"trigger"`
+	WorkflowStepID  string           `json:"workflow_step_id"`
+	AgentID         string           `json:"agent_id"`
+	Model           string           `json:"model"`
+	Status          ReviewRunStatus  `json:"status"`
+	ErrorCode       string           `json:"error_code"`
+	ErrorMessage    string           `json:"error_message"`
+	Summary         string           `json:"summary"`
+	FindingCount    int              `json:"finding_count"`
+	FileCount       int              `json:"file_count"`
+	RepositoryCount int              `json:"repository_count"`
+	PromptTokens    int              `json:"prompt_tokens"`
+	ResponseTokens  int              `json:"response_tokens"`
+	DurationMs      int              `json:"duration_ms"`
+	CreatedAt       time.Time        `json:"created_at"`
+	CompletedAt     *time.Time       `json:"completed_at,omitempty"`
+}
+
+// TaskReviewFinding is one anchored, advisory review comment produced by a
+// review run. It renders in the Changes/Review diff at File/StartLine..EndLine
+// of Repository, and carries FileDiffHash so a client can tell whether the
+// diff has moved under it (see ../../../../docs/specs/native-code-review/spec.md).
+type TaskReviewFinding struct {
+	ID             string              `json:"id"`
+	RunID          string              `json:"run_id"`
+	TaskID         string              `json:"task_id"`
+	RepositoryID   string              `json:"repository_id"`
+	RepositoryName string              `json:"repository_name"`
+	FilePath       string              `json:"file_path"`
+	StartLine      int                 `json:"start_line"`
+	EndLine        int                 `json:"end_line"`
+	Side           string              `json:"side"`
+	Severity       ReviewSeverity      `json:"severity"`
+	Category       string              `json:"category"`
+	Title          string              `json:"title"`
+	Body           string              `json:"body"`
+	Suggestion     string              `json:"suggestion"`
+	AnchorText     string              `json:"anchor_text"`
+	FileDiffHash   string              `json:"file_diff_hash"`
+	Status         ReviewFindingStatus `json:"status"`
+	ResolvedAt     *time.Time          `json:"resolved_at,omitempty"`
+	CreatedAt      time.Time           `json:"created_at"`
+	UpdatedAt      time.Time           `json:"updated_at"`
+}
+
+// ReviewFindingKey identifies a finding's anchor for supersede matching: a new
+// run that reports the same issue at the same place replaces the older row
+// instead of listing it twice.
+type ReviewFindingKey struct {
+	RepositoryName string
+	FilePath       string
+	StartLine      int
+	EndLine        int
+	Title          string
+}
+
+// SupersedeKey returns the finding's supersede identity.
+func (f *TaskReviewFinding) SupersedeKey() ReviewFindingKey {
+	return ReviewFindingKey{
+		RepositoryName: f.RepositoryName,
+		FilePath:       f.FilePath,
+		StartLine:      f.StartLine,
+		EndLine:        f.EndLine,
+		Title:          f.Title,
+	}
 }
 
 // TaskDocument represents a named document (plan, spec, notes, etc.) associated with a task.

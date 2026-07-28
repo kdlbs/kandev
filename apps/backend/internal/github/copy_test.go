@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 func newCopyTestService(t *testing.T) *Service {
@@ -19,11 +20,12 @@ func TestCopyWorkspaceSettingsToWorkspace_CopiesSettings(t *testing.T) {
 	const src, dst = "ws-src", "ws-dst"
 
 	if err := svc.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
-		WorkspaceID:         src,
-		RepoScopeMode:       RepoScopeModeRepos,
-		RepoScopeRepos:      []RepoFilter{{Owner: "kdlbs", Name: "kandev"}},
-		SavedPresets:        []byte(`[{"id":"p1","kind":"pr","label":"Mine"}]`),
-		DefaultQueryPresets: []byte(`{"pr":[],"issue":[]}`),
+		WorkspaceID:            src,
+		TaskGitCredentialsMode: TaskGitCredentialsModeExecutor,
+		RepoScopeMode:          RepoScopeModeRepos,
+		RepoScopeRepos:         []RepoFilter{{Owner: "kdlbs", Name: "kandev"}},
+		SavedPresets:           []byte(`[{"id":"p1","kind":"pr","label":"Mine"}]`),
+		DefaultQueryPresets:    []byte(`{"pr":[],"issue":[]}`),
 	}); err != nil {
 		t.Fatalf("seed source: %v", err)
 	}
@@ -40,6 +42,9 @@ func TestCopyWorkspaceSettingsToWorkspace_CopiesSettings(t *testing.T) {
 	}
 	if got.WorkspaceID != dst || got.RepoScopeMode != RepoScopeModeRepos {
 		t.Errorf("copied settings identity/scope mismatch: %+v", got)
+	}
+	if got.TaskGitCredentialsMode != TaskGitCredentialsModeExecutor {
+		t.Errorf("task Git credential mode not copied: %q", got.TaskGitCredentialsMode)
 	}
 	if len(got.RepoScopeRepos) != 1 || got.RepoScopeRepos[0].Owner != "kdlbs" ||
 		got.RepoScopeRepos[0].Name != "kandev" {
@@ -58,6 +63,49 @@ func TestCopyWorkspaceSettingsToWorkspace_CopiesSettings(t *testing.T) {
 	}
 	if len(presets.PR) != 1 || presets.PR[0].ID != "custom" {
 		t.Errorf("action presets not copied: %+v", presets.PR)
+	}
+}
+
+func TestCopyWorkspaceSettingsToWorkspace_DoesNotCopyAuthentication(t *testing.T) {
+	svc := newCopyTestService(t)
+	ctx := context.Background()
+	const src, dst = "ws-src", "ws-dst"
+	seedConnectionWorkspaces(t, svc.store, src, dst)
+	seedStoreAppRegistration(t, svc.store)
+	now := time.Now().UTC()
+	installationID := int64(42)
+	if err := svc.store.UpsertWorkspaceConnection(ctx, &WorkspaceConnection{
+		WorkspaceID: src, Source: ConnectionSourceGitHubAppInstallation, GitHubHost: "github.com",
+		InstallationID: &installationID, InstallationAccountLogin: "acme",
+		InstallationAccountType: "Organization", AppRegistrationID: "registration-store-test",
+		Status: ConnectionStatusActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed source connection: %v", err)
+	}
+	if err := svc.store.UpsertUserConnection(ctx, &UserConnection{
+		WorkspaceID: src, UserID: "default-user", AppRegistrationID: "registration-store-test",
+		GitHubUserID: 42, Login: "octocat",
+		Status: ConnectionStatusActive, AccessExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("seed source user connection: %v", err)
+	}
+
+	if _, err := svc.CopyWorkspaceSettingsToWorkspace(ctx, src, dst); err != nil {
+		t.Fatalf("copy: %v", err)
+	}
+	connection, err := svc.store.GetWorkspaceConnection(ctx, dst)
+	if err != nil {
+		t.Fatalf("get target connection: %v", err)
+	}
+	if connection != nil {
+		t.Fatalf("target inherited workspace auth: %+v", connection)
+	}
+	user, err := svc.store.GetUserConnection(ctx, dst, "default-user")
+	if err != nil {
+		t.Fatalf("get target user connection: %v", err)
+	}
+	if user != nil {
+		t.Fatalf("target inherited personal auth: %+v", user)
 	}
 }
 

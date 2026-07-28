@@ -156,33 +156,34 @@ func TestFinalizeBootMessage_NilService(t *testing.T) {
 	mgr.finalizeBootMessage(nil, msg, nil, nil, "exited")
 }
 
-func TestBootMessage_IsResumingFlag(t *testing.T) {
-	// Test that the is_resuming flag is correctly based on ACPSessionID presence
-	tests := []struct {
-		name         string
-		acpSessionID string
-		wantResuming bool
-	}{
-		{
-			name:         "new session (no ACP session ID)",
-			acpSessionID: "",
-			wantResuming: false,
-		},
-		{
-			name:         "resumed session (has ACP session ID)",
-			acpSessionID: "acp-session-123",
-			wantResuming: true,
-		},
+func TestCreateBootMessage_MarksResumedSession(t *testing.T) {
+	mgr := newTestManager(t)
+	bootSvc := &MockBootMessageService{}
+	mgr.bootMessageService = bootSvc
+	execution := &AgentExecution{
+		TaskID:       "task-1",
+		SessionID:    "session-1",
+		ACPSessionID: "acp-session-1",
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// The is_resuming logic is: execution.ACPSessionID != ""
-			isResuming := tt.acpSessionID != ""
-			if isResuming != tt.wantResuming {
-				t.Errorf("is_resuming = %v, want %v", isResuming, tt.wantResuming)
-			}
-		})
+	message, stopCh := mgr.createBootMessage(
+		context.Background(),
+		execution,
+		"mock-agent --resume acp-session-1",
+		"Mock",
+	)
+	if stopCh != nil {
+		close(stopCh)
+	}
+
+	if message == nil {
+		t.Fatal("resume boot message = nil")
+	}
+	if len(bootSvc.CreatedMessages) != 1 {
+		t.Fatalf("created boot messages = %d, want 1", len(bootSvc.CreatedMessages))
+	}
+	if got := message.Metadata["is_resuming"]; got != true {
+		t.Fatalf("is_resuming = %#v, want true", got)
 	}
 }
 

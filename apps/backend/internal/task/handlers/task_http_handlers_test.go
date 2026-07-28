@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -23,8 +24,10 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -74,6 +77,52 @@ func TestQuickChatRequestBuildRepositoriesAcceptsPluralInput(t *testing.T) {
 	require.Len(t, repos, 2)
 	assert.Equal(t, service.TaskRepositoryInput{RepositoryID: "repo-1", BaseBranch: "main"}, repos[0])
 	assert.Equal(t, service.TaskRepositoryInput{RepositoryID: "repo-2", BaseBranch: "develop"}, repos[1])
+}
+
+func TestWorkspaceSourceHTTPStatusUsesTypedErrors(t *testing.T) {
+	tests := []struct {
+		err  error
+		want int
+	}{
+		{service.ErrInvalidWorkspaceSource, http.StatusBadRequest},
+		{service.ErrWorkspaceSourceConflict, http.StatusConflict},
+		{service.ErrWorkspaceSourceActive, http.StatusConflict},
+		{service.ErrUnsupportedWorkspaceSource, http.StatusUnprocessableEntity},
+		{service.ErrWorkspaceSourceMaterialize, http.StatusUnprocessableEntity},
+	}
+	for _, tt := range tests {
+		assert.Equal(t, tt.want, workspaceSourceHTTPStatus(tt.err))
+	}
+}
+
+func TestWorkspaceSourceHTTPStatusMapsRepositoryNotFound(t *testing.T) {
+	assert.Equal(t, http.StatusNotFound, workspaceSourceHTTPStatus(fmt.Errorf("wrapped: %w", taskrepository.ErrRepositoryNotFound)))
+}
+
+func TestParseHTTPWorkspaceSourcesPreservesSnakeCaseFields(t *testing.T) {
+	sources, err := parseHTTPWorkspaceSources([]json.RawMessage{json.RawMessage(`{"kind":"repository","repository_id":"repo-1","base_branch":"main","checkout_branch":"feature/x"}`)})
+	require.NoError(t, err)
+	require.Len(t, sources, 1)
+	assert.Equal(t, "repo-1", sources[0].RepositoryID)
+	assert.Equal(t, "main", sources[0].BaseBranch)
+	assert.Equal(t, "feature/x", sources[0].CheckoutBranch)
+}
+
+func TestTaskPendingActionPtrAggregatesInputCapableSessions(t *testing.T) {
+	sessions := []*models.TaskSession{
+		{ID: "running", State: models.TaskSessionStateRunning},
+		{ID: "waiting", State: models.TaskSessionStateWaitingForInput},
+		{ID: "starting", State: models.TaskSessionStateStarting},
+	}
+	actions := map[string]models.TaskPendingAction{
+		"running":  models.TaskPendingActionClarification,
+		"waiting":  models.TaskPendingActionPermission,
+		"starting": models.TaskPendingActionPermission,
+	}
+
+	got := taskPendingActionPtr(sessions, actions)
+	require.NotNil(t, got)
+	assert.Equal(t, "permission", *got)
 }
 
 func TestQuickChatResolveParamsForcesWorktreeForRepositoryContext(t *testing.T) {
@@ -267,6 +316,22 @@ type captureCreateTaskRepo struct {
 	updateStateErr error
 }
 
+type missingWorkflowCreateTaskRepo struct {
+	captureCreateTaskRepo
+}
+
+type wipCreateTaskRepo struct {
+	captureCreateTaskRepo
+}
+
+func (*wipCreateTaskRepo) CreateTask(_ context.Context, _ *models.Task) error {
+	return wfmodels.NewWIPLimitError("review", 2, 2)
+}
+
+func (*missingWorkflowCreateTaskRepo) GetWorkflow(_ context.Context, id string) (*models.Workflow, error) {
+	return nil, fmt.Errorf("workflow not found: %s", id)
+}
+
 type captureTaskCreateLastUsedRecorder struct {
 	calls int
 	got   usermodels.TaskCreateLastUsed
@@ -280,6 +345,22 @@ func (m *captureTaskCreateLastUsedRecorder) RecordTaskCreateLastUsed(_ context.C
 
 func (m *captureCreateTaskRepo) GetWorkspaceTaskPrefix(_ context.Context, _ string) (string, string, error) {
 	return "KAN", "wf-office", nil
+}
+
+func (m *captureCreateTaskRepo) GetWorkflow(_ context.Context, id string) (*models.Workflow, error) {
+	return &models.Workflow{ID: id, WorkspaceID: "ws-1"}, nil
+}
+
+func (m *captureCreateTaskRepo) GetStep(_ context.Context, id string) (*wfmodels.WorkflowStep, error) {
+	return &wfmodels.WorkflowStep{ID: id, WorkflowID: "wf-1"}, nil
+}
+
+func (m *captureCreateTaskRepo) GetNextStepByPosition(
+	context.Context,
+	string,
+	int,
+) (*wfmodels.WorkflowStep, error) {
+	return nil, nil
 }
 
 func (m *captureCreateTaskRepo) GetRepository(_ context.Context, id string) (*models.Repository, error) {
@@ -362,6 +443,7 @@ func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -406,6 +488,7 @@ func TestHTTPCreateTaskRecordsRepositoryWithoutProfileIDs(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -527,6 +610,7 @@ func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -568,6 +652,7 @@ func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	recorder := &captureTaskCreateLastUsedRecorder{}
 	h := &TaskHandlers{service: svc, taskCreateLastUsedRecorder: recorder, logger: log}
 
@@ -596,6 +681,95 @@ func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {
 	}, recorder.got)
 }
 
+func TestWSCreateTaskReturnsValidationErrorForMissingWorkflow(t *testing.T) {
+	log := newTestLogger(t)
+	repo := &missingWorkflowCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id": "ws-1",
+		"workflow_id":  "missing-workflow",
+		"title":        "Broken workflow",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	assert.Contains(t, payload.Message, "workflow not found")
+}
+
+func TestWSCreateTaskReturnsConflictForWIPLimit(t *testing.T) {
+	log := newTestLogger(t)
+	repo := &wipCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+		"title":        "Full review step",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	assert.Contains(t, payload.Message, "WIP limit")
+}
+
+func TestWSCreateTaskReturnsValidationErrorForStepOutsideWorkflow(t *testing.T) {
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, logger: log}
+
+	msg, err := ws.NewRequest("msg-1", ws.ActionTaskCreate, map[string]any{
+		"workspace_id":     "ws-1",
+		"workflow_id":      "wf-2",
+		"workflow_step_id": "step-1",
+		"title":            "Broken step",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	assert.Contains(t, payload.Message, "workflow step not found")
+}
+
 func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := newTestLogger(t)
@@ -608,6 +782,7 @@ func TestHTTPCreateTask_StartAgentReturnsSchedulingTask(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	startCreatedCalled := make(chan struct{}, 1)
 	orch := &captureOrchestrator{startCreatedCalled: startCreatedCalled}
 	h := &TaskHandlers{service: svc, orchestrator: orch, logger: log}
@@ -649,6 +824,7 @@ func TestHTTPCreateTask_StartAgentKeepsCreatedStateWhenSchedulingUpdateFails(t *
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
 	startCreatedCalled := make(chan struct{}, 1)
 	orch := &captureOrchestrator{startCreatedCalled: startCreatedCalled}
 	h := &TaskHandlers{service: svc, orchestrator: orch, logger: log}

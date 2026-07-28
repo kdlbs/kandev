@@ -381,6 +381,14 @@ func (m *mockAgentManager) PromptAgent(ctx context.Context, executionID string, 
 	}
 	return &executor.PromptResult{}, nil
 }
+
+func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, executionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	result, err := m.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+	if err == nil && onDispatched != nil {
+		onDispatched()
+	}
+	return result, err
+}
 func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error {
 	m.cancelAgentCalls.Add(1)
 	if m.cancelAgentEntered != nil {
@@ -607,6 +615,7 @@ func seedSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID, w
 	// Create task
 	task := &models.Task{
 		ID:             taskID,
+		WorkspaceID:    "ws1",
 		WorkflowID:     "wf1",
 		WorkflowStepID: workflowStepID,
 		Title:          "Test Task",
@@ -1258,6 +1267,8 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	}
 	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
 
 	queuedMsg := &messagequeue.QueuedMessage{
 		ID:        "q1",
@@ -1276,6 +1287,27 @@ func TestExecuteQueuedMessage_RequeuesTransientPromptFailure(t *testing.T) {
 	}
 	if status.Entries[0].Content != "hello" {
 		t.Fatalf("expected queued content to be preserved, got %q", status.Entries[0].Content)
+	}
+	if status.Entries[0].Metadata[metaKeyUserMessageRecorded] != true {
+		t.Fatalf("expected requeued transient prompt to retain recorded-user-message metadata, got %#v", status.Entries[0].Metadata)
+	}
+
+	secondPromptDone := make(chan struct{})
+	agentMgr.mu.Lock()
+	agentMgr.promptErr = nil
+	agentMgr.promptDone = secondPromptDone
+	agentMgr.capturedPrompts = agentMgr.capturedPrompts[:0]
+	agentMgr.capturedPromptCalls = agentMgr.capturedPromptCalls[:0]
+	agentMgr.mu.Unlock()
+
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+	select {
+	case <-secondPromptDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("boot-ready drain did not dispatch the transiently requeued prompt")
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("expected boot-ready drain to reuse the existing user message, got %d", len(messages.userMessages))
 	}
 }
 

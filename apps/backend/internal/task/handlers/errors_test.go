@@ -5,11 +5,15 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // TestErrorsAreClassifiable verifies that the package's error-classification
@@ -40,6 +44,16 @@ func TestErrorsAreClassifiable(t *testing.T) {
 		}
 		if isAgentReportedError(errors.New("agent error: not the sentinel")) {
 			t.Errorf("untyped lookalike must no longer classify")
+		}
+	})
+
+	t.Run("WIP limit is a conflict for task creation", func(t *testing.T) {
+		gin.SetMode(gin.TestMode)
+		rec := httptest.NewRecorder()
+		ctx, _ := gin.CreateTestContext(rec)
+		handleNotFound(ctx, newTestLogger(t), fmt.Errorf("create task: %w", wfmodels.NewWIPLimitError("review", 2, 2)), "task not created")
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("status=%d, want %d", rec.Code, http.StatusConflict)
 		}
 	})
 }
@@ -75,6 +89,7 @@ func TestIsTimeoutError(t *testing.T) {
 			}
 		})
 	}
+
 }
 
 type timeoutNetErr struct{}

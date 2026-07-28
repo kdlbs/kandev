@@ -70,7 +70,118 @@ async function dockviewPanelIds(page: Page) {
   });
 }
 
+async function dockviewDefaultTree(page: Page, sessionId: string) {
+  return page.evaluate((currentSessionId) => {
+    type GridNode =
+      | { type: "branch"; data: GridNode[] }
+      | { type: "leaf"; data: { views: string[] } };
+    type Api = {
+      getPanel: (id: string) => { group: { id: string } } | null;
+      toJSON: () => { grid: { orientation: string; root: GridNode } };
+    };
+    const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+    if (!api) throw new Error("dockview api not exposed");
+    const layout = api.toJSON();
+    const root = layout.grid.root;
+    const rootColumns = root.type === "branch" ? root.data : [];
+    const rightColumnPreserved = rootColumns.some(
+      (column) =>
+        column.type === "branch" &&
+        column.data.some(
+          (group) =>
+            group.type === "leaf" &&
+            (group.data.views.includes("files") || group.data.views.includes("changes")),
+        ) &&
+        column.data.some(
+          (group) => group.type === "leaf" && group.data.views.includes("terminal-default"),
+        ),
+    );
+
+    return {
+      orientation: layout.grid.orientation,
+      centerGroupId: api.getPanel(`session:${currentSessionId}`)?.group.id ?? null,
+      rootColumnCount: rootColumns.length,
+      rightColumnPreserved,
+    };
+  }, sessionId);
+}
+
 test.describe("saved Dockview layouts", () => {
+  test("keeps the desktop split tree when switching tasks in one environment", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const parent = await createFinishedTaskWithSession(
+      apiClient,
+      seedData,
+      "Shared environment layout parent",
+      '/e2e:message("parent session")',
+    );
+    const child = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Shared environment layout child",
+      seedData.agentProfileId,
+      {
+        description: '/e2e:message("child session")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        parent_id: parent.task.id,
+        workspace_mode: "inherit_parent",
+      },
+    );
+    if (!child.session_id) throw new Error("child task did not return a session_id");
+
+    await expect
+      .poll(async () => {
+        const [{ sessions: parentSessions }, { sessions: childSessions }] = await Promise.all([
+          apiClient.listTaskSessions(parent.task.id),
+          apiClient.listTaskSessions(child.id),
+        ]);
+        const parentEnvironmentId = parentSessions[0]?.task_environment_id;
+        const childEnvironmentId = childSessions[0]?.task_environment_id;
+        return parentEnvironmentId && childEnvironmentId === parentEnvironmentId;
+      })
+      .toBe(true);
+
+    await testPage.goto(`/t/${parent.task.id}`);
+    await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("parent session")).toBeVisible({ timeout: 30_000 });
+
+    const sidebar = testPage.getByTestId("app-sidebar");
+    await sidebar.getByRole("button", { name: /Shared environment layout child/ }).click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${child.id}(?:\\?|$)`), { timeout: 10_000 });
+
+    await expect
+      .poll(() => dockviewPanelIds(testPage), {
+        timeout: 10_000,
+        message: "Waiting for the child session panel after the same-environment switch",
+      })
+      .toContain(`session:${child.session_id}`);
+    expect(await dockviewPanelIds(testPage)).not.toContain(`session:${parent.sessionId}`);
+
+    await expect
+      .poll(() => dockviewDefaultTree(testPage, child.session_id!))
+      .toEqual({
+        orientation: "HORIZONTAL",
+        centerGroupId: "group-center",
+        rootColumnCount: 2,
+        rightColumnPreserved: true,
+      });
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
+    await expect
+      .poll(() => dockviewDefaultTree(testPage, child.session_id!))
+      .toEqual({
+        orientation: "HORIZONTAL",
+        centerGroupId: "group-center",
+        rootColumnCount: 2,
+        rightColumnPreserved: true,
+      });
+  });
+
   test("saved chat-only layouts keep the current task session", async ({
     testPage,
     apiClient,

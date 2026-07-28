@@ -140,6 +140,16 @@ describe("useQueue", () => {
     });
   });
 
+  it("refetches a stale queue snapshot when the Kandev window regains focus", async () => {
+    renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalledTimes(1));
+    queueApiMock.getQueueStatus.mockClear();
+
+    window.dispatchEvent(new Event("focus"));
+
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID));
+  });
+
   it("does not refetch on foreground visibility while disconnected", async () => {
     mockState.connection.status = "disconnected";
     renderHook(() => useQueue(SESSION_ID));

@@ -1,6 +1,121 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
+	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_URL", "https://kandev.example/api/github/credentials/resolve")
+	t.Setenv("KANDEV_GITHUB_CLI_SHIM_DIR", "/kandev/shims")
+	env := CollectAgentEnv(map[string]string{"PATH": "/profile/bin:/usr/bin"})
+	want := strings.Join([]string{"/kandev/shims", "/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
+	if got := envSliceValue(env, "PATH"); got != want {
+		t.Fatalf("PATH = %q, want %q", got, want)
+	}
+}
+
+func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", "/opt/locstat/hooks")
+	t.Setenv("GIT_CONFIG_KEY_1", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_1", "cat_sort_uniq")
+
+	env := CollectAgentEnv(map[string]string{
+		"GIT_CONFIG_COUNT":   "2",
+		"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
+		"GIT_CONFIG_KEY_1":   "credential.useHttpPath",
+		"GIT_CONFIG_VALUE_1": "true",
+	})
+
+	if got := envSliceValue(env, "GIT_CONFIG_COUNT"); got != "4" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 4", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_0"); got != "core.hooksPath" {
+		t.Fatalf("GIT_CONFIG_KEY_0 = %q, want core.hooksPath", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_2"); got != "credential.https://github.com.helper" {
+		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want managed helper", got)
+	}
+}
+
+func TestCollectAgentEnvPreservesParentGitConfigHook(t *testing.T) {
+	repository := t.TempDir()
+	hooks := t.TempDir()
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hookPath := filepath.Join(hooks, "pre-commit")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0o755); err != nil {
+		t.Fatalf("write hook: %v", err)
+	}
+	runGit(t, nil, "init", repository)
+	runGit(t, nil, "-C", repository, "config", "user.name", "Kandev Test")
+	runGit(t, nil, "-C", repository, "config", "user.email", "kandev@example.test")
+
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_0", hooks)
+	t.Setenv("GIT_CONFIG_KEY_1", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_1", "cat_sort_uniq")
+	env := CollectAgentEnv(map[string]string{
+		"GIT_CONFIG_COUNT":   "2",
+		"GIT_CONFIG_KEY_0":   "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0": "!agentctl git-credential",
+		"GIT_CONFIG_KEY_1":   "credential.useHttpPath",
+		"GIT_CONFIG_VALUE_1": "true",
+	})
+
+	runGit(t, env, "-C", repository, "commit", "--allow-empty", "-m", "verify inherited hook")
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("inherited pre-commit hook did not run: %v", err)
+	}
+}
+
+func runGit(t *testing.T, env []string, args ...string) {
+	t.Helper()
+	command := exec.Command("git", args...)
+	if env != nil {
+		command.Env = env
+	}
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
+func envSliceValue(env []string, key string) string {
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			return strings.TrimPrefix(entry, prefix)
+		}
+	}
+	return ""
+}
+
+func TestValidateCommandArgs(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "valid preserves empty argument", args: []string{"runner", "", "two words"}},
+		{name: "empty argv", args: nil, want: true},
+		{name: "empty executable", args: []string{"", "arg"}, want: true},
+		{name: "whitespace executable", args: []string{" \t", "arg"}, want: true},
+		{name: "flag executable", args: []string{"--runner", "arg"}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateCommandArgs(tc.args)
+			if (err != nil) != tc.want {
+				t.Fatalf("ValidateCommandArgs(%#v) error = %v, want error=%v", tc.args, err, tc.want)
+			}
+		})
+	}
+}
 
 func TestConsumeNonce(t *testing.T) {
 	t.Run("valid nonce returns token and burns nonce", func(t *testing.T) {
@@ -149,6 +264,19 @@ func TestApplyOverrides_BaseBranches(t *testing.T) {
 // (empty AuthToken) the server must bind loopback only; when a token is
 // configured it binds all interfaces (empty host → ":port").
 func TestListenHost(t *testing.T) {
+	t.Run("explicit override wins when token is configured", func(t *testing.T) {
+		cfg := &Config{AuthToken: "secret", ListenHostOverride: "127.0.0.1"}
+		if got := cfg.ListenHost(); got != "127.0.0.1" {
+			t.Fatalf("ListenHost() = %q, want explicit loopback override", got)
+		}
+	})
+	t.Run("loads explicit override from launch environment", func(t *testing.T) {
+		t.Setenv("AGENTCTL_BOOTSTRAP_NONCE", "nonce")
+		t.Setenv("AGENTCTL_LISTEN_HOST", "127.0.0.1")
+		if got := Load().ListenHost(); got != "127.0.0.1" {
+			t.Fatalf("Load().ListenHost() = %q, want loopback override", got)
+		}
+	})
 	t.Run("no token binds loopback only", func(t *testing.T) {
 		cfg := &Config{AuthToken: ""}
 		if got := cfg.ListenHost(); got != "127.0.0.1" {

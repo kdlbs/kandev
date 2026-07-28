@@ -24,9 +24,7 @@ const state = {
   kanban: {
     workflowId: "wf-1" as string | null,
     steps: [{ id: "s1", title: "Todo" }],
-    tasks: [{ id: "t-1", title: "Parent task" }] as Array<{ id: string; title: string }>,
   },
-  tasks: { activeTaskId: null as string | null },
   setActiveTask: mocks.setActiveTask,
   setActiveSession: mocks.setActiveSession,
 };
@@ -76,14 +74,9 @@ vi.mock("@/components/task-create-dialog", () => ({
     </button>
   ),
 }));
-vi.mock("@/components/task/new-subtask-dialog", () => ({
-  NewSubtaskDialog: () => <div data-testid="new-subtask-dialog" />,
-}));
-
 import { AppSidebarNewTaskItem } from "./app-sidebar-new-task-item";
 import { requestNewTaskCreation } from "@/lib/desktop/new-task-request";
 
-const SUBTASK_TESTID = "sidebar-new-subtask";
 const OFFICE_DIALOG_TESTID = "office-new-task-dialog";
 const REGULAR_DIALOG_TESTID = "regular-task-create-dialog";
 
@@ -91,8 +84,6 @@ function resetTestState() {
   state.workspaces.activeId = "ws-1";
   state.kanban.workflowId = "wf-1";
   state.kanban.steps = [{ id: "s1", title: "Todo" }];
-  state.kanban.tasks = [{ id: "t-1", title: "Parent task" }];
-  state.tasks.activeTaskId = null;
   mocks.routerPush.mockClear();
   mocks.setActiveTask.mockClear();
   mocks.setActiveSession.mockClear();
@@ -173,37 +164,6 @@ describe("AppSidebarNewTaskItem row actions", () => {
     state.workspaces.activeId = null;
     renderItem(false);
     expect(screen.queryByTestId("sidebar-quick-chat-shortcut")).toBeNull();
-  });
-
-  it("offers a subtask affordance when a task is active in regular mode", () => {
-    state.tasks.activeTaskId = "t-1";
-    renderItem(false);
-    expect(screen.getByTestId(SUBTASK_TESTID)).toBeTruthy();
-    expect(screen.getByTestId("new-subtask-dialog")).toBeTruthy();
-  });
-
-  it("hides the subtask affordance when no task is active", () => {
-    state.tasks.activeTaskId = null;
-    renderItem(false);
-    expect(screen.queryByTestId(SUBTASK_TESTID)).toBeNull();
-  });
-
-  it("offers the subtask affordance in office mode too (compact subtask dialog)", async () => {
-    officeEnabled = true;
-    pathname = "/office";
-    state.tasks.activeTaskId = "t-1";
-    renderItem(false);
-    // Primary New Task uses the office dialog (lazy-loaded), but subtasks still
-    // go through the compact NewSubtaskDialog regardless of mode.
-    expect(await screen.findByTestId(OFFICE_DIALOG_TESTID)).toBeTruthy();
-    expect(screen.getByTestId(SUBTASK_TESTID)).toBeTruthy();
-    expect(screen.getByTestId("new-subtask-dialog")).toBeTruthy();
-  });
-
-  it("hides the subtask affordance when the rail is collapsed", () => {
-    state.tasks.activeTaskId = "t-1";
-    renderItem(true);
-    expect(screen.queryByTestId(SUBTASK_TESTID)).toBeNull();
   });
 });
 

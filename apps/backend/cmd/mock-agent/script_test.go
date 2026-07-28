@@ -466,6 +466,97 @@ func TestExecuteScriptToolUseAndResult(t *testing.T) {
 	}
 }
 
+// TestExecuteScriptShellResult verifies e2e:shell_result emits an
+// execute-kind tool call whose completion carries the given raw stdout,
+// exercising the same wire shape a real provider whose captured stdout
+// echoes the command would produce (see the ACP shell-output normalizer's
+// leading-echo stripping in shell_output.go).
+func TestExecuteScriptShellResult(t *testing.T) {
+	e, mock := newTestEmitter()
+	resetState()
+
+	executeScript(e, "", `e2e:shell_result("cat file.txt", "cat file.txt=== marker ===\n")`)
+
+	updates := mock.getUpdates()
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 updates, got %d", len(updates))
+	}
+
+	if !isToolCallUpdate(updates[0]) {
+		t.Fatal("expected tool_call update")
+	}
+	tc := updates[0].notification.Update.ToolCall
+	if tc.Kind != acp.ToolKindExecute {
+		t.Errorf("kind = %q, want %q", tc.Kind, acp.ToolKindExecute)
+	}
+	input, ok := tc.RawInput.(map[string]any)
+	if !ok || input["command"] != "cat file.txt" {
+		t.Errorf("raw input = %#v, want command %q", tc.RawInput, "cat file.txt")
+	}
+
+	if !isToolCallCompleteUpdate(updates[1]) {
+		t.Fatal("expected tool_call_update")
+	}
+	tcu := updates[1].notification.Update.ToolCallUpdate
+	output, ok := tcu.RawOutput.(map[string]any)
+	if !ok || output["output"] != "cat file.txt=== marker ===\n" {
+		t.Errorf("raw output = %#v, want the echoed stdout", tcu.RawOutput)
+	}
+}
+
+// TestExecuteScriptShellResultWithCwd verifies the optional third
+// e2e:shell_result argument populates rawInput["cwd"], reproducing a
+// provider that resolves a relative file-path argument in the command to
+// an absolute (cwd-joined) one before actually invoking the real terminal
+// (see the ACP shell-output normalizer's workDir-aware echo stripping in
+// shell_output.go).
+func TestExecuteScriptShellResultWithCwd(t *testing.T) {
+	e, mock := newTestEmitter()
+	resetState()
+
+	executeScript(e, "", `e2e:shell_result("cat notes.txt", "$ cat /work/notes.txt\nhello\n", "/work")`)
+
+	updates := mock.getUpdates()
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 updates, got %d", len(updates))
+	}
+
+	tc := updates[0].notification.Update.ToolCall
+	input, ok := tc.RawInput.(map[string]any)
+	if !ok || input["command"] != "cat notes.txt" || input["cwd"] != "/work" {
+		t.Errorf("raw input = %#v, want command %q and cwd %q", tc.RawInput, "cat notes.txt", "/work")
+	}
+
+	tcu := updates[1].notification.Update.ToolCallUpdate
+	output, ok := tcu.RawOutput.(map[string]any)
+	if !ok || output["output"] != "$ cat /work/notes.txt\nhello\n" {
+		t.Errorf("raw output = %#v, want the echoed stdout", tcu.RawOutput)
+	}
+}
+
+// TestExecuteScriptShellResultWithoutCwdOmitsCwdKey confirms the
+// two-argument form (no cwd) keeps working exactly as before: rawInput
+// carries no "cwd" key at all.
+func TestExecuteScriptShellResultWithoutCwdOmitsCwdKey(t *testing.T) {
+	e, mock := newTestEmitter()
+	resetState()
+
+	executeScript(e, "", `e2e:shell_result("cat file.txt", "cat file.txt=== marker ===\n")`)
+
+	updates := mock.getUpdates()
+	if len(updates) != 2 {
+		t.Fatalf("expected 2 updates, got %d", len(updates))
+	}
+	tc := updates[0].notification.Update.ToolCall
+	input, ok := tc.RawInput.(map[string]any)
+	if !ok {
+		t.Fatalf("raw input = %#v, want a map", tc.RawInput)
+	}
+	if _, present := input["cwd"]; present {
+		t.Errorf("raw input = %#v, want no cwd key", tc.RawInput)
+	}
+}
+
 // TestExecuteScriptToolUseNoInput verifies tool_use with no input arg.
 func TestExecuteScriptToolUseNoInput(t *testing.T) {
 	e, mock := newTestEmitter()

@@ -33,6 +33,36 @@ useRegularMode();
 test.describe("Clarification flow", () => {
   test.describe.configure({ retries: 1 });
 
+  test("keeps a pending question open while typing a digit in the regular composer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedClarificationTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Clarification Composer Queue",
+      "clarification",
+    );
+
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+    const composer = session.activeChat().getByTestId("chat-input-editor");
+    await expect(composer).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+    await expect(testPage.getByTestId("cancel-agent-button")).toBeVisible();
+
+    await composer.pressSequentially("Queue this after I answer 1", { timeout: 30_000 });
+    await expect(composer).toContainText("Queue this after I answer 1");
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await testPage.getByTestId("submit-message-button").click();
+
+    await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
+    await expect(session.clarificationOverlay()).toBeVisible();
+    await testPage.getByTestId("queue-chip").click();
+    await expect(testPage.getByTestId("queued-ghost-list")).toBeVisible();
+    await expect(testPage.getByTestId("queue-drain-next")).not.toBeVisible();
+  });
+
   test("select option (happy path)", async ({ testPage, apiClient, seedData }) => {
     const session = await seedClarificationTask(
       testPage,
@@ -184,11 +214,33 @@ test.describe("Clarification flow", () => {
     // Agent moved on; a late custom answer remains editable and goes through
     // the event fallback as a new prompt.
     const input = session.clarificationInput();
+    const inputRow = session.clarificationCustomInput();
     await expect(input).toBeEnabled();
-    await session.clarificationCustomInput().click({ position: { x: 4, y: 4 } });
+    await expect(input).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    const [inputBox, inputRowBox] = await Promise.all([
+      input.boundingBox(),
+      inputRow.boundingBox(),
+    ]);
+    if (!inputBox || !inputRowBox) {
+      throw new Error("expected the custom answer input and row to have bounding boxes");
+    }
+    expect(Math.abs(inputBox.x - inputRowBox.x)).toBeLessThanOrEqual(16);
+
+    await inputRow.click({ position: { x: 4, y: 4 } });
     await expect(input).toBeFocused();
     await input.pressSequentially("Use the embedded database for this task");
     await expect(input).toHaveValue("Use the embedded database for this task");
+    const [filledInputBox, filledInputRowBox] = await Promise.all([
+      input.boundingBox(),
+      inputRow.boundingBox(),
+    ]);
+    if (!filledInputBox || !filledInputRowBox) {
+      throw new Error("expected the filled custom answer input and row to have bounding boxes");
+    }
+    const inputCenter = filledInputBox.y + filledInputBox.height / 2;
+    const rowCenter = filledInputRowBox.y + filledInputRowBox.height / 2;
+    expect(Math.abs(inputCenter - rowCenter)).toBeLessThanOrEqual(1);
+
     await input.press("Enter");
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText("Use the embedded database for this task");

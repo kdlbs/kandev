@@ -301,6 +301,8 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 		Reviews: taskRepo,
 	}, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
+	taskSvc.SetWorkflowStepGetter(workflowSvc)
+	taskSvc.SetWorkspaceBootstrapper(taskRepo)
 
 	// Create simulated agent manager
 	agentManager := NewSimulatedAgentManager(eventBus, log)

@@ -1,4 +1,8 @@
-import type { TaskPendingAction, TaskState as TaskStatus } from "@/lib/types/http";
+import type {
+  ForegroundActivity,
+  TaskPendingAction,
+  TaskState as TaskStatus,
+} from "@/lib/types/http";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -59,9 +63,24 @@ export type KanbanState = {
       checkout_branch?: string;
       position: number;
     }>;
+    workspaceFolders?: Array<{
+      id: string;
+      local_path: string;
+      display_name: string;
+      position: number;
+    }>;
     primarySessionId?: string | null;
     primarySessionState?: string | null;
     primarySessionPendingAction?: TaskPendingAction | null;
+    taskPendingAction?: TaskPendingAction | null;
+    /**
+     * Task-level MOST-ACTIVE-WINS activity aggregate;
+     * undefined/null when no session is running. Drives the board card and task
+     * list background-running affordance.
+     */
+    foregroundActivity?: ForegroundActivity | null;
+    /** Live subagents across this task's sessions; reserved for future UI. */
+    activeSubagentCount?: number;
     sessionCount?: number | null;
     reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
     primaryExecutorId?: string | null;
@@ -131,10 +150,12 @@ export type KanbanSliceState = {
   kanban: KanbanState;
   kanbanMulti: KanbanMultiState;
   workflows: WorkflowsState;
+  workspaceContextGeneration: number;
   tasks: TaskState;
 };
 
 export type KanbanSliceActions = {
+  resetKanbanWorkspaceContext: () => void;
   setActiveWorkflow: (workflowId: string | null) => void;
   setWorkflows: (workflows: WorkflowsState["items"]) => void;
   reorderWorkflowItems: (workflowIds: string[]) => void;

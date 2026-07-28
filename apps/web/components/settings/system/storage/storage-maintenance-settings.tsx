@@ -127,6 +127,16 @@ function serializeSettings(settings: Settings | null): string {
   return settings ? JSON.stringify(settings) : "loading";
 }
 
+function policyPendingAction(action: ReturnType<typeof useStorageMaintenance>["pendingAction"]) {
+  return action === "load" || action === "save" || action === "adopt";
+}
+
+function policyBlockedReason(action: ReturnType<typeof useStorageMaintenance>["pendingAction"]) {
+  if (action === "adopt") return "Wait for Go cache adoption to finish.";
+  if (action === "load") return "Wait for storage settings to finish loading.";
+  return undefined;
+}
+
 function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenance>) {
   const [draft, setDraft] = useState<Settings | null>(null);
   const previousServerSettings = useRef<Settings | null>(null);
@@ -139,20 +149,23 @@ function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenan
       if (!current || !previous || serializeSettings(current) === serializeSettings(previous)) {
         return savedSettings;
       }
-      return current;
+      return {
+        ...current,
+        go_cache: { ...current.go_cache, adopted_path: savedSettings.go_cache.adopted_path },
+      };
     });
     previousServerSettings.current = savedSettings;
   }, [savedSettings]);
 
-  const pending = controller.pendingAction !== null;
+  const invalidReason = policyBlockedReason(controller.pendingAction);
   useSettingsSaveContributor({
     id: "system:storage-policy",
     revision: serializeSettings(draft),
     isDirty: Boolean(
       draft && savedSettings && serializeSettings(draft) !== serializeSettings(savedSettings),
     ),
-    canSave: !pending,
-    invalidReason: pending ? "Wait for the current storage action to finish." : undefined,
+    canSave: !invalidReason,
+    invalidReason,
     save: async () => {
       if (!draft || !savedSettings) return;
       const confirmation =
@@ -173,12 +186,14 @@ function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenan
 export function StorageMaintenanceSettings() {
   const controller = useStorageMaintenance();
   const { draft, setDraft, savedSettings } = useStoragePolicyDraft(controller);
-  const pending = controller.pendingAction !== null;
-  const disabledReason = pending ? "Wait for the current storage action to finish." : undefined;
+  const controlsPending = policyPendingAction(controller.pendingAction);
+  const actionDisabledReason = controller.pendingAction
+    ? "Wait for the current storage action to finish."
+    : undefined;
 
   return (
     <div className="min-w-0 space-y-6" data-testid="storage-settings-page">
-      <StorageActions controller={controller} disabledReason={disabledReason} />
+      <StorageActions controller={controller} disabledReason={actionDisabledReason} />
 
       {controller.error && (
         <Alert variant="destructive" data-testid="storage-error">
@@ -191,7 +206,7 @@ export function StorageMaintenanceSettings() {
       <div className="min-w-0 space-y-4" data-testid="storage-primary-sections">
         <StorageOverviewCard
           overview={controller.overview}
-          disabledReason={disabledReason}
+          disabledReason={actionDisabledReason}
           onRunGoCache={() => void controller.runNow(["go_cache"])}
         />
         {draft && savedSettings && controller.overview && (
@@ -199,7 +214,7 @@ export function StorageMaintenanceSettings() {
             settings={draft}
             savedSettings={savedSettings}
             capabilities={controller.overview.capabilities}
-            pending={pending}
+            pending={controlsPending}
             onChange={setDraft}
             onAdopt={controller.adopt}
           />
@@ -209,7 +224,7 @@ export function StorageMaintenanceSettings() {
       <StorageQuarantineCard
         entries={controller.quarantine}
         deleteJobId={controller.deleteJob?.id}
-        disabledReason={disabledReason}
+        disabledReason={actionDisabledReason}
         onRestore={controller.restore}
         onDelete={controller.permanentlyDelete}
       />

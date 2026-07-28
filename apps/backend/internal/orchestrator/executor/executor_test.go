@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -450,7 +451,13 @@ func TestLaunchPreparedSession_AbortsWhenStartingPersistenceFails(t *testing.T) 
 
 	persistErr := errors.New("session is terminal")
 	executor := newTestExecutor(t, agentManager, repo)
-	executor.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+	executor.SetOnSessionStarting(func(
+		ctx context.Context,
+		taskID string,
+		session *models.TaskSession,
+		expectedState models.TaskSessionState,
+		promoteTask bool,
+	) error {
 		return persistErr
 	})
 
@@ -863,6 +870,66 @@ func TestLaunchPreparedSession_ExistingWorkspace_StartAgent(t *testing.T) {
 	}
 }
 
+func TestStartAgentOnExistingWorkspace_CancellationAfterSnapshotWins(t *testing.T) {
+	ctx := context.Background()
+	repo := newMockRepository()
+	stored := &models.TaskSession{
+		ID:             "session-existing-race",
+		TaskID:         "task-existing-race",
+		AgentProfileID: "profile-123",
+		State:          models.TaskSessionStateCreated,
+	}
+	repo.sessions[stored.ID] = stored
+	callerSession := *stored
+
+	agentManager := &mockAgentManager{
+		getExecutionIDForSessionFunc: func(context.Context, string) (string, error) {
+			return "exec-existing-race", nil
+		},
+		startAgentProcessFunc: func(context.Context, string) error {
+			t.Fatal("agent process must not start after cancellation")
+			return nil
+		},
+	}
+	executor := newTestExecutor(t, agentManager, repo)
+
+	var gotExpectedState models.TaskSessionState
+	executor.SetOnSessionStarting(func(
+		ctx context.Context,
+		_ string,
+		next *models.TaskSession,
+		expectedState models.TaskSessionState,
+		_ bool,
+	) error {
+		gotExpectedState = expectedState
+		if err := repo.UpdateTaskSessionState(
+			ctx, stored.ID, models.TaskSessionStateCancelled, "stopped via API",
+		); err != nil {
+			return err
+		}
+		return executor.persistSessionFullRowIfCurrentState(ctx, next, expectedState)
+	})
+
+	_, err := executor.startAgentOnExistingWorkspace(
+		ctx,
+		&v1.Task{ID: stored.TaskID},
+		&callerSession,
+		"",
+		true,
+		"",
+		nil,
+	)
+	if !errors.Is(err, ErrSessionStateSuperseded) {
+		t.Fatalf("startAgentOnExistingWorkspace error = %v, want ErrSessionStateSuperseded", err)
+	}
+	if gotExpectedState != models.TaskSessionStateCreated {
+		t.Fatalf("expected state = %q, want CREATED", gotExpectedState)
+	}
+	if got := repo.sessions[stored.ID].State; got != models.TaskSessionStateCancelled {
+		t.Fatalf("stored state = %q, want CANCELLED", got)
+	}
+}
+
 // Regression: a workspace-only execution can be created by lazy workspace
 // restoration before workflow auto-start reaches LaunchPreparedSession. That
 // execution has no agent command, so it must go through LaunchAgent's promotion
@@ -1261,6 +1328,95 @@ func TestExecuteWithProfile_UsesPrepareThenLaunch(t *testing.T) {
 
 	if execution.TaskID != task.ID {
 		t.Errorf("Expected task ID %s, got %s", task.ID, execution.TaskID)
+	}
+}
+
+func TestExecuteWithProfile_PersistsEarlyLaunchFailure(t *testing.T) {
+	repo := newMockRepository()
+	sentinel := errors.New("GitHub is not configured")
+	const secret = "ghp_abcdefghijklmnopqrstuvwxyz1234567890AB"
+	repo.getTaskEnvironmentByTaskIDFunc = func(
+		context.Context,
+		string,
+	) (*models.TaskEnvironment, error) {
+		return nil, fmt.Errorf("resolve workspace Git credential: token=%s: %w", secret, sentinel)
+	}
+	agentManager := &mockAgentManager{}
+	executor := newTestExecutor(t, agentManager, repo)
+	task := &v1.Task{
+		ID: "task-early-failure", WorkspaceID: "workspace-123",
+		Title: "Test Task", Description: "Test description",
+	}
+	repo.tasks[task.ID] = &models.Task{
+		ID: task.ID, WorkspaceID: task.WorkspaceID, State: v1.TaskStateScheduling,
+	}
+
+	_, err := executor.ExecuteWithProfile(
+		context.Background(), task, "profile-123", "", "test prompt", "",
+	)
+	if err == nil || !errors.Is(err, sentinel) {
+		t.Fatalf("ExecuteWithProfile() error = %v, want GitHub credential failure", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("ExecuteWithProfile() returned raw credential: %v", err)
+	}
+	if len(repo.createTaskSessionCalls) != 1 {
+		t.Fatalf("created sessions = %d, want 1", len(repo.createTaskSessionCalls))
+	}
+	sessionID := repo.createTaskSessionCalls[0].ID
+	session := repo.sessions[sessionID]
+	if session.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", session.State)
+	}
+	if strings.Contains(session.ErrorMessage, secret) {
+		t.Fatalf("persisted session error contains raw credential: %q", session.ErrorMessage)
+	}
+	if repo.tasks[task.ID].State != v1.TaskStateFailed {
+		t.Fatalf("task state = %s, want FAILED", repo.tasks[task.ID].State)
+	}
+}
+
+func TestExecuteWithProfile_EarlyFailureDoesNotFailSupersededPrimary(t *testing.T) {
+	repo := newMockRepository()
+	repo.getTaskEnvironmentByTaskIDFunc = func(
+		context.Context,
+		string,
+	) (*models.TaskEnvironment, error) {
+		repo.mu.Lock()
+		repo.sessions["session-new"] = &models.TaskSession{
+			ID: "session-new", TaskID: "task-superseded",
+			State: models.TaskSessionStateRunning,
+		}
+		repo.mu.Unlock()
+		if err := repo.SetSessionPrimary(context.Background(), "session-new"); err != nil {
+			t.Fatalf("SetSessionPrimary: %v", err)
+		}
+		return nil, errors.New("resolve workspace Git credential: GitHub is not configured")
+	}
+	executor := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{
+		ID: "task-superseded", WorkspaceID: "workspace-123",
+		Title: "Test Task", Description: "Test description",
+	}
+	repo.tasks[task.ID] = &models.Task{
+		ID: task.ID, WorkspaceID: task.WorkspaceID, State: v1.TaskStateScheduling,
+	}
+
+	_, err := executor.ExecuteWithProfile(
+		context.Background(), task, "profile-123", "", "test prompt", "",
+	)
+	if err == nil {
+		t.Fatal("ExecuteWithProfile() succeeded, want early launch failure")
+	}
+	oldSessionID := repo.createTaskSessionCalls[0].ID
+	if repo.sessions[oldSessionID].State != models.TaskSessionStateFailed {
+		t.Fatalf("old session state = %s, want FAILED", repo.sessions[oldSessionID].State)
+	}
+	if repo.sessions["session-new"].State != models.TaskSessionStateRunning {
+		t.Fatalf("new primary state = %s, want RUNNING", repo.sessions["session-new"].State)
+	}
+	if repo.tasks[task.ID].State != v1.TaskStateScheduling {
+		t.Fatalf("task state = %s, want SCHEDULING", repo.tasks[task.ID].State)
 	}
 }
 
@@ -2344,24 +2500,32 @@ func TestRepositoryCloneURL(t *testing.T) {
 type recordingAuthenticatedCloner struct {
 	normalCalls int
 	authCalls   int
+	workspaceID string
+	provider    string
 	password    string
 }
 
-func (c *recordingAuthenticatedCloner) EnsureClonedForProvider(
-	_ context.Context, _, _, _, _, _, _, _ string,
+func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedForProvider(
+	_ context.Context, workspaceID, _, provider, _, _, _, _, _ string,
 ) (string, error) {
 	c.normalCalls++
+	c.workspaceID = workspaceID
+	c.provider = provider
 	return "/repos/normal", nil
 }
+
+func (c *recordingAuthenticatedCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
 
 func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_, _, _, _ string) (string, error) {
 	return "", nil
 }
 
-func (c *recordingAuthenticatedCloner) EnsureClonedWithBasicAuth(
-	_ context.Context, _, _, _, _, password string,
+func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedWithBasicAuth(
+	_ context.Context, workspaceID, provider, _, _, _, _, _, password string,
 ) (string, error) {
 	c.authCalls++
+	c.workspaceID = workspaceID
+	c.provider = provider
 	c.password = password
 	return "/repos/azure", nil
 }
@@ -2384,11 +2548,14 @@ func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if path != "/repos/azure" || cloner.authCalls != 1 || cloner.password != "workspace-pat" {
+	if path != "/repos/azure" || cloner.authCalls != 1 || cloner.workspaceID != "workspace-1" ||
+		cloner.provider != "azure_devops" || cloner.password != "workspace-pat" {
 		t.Fatalf("authenticated clone was not used with workspace credential: %+v", cloner)
 	}
 
-	github := &models.Repository{Provider: "github", ProviderOwner: "acme", ProviderName: "api"}
+	github := &models.Repository{
+		WorkspaceID: "workspace-2", Provider: "github", ProviderOwner: "acme", ProviderName: "api",
+	}
 	if _, err := exec.ensureClonedWithWorkspaceAuth(context.Background(), github, "https://github.com/acme/api.git"); err != nil {
 		t.Fatal(err)
 	}
@@ -2398,6 +2565,9 @@ func TestEnsureClonedWithWorkspaceAuth(t *testing.T) {
 	}
 	if cloner.normalCalls != 2 || cloner.authCalls != 1 {
 		t.Fatalf("non-Azure-HTTPS providers must use ordinary cloning: %+v", cloner)
+	}
+	if cloner.workspaceID != "workspace-1" || cloner.provider != "azure_devops" {
+		t.Fatalf("ordinary clone did not preserve workspace/provider isolation: %+v", cloner)
 	}
 }
 
@@ -2470,7 +2640,8 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 			CompletedAt: &completedAt,
 			UpdatedAt:   now,
 		}
-		repo.sessions[session.ID] = session
+		stored := *session
+		repo.sessions[session.ID] = &stored
 
 		if err := executor.persistResumeState(context.Background(), "task-1", session, true); err != nil {
 			t.Fatalf("persistResumeState: %v", err)
@@ -2493,7 +2664,15 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 		}
 		repo.sessions[session.ID] = session
 		var gotPromoteTask *bool
-		executor.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+		var gotExpectedState models.TaskSessionState
+		executor.SetOnSessionStarting(func(
+			ctx context.Context,
+			taskID string,
+			session *models.TaskSession,
+			expectedState models.TaskSessionState,
+			promoteTask bool,
+		) error {
+			gotExpectedState = expectedState
 			gotPromoteTask = &promoteTask
 			return repo.UpdateTaskSession(ctx, session)
 		})
@@ -2507,6 +2686,9 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 
 		if gotPromoteTask == nil {
 			t.Fatal("expected onSessionStarting callback")
+		}
+		if gotExpectedState != models.TaskSessionStateWaitingForInput {
+			t.Fatalf("expected source state WAITING_FOR_INPUT, got %s", gotExpectedState)
 		}
 		if *gotPromoteTask {
 			t.Fatal("resume STARTING persistence must defer task promotion until process start succeeds")
@@ -2554,13 +2736,16 @@ func TestPersistResumeState_SetsStartingState(t *testing.T) {
 	})
 }
 
-// TestUpdateSessionStarting_ArchiveCancelledSessionRecovers proves
+// TestUpdateSessionStarting_CancelledSessionRecovers proves
 // updateSessionStarting's fallback path (no onSessionStarting callback
-// wired) mirrors Service.setSessionStarting: an archive-cancelled session
-// (the resume path treats CANCELLED as an expected, resumable terminal
-// state) may recover into STARTING like a Failed session.
-func TestUpdateSessionStarting_ArchiveCancelledSessionRecovers(t *testing.T) {
-	for _, reason := range []string{models.SessionArchiveCancelReason, models.SessionArchiveTreeCancelReason} {
+// wired) mirrors Service.setSessionStarting: a CANCELLED session may recover
+// when CANCELLED was the state observed before the resume launch.
+func TestUpdateSessionStarting_CancelledSessionRecovers(t *testing.T) {
+	for _, reason := range []string{
+		"stopped via API",
+		models.SessionArchiveCancelReason,
+		models.SessionArchiveTreeCancelReason,
+	} {
 		t.Run(reason, func(t *testing.T) {
 			repo := newMockRepository()
 			executor := newTestExecutor(t, &mockAgentManager{}, repo)
@@ -2576,7 +2761,13 @@ func TestUpdateSessionStarting_ArchiveCancelledSessionRecovers(t *testing.T) {
 				State:  models.TaskSessionStateStarting,
 			}
 
-			if err := executor.updateSessionStarting(context.Background(), "task-1", next, false); err != nil {
+			if err := executor.updateSessionStarting(
+				context.Background(),
+				"task-1",
+				next,
+				models.TaskSessionStateCancelled,
+				false,
+			); err != nil {
 				t.Fatalf("updateSessionStarting: %v", err)
 			}
 			if got := repo.sessions["session-1"].State; got != models.TaskSessionStateStarting {
@@ -2586,11 +2777,7 @@ func TestUpdateSessionStarting_ArchiveCancelledSessionRecovers(t *testing.T) {
 	}
 }
 
-// TestUpdateSessionStarting_OrdinaryCancelledSessionStaysRejected is the
-// counterpart to TestUpdateSessionStarting_ArchiveCancelledSessionRecovers:
-// an ordinary/explicit cancellation (no archive-cancel reason) must stay
-// rejected as superseded, never silently promoted back into STARTING.
-func TestUpdateSessionStarting_OrdinaryCancelledSessionStaysRejected(t *testing.T) {
+func TestUpdateSessionStarting_CancellationAfterResumeSnapshotStaysRejected(t *testing.T) {
 	repo := newMockRepository()
 	executor := newTestExecutor(t, &mockAgentManager{}, repo)
 	repo.sessions["session-1"] = &models.TaskSession{
@@ -2604,7 +2791,13 @@ func TestUpdateSessionStarting_OrdinaryCancelledSessionStaysRejected(t *testing.
 		State:  models.TaskSessionStateStarting,
 	}
 
-	err := executor.updateSessionStarting(context.Background(), "task-1", next, false)
+	err := executor.updateSessionStarting(
+		context.Background(),
+		"task-1",
+		next,
+		models.TaskSessionStateWaitingForInput,
+		false,
+	)
 	var superseded *SessionStateSupersededError
 	if !errors.As(err, &superseded) {
 		t.Fatalf("updateSessionStarting error = %v, want SessionStateSupersededError", err)
@@ -2668,6 +2861,12 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 	var launchCount int64
 	entered := make(chan struct{}, 2)
 	gate := make(chan struct{})
+	startProcessGate := make(chan struct{})
+	var releaseStartProcess sync.Once
+	releaseStartProcessGate := func() {
+		releaseStartProcess.Do(func() { close(startProcessGate) })
+	}
+	t.Cleanup(releaseStartProcessGate)
 	agentManager := &mockAgentManager{
 		launchAgentFunc: func(ctx context.Context, req *LaunchAgentRequest) (*LaunchAgentResponse, error) {
 			atomic.AddInt64(&launchCount, 1)
@@ -2690,6 +2889,13 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 		// the live store would return after the first caller registered.
 		getExecutionIDForSessionFunc: func(ctx context.Context, sessionID string) (string, error) {
 			return "exec-race", nil
+		},
+		// The repository mock returns shared pointers, unlike the production
+		// database store. Hold both async process-start callbacks until the
+		// serialized launch calls finish mutating their session snapshots.
+		startAgentProcessFunc: func(_ context.Context, _ string) error {
+			<-startProcessGate
+			return nil
 		},
 	}
 	executor := newTestExecutor(t, agentManager, repo)
@@ -2730,6 +2936,9 @@ func TestLaunchPreparedSession_SerialisesConcurrentLaunches(t *testing.T) {
 	}
 	close(gate)
 	wg.Wait()
+	releaseStartProcessGate()
+	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
+	waitForUpdateTaskStateIfNotArchivedCall(t, repo)
 
 	// First call ran LaunchAgent; second call took the fast path so total
 	// stays at 1. Both return non-error (the second is a no-op start).

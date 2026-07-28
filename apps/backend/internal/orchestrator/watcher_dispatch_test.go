@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // nopLogger returns a *logger.Logger backed by zap.NewNop() for use in tests.
@@ -244,6 +245,26 @@ func TestCoordinator_Dispatch_CreateError_Releases(t *testing.T) {
 	}
 	if src.recordedAttach != 0 || starter.called != 0 {
 		t.Fatal("expected pipeline to stop after create error")
+	}
+}
+
+func TestCoordinator_Dispatch_WIPLimitRejection_ReleasesWithoutErrorSemantics(t *testing.T) {
+	src := &fakeWatcherSource{
+		name:      "linear",
+		reserveOK: true,
+		buildReq:  &IssueTaskRequest{WorkspaceID: "ws-1", WorkflowStepID: "step-1"},
+	}
+	tc := &fakeTaskCreator{createErr: workflowmodels.NewWIPLimitError("step-1", 2, 2)}
+	starter := &fakeTaskStarter{}
+	c := newTestCoordinator(t, tc, true, starter)
+
+	c.Dispatch(context.Background(), src, "evt")
+
+	if src.recordedRelease != 1 {
+		t.Fatalf("expected release after WIP rejection, got %d", src.recordedRelease)
+	}
+	if src.recordedAttach != 0 || starter.called != 0 {
+		t.Fatal("expected WIP rejection to stop before attach and auto-start")
 	}
 }
 

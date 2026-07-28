@@ -41,12 +41,39 @@ const degradedOverview = {
       managed_container_bytes: 0,
     },
   },
+  analyzed_at: "2026-07-23T12:00:00Z",
   last_run: null,
 } satisfies StorageOverviewResponse;
 
 afterEach(cleanup);
 
 describe("StorageOverviewCard", () => {
+  it("shows the relative age and absolute time of the returned snapshot", () => {
+    const analyzedAt = "2026-07-23T11:58:00Z";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-23T12:00:00Z"));
+
+    render(
+      <StorageOverviewCard
+        overview={{ ...degradedOverview, analyzed_at: analyzedAt } as StorageOverviewResponse}
+        onRunGoCache={vi.fn()}
+      />,
+    );
+
+    const timestamp = screen.getByText("Last analyzed 2m ago");
+    expect(timestamp.tagName).toBe("TIME");
+    expect(timestamp.getAttribute("dateTime")).toBe(analyzedAt);
+    expect(timestamp.getAttribute("title")).toBe(new Date(analyzedAt).toLocaleString());
+    vi.useRealTimers();
+  });
+
+  it("shows a loading spinner while the overview is unavailable", () => {
+    render(<StorageOverviewCard overview={null} onRunGoCache={vi.fn()} />);
+
+    expect(screen.getByRole("status", { name: "Loading" })).toBeTruthy();
+    expect(screen.getByText("Loading storage data…")).toBeTruthy();
+  });
+
   it("renders a degraded quarantine warning without inventing zero usage", () => {
     render(<StorageOverviewCard overview={degradedOverview} onRunGoCache={vi.fn()} />);
 

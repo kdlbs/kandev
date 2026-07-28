@@ -63,11 +63,12 @@ var triggerTypeRegistry = []TriggerTypeInfo{
 		DefaultConfig:    json.RawMessage(`{"events":["opened"],"repos":[],"exclude_draft":false}`),
 	},
 	{
-		Type:        TriggerTypeGitHubPush,
-		Label:       "Push to branch",
-		Description: "Triggers when commits are pushed to matching branches",
-		Category:    triggerCategoryGitHub,
-		Enabled:     false,
+		Type:  TriggerTypeGitHubPush,
+		Label: "Push to branch",
+		Description: "Webhook-driven: triggers when commits are pushed to matching branches. Requires " +
+			"a workspace GitHub App connection subscribed to push events.",
+		Category: triggerCategoryGitHub,
+		Enabled:  true,
 		Placeholders: append([]PlaceholderInfo{
 			{Key: "push.branch", Description: "Branch that was pushed to", Example: defaultBranchMain},
 			{Key: "push.repo", Description: placeholderRepositoryOwner, Example: exampleRepositoryOwner},
@@ -79,11 +80,12 @@ var triggerTypeRegistry = []TriggerTypeInfo{
 		DefaultConfig:    json.RawMessage(`{"repos":[],"branches":["main"]}`),
 	},
 	{
-		Type:        TriggerTypeGitHubCI,
-		Label:       "CI check result",
-		Description: "Triggers when a CI check completes with matching conclusion",
-		Category:    triggerCategoryGitHub,
-		Enabled:     false,
+		Type:  TriggerTypeGitHubCI,
+		Label: "CI check result",
+		Description: "Webhook-driven: triggers when a CI check completes with matching conclusion. Requires " +
+			"a workspace GitHub App connection subscribed to check_run events.",
+		Category: triggerCategoryGitHub,
+		Enabled:  true,
 		Placeholders: append([]PlaceholderInfo{
 			{Key: "ci.check_name", Description: "CI check/workflow name", Example: "build"},
 			{Key: "ci.conclusion", Description: "CI conclusion", Example: "failure"},

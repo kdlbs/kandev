@@ -354,7 +354,7 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 		return resp
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, constants.SessionNewTimeout)
 	defer cancel()
 
 	adapter := s.procMgr.GetAdapter()

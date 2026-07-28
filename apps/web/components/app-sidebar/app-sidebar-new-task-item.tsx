@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useRouter } from "@/lib/routing/client-router";
-import { IconMessageCircle, IconSquarePlus, IconSubtask } from "@tabler/icons-react";
+import { IconMessageCircle, IconSquarePlus } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
@@ -21,7 +21,6 @@ const NewTaskDialog = dynamic(
   () => import("@/app/office/components/new-task-dialog").then((m) => m.NewTaskDialog),
   { ssr: false },
 );
-import { NewSubtaskDialog } from "@/components/task/new-subtask-dialog";
 import { AppSidebarNavItem } from "./app-sidebar-nav-item";
 
 type AppSidebarNewTaskItemProps = {
@@ -39,8 +38,6 @@ function useNewTaskCreationRequest(
 }
 
 const ONE_ROW_ACTION_INSET_CLASS = "pr-10";
-const TWO_ROW_ACTIONS_INSET_CLASS = "pr-16";
-
 type RowActionButtonProps = {
   icon: TablerIcon;
   label: string;
@@ -75,44 +72,23 @@ function RowActionButton({ icon: Icon, label, testId, onClick }: RowActionButton
  * workflow. Gate on `useInOffice()` (route), not the bare `office` flag, so the
  * Office dialog never leaks into Kanban mode.
  *
- * When the user is inside a task (an active task in regular mode), a trailing
- * subtask affordance appears so a child task can be created against the current
- * one — restoring the contextual action the retired dockview header dropdown
- * used to provide.
+ * Task-specific actions live on each task row's context menu, keeping this
+ * global navigation item focused on creating top-level tasks and quick chats.
  */
 export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps) {
   const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const workflowId = useAppStore((s) => s.kanban.workflowId);
   const steps = useAppStore((s) => s.kanban.steps);
-  const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const setActiveTask = useAppStore((s) => s.setActiveTask);
   const setActiveSession = useAppStore((s) => s.setActiveSession);
-  const activeTaskTitle = useAppStore((s) => {
-    const id = s.tasks.activeTaskId;
-    if (!id) return "";
-    return s.kanban.tasks.find((t) => t.id === id)?.title ?? "";
-  });
   const inOffice = useInOffice();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
   const [open, setOpen] = useState(false);
-  const [subtaskOpen, setSubtaskOpen] = useState(false);
   useNewTaskCreationRequest(workspaceId, setOpen);
 
-  // The subtask affordance is available in both modes (office uses the richer
-  // dialog for the primary New Task, but subtasks always go through the compact
-  // NewSubtaskDialog, matching the retired dropdown). It needs an active task
-  // and the expanded rail to host the trailing button.
   const canOpenQuickChat = !collapsed && !!workspaceId;
-  const canCreateSubtask = !collapsed && !!workspaceId && !!activeTaskId;
-  let actionInsetClass: string | undefined;
-  // Keep the label clear of the absolute action cluster:
-  // pr-10 covers one w-6 button + right-1.5 inset; pr-16 covers two buttons + gap-1.
-  if (canCreateSubtask) {
-    actionInsetClass = TWO_ROW_ACTIONS_INSET_CLASS;
-  } else if (canOpenQuickChat) {
-    actionInsetClass = ONE_ROW_ACTION_INSET_CLASS;
-  }
+  const actionInsetClass = canOpenQuickChat ? ONE_ROW_ACTION_INSET_CLASS : undefined;
   const handleRegularTaskCreated = useCallback(
     (
       task: Task,
@@ -151,14 +127,6 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
               testId="sidebar-quick-chat-shortcut"
               onClick={handleOpenQuickChat}
             />
-            {canCreateSubtask && (
-              <RowActionButton
-                icon={IconSubtask}
-                label="New subtask of current task"
-                testId="sidebar-new-subtask"
-                onClick={() => setSubtaskOpen(true)}
-              />
-            )}
           </div>
         )}
       </div>
@@ -177,14 +145,6 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
             onSuccess={handleRegularTaskCreated}
           />
         ))}
-      {canCreateSubtask && (
-        <NewSubtaskDialog
-          open={subtaskOpen}
-          onOpenChange={setSubtaskOpen}
-          parentTaskId={activeTaskId}
-          parentTaskTitle={activeTaskTitle}
-        />
-      )}
     </>
   );
 }

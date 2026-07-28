@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -24,6 +25,114 @@ import (
 	"github.com/kandev/kandev/pkg/agent"
 	"github.com/stretchr/testify/require"
 )
+
+func TestManagerExposesRefreshWithCommand(t *testing.T) {
+	_, ok := reflect.TypeOf((*Manager)(nil)).MethodByName("RefreshWithCommand")
+	require.True(t, ok, "managed runtime updates need a command-override refresh")
+}
+
+func TestRefreshWithCommandUsesOverrideAndPreservesCacheOnAuthFailure(t *testing.T) {
+	log := newTestLogger(t)
+	reg := registry.NewRegistry(log)
+	const agentType = "managed-acp"
+	require.NoError(t, reg.Register(&installedInferenceAgent{id: agentType}))
+
+	var requestedCommand []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/inference/probe":
+			var request agentctlutil.ProbeRequest
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			requestedCommand = append([]string(nil), request.InferenceConfig.Command...)
+			w.Header().Set("Content-Type", "application/json")
+			require.NoError(t, json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+				Success: false,
+				Error:   "login required",
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	host, port := serverHostPort(t, server)
+
+	mgr := NewManager(reg, host, port, nil, log)
+	mgr.cache.set(AgentCapabilities{
+		AgentType:    agentType,
+		AgentVersion: "1.0.0",
+		Status:       StatusOK,
+		Models:       []Model{{ID: "old-model", Name: "Old model"}},
+	})
+	mgr.instances[agentType] = &instance{
+		agentType: agentType,
+		workDir:   t.TempDir(),
+		client:    agentctlclient.NewClient(host, port, log),
+	}
+
+	caps, err := mgr.RefreshWithCommand(
+		context.Background(),
+		agentType,
+		agents.NewCommand("npx", "--yes", "--prefer-offline", "@example/managed-acp"),
+	)
+	require.NoError(t, err)
+	require.Equal(t, StatusAuthRequired, caps.Status)
+	require.Equal(t,
+		[]string{"npx", "--yes", "--prefer-offline", "@example/managed-acp"},
+		requestedCommand,
+	)
+	cached, ok := mgr.Get(agentType)
+	require.True(t, ok)
+	require.Equal(t, "1.0.0", cached.AgentVersion)
+	require.Equal(t, "old-model", cached.Models[0].ID)
+}
+
+func TestRefreshWithCommandReplacesCacheAfterSuccessfulProbe(t *testing.T) {
+	log := newTestLogger(t)
+	reg := registry.NewRegistry(log)
+	const agentType = "managed-acp"
+	require.NoError(t, reg.Register(&installedInferenceAgent{id: agentType}))
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/inference/probe":
+			w.Header().Set("Content-Type", "application/json")
+			require.NoError(t, json.NewEncoder(w).Encode(agentctlutil.ProbeResponse{
+				Success:      true,
+				AgentVersion: "1.1.0",
+				Models: []agentctlutil.ProbeModel{{
+					ID:   "new-model",
+					Name: "New model",
+				}},
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	host, port := serverHostPort(t, server)
+	mgr := NewManager(reg, host, port, nil, log)
+	mgr.cache.set(AgentCapabilities{AgentType: agentType, AgentVersion: "1.0.0", Status: StatusOK})
+	mgr.instances[agentType] = &instance{
+		agentType: agentType,
+		workDir:   t.TempDir(),
+		client:    agentctlclient.NewClient(host, port, log),
+	}
+
+	_, err := mgr.RefreshWithCommand(
+		context.Background(),
+		agentType,
+		agents.NewCommand("npx", "@example/managed-acp"),
+	)
+	require.NoError(t, err)
+	cached, ok := mgr.Get(agentType)
+	require.True(t, ok)
+	require.Equal(t, "1.1.0", cached.AgentVersion)
+	require.Equal(t, "new-model", cached.Models[0].ID)
+}
 
 func TestStopCancelsInFlightBootstrap(t *testing.T) {
 	log := newTestLogger(t)

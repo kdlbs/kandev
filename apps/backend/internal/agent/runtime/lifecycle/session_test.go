@@ -1109,6 +1109,44 @@ func TestSendPrompt_RetriesUntilUpdateStreamReconnects(t *testing.T) {
 	}
 }
 
+func TestSendPrompt_MapsCancelErrorFromReconnectRetry(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "prompt abandoned after cancel", nil)
+			return resp
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	stopCh := newTestStopCh(t)
+	sm := NewSessionManager(log, stopCh)
+	streamMgr := NewStreamManager(log, StreamCallbacks{
+		OnAgentEvent: func(execution *AgentExecution, event agentctl.AgentEvent) {},
+	}, nil, stopCh)
+	cleanupStreamManager(t, stopCh, streamMgr)
+	sm.SetDependencies(nil, streamMgr, nil, nil)
+
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		TaskID:       "test-task",
+		SessionID:    "test-session",
+		agentctl:     client,
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := sm.SendPrompt(ctx, execution, "hello after cancel", false, nil, true)
+	if !errors.Is(err, ErrCancelEscalated) {
+		t.Fatalf("retry-side cancel release must map to ErrCancelEscalated, got: %v", err)
+	}
+}
+
 // TestSendPrompt_DispatchOnlyReturnsWithoutWaiting verifies that dispatch-only
 // mode returns immediately after agentctl.Prompt succeeds, without blocking on
 // the agent's complete event. This is what message_task_kandev relies on so the
@@ -1166,6 +1204,185 @@ func TestSendPrompt_DispatchOnlyReturnsWithoutWaiting(t *testing.T) {
 	}
 }
 
+func TestSendPrompt_PersistsPartialAssistantHistoryBeforeReset(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+
+	log := newSessionTestLogger()
+	history, err := NewSessionHistoryManager(t.TempDir(), "", log)
+	if err != nil {
+		t.Fatalf("create history manager: %v", err)
+	}
+	sm := NewSessionManager(log, make(chan struct{}))
+	sm.SetDependencies(nil, nil, nil, history)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:             "test-exec",
+		TaskID:         "test-task",
+		SessionID:      "test-session",
+		WorkspacePath:  "/workspace",
+		Status:         v1.AgentStatusReady,
+		agentctl:       client,
+		promptDoneCh:   make(chan PromptCompletionSignal, 1),
+		historyEnabled: true,
+	}
+	execution.assistantHistoryBuffer.WriteString("partial prior response")
+
+	if _, err := sm.SendPrompt(ctx, execution, "next prompt", true, nil, true); err != nil {
+		t.Fatalf("SendPrompt: %v", err)
+	}
+
+	entries, err := history.ReadHistory(execution.SessionID)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("history entry count = %d, want assistant then user: %+v", len(entries), entries)
+	}
+	if entries[0].Type != "agent_message" || entries[0].Content != "partial prior response" {
+		t.Fatalf("first history entry = %+v, want partial assistant response", entries[0])
+	}
+	if entries[1].Type != "user_message" || entries[1].Content != "next prompt" {
+		t.Fatalf("second history entry = %+v, want next user prompt", entries[1])
+	}
+	if execution.assistantHistoryBuffer.Len() != 0 {
+		t.Fatal("assistant history buffer was not reset after prompt dispatch")
+	}
+}
+
+func TestSendPrompt_DispatchOnlyBlocksNextPromptUntilItsCompletion(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	firstPromptSeen := make(chan struct{})
+	secondPromptSeen := make(chan struct{})
+	var promptCount int
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			promptCount++
+			switch promptCount {
+			case 1:
+				close(firstPromptSeen)
+			case 2:
+				close(secondPromptSeen)
+			}
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		TaskID:       "test-task",
+		SessionID:    "test-session",
+		agentctl:     client,
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	if _, err := sm.SendPrompt(ctx, execution, "first", false, nil, true); err != nil {
+		t.Fatalf("dispatch-only prompt failed: %v", err)
+	}
+	select {
+	case <-firstPromptSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first prompt did not reach agentctl")
+	}
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := sm.SendPrompt(ctx, execution, "second", false, nil, false)
+		result <- err
+	}()
+
+	select {
+	case <-secondPromptSeen:
+		t.Fatal("second prompt reached agentctl before the dispatch-only turn completed")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "first-complete"}
+	select {
+	case <-secondPromptSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second prompt did not reach agentctl after the dispatch-only turn completed")
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "second-complete"}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("second prompt failed: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second prompt did not return")
+	}
+}
+
+func TestSendPromptWithDispatchCallback_NotifiesBeforeCompletion(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		TaskID:       "test-task",
+		SessionID:    "test-session",
+		agentctl:     client,
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	dispatched := make(chan struct{})
+	result := make(chan error, 1)
+	go func() {
+		_, err := sm.SendPromptWithDispatchCallback(
+			ctx, execution, "hello", false, nil, false, func() { close(dispatched) },
+		)
+		result <- err
+	}()
+
+	select {
+	case <-dispatched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("dispatch callback was not invoked after agentctl accepted the prompt")
+	}
+	select {
+	case err := <-result:
+		t.Fatalf("SendPrompt returned before completion: %v", err)
+	default:
+	}
+
+	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "complete"}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("SendPrompt returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("SendPrompt did not return after completion")
+	}
+}
+
 func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
 	mock := newMockAgentServer(t)
 	t.Cleanup(mock.Close)
@@ -1203,6 +1420,7 @@ func TestSendPrompt_AdvancesGenerationForEveryDispatch(t *testing.T) {
 	if !store.OwnsPromptGeneration(execution.SessionID, execution.ID, 1) {
 		t.Fatal("initial prompt must own generation 1 even when execution starts running")
 	}
+	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "initial-complete"}
 
 	if _, err := sm.SendPrompt(ctx, execution, "replacement", true, nil, true); err != nil {
 		t.Fatalf("dispatch replacement prompt: %v", err)
@@ -1258,6 +1476,218 @@ func TestSendPrompt_DrainsStaleSignalFromPriorDispatchOnly(t *testing.T) {
 	}
 }
 
+func TestSendPrompt_SerializesCompletionWaitersPerExecution(t *testing.T) {
+	mock := newMockAgentServer(t)
+	defer mock.Close()
+
+	firstPromptSeen := make(chan struct{})
+	secondPromptSeen := make(chan struct{})
+	var promptCount int
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			promptCount++
+			switch promptCount {
+			case 1:
+				close(firstPromptSeen)
+			case 2:
+				close(secondPromptSeen)
+			}
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	log := newSessionTestLogger()
+	sm := NewSessionManager(log, make(chan struct{}))
+	client := createTestClient(t, mock.server.URL)
+	defer client.Close()
+
+	ctx := context.Background()
+	if err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("failed to connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		TaskID:       "test-task",
+		SessionID:    "test-session",
+		agentctl:     client,
+		promptDoneCh: make(chan PromptCompletionSignal, 1),
+	}
+	results := make(chan error, 2)
+	go func() {
+		_, err := sm.SendPrompt(ctx, execution, "first", false, nil, false)
+		results <- err
+	}()
+
+	select {
+	case <-firstPromptSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first prompt did not reach agentctl")
+	}
+
+	go func() {
+		_, err := sm.SendPrompt(ctx, execution, "second", false, nil, false)
+		results <- err
+	}()
+
+	secondArrivedBeforeFirstCompleted := false
+	select {
+	case <-secondPromptSeen:
+		secondArrivedBeforeFirstCompleted = true
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "first-complete"}
+	select {
+	case <-secondPromptSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second prompt did not reach agentctl after first completion")
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{StopReason: "second-complete"}
+
+	for range 2 {
+		select {
+		case err := <-results:
+			if err != nil {
+				t.Fatalf("SendPrompt returned error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("SendPrompt did not return")
+		}
+	}
+
+	if secondArrivedBeforeFirstCompleted {
+		t.Fatal("second prompt reached agentctl before the first completion was correlated")
+	}
+}
+
+func TestSendPrompt_AuthoritativeHandoffReleasesNextGeneration(t *testing.T) {
+	mock := newMockAgentServer(t)
+	t.Cleanup(mock.Close)
+
+	firstPromptSeen := make(chan struct{})
+	secondPromptSeen := make(chan struct{})
+	var promptCount int
+	mock.handler = func(msg ws.Message) *ws.Message {
+		if msg.Action == "agent.prompt" {
+			promptCount++
+			switch promptCount {
+			case 1:
+				close(firstPromptSeen)
+			case 2:
+				close(secondPromptSeen)
+			}
+		}
+		return mock.defaultHandler(msg)
+	}
+
+	mgr, eventBus := createTestManagerWithTracking()
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	if err := client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil); err != nil {
+		t.Fatalf("connect stream: %v", err)
+	}
+	waitForWSConnected(t, mock)
+
+	execution := createTestExecution("exec-handoff", "task-handoff", "session-handoff")
+	execution.agentctl = client
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	firstResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.sessionManager.SendPrompt(ctx, execution, "first", false, nil, false)
+		firstResult <- err
+	}()
+	select {
+	case <-firstPromptSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first prompt did not reach agentctl")
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeMessageChunk,
+		Text:             "parent answer",
+		PromptGeneration: 1,
+	})
+
+	secondResult := make(chan error, 1)
+	go func() {
+		_, err := mgr.sessionManager.SendPrompt(ctx, execution, "second", false, nil, false)
+		secondResult <- err
+	}()
+	select {
+	case <-secondPromptSeen:
+		t.Fatal("second prompt reached agentctl before foreground handoff")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeForegroundIdle,
+		PromptGeneration: 1,
+		Data:             map[string]any{streams.AgentEventDataPromptHandoff: true},
+	})
+
+	select {
+	case err := <-firstResult:
+		if err != nil {
+			t.Fatalf("first prompt handoff returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("foreground handoff did not release the first lifecycle waiter")
+	}
+	select {
+	case <-secondPromptSeen:
+	case <-time.After(2 * time.Second):
+		t.Fatal("second prompt did not reach agentctl after foreground handoff")
+	}
+
+	// The original bridge RPC can return only after the follow-up echo. Its late
+	// result must not complete or reset generation 2.
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		PromptGeneration: 1,
+		Data:             map[string]any{"stop_reason": "end_turn"},
+	})
+	select {
+	case err := <-secondResult:
+		t.Fatalf("late generation-1 completion released generation 2: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if !mgr.executionStore.OwnsPromptGeneration(execution.SessionID, execution.ID, 2) {
+		t.Fatal("late original completion replaced generation-2 ownership")
+	}
+
+	var streamed string
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data != nil && event.Data.Type == "message_streaming" {
+			streamed += event.Data.Text
+		}
+	}
+	if streamed != "parent answer" {
+		t.Fatalf("streamed handoff boundary = %q, want parent answer", streamed)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		PromptGeneration: 2,
+		Data:             map[string]any{"stop_reason": "end_turn"},
+	})
+	select {
+	case err := <-secondResult:
+		if err != nil {
+			t.Fatalf("second prompt returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("generation-2 completion did not release its waiter")
+	}
+}
+
 func TestWaitForPromptDone_TreatsPromptAbandonedAfterCancelAsCancelEscalated(t *testing.T) {
 	log := newSessionTestLogger()
 	sm := NewSessionManager(log, make(chan struct{}))
@@ -1270,12 +1700,37 @@ func TestWaitForPromptDone_TreatsPromptAbandonedAfterCancelAsCancelEscalated(t *
 		Error:   "prompt abandoned after cancel",
 	}
 
-	_, err := sm.waitForPromptDone(context.Background(), execution)
+	_, err := sm.waitForPromptDone(context.Background(), execution, 0)
 	if !errors.Is(err, ErrCancelEscalated) {
 		t.Fatalf("expected ErrCancelEscalated, got: %v", err)
 	}
 	if !errors.Is(err, ErrAgentReported) {
 		t.Fatalf("expected ErrAgentReported wrapper, got: %v", err)
+	}
+}
+
+func TestWaitForPromptDone_IgnoresSupersededGenerationSignal(t *testing.T) {
+	sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+	execution := &AgentExecution{
+		ID:           "test-exec",
+		promptDoneCh: make(chan PromptCompletionSignal, 2),
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		IsError:          true,
+		Error:            "old stream disconnected",
+		PromptGeneration: 1,
+	}
+	execution.promptDoneCh <- PromptCompletionSignal{
+		StopReason:       "end_turn",
+		PromptGeneration: 2,
+	}
+
+	result, err := sm.waitForPromptDone(context.Background(), execution, 2)
+	if err != nil {
+		t.Fatalf("waitForPromptDone: %v", err)
+	}
+	if result == nil || result.StopReason != "end_turn" {
+		t.Fatalf("result = %+v, want replacement completion", result)
 	}
 }
 

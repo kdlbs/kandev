@@ -9,12 +9,16 @@ type Task = { id: string; title: string };
 type MockState = {
   connection: { status: string };
   kanban: { workflowId: string | null; tasks: Task[]; steps: unknown[]; isLoading?: boolean };
+  workspaces: { activeId: string | null };
+  workspaceContextGeneration: number;
   hydrate: typeof mockHydrate;
 };
 
 let mockState: MockState = {
   connection: { status: "connected" },
   kanban: { workflowId: null, tasks: [], steps: [] },
+  workspaces: { activeId: "ws-1" },
+  workspaceContextGeneration: 0,
   hydrate: mockHydrate,
 };
 
@@ -57,6 +61,8 @@ describe("useTasks — loading and matching", () => {
     mockState = {
       connection: { status: "connected" },
       kanban: { workflowId: null, tasks: [], steps: [], isLoading: false },
+      workspaces: { activeId: "ws-1" },
+      workspaceContextGeneration: 0,
       hydrate: mockHydrate,
     };
   });

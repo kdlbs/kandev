@@ -1,34 +1,39 @@
-import { createRef } from "react";
+import React, { createRef } from "react";
 import { renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { ToastProvider } from "@/components/toast-provider";
 import { shouldShowChatFocusHint, useChatInputContainer } from "./use-chat-input-container";
 import type { ChatInputContainerHandle } from "./chat-input-container";
 
 function renderInputState(overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {}) {
-  return renderHook(() =>
-    useChatInputContainer({
-      ref: createRef<ChatInputContainerHandle>(),
-      sessionId: "session-1",
-      isSending: false,
-      isStarting: false,
-      isPreparingEnvironment: false,
-      isMoving: false,
-      isFailed: false,
-      needsRecovery: false,
-      executorUnavailable: false,
-      isAgentBusy: false,
-      hasAgentCommands: true,
-      placeholder: undefined,
-      contextItems: [],
-      pendingClarification: null,
-      onClarificationResolved: undefined,
-      pendingCommentsByFile: undefined,
-      hasContextComments: false,
-      showRequestChangesTooltip: false,
-      onRequestChangesTooltipDismiss: undefined,
-      onSubmit: vi.fn(),
-      ...overrides,
-    }),
+  return renderHook(
+    () =>
+      useChatInputContainer({
+        ref: createRef<ChatInputContainerHandle>(),
+        sessionId: "session-1",
+        isSending: false,
+        isStarting: false,
+        isPreparingEnvironment: false,
+        isMoving: false,
+        isFailed: false,
+        needsRecovery: false,
+        executorUnavailable: false,
+        isAgentBusy: false,
+        hasAgentCommands: true,
+        placeholder: undefined,
+        contextItems: [],
+        pendingClarification: null,
+        onClarificationResolved: undefined,
+        pendingCommentsByFile: undefined,
+        hasContextComments: false,
+        showRequestChangesTooltip: false,
+        onRequestChangesTooltipDismiss: undefined,
+        onSubmit: vi.fn(),
+        ...overrides,
+      }),
+    {
+      wrapper: ({ children }) => React.createElement(ToastProvider, null, children),
+    },
   );
 }
 
@@ -53,6 +58,23 @@ describe("useChatInputContainer", () => {
     });
 
     expect(result.current.submitDisabledReason).toBe("The agent is still being set up.");
+  });
+
+  it("keeps queueing enabled for an interactive clarification during stale startup", () => {
+    const { result } = renderInputState({
+      isStarting: true,
+      isPreparingEnvironment: true,
+      placeholder: "Queue instructions while the question is pending...",
+      pendingClarification: { id: "clarification-1" } as never,
+      onClarificationResolved: vi.fn(),
+    });
+
+    expect(result.current.isDisabled).toBe(false);
+    expect(result.current.submitDisabled).toBe(false);
+    expect(result.current.submitDisabledReason).toBeUndefined();
+    expect(result.current.inputPlaceholder).toBe(
+      "Queue instructions while the question is pending...",
+    );
   });
 });
 

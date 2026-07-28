@@ -80,6 +80,9 @@ type CreateAgentProfileRequest struct {
 	// by default) so a fresh profile opens with the agent's suggestions.
 	CLIFlags []dto.CLIFlagDTO
 	EnvVars  []dto.ProfileEnvVarDTO
+	// CommandPrefix is an optional launcher prefix prepended to the agent
+	// command (e.g. "greywall --"). Shell-tokenised at launch time.
+	CommandPrefix string
 }
 
 func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*dto.AgentDTO, error) {
@@ -108,6 +111,14 @@ func (c *Controller) CreateAgent(ctx context.Context, req CreateAgentRequest) (*
 	displayName, err := c.resolveDisplayName(agentConfig, req.Name)
 	if err != nil {
 		return nil, err
+	}
+	// Validate every profile request BEFORE inserting the agent row so an
+	// invalid profile (e.g. a malformed command_prefix) returns a 400 without
+	// leaving an orphaned agent behind.
+	for i := range req.Profiles {
+		if err := validateCreateProfileRequest(req.Profiles[i]); err != nil {
+			return nil, err
+		}
 	}
 	agent := &models.Agent{
 		Name:          matched.Name,
@@ -169,15 +180,25 @@ func (c *Controller) findMatchedAvailability(name string, results []discovery.Av
 	return nil, fmt.Errorf("unknown agent: %s", name)
 }
 
+// validateCreateProfileRequest runs all save-time validation for a nested
+// agent-create profile. Kept separate so CreateAgent can validate every profile
+// before inserting the agent row (avoiding an orphaned agent on a bad profile).
+func validateCreateProfileRequest(p CreateAgentProfileRequest) error {
+	if p.CLIFlags != nil {
+		if err := validateCLIFlagDTOs(p.CLIFlags); err != nil {
+			return err
+		}
+	}
+	if err := validateProfileEnvVarDTOs(p.EnvVars); err != nil {
+		return err
+	}
+	return validateCommandPrefix(p.CommandPrefix)
+}
+
 func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayName string, profileReqs []CreateAgentProfileRequest, agentConfig agents.Agent) ([]*models.AgentProfile, error) {
 	profiles := make([]*models.AgentProfile, 0, len(profileReqs))
 	for _, profileReq := range profileReqs {
-		if profileReq.CLIFlags != nil {
-			if err := validateCLIFlagDTOs(profileReq.CLIFlags); err != nil {
-				return nil, err
-			}
-		}
-		if err := validateProfileEnvVarDTOs(profileReq.EnvVars); err != nil {
+		if err := validateCreateProfileRequest(profileReq); err != nil {
 			return nil, err
 		}
 		cliFlags := cliFlagsFromDTO(profileReq.CLIFlags)
@@ -192,6 +213,7 @@ func (c *Controller) createAgentProfiles(ctx context.Context, agentID, displayNa
 			Mode:             profileReq.Mode,
 			CLIFlags:         cliFlags,
 			EnvVars:          envVarsFromDTO(profileReq.EnvVars),
+			CommandPrefix:    strings.TrimSpace(profileReq.CommandPrefix),
 		}
 		if err := c.repo.CreateAgentProfile(ctx, profile); err != nil {
 			return nil, err

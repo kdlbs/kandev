@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Write a feature spec — the "what & why" of a kandev product feature, before coding. Use ONLY for a product-feature surface (user-visible capability the app supports). Do NOT use for bug fixes, incident postmortems, refactors that preserve behavior, or infra-only work — those get ADRs (if a new convention emerged) and/or regression tests, not specs. Use when the user says "let's spec X" or starts a new product feature.
+description: Write a feature spec — the "what & why" of a Kandev product feature, before coding. Use for a product feature, or from `/fix` to amend/create the concise behavioral repair spec required before implementation. Do not use for incident postmortems, behavior-preserving refactors, or infra-only work.
 ---
 
 # Writing a Spec
@@ -30,7 +30,8 @@ If any of these are false, STOP and route to the right artifact:
 
 | Situation | Use this instead |
 |---|---|
-| Bug fix, incident postmortem | `/fix` — plus an ADR via `/record decision` if the fix encoded a new convention. No spec. |
+| Bug fix | `/fix` — diagnose first, then amend/create its concise behavioral repair spec, plan, and task files before implementation. |
+| Incident postmortem | `/record decision` when it establishes a durable convention; otherwise retain the incident record. |
 | Architecture or convention decision | `/record decision` — produces an ADR under `docs/decisions/`. No spec. |
 | Refactor that preserves behavior | Commit + (optional) ADR. No spec. |
 | Infra / tooling / build / CI change | Commit + (optional) ADR. No spec. |

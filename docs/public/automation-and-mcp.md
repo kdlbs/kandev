@@ -7,14 +7,14 @@ description: "Create scheduled, GitHub, or webhook automations and connect agent
 
 Kandev has several mechanisms that can act without repeated manual setup. Their scopes and trust boundaries differ:
 
-| Mechanism | Purpose |
-|---|---|
-| Workflow events and actions | React to an existing task entering a step, receiving a message, or completing an agent turn. |
-| Workspace automations | Create task-backed work from a schedule, GitHub pull request, webhook, or manual trigger. |
-| Task MCP | Give an active Kandev session task, plan, conversation, and coordination tools. |
-| Office MCP and runtime CLI | Give an Office run a restricted coordination surface and permission-checked commands for Office state changes. |
-| Profile MCP | Add third-party MCP servers to one agent profile, subject to executor policy. |
-| External MCP | Let a client outside a task configure Kandev and create or manage work through the backend. |
+| Mechanism                   | Purpose                                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Workflow events and actions | React to an existing task entering a step, receiving a message, or completing an agent turn.                   |
+| Workspace automations       | Create task-backed work from a schedule, GitHub pull request, webhook, or manual trigger.                      |
+| Task MCP                    | Give an active Kandev session task, plan, conversation, and coordination tools.                                |
+| Office MCP and runtime CLI  | Give an Office run a restricted coordination surface and permission-checked commands for Office state changes. |
+| Profile MCP                 | Add third-party MCP servers to one agent profile, subject to executor policy.                                  |
+| External MCP                | Let a client outside a task configure Kandev and create or manage work through the backend.                    |
 
 Use workflow events for predictable transitions on existing work. Use a workspace automation when an external signal must create new work. MCP is a tool interface, not a scheduler.
 
@@ -63,7 +63,7 @@ In the current backend, the schedule and GitHub PR condition are independent tri
 
 ### Schedule
 
-The scheduler checks every 30 seconds and treats expressions as elapsed intervals, not calendar cron times. If a new enabled schedule has never been evaluated, its first check fires immediately; later runs are spaced from the last evaluation.
+The scheduler checks every 30 seconds and computes each expression's next calendar fire time in its configured timezone. A schedule created part-way through the day first fires at its next scheduled occurrence after creation (not immediately). A schedule missed while the backend was stopped fires once on the next check rather than once per missed occurrence.
 
 <DocsVideo
   webm="./media/feature-guides/scheduled-workflow-automation.webm"
@@ -75,7 +75,7 @@ The scheduler checks every 30 seconds and treats expressions as elapsed interval
 
 Use the supplied presets: every 5, 15, or 30 minutes; hourly; every 6 hours; daily; or weekly. The backend also accepts `@every` followed by a Go duration, `@hourly`, `@daily`, `@weekly`, and step forms such as `*/10 * * * *` or `0 */6 * * *`.
 
-The editor currently accepts arbitrary five-field cron text, but the backend cannot execute fixed calendar forms such as `30 8 * * *`. A saved timezone defaults to UTC but is not used in schedule evaluation. Until calendar scheduling is implemented, use a preset or `@every` and interpret it as an interval. Scheduled runs are deduplicated per trigger per minute.
+The editor accepts arbitrary five-field cron text, including fixed calendar forms such as `30 8 * * *`, weekday ranges such as `15 9 * * 1-5`, and day-of-month schedules — all of which now fire at the correct time. A saved timezone (for example `America/New_York`) is honored, including that zone's daylight-saving transitions; an empty timezone means UTC, so schedules are deterministic regardless of the host clock. Scheduled runs are deduplicated per trigger per minute.
 
 ### GitHub pull requests
 
@@ -88,7 +88,16 @@ The GitHub evaluator polls every 60 seconds and requires a working GitHub integr
 
 Select at least one repository. Although the UI offers **All repos**, an empty repository list is not evaluated, so it produces no PR runs. The editor exposes only the **Opened** event, but the evaluator currently ignores the saved event list: clearing that checkbox does not stop polling or firing. Disable the automation/trigger instead. The first evaluation considers every currently open matching PR rather than only PRs opened after the automation was enabled. Each matching PR is then deduplicated once per automation by repository and PR number.
 
-The current evaluator does not apply label filters, and the current form does not offer them. GitHub push and generic CI-result conditions are shown as **Coming soon**; their backend evaluators do not create runs. Task-specific PR check remediation is a separate review feature, not the generic CI automation trigger.
+The current evaluator does not apply label filters, and the current form does not offer them.
+
+### GitHub push and CI checks
+
+Push and CI-check conditions are webhook-driven rather than polled. They require a workspace GitHub App connection (Settings > Workspaces > _workspace_ > GitHub) whose installation is subscribed to the `push` and `check_run` events. When the App delivers a matching, HMAC-verified webhook, the installation is resolved to its workspace and the matching automation fires.
+
+- **Push**: fires when commits are pushed to a matching branch. Configure an explicit repository list and optional branch glob filters (`main`, `release/*`). Branch deletions are ignored. Deduplicated per repository by branch and pushed commit SHA.
+- **CI check**: fires when a check run completes. Configure an explicit repository list, the conclusions to match (defaults to `failure`, which drives auto-fix-CI flows), and optional check-name and head-branch filters. Deduplicated per repository by check-run ID.
+
+Because GitHub Apps only deliver events a user subscribed to at installation time, an App connection created before push/CI support was added must be reinstalled (or updated from its GitHub settings page) before these webhooks begin arriving. This generic CI trigger is distinct from the task-specific PR check remediation described under review features.
 
 ### Webhook
 
@@ -138,15 +147,15 @@ Task tools use normal client discovery. When `step_complete_kandev` is required 
 
 Task mode currently registers these tool groups:
 
-| Group | Available operations |
-|---|---|
-| Board lookups and task lifecycle | List workspaces, workflows, workflow steps, tasks, agents, and executor profiles; create, update, move, archive, or delete tasks; halt all live work on a direct child. This mode does not mutate workflows, profiles, or executors. |
-| Coordination | Message a task or targeted session, spawn a named session on the current or another same-workspace task, and read task conversation. See [Agent Communication](agent-communication.md) for delivery semantics, bidirectional reply patterns, and a worked example. |
-| User interaction | Ask a structured question when the current agent/session supports it. |
-| Plans | Create, get, update, and delete the current task plan. |
-| Walkthroughs | Show, get, and delete the task's code walkthrough. |
-| Relationships and branches | List related tasks, add a branch/worktree to a task, and change a repository's diff base. |
-| Workflow signal | Signal step completion when an auto-advance step explicitly requires that signal. |
+| Group                               | Available operations                                                                                                                                                                                                                                               |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Board lookups and task lifecycle    | List workspaces, workflows, workflow steps, tasks, agents, and executor profiles; create, update, move, archive, or delete tasks; halt all live work on a direct child. This mode does not mutate workflows, profiles, or executors.                               |
+| Coordination                        | Message a task or targeted session, spawn a named session on the current or another same-workspace task, and read task conversation. See [Agent Communication](agent-communication.md) for delivery semantics, bidirectional reply patterns, and a worked example. |
+| User interaction                    | Ask a structured question when the current agent/session supports it.                                                                                                                                                                                              |
+| Plans                               | Create, get, update, and delete the current task plan.                                                                                                                                                                                                             |
+| Walkthroughs                        | Show, get, and delete the task's code walkthrough.                                                                                                                                                                                                                 |
+| Relationships and workspace sources | List related tasks, add a mixed repository/folder source batch to an idle task, use the legacy one-branch tool, and change a repository's diff base.                                                                                                               |
+| Workflow signal                     | Signal step completion when an auto-advance step explicitly requires that signal.                                                                                                                                                                                  |
 
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.
 
@@ -158,7 +167,11 @@ Use `stop_task_kandev` only when the direct child should halt without a replacem
 
 After an accepted stop, Kandev attempts to move an unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states are preserved. Worktrees, task environments, commits, task records, descendants, and queued messages remain available, and the task can be started again later.
 
-`add_branch_to_task_kandev` works only with the Worktree executor. It can add another branch of the same repository or a second repository entirely. Select at most one of `repository_id`, `repository_url`, or `local_path`; `repository_url` accepts a GitHub repository URL, while the URL/path forms find or create that repository in the task's workspace. A locator is optional for a single-repository task and required to disambiguate a multi-repository task. The new repository/branch receives its own worktree. `update_repository_base_branch_kandev` changes the base used for Kandev's diff, not a pull request's target branch.
+`add_workspace_sources_kandev` adds one or more sources to an idle task and defaults `task_id` to the current task. Its `sources` input accepts the same atomic mixed batch as the Files panel: `repository` sources use exactly one saved repository ID, local Git path, or remote repository locator plus branch fields; `folder` sources use a local path and optional display name. Repository sources work on Worktree, Local/Local PC, Local Docker, SSH, and Sprites; folders work only on Worktree and Local/Local PC. The task must be repository-backed and have no active turn or tool call. Invalid, duplicate, unsupported, or failed sources roll back the entire batch.
+
+`add_branch_to_task_kandev` is the Worktree-only compatibility path for adding one repository/branch during an active agent turn. It creates the worktree as a sibling under the task directory, promotes the persisted Files root to that parent, and rescans it without restarting the agent, terminals, or workspace processes. The response returns `worktree_path` (the exact new repository location), `task_workspace_path` (the Files root), and `agent_cwd_changed: false`; deferred pre-launch materialization omits both paths. The original repository stays a separate Git worktree, so the sibling is not reported as an embedded repository or untracked files by its Git status. Use `add_workspace_sources_kandev` for mixed batch attachments to an idle task. `update_repository_base_branch_kandev` changes the base used for Kandev's diff, not a pull request's target branch.
+
+The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
 `step_complete_kandev` is registered and discoverable in every task-mode session. Kandev includes its completion instruction, and acts on its signal, only on Kanban steps whose auto-advance action explicitly requires that signal. A user message arriving before transition can cancel that automatic move.
 
@@ -174,6 +187,20 @@ Office runs use a smaller MCP surface than regular task-mode sessions. The built
 - `list_task_documents_kandev`, `get_task_document_kandev`, and `write_task_document_kandev`.
 
 These tools cover human questions, the current task plan, related-task discovery, and task documents. Office state changes use the injected `$KANDEV_CLI kandev ...` commands instead. An Office agent should not search for additional Kandev MCP tools: Kanban/configuration tools and `step_complete_kandev` are task-mode only and are not registered in Office mode.
+
+### Runtime credentials
+
+Kandev injects `$KANDEV_CLI`, `KANDEV_API_URL`, and `KANDEV_API_KEY` when the
+Office scheduler starts an Office run. The API key is a short-lived, scoped
+runtime token; it is not a personal access token or a value to create, copy,
+or persist in configuration. The run also receives its agent, workspace, task,
+and run identifiers automatically, and the launch context is bound to that
+task.
+
+If `agentctl kandev ...` reports that `KANDEV_API_URL` or `KANDEV_API_KEY` is
+missing, do not set either variable yourself. A regular task session should use
+its injected Kandev MCP tools. An Office-owned task must be started or woken
+through Office so the scheduler can supply its signed runtime context.
 
 An Office run can inspect the projects in its current workspace:
 
@@ -247,7 +274,8 @@ The backend's `/mcp`, `/mcp/sse`, and `/mcp/message` routes currently have no Ka
 
 ## Troubleshooting
 
-- **No scheduled run:** use a preset or `@every`; fixed calendar cron and timezone scheduling are not implemented.
+- **No scheduled run:** confirm the cron expression is valid five-field or `@`-shorthand text and the automation/trigger is enabled; a schedule fires at its next occurrence after creation, not immediately.
+- **No GitHub push or CI runs:** connect a workspace GitHub App whose installation is subscribed to `push`/`check_run` events, reinstall a pre-existing App so it receives them, and select explicit repositories (an empty repository list is not evaluated).
 - **Scheduled run happened as well as a PR run:** clear the schedule expression. The two stored triggers fire independently.
 - **No GitHub PR runs:** connect GitHub and select explicit repositories; **All repos** currently evaluates none.
 - **Run fails before a task starts:** select valid non-passthrough agent and non-local executor profiles, and add/select a repository.

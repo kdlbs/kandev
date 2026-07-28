@@ -574,7 +574,6 @@ test.describe("Mobile kanban view", () => {
       is_start_step: true,
     });
     await apiClient.createWorkflowStep(workflow.id, "Done", 1);
-    await apiClient.updateWorkflowStep(limitedStep.id, { wip_limit: 1 });
     await apiClient.createTask(seedData.workspaceId, "Mobile WIP One", {
       workflow_id: workflow.id,
       workflow_step_id: limitedStep.id,
@@ -583,6 +582,9 @@ test.describe("Mobile kanban view", () => {
       workflow_id: workflow.id,
       workflow_step_id: limitedStep.id,
     });
+    // Seed a legacy over-limit state by applying the limit after task creation;
+    // creation itself must now reject capacity overflow.
+    await apiClient.updateWorkflowStep(limitedStep.id, { wip_limit: 1 });
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: workflow.id,

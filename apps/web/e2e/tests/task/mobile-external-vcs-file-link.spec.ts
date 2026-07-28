@@ -9,7 +9,6 @@ import { SessionPage } from "../../pages/session-page";
 
 const MOBILE_FILE = "mobile-external-link.ts";
 const MOBILE_REMOTE = "https://github.com/testorg/mobile-external-links.git";
-
 function initializeMobileRepository(backend: BackendContext): string {
   const repositoryPath = path.join(backend.tmpDir, "repos", `mobile-link-${Date.now()}`);
   fs.mkdirSync(repositoryPath, { recursive: true });
@@ -60,6 +59,10 @@ test.describe("Mobile external VCS file link", () => {
   }) => {
     const repositoryPath = initializeMobileRepository(backend);
     await createMobileRepository(apiClient, seedData.workspaceId, repositoryPath);
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Mobile external file link",

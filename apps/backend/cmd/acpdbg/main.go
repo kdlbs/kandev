@@ -71,7 +71,7 @@ Usage:
   acpdbg probe <agent> [flags]
   acpdbg probe --exec "<cmd> [args...]" [flags]
   acpdbg prompt <agent> --prompt TEXT [--model M] [--mode M] [flags]
-  acpdbg session-load <agent> --session-id ID [flags]
+  acpdbg session-load <agent> --session-id ID [--prompt TEXT] [flags]
   acpdbg matrix [flags]
 
 Shared flags:
@@ -239,6 +239,7 @@ func runSessionLoad(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("session-load", flag.ExitOnError)
 	shared := registerShared(fs)
 	sessionID := fs.String("session-id", "", "ACP session id to load (required)")
+	prompt := fs.String("prompt", "", "prompt text to send after loading the session")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -261,13 +262,21 @@ func runSessionLoad(ctx context.Context, args []string) error {
 	}
 	defer runner.Close("completed")
 
-	res, err := acpdbg.SessionLoad(runCtx, runner, *sessionID)
+	res, err := acpdbg.SessionLoad(runCtx, runner, acpdbg.SessionLoadOptions{
+		SessionID: *sessionID,
+		Prompt:    *prompt,
+	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "session-load failed: %v\n", err)
 		fmt.Fprintf(os.Stderr, "jsonl: %s\n", runner.Path())
 		return err
 	}
-	printProbeSummary(cfg.AgentID, runner.Path(), res)
+	printProbeSummary(cfg.AgentID, runner.Path(), &res.ProbeResult)
+	if *prompt != "" {
+		fmt.Println()
+		fmt.Println("--- response ---")
+		fmt.Println(res.Text)
+	}
 	return nil
 }
 

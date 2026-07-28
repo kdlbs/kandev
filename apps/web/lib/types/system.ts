@@ -291,6 +291,7 @@ export interface StorageOverviewResponse {
   settings: StorageMaintenanceSettings;
   capabilities: StorageCapabilities;
   summary: StorageSummary;
+  analyzed_at: string;
   last_run: StorageMaintenanceRun | null;
 }
 

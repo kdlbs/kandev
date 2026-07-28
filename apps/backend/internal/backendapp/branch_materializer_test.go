@@ -32,7 +32,7 @@ type stubRescanCall struct {
 	workDir   string
 }
 
-func (s *stubRescanner) RescanWorkspaceForSession(_ context.Context, sessionID, workDir string) error {
+func (s *stubRescanner) RescanWorkspaceForSession(_ context.Context, sessionID, workDir string, _ ...[]string) error {
 	s.calls = append(s.calls, stubRescanCall{sessionID: sessionID, workDir: workDir})
 	return nil
 }
@@ -78,11 +78,15 @@ func TestBranchMaterializer_PromotesWorkspacePathAndTriggersRescan(t *testing.T)
 		t.Fatalf("CreateTaskRepository: %v", err)
 	}
 
-	if err := mat.MaterializeBranch(ctx, "task-1", tr.ID); err != nil {
+	materialized, err := mat.MaterializeBranch(ctx, "task-1", tr.ID)
+	if err != nil {
 		t.Fatalf("MaterializeBranch: %v", err)
 	}
 
 	wantSiblingDir := filepath.Join(taskRoot, "kandev-branch-2")
+	if materialized == nil || materialized.WorktreePath != wantSiblingDir || materialized.TaskWorkspacePath != taskRoot {
+		t.Fatalf("materialization result = %#v, want sibling worktree and task root", materialized)
+	}
 	if _, err := os.Stat(wantSiblingDir); err != nil {
 		t.Fatalf("expected sibling worktree at %s: %v", wantSiblingDir, err)
 	}
@@ -147,7 +151,7 @@ func TestBranchMaterializer_SecondBranchKeepsTaskRootPromoted(t *testing.T) {
 	if err := repoSqlite.CreateTaskRepository(ctx, tr2); err != nil {
 		t.Fatalf("CreateTaskRepository branch-2: %v", err)
 	}
-	if err := mat.MaterializeBranch(ctx, "task-1", tr2.ID); err != nil {
+	if _, err := mat.MaterializeBranch(ctx, "task-1", tr2.ID); err != nil {
 		t.Fatalf("MaterializeBranch branch-2: %v", err)
 	}
 
@@ -159,7 +163,7 @@ func TestBranchMaterializer_SecondBranchKeepsTaskRootPromoted(t *testing.T) {
 	if err := repoSqlite.CreateTaskRepository(ctx, tr3); err != nil {
 		t.Fatalf("CreateTaskRepository branch-3: %v", err)
 	}
-	if err := mat.MaterializeBranch(ctx, "task-1", tr3.ID); err != nil {
+	if _, err := mat.MaterializeBranch(ctx, "task-1", tr3.ID); err != nil {
 		t.Fatalf("MaterializeBranch branch-3: %v", err)
 	}
 

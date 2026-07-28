@@ -1,5 +1,6 @@
 import { IconCheck, IconX, IconClock } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { Button } from "@kandev/ui/button";
 import type { PRReview, RequestedReviewer } from "@/lib/types/github";
 import { CollapsibleSection, FeedbackItemRow } from "./pr-shared";
 
@@ -59,15 +60,30 @@ function buildAllReviewsMessage(reviews: PRReview[], prUrl: string): string {
   return parts.join("\n");
 }
 
-function deduplicateReviews(reviews: PRReview[]): PRReview[] {
+function normalizeLogin(login: string): string {
+  return login.trim().toLowerCase();
+}
+
+export function reconcileReviews(reviews: PRReview[], requestedReviewers: RequestedReviewer[]) {
   const latestByAuthor = new Map<string, PRReview>();
   for (const review of reviews) {
-    const current = latestByAuthor.get(review.author);
+    const author = normalizeLogin(review.author);
+    const current = latestByAuthor.get(author);
     if (!current || new Date(review.created_at) > new Date(current.created_at)) {
-      latestByAuthor.set(review.author, review);
+      latestByAuthor.set(author, review);
     }
   }
-  return Array.from(latestByAuthor.values());
+  const requestedByLogin = new Map<string, RequestedReviewer>();
+  for (const reviewer of requestedReviewers) {
+    const login = normalizeLogin(reviewer.login);
+    if (!requestedByLogin.has(login)) requestedByLogin.set(login, reviewer);
+  }
+  return {
+    reviews: Array.from(latestByAuthor.entries())
+      .filter(([author]) => !requestedByLogin.has(author))
+      .map(([, review]) => review),
+    pendingReviewers: Array.from(requestedByLogin.values()),
+  };
 }
 
 function formatPendingReviewer(reviewer: RequestedReviewer): string {
@@ -114,29 +130,58 @@ function SubmittedReviewRow({
   review,
   prUrl,
   onAddAsContext,
+  canReRequest,
+  isRequesting,
+  onReRequest,
 }: {
   review: PRReview;
   prUrl: string;
   onAddAsContext: (message: string) => void;
+  canReRequest: boolean;
+  isRequesting: boolean;
+  onReRequest?: (reviewer: string) => void;
 }) {
   const hasActionable = review.state === "CHANGES_REQUESTED" || !!review.body;
   return (
-    <FeedbackItemRow
-      author={review.author}
-      authorAvatar={review.author_avatar}
-      body={review.body || undefined}
-      createdAt={review.created_at}
-      metaBadge={<ReviewMetaBadge state={review.state} />}
-      onAddAsContext={
-        hasActionable ? () => onAddAsContext(buildReviewMessage(review, prUrl)) : undefined
-      }
-    />
+    <div data-testid={`pr-submitted-review-${normalizeLogin(review.author)}`}>
+      <FeedbackItemRow
+        author={review.author}
+        authorAvatar={review.author_avatar}
+        body={review.body || undefined}
+        createdAt={review.created_at}
+        metaBadge={<ReviewMetaBadge state={review.state} />}
+        trailingAction={
+          canReRequest && review.state === "DISMISSED" && onReRequest ? (
+            <div className="basis-full w-full sm:basis-auto sm:w-auto">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 min-h-11 w-full max-w-full sm:w-auto sm:min-h-0 shrink-0 cursor-pointer px-2 text-[10px] [@media(pointer:coarse)]:min-h-11"
+                data-testid={`pr-rerequest-review-${normalizeLogin(review.author)}`}
+                aria-label={`Re-request review from ${review.author}`}
+                onClick={() => onReRequest(review.author)}
+                disabled={isRequesting}
+              >
+                {isRequesting ? "Requesting..." : "Re-request review"}
+              </Button>
+            </div>
+          ) : undefined
+        }
+        onAddAsContext={
+          hasActionable ? () => onAddAsContext(buildReviewMessage(review, prUrl)) : undefined
+        }
+      />
+    </div>
   );
 }
 
 function PendingReviewRow({ reviewer }: { reviewer: RequestedReviewer }) {
   return (
-    <div className="px-2.5 py-1.5 rounded-md border border-border bg-muted/30">
+    <div
+      className="px-2.5 py-1.5 rounded-md border border-border bg-muted/30"
+      data-testid={`pr-pending-reviewer-${normalizeLogin(reviewer.login)}`}
+    >
       <div className="flex items-center gap-2">
         <IconClock className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
         <span className="text-xs font-medium">{formatPendingReviewer(reviewer)}</span>
@@ -153,6 +198,9 @@ export function ReviewsSection({
   reviewState,
   pendingReviewCount,
   onAddAsContext,
+  canReRequest = false,
+  requestingReviewers = [],
+  onReRequest,
 }: {
   reviews: PRReview[];
   requestedReviewers: RequestedReviewer[];
@@ -160,16 +208,19 @@ export function ReviewsSection({
   reviewState: string;
   pendingReviewCount: number;
   onAddAsContext: (message: string) => void;
+  canReRequest?: boolean;
+  requestingReviewers?: string[];
+  onReRequest?: (reviewer: string) => void;
 }) {
-  const dedupedReviews = deduplicateReviews(reviews);
-  const reviewedAuthors = new Set(
-    dedupedReviews.filter((r) => r.state !== "PENDING").map((r) => r.author),
+  const { reviews: reconciledReviews, pendingReviewers } = reconcileReviews(
+    reviews,
+    requestedReviewers,
   );
-  const pendingOnly = requestedReviewers.filter((r) => !reviewedAuthors.has(r.login));
+  const requestingReviewerLogins = new Set(requestingReviewers.map(normalizeLogin));
 
   const { pendingCount, summary, totalCount } = computeSectionSummary(
-    dedupedReviews,
-    pendingOnly,
+    reconciledReviews,
+    pendingReviewers,
     pendingReviewCount,
   );
   const pendingText = pendingCount > 0 ? ` (${pendingCount} pending)` : "";
@@ -188,24 +239,27 @@ export function ReviewsSection({
       defaultOpen
       subtitle={subtitle}
       onAddAll={
-        dedupedReviews.length > 0
-          ? () => onAddAsContext(buildAllReviewsMessage(dedupedReviews, prUrl))
+        reconciledReviews.length > 0
+          ? () => onAddAsContext(buildAllReviewsMessage(reconciledReviews, prUrl))
           : undefined
       }
       addAllLabel="Add all reviews to chat context"
     >
-      {dedupedReviews.length === 0 && pendingCount === 0 && (
+      {reconciledReviews.length === 0 && pendingCount === 0 && (
         <p className="text-xs text-muted-foreground px-2 py-2">No reviews yet</p>
       )}
-      {dedupedReviews.map((review) => (
+      {reconciledReviews.map((review) => (
         <SubmittedReviewRow
           key={review.id}
           review={review}
           prUrl={prUrl}
           onAddAsContext={onAddAsContext}
+          canReRequest={canReRequest}
+          isRequesting={requestingReviewerLogins.has(normalizeLogin(review.author))}
+          onReRequest={onReRequest}
         />
       ))}
-      {pendingOnly.map((reviewer) => (
+      {pendingReviewers.map((reviewer) => (
         <PendingReviewRow key={`pending-${reviewer.type}-${reviewer.login}`} reviewer={reviewer} />
       ))}
     </CollapsibleSection>

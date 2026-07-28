@@ -29,8 +29,8 @@ repos:
         pass_filenames: true
 
       - id: go-lint
-        name: Go lint (changed files only)
-        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; cd apps/backend && golangci-lint run --new-from-rev=HEAD'
+        name: Go lint (PR changed code)
+        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD); cd apps/backend && golangci-lint run ./... --new-from-rev="$base" --timeout=5m'
         language: system
         files: ^apps/backend/.*\.go$
         pass_filenames: false

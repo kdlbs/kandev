@@ -14,12 +14,15 @@ import (
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
+	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -51,6 +54,11 @@ type Config struct {
 	// Generated internally when AGENTCTL_BOOTSTRAP_NONCE is present.
 	// Empty means authentication is disabled (e.g. dev/test without nonce).
 	AuthToken string
+
+	// ListenHostOverride forces HTTP listeners to a specific host. It is used by
+	// SSH launches, whose controller and instance traffic stays inside explicit
+	// loopback SSH forwards even though bootstrap authentication is enabled.
+	ListenHostOverride string
 
 	// BootstrapNonce is a one-time-use nonce for the handshake protocol.
 	// When set (via AGENTCTL_BOOTSTRAP_NONCE), agentctl generates its own AuthToken.
@@ -195,6 +203,9 @@ type InstanceConfig struct {
 	// continuation (thread ID appended at runtime). Only used by Amp.
 	ContinueCommand string
 
+	// ContinueArgs is the structured argv for ContinueCommand.
+	ContinueArgs []string
+
 	// VscodeCommand is the command to run the VS Code server (e.g., "code-server")
 	VscodeCommand string
 
@@ -231,6 +242,10 @@ type InstanceConfig struct {
 	// WorkspaceTracker's baseBranch. Empty falls back to the hardcoded
 	// origin/main → master priority list inside workspace_git_status.go.
 	BaseBranches map[string]string
+
+	// WorkspaceSourceRoots are canonical durable source roots permitted for
+	// linked workspace file operations.
+	WorkspaceSourceRoots []string
 }
 
 // Load loads the configuration from environment variables.
@@ -255,6 +270,7 @@ func Load() *Config {
 		LogFormat:          getEnv("AGENTCTL_LOG_FORMAT", "json"),
 		McpLogFile:         getEnv("KANDEV_MCP_LOG_FILE", ""),
 		VscodeCommand:      getEnv("AGENTCTL_VSCODE_COMMAND", "code-server"),
+		ListenHostOverride: getEnv("AGENTCTL_LISTEN_HOST", ""),
 		IdleTimeout:        getEnvDuration("KANDEV_ACP_IDLE_TIMEOUT", time.Hour),
 		IdleReaperInterval: getEnvDuration("KANDEV_ACP_IDLE_REAPER_INTERVAL", time.Minute),
 	}
@@ -281,6 +297,9 @@ func Load() *Config {
 //
 // An empty return means "all interfaces" (the historical ":port" form).
 func (c *Config) ListenHost() string {
+	if c.ListenHostOverride != "" {
+		return c.ListenHostOverride
+	}
 	if c.AuthToken == "" {
 		return "127.0.0.1"
 	}
@@ -410,6 +429,9 @@ func applyOverrides(cfg *InstanceConfig, overrides *InstanceOverrides) {
 	if len(overrides.BaseBranches) > 0 {
 		cfg.BaseBranches = overrides.BaseBranches
 	}
+	if overrides.WorkspaceSourceRoots != nil {
+		cfg.WorkspaceSourceRoots = append([]string(nil), overrides.WorkspaceSourceRoots...)
+	}
 }
 
 // applyApprovalOverrides sets approval-related instance overrides. Env is a
@@ -450,6 +472,7 @@ type InstanceOverrides struct {
 	RequiresProcessKill    bool
 	StripEnv               []string
 	BaseBranches           map[string]string
+	WorkspaceSourceRoots   []string
 }
 
 // ParseCommand splits a command string into arguments
@@ -457,9 +480,44 @@ func ParseCommand(cmd string) []string {
 	return strings.Fields(cmd)
 }
 
+// ValidateCommandArgs rejects argv that cannot safely identify an executable.
+func ValidateCommandArgs(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("agent command cannot be empty")
+	}
+	executable := strings.TrimSpace(args[0])
+	if executable == "" || strings.HasPrefix(executable, "-") {
+		return fmt.Errorf("agent command executable is invalid")
+	}
+	return nil
+}
+
 // CollectAgentEnv collects environment variables to pass to the agent.
 // It filters out AGENTCTL_* variables and optionally merges additional env vars.
 func CollectAgentEnv(additional map[string]string) []string {
+	env, err := CollectAgentEnvWithError(additional)
+	if err == nil {
+		return env
+	}
+	// Legacy callers cannot surface an error. Preserve their filtered parent
+	// environment rather than returning nil when an optional overlay is bad.
+	return CollectAgentEnvWithoutAdditional()
+}
+
+func CollectAgentEnvWithoutAdditional() []string {
+	env := make([]string, 0, len(os.Environ()))
+	for _, value := range os.Environ() {
+		if idx := strings.Index(value, "="); idx > 0 &&
+			!strings.HasPrefix(value[:idx], "AGENTCTL_") && !isNpmEnvVar(value[:idx]) {
+			env = append(env, value)
+		}
+	}
+	return env
+}
+
+// CollectAgentEnvWithError collects environment variables for an agent instance.
+// It rejects malformed indexed Git configuration rather than changing Git's effective config.
+func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 	envMap := make(map[string]string)
 
 	// Start with current environment, excluding AGENTCTL_* and npm_config_* vars.
@@ -474,9 +532,15 @@ func CollectAgentEnv(additional map[string]string) []string {
 		}
 	}
 
-	// Merge additional env vars
-	for k, v := range additional {
-		envMap[k] = v
+	// Merge additional env vars. Git's indexed configuration environment is a
+	// single ordered protocol, so it must not be overlaid key by key.
+	var err error
+	envMap, err = gitconfigenv.Merge(envMap, additional)
+	if err != nil {
+		return nil, fmt.Errorf("compose indexed Git config: %w", err)
+	}
+	if envMap["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"] != "" {
+		prependPathEntry(envMap, envMap["KANDEV_GITHUB_CLI_SHIM_DIR"])
 	}
 
 	// Convert back to slice
@@ -484,7 +548,23 @@ func CollectAgentEnv(additional map[string]string) []string {
 	for k, v := range envMap {
 		result = append(result, k+"="+v)
 	}
-	return result
+	return result, nil
+}
+
+func prependPathEntry(env map[string]string, entry string) {
+	if entry == "" {
+		return
+	}
+	cleanEntry := filepath.Clean(entry)
+	parts := filepath.SplitList(env["PATH"])
+	filtered := make([]string, 0, len(parts)+1)
+	filtered = append(filtered, entry)
+	for _, part := range parts {
+		if filepath.Clean(part) != cleanEntry {
+			filtered = append(filtered, part)
+		}
+	}
+	env["PATH"] = strings.Join(filtered, string(os.PathListSeparator))
 }
 
 func envBool(env []string, key string) bool {

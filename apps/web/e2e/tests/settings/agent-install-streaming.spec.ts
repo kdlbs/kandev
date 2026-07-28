@@ -12,6 +12,7 @@ import { test, expect } from "../../fixtures/test-base";
  */
 test.describe("agent install streaming", () => {
   test("POST returns a job_id, WS streams started+output+finished, GET reflects success", async ({
+    apiClient,
     backend,
   }) => {
     test.setTimeout(15_000);
@@ -29,9 +30,7 @@ test.describe("agent install streaming", () => {
       }
     });
 
-    const enqueueRes = await fetch(`${backend.baseUrl}/api/v1/agent-install/mock-agent`, {
-      method: "POST",
-    });
+    const enqueueRes = await apiClient.rawRequest("POST", "/api/v1/agent-install/mock-agent");
     expect(enqueueRes.status).toBe(202);
     const job = (await enqueueRes.json()) as { job_id: string; status: string };
     expect(job.job_id).toBeTruthy();
@@ -67,7 +66,10 @@ test.describe("agent install streaming", () => {
     expect(snap.status).toBe("succeeded");
   });
 
-  test("POST while a job is running returns the same job_id (idempotent)", async ({ backend }) => {
+  test("POST while a job is running returns the same job_id (idempotent)", async ({
+    apiClient,
+    backend,
+  }) => {
     test.setTimeout(15_000);
 
     // Note: mock-agent's script is fast (~10ms), so the second POST usually
@@ -75,11 +77,11 @@ test.describe("agent install streaming", () => {
     // same job_id (still running) OR different job_id with first already in
     // retention. The contract under test is: no duplicate concurrent runs.
     const first = (await (
-      await fetch(`${backend.baseUrl}/api/v1/agent-install/mock-agent`, { method: "POST" })
+      await apiClient.rawRequest("POST", "/api/v1/agent-install/mock-agent")
     ).json()) as { job_id: string };
 
     const second = (await (
-      await fetch(`${backend.baseUrl}/api/v1/agent-install/mock-agent`, { method: "POST" })
+      await apiClient.rawRequest("POST", "/api/v1/agent-install/mock-agent")
     ).json()) as { job_id: string };
 
     // If both raced before finish they must share IDs; if first already
@@ -92,13 +94,14 @@ test.describe("agent install streaming", () => {
     }
   });
 
-  test("GET /agent-install/jobs lists recent jobs for rehydration", async ({ backend }) => {
+  test("GET /agent-install/jobs lists recent jobs for rehydration", async ({
+    apiClient,
+    backend,
+  }) => {
     test.setTimeout(15_000);
 
     // Trigger an install so there's at least one job in retention.
-    const enqueueRes = await fetch(`${backend.baseUrl}/api/v1/agent-install/mock-agent`, {
-      method: "POST",
-    });
+    const enqueueRes = await apiClient.rawRequest("POST", "/api/v1/agent-install/mock-agent");
     const job = (await enqueueRes.json()) as { job_id: string };
 
     // Wait for it to finish (mock script is fast).
@@ -128,6 +131,7 @@ test.describe("agent install streaming", () => {
   });
 
   test("after install probe completes, agent.available.updated is broadcast", async ({
+    apiClient,
     backend,
   }) => {
     test.setTimeout(20_000);
@@ -145,7 +149,7 @@ test.describe("agent install streaming", () => {
       }
     });
 
-    await fetch(`${backend.baseUrl}/api/v1/agent-install/mock-agent`, { method: "POST" });
+    await apiClient.rawRequest("POST", "/api/v1/agent-install/mock-agent");
 
     // The controller fires a `Refresh` after install and then broadcasts
     // `agent.available.updated`. The mock-agent's host-utility probe may

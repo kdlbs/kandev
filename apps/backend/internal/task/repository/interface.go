@@ -7,6 +7,7 @@ import (
 	agentdto "github.com/kandev/kandev/internal/agent/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -15,6 +16,7 @@ var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
+var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -71,8 +73,8 @@ type TaskRepository interface {
 	CountOpenWatcherCreatedTasks(ctx context.Context, metadataKey, watchID string) (int, error)
 	UpdateTaskState(ctx context.Context, id string, state v1.TaskState) error
 	// UpdateTaskStateIfSessionState atomically transitions task state only while
-	// the named owning session remains in expectedSessionState and the task is
-	// not archived. Returns the pre-update task state and whether a row changed.
+	// the named session remains in expectedSessionState and the task is not
+	// archived. Returns the pre-update state and whether a row changed.
 	UpdateTaskStateIfSessionState(
 		ctx context.Context,
 		taskID, sessionID string,
@@ -134,6 +136,16 @@ type TaskRepoRepository interface {
 	DeleteTaskRepository(ctx context.Context, id string) error
 	DeleteTaskRepositoriesByTask(ctx context.Context, taskID string) error
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
+}
+
+// TaskWorkspaceFolderRepository handles canonical non-Git folder attachments.
+// It is intentionally separate from TaskRepoRepository to preserve existing
+// repository payload and Git-consumer contracts.
+type TaskWorkspaceFolderRepository interface {
+	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
+	ListTaskWorkspaceFoldersByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*models.TaskWorkspaceFolder, error)
+	CreateWorkspaceSourceBatch(ctx context.Context, batch *models.WorkspaceSourceBatch) error
+	CompensateWorkspaceSourceBatch(ctx context.Context, batch *models.WorkspaceSourceBatch) error
 }
 
 // WorkflowRepository handles workflow CRUD.
@@ -280,6 +292,15 @@ type RepositoryEntityRepository interface {
 	// single-process race; it is not a substitute for a database-level
 	// uniqueness constraint against writers outside this process.
 	GetRepositoryByLocalPath(ctx context.Context, workspaceID, localPath string) (*models.Repository, error)
+}
+
+// RepositoryCleanupRepository performs guarded deletion of repositories
+// created during workspace-source attachment rollback.
+type RepositoryCleanupRepository interface {
+	// DeleteRepositoryIfUnreferenced soft-deletes a repository only when no
+	// task_repositories row currently adopts it. The predicate is part of the
+	// mutation so rollback cleanup cannot delete a repository another task won.
+	DeleteRepositoryIfUnreferenced(ctx context.Context, id string) (bool, error)
 }
 
 // ExecutorRepository handles executor CRUD, executor profiles, and running state.

@@ -50,6 +50,12 @@ vi.mock("@/lib/api/domains/plugins-api", () => ({
   installPluginFromUrl: (...args: [string]) => installPluginFromUrlSpy(...args),
   installPluginUpload: (...args: [File]) => installPluginUploadSpy(...args),
   syncPlugins: (...args: unknown[]) => syncPluginsSpy(...args),
+  // The auto-update controls fetch the instance-wide default on mount and
+  // persist per-plugin overrides; these tests don't exercise them, so provide
+  // inert stubs that keep useAutoUpdateSettings from throwing at mount.
+  getPluginSettings: () => Promise.resolve({ auto_update_default: false }),
+  updatePluginSettings: (enabled: boolean) => Promise.resolve({ auto_update_default: enabled }),
+  setPluginAutoUpdate: () => Promise.resolve(undefined),
 }));
 
 const { loadPluginsSpy, unloadPluginSpy } = vi.hoisted(() => ({

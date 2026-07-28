@@ -23,6 +23,11 @@ vi.mock("@/components/state-provider", () => ({
       ...mocks.appState,
       toggleSidebarGroupCollapsed: mocks.toggleSidebarGroupCollapsed,
     }),
+  // TaskNestContextMenuItems (rendered inside the shared context menu) reads
+  // the store api via useNestTask; provide a minimal stub so it renders.
+  useAppStoreApi: () => ({
+    getState: () => ({ kanbanMulti: { snapshots: {} } }),
+  }),
 }));
 
 vi.mock("@/hooks/domains/sidebar/use-effective-sidebar-view", () => ({

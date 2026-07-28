@@ -14,6 +14,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 
+const TASK_LISTING_VIEW_STORAGE_KEY = "kandev.taskListing.view.v1";
+
 test.describe("Quick Chat entry points on mobile", () => {
   test("opens from the home header and closes with the touch control", async ({ testPage }) => {
     await testPage.goto("/");
@@ -69,10 +71,14 @@ test.describe("Quick Chat entry points on mobile", () => {
     await assertNoDocumentHorizontalOverflow(testPage);
   });
 
-  test("returns to the selected workspace home from the Tasks header", async ({
+  test("preserves the selected workspace when Home restores List", async ({
     testPage,
     seedData,
   }) => {
+    await testPage.addInitScript(
+      (key) => window.localStorage.setItem(key, JSON.stringify("list")),
+      TASK_LISTING_VIEW_STORAGE_KEY,
+    );
     await testPage.goto(`/tasks?workspace=${seedData.workspaceId}`);
     await testPage.waitForLoadState("networkidle");
 
@@ -82,10 +88,11 @@ test.describe("Quick Chat entry points on mobile", () => {
     await homeLink.click();
 
     await expect(testPage).toHaveURL((url) => {
-      return url.pathname === "/" && url.searchParams.get("workspaceId") === seedData.workspaceId;
+      return (
+        url.pathname === "/tasks" && url.searchParams.get("workspace") === seedData.workspaceId
+      );
     });
-    const homeHeader = testPage.getByRole("link", { name: "Kandev home" }).locator("..");
-    await expect(homeHeader.getByText("Home", { exact: true })).toHaveCount(0);
+    await expect(testPage.getByText("No tasks found.", { exact: true })).toBeVisible();
     await assertNoDocumentHorizontalOverflow(testPage);
   });
 });

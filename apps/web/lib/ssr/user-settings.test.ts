@@ -9,6 +9,7 @@ import {
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
 
 const UPDATED_AT = "2026-01-01T00:00:00Z";
+const DEFAULT_USER_ID = "default-user";
 
 describe("buildCoreFields", () => {
   it("normalizes the simplified metrics preference and defaults old rows to detailed", () => {
@@ -143,6 +144,22 @@ describe("buildTerminalFields via buildCoreFields", () => {
 });
 
 describe("mapUserSettingsResponse", () => {
+  it("maps the portable task-list details preference and defaults it to false", () => {
+    expect(mapUserSettingsResponse(null).tasksListShowDetails).toBe(false);
+
+    const result = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        tasks_list_show_details: true,
+        updated_at: UPDATED_AT,
+      },
+    });
+
+    expect(result.tasksListShowDetails).toBe(true);
+  });
+
   it("defaults portable app status bar order to empty arrays", () => {
     expect(mapUserSettingsResponse(null).appStatusBarOrder).toEqual({
       leftItemIds: [],
@@ -154,7 +171,7 @@ describe("mapUserSettingsResponse", () => {
     const missing = mapUserSettingsResponse(null);
     const unknown = mapUserSettingsResponse({
       settings: {
-        user_id: "default-user",
+        user_id: DEFAULT_USER_ID,
         workspace_id: toWorkspaceId(""),
         repository_ids: [],
         mcp_task_agent_profile_default: "unexpected",
@@ -173,7 +190,7 @@ describe("mapUserSettingsResponse", () => {
   it("preserves an explicitly disabled archive confirmation preference", () => {
     const result = mapUserSettingsResponse({
       settings: {
-        user_id: "default-user",
+        user_id: DEFAULT_USER_ID,
         workspace_id: toWorkspaceId(""),
         repository_ids: [],
         confirm_task_archive: false,
@@ -197,7 +214,7 @@ describe("mapUserSettingsResponse", () => {
   it("maps sidebar active view and draft state", () => {
     const result = mapUserSettingsResponse({
       settings: {
-        user_id: "default-user",
+        user_id: DEFAULT_USER_ID,
         workspace_id: toWorkspaceId(""),
         repository_ids: [],
         sidebar_views: [

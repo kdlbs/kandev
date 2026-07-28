@@ -44,6 +44,11 @@ function buttonSize(size: NonNullable<ExternalVcsFileLinkProps["size"]>) {
   return "icon-sm" as const;
 }
 
+const buttonClass = (size: NonNullable<ExternalVcsFileLinkProps["size"]>) =>
+  size === "sm"
+    ? `${sizeClasses[size]} cursor-pointer`
+    : `${sizeClasses[size]} cursor-pointer opacity-60 hover:opacity-100`;
+
 export function useExternalVcsFileStatus(
   filePath: string,
   sessionId?: string | null,
@@ -65,12 +70,7 @@ export function ExternalVcsFileLink({ size = "xs", ...input }: ExternalVcsFileLi
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          asChild
-          variant="ghost"
-          size={buttonSize(size)}
-          className={`${sizeClasses[size]} cursor-pointer text-muted-foreground hover:text-foreground`}
-        >
+        <Button asChild variant="ghost" size={buttonSize(size)} className={buttonClass(size)}>
           <a
             href={link.url}
             target="_blank"

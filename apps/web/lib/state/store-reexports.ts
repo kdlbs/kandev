@@ -1,5 +1,13 @@
 // Re-export all types from slices for backwards compatibility.
 // Extracted from store.ts to keep that file under the max-lines limit.
+import type { SessionRuntimeSlice, SessionSliceActions } from "./slices";
+
+export type WorkspaceSourceStoreState = Pick<
+  SessionRuntimeSlice,
+  "workspaceFilesRefresh" | "bumpWorkspaceFilesRefresh"
+> &
+  Pick<SessionSliceActions, "reconcileWorkspaceSourcesAdopted">;
+
 export type {
   KanbanState,
   KanbanMultiState,
@@ -57,6 +65,7 @@ export type {
   GitHubSliceState,
   GitHubSliceActions,
   GitHubStatusState,
+  GitHubAppRegistrationsState,
   TaskPRsState,
   PRWatchesState,
   ReviewWatchesState,

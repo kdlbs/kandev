@@ -53,6 +53,9 @@ type PlanService struct {
 	eventBus       bus.EventBus
 	logger         *logger.Logger
 	coalesceWindow time.Duration
+	// authorizeTask gates plan access by the task's workspace ownership
+	// (opt-in auth). Nil = unscoped (internal callers / auth disabled).
+	authorizeTask func(ctx context.Context, taskID string) error
 }
 
 // NewPlanService creates a new task plan service. The concrete repository
@@ -65,6 +68,19 @@ func NewPlanService(repo planRepo, eventBus bus.EventBus, log *logger.Logger) *P
 		logger:         log.WithFields(zap.String("component", "plan-service")),
 		coalesceWindow: readCoalesceWindow(),
 	}
+}
+
+// SetTaskAuthorizer wires the per-user task-access check (opt-in auth). The
+// authorizer must return nil for contexts without a request identity.
+func (s *PlanService) SetTaskAuthorizer(fn func(ctx context.Context, taskID string) error) {
+	s.authorizeTask = fn
+}
+
+func (s *PlanService) authorize(ctx context.Context, taskID string) error {
+	if s.authorizeTask == nil {
+		return nil
+	}
+	return s.authorizeTask(ctx, taskID)
 }
 
 func readCoalesceWindow() time.Duration {
@@ -92,6 +108,9 @@ type CreatePlanRequest struct {
 
 // CreatePlan upserts a plan and appends or coalesces a revision.
 func (s *PlanService) CreatePlan(ctx context.Context, req CreatePlanRequest) (*models.TaskPlan, error) {
+	if err := s.authorize(ctx, req.TaskID); err != nil {
+		return nil, err
+	}
 	return s.upsertPlan(ctx, req)
 }
 
@@ -109,6 +128,9 @@ type UpdatePlanRequest struct {
 func (s *PlanService) UpdatePlan(ctx context.Context, req UpdatePlanRequest) (*models.TaskPlan, error) {
 	if req.TaskID == "" {
 		return nil, ErrTaskIDRequired
+	}
+	if err := s.authorize(ctx, req.TaskID); err != nil {
+		return nil, err
 	}
 	existing, err := s.repo.GetTaskPlan(ctx, req.TaskID)
 	if err != nil {
@@ -309,6 +331,9 @@ func (s *PlanService) GetPlan(ctx context.Context, taskID string) (*models.TaskP
 	if taskID == "" {
 		return nil, ErrTaskIDRequired
 	}
+	if err := s.authorize(ctx, taskID); err != nil {
+		return nil, err
+	}
 	return s.repo.GetTaskPlan(ctx, taskID)
 }
 
@@ -324,6 +349,9 @@ func (s *PlanService) MarkImplementationStarted(ctx context.Context, req MarkImp
 	}
 	if req.SessionID == "" {
 		return nil, ErrSessionIDRequired
+	}
+	if err := s.authorize(ctx, req.TaskID); err != nil {
+		return nil, err
 	}
 	session, err := s.repo.GetTaskSession(ctx, req.SessionID)
 	if err != nil {
@@ -359,6 +387,9 @@ func (s *PlanService) DeletePlan(ctx context.Context, taskID string) error {
 	if taskID == "" {
 		return ErrTaskIDRequired
 	}
+	if err := s.authorize(ctx, taskID); err != nil {
+		return err
+	}
 	existing, err := s.repo.GetTaskPlan(ctx, taskID)
 	if err != nil {
 		return err
@@ -378,6 +409,9 @@ func (s *PlanService) ListRevisions(ctx context.Context, taskID string) ([]*mode
 	if taskID == "" {
 		return nil, ErrTaskIDRequired
 	}
+	if err := s.authorize(ctx, taskID); err != nil {
+		return nil, err
+	}
 	return s.repo.ListTaskPlanRevisions(ctx, taskID, 0)
 }
 
@@ -389,6 +423,9 @@ func (s *PlanService) GetRevision(ctx context.Context, id string) (*models.TaskP
 	}
 	if rev == nil {
 		return nil, ErrRevisionNotFound
+	}
+	if err := s.authorize(ctx, rev.TaskID); err != nil {
+		return nil, err
 	}
 	return rev, nil
 }
@@ -409,6 +446,9 @@ func (s *PlanService) RevertPlan(ctx context.Context, req RevertPlanRequest) (*m
 	}
 	if req.TargetRevisionID == "" {
 		return nil, ErrRevisionIDRequired
+	}
+	if err := s.authorize(ctx, req.TaskID); err != nil {
+		return nil, err
 	}
 	target, err := s.repo.GetTaskPlanRevision(ctx, req.TargetRevisionID)
 	if err != nil {

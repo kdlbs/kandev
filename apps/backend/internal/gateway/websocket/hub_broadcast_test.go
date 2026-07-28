@@ -117,3 +117,55 @@ func TestBroadcastToSession_DeliversOnceToSubscribedAndFocusedClient(t *testing.
 		t.Fatal("subscribed+focused client received a duplicate broadcast")
 	}
 }
+
+func TestBroadcastToUserReportsWhetherAFrameWasQueued(t *testing.T) {
+	h := newTestHub(t)
+	msg, err := ws.NewNotification("system.update_available", map[string]any{"occurrence_id": "v1.2.3"})
+	if err != nil {
+		t.Fatalf("notification: %v", err)
+	}
+	if h.BroadcastToUser("user-1", msg) {
+		t.Fatal("broadcast without a user subscriber must report no queued recipient")
+	}
+
+	c := newTestClient("c1")
+	registerTestClient(h, c)
+	h.SubscribeToUser(c, "user-1")
+	if !h.BroadcastToUser("user-1", msg) {
+		t.Fatal("broadcast with a user subscriber must report a queued recipient")
+	}
+}
+
+func TestBroadcastToUserReportsFalseWhenSubscriberBufferIsFull(t *testing.T) {
+	h := newTestHub(t)
+	c := newTestClient("c1")
+	registerTestClient(h, c)
+	h.SubscribeToUser(c, "user-1")
+	for index := 0; index < cap(c.send); index++ {
+		c.send <- []byte("queued")
+	}
+
+	msg, err := ws.NewNotification("system.update_available", map[string]any{"occurrence_id": "v1.2.3"})
+	if err != nil {
+		t.Fatalf("notification: %v", err)
+	}
+	if h.BroadcastToUser("user-1", msg) {
+		t.Fatal("broadcast with a full subscriber buffer must report no queued recipient")
+	}
+}
+
+func TestBroadcastToUserReportsFalseWhenSubscriberIsClosed(t *testing.T) {
+	h := newTestHub(t)
+	c := newTestClient("c1")
+	registerTestClient(h, c)
+	h.SubscribeToUser(c, "user-1")
+	c.closeSend()
+
+	msg, err := ws.NewNotification("system.update_available", map[string]any{"occurrence_id": "v1.2.3"})
+	if err != nil {
+		t.Fatalf("notification: %v", err)
+	}
+	if h.BroadcastToUser("user-1", msg) {
+		t.Fatal("broadcast to a closed subscriber must report no queued recipient")
+	}
+}

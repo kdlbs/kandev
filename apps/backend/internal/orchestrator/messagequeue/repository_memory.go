@@ -33,6 +33,31 @@ func (r *memoryRepository) Insert(_ context.Context, msg *QueuedMessage, maxPerS
 	return r.insertLocked(msg, maxPerSession)
 }
 
+func (r *memoryRepository) Restore(_ context.Context, msg *QueuedMessage, maxPerSession int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list := r.entries[msg.SessionID]
+	if maxPerSession > 0 && len(list) >= maxPerSession {
+		return ErrQueueFull
+	}
+	if msg.ID == "" {
+		msg.ID = uuid.New().String()
+	}
+	if msg.QueuedAt.IsZero() {
+		msg.QueuedAt = time.Now().UTC()
+	}
+	clone := *msg
+	index := sort.Search(len(list), func(i int) bool { return list[i].Position > clone.Position })
+	list = append(list, nil)
+	copy(list[index+1:], list[index:])
+	list[index] = &clone
+	r.entries[msg.SessionID] = list
+	if clone.Position > r.nextPosition[msg.SessionID] {
+		r.nextPosition[msg.SessionID] = clone.Position
+	}
+	return nil
+}
+
 // insertLocked performs the actual insert. Caller must already hold r.mu.
 func (r *memoryRepository) insertLocked(msg *QueuedMessage, maxPerSession int) error {
 	list := r.entries[msg.SessionID]

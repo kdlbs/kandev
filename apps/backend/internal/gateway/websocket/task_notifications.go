@@ -39,6 +39,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.AgentProfileDeleted, ws.ActionAgentProfileDeleted)
 	b.subscribe(eventBus, events.TaskCreated, ws.ActionTaskCreated)
 	b.subscribe(eventBus, events.TaskUpdated, ws.ActionTaskUpdated)
+	b.subscribe(eventBus, events.SessionWorkspaceSourcesUpdated, ws.ActionSessionWorkspaceSourcesUpdated)
 	b.subscribe(eventBus, events.TaskDeleted, ws.ActionTaskDeleted)
 	b.subscribe(eventBus, events.TaskStateChanged, ws.ActionTaskStateChanged)
 	b.subscribe(eventBus, events.TaskPlanCreated, ws.ActionTaskPlanCreated)
@@ -49,6 +50,10 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskWalkthroughCreated, ws.ActionTaskWalkthroughCreated)
 	b.subscribe(eventBus, events.TaskWalkthroughUpdated, ws.ActionTaskWalkthroughUpdated)
 	b.subscribe(eventBus, events.TaskWalkthroughDeleted, ws.ActionTaskWalkthroughDeleted)
+	b.subscribe(eventBus, events.TaskReviewRunUpdated, ws.ActionTaskReviewRunUpdated)
+	b.subscribe(eventBus, events.TaskReviewFindingsPublished, ws.ActionTaskReviewFindingsPublished)
+	b.subscribe(eventBus, events.TaskReviewFindingUpdated, ws.ActionTaskReviewFindingUpdated)
+	b.subscribe(eventBus, events.TaskReviewCleared, ws.ActionTaskReviewCleared)
 	b.subscribe(eventBus, events.RepositoryCreated, ws.ActionRepositoryCreated)
 	b.subscribe(eventBus, events.RepositoryUpdated, ws.ActionRepositoryUpdated)
 	b.subscribe(eventBus, events.RepositoryDeleted, ws.ActionRepositoryDeleted)
@@ -67,6 +72,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.EnvironmentUpdated, ws.ActionEnvironmentUpdated)
 	b.subscribe(eventBus, events.EnvironmentDeleted, ws.ActionEnvironmentDeleted)
 	b.subscribe(eventBus, events.TaskSessionStateChanged, ws.ActionSessionStateChanged)
+	b.subscribe(eventBus, events.TaskSessionActivityChanged, ws.ActionSessionActivityChanged)
 	b.subscribe(eventBus, events.MessageAdded, ws.ActionSessionMessageAdded)
 	b.subscribe(eventBus, events.MessageUpdated, ws.ActionSessionMessageUpdated)
 	b.subscribe(eventBus, events.MessageDeleted, ws.ActionSessionMessageDeleted)
@@ -128,18 +134,35 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 			b.logLifecycleBroadcast(action, data, sessionID)
 		}
 
+		workspaceID := extractWorkspaceID(event.Data)
 		switch action {
+		case ws.ActionWorkspaceCreated, ws.ActionWorkspaceUpdated, ws.ActionWorkspaceDeleted:
+			// Workspace event payloads are the workspace DTO itself: the
+			// workspace ID lives under "id", not "workspace_id". Without this
+			// the extract comes back empty and the event would broadcast to
+			// every user (caught by the auth E2E segregation spec).
+			if workspaceID == "" {
+				workspaceID = extractStringField(event.Data, "id")
+			}
+			b.hub.BroadcastToWorkspace(workspaceID, msg)
+			return nil
 		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
 			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)
 				return nil
 			}
 		case ws.ActionSessionStateChanged:
-			// Broadcast globally so the sidebar task switcher can track
-			// session state changes for all tasks, not just the active one.
-			b.hub.Broadcast(msg)
+			// Broadcast beyond the session subscribers so the sidebar task
+			// switcher can track state changes for all tasks — but scoped to
+			// the owning workspace's user when auth is enabled.
+			b.hub.BroadcastToWorkspace(workspaceID, msg)
 			return nil
 		case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted:
+			if sessionID != "" {
+				b.hub.BroadcastToSession(sessionID, msg)
+				return nil
+			}
+		case ws.ActionSessionWorkspaceSourcesUpdated:
 			if sessionID != "" {
 				b.hub.BroadcastToSession(sessionID, msg)
 				return nil
@@ -150,12 +173,16 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 				return nil
 			}
 		case ws.ActionExecutorPrepareProgress, ws.ActionExecutorPrepareCompleted:
-			// Broadcast globally so prepare progress/warnings are available
-			// when the user navigates to the session page after task creation.
-			b.hub.Broadcast(msg)
+			// Broadcast to the owning workspace's clients so prepare
+			// progress/warnings are available when the user navigates to the
+			// session page after task creation.
+			b.hub.BroadcastToWorkspace(workspaceID, msg)
 			return nil
 		}
-		b.hub.Broadcast(msg)
+		// Workspace-carrying events (task/workflow/repository/…) route to the
+		// owner's clients; events without workspace context (executors,
+		// environments, agent profiles — instance-wide resources) stay global.
+		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
 	})
 	if err != nil {
@@ -163,6 +190,28 @@ func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action 
 		return
 	}
 	b.subscriptions = append(b.subscriptions, sub)
+}
+
+// extractWorkspaceID pulls a workspace ID from event payloads (map- or
+// struct-shaped). Empty means "no workspace context" — the event is treated
+// as instance-wide and broadcast to everyone.
+func extractWorkspaceID(data interface{}) string {
+	if id := extractStringField(data, "workspace_id"); id != "" {
+		return id
+	}
+	if provider, ok := data.(interface{ GetWorkspaceID() string }); ok {
+		return provider.GetWorkspaceID()
+	}
+	return ""
+}
+
+func extractStringField(data interface{}, key string) string {
+	if m, ok := data.(map[string]interface{}); ok {
+		if value, ok := m[key].(string); ok {
+			return value
+		}
+	}
+	return ""
 }
 
 func (b *TaskEventBroadcaster) logLifecycleBroadcast(action string, data map[string]interface{}, sessionID string) {

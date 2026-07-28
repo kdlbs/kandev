@@ -10,6 +10,12 @@ status: implemented
 
 Make the default Office setup task executable by giving authorized Office agents a run-scoped project list/create surface, exposing it through `$KANDEV_CLI`, and allowing created follow-up tasks to carry `project_id`. Separately replace the generic Kanban tool inventory injected into Office turns with an exact Office capability context. This plan does not add workspace creation or expose Kanban completion tools to Office.
 
+Corrective follow-up: an Office-only prompt and CLI must never be launched
+without the scheduler-created signed runtime environment. Generic task/session
+start paths fail closed for Office-owned tasks when that context is absent, and
+the CLI/public docs explain that its API URL and key are automatic Office run
+credentials rather than user configuration.
+
 ## Backend
 
 ### Run-scoped project capability
@@ -62,6 +68,35 @@ Changes:
 - Add a `kandev-projects` system skill, default for CEOs, documenting list/create and task-project assignment.
 - Cross-check advertised Office tool names against the registered `ModeOffice` inventory. Assert that `step_complete_kandev` is absent.
 
+### Office launch-context invariant
+
+Files:
+- `apps/backend/internal/orchestrator/task_operations.go`
+- `apps/backend/internal/orchestrator/task_operations_test.go`
+
+Changes:
+- Validate the minimum, task-bound Office runtime environment before any
+  `LaunchPreparedSession` call selects `ModeOffice`.
+- Fail before starting the agent when a generic/manual/workflow path reaches an
+  Office-owned task without scheduler-provided `KANDEV_CLI`,
+  `KANDEV_API_URL`, `KANDEV_API_KEY`, agent/workspace identity, and run ID.
+- Reject generic Office resume and prepared-workspace relaunch paths; Office
+  recovery must return to the scheduler so it can mint fresh runtime context.
+- Preserve scheduler launches through `StartTaskWithEnv` and keep regular
+  task-mode launches unchanged.
+
+### CLI context diagnostics
+
+Files:
+- `apps/backend/cmd/agentctl/kandev_client.go`
+- `apps/backend/cmd/agentctl/kandev_test.go`
+
+Changes:
+- Replace the bare missing-variable error with an actionable explanation that
+  the values are injected automatically for Office runs.
+- Direct regular task sessions to their Kandev MCP tools without suggesting
+  users manufacture or persist an Office JWT.
+
 ## Frontend
 
 No UI behavior changes. The existing onboarding wizard, project pages, and permission metadata renderer consume the backend contracts. The new permission must appear automatically through the existing permission metadata response.
@@ -86,6 +121,16 @@ No UI behavior changes. The existing onboarding wizard, project pages, and permi
 - **What:** onboarding's default setup brief is executable through the advertised Office CLI/tool surface.
   **File:** `apps/backend/internal/office/onboarding/service_test.go`
   **How:** contract test against required setup mutations and capability catalog.
+- **What:** Office-owned tasks cannot start in `ModeOffice` without a complete
+  scheduler-provided runtime environment, while scheduler and regular
+  task-mode launches retain their existing behavior.
+  **File:** `apps/backend/internal/orchestrator/task_operations_test.go`
+  **How:** focused orchestrator launch tests with captured executor requests.
+- **What:** invoking the CLI outside an Office run returns actionable,
+  non-secret-bearing guidance.
+  **File:** `apps/backend/cmd/agentctl/kandev_test.go`
+  **How:** run the command with the two required variables unset and assert the
+  structured error and zero HTTP dispatch.
 
 ## E2E Tests
 
@@ -104,6 +149,13 @@ Wave 3:
 - [x] [task-04-office-integration-verification](task-04-office-integration-verification.md)
 - [x] [task-05-public-docs](task-05-public-docs.md)
 
+Wave 4 (parallel):
+- [x] [task-06-office-launch-context-guard](task-06-office-launch-context-guard.md)
+- [x] [task-07-cli-context-diagnostic](task-07-cli-context-diagnostic.md)
+
+Wave 5:
+- [x] [task-08-public-runtime-credentials-docs](task-08-public-runtime-credentials-docs.md)
+
 ## Verification Commands
 
 ```bash
@@ -118,4 +170,6 @@ node scripts/validate-public-docs.mjs
 
 ## Open Questions
 
-None. Project creation is CEO-only by default but remains individually grantable through `can_create_projects`. Additional workspace creation remains human-owned and out of scope.
+None. The approved corrective contract fails generic manual/workflow Office
+launches before process start instead of minting a second, unaudited credential
+class or silently granting the broader task-mode MCP surface.

@@ -25,6 +25,7 @@ type WorkflowStepLister interface {
 type WorkflowHandlers struct {
 	service            *service.Service
 	workflowStepLister WorkflowStepLister
+	foregroundActivity dto.ForegroundActivityProvider
 	logger             *logger.Logger
 }
 
@@ -42,10 +43,16 @@ func RegisterWorkflowRoutes(
 	svc *service.Service,
 	stepLister WorkflowStepLister,
 	log *logger.Logger,
-) {
+) *WorkflowHandlers {
 	handlers := NewWorkflowHandlers(svc, stepLister, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
+	return handlers
+}
+
+// SetForegroundActivityProvider wires live session activity into task snapshots.
+func (h *WorkflowHandlers) SetForegroundActivityProvider(provider dto.ForegroundActivityProvider) {
+	h.foregroundActivity = provider
 }
 
 func (h *WorkflowHandlers) registerHTTP(router *gin.Engine) {
@@ -545,5 +552,5 @@ func (h *WorkflowHandlers) convertTasksWithPrimarySessions(
 	ctx context.Context,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, tasks)
 }

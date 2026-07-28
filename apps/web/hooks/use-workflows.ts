@@ -1,7 +1,10 @@
 import { useEffect } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { listWorkflows } from "@/lib/api";
 import type { WorkflowsState } from "@/lib/state/slices";
+import { isCurrentWorkspaceContext } from "@/lib/state/workspace-context";
+import type { AppState } from "@/lib/state/store";
+import type { StoreApi } from "zustand";
 
 type StoreWorkflow = WorkflowsState["items"][number];
 type SetWorkflows = (workflows: StoreWorkflow[]) => void;
@@ -15,14 +18,23 @@ type SetWorkflows = (workflows: StoreWorkflow[]) => void;
 function useWorkflowsFetchEffect(
   workspaceId: string | null,
   enabled: boolean,
+  requireActiveWorkspace: boolean,
   setWorkflows: SetWorkflows,
+  store: StoreApi<AppState>,
 ) {
   useEffect(() => {
     if (!enabled || !workspaceId) return;
     let cancelled = false;
+    const generation = store.getState().workspaceContextGeneration;
     listWorkflows(workspaceId, { cache: "no-store", includeHidden: true })
       .then((response) => {
-        if (cancelled) return;
+        const state = store.getState();
+        const staleWorkspaceContext = requireActiveWorkspace
+          ? !isCurrentWorkspaceContext(state, workspaceId, generation)
+          : state.workspaceContextGeneration !== generation;
+        if (cancelled || staleWorkspaceContext) {
+          return;
+        }
         const mapped = response.workflows.map((workflow) => ({
           id: workflow.id,
           workspaceId: workflow.workspace_id,
@@ -43,7 +55,7 @@ function useWorkflowsFetchEffect(
     return () => {
       cancelled = true;
     };
-  }, [enabled, setWorkflows, workspaceId]);
+  }, [enabled, requireActiveWorkspace, setWorkflows, store, workspaceId]);
 }
 
 /**
@@ -53,14 +65,16 @@ function useWorkflowsFetchEffect(
  * collapsed and its children (which consume workflows) are unmounted.
  */
 export function useEnsureWorkspaceWorkflows() {
+  const store = useAppStoreApi();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const setWorkflows = useAppStore((state) => state.setWorkflows);
-  useWorkflowsFetchEffect(workspaceId, true, setWorkflows);
+  useWorkflowsFetchEffect(workspaceId, true, true, setWorkflows, store);
 }
 
 export function useWorkflows(workspaceId: string | null, enabled = true) {
+  const store = useAppStoreApi();
   const workflows = useAppStore((state) => state.workflows.items);
   const setWorkflows = useAppStore((state) => state.setWorkflows);
-  useWorkflowsFetchEffect(workspaceId, enabled, setWorkflows);
+  useWorkflowsFetchEffect(workspaceId, enabled, false, setWorkflows, store);
   return { workflows };
 }

@@ -51,6 +51,19 @@ Use separate profiles for different trust levels. Do not give a routine document
 
 An agent profile combines a CLI, model, mode, flags, environment values, secret references, permissions, and optional MCP servers. Treat it as a reusable authority package.
 
+The configurable ACP command prefix is currently a launch-customization
+feature, not an isolation boundary. Kandev does not yet have a separate
+authenticated operator session for profile mutations, so an agent that can
+reach the main HTTP API may attempt the same profile edits as the UI. Do not
+rely on the prefix to confine a hostile agent until the operator-owned settings
+boundary in
+[ADR-2026-07-24-operator-owned-agent-launcher-settings](../decisions/2026-07-24-operator-owned-agent-launcher-settings.md)
+is enforced. The current per-boot token is a deliberately replayable interim
+CSRF and accidental-mutation interlock, not authentication: an intentional
+agent can fetch and replay it. It does not close this direct-client path, and
+an ambient browser login is insufficient while agent-controlled previews can
+share the operator origin.
+
 1. Create a profile for one purpose, such as local implementation, read-focused review, or unattended maintenance.
 2. Select the least-privileged Git, provider, and cloud credentials that purpose needs.
 3. Leave approval or sandbox bypasses disabled unless the executor is disposable and the task is trusted.
@@ -60,6 +73,12 @@ An agent profile combines a CLI, model, mode, flags, environment values, secret 
 Agent CLIs can also discover authentication from their normal home-directory files, environment, keychain, or provider CLI. Removing a Kandev secret does not revoke a token stored elsewhere. Revoke credentials at the provider and remove retained executor copies when access should end.
 
 See [Agents and profiles](agents-and-profiles.md) for exact profile fields and [Automation and MCP](automation-and-mcp.md) for unattended and external-client boundaries.
+
+## Treat workspace sources as access grants
+
+Adding a repository or folder gives the task access to that source. A local folder is a live host-path grant, not an upload: Kandev does not copy, move, delete, or add marker files to it. Folder sources are therefore limited to Local/Local PC and Worktree tasks and are never sent to Docker, SSH, Sprites, or Remote Docker.
+
+Remote repository locators and clone credentials can reveal authority. Kandev does not persist credential-bearing URLs or include credentials in source metadata or logs. Use provider credentials or a safe cloneable locator, and never paste tokens into a repository URL, task prompt, or source display name.
 
 ## Protect stored secrets
 

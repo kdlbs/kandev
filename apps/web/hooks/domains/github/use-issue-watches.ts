@@ -14,10 +14,7 @@ import {
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { CreateIssueWatchRequest, UpdateIssueWatchRequest } from "@/lib/types/github";
 
-// useIssueWatches has three modes:
-//   - workspaceId: string         → fetch watches scoped to one workspace
-//   - workspaceId: undefined      → fetch watches across all workspaces
-//   - workspaceId: null           → don't fetch (caller hasn't resolved a workspace yet)
+// useIssueWatches fetches only after the active workspace resolves.
 export function useIssueWatches(workspaceId?: string | null) {
   const items = useAppStore((state) => state.issueWatches.items);
   const loaded = useAppStore((state) => state.issueWatches.loaded);
@@ -34,13 +31,13 @@ export function useIssueWatches(workspaceId?: string | null) {
   const storeApi = useAppStoreApi();
 
   useEffect(() => {
-    if (workspaceId === null) return;
-    const scopeKey = workspaceId ?? "__all__";
+    if (!workspaceId) return;
+    const scopeKey = workspaceId;
     if (loadedScopeRef.current === scopeKey) return;
     let cancelled = false;
     loadedScopeRef.current = scopeKey;
     setIssueWatchesLoading(true);
-    listIssueWatches(workspaceId ?? undefined, { cache: "no-store" })
+    listIssueWatches(workspaceId, { cache: "no-store" })
       .then((response) => {
         if (cancelled) return;
         setIssueWatches(response?.watches ?? []);

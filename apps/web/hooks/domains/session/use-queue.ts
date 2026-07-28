@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import {
   queueMessage,
   clearQueue,
@@ -213,18 +214,17 @@ export function useQueue(sessionId: string | null) {
     });
   }, [sessionId, connectionStatus, refetch]);
 
-  useEffect(() => {
-    if (!sessionId) return;
-    const refetchOnVisible = () => {
-      if (document.visibilityState !== "visible") return;
+  useForegroundRefresh(
+    () => {
+      if (!sessionId) return;
       if (connectionStatus !== "connected") return;
-      void refetch(sessionId).catch((err) => {
-        console.error("Failed to fetch queue status after visibility change:", err);
+      return refetch(sessionId).catch((err) => {
+        console.error("Failed to fetch queue status after foreground refresh:", err);
       });
-    };
-    document.addEventListener("visibilitychange", refetchOnVisible);
-    return () => document.removeEventListener("visibilitychange", refetchOnVisible);
-  }, [sessionId, connectionStatus, refetch]);
+    },
+    Boolean(sessionId),
+    sessionId,
+  );
 
   const refetchBound = useCallback(
     () => (sessionId ? refetch(sessionId) : Promise.resolve()),

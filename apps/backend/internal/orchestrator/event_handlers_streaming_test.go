@@ -147,6 +147,25 @@ type serviceBackedMessageCreator struct {
 	svc *taskservice.Service
 }
 
+func (m *serviceBackedMessageCreator) CreateSessionMessage(
+	ctx context.Context,
+	taskID, content, sessionID, messageType, turnID string,
+	metadata map[string]interface{},
+	requestsInput bool,
+) error {
+	_, err := m.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+		RequestsInput: requestsInput,
+	})
+	return err
+}
+
 func (m *serviceBackedMessageCreator) UpdateToolCallMessage(
 	ctx context.Context,
 	taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string,
@@ -827,6 +846,72 @@ func TestStatuslessToolUpdateDoesNotCreateTurn(t *testing.T) {
 	require.Zero(t, openTurnCount(t, repo, "session1"))
 }
 
+func TestResumedSessionStatusDoesNotCreateTurnForWaitingSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
+
+	svc.handleSessionStatusEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task1",
+		SessionID: "session1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:          "session_status",
+			SessionStatus: streams.SessionStatusResumed,
+		},
+	})
+
+	require.Zero(t, openTurnCount(t, repo, "session1"),
+		"resume status metadata must not create a phantom active turn")
+	messages, err := repo.ListMessages(ctx, "session1")
+	require.NoError(t, err)
+	require.Empty(t, messages, "resume status without an active turn must not create a message")
+}
+
+func TestResumedSessionStatusUsesExistingActiveTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task1", "session1", "step1")
+
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn1",
+		TaskSessionID: "session1",
+		TaskID:        "task1",
+		StartedAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.turnService = &repoTurnService{repo: repo}
+	svc.messageCreator = newServiceBackedMessageCreator(repo)
+
+	svc.handleSessionStatusEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "task1",
+		SessionID: "session1",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:          "session_status",
+			SessionStatus: streams.SessionStatusResumed,
+		},
+	})
+
+	require.Equal(t, 1, openTurnCount(t, repo, "session1"))
+	messages, err := repo.ListMessages(ctx, "session1")
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+	require.Equal(t, "turn1", messages[0].TurnID)
+	require.Equal(t, "Session resumed", messages[0].Content)
+}
+
 func TestToolUpdateFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -921,6 +1006,10 @@ func TestCompleteStreamFromCompletedExecutionFlushesAgentText(t *testing.T) {
 	firstTurn, err := svc.turnService.StartTurn(ctx, "s1")
 	require.NoError(t, err)
 	svc.markExecutionCompleted("s1", "exec-1")
+	// StopExecution can emit agent.stopped after agent.completed but before this
+	// buffered terminal stream. The stopped marker must not downgrade permission
+	// to flush the successful execution's final text and metadata.
+	svc.markExecutionFailed("s1", "exec-1")
 	svc.completeTurnForSession(ctx, "s1")
 	nextTurn, err := svc.turnService.StartTurn(ctx, "s1")
 	require.NoError(t, err)
@@ -1653,6 +1742,35 @@ func TestCompletedExecutionMarkerExpiresAndDeletes(t *testing.T) {
 	require.False(t, ok, "matching expiry callback should delete the marker")
 }
 
+func TestTerminalExecutionMarker_CompletionPermissionIsMonotonic(t *testing.T) {
+	svc := &Service{}
+	const sessionID, executionID = "session-terminal-race", "execution-terminal-race"
+	key := terminalExecutionKey(sessionID, executionID)
+
+	for range 25 {
+		svc.completedExecutions.Delete(key)
+		start := make(chan struct{})
+		var wait sync.WaitGroup
+		wait.Add(2)
+		go func() {
+			defer wait.Done()
+			<-start
+			svc.markExecutionCompleted(sessionID, executionID)
+		}()
+		go func() {
+			defer wait.Done()
+			<-start
+			svc.markExecutionFailed(sessionID, executionID)
+		}()
+		close(start)
+		wait.Wait()
+
+		marker, ok := svc.terminalCompleteStreamMarker(sessionID, executionID)
+		require.True(t, ok, "concurrent stopped marker downgraded successful completion")
+		require.True(t, marker.allowCompleteStream)
+	}
+}
+
 // TestSetSessionRunning_NoRedundantTaskWrites locks in the dedup: when the
 // session is already RUNNING, setSessionRunning must not re-write tasks.state.
 // Without the guard, every tool_call / tool_update fired UpdateTaskState
@@ -1740,7 +1858,9 @@ func TestSetSessionStartingWritesTaskInProgress(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.NoError(t, svc.setSessionStarting(ctx, "t1", session, true))
+	require.NoError(t, svc.setSessionStarting(
+		ctx, "t1", session, models.TaskSessionStateRunning, true,
+	))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
@@ -1763,7 +1883,9 @@ func TestSetSessionStartingCanDeferTaskInProgress(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.NoError(t, svc.setSessionStarting(ctx, "t1", session, false))
+	require.NoError(t, svc.setSessionStarting(
+		ctx, "t1", session, models.TaskSessionStateRunning, false,
+	))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
@@ -1789,7 +1911,9 @@ func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.Error(t, svc.setSessionStarting(ctx, "t1", &next, true))
+	require.Error(t, svc.setSessionStarting(
+		ctx, "t1", &next, models.TaskSessionStateCancelled, true,
+	))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
@@ -1797,7 +1921,7 @@ func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	require.Empty(t, taskRepo.stateWrites)
 }
 
-func TestSetSessionStartingRejectsCancelledTerminalResumeWithoutPromotion(t *testing.T) {
+func TestSetSessionStartingAllowsExplicitlyCancelledResumeWithoutPromotion(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -1805,6 +1929,7 @@ func TestSetSessionStartingRejectsCancelledTerminalResumeWithoutPromotion(t *tes
 	current, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
 	current.State = models.TaskSessionStateCancelled
+	current.ErrorMessage = "stopped via API"
 	require.NoError(t, repo.UpdateTaskSession(ctx, current))
 
 	next := *current
@@ -1815,7 +1940,37 @@ func TestSetSessionStartingRejectsCancelledTerminalResumeWithoutPromotion(t *tes
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.Error(t, svc.setSessionStarting(ctx, "t1", &next, false))
+	require.NoError(t, svc.setSessionStarting(
+		ctx, "t1", &next, models.TaskSessionStateCancelled, false,
+	))
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateStarting, updated.State)
+	require.Empty(t, taskRepo.stateWrites)
+}
+
+func TestSetSessionStartingRejectsCancellationAfterResumeSnapshot(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	stale, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	stale.State = models.TaskSessionStateStarting
+
+	current, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	current.State = models.TaskSessionStateCancelled
+	current.ErrorMessage = "stopped via API"
+	require.NoError(t, repo.UpdateTaskSession(ctx, current))
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	require.Error(t, svc.setSessionStarting(
+		ctx, "t1", stale, models.TaskSessionStateRunning, false,
+	))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
@@ -1845,7 +2000,9 @@ func TestSetSessionStartingAllowsTerminalResumeWithoutTaskPromotion(t *testing.T
 	taskRepo := newMockTaskRepo()
 	svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-	require.NoError(t, svc.setSessionStarting(ctx, "t1", &next, false))
+	require.NoError(t, svc.setSessionStarting(
+		ctx, "t1", &next, models.TaskSessionStateFailed, false,
+	))
 
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
@@ -1881,7 +2038,9 @@ func TestSetSessionStartingAllowsArchiveCancelledResumeWithoutPromotion(t *testi
 			taskRepo := newMockTaskRepo()
 			svc := createTestService(repo, newMockStepGetter(), taskRepo)
 
-			require.NoError(t, svc.setSessionStarting(ctx, "t1", &next, false))
+			require.NoError(t, svc.setSessionStarting(
+				ctx, "t1", &next, models.TaskSessionStateCancelled, false,
+			))
 
 			updated, err := repo.GetTaskSession(ctx, "s1")
 			require.NoError(t, err)

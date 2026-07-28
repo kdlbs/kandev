@@ -1,6 +1,14 @@
 "use client";
 
-import React, { useEffect, useMemo, useCallback, useLayoutEffect, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useMemo,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Ref,
+} from "react";
 import { ScrollArea } from "@kandev/ui/scroll-area";
 import type { FileTreeNode, OpenFileTab } from "@/lib/types/backend";
 import { useSession } from "@/hooks/domains/session/use-session";
@@ -40,6 +48,9 @@ type FileBrowserHeaderProps = {
   onOpenFolder: () => void;
   onCollapseAll: () => void;
   showCreateButton: boolean;
+  onAddSources?: (opener: HTMLButtonElement) => void;
+  addSourcesButtonRef?: Ref<HTMLButtonElement>;
+  addSourcesDisabledReason?: string;
 };
 
 function FileBrowserHeader({
@@ -54,6 +65,9 @@ function FileBrowserHeader({
   onOpenFolder,
   onCollapseAll,
   showCreateButton,
+  onAddSources,
+  addSourcesButtonRef,
+  addSourcesDisabledReason,
 }: FileBrowserHeaderProps) {
   if (!treeLoaded) return null;
   if (search.isSearchActive) {
@@ -79,6 +93,9 @@ function FileBrowserHeader({
       onStartSearch={() => search.setIsSearchActive(true)}
       onCollapseAll={onCollapseAll}
       showCreateButton={showCreateButton}
+      onAddSources={onAddSources}
+      addSourcesButtonRef={addSourcesButtonRef}
+      addSourcesDisabledReason={addSourcesDisabledReason}
     />
   );
 }
@@ -92,6 +109,9 @@ type FileBrowserProps = {
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
   activeFilePath?: string | null;
+  onAddSources?: (opener: HTMLButtonElement) => void;
+  addSourcesButtonRef?: Ref<HTMLButtonElement>;
+  addSourcesDisabledReason?: string;
 };
 
 function useFileBrowserHandlers(
@@ -384,13 +404,35 @@ function useKeyboardShortcuts(
   }, [containerRef, clearSelection, selectAll]);
 }
 
+export function getFileBrowserResetKey({
+  sessionId,
+  environmentId,
+  worktreeCount,
+  workspaceFilesRefresh,
+}: {
+  sessionId: string;
+  environmentId?: string | null;
+  worktreeCount: number;
+  workspaceFilesRefresh: number;
+}) {
+  return `${environmentId ?? sessionId}:${worktreeCount}:${workspaceFilesRefresh}`;
+}
+
 function useFileBrowserResetKey(sessionId: string, environmentId?: string | null) {
   // Worktree count participates in the tree's reset key so an add_branch_to_task
   // call that materializes a sibling worktree forces a fresh tree load.
   const worktreeCount = useAppStore(
     (state) => state.sessionWorktreesBySessionId.itemsBySessionId[sessionId]?.length ?? 0,
   );
-  return environmentId ? `${environmentId}:${worktreeCount}` : undefined;
+  const workspaceFilesRefresh = useAppStore(
+    (state) => state.workspaceFilesRefresh.bySessionId[sessionId] ?? 0,
+  );
+  return getFileBrowserResetKey({
+    sessionId,
+    environmentId,
+    worktreeCount,
+    workspaceFilesRefresh,
+  });
 }
 
 function useFileBrowserData(sessionId: string, environmentId: string | null | undefined) {
@@ -428,6 +470,94 @@ function useFileBrowserData(sessionId: string, environmentId: string | null | un
   };
 }
 
+function useFileBrowserViewModel({
+  sessionId,
+  environmentId,
+  onOpenFile,
+  onCreateFile,
+  onRenameFile,
+  activeFilePath,
+  scrollAreaRef,
+  containerRef,
+}: Pick<
+  FileBrowserProps,
+  "sessionId" | "environmentId" | "onOpenFile" | "onCreateFile" | "onRenameFile" | "activeFilePath"
+> & {
+  scrollAreaRef: React.RefObject<HTMLDivElement | null>;
+  containerRef: React.RefObject<HTMLDivElement | null>;
+}) {
+  const data = useFileBrowserData(sessionId, environmentId);
+  useScrollPersistence(sessionId, data.isTreeLoaded, scrollAreaRef, data.treeState.tree);
+  const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, data.treeState);
+  const selection = useSelectionInteractions(
+    data.treeState,
+    containerRef,
+    activeFilePath,
+    onRenameFile,
+  );
+  return { data, handlers, ...selection };
+}
+
+function FileBrowserTreeContent({
+  scrollAreaRef,
+  data,
+  handlers,
+  multiSelect,
+  dnd,
+  activeFilePath,
+  onDeleteFile,
+  onRenameFile,
+  onDownloadFile,
+}: Omit<FileBrowserProps, "sessionId" | "environmentId" | "onOpenFile" | "onCreateFile"> & {
+  scrollAreaRef: React.RefObject<HTMLDivElement | null>;
+  data: ReturnType<typeof useFileBrowserData>;
+  handlers: ReturnType<typeof useFileBrowserHandlers>;
+  multiSelect: ReturnType<typeof useSelectionInteractions>["multiSelect"];
+  dnd: ReturnType<typeof useSelectionInteractions>["dnd"];
+}) {
+  const { search, isSessionFailed, sessionError, treeState, fileStatuses } = data;
+  return (
+    <ScrollArea className="flex-1" ref={scrollAreaRef}>
+      <FileBrowserContentArea
+        isSearchActive={search.isSearchActive}
+        searchResults={search.searchResults}
+        isSessionFailed={isSessionFailed}
+        sessionError={sessionError}
+        loadState={treeState.loadState}
+        isLoadingTree={treeState.isLoadingTree}
+        tree={treeState.tree}
+        loadError={treeState.loadError}
+        creatingInPath={handlers.creatingInPath}
+        fileStatuses={fileStatuses}
+        visibleRows={treeState.visibleRows}
+        activeFolderPath={handlers.activeFolderPath}
+        activeFilePath={activeFilePath}
+        visibleLoadingPaths={treeState.visibleLoadingPaths}
+        onOpenFile={handlers.openFileByPath}
+        onToggleExpand={handlers.toggleExpand}
+        onDeleteFile={onDeleteFile}
+        onRenameFile={onRenameFile}
+        onDownloadFile={onDownloadFile}
+        onCreateFileSubmit={handlers.handleCreateFileSubmit}
+        onCancelCreate={handlers.handleCancelCreate}
+        onRetry={() => void treeState.loadTree({ resetRetry: true })}
+        setTree={treeState.setTree}
+        isSelectedFn={multiSelect.isSelected}
+        onSelect={multiSelect.handleClick}
+        isDragging={dnd.isDragging}
+        dragOverPath={dnd.dragOverPath}
+        onDragStart={dnd.handleDragStart}
+        onDragEnd={dnd.handleDragEnd}
+        onDragOver={dnd.handleDragOver}
+        onDragLeave={dnd.handleDragLeave}
+        onDrop={dnd.handleDrop}
+        selectedCount={multiSelect.selectedPaths.size}
+        selectedPaths={multiSelect.selectedPaths}
+      />
+    </ScrollArea>
+  );
+}
+
 export function FileBrowser({
   sessionId,
   environmentId,
@@ -437,32 +567,23 @@ export function FileBrowser({
   onRenameFile,
   onDownloadFile,
   activeFilePath,
+  onAddSources,
+  addSourcesButtonRef,
+  addSourcesDisabledReason,
 }: FileBrowserProps) {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const data = useFileBrowserData(sessionId, environmentId);
-  const {
-    isSessionFailed,
-    sessionError,
-    openFolder,
-    copied,
-    copyPath,
-    search,
-    treeState,
-    isTreeLoaded,
-    fileStatuses,
-    fullPath,
-    displayPath,
-  } = data;
-  useScrollPersistence(sessionId, isTreeLoaded, scrollAreaRef, treeState.tree);
-  const handlers = useFileBrowserHandlers(sessionId, onOpenFile, onCreateFile, treeState);
-  const { multiSelect, dnd, handleClickOutside } = useSelectionInteractions(
-    treeState,
-    containerRef,
-    activeFilePath,
+  const { data, handlers, multiSelect, dnd, handleClickOutside } = useFileBrowserViewModel({
+    sessionId,
+    environmentId,
+    onOpenFile,
+    onCreateFile,
     onRenameFile,
-  );
-
+    activeFilePath,
+    scrollAreaRef,
+    containerRef,
+  });
+  const { openFolder, copied, copyPath, search, treeState, fullPath, displayPath } = data;
   return (
     <div
       className="flex flex-col h-full"
@@ -482,45 +603,21 @@ export function FileBrowser({
         onOpenFolder={openFolder}
         onCollapseAll={treeState.collapseAll}
         showCreateButton={Boolean(onCreateFile)}
+        onAddSources={onAddSources}
+        addSourcesButtonRef={addSourcesButtonRef}
+        addSourcesDisabledReason={addSourcesDisabledReason}
       />
-      <ScrollArea className="flex-1" ref={scrollAreaRef}>
-        <FileBrowserContentArea
-          isSearchActive={search.isSearchActive}
-          searchResults={search.searchResults}
-          isSessionFailed={isSessionFailed}
-          sessionError={sessionError}
-          loadState={treeState.loadState}
-          isLoadingTree={treeState.isLoadingTree}
-          tree={treeState.tree}
-          loadError={treeState.loadError}
-          creatingInPath={handlers.creatingInPath}
-          fileStatuses={fileStatuses}
-          visibleRows={treeState.visibleRows}
-          activeFolderPath={handlers.activeFolderPath}
-          activeFilePath={activeFilePath}
-          visibleLoadingPaths={treeState.visibleLoadingPaths}
-          onOpenFile={handlers.openFileByPath}
-          onToggleExpand={handlers.toggleExpand}
-          onDeleteFile={onDeleteFile}
-          onRenameFile={onRenameFile}
-          onDownloadFile={onDownloadFile}
-          onCreateFileSubmit={handlers.handleCreateFileSubmit}
-          onCancelCreate={handlers.handleCancelCreate}
-          onRetry={() => void treeState.loadTree({ resetRetry: true })}
-          setTree={treeState.setTree}
-          isSelectedFn={multiSelect.isSelected}
-          onSelect={multiSelect.handleClick}
-          isDragging={dnd.isDragging}
-          dragOverPath={dnd.dragOverPath}
-          onDragStart={dnd.handleDragStart}
-          onDragEnd={dnd.handleDragEnd}
-          onDragOver={dnd.handleDragOver}
-          onDragLeave={dnd.handleDragLeave}
-          onDrop={dnd.handleDrop}
-          selectedCount={multiSelect.selectedPaths.size}
-          selectedPaths={multiSelect.selectedPaths}
-        />
-      </ScrollArea>
+      <FileBrowserTreeContent
+        scrollAreaRef={scrollAreaRef}
+        data={data}
+        handlers={handlers}
+        multiSelect={multiSelect}
+        dnd={dnd}
+        activeFilePath={activeFilePath}
+        onDeleteFile={onDeleteFile}
+        onRenameFile={onRenameFile}
+        onDownloadFile={onDownloadFile}
+      />
     </div>
   );
 }

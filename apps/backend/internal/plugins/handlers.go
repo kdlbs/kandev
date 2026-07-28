@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -44,14 +45,18 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	api := router.Group("/api/plugins")
 	api.POST("/install", ctrl.install)
 	api.POST("/sync", ctrl.sync)
-	// Register the static /marketplace routes before the /:id wildcard, matching
-	// the /install and /sync ordering — some gin/httprouter tree versions reject
-	// a static sibling added after an existing wildcard for the same method.
+	// Register the static /marketplace and /settings routes before the /:id
+	// wildcard, matching the /install and /sync ordering — some gin/httprouter
+	// tree versions reject a static sibling added after an existing wildcard for
+	// the same method.
 	ctrl.registerMarketplaceRoutes(api)
+	api.GET("/settings", ctrl.getSettings)
+	api.PUT("/settings", ctrl.updateSettings)
 	api.GET("", ctrl.list)
 	api.GET("/:id", ctrl.get)
 	api.GET("/:id/config", ctrl.getConfig)
 	api.PATCH("/:id", ctrl.updateConfig)
+	api.PUT("/:id/auto-update", ctrl.setAutoUpdate)
 	api.DELETE("/:id", ctrl.uninstall)
 	api.POST("/:id/enable", ctrl.enable)
 	api.POST("/:id/disable", ctrl.disable)
@@ -211,6 +216,55 @@ func (c *Controller) disable(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{"disabled": true})
 }
 
+// --- Auto-update settings ---
+
+// getSettings serves GET /api/plugins/settings: the instance-wide plugin
+// preferences (currently just the auto-update default).
+func (c *Controller) getSettings(ctx *gin.Context) {
+	def, err := c.svc.AutoUpdateDefault()
+	if err != nil {
+		c.log.Warn("plugin settings read error", zap.Error(err))
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, Settings{AutoUpdateDefault: def})
+}
+
+// updateSettings serves PUT /api/plugins/settings: sets the instance-wide
+// auto-update default. Turning it on opts every plugin without a per-plugin
+// override into auto-update.
+func (c *Controller) updateSettings(ctx *gin.Context) {
+	var req UpdateSettingsRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	if err := c.svc.SetAutoUpdateDefault(req.AutoUpdateDefault); err != nil {
+		c.log.Warn("plugin settings write error", zap.Error(err))
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, Settings(req))
+}
+
+// setAutoUpdate serves PUT /api/plugins/:id/auto-update: sets or clears the
+// per-plugin auto-update override. A null/omitted auto_update clears the
+// override so the plugin inherits the instance-wide default; true/false force
+// it on/off for this plugin.
+func (c *Controller) setAutoUpdate(ctx *gin.Context) {
+	var req SetAutoUpdateRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		return
+	}
+	rec, err := c.svc.SetPluginAutoUpdate(ctx.Param("id"), req.AutoUpdate)
+	if err != nil {
+		c.writeLookupError(ctx, err)
+		return
+	}
+	ctx.JSON(http.StatusOK, rec)
+}
+
 // writeLookupError maps common Service errors to HTTP status codes shared
 // by most management handlers.
 func (c *Controller) writeLookupError(ctx *gin.Context, err error) {
@@ -337,7 +391,7 @@ func (c *Controller) webhook(ctx *gin.Context) {
 		ctx.JSON(http.StatusServiceUnavailable, gin.H{"error": err.Error()})
 		return
 	}
-	writeWebhookResponse(ctx, resp)
+	c.writeWebhookResponse(ctx, record, resp)
 }
 
 // webhookStatusForResponse validates a plugin-supplied WebhookResponse.Status
@@ -357,9 +411,17 @@ func webhookStatusForResponse(status int32) (int, bool) {
 
 // writeWebhookResponse turns a plugin's WebhookResponse into the outbound
 // HTTP response: an out-of-range Status is rejected as 502 (see
-// webhookStatusForResponse) before ever reaching ctx.Writer.WriteHeader;
-// otherwise headers, status, and body are relayed verbatim.
-func writeWebhookResponse(ctx *gin.Context, resp *pluginsdk.WebhookResponse) {
+// webhookStatusForResponse) before ever reaching ctx.Writer.WriteHeader.
+//
+// Before relaying, it consumes the reserved SSO login directive (an
+// auth-capable plugin asserting a validated external identity — OIDC/SAML)
+// and, when accepted, mints and sets the session cookie host-side so the
+// plugin never handles the raw token. Plugin-supplied Set-Cookie headers are
+// dropped: a relayed webhook has no legitimate reason to set browser cookies,
+// and dropping them stops a plugin from overwriting the session cookie the
+// host just minted or fixating any other. Remaining headers, status, and body
+// are relayed verbatim.
+func (c *Controller) writeWebhookResponse(ctx *gin.Context, record *store.Record, resp *pluginsdk.WebhookResponse) {
 	status, ok := webhookStatusForResponse(resp.Status)
 	if !ok {
 		ctx.JSON(http.StatusBadGateway, gin.H{
@@ -367,11 +429,48 @@ func writeWebhookResponse(ctx *gin.Context, resp *pluginsdk.WebhookResponse) {
 		})
 		return
 	}
+	if raw, present, ambiguous := takeAuthLoginDirective(resp.Headers); present {
+		if ambiguous {
+			c.log.Warn("plugin sent multiple auth login directives", zap.String("plugin", record.ID))
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "auth login rejected"})
+			return
+		}
+		if err := c.applyAuthLogin(ctx, record, raw); err != nil {
+			// The webhook endpoint is public; keep the response body generic so
+			// a raw store/auth error can't be disclosed to an anonymous caller.
+			// The real cause is logged for the operator.
+			c.log.Warn("plugin auth login rejected", zap.String("plugin", record.ID), zap.Error(err))
+			ctx.JSON(http.StatusForbidden, gin.H{"error": "auth login rejected"})
+			return
+		}
+	}
 	for k, v := range resp.Headers {
+		if http.CanonicalHeaderKey(k) == "Set-Cookie" {
+			continue
+		}
 		ctx.Writer.Header().Set(k, v)
 	}
 	ctx.Writer.WriteHeader(status)
 	_, _ = ctx.Writer.Write(resp.Body)
+}
+
+// applyAuthLogin establishes a browser session from a plugin's external-identity
+// assertion. It requires the plugin to declare the `auth` capability and the
+// SSO login bridge to be wired (auth enabled); a plugin that emits the directive
+// without the capability is rejected rather than silently ignored.
+func (c *Controller) applyAuthLogin(ctx *gin.Context, record *store.Record, raw string) error {
+	if !record.Capabilities.Auth {
+		return fmt.Errorf("plugin %q used the auth login directive without the 'auth' capability", record.ID)
+	}
+	bridge := c.svc.authLoginBridge()
+	if bridge == nil {
+		return errors.New("authentication is not enabled")
+	}
+	var a externalLoginAssertion
+	if err := json.Unmarshal([]byte(raw), &a); err != nil {
+		return errors.New("invalid auth login assertion")
+	}
+	return bridge.LoginExternal(ctx, a.Provider, a.Subject, a.Email, a.DisplayName)
 }
 
 // manifestDeclaresWebhookKey reports whether record's manifest declares a

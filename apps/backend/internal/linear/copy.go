@@ -18,11 +18,16 @@ var ErrNothingToCopy = errors.New("linear: source workspace has no configuration
 // key) from sourceWorkspaceID to targetWorkspaceID. Watchers are intentionally
 // out of scope — only the connection settings and secret are duplicated.
 func (s *Service) CopyConfigToWorkspace(ctx context.Context, sourceWorkspaceID, targetWorkspaceID string) (*LinearConfig, error) {
-	sourceWorkspaceID, err := s.normalizeWorkspaceID(sourceWorkspaceID)
+	// Authorize BOTH workspaces up front. The integration middleware only
+	// authorizes the source (workspace_id query param); the target arrives in the
+	// request body and is otherwise unchecked, so a caller could copy their config
+	// and credential into another user's workspace by naming its ID here. Guard
+	// before the target health-row write below, not just before the config write.
+	sourceWorkspaceID, err := s.resolveWorkspaceID(ctx, sourceWorkspaceID)
 	if err != nil {
 		return nil, err
 	}
-	targetWorkspaceID, err = s.normalizeWorkspaceID(targetWorkspaceID)
+	targetWorkspaceID, err = s.resolveWorkspaceID(ctx, targetWorkspaceID)
 	if err != nil {
 		return nil, err
 	}

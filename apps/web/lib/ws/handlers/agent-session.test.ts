@@ -3,7 +3,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { registerTaskSessionHandlers } from "./agent-session";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
-import type { TaskSessionStateChangedPayload } from "@/lib/types/backend";
+import { createAppStore } from "@/lib/state/store";
+import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
+import type { TaskSession } from "@/lib/types/http";
+import type {
+  TaskSessionActivityChangedPayload,
+  TaskSessionStateChangedPayload,
+} from "@/lib/types/backend";
 
 function makeStore(overrides: Record<string, unknown> = {}) {
   const state: Record<string, unknown> = {
@@ -23,6 +29,10 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setSessionAgentctlStatus: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
+    clearLegacyGitStatusEntry: vi.fn(),
+    bumpSessionCommitsRefetch: vi.fn(),
+    bumpWorkspaceFilesRefresh: vi.fn(),
+    reconcileWorkspaceSourcesAdopted: vi.fn(),
     ...overrides,
   };
   return {
@@ -35,6 +45,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
 }
 
 const STATE_CHANGED_EVENT = "session.state_changed";
+const ACTIVITY_EVENT = "session.activity_changed";
 const RECOVERABLE_ERROR_MESSAGE = "peer disconnected before response";
 const RECOVERABLE_ERROR_AT = "2026-06-14T14:06:40Z";
 
@@ -45,6 +56,66 @@ function makeMessage(payload: TaskSessionStateChangedPayload) {
     action: "session.state_changed" as const,
     payload,
   };
+}
+
+function makeActivityMessage(
+  payload: Omit<TaskSessionActivityChangedPayload, "active_subagent_count"> & {
+    active_subagent_count?: number;
+  },
+) {
+  return {
+    id: "m",
+    type: "notification" as const,
+    action: "session.activity_changed" as const,
+    payload: { ...payload, active_subagent_count: payload.active_subagent_count ?? 0 },
+  };
+}
+
+function makeRealActivityStore(state: TaskSession["state"] = "WAITING_FOR_INPUT") {
+  const selected = {
+    id: "s-1",
+    task_id: "t-1",
+    state,
+    foreground_activity: "background",
+    started_at: RECOVERABLE_ERROR_AT,
+    updated_at: RECOVERABLE_ERROR_AT,
+  } as TaskSession;
+  const peer = { ...selected, id: "s-2" } as TaskSession;
+  const store = createAppStore();
+  store.getState().setTaskSession(selected);
+  store.getState().setTaskSession(peer);
+  return store;
+}
+
+function assertRealStoreActivityRouting() {
+  const selected = {
+    id: "s-1",
+    task_id: "t-1",
+    state: "RUNNING",
+    foreground_activity: "generating",
+    started_at: RECOVERABLE_ERROR_AT,
+    updated_at: RECOVERABLE_ERROR_AT,
+  } as TaskSession;
+  const peer = { ...selected, id: "s-2", foreground_activity: "background" } as TaskSession;
+  const store = createAppStore();
+  store.getState().setTaskSession(selected);
+  store.getState().setTaskSession(peer);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+  expect(deriveSessionInputMode(store.getState().taskSessions.items["s-1"])).toBe("queue");
+  handler(
+    makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+  );
+  expect(store.getState().taskSessions.items["s-1"].foreground_activity).toBe("background");
+  expect(deriveSessionInputMode(store.getState().taskSessions.items["s-1"])).toBe("direct");
+  expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+
+  handler(
+    makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "generating" }),
+  );
+  expect(deriveSessionInputMode(store.getState().taskSessions.items["s-1"])).toBe("queue");
+  expect(deriveSessionInputMode(store.getState().taskSessions.items["s-2"])).toBe("direct");
 }
 
 describe("session.state_changed handler", () => {
@@ -138,6 +209,34 @@ describe("session.state_changed handler", () => {
     );
 
     expect(store.getState().setSessionFailureNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe("session.workspace_sources.updated handler", () => {
+  it("adopts the workspace root and bumps the Files refresh key", () => {
+    const setTaskSession = vi.fn();
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "IDLE", worktree_path: "/old" } },
+      },
+      setTaskSession,
+      bumpWorkspaceFilesRefresh,
+    });
+
+    const handler = registerTaskSessionHandlers(store)["session.workspace_sources.updated"]!;
+    handler({
+      id: "msg-workspace-sources",
+      type: "notification",
+      action: "session.workspace_sources.updated",
+      payload: { task_id: "t-1", session_id: "s-1", workspace_path: "/new" },
+    } as never);
+
+    expect(setTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "s-1", worktree_path: "/new" }),
+    );
+    expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
+    expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(["s-1"]);
   });
 });
 
@@ -838,5 +937,287 @@ describe("session.state_changed → agentctl ready fallback", () => {
     }
 
     expect(setSessionAgentctlStatus).not.toHaveBeenCalled();
+  });
+});
+
+function applyActivityCount(existingCount: number, nextCount?: number) {
+  const upsert = vi.fn();
+  const store = makeStore({
+    taskSessions: {
+      items: {
+        "s-1": {
+          id: "s-1",
+          task_id: "t-1",
+          state: "RUNNING",
+          active_subagent_count: existingCount,
+        },
+      },
+    },
+    upsertTaskSessionFromEvent: upsert,
+  });
+  const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (
+    msg: ReturnType<typeof makeActivityMessage>,
+  ) => void;
+  const payload: Record<string, unknown> = {
+    task_id: "t-1",
+    session_id: "s-1",
+    foreground_activity: "background",
+  };
+  if (nextCount !== undefined) payload.active_subagent_count = nextCount;
+  handler({
+    id: "m",
+    type: "notification",
+    action: "session.activity_changed",
+    payload,
+  } as ReturnType<typeof makeActivityMessage>);
+  return upsert.mock.calls[0][1];
+}
+
+describe("session.activity_changed handler — fine-grained busy signal", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("annotates an existing RUNNING session with the background substate", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING" } } },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        foreground_activity: "background",
+        active_subagent_count: 2,
+      }),
+    );
+
+    expect(upsert).toHaveBeenCalledTimes(1);
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      id: "s-1",
+      state: "RUNNING",
+      foreground_activity: "background",
+      active_subagent_count: 2,
+    });
+  });
+
+  it("preserves the known count when an older activity event omits it", () => {
+    expect(applyActivityCount(4)).toMatchObject({ active_subagent_count: 4 });
+  });
+
+  it("clears the known count when an activity event explicitly sends zero", () => {
+    expect(applyActivityCount(4, 0)).toMatchObject({ active_subagent_count: 0 });
+  });
+
+  it("keeps accepting detached activity updates after the foreground settles", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: { "s-1": { id: "s-1", task_id: "t-1", state: "WAITING_FOR_INPUT" } },
+      },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+    );
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      state: "WAITING_FOR_INPUT",
+      foreground_activity: "background",
+    });
+  });
+
+  it("flips back to generating on the next activity event", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING" } } },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "generating" }),
+    );
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({ foreground_activity: "generating" });
+  });
+
+  it("does nothing until the session row exists (state_changed seeds it first)", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: {} },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT] as (msg: any) => void;
+
+    handler(
+      makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: "background" }),
+    );
+
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it(
+    "drives the selected session queue→direct→queue in the real store without affecting peers",
+    assertRealStoreActivityRouting,
+  );
+
+  it("clears background activity from an input-capable session without affecting its peer", () => {
+    const store = makeRealActivityStore();
+    const handler = registerTaskSessionHandlers(store)[ACTIVITY_EVENT]!;
+
+    handler(makeActivityMessage({ task_id: "t-1", session_id: "s-1", foreground_activity: null }));
+
+    expect(store.getState().taskSessions.items["s-1"].foreground_activity).toBeNull();
+    expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+  });
+});
+
+describe("session.state_changed carries and resets the busy substate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("merges foreground_activity from the state_changed payload", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: { "s-1": { id: "s-1", task_id: "t-1", state: "STARTING" } } },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "RUNNING",
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        foreground_activity: "generating" as any,
+        active_subagent_count: 2,
+      }),
+    );
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      state: "RUNNING",
+      foreground_activity: "generating",
+      active_subagent_count: 2,
+    });
+  });
+
+  it("merges background activity when the foreground settles", () => {
+    const upsert = vi.fn();
+    const store = makeStore({
+      taskSessions: { items: { "s-1": { id: "s-1", task_id: "t-1", state: "RUNNING" } } },
+      upsertTaskSessionFromEvent: upsert,
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "WAITING_FOR_INPUT",
+        foreground_activity: "background",
+      }),
+    );
+
+    expect(upsert.mock.calls[0][1]).toMatchObject({
+      state: "WAITING_FOR_INPUT",
+      foreground_activity: "background",
+    });
+  });
+});
+
+describe("session activity explicit-null contract", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("clears stale background activity on a terminal state event without affecting its peer", () => {
+    const store = makeRealActivityStore("RUNNING");
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "COMPLETED",
+        foreground_activity: null,
+      }),
+    );
+
+    expect(store.getState().taskSessions.items["s-1"]).toMatchObject({
+      state: "COMPLETED",
+      foreground_activity: null,
+    });
+    expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+  });
+
+  it.each([
+    {
+      name: "terminal clear before delayed activity",
+      events: [
+        makeMessage({
+          task_id: "t-1",
+          session_id: "s-1",
+          new_state: "COMPLETED",
+          foreground_activity: null,
+        }),
+        makeActivityMessage({
+          task_id: "t-1",
+          session_id: "s-1",
+          foreground_activity: "background",
+        }),
+      ],
+    },
+    {
+      name: "activity clear before terminal clear",
+      events: [
+        makeActivityMessage({
+          task_id: "t-1",
+          session_id: "s-1",
+          foreground_activity: null,
+        }),
+        makeMessage({
+          task_id: "t-1",
+          session_id: "s-1",
+          new_state: "COMPLETED",
+          foreground_activity: null,
+        }),
+      ],
+    },
+  ])("keeps terminal activity cleared when $name", ({ events }) => {
+    const store = makeRealActivityStore();
+    const handlers = registerTaskSessionHandlers(store);
+
+    for (const event of events) {
+      if (event.action === STATE_CHANGED_EVENT) handlers[STATE_CHANGED_EVENT]!(event as never);
+      else handlers[ACTIVITY_EVENT]!(event as never);
+    }
+
+    expect(store.getState().taskSessions.items["s-1"]).toMatchObject({
+      state: "COMPLETED",
+      foreground_activity: null,
+    });
+    expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
+  });
+
+  it("preserves background activity when a state event omits the activity field", () => {
+    const store = makeRealActivityStore("RUNNING");
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(makeMessage({ task_id: "t-1", session_id: "s-1", new_state: "WAITING_FOR_INPUT" }));
+
+    expect(store.getState().taskSessions.items["s-1"].foreground_activity).toBe("background");
+    expect(store.getState().taskSessions.items["s-2"].foreground_activity).toBe("background");
   });
 });

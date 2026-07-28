@@ -94,10 +94,25 @@ type Service struct {
 	agentProfiles    agentProfileDataSource
 	sessionCodeStats sessionCodeStatsSource
 	messageData      messageDataSource
+	taskWriter       taskWriter
 
 	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
 	utilityAgents utilityAgentSource
 	utilityRunner utilityRunner
+
+	// Host data API write dependencies wired late via SetWriteDeps (ADR
+	// 0043): the task-message delivery path and the orchestrator task-starter,
+	// both constructed after boot-active plugins spawn (see writeDeps on
+	// pluginHost). Mutex-guarded against the concurrent hostForPlugin reads.
+	messenger   taskMessenger
+	taskStarter taskStarter
+
+	// authLogin establishes an authenticated browser session for an external
+	// identity an auth-capable plugin asserts via its webhook response
+	// (OIDC/SAML SSO), wired via SetAuthLoginBridge. nil until backendapp
+	// wires it (only when the auth service exists); a nil bridge means the SSO
+	// login directive is rejected.
+	authLogin AuthLoginBridge
 
 	// kandevVersion is the currently running kandev build version, used to
 	// enforce a package's manifest.min_kandev_version at Install (see
@@ -111,6 +126,11 @@ type Service struct {
 	// marketplace is the plugin-discovery catalog service (nil until
 	// SetMarketplace is called by Provide). See marketplace.go.
 	marketplace *marketplace.Service
+
+	// settings persists instance-wide plugin preferences (the auto-update
+	// default). nil until SetSettings is called by Provide; the auto-update
+	// accessors treat a nil store as "default off, no overrides possible".
+	settings *settingsStore
 }
 
 // NewService wires a Service from its already-constructed dependencies.
@@ -210,6 +230,7 @@ func (s *Service) SetDataSources(
 	agentProfiles agentProfileDataSource,
 	sessionCodeStats sessionCodeStatsSource,
 	messages messageDataSource,
+	taskWrites taskWriter,
 ) {
 	s.taskData = tasks
 	s.workflows = workflows
@@ -217,6 +238,33 @@ func (s *Service) SetDataSources(
 	s.agentProfiles = agentProfiles
 	s.sessionCodeStats = sessionCodeStats
 	s.messageData = messages
+	s.taskWriter = taskWrites
+}
+
+// SetWriteDeps wires the Host data API's late write dependencies (ADR 0043
+// phase 2): the task-message delivery path behind the SendMessage RPC
+// (api_write:messages) and the orchestrator task-starter behind CreateTask's
+// start_agent flag. Wired LATE (not in SetDataSources) because the orchestrator
+// is constructed after StartActivePlugins has spawned boot-active plugins, so
+// hosts read these live via writeDependencies rather than snapshotting them —
+// the write here is mutex-guarded against those concurrent reads. Either
+// argument may be nil (feature-gated off), in which case the corresponding
+// write path returns Unimplemented / is a best-effort no-op.
+func (s *Service) SetWriteDeps(messenger taskMessenger, starter taskStarter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.messenger = messenger
+	s.taskStarter = starter
+}
+
+// writeDependencies returns the currently-wired task messenger and task
+// starter. Read live (not snapshotted at hostForPlugin time) so a plugin
+// spawned before SetWriteDeps still resolves them once it is called. Guarded by
+// s.mu against the SetWriteDeps write.
+func (s *Service) writeDependencies() (taskMessenger, taskStarter) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.messenger, s.taskStarter
 }
 
 // SetUtilityAgent wires the dependencies behind Host.InvokeUtilityAgent
@@ -243,6 +291,24 @@ func (s *Service) utilityAgentDeps() (utilityAgentSource, utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.utilityAgents, s.utilityRunner
+}
+
+// SetAuthLoginBridge wires the SSO login bridge auth-capable plugins use to
+// establish a browser session from a validated external identity (see
+// auth_login.go). Called once during startup wiring, only when the auth
+// service exists.
+func (s *Service) SetAuthLoginBridge(b AuthLoginBridge) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.authLogin = b
+}
+
+// authLoginBridge returns the wired SSO login bridge, or nil when auth is not
+// available. Read under s.mu against the SetAuthLoginBridge write.
+func (s *Service) authLoginBridge() AuthLoginBridge {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.authLogin
 }
 
 // SetKandevVersion wires the currently running kandev build version,
@@ -343,7 +409,9 @@ func (s *Service) hostForPlugin(pluginID string) pluginsdk.Host {
 		agentProfiles:    s.agentProfiles,
 		sessionCodeStats: s.sessionCodeStats,
 		messageData:      s.messageData,
+		taskWriter:       s.taskWriter,
 		utilityDeps:      s.utilityAgentDeps,
+		writeDeps:        s.writeDependencies,
 	}
 }
 
@@ -661,6 +729,13 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 		InstallPath: result.InstallPath,
 		Signed:      result.Signed,
 		InstalledAt: time.Now().UTC(),
+	}
+	// An in-place upgrade rebuilds the record from the new package's manifest,
+	// so the operator's per-plugin auto-update override (an operator choice,
+	// not a manifest fact) must be carried forward or an auto-update would
+	// silently reset the very toggle that triggered it.
+	if hadOldRec {
+		rec.AutoUpdate = oldRec.AutoUpdate
 	}
 	if err := s.store.Save(rec); err != nil {
 		s.rollbackFailedInstall(result.InstallPath, oldRec, hadOldRec && wasRunning)

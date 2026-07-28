@@ -28,6 +28,7 @@ import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-po
 import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/github/pr-ci-popover";
 import { useTaskCIAutomationOptions } from "@/hooks/domains/github/use-task-ci-options";
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
+import { useAppStore } from "@/components/state-provider";
 import {
   hasPRChecksInProgressForDisplay,
   hasPRChecksPassedForDisplay,
@@ -61,6 +62,16 @@ type AutomationFlags = {
   autoFix: boolean;
   autoMerge: boolean;
   autoFixRound: AutoFixRoundInfo | null;
+};
+type SingleChipProps = {
+  pr: TaskPR;
+  automation: AutomationFlags;
+  refreshTaskPR: () => void;
+};
+type MultiChipProps = {
+  prs: TaskPR[];
+  automation: AutomationFlags;
+  refreshTaskPR: () => void;
 };
 
 function chipStatus(pr: TaskPR): ChipStatus {
@@ -165,7 +176,8 @@ function useChipPopoverInteractions() {
  * CI chip would be redundant.
  */
 export function PRStatusChip({ taskId }: { taskId: string | null }) {
-  const { prs } = useTaskPR(taskId);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const { prs, refresh } = useTaskPR(taskId);
   const { options: automationOptions } = useTaskCIAutomationOptions(taskId);
   // Defensive Array.isArray: a partial hydration can briefly seed the store
   // with a non-array value (same guard as PRTaskIcon).
@@ -180,19 +192,21 @@ export function PRStatusChip({ taskId }: { taskId: string | null }) {
   // popover will actually open first (worst-status via pickDefaultPR — for a
   // single PR that's just the PR itself); the remaining PRs in a multi-PR
   // task warm when the popover opens.
-  usePRFeedbackBackgroundSync(pickDefaultPR(openPRs));
+  usePRFeedbackBackgroundSync(workspaceId, pickDefaultPR(openPRs));
   if (openPRs.length === 0) return null;
   if (openPRs.length === 1)
     return (
       <PRStatusChipInner
         pr={openPRs[0]}
         automation={automationForPR(automationOptions, openPRs[0])}
+        refreshTaskPR={refresh}
       />
     );
   return (
     <PRStatusChipMultiInner
       prs={openPRs}
       automation={automationForPRs(automationOptions, openPRs)}
+      refreshTaskPR={refresh}
     />
   );
 }
@@ -308,13 +322,13 @@ function AutomationFlagBadges({ automation }: { automation: AutomationFlags }) {
   );
 }
 
-function PRStatusChipInner({ pr, automation }: { pr: TaskPR; automation: AutomationFlags }) {
+function PRStatusChipInner(props: SingleChipProps) {
   const usesMobileDrawer = useTouchDrawer();
-  if (usesMobileDrawer) return <PRStatusChipDrawer pr={pr} automation={automation} />;
-  return <PRStatusChipHoverCard pr={pr} automation={automation} />;
+  if (usesMobileDrawer) return <PRStatusChipDrawer {...props} />;
+  return <PRStatusChipHoverCard {...props} />;
 }
 
-function PRStatusChipHoverCard({ pr, automation }: { pr: TaskPR; automation: AutomationFlags }) {
+function PRStatusChipHoverCard({ pr, automation, refreshTaskPR }: SingleChipProps) {
   const status = chipStatus(pr);
   const { ref, onPointerDownOutside } = useChipTriggerGuard();
   const { open, onOpenChange, onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } =
@@ -353,22 +367,16 @@ function PRStatusChipHoverCard({ pr, automation }: { pr: TaskPR; automation: Aut
         onPointerDownOutside={onPointerDownOutside}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <PRCIPopover pr={pr} enabled={open} />
+        <PRCIPopover pr={pr} enabled={open} refreshTaskPR={refreshTaskPR} />
       </PopoverContent>
     </Popover>
   );
 }
 
-function PRStatusChipMultiInner({
-  prs,
-  automation,
-}: {
-  prs: TaskPR[];
-  automation: AutomationFlags;
-}) {
+function PRStatusChipMultiInner(props: MultiChipProps) {
   const usesMobileDrawer = useTouchDrawer();
-  if (usesMobileDrawer) return <PRStatusChipMultiDrawer prs={prs} automation={automation} />;
-  return <PRStatusChipMultiHoverCard prs={prs} automation={automation} />;
+  if (usesMobileDrawer) return <PRStatusChipMultiDrawer {...props} />;
+  return <PRStatusChipMultiHoverCard {...props} />;
 }
 
 type MultiChipButtonAttrs = {
@@ -412,13 +420,7 @@ function MultiChipGlyph({
   );
 }
 
-function PRStatusChipMultiHoverCard({
-  prs,
-  automation,
-}: {
-  prs: TaskPR[];
-  automation: AutomationFlags;
-}) {
+function PRStatusChipMultiHoverCard({ prs, automation, refreshTaskPR }: MultiChipProps) {
   const status = aggregateChipStatus(prs);
   const { ref, onPointerDownOutside } = useChipTriggerGuard();
   const { open, onOpenChange, onTriggerEnter, onTriggerLeave, onContentEnter, onContentLeave } =
@@ -455,19 +457,13 @@ function PRStatusChipMultiHoverCard({
         onPointerDownOutside={onPointerDownOutside}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
-        <MultiPRCIPopover prs={prs} enabled={open} />
+        <MultiPRCIPopover prs={prs} enabled={open} refreshTaskPR={refreshTaskPR} />
       </PopoverContent>
     </Popover>
   );
 }
 
-function PRStatusChipMultiDrawer({
-  prs,
-  automation,
-}: {
-  prs: TaskPR[];
-  automation: AutomationFlags;
-}) {
+function PRStatusChipMultiDrawer({ prs, automation, refreshTaskPR }: MultiChipProps) {
   const status = aggregateChipStatus(prs);
   const [open, setOpen] = useState(false);
   return (
@@ -500,14 +496,14 @@ function PRStatusChipMultiDrawer({
           </DrawerClose>
         </DrawerHeader>
         <div className="flex-1 min-h-0 overflow-y-auto p-3" data-vaul-no-drag>
-          <MultiPRCIPopover prs={prs} enabled={open} />
+          <MultiPRCIPopover prs={prs} enabled={open} refreshTaskPR={refreshTaskPR} />
         </div>
       </DrawerContent>
     </Drawer>
   );
 }
 
-function PRStatusChipDrawer({ pr, automation }: { pr: TaskPR; automation: AutomationFlags }) {
+function PRStatusChipDrawer({ pr, automation, refreshTaskPR }: SingleChipProps) {
   const status = chipStatus(pr);
   const [open, setOpen] = useState(false);
   return (
@@ -542,7 +538,7 @@ function PRStatusChipDrawer({ pr, automation }: { pr: TaskPR; automation: Automa
           </DrawerClose>
         </DrawerHeader>
         <div className="flex-1 min-h-0 overflow-y-auto p-3" data-vaul-no-drag>
-          <PRCIPopover pr={pr} enabled={open} />
+          <PRCIPopover pr={pr} enabled={open} refreshTaskPR={refreshTaskPR} />
         </div>
       </DrawerContent>
     </Drawer>

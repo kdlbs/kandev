@@ -98,6 +98,8 @@ func NewTestServer(t *testing.T) *TestServer {
 		Reviews: taskRepo,
 	}, eventBus, log, taskservice.RepositoryDiscoveryConfig{})
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
+	taskSvc.SetWorkflowStepGetter(workflowSvc)
+	taskSvc.SetWorkspaceBootstrapper(taskRepo)
 
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)

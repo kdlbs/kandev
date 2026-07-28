@@ -87,11 +87,13 @@ function pillActiveClass(flat: boolean): string {
 function PillCommandList({
   options,
   onSelect,
+  onPointerSelect,
   setOpen,
   emptyMessage,
 }: {
   options: PillOption[];
   onSelect: (value: string) => void;
+  onPointerSelect: (pointerType: string) => void;
   setOpen: (open: boolean) => void;
   emptyMessage: string;
 }) {
@@ -104,6 +106,7 @@ function PillCommandList({
             key={option.value}
             value={option.value}
             keywords={[option.label, ...(option.keywords ?? [])]}
+            onPointerDown={(event) => onPointerSelect(event.pointerType)}
             onSelect={() => {
               onSelect(option.value);
               setOpen(false);
@@ -128,6 +131,88 @@ function pillTriggerClass(disabled: boolean, flat: boolean, hasValue: boolean): 
     disabled ? "opacity-50 cursor-not-allowed" : pillActiveClass(flat),
     !hasValue && "text-muted-foreground",
   );
+}
+
+function usePillTooltipSuppression(open: boolean) {
+  const [suppressTooltip, setSuppressTooltip] = useState(false);
+  const suppressTooltipRef = useRef(false);
+  const pointerInsideTriggerRef = useRef(false);
+  const suppressionReleaseOnExitRef = useRef(true);
+  const suppressionReleaseArmedRef = useRef(false);
+  const suppressionReleaseFrameRef = useRef<number | null>(null);
+  const clearTooltipSuppression = useCallback(() => {
+    if (suppressionReleaseFrameRef.current !== null) {
+      cancelAnimationFrame(suppressionReleaseFrameRef.current);
+      suppressionReleaseFrameRef.current = null;
+    }
+    suppressionReleaseArmedRef.current = false;
+    suppressionReleaseOnExitRef.current = true;
+    suppressTooltipRef.current = false;
+    setSuppressTooltip(false);
+  }, []);
+  const suppressTooltipUntilLeave = useCallback(
+    (releaseOnExit = true) => {
+      if (suppressionReleaseFrameRef.current !== null) {
+        cancelAnimationFrame(suppressionReleaseFrameRef.current);
+      }
+      suppressionReleaseOnExitRef.current = releaseOnExit;
+      suppressionReleaseArmedRef.current = false;
+      suppressTooltipRef.current = true;
+      setSuppressTooltip(true);
+      suppressionReleaseFrameRef.current = requestAnimationFrame(() => {
+        suppressionReleaseFrameRef.current = requestAnimationFrame(() => {
+          suppressionReleaseFrameRef.current = null;
+          if (!pointerInsideTriggerRef.current && suppressionReleaseOnExitRef.current) {
+            clearTooltipSuppression();
+            return;
+          }
+          suppressionReleaseArmedRef.current = true;
+        });
+      });
+    },
+    [clearTooltipSuppression],
+  );
+  useEffect(
+    () => () => {
+      if (suppressionReleaseFrameRef.current !== null) {
+        cancelAnimationFrame(suppressionReleaseFrameRef.current);
+      }
+    },
+    [],
+  );
+  const handlePointerEnter = useCallback(
+    (event: React.PointerEvent) => {
+      pointerInsideTriggerRef.current = true;
+      if (
+        event.pointerType !== "touch" &&
+        !suppressionReleaseOnExitRef.current &&
+        suppressTooltipRef.current
+      ) {
+        clearTooltipSuppression();
+      }
+    },
+    [clearTooltipSuppression],
+  );
+  const handlePointerLeave = useCallback(() => {
+    pointerInsideTriggerRef.current = false;
+    if (!open && suppressionReleaseOnExitRef.current && suppressionReleaseArmedRef.current) {
+      clearTooltipSuppression();
+    }
+  }, [clearTooltipSuppression, open]);
+  const handleBlur = useCallback(() => {
+    if (!open && suppressionReleaseOnExitRef.current && suppressionReleaseArmedRef.current) {
+      clearTooltipSuppression();
+    }
+  }, [clearTooltipSuppression, open]);
+
+  return {
+    suppressTooltip,
+    suppressTooltipRef,
+    suppressTooltipUntilLeave,
+    handlePointerEnter,
+    handlePointerLeave,
+    handleBlur,
+  };
 }
 
 function DisabledPillTooltip({
@@ -163,6 +248,7 @@ function PillPopoverContent({
   refreshLabel,
   options,
   onSelect,
+  onPointerSelect,
   setOpen,
   emptyMessage,
   portalContainer,
@@ -175,6 +261,7 @@ function PillPopoverContent({
   refreshLabel?: string;
   options: PillOption[];
   onSelect: (value: string) => void;
+  onPointerSelect: (pointerType: string) => void;
   setOpen: (open: boolean) => void;
   emptyMessage: string;
   portalContainer: HTMLElement | null;
@@ -223,11 +310,64 @@ function PillPopoverContent({
         <PillCommandList
           options={options}
           onSelect={onSelect}
+          onPointerSelect={onPointerSelect}
           setOpen={setOpen}
           emptyMessage={emptyMessage}
         />
       </Command>
     </PopoverContent>
+  );
+}
+
+function PillPopover({
+  open,
+  setOpen,
+  triggerButton,
+  filter,
+  searchPlaceholder,
+  onRefresh,
+  refreshing,
+  refreshLabel,
+  options,
+  onSelect,
+  onPointerSelect,
+  emptyMessage,
+  portalContainer,
+  action,
+}: {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+  triggerButton: React.ReactElement;
+  filter?: PillProps["filter"];
+  searchPlaceholder: string;
+  onRefresh?: () => void;
+  refreshing?: boolean;
+  refreshLabel?: string;
+  options: PillOption[];
+  onSelect: (value: string) => void;
+  onPointerSelect: (pointerType: string) => void;
+  emptyMessage: string;
+  portalContainer: HTMLElement | null;
+  action?: PillAction;
+}) {
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>{triggerButton}</PopoverTrigger>
+      <PillPopoverContent
+        filter={filter}
+        searchPlaceholder={searchPlaceholder}
+        onRefresh={onRefresh}
+        refreshing={refreshing}
+        refreshLabel={refreshLabel}
+        options={options}
+        onSelect={onSelect}
+        onPointerSelect={onPointerSelect}
+        setOpen={setOpen}
+        emptyMessage={emptyMessage}
+        portalContainer={portalContainer}
+        action={action}
+      />
+    </Popover>
   );
 }
 
@@ -240,8 +380,14 @@ function renderPillTriggerButton({
   hasValue,
   testId,
   prefix,
+  onPointerEnter,
+  onPointerLeave,
+  onBlur,
 }: Pick<PillProps, "icon" | "value" | "placeholder" | "disabled" | "flat" | "testId" | "prefix"> & {
   hasValue: boolean;
+  onPointerEnter?: React.PointerEventHandler<HTMLButtonElement>;
+  onPointerLeave?: React.PointerEventHandler<HTMLButtonElement>;
+  onBlur?: React.FocusEventHandler<HTMLButtonElement>;
 }): React.ReactElement {
   const showPrefix = !!prefix && hasValue;
   return (
@@ -250,6 +396,9 @@ function renderPillTriggerButton({
       disabled={disabled}
       data-testid={testId}
       className={pillTriggerClass(Boolean(disabled), Boolean(flat), hasValue)}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
+      onBlur={onBlur}
     >
       {icon}
       <span className="truncate max-w-[240px]">
@@ -258,6 +407,33 @@ function renderPillTriggerButton({
       </span>
     </button>
   );
+}
+
+function usePillOpenHandlers(
+  setOpenState: React.Dispatch<React.SetStateAction<boolean>>,
+  closeTooltip: () => void,
+  suppressTooltipUntilLeave: (releaseOnExit?: boolean) => void,
+) {
+  const selectionPointerTypeRef = useRef("");
+  const suppressForSelection = useCallback(() => {
+    suppressTooltipUntilLeave(selectionPointerTypeRef.current !== "touch");
+  }, [suppressTooltipUntilLeave]);
+  const setOpen = useCallback(
+    (next: boolean) => {
+      if (next) {
+        closeTooltip();
+        selectionPointerTypeRef.current = "";
+      } else {
+        suppressForSelection();
+      }
+      setOpenState(next);
+    },
+    [closeTooltip, setOpenState, suppressForSelection],
+  );
+  const recordPointerSelection = useCallback((pointerType: string) => {
+    selectionPointerTypeRef.current = pointerType;
+  }, []);
+  return { setOpen, suppressForSelection, recordPointerSelection };
 }
 
 /**
@@ -288,33 +464,25 @@ export function Pill({
   const [open, setOpenState] = useState(false);
   const { tooltipOpenState, handleTooltipOpenChange, closeTooltip } = useTooltipMountGate();
   const portalContainer = useTaskCreateDialogPopoverContainer();
-  const [suppressTooltip, setSuppressTooltip] = useState(false);
-  const suppressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const setOpen = useCallback(
-    (next: boolean) => {
-      if (next) closeTooltip();
-      setOpenState((prev) => {
-        if (prev && !next) {
-          if (suppressTimerRef.current) clearTimeout(suppressTimerRef.current);
-          setSuppressTooltip(true);
-          suppressTimerRef.current = setTimeout(() => {
-            setSuppressTooltip(false);
-            suppressTimerRef.current = null;
-          }, 200);
-        }
-        return next;
-      });
-    },
-    [closeTooltip],
+  const {
+    suppressTooltip,
+    suppressTooltipRef,
+    suppressTooltipUntilLeave,
+    handlePointerEnter,
+    handlePointerLeave,
+    handleBlur,
+  } = usePillTooltipSuppression(open);
+  const { setOpen, suppressForSelection, recordPointerSelection } = usePillOpenHandlers(
+    setOpenState,
+    closeTooltip,
+    suppressTooltipUntilLeave,
   );
-  useEffect(
-    () => () => {
-      if (suppressTimerRef.current) {
-        clearTimeout(suppressTimerRef.current);
-        suppressTimerRef.current = null;
-      }
+  const handlePillTooltipOpenChange = useCallback(
+    (next: boolean) => {
+      if (next && suppressTooltipRef.current) return;
+      handleTooltipOpenChange(next);
     },
-    [],
+    [handleTooltipOpenChange],
   );
   const triggerButton = renderPillTriggerButton({
     icon,
@@ -325,6 +493,9 @@ export function Pill({
     hasValue: Boolean(value),
     testId,
     prefix,
+    onPointerEnter: tooltip ? handlePointerEnter : undefined,
+    onPointerLeave: tooltip ? handlePointerLeave : undefined,
+    onBlur: tooltip ? handleBlur : undefined,
   });
 
   // Disabled buttons swallow pointer/focus events, so the wrapper owns tooltip
@@ -341,35 +512,39 @@ export function Pill({
   }
 
   const popover = (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        {tooltip ? <TooltipTrigger asChild>{triggerButton}</TooltipTrigger> : triggerButton}
-      </PopoverTrigger>
-      <PillPopoverContent
-        filter={filter}
-        searchPlaceholder={searchPlaceholder}
-        onRefresh={onRefresh}
-        refreshing={refreshing}
-        refreshLabel={refreshLabel}
-        options={options}
-        onSelect={onSelect}
-        setOpen={setOpen}
-        emptyMessage={emptyMessage}
-        portalContainer={portalContainer}
-        action={action}
-      />
-    </Popover>
+    <PillPopover
+      open={open}
+      setOpen={setOpen}
+      triggerButton={
+        tooltip ? <TooltipTrigger asChild>{triggerButton}</TooltipTrigger> : triggerButton
+      }
+      filter={filter}
+      searchPlaceholder={searchPlaceholder}
+      onRefresh={onRefresh}
+      refreshing={refreshing}
+      refreshLabel={refreshLabel}
+      options={options}
+      onPointerSelect={recordPointerSelection}
+      onSelect={(selectedValue) => {
+        if (tooltip) suppressForSelection();
+        onSelect(selectedValue);
+      }}
+      emptyMessage={emptyMessage}
+      portalContainer={portalContainer}
+      action={action}
+    />
   );
 
   if (!tooltip) return popover;
 
-  // Suppress the hover tooltip while the popover is open, then briefly after
-  // close so lingering hover cannot immediately reopen it.
-  const tooltipOpen = open || suppressTooltip ? false : tooltipOpenState;
+  // Suppress the hover tooltip while the popover is open and until the pointer
+  // leaves after close, so a selection cannot disclose a tooltip underneath it.
+  const tooltipOpen =
+    open || suppressTooltip || suppressTooltipRef.current ? false : tooltipOpenState;
   return (
-    <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
+    <Tooltip open={tooltipOpen} onOpenChange={handlePillTooltipOpenChange}>
       {popover}
-      <TooltipContent>{tooltip}</TooltipContent>
+      <TooltipContent className="max-w-[calc(100vw-2rem)] break-all">{tooltip}</TooltipContent>
     </Tooltip>
   );
 }

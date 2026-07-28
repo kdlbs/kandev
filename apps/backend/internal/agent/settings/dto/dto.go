@@ -4,22 +4,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
-	agentusage "github.com/kandev/kandev/internal/agent/usage"
 )
-
-// AgentSubscriptionUsage is one subscription-billed host agent's utilization
-// entry returned by GET /api/v1/agents/usage.
-type AgentSubscriptionUsage struct {
-	AgentID     string                    `json:"agent_id"`
-	DisplayName string                    `json:"display_name"`
-	Usage       *agentusage.ProviderUsage `json:"usage,omitempty"`
-	Error       string                    `json:"error,omitempty"`
-}
-
-// AgentSubscriptionUsageResponse is the GET /api/v1/agents/usage payload.
-type AgentSubscriptionUsageResponse struct {
-	Agents []AgentSubscriptionUsage `json:"agents"`
-}
 
 type AgentProfileDTO struct {
 	ID               string             `json:"id"`
@@ -34,7 +19,10 @@ type AgentProfileDTO struct {
 	CLIFlags         []CLIFlagDTO       `json:"cli_flags"`
 	EnvVars          []ProfileEnvVarDTO `json:"env_vars,omitempty"`
 	CLIPassthrough   bool               `json:"cli_passthrough"`
-	UserModified     bool               `json:"user_modified"`
+	// CommandPrefix is an optional launcher prefix prepended to the agent
+	// command (e.g. "greywall --"). Shell-tokenised at launch time.
+	CommandPrefix string `json:"command_prefix,omitempty"`
+	UserModified  bool   `json:"user_modified"`
 	// WorkspaceID scopes the profile to an office workspace. Empty for
 	// shallow kanban-only profiles. Surfaced so consumers (e.g. test
 	// cleanup helpers) can distinguish office-owned profiles from
@@ -217,7 +205,16 @@ type AvailableAgentDTO struct {
 	PermissionSettings map[string]PermissionSettingDTO `json:"permission_settings,omitempty"`
 	PassthroughConfig  *PassthroughConfigDTO           `json:"passthrough_config,omitempty"`
 	LoginCommand       *LoginCommandDTO                `json:"login_command,omitempty"`
+	RuntimeUpdate      *RuntimeUpdateDTO               `json:"runtime_update,omitempty"`
 	UpdatedAt          time.Time                       `json:"updated_at"`
+}
+
+// RuntimeUpdateDTO describes a Kandev-managed npm runtime. Package is
+// informational; update requests select only the built-in agent name.
+type RuntimeUpdateDTO struct {
+	Supported      bool   `json:"supported"`
+	Package        string `json:"package"`
+	CurrentVersion string `json:"current_version,omitempty"`
 }
 
 type ListAvailableAgentsResponse struct {
@@ -261,6 +258,47 @@ type ListInstallJobsResponse struct {
 	Jobs []InstallJobDTO `json:"jobs"`
 }
 
+// AgentUpdateJobStatus represents one phase of a managed-runtime update.
+type AgentUpdateJobStatus string
+
+const (
+	AgentUpdateJobStatusQueued     AgentUpdateJobStatus = "queued"
+	AgentUpdateJobStatusResolving  AgentUpdateJobStatus = "resolving"
+	AgentUpdateJobStatusUpdating   AgentUpdateJobStatus = "updating"
+	AgentUpdateJobStatusRefreshing AgentUpdateJobStatus = "refreshing"
+	AgentUpdateJobStatusSucceeded  AgentUpdateJobStatus = "succeeded"
+	AgentUpdateJobStatusFailed     AgentUpdateJobStatus = "failed"
+)
+
+// AgentUpdateJobDTO is the retained HTTP and WebSocket update snapshot.
+type AgentUpdateJobDTO struct {
+	JobID          string               `json:"job_id"`
+	AgentName      string               `json:"agent_name"`
+	Status         AgentUpdateJobStatus `json:"status"`
+	CurrentVersion string               `json:"current_version,omitempty"`
+	TargetVersion  string               `json:"target_version,omitempty"`
+	Output         string               `json:"output,omitempty"`
+	Error          string               `json:"error,omitempty"`
+	RefreshError   string               `json:"refresh_error,omitempty"`
+	StartedAt      time.Time            `json:"started_at"`
+	FinishedAt     *time.Time           `json:"finished_at,omitempty"`
+}
+
+// AgentUpdatePreviewDTO is a read-only representation of the next managed
+// runtime update. The command is derived from trusted built-in agent metadata.
+type AgentUpdatePreviewDTO struct {
+	AgentName      string   `json:"agent_name"`
+	Package        string   `json:"package"`
+	CurrentVersion string   `json:"current_version,omitempty"`
+	TargetVersion  string   `json:"target_version"`
+	Command        []string `json:"command"`
+	CommandString  string   `json:"command_string"`
+}
+
+type ListAgentUpdateJobsResponse struct {
+	Jobs []AgentUpdateJobDTO `json:"jobs"`
+}
+
 type AgentProfileMcpConfigDTO struct {
 	ProfileID string                         `json:"profile_id"`
 	Enabled   bool                           `json:"enabled"`
@@ -273,6 +311,7 @@ type CommandPreviewRequest struct {
 	Model              string          `json:"model"`
 	PermissionSettings map[string]bool `json:"permission_settings"`
 	CLIPassthrough     bool            `json:"cli_passthrough"`
+	CommandPrefix      string          `json:"command_prefix,omitempty"`
 }
 
 // CommandPreviewResponse is the response for the command preview endpoint

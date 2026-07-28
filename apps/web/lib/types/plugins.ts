@@ -29,10 +29,24 @@ export interface PluginUIPage {
   surface: string;
 }
 
+/**
+ * A single keyboard shortcut a plugin's UI bundle wants kandev to register
+ * and dispatch on its behalf. `id` is plugin-local (unique within the
+ * plugin, not globally); `default` is a combo like "mod+shift+k" ("mod"
+ * resolves to Cmd on macOS, Ctrl elsewhere). Only meaningful alongside
+ * `bundle` — the backend rejects keybindings declared without one.
+ */
+export interface PluginKeybinding {
+  id: string;
+  default: string;
+  description: string;
+}
+
 export interface PluginUISection {
   pages?: PluginUIPage[];
   bundle?: string;
   styles?: string[];
+  keybindings?: PluginKeybinding[];
 }
 
 /**
@@ -72,6 +86,28 @@ export interface PluginRecord {
   /** Crash-restart attempts since install (health-check backoff counter). */
   restart_count: number;
   last_health_check?: string | null;
+  /**
+   * Per-plugin auto-update override. Tri-state: `null`/`undefined` means
+   * "inherit the instance-wide default" (see PluginSettings.auto_update_default),
+   * `true` forces auto-update on for this plugin, `false` forces it off — either
+   * override wins over the global default. Mirrors store.Record.AutoUpdate
+   * (`auto_update`, omitempty), so an absent field decodes as "inherit".
+   */
+  auto_update?: boolean | null;
+}
+
+/**
+ * Instance-wide plugin preferences, as returned by GET/PUT
+ * /api/plugins/settings. Mirrors plugins.Settings
+ * (apps/backend/internal/plugins/settings_store.go).
+ */
+export interface PluginSettings {
+  /**
+   * When true, every installed plugin without a per-plugin override
+   * (PluginRecord.auto_update) is auto-updated in the background. Defaults to
+   * false — auto-update is strictly opt-in.
+   */
+  auto_update_default: boolean;
 }
 
 /**

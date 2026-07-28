@@ -132,12 +132,6 @@ func (c *Canceller) DetachSessionAndNotify(ctx context.Context, sessionID string
 	return c.detachSessionBundles(ctx, sessionID)
 }
 
-// Deprecated: use DetachSessionAndNotify. This alias remains so older tests and
-// integrations keep the pre-rename entrypoint while detach semantics settle.
-func (c *Canceller) CancelSessionAndNotify(ctx context.Context, sessionID string) int {
-	return c.DetachSessionAndNotify(ctx, sessionID)
-}
-
 // ExpireSessionAndNotify cancels in-memory waiters and marks clarification
 // messages expired so the overlay closes and history shows a timed-out entry.
 // TODO: wire this into terminal teardown paths that should close the overlay

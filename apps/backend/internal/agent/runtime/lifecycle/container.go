@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -18,12 +17,14 @@ import (
 	"github.com/kandev/kandev/internal/agent/docker"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/gitconfigenv"
 )
 
 const (
-	dockerAgentctlInstancePortBase = 41001
-	dockerAgentctlInstancePortMax  = 41100
-	boolStringTrue                 = "true"
+	dockerAgentctlInstancePortBase  = 41001
+	dockerAgentctlInstancePortMax   = 41100
+	boolStringTrue                  = "true"
+	gitHubCredentialHelperConfigKey = "credential.https://github.com.helper"
 )
 
 // ContainerConfig holds configuration for launching a Docker container
@@ -451,7 +452,10 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	}
 
 	// Build environment variables
-	env := cm.buildEnvVars(config)
+	env, err := cm.buildEnvVars(config)
+	if err != nil {
+		return docker.ContainerConfig{}, err
+	}
 
 	// Calculate resource limits
 	memoryBytes := rt.ResourceLimits.MemoryMB * 1024 * 1024
@@ -480,7 +484,14 @@ func (cm *ContainerManager) buildContainerConfig(config ContainerConfig) (docker
 	//nolint:dupword // two `fi` tokens close two distinct shell blocks.
 	bootstrap := []string{
 		"sh", "-c",
-		`if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
+		`if [ -n "${KANDEV_GITHUB_CREDENTIAL_BROKER_URL:-}" ] && [ -n "${KANDEV_GITHUB_CREDENTIAL_LEASE:-}" ]; then
+` + brokerReachabilityScript + `
+  probe_rc=$?
+  if [ "$probe_rc" -ne 0 ]; then
+    exit "$probe_rc"
+  fi
+fi
+if [ -n "$KANDEV_PREPARE_SCRIPT" ]; then
   (eval "$KANDEV_PREPARE_SCRIPT")
   prep_rc=$?
   if [ "$prep_rc" -ne 0 ]; then
@@ -600,7 +611,7 @@ func (cm *ContainerManager) expandMountSource(source, workspacePath string) stri
 }
 
 // buildEnvVars builds environment variables for the container
-func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
+func (cm *ContainerManager) buildEnvVars(config ContainerConfig) ([]string, error) {
 	ag := config.AgentConfig
 	rt := ag.Runtime()
 	env := make([]string, 0)
@@ -625,40 +636,32 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
 	// - Trust all directories (for mounted workspaces)
 	// - URL rewriting: SSH → HTTPS for GitHub (enables token auth)
 	// - Credential helper for GitHub HTTPS auth (uses GH_TOKEN env var)
-	gitConfigCount := 3
-	env = append(env,
-		"GIT_CONFIG_KEY_0=safe.directory",
-		"GIT_CONFIG_VALUE_0=*",
-		"GIT_CONFIG_KEY_1=url.https://github.com/.insteadOf",
-		"GIT_CONFIG_VALUE_1=git@github.com:",
-		"GIT_CONFIG_KEY_2=url.https://github.com/.insteadOf",
-		"GIT_CONFIG_VALUE_2=ssh://git@github.com/",
-	)
+	gitConfig := map[string]string{
+		"GIT_CONFIG_COUNT":   "3",
+		"GIT_CONFIG_KEY_0":   "safe.directory",
+		"GIT_CONFIG_VALUE_0": "*",
+		"GIT_CONFIG_KEY_1":   "url.https://github.com/.insteadOf",
+		"GIT_CONFIG_VALUE_1": "git@github.com:",
+		"GIT_CONFIG_KEY_2":   "url.https://github.com/.insteadOf",
+		"GIT_CONFIG_VALUE_2": "ssh://git@github.com/",
+	}
 
 	// If GitHub token is provided, add credential helper
 	// Use ${GH_TOKEN:-${GITHUB_TOKEN}} to support either env var being set
 	if config.Credentials["GH_TOKEN"] != "" || config.Credentials["GITHUB_TOKEN"] != "" {
-		env = append(env,
-			"GIT_CONFIG_KEY_3=credential.https://github.com.helper",
-			`GIT_CONFIG_VALUE_3=!f() { echo "username=x-access-token"; echo "password=${GH_TOKEN:-${GITHUB_TOKEN}}"; }; f`,
-		)
-		gitConfigCount = 4
+		gitConfig["GIT_CONFIG_COUNT"] = "4"
+		gitConfig["GIT_CONFIG_KEY_3"] = gitHubCredentialHelperConfigKey
+		gitConfig["GIT_CONFIG_VALUE_3"] = `!f() { echo "username=x-access-token"; echo "password=${GH_TOKEN:-${GITHUB_TOKEN}}"; }; f`
 	}
-	if incomingCount, err := strconv.Atoi(config.Credentials["GIT_CONFIG_COUNT"]); err == nil {
-		for i := 0; i < incomingCount; i++ {
-			key, keyOK := config.Credentials[fmt.Sprintf("GIT_CONFIG_KEY_%d", i)]
-			value, valueOK := config.Credentials[fmt.Sprintf("GIT_CONFIG_VALUE_%d", i)]
-			if !keyOK || !valueOK {
-				continue
-			}
-			env = append(env,
-				fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", gitConfigCount, key),
-				fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", gitConfigCount, value),
-			)
-			gitConfigCount++
-		}
+	gitConfig, err := gitconfigenv.Merge(gitConfig, config.Credentials)
+	if err != nil {
+		return nil, fmt.Errorf("compose container Git config: %w", err)
 	}
-	env = append(env, fmt.Sprintf("GIT_CONFIG_COUNT=%d", gitConfigCount))
+	gitConfigEntries, err := gitconfigenv.EnvironmentEntries(gitConfig)
+	if err != nil {
+		return nil, fmt.Errorf("serialize container Git config: %w", err)
+	}
+	env = append(env, gitConfigEntries...)
 
 	// Inject credentials from the provided credentials map
 	for k, v := range config.Credentials {
@@ -684,7 +687,7 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) []string {
 		env = append(env, "AGENTCTL_BOOTSTRAP_NONCE="+config.BootstrapNonce)
 	}
 
-	return env
+	return env, nil
 }
 
 // generateBootstrapNonce creates a cryptographically random 32-byte hex-encoded nonce.

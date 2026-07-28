@@ -100,7 +100,7 @@ func TestWaitForPromptRPCAfterUserCancel_CompletesAfterAbort(t *testing.T) {
 
 func TestRegisterPromptTurn_CancelCause(t *testing.T) {
 	a := newTestAdapter()
-	ctx, turn := a.registerPromptTurn(context.Background())
+	ctx, turn := a.registerPromptTurn(context.Background(), 0)
 	defer a.clearPromptTurn(turn)
 
 	turn.endTurn(ErrTurnCancelNotAcknowledged)
@@ -116,7 +116,7 @@ func TestRegisterPromptTurn_CancelCause(t *testing.T) {
 // timeout branches of the waiters.
 func TestSignalPromptTurnAbort_DoesNotCancelPromptCtx(t *testing.T) {
 	a := newTestAdapter()
-	ctx, turn := a.registerPromptTurn(context.Background())
+	ctx, turn := a.registerPromptTurn(context.Background(), 0)
 	defer a.clearPromptTurn(turn)
 
 	turn.rpcDone = make(chan struct{})
@@ -142,7 +142,7 @@ func TestWaitForPromptRPCAfterUserCancel_CancelsPromptCtxOnTimeout(t *testing.T)
 	t.Cleanup(func() { promptCancelJoinTimeout = prev })
 
 	a := newTestAdapter()
-	ctx, turn := a.registerPromptTurn(context.Background())
+	ctx, turn := a.registerPromptTurn(context.Background(), 0)
 	defer a.clearPromptTurn(turn)
 	turn.rpcDone = make(chan struct{})
 	turn.abortCh = make(chan struct{})
@@ -166,7 +166,7 @@ func TestWaitForPromptRPCAfterCancel_CancelsPromptCtxOnTimeout(t *testing.T) {
 	t.Cleanup(func() { promptCancelJoinTimeout = prev })
 
 	a := newTestAdapter()
-	ctx, turn := a.registerPromptTurn(context.Background())
+	ctx, turn := a.registerPromptTurn(context.Background(), 0)
 	defer a.clearPromptTurn(turn)
 	turn.rpcDone = make(chan struct{})
 
@@ -187,4 +187,79 @@ func TestNormalizePromptErrorAfterCancel_MapsTimeoutCanceledRPCToAbandonedPrompt
 	if !errors.Is(err, errPromptAbandonedAfterCancel) {
 		t.Fatalf("expected errPromptAbandonedAfterCancel, got %v", err)
 	}
+}
+
+func TestTransferredPromptOwnsCancelAndReleasesGate(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = claudeAgentID
+	t.Cleanup(func() { _ = a.Close() })
+
+	_, first := newPromptTurnState(context.Background(), 1, true)
+	if err := a.acquirePromptTurn(context.Background(), first, true); err != nil {
+		t.Fatalf("acquire first prompt: %v", err)
+	}
+	if !a.markPromptHandoff("session-1", 1) {
+		t.Fatal("first prompt did not accept authoritative handoff")
+	}
+
+	_, second := newPromptTurnState(context.Background(), 2, true)
+	if err := a.acquirePromptTurn(context.Background(), second, true); err != nil {
+		t.Fatalf("transfer prompt gate: %v", err)
+	}
+	a.finishPromptTurn(first)
+
+	cancelled := a.signalPromptTurnAbort()
+	if cancelled != second {
+		t.Fatalf("cancel targeted %p, want transferred successor %p", cancelled, second)
+	}
+	select {
+	case <-second.abortCh:
+	default:
+		t.Fatal("transferred successor did not receive cancel signal")
+	}
+	select {
+	case <-first.abortCh:
+		t.Fatal("transferred predecessor received successor cancel signal")
+	default:
+	}
+
+	// The same cleanup runs on prompt failure, cancellation, or normal return.
+	// Once the successor finishes, a synthetic prompt must be able to acquire
+	// the physical token rather than leaking behind the transferred owner.
+	a.finishPromptTurn(second)
+	_, synthetic := newPromptTurnState(context.Background(), 0, false)
+	acquireCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := a.acquirePromptTurn(acquireCtx, synthetic, false); err != nil {
+		t.Fatalf("synthetic prompt remained blocked after successor cleanup: %v", err)
+	}
+	a.finishPromptTurn(synthetic)
+}
+
+func TestQueuedPromptOwnershipWaiterUnblocksOnAdapterClose(t *testing.T) {
+	a := newTestAdapter()
+
+	_, owner := newPromptTurnState(context.Background(), 1, false)
+	if err := a.acquirePromptTurn(context.Background(), owner, true); err != nil {
+		t.Fatalf("acquire owner: %v", err)
+	}
+
+	waiterDone := make(chan error, 1)
+	go func() {
+		_, waiter := newPromptTurnState(context.Background(), 2, false)
+		waiterDone <- a.acquirePromptTurn(context.Background(), waiter, true)
+	}()
+
+	if err := a.Close(); err != nil {
+		t.Fatalf("close adapter: %v", err)
+	}
+	select {
+	case err := <-waiterDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("queued waiter error = %v, want context canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("adapter close leaked queued prompt ownership waiter")
+	}
+	a.finishPromptTurn(owner)
 }

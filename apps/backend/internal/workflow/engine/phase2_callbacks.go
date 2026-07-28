@@ -382,45 +382,9 @@ func queueRunForEachParticipantReason(in ActionInput) string {
 	return string(in.Trigger)
 }
 
-// PlaceholderQueueRunCallback is preserved as a typed alias for backward
-// compatibility with the Phase 2 prep slice. New code should construct
-// QueueRunCallback directly.
-//
-// Deprecated: Use QueueRunCallback.
-type PlaceholderQueueRunCallback struct{}
-
-// Execute returns ErrActionNotYetWired so accidental use is loud.
-func (PlaceholderQueueRunCallback) Execute(_ context.Context, _ ActionInput) (ActionResult, error) {
-	return ActionResult{}, ErrActionNotYetWired
-}
-
-// PlaceholderClearDecisionsCallback is preserved for backward compatibility.
-//
-// Deprecated: Use ClearDecisionsCallback.
-type PlaceholderClearDecisionsCallback struct{}
-
-// Execute returns ErrActionNotYetWired so accidental use is loud.
-func (PlaceholderClearDecisionsCallback) Execute(_ context.Context, _ ActionInput) (ActionResult, error) {
-	return ActionResult{}, ErrActionNotYetWired
-}
-
-// PlaceholderQueueRunForEachParticipantCallback is preserved for backward
-// compatibility.
-//
-// Deprecated: Use QueueRunForEachParticipantCallback.
-type PlaceholderQueueRunForEachParticipantCallback struct{}
-
-// Execute returns ErrActionNotYetWired so accidental use is loud.
-func (PlaceholderQueueRunForEachParticipantCallback) Execute(_ context.Context, _ ActionInput) (ActionResult, error) {
-	return ActionResult{}, ErrActionNotYetWired
-}
-
 // Compile-time interface assertions.
 var (
 	_ ActionCallback = QueueRunCallback{}
 	_ ActionCallback = ClearDecisionsCallback{}
 	_ ActionCallback = QueueRunForEachParticipantCallback{}
-	_ ActionCallback = PlaceholderQueueRunCallback{}
-	_ ActionCallback = PlaceholderClearDecisionsCallback{}
-	_ ActionCallback = PlaceholderQueueRunForEachParticipantCallback{}
 )

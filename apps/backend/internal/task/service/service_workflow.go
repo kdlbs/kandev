@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -21,6 +22,16 @@ type ApproveSessionResult struct {
 	WorkflowStep *wfmodels.WorkflowStep
 }
 
+type primarySessionTaskStateRepository interface {
+	UpdateTaskStateIfPrimarySessionState(
+		context.Context,
+		string,
+		string,
+		models.TaskSessionState,
+		v1.TaskState,
+	) (v1.TaskState, bool, error)
+}
+
 // ApproveSession approves a session's current step and moves it to the next step.
 // It reads the step's on_turn_complete actions to determine where to transition.
 // If no transition actions are configured, it falls back to the next step by position.
@@ -30,6 +41,10 @@ func (s *Service) ApproveSession(ctx context.Context, sessionID string) (*Approv
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session: %w", err)
+	}
+	// Approving advances the task's workflow step, so this must be owner-only.
+	if err := s.authorizeTaskID(ctx, session.TaskID); err != nil {
+		return nil, err
 	}
 	result.Session = session
 
@@ -268,9 +283,49 @@ func (s *Service) UpdateTaskStateIfSessionState(
 	expectedSessionState models.TaskSessionState,
 	state v1.TaskState,
 ) (bool, error) {
-	oldState, updated, err := s.tasks.UpdateTaskStateIfSessionState(
-		ctx, taskID, sessionID, expectedSessionState, state,
+	return s.updateTaskStateIfSessionState(
+		ctx, taskID, sessionID, expectedSessionState, state, false,
 	)
+}
+
+// UpdateTaskStateIfPrimarySessionState also requires the named session to
+// remain primary.
+func (s *Service) UpdateTaskStateIfPrimarySessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	return s.updateTaskStateIfSessionState(
+		ctx, taskID, sessionID, expectedSessionState, state, true,
+	)
+}
+
+func (s *Service) updateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+	requirePrimary bool,
+) (bool, error) {
+	var (
+		oldState v1.TaskState
+		updated  bool
+		err      error
+	)
+	if requirePrimary {
+		updater, ok := s.tasks.(primarySessionTaskStateRepository)
+		if !ok {
+			return false, errors.New("primary-session task state update is not supported")
+		}
+		oldState, updated, err = updater.UpdateTaskStateIfPrimarySessionState(
+			ctx, taskID, sessionID, expectedSessionState, state,
+		)
+	} else {
+		oldState, updated, err = s.tasks.UpdateTaskStateIfSessionState(
+			ctx, taskID, sessionID, expectedSessionState, state,
+		)
+	}
 	if err != nil || !updated {
 		return false, err
 	}
@@ -462,31 +517,6 @@ func (s *Service) syncTaskStateForWorkflowMove(ctx context.Context, task *models
 	return nil
 }
 
-func (s *Service) syncTaskStateForBulkWorkflowMove(ctx context.Context, task *models.Task, oldStepID, targetStepID string, targetIsTerminal, sourceIsTerminal, sourceTerminalKnown bool) error {
-	if targetIsTerminal {
-		if !models.IsTerminalTaskState(task.State) {
-			task.State = v1.TaskStateCompleted
-		}
-		return nil
-	}
-	if oldStepID == targetStepID || task.State != v1.TaskStateCompleted {
-		return nil
-	}
-
-	oldTerminal := sourceIsTerminal
-	if !sourceTerminalKnown {
-		var err error
-		oldTerminal, err = s.terminalWorkflowStep(ctx, oldStepID)
-		if err != nil {
-			return err
-		}
-	}
-	if oldTerminal {
-		task.State = v1.TaskStateTODO
-	}
-	return nil
-}
-
 func (s *Service) pullNextTaskOnVacate(ctx context.Context, vacatedStepID, excludeTaskID string) {
 	vacatedStep := s.pullEnabledStep(ctx, vacatedStepID)
 	if vacatedStep == nil {
@@ -647,7 +677,7 @@ func (s *Service) validateMoveWIPLimit(ctx context.Context, task *models.Task, t
 		return fmt.Errorf("failed to count target workflow step tasks: %w", err)
 	}
 	if occupants >= targetStep.WIPLimit {
-		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d already occupied", targetStep.ID, targetStep.WIPLimit)
+		return wfmodels.NewWIPLimitError(targetStep.ID, targetStep.WIPLimit, occupants)
 	}
 	return nil
 }
@@ -809,8 +839,7 @@ func (s *Service) validateBulkMoveWIPCapacity(ctx context.Context, tasks []*mode
 		return fmt.Errorf("failed to count target workflow step tasks: %w", err)
 	}
 	if occupants+incoming > targetStep.WIPLimit {
-		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d, occupied %d, moving %d",
-			targetStep.ID, targetStep.WIPLimit, occupants, incoming)
+		return fmt.Errorf("%w: moving %d task(s)", wfmodels.NewWIPLimitError(targetStep.ID, targetStep.WIPLimit, occupants), incoming)
 	}
 	return nil
 }

@@ -9,6 +9,11 @@ type Repository interface {
 	// Returns ErrQueueFull if maxPerSession > 0 and the count would exceed it.
 	Insert(ctx context.Context, msg *QueuedMessage, maxPerSession int) error
 
+	// Restore reinserts a previously dequeued entry at its original FIFO
+	// position. It is used when a delivery fails after TakeHead so later
+	// messages cannot overtake the failed one.
+	Restore(ctx context.Context, msg *QueuedMessage, maxPerSession int) error
+
 	// AppendOrInsertTail concatenates content onto the tail entry when the tail
 	// exists AND its QueuedBy matches the supplied queuedBy. Otherwise inserts a
 	// new entry. Returns the resulting entry and whether the call appended (true)

@@ -80,15 +80,25 @@ const overview: StorageOverviewResponse = {
       managed_container_bytes: 60,
     },
   },
+  analyzed_at: "2026-07-23T12:00:00Z",
   last_run: null,
 };
 
+const cleanupJobId = "cleanup-job";
 const cleanupJob = {
-  id: "cleanup-job",
+  id: cleanupJobId,
   kind: "storage-cleanup",
   state: "running",
   started_at: "2026-07-15T00:00:00Z",
 };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 function wrapper({ children }: { children: ReactNode }) {
   return <StateProvider>{children}</StateProvider>;
@@ -102,7 +112,7 @@ beforeEach(() => {
   mocks.fetchJob.mockResolvedValue(cleanupJob);
   mocks.save.mockResolvedValue({ settings });
   // Keep cleanup jobs deterministic for controller action tests.
-  mocks.run.mockResolvedValue({ job_id: "cleanup-job" });
+  mocks.run.mockResolvedValue({ job_id: cleanupJobId });
 });
 
 describe("useStorageMaintenance", () => {
@@ -161,7 +171,7 @@ describe("useStorageMaintenance", () => {
     await act(async () => {
       await result.current.runNow();
     });
-    await waitFor(() => expect(result.current.cleanupJob?.id).toBe("cleanup-job"));
+    await waitFor(() => expect(result.current.cleanupJob?.id).toBe(cleanupJobId));
 
     mocks.run.mockRejectedValueOnce(new Error("storage maintenance is busy"));
     await act(async () => {
@@ -170,6 +180,66 @@ describe("useStorageMaintenance", () => {
 
     expect(result.current.cleanupJob).toBeUndefined();
     expect(result.current.error).toBe("storage maintenance is busy");
+  });
+});
+
+describe("useStorageMaintenance pending action tracking", () => {
+  it("returns to a pending resource action after an overlapping save finishes", async () => {
+    const pendingRun = deferred<{ job_id: string }>();
+    const pendingSave = deferred<{ settings: StorageMaintenanceSettings }>();
+    mocks.run.mockReturnValueOnce(pendingRun.promise);
+    mocks.save.mockReturnValueOnce(pendingSave.promise);
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+
+    let runPromise!: Promise<void>;
+    let savePromise!: Promise<void>;
+    await act(async () => {
+      runPromise = result.current.runNow();
+      savePromise = result.current.save(settings);
+    });
+    await waitFor(() => expect(result.current.pendingAction).toBe("save"));
+
+    await act(async () => {
+      pendingSave.resolve({ settings });
+      await savePromise;
+    });
+    expect(result.current.pendingAction).toBe("run");
+
+    await act(async () => {
+      pendingRun.resolve({ job_id: cleanupJobId });
+      await runPromise;
+    });
+    expect(result.current.pendingAction).toBeNull();
+  });
+
+  it("keeps an overlapping save pending when the resource request finishes first", async () => {
+    const pendingRun = deferred<{ job_id: string }>();
+    const pendingSave = deferred<{ settings: StorageMaintenanceSettings }>();
+    mocks.run.mockReturnValueOnce(pendingRun.promise);
+    mocks.save.mockReturnValueOnce(pendingSave.promise);
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+
+    let runPromise!: Promise<void>;
+    let savePromise!: Promise<void>;
+    await act(async () => {
+      runPromise = result.current.runNow();
+      savePromise = result.current.save(settings);
+    });
+    await waitFor(() => expect(result.current.pendingAction).toBe("save"));
+
+    await act(async () => {
+      pendingRun.resolve({ job_id: cleanupJobId });
+      await runPromise;
+    });
+    expect(result.current.pendingAction).toBe("save");
+
+    await act(async () => {
+      pendingSave.resolve({ settings });
+      await savePromise;
+    });
+    expect(result.current.pendingAction).toBeNull();
   });
 });
 

@@ -17,6 +17,7 @@
     "executors",
     "integrations",
     "automation-and-mcp",
+    "authentication",
     "configuration",
     "---Install Kandev---",
     "cli",

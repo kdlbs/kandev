@@ -47,6 +47,13 @@ export function useKeyboardShortcut(
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       if (!enabled) return;
+      // Precedence: a capture-phase core dispatcher (`useAppShortcuts`) or a
+      // plugin keybinding (`usePluginShortcuts`) may have already handled and
+      // prevented this event before this bubble-phase, per-component listener
+      // runs. Bail out so the same combo fires exactly one action instead of
+      // both. See `useAppShortcuts`/`usePluginShortcuts` for the full
+      // core-vs-plugin precedence chain.
+      if (event.defaultPrevented) return;
 
       if (matchesShortcut(event, shortcut)) {
         if (preventDefault) {

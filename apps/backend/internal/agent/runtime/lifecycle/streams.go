@@ -14,7 +14,7 @@ import (
 // StreamCallbacks defines callbacks for stream events
 type StreamCallbacks struct {
 	OnAgentEvent       func(execution *AgentExecution, event agentctl.AgentEvent)
-	OnStreamDisconnect func(execution *AgentExecution, err error)
+	OnStreamDisconnect func(execution *AgentExecution, err error, promptGeneration uint64)
 	OnGitStatus        func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
 	OnGitCommit        func(execution *AgentExecution, commit *agentctl.GitCommitNotification)
 	OnGitReset         func(execution *AgentExecution, reset *agentctl.GitResetNotification)
@@ -31,6 +31,10 @@ type StreamManager struct {
 	logger     *logger.Logger
 	callbacks  StreamCallbacks
 	mcpHandler agentctl.MCPHandler
+	// mcpIdentityScoper scopes in-session MCP dispatches to the owner of the
+	// stream's task. Nil leaves dispatch unscoped (single-user instances and
+	// isolated tests); set via Manager.SetMCPIdentityScoper.
+	mcpIdentityScoper MCPIdentityScoper
 	// stopCh is the Manager-owned shutdown signal. The retry/backoff and
 	// connected `<-ws.Done() / <-stop>` select read from it so they drain on
 	// Manager.Stop. May be nil when isolated tests don't care about external
@@ -282,21 +286,9 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		if sm.callbacks.OnAgentEvent != nil {
 			sm.callbacks.OnAgentEvent(execution, event)
 		}
-	}, sm.mcpHandler, func(disconnectErr error) {
-		// WebSocket dropped — signal promptDoneCh so SendPrompt doesn't hang forever.
-		// Only signal on unexpected errors (not normal close).
+	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		if disconnectErr != nil {
-			select {
-			case execution.promptDoneCh <- PromptCompletionSignal{
-				IsError: true,
-				Error:   "agent stream disconnected: " + disconnectErr.Error(),
-			}:
-			default:
-			}
-			// Notify lifecycle manager so it can proactively update execution status
-			if sm.callbacks.OnStreamDisconnect != nil {
-				sm.callbacks.OnStreamDisconnect(execution, disconnectErr)
-			}
+			sm.handleUpdatesDisconnect(execution, disconnectErr)
 		}
 	})
 
@@ -314,6 +306,23 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 }
 
+func (sm *StreamManager) handleUpdatesDisconnect(execution *AgentExecution, disconnectErr error) {
+	// Capture prompt ownership before signaling the waiter. A replacement may
+	// advance the generation before the lifecycle callback runs.
+	promptGeneration := execution.promptGenerationSnapshot()
+	select {
+	case execution.promptDoneCh <- PromptCompletionSignal{
+		IsError:          true,
+		Error:            "agent stream disconnected: " + disconnectErr.Error(),
+		PromptGeneration: promptGeneration,
+	}:
+	default:
+	}
+	if sm.callbacks.OnStreamDisconnect != nil {
+		sm.callbacks.OnStreamDisconnect(execution, disconnectErr, promptGeneration)
+	}
+}
+
 // connectMCPStream opens the agent updates WebSocket for a PASSTHROUGH session
 // purely to drain the MCP request channel: the agentctl instance serves /mcp and
 // proxies tool calls to the backend over this stream, so without it kandev MCP
@@ -324,7 +333,7 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 // closing this stream is expected, not an error.
 func (sm *StreamManager) connectMCPStream(execution *AgentExecution) {
 	ctx := sm.streamContext(execution)
-	err := execution.agentctl.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, sm.mcpHandler, func(disconnectErr error) {
+	err := execution.agentctl.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		if disconnectErr != nil {
 			sm.logger.Debug("passthrough MCP stream disconnected",
 				zap.String("execution_id", execution.ID),

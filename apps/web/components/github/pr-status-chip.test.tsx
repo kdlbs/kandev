@@ -19,6 +19,9 @@ const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "compactDesktop" | "desktop",
   isFinePointer: true,
 }));
+const wsMock = vi.hoisted(() => ({
+  client: null as { request: ReturnType<typeof vi.fn> } | null,
+}));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
     breakpoint: responsiveMock.breakpoint,
@@ -54,7 +57,7 @@ vi.mock("@/lib/api/domains/github-api", async (importOriginal) => {
 });
 
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: vi.fn(() => null),
+  getWebSocketClient: () => wsMock.client,
 }));
 
 function renderWithStore(initialState: Partial<AppState> | undefined, ui: ReactNode) {
@@ -117,6 +120,7 @@ function makeCIOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCI
 beforeEach(() => {
   responsiveMock.breakpoint = "desktop";
   responsiveMock.isFinePointer = true;
+  wsMock.client = null;
 });
 
 afterEach(() => {
@@ -218,6 +222,38 @@ describe("PRStatusChip desktop branch", () => {
     expect(chip.getAttribute("data-pr-state")).toBe("open");
     expect(chip.getAttribute(ATTR_STATUS)).toBe("passed");
     expect(chip.getAttribute(ATTR_READY_TO_MERGE)).toBe("true");
+  });
+
+  it("refreshes a stale failed status when the popover opens", async () => {
+    const failed = makePR({
+      review_state: "",
+      checks_state: "failure",
+      checks_total: 2,
+      checks_passing: 1,
+      mergeable_state: "blocked",
+    });
+    const pending = { ...failed, checks_state: "pending" as const };
+    const request = vi
+      .fn()
+      .mockResolvedValueOnce({ prs: [failed] })
+      .mockResolvedValueOnce({ prs: [pending] });
+    wsMock.client = { request };
+
+    renderWithStore(
+      { taskPRs: { byTaskId: { "task-1": [failed] } } },
+      <PRStatusChip taskId="task-1" />,
+    );
+
+    await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("failed");
+
+    fireEvent.mouseEnter(screen.getByTestId(CHIP_TESTID));
+    await screen.findByTestId("pr-topbar-popover-inner");
+
+    await waitFor(() =>
+      expect(screen.getByTestId(CHIP_TESTID).getAttribute(ATTR_STATUS)).toBe("in_progress"),
+    );
+    expect(request).toHaveBeenCalledTimes(2);
   });
 
   it("shows automation badges when auto-fix or auto-merge are enabled", () => {

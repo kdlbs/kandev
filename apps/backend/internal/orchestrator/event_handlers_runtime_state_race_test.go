@@ -64,3 +64,43 @@ func TestReconcileTaskStateForRuntime_RejectsClarificationRace(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
 }
+
+func TestReconcileTaskStateForRuntime_AllowsWorkingNonPrimarySession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-runtime-secondary", "session-runtime-secondary", "")
+	require.NoError(t, repo.UpdateTaskState(
+		ctx, "task-runtime-secondary", v1.TaskStateScheduling,
+	))
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx, "session-runtime-secondary", models.TaskSessionStateStarting, "",
+	))
+	session, err := repo.GetTaskSession(ctx, "session-runtime-secondary")
+	require.NoError(t, err)
+	require.False(t, session.IsPrimary)
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.updateIfSessionState = func(
+		ctx context.Context,
+		taskID, sessionID string,
+		expectedSessionState models.TaskSessionState,
+		state v1.TaskState,
+	) (bool, error) {
+		_, updated, updateErr := repo.UpdateTaskStateIfSessionState(
+			ctx, taskID, sessionID, expectedSessionState, state,
+		)
+		return updated, updateErr
+	}
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	require.NoError(t, svc.reconcileTaskStateForRuntime(
+		ctx,
+		"task-runtime-secondary",
+		"session-runtime-secondary",
+		v1.TaskStateInProgress,
+	))
+
+	task, err := repo.GetTask(ctx, "task-runtime-secondary")
+	require.NoError(t, err)
+	require.Equal(t, v1.TaskStateInProgress, task.State)
+}

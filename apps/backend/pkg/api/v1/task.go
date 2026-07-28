@@ -43,6 +43,56 @@ const (
 	TaskSessionStateCancelled       TaskSessionState = "CANCELLED"
 )
 
+// ForegroundActivity is the fine-grained busy substate of a session
+// (ADR-0049). It distinguishes a foreground turn that is
+// actively generating from one that is idle, held open only by spawned
+// background work (a subagent task, a run-in-background shell, an active
+// Monitor). "generating" is only meaningful while the session state is
+// RUNNING, but "background" can outlive the foreground turn: detached work
+// keeps it set after the coarse state settles (e.g. WAITING_FOR_INPUT), and
+// consumers must not assume RUNNING when they see it.
+type ForegroundActivity string
+
+const (
+	// ForegroundActivityGenerating means the foreground agent is producing
+	// output — the historical "busy" condition; input stays gated.
+	ForegroundActivityGenerating ForegroundActivity = "generating"
+	// ForegroundActivityBackground means the foreground turn has yielded to
+	// outstanding background work; input is accepted even though the session
+	// still reads RUNNING and the "working" affordance stays up.
+	ForegroundActivityBackground ForegroundActivity = "background"
+)
+
+// AggregateForegroundActivity reduces the per-session foreground activities of a
+// task's RUNNING sessions to a single task-level value using MOST-ACTIVE-WINS
+// The aggregate is:
+//
+//   - ForegroundActivityGenerating — any session is generating;
+//   - ForegroundActivityBackground — none is generating but at least one is
+//     holding a turn open for background work;
+//   - ""                           — neither, so task-level surfaces fall through
+//     to the coarse task state (done / waiting / failed).
+//
+// Callers pass only the activities of RUNNING sessions (a non-RUNNING session
+// carries no busy substate); empty values are ignored, so passing "" for a
+// non-RUNNING session is harmless. The background tier is inserted BETWEEN
+// generating and done and does not redefine the other states.
+func AggregateForegroundActivity(activities []ForegroundActivity) ForegroundActivity {
+	sawBackground := false
+	for _, activity := range activities {
+		switch activity {
+		case ForegroundActivityGenerating:
+			return ForegroundActivityGenerating
+		case ForegroundActivityBackground:
+			sawBackground = true
+		}
+	}
+	if sawBackground {
+		return ForegroundActivityBackground
+	}
+	return ""
+}
+
 // MessageType represents a normalized session message type.
 type MessageType string
 
@@ -70,25 +120,37 @@ type TaskRepository struct {
 	UpdatedAt    time.Time              `json:"updated_at"`
 }
 
+// TaskWorkspaceFolder represents a non-Git folder associated with a task.
+type TaskWorkspaceFolder struct {
+	ID          string    `json:"id"`
+	TaskID      string    `json:"task_id"`
+	LocalPath   string    `json:"local_path"`
+	DisplayName string    `json:"display_name"`
+	Position    int       `json:"position"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 // Task represents a Kanban task
 type Task struct {
-	ID           string                 `json:"id"`
-	WorkspaceID  string                 `json:"workspace_id"`
-	WorkflowID   string                 `json:"workflow_id"`
-	Title        string                 `json:"title"`
-	Description  string                 `json:"description"`
-	State        TaskState              `json:"state"`
-	Priority     string                 `json:"priority"`
-	Repositories []TaskRepository       `json:"repositories,omitempty"`
-	CreatedBy    string                 `json:"created_by"`
-	CreatedAt    time.Time              `json:"created_at"`
-	UpdatedAt    time.Time              `json:"updated_at"`
-	StartedAt    *time.Time             `json:"started_at,omitempty"`
-	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
-	Metadata     map[string]interface{} `json:"metadata,omitempty"`
-	IsEphemeral  bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID     string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	Identifier   string                 `json:"identifier,omitempty"`
+	ID               string                 `json:"id"`
+	WorkspaceID      string                 `json:"workspace_id"`
+	WorkflowID       string                 `json:"workflow_id"`
+	Title            string                 `json:"title"`
+	Description      string                 `json:"description"`
+	State            TaskState              `json:"state"`
+	Priority         string                 `json:"priority"`
+	Repositories     []TaskRepository       `json:"repositories,omitempty"`
+	WorkspaceFolders []TaskWorkspaceFolder  `json:"workspace_folders,omitempty"`
+	CreatedBy        string                 `json:"created_by"`
+	CreatedAt        time.Time              `json:"created_at"`
+	UpdatedAt        time.Time              `json:"updated_at"`
+	StartedAt        *time.Time             `json:"started_at,omitempty"`
+	CompletedAt      *time.Time             `json:"completed_at,omitempty"`
+	Metadata         map[string]interface{} `json:"metadata,omitempty"`
+	IsEphemeral      bool                   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID         string                 `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Identifier       string                 `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories

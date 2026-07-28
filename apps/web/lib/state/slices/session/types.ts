@@ -206,6 +206,8 @@ export type SessionSliceActions = {
     metadata?: Record<string, unknown>,
   ) => void;
   setActiveTurn: (sessionId: string, turnId: string | null) => void;
+  /** Source adoption is an authoritative idle boundary for the listed sessions. */
+  reconcileWorkspaceSourcesAdopted: (sessionIds: string[]) => void;
   setTaskSession: (session: TaskSession) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;

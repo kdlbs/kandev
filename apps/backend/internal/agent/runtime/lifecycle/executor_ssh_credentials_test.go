@@ -1,9 +1,64 @@
 package lifecycle
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/agent/remoteauth"
 )
+
+func TestRemoteExecutorsIgnoreLegacyHostGHTokenSelection(t *testing.T) {
+	binDir := t.TempDir()
+	ghPath := filepath.Join(binDir, "gh")
+	if err := os.WriteFile(ghPath, []byte("#!/bin/sh\nprintf host-global-token\n"), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	tests := []struct {
+		name    string
+		resolve func([]string, *ExecutorCreateRequest) []string
+	}{
+		{name: "ssh", resolve: (&SSHExecutor{logger: newTestLogger()}).resolveGHToken},
+		{name: "sprites", resolve: (&SpritesExecutor{logger: newTestLogger()}).resolveGHToken},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &ExecutorCreateRequest{Env: map[string]string{}}
+			remaining := tt.resolve([]string{"gh_cli_token", "agent:codex:files:0"}, req)
+			if got := req.Env["GITHUB_TOKEN"]; got != "" {
+				t.Fatalf("GITHUB_TOKEN = %q, want no host-global token injection", got)
+			}
+			if len(remaining) != 1 || remaining[0] != "agent:codex:files:0" {
+				t.Fatalf("remaining methods = %v, want stale gh_cli_token filtered", remaining)
+			}
+		})
+	}
+}
+
+func TestRemoteExecutorsResolveExplicitGitHubTokenSecret(t *testing.T) {
+	store := &mockSecretStore{store: map[string]string{"secret-1": "workspace-token"}}
+	metadata := map[string]interface{}{"remote_auth_secrets": `{"gh_cli_env":"secret-1"}`}
+	tests := []struct {
+		name    string
+		resolve func(context.Context, *ExecutorCreateRequest, remoteauth.Catalog)
+	}{
+		{name: "ssh", resolve: (&SSHExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets},
+		{name: "sprites", resolve: (&SpritesExecutor{secretStore: store, logger: newTestLogger()}).resolveAuthSecrets},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := &ExecutorCreateRequest{Metadata: metadata, Env: map[string]string{}}
+			tt.resolve(context.Background(), req, remoteauth.BuildCatalogForHost(nil, "linux", ""))
+			if got := req.Env["GITHUB_TOKEN"]; got != "workspace-token" {
+				t.Fatalf("GITHUB_TOKEN = %q, want selected stored secret", got)
+			}
+		})
+	}
+}
 
 func TestWrapLoginShell(t *testing.T) {
 	t.Run("empty shell defaults to bash", func(t *testing.T) {
@@ -95,16 +150,27 @@ func TestParentDir(t *testing.T) {
 
 func TestBuildSSHEnvInitScript(t *testing.T) {
 	t.Run("empty map returns empty string", func(t *testing.T) {
-		if got := buildSSHEnvInitScript(nil); got != "" {
+		got, err := buildSSHEnvInitScript(nil)
+		if err != nil {
+			t.Fatalf("buildSSHEnvInitScript(nil): %v", err)
+		}
+		if got != "" {
 			t.Errorf("buildSSHEnvInitScript(nil) = %q, want \"\"", got)
 		}
-		if got := buildSSHEnvInitScript(map[string]string{}); got != "" {
+		got, err = buildSSHEnvInitScript(map[string]string{})
+		if err != nil {
+			t.Fatalf("buildSSHEnvInitScript(empty): %v", err)
+		}
+		if got != "" {
 			t.Errorf("buildSSHEnvInitScript(empty) = %q, want \"\"", got)
 		}
 	})
 
 	t.Run("single env var is shell-quoted on its own line", func(t *testing.T) {
-		got := buildSSHEnvInitScript(map[string]string{"FOO": "bar baz"})
+		got, err := buildSSHEnvInitScript(map[string]string{"FOO": "bar baz"})
+		if err != nil {
+			t.Fatalf("buildSSHEnvInitScript: %v", err)
+		}
 		// Each line is a POSIX shell assignment; the line break separates
 		// entries so `. /dev/stdin` under `set -a` exports each one.
 		if got != "FOO='bar baz'\n" {
@@ -113,7 +179,10 @@ func TestBuildSSHEnvInitScript(t *testing.T) {
 	})
 
 	t.Run("values with embedded single quotes are escaped", func(t *testing.T) {
-		got := buildSSHEnvInitScript(map[string]string{"TOKEN": "it's-a-secret"})
+		got, err := buildSSHEnvInitScript(map[string]string{"TOKEN": "it's-a-secret"})
+		if err != nil {
+			t.Fatalf("buildSSHEnvInitScript: %v", err)
+		}
 		// shellQuote replaces ' with '\'' for POSIX-safe escaping.
 		if !strings.Contains(got, `TOKEN='it'\''s-a-secret'`) {
 			t.Errorf("buildSSHEnvInitScript did not escape single quote: %q", got)
@@ -122,4 +191,56 @@ func TestBuildSSHEnvInitScript(t *testing.T) {
 			t.Errorf("buildSSHEnvInitScript missing trailing newline: %q", got)
 		}
 	})
+
+	for _, key := range []string{"BAD KEY", "BAD; touch /tmp/pwned", "BAD\nKEY", "$(touch /tmp/pwned)", "1BAD"} {
+		t.Run("rejects invalid key "+key, func(t *testing.T) {
+			script, err := buildSSHEnvInitScript(map[string]string{key: "secret"})
+			if err == nil {
+				t.Fatal("expected invalid key error")
+			}
+			if script != "" {
+				t.Errorf("invalid key appeared in script: %q", script)
+			}
+		})
+	}
+}
+
+func TestStartRemoteAgentctlRejectsInvalidEnvBeforeSSHLaunch(t *testing.T) {
+	_, _, err := startRemoteAgentctl(
+		context.Background(),
+		nil,
+		"bash",
+		"/usr/local/bin/agentctl",
+		"/workspace",
+		"/tmp/session",
+		map[string]string{"BAD; touch /tmp/pwned": "secret"},
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected invalid SSH environment key to abort agentctl launch")
+	}
+	if !strings.Contains(err.Error(), "invalid SSH environment variable key") {
+		t.Errorf("startRemoteAgentctl error = %q", err)
+	}
+}
+
+func TestSSHAgentctlLaunchEnvForcesLoopbackAndOmitsBearerToken(t *testing.T) {
+	env := sshAgentctlLaunchEnv(map[string]string{
+		"AGENTCTL_AUTH_TOKEN":  "profile-token",
+		"AGENTCTL_LISTEN_HOST": "0.0.0.0",
+		"OPENAI_API_KEY":       "key",
+	}, "bootstrap-nonce")
+
+	if got := env["AGENTCTL_BOOTSTRAP_NONCE"]; got != "bootstrap-nonce" {
+		t.Fatalf("AGENTCTL_BOOTSTRAP_NONCE = %q, want bootstrap nonce", got)
+	}
+	if got := env["AGENTCTL_LISTEN_HOST"]; got != "127.0.0.1" {
+		t.Fatalf("AGENTCTL_LISTEN_HOST = %q, want loopback", got)
+	}
+	if _, found := env["AGENTCTL_AUTH_TOKEN"]; found {
+		t.Fatal("SSH agentctl launch environment must not contain bearer token")
+	}
+	if got := env["OPENAI_API_KEY"]; got != "key" {
+		t.Fatalf("OPENAI_API_KEY = %q, want copied profile value", got)
+	}
 }

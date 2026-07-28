@@ -12,24 +12,28 @@ import (
 
 // Components holds the automation subsystem components for lifecycle management.
 type Components struct {
-	Service   *Service
-	Scheduler *CronScheduler
-	Evaluator *GitHubEvaluator
+	Service           *Service
+	Scheduler         *CronScheduler
+	Evaluator         *GitHubEvaluator
+	WebhookSubscriber *GitHubWebhookSubscriber
 }
 
-// Start begins background processing (scheduler + GitHub polling).
+// Start begins background processing (scheduler + GitHub polling + webhook subscriber).
 func (c *Components) Start(ctx context.Context) {
 	c.Scheduler.Start(ctx)
 	c.Evaluator.Start(ctx)
+	c.WebhookSubscriber.Start(ctx)
 }
 
 // Stop gracefully shuts down background processing.
 func (c *Components) Stop() {
 	c.Scheduler.Stop()
 	c.Evaluator.Stop()
+	c.WebhookSubscriber.Stop()
 }
 
-// Provide creates the full automation stack: store, service, scheduler, evaluator.
+// Provide creates the full automation stack: store, service, scheduler, evaluator,
+// webhook subscriber.
 func Provide(
 	writer, reader *sqlx.DB,
 	eventBus bus.EventBus,
@@ -44,15 +48,13 @@ func Provide(
 	svc := NewService(store, eventBus, log)
 	scheduler := NewCronScheduler(svc, log)
 
-	var ghClient github.Client
-	if ghSvc != nil {
-		ghClient = ghSvc.Client()
-	}
-	evaluator := NewGitHubEvaluator(svc, ghClient, log)
+	evaluator := NewGitHubEvaluator(svc, ghSvc, log)
+	webhookSubscriber := NewGitHubWebhookSubscriber(svc, eventBus, log)
 
 	return &Components{
-		Service:   svc,
-		Scheduler: scheduler,
-		Evaluator: evaluator,
+		Service:           svc,
+		Scheduler:         scheduler,
+		Evaluator:         evaluator,
+		WebhookSubscriber: webhookSubscriber,
 	}, nil
 }

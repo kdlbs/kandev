@@ -11,13 +11,19 @@ import {
   updateUserSettings,
 } from "@/lib/api";
 import { KanbanHeader } from "@/components/kanban/kanban-header";
+import { MobileFab } from "@/components/kanban/mobile-fab";
 import { MobileSearchBar } from "@/components/kanban/mobile-search-bar";
+import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useDebounce } from "@/hooks/use-debounce";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useTaskListingView } from "@/hooks/use-task-listing-view";
+import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
+import { useWorkflowSnapshot } from "@/hooks/use-workflow-snapshot";
+import { useWorkspacePRs } from "@/hooks/domains/github/use-task-pr";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
 import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
@@ -52,6 +58,17 @@ type UseTaskOperationsParams = {
   tasksListSort: TasksListSort;
   setTasks: (tasks: Task[]) => void;
   setTotal: (total: number) => void;
+};
+
+const EMPTY_WORKFLOW_STEPS: KanbanStep[] = [];
+
+type KanbanStep = {
+  id: string;
+  title: string;
+  events?: {
+    on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
+    on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
+  };
 };
 
 function useLatestWorkspaceRequest(activeWorkspaceId: string | null) {
@@ -91,49 +108,56 @@ function useTaskOperations({
   const [isLoading, setIsLoading] = useState(false);
   const { beginRequest, isCurrentRequest } = useLatestWorkspaceRequest(activeWorkspaceId);
 
-  const fetchTasks = useCallback(async () => {
-    if (!activeWorkspaceId) return;
-    const requestSeq = beginRequest(activeWorkspaceId);
-    const shouldCommit = () => isCurrentRequest(requestSeq, activeWorkspaceId);
-    setIsLoading(true);
-    try {
-      const result = await listTasksByWorkspace(activeWorkspaceId, {
-        page: pagination.pageIndex + 1,
-        pageSize: pagination.pageSize,
-        query: debouncedQuery,
-        includeArchived: showArchived,
-        workflowId: activeWorkflowId,
-        repositoryId: selectedRepositoryId,
-        sort: tasksListSort,
-      });
-      if (!shouldCommit()) return;
-      setTasks(result.tasks);
-      setTotal(result.total);
-    } catch (err) {
-      if (!shouldCommit()) return;
-      toast({
-        title: "Failed to load tasks",
-        description: errorDescription(err),
-        variant: "error",
-      });
-    } finally {
-      if (shouldCommit()) setIsLoading(false);
-    }
-  }, [
-    activeWorkspaceId,
-    activeWorkflowId,
-    selectedRepositoryId,
-    pagination.pageIndex,
-    pagination.pageSize,
-    debouncedQuery,
-    showArchived,
-    tasksListSort,
-    beginRequest,
-    isCurrentRequest,
-    toast,
-    setTasks,
-    setTotal,
-  ]);
+  const fetchTasks = useCallback(
+    async (silent = false) => {
+      if (!activeWorkspaceId) return;
+      const requestSeq = beginRequest(activeWorkspaceId);
+      const shouldCommit = () => isCurrentRequest(requestSeq, activeWorkspaceId);
+      setIsLoading(true);
+      try {
+        const result = await listTasksByWorkspace(activeWorkspaceId, {
+          page: pagination.pageIndex + 1,
+          pageSize: pagination.pageSize,
+          query: debouncedQuery,
+          includeArchived: showArchived,
+          workflowId: activeWorkflowId,
+          repositoryId: selectedRepositoryId,
+          sort: tasksListSort,
+        });
+        if (!shouldCommit()) return;
+        setTasks(result.tasks);
+        setTotal(result.total);
+      } catch (err) {
+        if (!shouldCommit()) return;
+        if (!silent) {
+          toast({
+            title: "Failed to load tasks",
+            description: errorDescription(err),
+            variant: "error",
+          });
+        } else {
+          console.error("[TasksPage] Silent foreground refresh failed:", err);
+        }
+      } finally {
+        if (shouldCommit()) setIsLoading(false);
+      }
+    },
+    [
+      activeWorkspaceId,
+      activeWorkflowId,
+      selectedRepositoryId,
+      pagination.pageIndex,
+      pagination.pageSize,
+      debouncedQuery,
+      showArchived,
+      tasksListSort,
+      beginRequest,
+      isCurrentRequest,
+      toast,
+      setTasks,
+      setTotal,
+    ],
+  );
 
   const mutations = useTaskMutations(fetchTasks);
   return { isLoading, fetchTasks, ...mutations };
@@ -374,7 +398,7 @@ function useTasksPageSetup(props: TasksPageClientProps) {
     pagination: viewState.pagination,
     router,
   });
-  return { ...viewState, ...ops, ...computed, activeWorkspaceId, debouncedQuery };
+  return { ...viewState, ...ops, ...computed, activeWorkspaceId, activeWorkflowId, debouncedQuery };
 }
 
 function useTasksListPreferenceSync({
@@ -485,9 +509,18 @@ function useTasksListPreferenceSync({
 
 export function TasksPageClient(props: TasksPageClientProps) {
   const s = useTasksPageSetup(props);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const { setView } = useTaskListingView();
   const setMobileSearchOpen = useAppStore((state) => state.setMobileKanbanSearchOpen);
   const isMobileSearchOpen = useAppStore((state) => state.mobileKanban.isSearchOpen);
   const { isMobile } = useResponsiveBreakpoint();
+  const showTaskDetails = useAppStore((state) => state.userSettings.tasksListShowDetails ?? false);
+  const activeSteps = useAppStore((state) =>
+    state.kanban.workflowId === s.activeWorkflowId ? state.kanban.steps : EMPTY_WORKFLOW_STEPS,
+  );
+  useWorkflowSnapshot(s.activeWorkflowId);
+  useWorkspacePRs(showTaskDetails ? s.activeWorkspaceId : null);
+  useForegroundRefresh(() => s.fetchTasks(true), Boolean(s.activeWorkspaceId), s.activeWorkspaceId);
   const { handleSortChange, handleGroupChange } = useTasksListPreferenceSync({
     tasksListSort: s.tasksListSort,
     setTasksListSort: s.setTasksListSort,
@@ -502,6 +535,10 @@ export function TasksPageClient(props: TasksPageClientProps) {
     return () => setMobileSearchOpen(false);
   }, [setMobileSearchOpen]);
 
+  useEffect(() => {
+    setView("list");
+  }, [setView]);
+
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <KanbanHeader
@@ -511,6 +548,14 @@ export function TasksPageClient(props: TasksPageClientProps) {
         searchQuery={s.searchQuery}
         onSearchChange={s.setSearchQuery}
         isSearchLoading={s.isLoading && !!s.debouncedQuery}
+        tasksListOptions={{
+          showArchived: s.showArchived,
+          onShowArchivedChange: s.setShowArchived,
+          sort: s.tasksListSort,
+          onSortChange: handleSortChange,
+          group: s.tasksListGroup,
+          onGroupChange: handleGroupChange,
+        }}
       />
       {isMobile && isMobileSearchOpen && (
         <MobileSearchBar searchQuery={s.searchQuery} onSearchChange={s.setSearchQuery} />
@@ -525,6 +570,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
         tasks={s.tasks}
         workflows={s.workflows}
         repositories={s.repositories}
+        showTaskDetails={showTaskDetails}
         total={s.total}
         pageCount={s.pageCount}
         pagination={s.pagination}
@@ -535,7 +581,55 @@ export function TasksPageClient(props: TasksPageClientProps) {
         handleArchive={s.handleArchive}
         handleUnarchive={s.handleUnarchive}
         handleDelete={s.handleDelete}
+        onRefresh={isMobile ? () => s.fetchTasks() : undefined}
       />
+      {isMobile && s.activeWorkspaceId && (
+        <>
+          <MobileFab onClick={() => setIsCreateOpen(true)} />
+          <MobileTasksCreateDialog
+            open={isCreateOpen}
+            onOpenChange={setIsCreateOpen}
+            workspaceId={s.activeWorkspaceId}
+            workflowId={s.activeWorkflowId}
+            steps={activeSteps}
+            onCreated={() => s.fetchTasks(true)}
+          />
+        </>
+      )}
     </div>
+  );
+}
+
+type MobileTasksCreateDialogProps = {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  workspaceId: string;
+  workflowId: string | null;
+  steps: KanbanStep[];
+  onCreated: () => Promise<void>;
+};
+
+function MobileTasksCreateDialog({
+  open,
+  onOpenChange,
+  workspaceId,
+  workflowId,
+  steps,
+  onCreated,
+}: MobileTasksCreateDialogProps) {
+  return (
+    <TaskCreateDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      mode="create"
+      workspaceId={workspaceId}
+      workflowId={workflowId}
+      defaultStepId={steps[0]?.id ?? null}
+      steps={steps}
+      onSuccess={() => {
+        onOpenChange(false);
+        void onCreated();
+      }}
+    />
   );
 }

@@ -2,16 +2,22 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -161,6 +167,38 @@ func TestDockerStopInstanceStopsContainerOnStaleCleanup(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "docker required for stale cleanup") {
 		t.Fatalf("StopInstance error = %v", err)
+	}
+}
+
+func TestRollbackLaunchExecutionForceKillsUnregisteredDockerContainer(t *testing.T) {
+	requests := make(chan string, 1)
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requests <- r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+
+	mgr := newTestManager(t)
+	mgr.rollbackLaunchExecution(context.Background(), dockerExec, &ExecutorInstance{
+		InstanceID:  "failed-instance",
+		ContainerID: "failed-container",
+	}, &AgentExecution{ID: "failed-execution", SessionID: "failed-session"}, "command construction failed")
+
+	select {
+	case got := <-requests:
+		require.Equal(t, http.MethodPost, strings.Fields(got)[0])
+		require.True(t, strings.HasSuffix(got, "/containers/failed-container/kill"), got)
+	default:
+		t.Fatal("rollback must force Docker cleanup for an unregistered failed instance")
 	}
 }
 
@@ -673,6 +711,129 @@ func TestBuildReconnectCreateInstanceRequestOmitsAutoApproveOverrideWhenUnset(t 
 	}
 }
 
+type recordingReconnectControl struct {
+	methods []string
+	created *agentctl.CreateInstanceRequest
+}
+
+func (c *recordingReconnectControl) GetInstance(
+	_ context.Context,
+	_ string,
+) (*agentctl.InstanceInfo, error) {
+	c.methods = append(c.methods, "GET")
+	return &agentctl.InstanceInfo{ID: "instance-1", Port: 41001}, nil
+}
+
+func (c *recordingReconnectControl) DeleteInstance(_ context.Context, _ string) error {
+	c.methods = append(c.methods, "DELETE")
+	return nil
+}
+
+func (c *recordingReconnectControl) CreateInstance(
+	_ context.Context,
+	req *agentctl.CreateInstanceRequest,
+) (*agentctl.CreateInstanceResponse, error) {
+	c.methods = append(c.methods, "POST")
+	c.created = req
+	return &agentctl.CreateInstanceResponse{ID: "instance-1", Port: 41002}, nil
+}
+
+func TestDockerManagedBrokerReconnectRecreatesInstanceWithFreshLease(t *testing.T) {
+	const freshLease = "fresh-lease-after-restart"
+	control := &recordingReconnectControl{}
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		TaskID:     "task-1",
+		SessionID:  "session-1",
+		Env: map[string]string{
+			envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+			envKeyGitHubCredentialLease:     freshLease,
+		},
+	}
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	dockerExec.brokerPreflight = func(
+		context.Context,
+		brokerAgentctlProcessClient,
+		string,
+		map[string]string,
+	) error {
+		return nil
+	}
+	gotPort, reused, err := dockerExec.findExistingInstance(
+		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
+		req, "container-1", "172.17.0.2", "instance-1", "",
+	)
+	if err != nil {
+		t.Fatalf("findExistingInstance() error = %v", err)
+	}
+	if reused {
+		t.Fatal("managed broker reconnect reused the stale instance")
+	}
+	if gotPort != 41002 {
+		t.Fatalf("instance port = %d, want recreated port 41002", gotPort)
+	}
+	if got, want := strings.Join(control.methods, ","), "GET,DELETE,POST"; got != want {
+		t.Fatalf("control methods = %s, want %s", got, want)
+	}
+	if control.created == nil || control.created.Env[envKeyGitHubCredentialLease] != freshLease {
+		t.Fatalf("recreated request = %#v, want lease %q", control.created, freshLease)
+	}
+}
+
+func TestDockerManagedBrokerReconnectStopsBeforeReplacementWhenUnreachable(t *testing.T) {
+	control := &recordingReconnectControl{}
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		SessionID:  "session-1",
+		Env: map[string]string{
+			envKeyGitHubCredentialBrokerURL: "https://unreachable.example/resolve",
+			envKeyGitHubCredentialLease:     "fresh-lease",
+		},
+	}
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	dockerExec.brokerPreflight = func(
+		context.Context,
+		brokerAgentctlProcessClient,
+		string,
+		map[string]string,
+	) error {
+		return ErrGitHubCredentialBrokerUnreachable
+	}
+	_, _, err := dockerExec.findExistingInstance(
+		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
+		req, "container-1", "172.17.0.2", "instance-1", "",
+	)
+	if !errors.Is(err, ErrGitHubCredentialBrokerUnreachable) {
+		t.Fatalf("findExistingInstance() error = %v, want unreachable", err)
+	}
+	if got, want := strings.Join(control.methods, ","), "GET"; got != want {
+		t.Fatalf("control methods = %s, want %s", got, want)
+	}
+}
+
+func TestDockerExplicitTokenReconnectDoesNotReplaceInstance(t *testing.T) {
+	control := &recordingReconnectControl{}
+	req := &ExecutorCreateRequest{
+		InstanceID: "instance-1",
+		SessionID:  "session-1",
+		Env:        map[string]string{"GITHUB_TOKEN": "explicit-profile-token"},
+	}
+	dockerExec := NewDockerExecutor(config.DockerConfig{}, "", newTestDockerLogger())
+	port, _, err := dockerExec.findExistingInstance(
+		context.Background(), stubHostPortLookup{host: "127.0.0.1", port: 1}, control,
+		req, "container-1", "172.17.0.2", "instance-1", "",
+	)
+	if err != nil {
+		t.Fatalf("findExistingInstance() error = %v", err)
+	}
+	if port != 41001 {
+		t.Fatalf("instance port = %d, want existing port", port)
+	}
+	if got, want := strings.Join(control.methods, ","), "GET"; got != want {
+		t.Fatalf("control methods = %s, want %s", got, want)
+	}
+}
+
 func TestResolvePrepareScript(t *testing.T) {
 	log := newTestDockerLogger()
 	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
@@ -748,10 +909,13 @@ func TestContainerBuildEnvVarsMergesEphemeralGitLabCredentialHelper(t *testing.T
 		"GIT_CONFIG_KEY_0":   "credential.http://gitlab.internal:8080.helper",
 		"GIT_CONFIG_VALUE_0": `!f() { echo "username=oauth2"; echo "password=$GITLAB_TOKEN"; }; f`,
 	}
-	env := (&ContainerManager{}).buildEnvVars(ContainerConfig{
+	env, err := (&ContainerManager{}).buildEnvVars(ContainerConfig{
 		AgentConfig: agents.NewMockAgent(),
 		Credentials: credentials,
 	})
+	if err != nil {
+		t.Fatalf("buildEnvVars() error = %v", err)
+	}
 	joined := strings.Join(env, "\n")
 	if !strings.Contains(joined, "GIT_CONFIG_COUNT=4") || !strings.Contains(joined, "GIT_CONFIG_KEY_3=credential.http://gitlab.internal:8080.helper") {
 		t.Fatalf("GitLab credential helper was not merged:\n%s", joined)
@@ -761,6 +925,19 @@ func TestContainerBuildEnvVarsMergesEphemeralGitLabCredentialHelper(t *testing.T
 	}
 	if strings.Contains(joined, "password=glpat-super-secret") {
 		t.Fatalf("token embedded in credential helper:\n%s", joined)
+	}
+}
+
+func TestContainerBuildEnvVarsRejectsMalformedIndexedGitConfig(t *testing.T) {
+	_, err := (&ContainerManager{}).buildEnvVars(ContainerConfig{
+		AgentConfig: agents.NewMockAgent(),
+		Credentials: map[string]string{
+			"GIT_CONFIG_COUNT": "1",
+			"GIT_CONFIG_KEY_0": "core.hooksPath",
+		},
+	})
+	if err == nil {
+		t.Fatal("buildEnvVars() error = nil, want malformed indexed Git config error")
 	}
 }
 

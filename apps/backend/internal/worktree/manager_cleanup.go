@@ -278,7 +278,7 @@ func (m *Manager) ReleaseWorktreeReference(ctx context.Context, wt *Worktree) er
 // and the failure is recorded on wt as a warning (surfaced by the env preparer)
 // so the agent can still launch. This mirrors the task-level setup script
 // behavior in runSetupScriptStep — a broken setup script must not block the task.
-func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree) {
+func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree, profileEnv map[string]string) {
 	if m.scriptMsgHandler == nil || m.repoProvider == nil {
 		return
 	}
@@ -307,7 +307,7 @@ func (m *Manager) runWorktreeSetupScript(ctx context.Context, wt *Worktree) {
 		Script:       repo.SetupScript,
 		WorkingDir:   wt.Path,
 		ScriptType:   "setup",
-		Env:          m.managedScriptEnvironment(ctx),
+		Env:          mergeScriptEnv(profileEnv, m.managedScriptEnvironment(ctx)),
 	}
 	if err := m.scriptMsgHandler.ExecuteSetupScript(ctx, scriptReq); err != nil {
 		// Non-fatal: keep the worktree and surface a warning. The detailed
@@ -358,6 +358,25 @@ func (m *Manager) runWorktreeCleanupScript(ctx context.Context, wt *Worktree) {
 		m.logger.Info("cleanup script completed successfully",
 			zap.String("worktree_id", wt.ID))
 	}
+}
+
+// mergeScriptEnv combines resolved executor-profile env vars with the
+// install-managed script environment. Managed values (e.g. GOCACHE) take
+// precedence so the managed build cache is never clobbered by a profile entry.
+// Returns nil when both inputs are empty so callers preserve the "inherit the
+// full process environment" behavior of scriptProcessEnvironment(nil).
+func mergeScriptEnv(profileEnv, managed map[string]string) map[string]string {
+	if len(profileEnv) == 0 && len(managed) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(profileEnv))
+	for k, v := range profileEnv {
+		merged[k] = v
+	}
+	for k, v := range managed {
+		merged[k] = v
+	}
+	return merged
 }
 
 func (m *Manager) managedScriptEnvironment(ctx context.Context) map[string]string {

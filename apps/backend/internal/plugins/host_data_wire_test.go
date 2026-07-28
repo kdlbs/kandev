@@ -254,6 +254,68 @@ func TestPluginHostData_Wire_Messages(t *testing.T) {
 	})
 }
 
+// TestPluginHostData_Wire_Writes proves the write RPCs (CreateTask/UpdateTask/
+// SendMessage) travel intact over the real broker transport and enforce
+// api_write:<resource> host-side, exactly like the reads. A plugin declaring
+// api_write:tasks (but not messages) can create/update tasks over the wire, and
+// its undeclared message send is denied with the exact wire message on the
+// same connection.
+func TestPluginHostData_Wire_Writes(t *testing.T) {
+	t.Run("TasksCreateUpdateSucceed_MessageDenied", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+		d.taskWriter.created = &taskmodels.Task{ID: "task-new", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate"}
+		d.taskWriter.updated = &taskmodels.Task{ID: "task-1", Title: "Renamed"}
+		host := dialPluginHostOverWire(t, d.host)
+
+		created, err := host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
+			WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", StartAgent: true,
+		})
+		require.NoError(t, err)
+		require.Equal(t, "task-new", created.ID)
+		require.Equal(t, "plugin:p1", d.taskWriter.lastCreate.Source)
+		require.Equal(t, 1, d.starter.calls, "start_agent should reach the wired starter")
+
+		title := "Renamed"
+		updated, err := host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Title: &title})
+		require.NoError(t, err)
+		require.Equal(t, "task-1", updated.ID)
+
+		// The undeclared message write is denied, per-resource, on the same host.
+		_, err = host.Messages().Send(context.Background(), "task-1", "", "hi")
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok, "expected a gRPC status error, got %v", err)
+		require.Equal(t, codes.PermissionDenied, st.Code())
+		require.Equal(t, "capability 'api_write:messages' not declared", st.Message())
+	})
+
+	t.Run("SendMessageSucceeds", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"messages"}})
+		d.messenger.result = PluginMessageResult{SessionID: "session-2", Status: "queued"}
+		host := dialPluginHostOverWire(t, d.host)
+
+		dispatch, err := host.Messages().Send(context.Background(), "task-1", "session-2", "from the plugin")
+		require.NoError(t, err)
+		require.Equal(t, "session-2", dispatch.SessionID)
+		require.Equal(t, "queued", dispatch.Status)
+		require.Equal(t, "from the plugin", d.messenger.lastText)
+		require.Equal(t, "plugin:p1", d.messenger.lastSource)
+	})
+
+	t.Run("TaskCreateDeniedWithoutCapability", func(t *testing.T) {
+		d := newTestDataHost(manifest.Capabilities{})
+		host := dialPluginHostOverWire(t, d.host)
+
+		_, err := host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{Title: "x", WorkspaceID: "ws-1", WorkflowID: "wf-1"})
+		require.Error(t, err)
+		st, ok := status.FromError(err)
+		require.True(t, ok, "expected a gRPC status error, got %v", err)
+		require.Equal(t, codes.PermissionDenied, st.Code())
+		require.Equal(t, "capability 'api_write:tasks' not declared", st.Message())
+		require.Equal(t, 0, d.taskWriter.createCalls, "gate must block before the service call")
+	})
+}
+
 // TestPluginHostData_Wire_InvokeUtilityAgent proves the agent_invoke gate and
 // the one-shot completion round-trip over the real transport: an undeclared
 // manifest is PermissionDenied, and a declared one resolves the configured

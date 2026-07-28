@@ -25,11 +25,15 @@ func TestPollerStartRecordsHealthForEveryConfiguredWorkspace(t *testing.T) {
 	t.Cleanup(func() { cancel(); poller.Stop() })
 	deadline := time.Now().Add(time.Second)
 	for {
-		cfg, err := store.GetConfigForWorkspace(context.Background(), "workspace-a")
-		if err != nil {
-			t.Fatalf("get config workspace-a: %v", err)
+		allProbed := true
+		for _, workspaceID := range []string{"workspace-a", "workspace-b"} {
+			cfg, err := store.GetConfigForWorkspace(context.Background(), workspaceID)
+			if err != nil {
+				t.Fatalf("get config %s: %v", workspaceID, err)
+			}
+			allProbed = allProbed && cfg.LastCheckedAt != nil
 		}
-		if cfg.LastCheckedAt != nil {
+		if allProbed {
 			break
 		}
 		if time.Now().After(deadline) {

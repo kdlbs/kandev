@@ -93,18 +93,17 @@ Important fields:
 
 - `description` is required.
 - `mode`: `primary`, `subagent`, or `all`; default is `all`.
-- `model`: provider/model-id format when explicitly pinned. Kandev's OpenCode
-  mirrors omit it so the configured provider and primary model are inherited.
+- `model`: provider/model-id format when explicitly pinned.
 - `temperature`: lower for planning/review; higher for brainstorming.
 - `steps`: max agentic iterations; legacy `maxSteps` is deprecated.
 - `permission`: use this instead of deprecated `tools`.
 - `hidden`: hide a subagent from autocomplete.
 - `permission.task`: restrict which subagents another agent can invoke.
 
-Kandev intentionally omits `model` from its OpenCode subagent mirrors so users
-can keep their configured provider. Because OpenCode then inherits the primary
-agent's model, this is the one platform mirror that does not guarantee worker
-cost separation. Every OpenCode worker sets `permission.task: deny` to prevent
+Kandev maintains only the read-only `.opencode/agents/pr-poller.md`, using
+DeepSeek Flash for an explicitly user-authorized PR wait. When the user
+explicitly requests another project agent, retain the selected primary model
+unless they choose otherwise and set `permission.task` deliberately to control
 recursive delegation.
 
 OpenCode `temperature` controls sampling randomness, not reasoning effort. With

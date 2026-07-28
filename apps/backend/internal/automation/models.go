@@ -22,18 +22,12 @@ const (
 )
 
 const (
-	defaultBranchMain           = "main"
-	exampleRepositoryOwner      = "org/repo"
-	placeholderRepositoryOwner  = "Repository (owner/name)"
-	triggerCategoryGitHub       = "github"
-	triggerDataSourceKey        = "source"
-	triggerDataSourceManual     = "manual"
-	triggerCronHourlyShorthand  = "@hourly"
-	triggerCronHourlyExpression = "0 * * * *"
-	triggerCronDailyShorthand   = "@daily"
-	triggerCronDailyExpression  = "0 0 * * *"
-	triggerCronWeeklyShorthand  = "@weekly"
-	triggerCronWeeklyExpression = "0 0 * * 0"
+	defaultBranchMain          = "main"
+	exampleRepositoryOwner     = "org/repo"
+	placeholderRepositoryOwner = "Repository (owner/name)"
+	triggerCategoryGitHub      = "github"
+	triggerDataSourceKey       = "source"
+	triggerDataSourceManual    = "manual"
 )
 
 // RunStatus tracks the outcome of a trigger firing.
@@ -45,13 +39,25 @@ const (
 	RunStatusSucceeded   RunStatus = "succeeded"
 	RunStatusFailed      RunStatus = "failed"
 	RunStatusSkipped     RunStatus = "skipped"
+	// RunStatusArchived is a read-time-derived terminal status: it is never
+	// written by a trigger-firing code path, only computed by ListRuns when
+	// a task_created run's generated task has been archived (archived_at
+	// set) — whether archived through the UI or by the agent itself (e.g.
+	// via an "archive this task" instruction). The task's outcome may still
+	// be known (succeeded/failed already recorded); this only overrides the
+	// still-open task_created status, never a real terminal one.
+	RunStatusArchived RunStatus = "archived"
 	// RunStatusCancelled is a read-time-derived terminal status: it is never
 	// written by a trigger-firing code path, only computed by ListRuns (and
-	// implied by CountActiveRuns' filter) when a task_created run's
-	// generated task has been archived or no longer exists. The task's
-	// outcome is unknown at that point — the user closed it out some other
-	// way — so this is deliberately distinct from succeeded/failed rather
-	// than guessing one.
+	// implied by CountActiveRuns' filter) for a task_created run whose
+	// generated task either no longer exists (deleted — outcome
+	// unrecoverable) or whose task's *current* session (task_sessions row
+	// with is_primary = 1) was explicitly put into the CANCELLED state —
+	// set only when an agent run was manually stopped (a deliberate
+	// cancellation, distinct from archiving; the task's own state is not
+	// touched by a stop and so isn't consulted here). Archived_at takes
+	// precedence over the cancelled-session check when both apply — see
+	// listRunsWithTaskState.
 	RunStatusCancelled RunStatus = "cancelled"
 )
 
@@ -162,6 +168,7 @@ type GitHubCITriggerConfig struct {
 	Repos       []github.RepoFilter `json:"repos"`
 	Conclusions []string            `json:"conclusions"` // success, failure, etc.
 	CheckNames  []string            `json:"check_names,omitempty"`
+	Branches    []string            `json:"branches,omitempty"` // head-branch glob filter; empty = all
 }
 
 // WebhookTriggerConfig holds configuration for webhook triggers.

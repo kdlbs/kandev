@@ -233,10 +233,32 @@ func (e *Executor) StopByTaskID(ctx context.Context, taskID string, reason strin
 // — see promptPassthrough below.
 const stopReasonPassthrough = "passthrough_dispatched"
 
+var ErrPromptDispatchCallbackUnsupported = errors.New("agent manager does not support prompt dispatch callback")
+
 // Prompt sends a follow-up prompt to a running agent for a task
 // Returns PromptResult indicating if the agent needs input
-// Attachments (images) are passed to the agent if provided
+// Attachments (images) are passed to the agent if provided.
+//
+// promptTask (task_operations.go) always calls PromptWithDispatchCallback
+// instead — it needs the dispatch callback to keep foreground-admission
+// tracking in step. Prompt has no production caller of its own; it is kept as
+// a thin nil-callback delegation for tests and any future caller that has no
+// dispatch callback to provide.
 func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+	return e.PromptWithDispatchCallback(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, nil, preloadedSession...)
+}
+
+// PromptWithDispatchCallback invokes onDispatched after agentctl accepts the
+// prompt but before waiting for the turn to complete.
+func (e *Executor) PromptWithDispatchCallback(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
+	return e.prompt(ctx, taskID, sessionID, prompt, attachments, dispatchOnly, onDispatched, preloadedSession...)
+}
+
+type promptAgentWithDispatchCallback interface {
+	PromptAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*PromptResult, error)
+}
+
+func (e *Executor) prompt(ctx context.Context, taskID, sessionID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func(), preloadedSession ...*models.TaskSession) (*PromptResult, error) {
 	var session *models.TaskSession
 	if len(preloadedSession) > 0 && preloadedSession[0] != nil {
 		session = preloadedSession[0]
@@ -270,10 +292,23 @@ func (e *Executor) Prompt(ctx context.Context, taskID, sessionID string, prompt 
 	// dispatchOnly is intentionally not forwarded: PTY writes are inherently
 	// fire-and-forget, so the flag has no analogue in passthrough mode.
 	if e.agentManager.IsPassthroughSession(ctx, sessionID) {
-		return e.promptPassthrough(ctx, taskID, session, prompt, attachments)
+		result, err := e.promptPassthrough(ctx, taskID, session, prompt, attachments)
+		if err == nil && onDispatched != nil {
+			onDispatched()
+		}
+		return result, err
 	}
 
-	result, err := e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+	var result *PromptResult
+	if onDispatched != nil {
+		notifier, ok := e.agentManager.(promptAgentWithDispatchCallback)
+		if !ok {
+			return nil, ErrPromptDispatchCallbackUnsupported
+		}
+		result, err = notifier.PromptAgentWithDispatchCallback(ctx, executionID, prompt, attachments, dispatchOnly, onDispatched)
+	} else {
+		result, err = e.agentManager.PromptAgent(ctx, executionID, prompt, attachments, dispatchOnly)
+	}
 	if err != nil {
 		if errors.Is(err, lifecycle.ErrExecutionNotFound) {
 			return nil, ErrExecutionNotFound
@@ -638,6 +673,7 @@ func (e *Executor) applyWorktreeToSwitchRequest(req *LaunchAgentRequest, session
 // container_id / status are written by the lifecycle manager during the launch
 // itself (lifecycle.persistExecutorRunning) and not touched here.
 func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionID string, session *models.TaskSession, newModel string) error {
+	expectedState := session.State
 	session.State = models.TaskSessionStateStarting
 	session.UpdatedAt = time.Now().UTC()
 
@@ -646,7 +682,7 @@ func (e *Executor) persistModelSwitchState(ctx context.Context, taskID, sessionI
 	}
 	session.AgentProfileSnapshot["model"] = newModel
 
-	if err := e.updateSessionStarting(ctx, taskID, session, true); err != nil {
+	if err := e.updateSessionStarting(ctx, taskID, session, expectedState, true); err != nil {
 		e.logger.Error("failed to update session after model switch",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),

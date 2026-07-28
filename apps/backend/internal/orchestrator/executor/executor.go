@@ -44,6 +44,7 @@ type executorStore interface {
 	// Task↔repo junction
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
+	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
 	// Session
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
@@ -82,6 +83,16 @@ type executorStore interface {
 	// Session history + plan (for context handover)
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
+}
+
+type primarySessionTaskStateStore interface {
+	UpdateTaskStateIfPrimarySessionState(
+		context.Context,
+		string,
+		string,
+		models.TaskSessionState,
+		v1.TaskState,
+	) (v1.TaskState, bool, error)
 }
 
 // Common errors
@@ -372,13 +383,16 @@ type LaunchAgentRequest struct {
 	// When non-empty it is the source of truth and the legacy single-repo
 	// top-level fields above are populated from Repositories[0] for backwards
 	// compatibility with code paths that have not yet been updated.
-	Repositories []RepoSpec
+	Repositories     []RepoSpec
+	WorkspaceFolders []WorkspaceFolderSpec
 
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. nil when routing is disabled or this is a kanban
 	// launch.
 	RouteOverride *RouteOverride
 }
+
+type WorkspaceFolderSpec struct{ Name, LocalPath string }
 
 // RepoSpec describes one repository for a multi-repo task launch from the
 // orchestrator. Mirrors lifecycle.RepoLaunchSpec; kept as a separate type so
@@ -564,9 +578,17 @@ type SessionStateTransitionFunc func(
 
 // SessionStartingFunc is called when the executor has prepared/resumed an
 // execution and needs to mark the session STARTING while preserving other
-// session-row updates such as metadata. promoteTask controls whether the
-// callback should also move the parent task to IN_PROGRESS immediately.
-type SessionStartingFunc func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error
+// session-row updates such as metadata. expectedState is the state observed
+// before runtime launch, so a prior CANCELLED state can resume without
+// overwriting a cancellation that raced the launch. promoteTask controls
+// whether the callback should also move the parent task to IN_PROGRESS.
+type SessionStartingFunc func(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	expectedState models.TaskSessionState,
+	promoteTask bool,
+) error
 
 // ExecutionCleanupClaimFunc atomically claims forced cleanup for one exact
 // session execution. It returns true when the executor owns cleanup and false
@@ -624,6 +646,10 @@ type Executor struct {
 	gitlabCredentials GitLabCredentialResolver
 	logger            *logger.Logger
 
+	githubCredentialIssuer         GitHubCredentialLeaseIssuer
+	githubCredentialBrokerURL      string
+	githubCredentialPolicyResolver TaskGitCredentialPolicyResolver
+
 	// Configuration
 	retryLimit int
 	retryDelay time.Duration
@@ -634,6 +660,9 @@ type Executor struct {
 
 	// Session-aware task state callback used after agent-process start settles.
 	onTaskRuntimeStateReconcile TaskRuntimeStateReconcileFunc
+	// Primary-session-aware task state callback used for failures before
+	// AgentManager.LaunchAgent owns failure bookkeeping.
+	onEarlyLaunchTaskStateReconcile TaskRuntimeStateReconcileFunc
 
 	// Callback for session state changes that need event publishing.
 	// Set by the orchestrator to route through updateTaskSessionState which
@@ -702,35 +731,33 @@ func (e *Executor) taskEnvLock(taskID string) *sync.Mutex {
 
 // RepoCloner clones remote repositories to local disk.
 type RepoCloner interface {
-	EnsureClonedForProvider(
-		ctx context.Context,
-		cloneURL, provider, providerHost, owner, name, credentialHost, token string,
+	EnsureWorkspaceClonedForProvider(
+		ctx context.Context, workspaceID, cloneURL, provider, providerHost,
+		owner, name, credentialHost, token string,
 	) (string, error)
+	ShouldRecloneForWorkspace(workspaceID, path string) bool
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
 	BuildCloneURLWithHost(provider, host, owner, name string) (string, error)
 }
 
 type authenticatedRepoCloner interface {
-	EnsureClonedWithBasicAuth(ctx context.Context, cloneURL, owner, name, username, password string) (string, error)
+	EnsureWorkspaceClonedWithBasicAuth(
+		ctx context.Context, workspaceID, provider, providerHost,
+		cloneURL, owner, name, username, password string,
+	) (string, error)
 }
 
 func (e *Executor) ensureClonedWithWorkspaceAuth(
 	ctx context.Context, repo *models.Repository, cloneURL string,
 ) (string, error) {
-	if strings.EqualFold(repo.Provider, "gitlab") {
-		credentialHost, token := "", ""
-		if e.gitlabCredentials != nil {
-			credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
-		}
-		return e.repoCloner.EnsureClonedForProvider(
-			ctx, cloneURL, repo.Provider, repo.ProviderHost,
-			repo.ProviderOwner, repo.ProviderName, credentialHost, token,
-		)
+	credentialHost, token := "", ""
+	if strings.EqualFold(repo.Provider, "gitlab") && e.gitlabCredentials != nil {
+		credentialHost, token, _ = e.gitlabCredentials.ResolveGitLabExecutionCredentials(ctx, repo.WorkspaceID)
 	}
 	if repo.Provider != "azure_devops" || !strings.HasPrefix(cloneURL, "https://") {
-		return e.repoCloner.EnsureClonedForProvider(
-			ctx, cloneURL, repo.Provider, repo.ProviderHost,
-			repo.ProviderOwner, repo.ProviderName, "", "",
+		return e.repoCloner.EnsureWorkspaceClonedForProvider(
+			ctx, repo.WorkspaceID, cloneURL, repo.Provider, repo.ProviderHost,
+			repo.ProviderOwner, repo.ProviderName, credentialHost, token,
 		)
 	}
 	authCloner, ok := e.repoCloner.(authenticatedRepoCloner)
@@ -742,7 +769,10 @@ func (e *Executor) ensureClonedWithWorkspaceAuth(
 		return "", fmt.Errorf("read Azure DevOps clone credential: %w", err)
 	}
 	// Azure DevOps PAT authentication ignores the username; any non-empty value works.
-	return authCloner.EnsureClonedWithBasicAuth(ctx, cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat)
+	return authCloner.EnsureWorkspaceClonedWithBasicAuth(
+		ctx, repo.WorkspaceID, repo.Provider, repo.ProviderHost,
+		cloneURL, repo.ProviderOwner, repo.ProviderName, "kandev", pat,
+	)
 }
 
 // RepoUpdater updates repository records in the database.
@@ -789,6 +819,12 @@ func (e *Executor) SetOnTaskStateChange(fn TaskStateChangeFunc) {
 // SetOnTaskRuntimeStateReconcile sets the session-aware runtime task-state callback.
 func (e *Executor) SetOnTaskRuntimeStateReconcile(fn TaskRuntimeStateReconcileFunc) {
 	e.onTaskRuntimeStateReconcile = fn
+}
+
+// SetOnEarlyLaunchTaskStateReconcile sets the primary-session-aware task-state
+// callback for environment-preparation failures.
+func (e *Executor) SetOnEarlyLaunchTaskStateReconcile(fn TaskRuntimeStateReconcileFunc) {
+	e.onEarlyLaunchTaskStateReconcile = fn
 }
 
 // SetOnSessionStateChange sets a callback for session state changes.

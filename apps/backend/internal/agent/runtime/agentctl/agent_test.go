@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,6 +22,46 @@ func newTestLogger() *logger.Logger {
 		Format: "json",
 	})
 	return log
+}
+
+func TestConfigureAgent_SerializesStructuredArgsAndOmitsAbsentFallback(t *testing.T) {
+	var bodies [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read configure request: %v", err)
+		}
+		bodies = append(bodies, body)
+		_, _ = w.Write([]byte(`{"success":true}`))
+	}))
+	defer server.Close()
+
+	client := &Client{baseURL: server.URL, httpClient: server.Client()}
+	args := []string{"runner", "two words", "", `C:\tools\agent.exe`}
+	continueArgs := []string{"runner", "continue", "thread id"}
+	if err := client.ConfigureAgent(context.Background(), "runner two words  C:\\tools\\agent.exe", args, nil, "", "runner continue thread id", continueArgs); err != nil {
+		t.Fatalf("configure structured args: %v", err)
+	}
+	if err := client.ConfigureAgent(context.Background(), "legacy --flag", nil, nil, "", "", nil); err != nil {
+		t.Fatalf("configure legacy fallback: %v", err)
+	}
+
+	var structured map[string]json.RawMessage
+	if err := json.Unmarshal(bodies[0], &structured); err != nil {
+		t.Fatalf("decode structured request: %v", err)
+	}
+	for _, field := range []string{"agent_args", "continue_args"} {
+		if _, ok := structured[field]; !ok {
+			t.Fatalf("structured request omitted %s: %s", field, bodies[0])
+		}
+	}
+	var legacy map[string]json.RawMessage
+	if err := json.Unmarshal(bodies[1], &legacy); err != nil {
+		t.Fatalf("decode legacy request: %v", err)
+	}
+	if _, ok := legacy["agent_args"]; ok {
+		t.Fatalf("legacy fallback unexpectedly sent agent_args: %s", bodies[1])
+	}
 }
 
 // wsTestServer creates a test WebSocket server that echoes back response messages.

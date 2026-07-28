@@ -42,15 +42,16 @@ func (a *Adapter) sendPrompt(
 	expectSession string,
 	promptGeneration uint64,
 ) error {
-	// Acquire the prompt gate, honouring ctx so a queued wakeup whose context
-	// is cancelled (timeout / adapter Close) aborts instead of blocking on a
-	// stuck in-flight turn.
-	select {
-	case a.promptGate <- struct{}{}:
-		defer func() { <-a.promptGate }()
-	case <-ctx.Done():
-		return ctx.Err()
+	humanPrompt := expectSession == ""
+	promptCtx, turn := newPromptTurnState(
+		ctx,
+		promptGeneration,
+		humanPrompt && a.supportsPromptHandoff() && promptGeneration != 0,
+	)
+	if err := a.acquirePromptTurn(ctx, turn, humanPrompt); err != nil {
+		return err
 	}
+	defer a.finishPromptTurn(turn)
 
 	a.mu.Lock()
 	conn := a.acpConn
@@ -93,15 +94,18 @@ func (a *Adapter) sendPrompt(
 	contentBlocks := a.buildPromptContentBlocks(finalMessage, attachments)
 
 	// Start prompt span — notification spans become children via getPromptTraceCtx()
-	traceCtx, promptSpan := shared.TraceProtocolRequest(ctx, shared.ProtocolACP, a.agentID, "prompt")
+	traceCtx, promptSpan := shared.TraceProtocolRequest(
+		promptCtx,
+		shared.ProtocolACP,
+		a.agentID,
+		"prompt",
+	)
 	promptSpan.SetAttributes(
 		attribute.String("session_id", sessionID),
 		attribute.Int("prompt_length", len(finalMessage)),
 		attribute.Int("image_count", len(attachments)),
 	)
-	promptCtx, turn := a.registerPromptTurn(traceCtx)
-	defer a.clearPromptTurn(turn)
-	a.setPromptTraceCtx(promptCtx)
+	a.setPromptTraceCtx(turn, traceCtx)
 
 	// Clear the loading flag before sending the prompt.
 	// If we're resuming a session, history replay is complete by the time we send a new prompt.
@@ -124,7 +128,7 @@ func (a *Adapter) sendPrompt(
 	var err error
 	go func() {
 		defer close(turn.rpcDone)
-		resp, err = conn.Prompt(promptCtx, acp.PromptRequest{
+		resp, err = conn.Prompt(traceCtx, acp.PromptRequest{
 			SessionId: acp.SessionId(sessionID),
 			Prompt:    contentBlocks,
 		})
@@ -133,12 +137,14 @@ func (a *Adapter) sendPrompt(
 	if waitErr := a.waitForPromptRPCAfterUserCancel(turn); waitErr != nil {
 		promptSpan.RecordError(waitErr)
 		promptSpan.End()
-		a.clearPromptTraceCtx()
+		a.clearPromptTraceCtx(turn)
 		return waitErr
 	}
 
-	// Clear prompt context and end span regardless of outcome
-	a.clearPromptTraceCtx()
+	ownsCompletion := a.claimPromptTurnCompletion(turn)
+	// Clear prompt context and end span regardless of outcome. A transferred
+	// predecessor cannot clear the successor's trace.
+	a.clearPromptTraceCtx(turn)
 	stopReason := ""
 	if err != nil {
 		promptSpan.RecordError(err)
@@ -148,8 +154,15 @@ func (a *Adapter) sendPrompt(
 	}
 	promptSpan.End()
 
+	if !ownsCompletion {
+		a.logger.Debug("suppressing completion from handed-off prompt RPC",
+			zap.String("session_id", sessionID),
+			zap.Uint64("prompt_generation", promptGeneration),
+			zap.Error(err))
+		return nil
+	}
 	if err != nil {
-		return normalizePromptErrorAfterCancel(promptCtx, err)
+		return normalizePromptErrorAfterCancel(traceCtx, err)
 	}
 
 	// Drain queued ACP notifications before running the post-prompt sweeps and
@@ -169,7 +182,7 @@ func (a *Adapter) sendPrompt(
 
 	// Cancel any tool calls still in-flight (e.g. a denied permission leaves the
 	// tool_call without a terminal status update from the agent).
-	a.cancelActiveToolCalls(sessionID)
+	a.cancelPromptEndToolCalls(sessionID)
 
 	// Mark any tracked Monitors as ended. They live longer than a typical tool
 	// call (the script keeps running across model turns), so this sweep runs
@@ -184,11 +197,11 @@ func (a *Adapter) sendPrompt(
 		zap.String("stop_reason", stopReason))
 	a.cancelAsyncTurnComplete(sessionID)
 	usage := a.dialect.promptUsage(extractUsage(&resp), resp.Meta)
-	// codex-acp emits no per-turn usage frame, only cumulative
-	// usage_update.used. Fall back to the inferred delta so the office
-	// cost subscriber sees at least an approximate input count. The
-	// resulting cost is off (no input/output split) — flagged via
-	// PromptUsage.Estimated so downstream rows carry estimated=true.
+	// codex-acp emits no per-turn usage frame, only cumulative context
+	// occupancy. Fall back to nonnegative occupancy growth so the office cost
+	// subscriber sees an approximate input count. It has no input/output split,
+	// so Estimated remains true. usage_update cost is cumulative session cost;
+	// consumeUsageDelta converts it to the current turn's nonnegative delta.
 	delta, costSubcents := a.consumeUsageDelta(sessionID)
 	if usage == nil {
 		if delta > 0 || costSubcents > 0 {
@@ -199,8 +212,8 @@ func (a *Adapter) sendPrompt(
 			}
 		}
 	} else if costSubcents > 0 {
-		// claude-acp: usage_update.cost.amount carries the authoritative
-		// USD cost — attach it to the typed usage frame so Layer A wins
+		// claude-acp: usage_update.cost.amount carries authoritative cumulative
+		// USD cost — attach the derived turn delta so Layer A wins
 		// downstream and the office cost subscriber stores the row
 		// verbatim instead of falling back to models.dev. claude-acp's
 		// model id is a logical alias (sonnet / haiku) that won't match
@@ -216,6 +229,10 @@ func (a *Adapter) sendPrompt(
 	})
 
 	return nil
+}
+
+func (a *Adapter) supportsPromptHandoff() bool {
+	return a.agentID == claudeAgentID || a.agentID == mockAgentID
 }
 
 func normalizePromptErrorAfterCancel(promptCtx context.Context, err error) error {
@@ -438,7 +455,24 @@ func (a *Adapter) Cancel(ctx context.Context) error {
 // when the subagent finishes seconds later. Leaving the entry in
 // activeToolCalls lets that authoritative terminal update land naturally.
 func (a *Adapter) cancelActiveToolCalls(sessionID string) {
+	a.cancelActiveToolCallsPreservingHandoff(sessionID, false)
+}
+
+// cancelPromptEndToolCalls preserves background work inherited from a
+// handed-off predecessor. Explicit session cancellation still uses
+// cancelActiveToolCalls so it can terminate the whole session.
+func (a *Adapter) cancelPromptEndToolCalls(sessionID string) {
+	a.cancelActiveToolCallsPreservingHandoff(sessionID, true)
+}
+
+func (a *Adapter) cancelActiveToolCallsPreservingHandoff(
+	sessionID string,
+	preserveHandoff bool,
+) {
 	a.mu.Lock()
+	if !preserveHandoff {
+		a.clearPromptHandoffToolTrackingLocked()
+	}
 	monitorToolCallIDs := make(map[string]bool)
 	for _, tcID := range a.activeMonitors[sessionID] {
 		monitorToolCallIDs[tcID] = true
@@ -447,12 +481,15 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 	preserved := make(map[string]*streams.NormalizedPayload)
 	for tcID, payload := range a.activeToolCalls {
 		switch {
+		case preserveHandoff && a.isPromptHandoffToolProtectedLocked(tcID):
+			preserved[tcID] = payload
 		case monitorToolCallIDs[tcID]:
 			preserved[tcID] = payload
 		case payload != nil && payload.Kind() == streams.ToolKindSubagentTask:
 			preserved[tcID] = payload
 		default:
 			toCancel[tcID] = payload
+			a.forgetPromptHandoffToolLocked(tcID)
 		}
 	}
 	a.activeToolCalls = preserved
@@ -470,4 +507,61 @@ func (a *Adapter) cancelActiveToolCalls(sessionID string) {
 			NormalizedPayload: normalized,
 		})
 	}
+}
+
+func (a *Adapter) protectActiveBackgroundWorkForHandoff(sessionID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	for toolCallID, payload := range a.activeToolCalls {
+		if payload != nil && payload.IsActiveBackgroundWork() {
+			a.handoffProtectedToolCalls[toolCallID] = struct{}{}
+		}
+	}
+	for _, toolCallID := range a.activeMonitors[sessionID] {
+		a.handoffProtectedToolCalls[toolCallID] = struct{}{}
+	}
+
+	// Include nested children that were already live at the handoff boundary.
+	// Children arriving later inherit protection in trackToolCallLineage.
+	for changed := true; changed; {
+		changed = false
+		for toolCallID, parentToolCallID := range a.toolCallParents {
+			if _, parentProtected := a.handoffProtectedToolCalls[parentToolCallID]; !parentProtected {
+				continue
+			}
+			if _, alreadyProtected := a.handoffProtectedToolCalls[toolCallID]; alreadyProtected {
+				continue
+			}
+			a.handoffProtectedToolCalls[toolCallID] = struct{}{}
+			changed = true
+		}
+	}
+}
+
+func (a *Adapter) trackToolCallLineage(toolCallID, parentToolCallID string) {
+	if toolCallID == "" || parentToolCallID == "" {
+		return
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.toolCallParents[toolCallID] = parentToolCallID
+	if _, protected := a.handoffProtectedToolCalls[parentToolCallID]; protected {
+		a.handoffProtectedToolCalls[toolCallID] = struct{}{}
+	}
+}
+
+func (a *Adapter) isPromptHandoffToolProtectedLocked(toolCallID string) bool {
+	_, protected := a.handoffProtectedToolCalls[toolCallID]
+	return protected
+}
+
+func (a *Adapter) forgetPromptHandoffToolLocked(toolCallID string) {
+	delete(a.toolCallParents, toolCallID)
+	delete(a.handoffProtectedToolCalls, toolCallID)
+}
+
+func (a *Adapter) clearPromptHandoffToolTrackingLocked() {
+	clear(a.toolCallParents)
+	clear(a.handoffProtectedToolCalls)
 }

@@ -335,6 +335,155 @@ func TestValidate_ManifestWithBundleAndNoPagesPasses(t *testing.T) {
 	}
 }
 
+func TestValidate_ValidKeybindingPasses(t *testing.T) {
+	m := validManifest(t)
+	m.UI.Bundle = "/ui/bundle.js"
+	m.UI.Keybindings = []UIKeybinding{
+		{ID: "open-demo", Default: "mod+shift+k", Description: "Open the demo modal"},
+	}
+
+	if err := m.Validate(); err != nil {
+		t.Fatalf("Validate() unexpected error: %v", err)
+	}
+}
+
+func TestValidate_RejectsDuplicateKeybindingID(t *testing.T) {
+	m := validManifest(t)
+	m.UI.Bundle = "/ui/bundle.js"
+	m.UI.Keybindings = []UIKeybinding{
+		{ID: "open-demo", Default: "mod+k", Description: "Open the demo modal"},
+		{ID: "open-demo", Default: "mod+j", Description: "Open a different modal"},
+	}
+
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("Validate() expected error for duplicate ui.keybindings id, got nil")
+	}
+	if !strings.Contains(err.Error(), "duplicate") {
+		t.Fatalf("Validate() error = %q, want substring %q", err.Error(), "duplicate")
+	}
+}
+
+func TestValidate_RejectsEmptyKeybindingDescription(t *testing.T) {
+	m := validManifest(t)
+	m.UI.Bundle = "/ui/bundle.js"
+	m.UI.Keybindings = []UIKeybinding{
+		{ID: "open-demo", Default: "mod+k", Description: ""},
+	}
+
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("Validate() expected error for empty ui.keybindings description, got nil")
+	}
+	if !strings.Contains(err.Error(), "description") {
+		t.Fatalf("Validate() error = %q, want substring %q", err.Error(), "description")
+	}
+}
+
+func TestValidate_RejectsKeybindingWithoutBundle(t *testing.T) {
+	m := validManifest(t)
+	m.UI.Bundle = ""
+	m.UI.Keybindings = []UIKeybinding{
+		{ID: "open-demo", Default: "mod+k", Description: "Open the demo modal"},
+	}
+
+	err := m.Validate()
+	if err == nil {
+		t.Fatal("Validate() expected error for ui.keybindings without ui.bundle, got nil")
+	}
+	if !strings.Contains(err.Error(), "ui.bundle") {
+		t.Fatalf("Validate() error = %q, want substring %q", err.Error(), "ui.bundle")
+	}
+}
+
+func TestParseKeybindingCombo_ValidCombos(t *testing.T) {
+	valid := []string{"k", "mod+k", "mod+shift+k", "ctrl+alt+f1", "arrowup", "cmd+enter", " mod + K "}
+	for _, combo := range valid {
+		if err := parseKeybindingCombo(combo); err != nil {
+			t.Errorf("parseKeybindingCombo(%q) unexpected error: %v", combo, err)
+		}
+	}
+}
+
+func TestParseKeybindingCombo_RejectsEmpty(t *testing.T) {
+	if err := parseKeybindingCombo(""); err == nil {
+		t.Fatal("parseKeybindingCombo(\"\") expected error, got nil")
+	}
+}
+
+func TestParseKeybindingCombo_RejectsTwoNonModifierKeys(t *testing.T) {
+	err := parseKeybindingCombo("mod+k+j")
+	if err == nil {
+		t.Fatal("parseKeybindingCombo(\"mod+k+j\") expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("parseKeybindingCombo() error = %q, want substring %q", err.Error(), "exactly one")
+	}
+}
+
+func TestParseKeybindingCombo_RejectsNoNonModifierKey(t *testing.T) {
+	err := parseKeybindingCombo("mod+shift")
+	if err == nil {
+		t.Fatal("parseKeybindingCombo(\"mod+shift\") expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "exactly one") {
+		t.Fatalf("parseKeybindingCombo() error = %q, want substring %q", err.Error(), "exactly one")
+	}
+}
+
+func TestParseKeybindingCombo_RejectsUnknownModifier(t *testing.T) {
+	err := parseKeybindingCombo("hyper+k")
+	if err == nil {
+		t.Fatal("parseKeybindingCombo(\"hyper+k\") expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown token") {
+		t.Fatalf("parseKeybindingCombo() error = %q, want substring %q", err.Error(), "unknown token")
+	}
+}
+
+// "control" and "super" are undocumented aliases for ctrl/cmd that the
+// backend used to accept even though docs/plans/plugins/PLUGIN-API.md only
+// documents mod|ctrl|cmd|meta|alt|option|shift. Dropped for consistency with
+// the public contract and the frontend parser.
+func TestParseKeybindingCombo_RejectsUndocumentedModifierAliases(t *testing.T) {
+	for _, combo := range []string{"control+k", "super+k"} {
+		err := parseKeybindingCombo(combo)
+		if err == nil {
+			t.Fatalf("parseKeybindingCombo(%q) expected error, got nil", combo)
+		}
+		if !strings.Contains(err.Error(), "unknown token") {
+			t.Fatalf("parseKeybindingCombo(%q) error = %q, want substring %q", combo, err.Error(), "unknown token")
+		}
+	}
+}
+
+// A manifest default like "mod+shift+slash" or "shift+1" is stored/compared
+// against KeyboardEvent.key, but a physically-held Shift means the browser
+// reports the shifted character ("?", "!") instead of the token validated
+// here — so the combo could never actually dispatch. Reject it at
+// registration time instead.
+func TestParseKeybindingCombo_RejectsShiftWithAlteredKey(t *testing.T) {
+	for _, combo := range []string{"shift+1", "mod+shift+slash", "shift+9", "shift+minus"} {
+		err := parseKeybindingCombo(combo)
+		if err == nil {
+			t.Fatalf("parseKeybindingCombo(%q) expected error, got nil", combo)
+		}
+		if !strings.Contains(err.Error(), "shift") {
+			t.Fatalf("parseKeybindingCombo(%q) error = %q, want substring %q", combo, err.Error(), "shift")
+		}
+	}
+}
+
+// Shift is fine with letters (case is normalized before matching), named
+// keys, and function keys, since Shift doesn't change their KeyboardEvent.key.
+func TestParseKeybindingCombo_AllowsShiftWithUnaffectedKeys(t *testing.T) {
+	for _, combo := range []string{"shift+k", "mod+shift+tab", "shift+arrowup", "ctrl+shift+f1"} {
+		if err := parseKeybindingCombo(combo); err != nil {
+			t.Errorf("parseKeybindingCombo(%q) unexpected error: %v", combo, err)
+		}
+	}
+}
+
 func TestHasUIBundle_TrueWhenBundleSet(t *testing.T) {
 	m := validManifest(t)
 	m.UI.Bundle = "/ui/bundle.js"

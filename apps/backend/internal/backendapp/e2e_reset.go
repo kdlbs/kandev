@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"net/http"
 	"os"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
@@ -49,6 +51,10 @@ func registerE2EResetRoutes(
 		api.POST("/automations", handleE2ECreateAutomation(automationSvc, log))
 		api.POST("/automation-runs", handleE2ECreateAutomationRun(automationSvc, log))
 	}
+	// Seeds a task_sessions row directly (e.g. a CANCELLED primary session)
+	// so tests can assert on session-state-derived behavior without a full
+	// agent stop/resume cycle.
+	api.POST("/task-sessions", handleE2ECreateTaskSession(repo, log))
 
 	log.Info("registered E2E endpoints (test-only)")
 }
@@ -94,6 +100,19 @@ func handleE2EReset(
 		}
 		if _, err := repo.DB().ExecContext(ctx, `DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID); err != nil {
 			log.Warn("e2e reset: GitHub workspace settings cleanup failed", zap.Error(err))
+		}
+		if err := deleteGitHubAuthForReset(ctx, repo.DB(), workspaceID); err != nil {
+			log.Error("e2e reset: GitHub authentication cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: "GitHub authentication cleanup failed"})
+			return
+		}
+		if githubSvc != nil {
+			githubSvc.ResetMockAuth(workspaceID)
+			if err := resetGitHubAppRegistrationsForE2E(ctx, githubSvc, workspaceID); err != nil {
+				log.Error("e2e reset: GitHub deployment App cleanup failed", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: "GitHub deployment App cleanup failed"})
+				return
+			}
 		}
 		// The workflow-sync poller reads these rows globally; delete before
 		// task/workflow deletion so a mid-reset tick can't resync workflows.
@@ -147,6 +166,15 @@ func handleE2EReset(
 				return
 			}
 			gitLabReset = resetResult
+		}
+
+		// Clear native code-review runs and findings before deleting the tasks
+		// that own them. A review pass left in flight by an earlier spec would
+		// otherwise publish findings mid-reset and leak them into a later test.
+		if err := repo.DeleteTaskReviewByWorkspace(ctx, workspaceID); err != nil {
+			log.Error("e2e reset: task review cleanup failed", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
 		}
 
 		// Route through the task service (rather than a raw SQL DELETE) so
@@ -207,6 +235,42 @@ func handleE2EReset(
 			"deleted_gitlab_issue_watches":  gitLabReset.IssueWatches,
 		})
 	}
+}
+
+func resetGitHubAppRegistrationsForE2E(
+	ctx context.Context,
+	service *github.Service,
+	workspaceID string,
+) error {
+	if service == nil {
+		return nil
+	}
+	return service.ResetAppRegistrationsForE2E(ctx, workspaceID)
+}
+
+func deleteGitHubAuthForReset(ctx context.Context, database *sql.DB, workspaceID string) error {
+	tx, err := database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, query := range []string{
+		`DELETE FROM github_auth_flows WHERE workspace_id = ?`,
+		`DELETE FROM github_user_connections WHERE workspace_id = ?`,
+		`DELETE FROM github_workspace_connections WHERE workspace_id = ?`,
+	} {
+		if _, err := tx.ExecContext(ctx, query, workspaceID); err != nil {
+			return err
+		}
+	}
+	userSecretPrefix := "github:user:" + workspaceID + ":"
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM secrets
+		WHERE id = ? OR substr(id, 1, length(?)) = ?`,
+		github.WorkspacePATSecretKey(workspaceID), userSecretPrefix, userSecretPrefix); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func deleteAutomationsForReset(
@@ -318,6 +382,62 @@ func handleE2ECreateAutomationRun(svc *automation.Service, log *logger.Logger) g
 		}
 		c.JSON(http.StatusCreated, gin.H{
 			"id": run.ID, "automation_id": run.AutomationID, statusKey: run.Status, taskIDPayloadKey: run.TaskID,
+		})
+	}
+}
+
+type e2eCreateTaskSessionRequest struct {
+	TaskID string `json:"task_id"`
+	State  string `json:"state"`
+	// IsPrimary defaults to true: tests seeding a single session almost
+	// always want it to be the task's *current* session (the one
+	// listRunsWithTaskState/countActiveRunsWithTaskState read). Set to
+	// false to seed a stale, superseded session for resume scenarios.
+	IsPrimary *bool `json:"is_primary"`
+}
+
+// handleE2ECreateTaskSession seeds a task_sessions row directly for E2E
+// tests that need to assert on session-state-derived behavior (e.g. the
+// automation Recent Runs "Cancelled" status, which is keyed off the task's
+// primary session state, not the task's own state — see
+// internal/automation.Store.listRunsWithTaskState) without driving a real
+// agent through a full stop/resume cycle.
+func handleE2ECreateTaskSession(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var body e2eCreateTaskSessionRequest
+		if err := c.ShouldBindJSON(&body); err != nil || body.TaskID == "" || body.State == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "task_id and state are required"})
+			return
+		}
+		isPrimary := true
+		if body.IsPrimary != nil {
+			isPrimary = *body.IsPrimary
+		}
+		session := &taskmodels.TaskSession{
+			TaskID: body.TaskID,
+			State:  taskmodels.TaskSessionState(body.State),
+		}
+		if err := repo.CreateTaskSession(c.Request.Context(), session); err != nil {
+			log.Error("e2e: failed to create task session", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+		// SetSessionPrimary clears is_primary on every other session for this
+		// task before setting it here, mirroring production's resume path
+		// (Repository.SetSessionPrimary) so seeding a second primary session
+		// for a task that already has one can't leave two is_primary = 1 rows
+		// behind — that would corrupt the run-status query's read of the
+		// task's "current" session (see listRunsWithTaskState).
+		if isPrimary {
+			if err := repo.SetSessionPrimary(c.Request.Context(), session.ID); err != nil {
+				log.Error("e2e: failed to set primary task session", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+				return
+			}
+			session.IsPrimary = true
+		}
+		c.JSON(http.StatusCreated, gin.H{
+			"id": session.ID, taskIDPayloadKey: session.TaskID, statusKey: session.State,
 		})
 	}
 }

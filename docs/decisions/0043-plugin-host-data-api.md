@@ -141,6 +141,54 @@ Concretely:
 - Write RPCs inherit kandev's event-publishing invariant for free by routing
   through service methods; no plugin can mutate a task without `task.*` firing.
 
+## Update — 2026-07-26: writes implemented
+
+The phase-2 write RPCs are now wired, following this ADR's decision points 3–5
+verbatim. Concretely:
+
+- **`CreateTask` / `UpdateTask`** (capability `api_write:tasks`) route through
+  `internal/task/service.Service.CreateTask` / `UpdateTask` — the same
+  event-publishing methods the REST/MCP API uses — via a backendapp adapter
+  (`pluginsTaskWriterAdapter`) that translates the SDK's plugins-local input
+  structs into `service.CreateTaskRequest` / `UpdateTaskRequest` (the service
+  types can't be referenced from `internal/plugins` without the import cycle
+  this ADR's `SetDataSources` note already calls out). `CreateTask` resolves
+  placement defaults (single workspace; that workspace's first workflow;
+  ambiguous → `InvalidArgument`) and honors an optional `start_agent` that
+  best-effort launches an agent through the orchestrator (a launch failure never
+  fails the create, matching REST/MCP's async auto-start). `UpdateTask` exposes
+  a **conservative field mask** — `title` / `description` / `state` /
+  `workflow_step_id`, each optional — deliberately smaller than the full REST
+  update surface.
+- **`SendMessage`** (capability `api_write:messages`) replaced the originally
+  planned `CreateComment`: an office `TaskComment` is an office/dashboard
+  construct, not a way to message the agent working a task. SendMessage delivers
+  a prompt to a task session through the orchestrator's real delivery path — the
+  same one `message_task` uses — via a backendapp adapter
+  (`pluginsTaskMessengerAdapter`) that resolves the target session (explicit id,
+  verified to belong to the task, or the task's primary session), records a user
+  message stamped `source = "plugin:<id>"`, and dispatches by session state: a
+  running session queues the prompt; an idle/completed one is prompted (resuming
+  the agent process if it has gone); a never-started one is launched with the
+  prompt as its first turn. A failed dispatch deletes the recorded message so no
+  orphan prompt is left. The adapter and the orchestrator task-starter are
+  reached via a late `SetWriteDeps` hook read live at call time, because the
+  orchestrator is constructed after boot-active plugins spawn — the same
+  live-read pattern the utility agent (ADR 0048) uses.
+- **Provenance.** The server stamps `source = "plugin:<id>"` — task metadata
+  `source` for created tasks (the Task model has no source column), and the
+  recorded user message's metadata for SendMessage. A plugin cannot set it.
+- **Gating** is per-method on the shared accessors: `Tasks()` gates List/Get on
+  `api_read:tasks` and Create/Update on `api_write:tasks`; `Messages()` gates
+  List on `api_read:messages` and Send on `api_write:messages` — each pair
+  independent, so a plugin may hold one without the other. Undeclared → gRPC
+  `PermissionDenied`, identical to reads.
+
+This closes the "writes deferred to phase 2" language in the Decision above.
+The comment-create RPC named there was dropped in favor of SendMessage.
+Broadening the write surface (delete/archive tasks, sessions/workspaces, a
+wider update mask, delivery-mode/interrupt on SendMessage) remains future work.
+
 ## Alternatives considered
 
 - **Raw DB access (status quo).** What the agent-stats plugin does today.

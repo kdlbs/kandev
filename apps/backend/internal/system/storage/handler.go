@@ -55,11 +55,16 @@ type OverviewProvider interface {
 	Capabilities(context.Context, StorageMaintenanceSettings) Capabilities
 }
 
+type OverviewReader interface {
+	Get(context.Context) (OverviewSnapshot, error)
+	Capabilities(context.Context, StorageMaintenanceSettings) Capabilities
+}
+
 type HandlerConfig struct {
 	Settings          SettingsManager
 	Runs              RunLister
 	Quarantine        QuarantineLister
-	Overview          OverviewProvider
+	Overview          OverviewReader
 	Mutations         Mutations
 	OnSettingsChanged func(StorageMaintenanceSettings)
 }
@@ -199,7 +204,7 @@ func (h *Handler) getStorage(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	summary, err := h.config.Overview.Summary(c.Request.Context())
+	snapshot, err := h.config.Overview.Get(c.Request.Context())
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -215,7 +220,7 @@ func (h *Handler) getStorage(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"settings": settings, "capabilities": h.config.Overview.Capabilities(c.Request.Context(), settings),
-		"summary": summary, "last_run": lastRun,
+		"summary": snapshot.Summary, "analyzed_at": snapshot.AnalyzedAt, "last_run": lastRun,
 	})
 }
 

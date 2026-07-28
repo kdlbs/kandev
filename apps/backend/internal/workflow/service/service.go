@@ -557,7 +557,7 @@ func (s *Service) stepFromPortable(workflowID string, sp models.StepPortable, po
 		Position:                  sp.Position,
 		Color:                     sp.Color,
 		Prompt:                    sp.Prompt,
-		Events:                    models.ConvertPositionToStepID(sp.Events, posToID),
+		Events:                    models.ConvertReviewProfileToID(models.ConvertPositionToStepID(sp.Events, posToID), s.matchProfile),
 		IsStartStep:               sp.IsStartStep,
 		ShowInCommandPanel:        sp.ShowInCommandPanel,
 		AllowManualMove:           sp.AllowManualMove,

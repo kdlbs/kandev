@@ -38,13 +38,16 @@ const storeState = {
     items: [
       { id: "w1", name: "Default Workspace", office_workflow_id: "" },
       { id: "w2", name: "Office Workspace", office_workflow_id: "wf-office" },
+      { id: "w3", name: "Alternate Workspace", office_workflow_id: "" },
     ],
     activeId: "w1",
   },
   setActiveWorkspace: vi.fn(),
+  resetKanbanWorkspaceContext: vi.fn(),
 };
 const KANBAN_WORKSPACE_ITEM = "sidebar-workspace-item-w1";
 const OFFICE_WORKSPACE_ITEM = "sidebar-workspace-item-w2";
+const ALTERNATE_KANBAN_WORKSPACE_ITEM = "sidebar-workspace-item-w3";
 // jsdom over http drops `secure` cookies, so intercept the setter to capture
 // the write directly rather than reading `document.cookie` back.
 let cookieWrites: string[] = [];
@@ -55,6 +58,7 @@ function resetWorkspaceSelectTest() {
   storeState.features.office = false;
   storeState.workspaces.activeId = "w1";
   storeState.setActiveWorkspace = vi.fn();
+  storeState.resetKanbanWorkspaceContext = vi.fn();
   cookieWrites = [];
   cookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, "cookie");
   Object.defineProperty(document, "cookie", {
@@ -154,6 +158,20 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w2");
     expect(navigationMock.push).not.toHaveBeenCalled();
+  });
+
+  it("clears stale kanban context and routes to another kanban workspace with office disabled", () => {
+    storeState.features.office = false;
+    render(<AppSidebarWorkspacePicker />);
+
+    fireEvent.click(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM));
+
+    expect(storeState.resetKanbanWorkspaceContext).toHaveBeenCalledOnce();
+    expect(storeState.resetKanbanWorkspaceContext.mock.invocationCallOrder[0]).toBeLessThan(
+      storeState.setActiveWorkspace.mock.invocationCallOrder[0],
+    );
+    expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w3");
+    expect(navigationMock.push).toHaveBeenCalledWith("/?workspaceId=w3");
   });
 
   it("calls onActionComplete when selecting a different workspace", () => {

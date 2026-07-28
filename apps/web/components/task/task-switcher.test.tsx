@@ -219,6 +219,28 @@ describe("TaskSwitcher — detach menu", () => {
   });
 });
 
+describe("TaskSwitcher — create subtask menu", () => {
+  it("passes the right-clicked task to the create-subtask action", () => {
+    const onCreateSubtask = vi.fn();
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={grouped()}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onCreateSubtask={onCreateSubtask}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(CHILD.title));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Create Subtask" }));
+
+    expect(onCreateSubtask).toHaveBeenCalledWith(CHILD.id, CHILD.title);
+  });
+});
+
 describe("TaskSwitcher — external issue link menu", () => {
   it("offers configured external issue providers from the task context menu", async () => {
     const onLinkMergeRequest = vi.fn();

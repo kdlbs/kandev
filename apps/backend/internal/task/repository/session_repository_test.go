@@ -771,3 +771,54 @@ func TestListWorktreesBySessionIDs_ChunksOverPlaceholderLimit(t *testing.T) {
 		t.Errorf("expected empty map for non-existent session IDs, got %d entries", len(got))
 	}
 }
+
+// TestSetSessionPrimary_DemotesOthersAndPromotesExactlyOne pins the core
+// invariant SetSessionPrimary exists to maintain: after promoting a second
+// session, the first is demoted and exactly one session is primary. See
+// internal/automation.Store.listRunsWithTaskState, which reads a task's
+// current session via is_primary = 1 and would misclassify a run if two
+// sessions were ever left primary.
+func TestSetSessionPrimary_DemotesOthersAndPromotesExactlyOne(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-primary", Name: "WF"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-primary", WorkflowID: "wf-primary", WorkflowStepID: "step-1", Title: "T",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	s1 := &models.TaskSession{ID: "sess-primary-1", TaskID: "task-primary", State: models.TaskSessionStateCancelled}
+	if err := repo.CreateTaskSession(ctx, s1); err != nil {
+		t.Fatalf("CreateTaskSession s1: %v", err)
+	}
+	s2 := &models.TaskSession{ID: "sess-primary-2", TaskID: "task-primary", State: models.TaskSessionStateRunning}
+	if err := repo.CreateTaskSession(ctx, s2); err != nil {
+		t.Fatalf("CreateTaskSession s2: %v", err)
+	}
+
+	if err := repo.SetSessionPrimary(ctx, s1.ID); err != nil {
+		t.Fatalf("SetSessionPrimary(s1): %v", err)
+	}
+	if err := repo.SetSessionPrimary(ctx, s2.ID); err != nil {
+		t.Fatalf("SetSessionPrimary(s2): %v", err)
+	}
+
+	got1, err := repo.GetTaskSession(ctx, s1.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession(s1): %v", err)
+	}
+	got2, err := repo.GetTaskSession(ctx, s2.ID)
+	if err != nil {
+		t.Fatalf("GetTaskSession(s2): %v", err)
+	}
+	if got1.IsPrimary {
+		t.Errorf("s1 still primary after promoting s2 — exactly-one-primary invariant broken")
+	}
+	if !got2.IsPrimary {
+		t.Errorf("s2 not primary after being promoted")
+	}
+}

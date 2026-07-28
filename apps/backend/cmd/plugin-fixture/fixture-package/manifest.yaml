@@ -34,6 +34,10 @@ webhooks:
 
 ui:
   bundle: "/ui/bundle.js"
+  keybindings:
+    - id: open-demo
+      default: mod+shift+j
+      description: Open the demo modal
 
 config_schema:
   type: object

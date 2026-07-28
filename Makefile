@@ -22,6 +22,18 @@ else
   RMDIR = rm -rf
 endif
 
+# stderr redirect for $(shell ...) probes. Keyed on $(OS)$(MSYSTEM) rather than
+# $(OS) alone: Git Bash sets OS=Windows_NT yet runs commands through sh, so it
+# needs the POSIX path. Under native cmd there is no /dev/null, and cmd resolves
+# redirections before running the command — `2>/dev/null` would abort the probe
+# and silently force its fallback. Holds the whole token so callers can blank it.
+# Mirrors apps/backend/Makefile.
+ifeq ($(OS)$(MSYSTEM),Windows_NT)
+  NULL_REDIR := 2>NUL
+else
+  NULL_REDIR := 2>/dev/null
+endif
+
 # Colors for terminal output
 RESET := \033[0m
 BOLD := \033[1m
@@ -33,10 +45,10 @@ YELLOW := \033[33m
 MAGENTA := \033[35m
 
 VERBOSE ?= 0
-NODE ?= $(shell command -v node 2>/dev/null || echo node)
+NODE ?= $(shell command -v node $(NULL_REDIR) || echo node)
 SERVICE_LAUNCHER := $(CURDIR)/dist/kandev/bin/kandev
 SERVICE_BUNDLE_DIR := $(CURDIR)/dist/kandev
-SERVICE_VERSION := $(shell git rev-parse --short HEAD 2>/dev/null || echo dev)
+SERVICE_VERSION := $(shell git rev-parse --short HEAD $(NULL_REDIR) || echo dev)
 SERVICE_ENV := KANDEV_BUNDLE_DIR="$(SERVICE_BUNDLE_DIR)" KANDEV_VERSION="$(SERVICE_VERSION)"
 SERVICE_PORT_FLAG := $(if $(PORT),--port $(PORT),)
 SERVICE_HOME_DIR_FLAG := $(if $(HOME_DIR),--home-dir "$(HOME_DIR)",)
@@ -150,7 +162,15 @@ bootstrap-e2e:
 
 .PHONY: doctor
 doctor:
+# Native Windows (cmd/PowerShell) has no POSIX shell for the bash-only doctor
+# script. Under Git Bash/MSYS ($(MSYSTEM) is set) it runs fine, so skip only
+# when OS is Windows_NT AND MSYSTEM is empty — the concatenation equals
+# "Windows_NT" only in that native case.
+ifeq ($(OS)$(MSYSTEM),Windows_NT)
+	@echo pre-commit hooks skipped on native Windows - run scripts/doctor from Git Bash to enable
+else
 	@scripts/doctor
+endif
 
 .PHONY: dev
 dev: doctor

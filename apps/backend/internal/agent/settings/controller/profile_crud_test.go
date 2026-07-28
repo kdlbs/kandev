@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -121,6 +122,44 @@ func TestValidateCLIFlagDTOs(t *testing.T) {
 	}
 }
 
+// TestValidateCommandPrefix accepts an empty prefix (run unwrapped) and
+// well-formed launcher strings, and rejects malformed shell tokens.
+func TestValidateCommandPrefix(t *testing.T) {
+	cases := []struct {
+		name    string
+		prefix  string
+		wantErr bool
+	}{
+		{name: "empty accepted", prefix: ""},
+		{name: "whitespace accepted", prefix: "   "},
+		{name: "simple launcher accepted", prefix: "greywall --"},
+		{name: "quoted arg accepted", prefix: `sandbox-exec -f "my profile.sb"`},
+		{name: "unterminated quote rejected", prefix: `greywall "unterminated`, wantErr: true},
+		{name: "trailing backslash rejected", prefix: `greywall foo\`, wantErr: true},
+		{name: "only-empty-quotes rejected", prefix: `""`, wantErr: true},
+		{name: "whitespace executable rejected", prefix: `"   " --arg`, wantErr: true},
+		{name: "leading flag rejected", prefix: `--foo greywall`, wantErr: true},
+		{name: "leading dash rejected", prefix: `-x sandbox`, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateCommandPrefix(tc.prefix)
+			if tc.wantErr {
+				if err == nil {
+					t.Error("expected error, got nil")
+				} else if !errors.Is(err, ErrInvalidCommandPrefix) {
+					// The handlers map only ErrInvalidCommandPrefix to HTTP 400;
+					// an unwrapped error would fall through to a 500.
+					t.Errorf("error does not wrap ErrInvalidCommandPrefix: %v", err)
+				}
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
 func TestValidateProfileEnvVarDTOs(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -131,8 +170,13 @@ func TestValidateProfileEnvVarDTOs(t *testing.T) {
 		{name: "valid secret", envVars: []dto.ProfileEnvVarDTO{{Key: "TOKEN", SecretID: "sec-1"}}},
 		{name: "empty key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: ""}}, wantErr: true},
 		{name: "whitespace key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "   "}}, wantErr: true},
+		{name: "padded key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: " FOO ", Value: "x"}}, wantErr: true},
 		{name: "equals key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD=KEY", Value: "x"}}, wantErr: true},
 		{name: "null key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD\x00KEY", Value: "x"}}, wantErr: true},
+		{name: "shell injection keys rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD; touch /tmp/pwned", Value: "x"}}, wantErr: true},
+		{name: "command substitution key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "$(touch /tmp/pwned)", Value: "x"}}, wantErr: true},
+		{name: "newline key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "BAD\nKEY", Value: "x"}}, wantErr: true},
+		{name: "numeric first character rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "1BAD", Value: "x"}}, wantErr: true},
 		{name: "duplicate key rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "one"}, {Key: " FOO ", Value: "two"}}, wantErr: true},
 		{name: "value and secret rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bar", SecretID: "sec-1"}}, wantErr: true},
 		{name: "null value rejected", envVars: []dto.ProfileEnvVarDTO{{Key: "FOO", Value: "bad\x00val"}}, wantErr: true},
@@ -248,5 +292,74 @@ func TestCreateAgentProfiles_PersistsEnvVars(t *testing.T) {
 	}
 	if len(profiles) != 1 || len(profiles[0].EnvVars) != 1 || profiles[0].EnvVars[0].Key != "FOO" {
 		t.Fatalf("created env vars: %+v", profiles)
+	}
+}
+
+// TestCreateAgentProfiles_PersistsCommandPrefix confirms a valid prefix on a
+// nested-create profile is trimmed and stored.
+func TestCreateAgentProfiles_PersistsCommandPrefix(t *testing.T) {
+	ctrl := newTestController(nil)
+	st := newFakeStore()
+	ctrl.repo = st
+
+	profiles, err := ctrl.createAgentProfiles(context.Background(), "agent-1", "Test Agent", []CreateAgentProfileRequest{{
+		Name:          "Sandboxed",
+		Model:         "model-1",
+		CommandPrefix: "  greywall --  ",
+	}}, &testAgent{id: "test-agent", name: "test-agent"})
+	if err != nil {
+		t.Fatalf("createAgentProfiles: %v", err)
+	}
+	if len(profiles) != 1 || profiles[0].CommandPrefix != "greywall --" {
+		t.Fatalf("created command prefix: %+v", profiles)
+	}
+}
+
+// TestCreateAgentProfiles_RejectsBadCommandPrefix confirms a malformed prefix on
+// a nested-create profile returns ErrInvalidCommandPrefix (mapped to HTTP 400)
+// rather than a generic error, and that the validate-first pass surfaces it.
+func TestCreateAgentProfiles_RejectsBadCommandPrefix(t *testing.T) {
+	ctrl := newTestController(nil)
+	st := newFakeStore()
+	ctrl.repo = st
+
+	_, err := ctrl.createAgentProfiles(context.Background(), "agent-1", "Test Agent", []CreateAgentProfileRequest{{
+		Name:          "Bad",
+		Model:         "model-1",
+		CommandPrefix: `greywall "unterminated`,
+	}}, &testAgent{id: "test-agent", name: "test-agent"})
+	if !errors.Is(err, ErrInvalidCommandPrefix) {
+		t.Fatalf("expected ErrInvalidCommandPrefix, got %v", err)
+	}
+	if len(st.created) != 0 {
+		t.Fatalf("bad nested profile create made %d profile writes", len(st.created))
+	}
+}
+
+func TestCreateAgent_RejectsBadNestedProfileBeforeAnyWrite(t *testing.T) {
+	t.Setenv("KANDEV_E2E_MOCK", "true")
+	ctrl := newTestController(map[string]agents.Agent{
+		"test-agent": &testAgent{
+			id:          "test-agent",
+			name:        "test-agent",
+			displayName: "Test Agent",
+			enabled:     true,
+		},
+	})
+	st := newFakeStore()
+	ctrl.repo = st
+
+	_, err := ctrl.CreateAgent(context.Background(), CreateAgentRequest{
+		Name: "test-agent",
+		Profiles: []CreateAgentProfileRequest{{
+			Name:          "Bad",
+			CommandPrefix: `--not-a-launcher`,
+		}},
+	})
+	if !errors.Is(err, ErrInvalidCommandPrefix) {
+		t.Fatalf("expected ErrInvalidCommandPrefix, got %v", err)
+	}
+	if len(st.agents) != 0 || len(st.created) != 0 {
+		t.Fatalf("bad create made writes: agents=%d profiles=%d", len(st.agents), len(st.created))
 	}
 }

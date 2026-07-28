@@ -24,6 +24,9 @@ func newTestStore(t *testing.T) *Store {
 	if _, err := sqlxDB.Exec(`CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT, archived_at DATETIME)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
+	if _, err := sqlxDB.Exec(`CREATE TABLE workspaces (id TEXT PRIMARY KEY)`); err != nil {
+		t.Fatalf("create workspaces table: %v", err)
+	}
 	store, err := NewStore(sqlxDB, sqlxDB)
 	if err != nil {
 		t.Fatalf("new store: %v", err)

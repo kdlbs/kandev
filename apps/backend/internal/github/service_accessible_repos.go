@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -58,8 +59,76 @@ func (s *Service) ListAccessibleRepos(ctx context.Context, query string, limit i
 	if s.client == nil {
 		return nil, ErrNoClient
 	}
+	return s.listAccessibleReposWithClient(ctx, s.client, "legacy", query, limit)
+}
+
+// ListAccessibleReposForWorkspace returns the personal identity's repositories
+// intersected with both the workspace boundary and automation visibility.
+func (s *Service) ListAccessibleReposForWorkspace(
+	ctx context.Context, workspaceID, userID, query string, limit int,
+) ([]GitHubRepo, error) {
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, "", "")
+	if err != nil {
+		return nil, err
+	}
+	settings, err := s.GetWorkspaceSettings(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	repos, err := s.listAccessibleReposWithClient(ctx, resolved.Client, resolved.CacheScope, query, maxAccessibleReposLimit)
+	if err != nil {
+		return nil, err
+	}
+	automationRepos, err := s.listAutomationAccessibleRepos(ctx, workspaceID, query)
+	if err != nil {
+		return nil, err
+	}
+	automationVisible := repositorySet(automationRepos)
+	filtered := make([]GitHubRepo, 0, len(repos))
+	for _, repo := range repos {
+		if repositoryInWorkspaceScope(settings, repo.Owner, repo.Name) &&
+			repositorySetContains(automationVisible, repo.Owner, repo.Name) {
+			filtered = append(filtered, repo)
+		}
+	}
 	limit = clampAccessibleReposLimit(limit)
-	key := accessibleReposCacheKey(query, limit)
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	return filtered, nil
+}
+
+func (s *Service) listAutomationAccessibleRepos(
+	ctx context.Context,
+	workspaceID, query string,
+) ([]GitHubRepo, error) {
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, "", "")
+	if err != nil {
+		return nil, err
+	}
+	return s.listAccessibleReposWithClient(
+		ctx, resolved.Client, resolved.CacheScope, query, maxAccessibleReposLimit,
+	)
+}
+
+func repositorySet(repos []GitHubRepo) map[string]struct{} {
+	set := make(map[string]struct{}, len(repos))
+	for _, repo := range repos {
+		set[strings.ToLower(strings.TrimSpace(repo.Owner)+"/"+strings.TrimSpace(repo.Name))] = struct{}{}
+	}
+	return set
+}
+
+func repositorySetContains(set map[string]struct{}, owner, repo string) bool {
+	_, ok := set[strings.ToLower(strings.TrimSpace(owner)+"/"+strings.TrimSpace(repo))]
+	return ok
+}
+
+func (s *Service) listAccessibleReposWithClient(
+	ctx context.Context, client Client, cacheScope, query string, limit int,
+) ([]GitHubRepo, error) {
+	limit = clampAccessibleReposLimit(limit)
+	key := scopedCacheKey(cacheScope, accessibleReposCacheKey(query, limit))
 	if v, ok := s.accessibleReposCache.get(key); ok {
 		return v.([]GitHubRepo), nil
 	}
@@ -73,7 +142,7 @@ func (s *Service) ListAccessibleRepos(ctx context.Context, query string, limit i
 	// cancel (and SIGKILL) the shared fetch; bound it with our own timeout.
 	fetchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), accessibleReposFetchTimeout)
 	defer cancel()
-	repos, err := s.client.ListAccessibleRepos(fetchCtx, query, limit)
+	repos, err := client.ListAccessibleRepos(fetchCtx, query, limit)
 	if err != nil {
 		return nil, err
 	}

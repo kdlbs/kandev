@@ -40,7 +40,8 @@ Do not create a skill for:
 - Always-on repo constraints. Use `AGENTS.md`.
 - A one-off prompt.
 - Behavior better encoded in a deterministic script.
-- A role requiring a distinct model/tool surface. Use an agent/subagent.
+- A model-switch checkpoint. Use the primary-session policy in
+  `/planner-orchestration`, not a custom agent.
 
 ## Body Structure
 
@@ -68,5 +69,6 @@ Run:
 
 ```bash
 git diff --check -- .agents/skills/<skill-name>
-rg -n "<old-name>|<stale-reference>" .agents/skills .agents/agents AGENTS.md CLAUDE.md
+rg -n "<old-name>|<stale-reference>" \
+  .agents .codex .cursor .opencode .claude AGENTS.md CLAUDE.md
 ```

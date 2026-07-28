@@ -15,7 +15,6 @@ import (
 
 // appsDir is the apps/ workspace root relative to the working directory (apps/backend/).
 const appsDir = ".."
-const repoRootDir = "../.."
 
 // goDockerImage is used to cross-compile CGO binaries on non-linux/amd64 hosts.
 const goDockerImage = "golang:1.26-bookworm"

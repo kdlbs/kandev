@@ -37,7 +37,8 @@ func TestMultipleClients(t *testing.T) {
 	require.NoError(t, err)
 	workflowID := workflowPayload["id"].(string)
 
-	// Client 2 can see the workflow (filter by workspace to avoid default workflow)
+	// Client 2 can see both the workspace's default Kanban workflow and the
+	// additional workflow created by client 1.
 	listResp, err := client2.SendRequest("c2-list-1", ws.ActionWorkflowList, map[string]interface{}{
 		"workspace_id": workspaceID,
 	})
@@ -49,7 +50,7 @@ func TestMultipleClients(t *testing.T) {
 
 	workflows, ok := listPayload["workflows"].([]interface{})
 	require.True(t, ok)
-	assert.Len(t, workflows, 1)
+	assert.Len(t, workflows, 2)
 
 	// Client 2 lists workflow steps (created automatically with workflow)
 	stepResp, err := client2.SendRequest("c2-step-list-1", ws.ActionWorkflowStepList, map[string]interface{}{

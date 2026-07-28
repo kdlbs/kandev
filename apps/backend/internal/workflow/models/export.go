@@ -86,7 +86,7 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			Position:                  s.Position,
 			Color:                     s.Color,
 			Prompt:                    s.Prompt,
-			Events:                    convertStepIDToPosition(s.Events, idToPos),
+			Events:                    ConvertReviewProfileToPortable(convertStepIDToPosition(s.Events, idToPos), resolveProfile),
 			IsStartStep:               s.IsStartStep,
 			ShowInCommandPanel:        s.ShowInCommandPanel,
 			AllowManualMove:           s.AllowManualMove,
@@ -282,6 +282,76 @@ func convertStepIDToPosition(events StepEvents, idToPos map[string]int) StepEven
 		pos, found := idToPos[s]
 		return pos, found
 	})
+}
+
+// ReviewAgentProfilePortableKey is the on_enter config key that carries a
+// run_code_review action's reviewing profile in portable form. The instance
+// `agent_profile_id` is meaningless in another workspace, so export swaps it for
+// the {agent_name, model, mode} triple and import matches it back.
+const ReviewAgentProfilePortableKey = "agent_profile"
+
+// ConvertReviewProfileToPortable rewrites run_code_review on_enter actions,
+// replacing `agent_profile_id` with a portable `agent_profile` descriptor.
+// An unresolvable profile has its key dropped, so the imported action falls back
+// to the code-review utility agent instead of carrying a dangling ID.
+func ConvertReviewProfileToPortable(events StepEvents, resolveProfile AgentProfileResolver) StepEvents {
+	return remapReviewProfile(events, ReviewAgentProfileConfigKey, ReviewAgentProfilePortableKey, func(v any) (any, bool) {
+		profileID, ok := v.(string)
+		if !ok || profileID == "" || resolveProfile == nil {
+			return nil, false
+		}
+		portable := resolveProfile(profileID)
+		if portable == nil {
+			return nil, false
+		}
+		return map[string]any{
+			"agent_name": portable.AgentName,
+			"model":      portable.Model,
+			"mode":       portable.Mode,
+		}, true
+	})
+}
+
+// ConvertReviewProfileToID rewrites run_code_review on_enter actions, replacing
+// a portable `agent_profile` descriptor with a local `agent_profile_id`.
+func ConvertReviewProfileToID(events StepEvents, matchProfile AgentProfileMatcher) StepEvents {
+	return remapReviewProfile(events, ReviewAgentProfilePortableKey, ReviewAgentProfileConfigKey, func(v any) (any, bool) {
+		descriptor, ok := v.(map[string]any)
+		if !ok || matchProfile == nil {
+			return nil, false
+		}
+		agentName, _ := descriptor["agent_name"].(string)
+		model, _ := descriptor["model"].(string)
+		mode, _ := descriptor["mode"].(string)
+		profileID := matchProfile(agentName, model, mode)
+		if profileID == "" {
+			return nil, false
+		}
+		return profileID, true
+	})
+}
+
+// remapReviewProfile rewrites the profile key on every run_code_review on_enter
+// action, leaving other actions and triggers untouched. When the lookup fails,
+// the source key is removed rather than preserved, so no instance-specific or
+// unmatched reference survives the round trip.
+func remapReviewProfile(events StepEvents, fromKey, toKey string, lookup func(any) (any, bool)) StepEvents {
+	result := events
+	result.OnEnter = make([]OnEnterAction, 0, len(events.OnEnter))
+	for _, a := range events.OnEnter {
+		if a.Type == OnEnterRunCodeReview && a.Config != nil {
+			if cfg, ok := remapConfigKey(a.Config, fromKey, toKey, lookup); ok {
+				a = OnEnterAction{Type: a.Type, Config: cfg}
+			} else if _, exists := a.Config[fromKey]; exists {
+				cfg := make(map[string]any, len(a.Config))
+				maps.Copy(cfg, a.Config)
+				delete(cfg, fromKey)
+				a = OnEnterAction{Type: a.Type, Config: cfg}
+			}
+		}
+		result.OnEnter = append(result.OnEnter, a)
+	}
+	return result
 }
 
 // ConvertPositionToStepID rewrites move_to_step events: step_position → step_id.

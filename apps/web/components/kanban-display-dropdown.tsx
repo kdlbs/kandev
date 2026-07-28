@@ -18,6 +18,7 @@ import type { ComponentProps } from "react";
 
 type KanbanDisplayDropdownProps = {
   triggerSize?: ComponentProps<typeof Button>["size"];
+  currentPage?: "kanban" | "tasks";
 };
 
 function getRepositoryPlaceholder(
@@ -98,7 +99,10 @@ function RepositorySection({
   );
 }
 
-export function KanbanDisplayDropdown({ triggerSize = "icon" }: KanbanDisplayDropdownProps) {
+export function KanbanDisplayDropdown({
+  triggerSize = "icon",
+  currentPage = "kanban",
+}: KanbanDisplayDropdownProps) {
   const {
     workflows,
     activeWorkflowId,
@@ -107,9 +111,11 @@ export function KanbanDisplayDropdown({ triggerSize = "icon" }: KanbanDisplayDro
     allRepositoriesSelected,
     selectedRepositoryId,
     enablePreviewOnClick,
+    tasksListShowDetails,
     onWorkflowChange,
     onRepositoryChange,
     onTogglePreviewOnClick,
+    onToggleTasksListShowDetails,
   } = useKanbanDisplaySettings();
 
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
@@ -157,6 +163,24 @@ export function KanbanDisplayDropdown({ triggerSize = "icon" }: KanbanDisplayDro
               navigates directly to the session.
             </p>
           </div>
+          {currentPage === "tasks" && (
+            <>
+              <DropdownMenuSeparator />
+              <div className="space-y-1.5">
+                <DropdownMenuLabel className="px-0 text-foreground">List rows</DropdownMenuLabel>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <Checkbox
+                    checked={tasksListShowDetails}
+                    onCheckedChange={(checked) => onToggleTasksListShowDetails(checked === true)}
+                  />
+                  <span className="text-sm text-foreground">Show task details</span>
+                </label>
+                <p className="pl-6 text-xs text-muted-foreground">
+                  Add repository, pull request, session, parent, and review context to List rows.
+                </p>
+              </div>
+            </>
+          )}
         </div>
       </DropdownMenuContent>
     </DropdownMenu>

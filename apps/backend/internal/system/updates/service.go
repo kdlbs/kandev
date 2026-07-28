@@ -106,6 +106,10 @@ type Service struct {
 	now        func() time.Time
 	applyRun   applyRunner
 
+	// notifier routes update availability through the canonical notification
+	// service. It is nil-safe for isolated updates tests and minimal startup.
+	notifier UpdateNotifier
+
 	// applyStartedAt holds the unix-nano timestamp of the last self-update launch
 	// (0 = none in flight). It guards against two concurrent /updates/apply calls
 	// each launching a helper that would race the reinstall/restart, and
@@ -135,6 +139,13 @@ type Service struct {
 // Fetcher abstracts the GitHub release call so tests can drive
 // the poller and Check() without spinning up an httptest server.
 type Fetcher func(ctx context.Context) (tag, url string, err error)
+
+// UpdateNotifier is the narrow canonical notification-service boundary used
+// by release detection. Provider policy and occurrence de-duplication remain
+// owned by that service.
+type UpdateNotifier interface {
+	HandleUpdateAvailable(ctx context.Context, version, releaseURL string)
+}
 
 // Option customises Service construction without growing NewService's public
 // parameter list.
@@ -236,6 +247,13 @@ func (s *Service) SetFetcher(f Fetcher) {
 func (s *Service) SetReleaseURL(url string) {
 	s.mu.Lock()
 	s.releaseURL = url
+	s.mu.Unlock()
+}
+
+// SetNotifier wires the canonical notifier after gateway composition.
+func (s *Service) SetNotifier(notifier UpdateNotifier) {
+	s.mu.Lock()
+	s.notifier = notifier
 	s.mu.Unlock()
 }
 
@@ -358,7 +376,33 @@ func (s *Service) fetchAndPersist(ctx context.Context) (UpdatesResponse, error) 
 		s.log.Warn("updates: persist latest version failed", zap.Error(werr))
 		return UpdatesResponse{}, werr
 	}
+	s.notifyUpdateAvailable(ctx, tag, releaseURL)
 	return s.buildResponse(tag, releaseURL, now), nil
+}
+
+// ReplayCachedUpdate delivers a previously persisted newer release without
+// contacting GitHub. It is called when the default user becomes eligible for
+// Local delivery after an early startup poll.
+func (s *Service) ReplayCachedUpdate(ctx context.Context) error {
+	tag, releaseURL, _, err := persistence.ReadLatestVersion(s.pool.Reader())
+	if err != nil {
+		return err
+	}
+	s.notifyUpdateAvailable(ctx, tag, releaseURL)
+	return nil
+}
+
+func (s *Service) notifyUpdateAvailable(ctx context.Context, tag, releaseURL string) {
+	if !s.updateAvailable(tag) {
+		return
+	}
+	s.mu.Lock()
+	notifier := s.notifier
+	s.mu.Unlock()
+	if notifier == nil {
+		return
+	}
+	notifier.HandleUpdateAvailable(ctx, tag, releaseURL)
 }
 
 func (s *Service) buildResponse(latest, url string, checkedAt time.Time) UpdatesResponse {

@@ -2,7 +2,6 @@
 
 import { useMemo, useState } from "react";
 import type { PaginationState } from "@tanstack/react-table";
-import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
@@ -13,9 +12,11 @@ import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { primaryTaskRepository, type Repository, type Task, type Workflow } from "@/lib/types/http";
 import { formatTaskStateLabel } from "@/lib/ui/state-labels";
-import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { isTaskInFlight } from "@/lib/ui/state-icons";
 import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
+import { TaskListRowPrimaryContent } from "./rich-task-list-row";
+import { PullToRefresh } from "@/components/mobile/pull-to-refresh";
 import {
   TASKS_LIST_GROUP_OPTIONS,
   TASKS_LIST_SORT_OPTIONS,
@@ -35,6 +36,7 @@ export type TasksListViewProps = {
   tasks: Task[];
   workflows: Workflow[];
   repositories: Repository[];
+  showTaskDetails: boolean;
   pageCount: number;
   pagination: PaginationState;
   setPagination: (next: PaginationState | ((prev: PaginationState) => PaginationState)) => void;
@@ -44,6 +46,7 @@ export type TasksListViewProps = {
   handleArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   handleUnarchive: (taskId: string) => Promise<void>;
   handleDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onRefresh?: () => void | Promise<void>;
 };
 
 export function TasksListView({
@@ -57,6 +60,7 @@ export function TasksListView({
   tasks,
   workflows,
   repositories,
+  showTaskDetails,
   pageCount,
   pagination,
   setPagination,
@@ -66,8 +70,9 @@ export function TasksListView({
   handleArchive,
   handleUnarchive,
   handleDelete,
+  onRefresh,
 }: TasksListViewProps) {
-  return (
+  const content = (
     <main className="flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-6">
       <div className="space-y-4">
         <TasksListControls
@@ -82,6 +87,7 @@ export function TasksListView({
           tasks={tasks}
           workflows={workflows}
           repositories={repositories}
+          showTaskDetails={showTaskDetails}
           tasksListGroup={tasksListGroup}
           isLoading={isLoading}
           deletingTaskId={deletingTaskId}
@@ -99,6 +105,7 @@ export function TasksListView({
       </div>
     </main>
   );
+  return onRefresh ? <PullToRefresh onRefresh={onRefresh}>{content}</PullToRefresh> : content;
 }
 
 function TasksListControls({
@@ -117,7 +124,7 @@ function TasksListControls({
   onTasksListGroupChange: (group: TasksListGroup) => void;
 }) {
   return (
-    <div className="flex min-h-9 flex-wrap items-center justify-end gap-3">
+    <div className="hidden min-h-9 flex-wrap items-center justify-end gap-3 sm:flex">
       <ListOptionSelect
         label="Sort"
         value={tasksListSort}
@@ -192,6 +199,7 @@ function TaskRows({
   tasks,
   workflows,
   repositories,
+  showTaskDetails,
   tasksListGroup,
   isLoading,
   deletingTaskId,
@@ -203,6 +211,7 @@ function TaskRows({
   tasks: Task[];
   workflows: Workflow[];
   repositories: Repository[];
+  showTaskDetails: boolean;
   tasksListGroup: TasksListGroup;
   isLoading: boolean;
   deletingTaskId: string | null;
@@ -244,6 +253,9 @@ function TaskRows({
           onUnarchive={onUnarchive}
           onDelete={onDelete}
           onRowClick={onRowClick}
+          repositories={repositories}
+          parentTasks={tasks}
+          showTaskDetails={showTaskDetails}
         />
       ))}
     </div>
@@ -360,6 +372,9 @@ function flattenTaskTree(nodes: TaskTreeNode[]): TaskTreeNode[] {
 function TaskListRow({
   task,
   level,
+  repositories,
+  parentTasks,
+  showTaskDetails,
   deletingTaskId,
   onArchive,
   onUnarchive,
@@ -368,6 +383,9 @@ function TaskListRow({
 }: {
   task: Task;
   level: number;
+  repositories: Repository[];
+  parentTasks: Task[];
+  showTaskDetails: boolean;
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
@@ -395,24 +413,13 @@ function TaskListRow({
         }
       }}
     >
-      <div
-        className="flex min-w-0 items-center gap-2"
-        data-testid="tasks-list-row-content"
-        style={{ paddingLeft: `${level * 28}px` }}
-      >
-        {getTaskStateIcon(task.state, "h-4 w-4 shrink-0")}
-        <span className="min-w-0 truncate font-medium" data-testid="tasks-list-row-title">
-          {task.title}
-        </span>
-        {isArchived && (
-          <Badge
-            variant="outline"
-            className="shrink-0 border-amber-500/30 px-1.5 py-0 text-[10px] text-amber-500"
-          >
-            Archived
-          </Badge>
-        )}
-      </div>
+      <TaskListRowPrimaryContent
+        task={task}
+        level={level}
+        repositories={repositories}
+        parentTasks={parentTasks}
+        showTaskDetails={showTaskDetails}
+      />
       <div className="flex items-center justify-between gap-3 md:justify-end">
         <span className="hidden text-xs text-muted-foreground sm:inline">
           {formatRelativeTime(task.updated_at)}
@@ -436,6 +443,9 @@ function TaskListRow({
 
 function TaskListSectionView({
   section,
+  repositories,
+  parentTasks,
+  showTaskDetails,
   deletingTaskId,
   onArchive,
   onUnarchive,
@@ -443,6 +453,9 @@ function TaskListSectionView({
   onRowClick,
 }: {
   section: TaskListSection;
+  repositories: Repository[];
+  parentTasks: Task[];
+  showTaskDetails: boolean;
   deletingTaskId: string | null;
   onArchive: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (taskId: string) => Promise<void>;
@@ -464,6 +477,9 @@ function TaskListSectionView({
             key={task.id}
             task={task}
             level={level}
+            repositories={repositories}
+            parentTasks={parentTasks}
+            showTaskDetails={showTaskDetails}
             deletingTaskId={deletingTaskId}
             onArchive={onArchive}
             onUnarchive={onUnarchive}
@@ -587,6 +603,7 @@ function TaskRowActions({
         onOpenChange={onDeleteOpenChange}
         taskTitle={task.title}
         taskId={task.id}
+        isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
         isDeleting={isDeleting}
         onConfirm={({ cascade }) => onDelete(task.id, { cascade })}
@@ -596,6 +613,7 @@ function TaskRowActions({
         onOpenChange={onArchiveOpenChange}
         taskTitle={task.title}
         taskId={task.id}
+        isInFlight={isTaskInFlight(task.foreground_activity)}
         executorType={task.primary_executor_type}
         onConfirm={({ cascade }) => onArchive(task.id, { cascade })}
       />

@@ -42,6 +42,21 @@ var definitions = []RuntimeFlagDefinition{
 		Mutable:         true,
 	},
 	{
+		Key:         featureAuthKey,
+		EnvVar:      envFeaturesAuth,
+		Kind:        KindFeature,
+		Label:       "Authentication & users",
+		Description: "Requires every visitor to sign in and gives each user their own private workspaces. The first person to sign in after enabling becomes the admin.",
+		Stability:   StabilityExperimental,
+		RiskLevel:   RiskHigh,
+		RiskDescription: "Turning this ON locks the instance behind a login after restart — the first visitor " +
+			"completes a setup wizard and becomes the admin, and existing workspaces/secrets are assigned to " +
+			"them. Turning it OFF after restart makes the instance open to anyone who can reach it again. " +
+			"Enable it before exposing kandev on a shared or public network.",
+		RestartRequired: true,
+		Mutable:         true,
+	},
+	{
 		Key:         debugDevModeKey,
 		EnvVar:      envDebugDevMode,
 		Kind:        KindDebug,

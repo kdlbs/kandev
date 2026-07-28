@@ -1,10 +1,13 @@
-// PROPOSED — kandev.plugin.v1 Host data API (draft for review, not wired yet).
+// kandev.plugin.v1 Host data API — folded into
+// apps/backend/proto/kandev/plugin/v1/plugin.proto and fully wired (reads and
+// writes both implemented). This file is the frozen design draft kept for
+// reference alongside the ADRs.
 //
-// Extends the existing capability-gated Host service so plugins read (and, in a
-// second phase, write) kandev data through a typed, versioned contract instead
-// of touching the SQLite file directly. These messages are a HAND-DEFINED public
-// contract: the backend maps internal models → these DTOs explicitly. Do NOT
-// generate them from domain structs — the mapping IS the decoupling.
+// Extends the existing capability-gated Host service so plugins read AND write
+// kandev data through a typed, versioned contract instead of touching the
+// SQLite file directly. These messages are a HAND-DEFINED public contract: the
+// backend maps internal models → these DTOs explicitly. Do NOT generate them
+// from domain structs — the mapping IS the decoupling.
 //
 // Enforcement (host side): each RPC checks the caller plugin's manifest
 // capabilities. Reads require `api_read: ["<resource>"]`; writes require
@@ -41,7 +44,7 @@ service HostData {
   // plugins write the DB.
   rpc CreateTask(CreateTaskRequest) returns (CreateTaskResponse);
   rpc UpdateTask(UpdateTaskRequest) returns (UpdateTaskResponse);
-  rpc CreateComment(CreateCommentRequest) returns (CreateCommentResponse);
+  rpc SendMessage(SendMessageRequest) returns (SendMessageResponse);
 }
 
 // ── Common ──────────────────────────────────────────────────────────────────
@@ -191,7 +194,7 @@ message SessionCodeStats {
 message ListSessionCodeStatsRequest { SessionFilter filter = 1; Page page = 2; }
 message ListSessionCodeStatsResponse { repeated SessionCodeStats stats = 1; PageInfo page_info = 2; }
 
-// ── Writes (phase 2; api_write) ──────────────────────────────────────────────
+// ── Writes (api_write) ───────────────────────────────────────────────────────
 message CreateTaskRequest {
   string workspace_id = 1;
   string workflow_id = 2;
@@ -211,12 +214,17 @@ message UpdateTaskRequest {
   optional string workflow_step_id = 5;
 }
 message UpdateTaskResponse { Task task = 1; }
-message Comment {
-  string id = 1;
-  string task_id = 2;
-  string body = 3;
-  string source = 4;                // "plugin:<id>"
-  string created_at = 5;
+// SendMessage delivers a prompt to a task session (api_write:messages) through
+// the orchestrator — the same delivery path message_task uses. The server
+// records a user message stamped source = "plugin:<id>" and resolves session_id
+// (empty → the task's primary session), queueing when the session is running
+// and resuming/starting it otherwise.
+message SendMessageRequest {
+  string task_id = 1;
+  string session_id = 2;            // empty → the task's primary session
+  string text = 3;
 }
-message CreateCommentRequest { string task_id = 1; string body = 2; }
-message CreateCommentResponse { Comment comment = 1; }
+message SendMessageResponse {
+  string session_id = 1;            // the session the message was delivered to
+  string status = 2;                // "queued" | "sent" | "started"
+}

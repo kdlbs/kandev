@@ -135,14 +135,7 @@ func systemdSelfUpdateArgs(req applyRequest, unitName string) []string {
 	for _, env := range selfUpdateEnvironment() {
 		args = append(args, "--setenv="+env)
 	}
-	return append(args,
-		req.Intent.Install.NodePath,
-		req.Intent.Install.CLIEntry,
-		"service",
-		"self-update",
-		"--intent",
-		req.IntentPath,
-	)
+	return append(args, selfUpdateCommandArgs(req)...)
 }
 
 const selfUpdateHelperDirName = "self-update"
@@ -220,14 +213,7 @@ func cleanupStaleLaunchdHelpers(ctx context.Context, dir, domain string) {
 // so the helper can resolve npm; stdout/stderr are captured to the log dir as a
 // fallback alongside the helper's own self-update-<ts>.log.
 func renderLaunchdHelperPlist(label string, req applyRequest) string {
-	args := []string{
-		req.Intent.Install.NodePath,
-		req.Intent.Install.CLIEntry,
-		"service",
-		"self-update",
-		"--intent",
-		req.IntentPath,
-	}
+	args := selfUpdateCommandArgs(req)
 	var argsXML strings.Builder
 	for _, arg := range args {
 		argsXML.WriteString("    <string>" + escapeXML(arg) + "</string>\n")
@@ -264,6 +250,27 @@ func renderLaunchdHelperPlist(label string, req applyRequest) string {
 </dict>
 </plist>
 `
+}
+
+func selfUpdateCommandArgs(req applyRequest) []string {
+	install := req.Intent.Install
+	if install.LauncherPath != "" {
+		return []string{
+			install.LauncherPath,
+			"service",
+			"self-update",
+			"--intent",
+			req.IntentPath,
+		}
+	}
+	return []string{
+		install.NodePath,
+		install.CLIEntry,
+		"service",
+		"self-update",
+		"--intent",
+		req.IntentPath,
+	}
 }
 
 func selfUpdateEnvironment() []string {

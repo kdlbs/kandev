@@ -93,15 +93,6 @@ func NewVscodeManager(
 	}
 }
 
-func (v *VscodeManager) setEnv(env map[string]string) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-	v.env = make(map[string]string, len(env))
-	for key, value := range env {
-		v.env[key] = value
-	}
-}
-
 // Start launches the code-server process asynchronously.
 // It returns immediately after setting status to "installing" and spawns
 // a background goroutine that resolves the binary, writes theme settings,

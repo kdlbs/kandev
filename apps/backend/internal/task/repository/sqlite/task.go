@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	usermodels "github.com/kandev/kandev/internal/user/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -139,6 +140,20 @@ func runnerProjection(alias string) string {
 // (ADR 0005 Wave F); when the request carries AssigneeAgentProfileID we
 // upsert a 'runner' row in workflow_step_participants instead.
 func (r *Repository) CreateTask(ctx context.Context, task *models.Task) error {
+	return r.createTask(ctx, task, "", 0)
+}
+
+// CreateTaskIfWorkflowStepHasCapacity atomically admits a task into a
+// WIP-limited workflow step. The occupancy check and insert share one writer
+// transaction, so concurrent watcher events cannot overfill the step.
+func (r *Repository) CreateTaskIfWorkflowStepHasCapacity(ctx context.Context, task *models.Task, targetStepID string, limit int) error {
+	if limit <= 0 {
+		return r.CreateTask(ctx, task)
+	}
+	return r.createTask(ctx, task, targetStepID, limit)
+}
+
+func (r *Repository) createTask(ctx context.Context, task *models.Task, targetStepID string, limit int) error {
 	if task.ID == "" {
 		task.ID = uuid.New().String()
 	}
@@ -163,6 +178,11 @@ func (r *Repository) CreateTask(ctx context.Context, task *models.Task) error {
 	if err != nil {
 		return err
 	}
+	defer func() { _ = tx.Rollback() }()
+
+	if err := r.ensureWorkflowStepCapacity(ctx, tx, targetStepID, limit); err != nil {
+		return err
+	}
 
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO tasks (id, workspace_id, workflow_id, workflow_step_id, title, description, state, priority, position, metadata, is_ephemeral, parent_id, created_at, updated_at, origin, project_id, labels, identifier)
@@ -185,6 +205,36 @@ func (r *Repository) CreateTask(ctx context.Context, task *models.Task) error {
 	}
 
 	return tx.Commit()
+}
+
+func (r *Repository) ensureWorkflowStepCapacity(ctx context.Context, tx *sql.Tx, targetStepID string, limit int) error {
+	if limit <= 0 {
+		return nil
+	}
+	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
+		return err
+	}
+	var occupants int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT COUNT(*) FROM tasks
+		WHERE workflow_step_id = ?
+		  AND archived_at IS NULL
+		  AND is_ephemeral = 0
+	`), targetStepID).Scan(&occupants); err != nil {
+		return err
+	}
+	if occupants >= limit {
+		return wfmodels.NewWIPLimitError(targetStepID, limit, occupants)
+	}
+	return nil
+}
+
+func lockWorkflowStepForCapacity(ctx context.Context, tx *sql.Tx, driver string, rebind func(string) string, stepID string) error {
+	if !dialect.IsPostgres(driver) {
+		return nil
+	}
+	var lockedID string
+	return tx.QueryRowContext(ctx, rebind(`SELECT id FROM workflow_steps WHERE id = ? FOR UPDATE`), stepID).Scan(&lockedID)
 }
 
 // upsertRunnerInTx writes (or replaces) a 'runner' participant row for
@@ -367,6 +417,10 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := lockWorkflowStepForCapacity(ctx, tx, r.db.DriverName(), r.db.Rebind, targetStepID); err != nil {
+		return err
+	}
+
 	var occupants int
 	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
 		SELECT COUNT(*) FROM tasks
@@ -378,7 +432,7 @@ func (r *Repository) UpdateTaskIfWorkflowStepHasCapacity(ctx context.Context, ta
 		return err
 	}
 	if occupants >= limit {
-		return fmt.Errorf("WIP limit exceeded for workflow step %s: limit %d already occupied", targetStepID, limit)
+		return wfmodels.NewWIPLimitError(targetStepID, limit, occupants)
 	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -1269,6 +1323,31 @@ func (r *Repository) UpdateTaskStateIfSessionState(
 	expectedSessionState models.TaskSessionState,
 	state v1.TaskState,
 ) (v1.TaskState, bool, error) {
+	return r.updateTaskStateIfSessionState(
+		ctx, taskID, sessionID, expectedSessionState, state, false,
+	)
+}
+
+// UpdateTaskStateIfPrimarySessionState additionally requires the named
+// session to remain primary.
+func (r *Repository) UpdateTaskStateIfPrimarySessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (v1.TaskState, bool, error) {
+	return r.updateTaskStateIfSessionState(
+		ctx, taskID, sessionID, expectedSessionState, state, true,
+	)
+}
+
+func (r *Repository) updateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+	requirePrimary bool,
+) (v1.TaskState, bool, error) {
 	for attempt := range updateTaskStateIfNotArchivedMaxAttempts {
 		if attempt > 0 {
 			select {
@@ -1278,7 +1357,7 @@ func (r *Repository) UpdateTaskStateIfSessionState(
 			}
 		}
 		oldState, updated, retry, err := r.tryUpdateTaskStateIfSessionState(
-			ctx, taskID, sessionID, expectedSessionState, state,
+			ctx, taskID, sessionID, expectedSessionState, state, requirePrimary,
 		)
 		if err != nil || !retry {
 			return oldState, updated, err
@@ -1293,6 +1372,7 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 	taskID, sessionID string,
 	expectedSessionState models.TaskSessionState,
 	state v1.TaskState,
+	requirePrimary bool,
 ) (oldState v1.TaskState, updated, retry bool, err error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1302,20 +1382,26 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 
 	var archivedAt sql.NullTime
 	var currentSessionState models.TaskSessionState
+	var currentSessionIsPrimary bool
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		SELECT tasks.state, tasks.archived_at, task_sessions.state
+		SELECT tasks.state, tasks.archived_at, task_sessions.state, task_sessions.is_primary
 		FROM tasks
 		JOIN task_sessions ON task_sessions.task_id = tasks.id
 		WHERE tasks.id = ? AND task_sessions.id = ?
-	`), taskID, sessionID).Scan(&oldState, &archivedAt, &currentSessionState)
+	`), taskID, sessionID).Scan(&oldState, &archivedAt, &currentSessionState, &currentSessionIsPrimary)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, false, nil
 	}
 	if err != nil {
 		return "", false, false, err
 	}
-	if archivedAt.Valid || currentSessionState != expectedSessionState {
+	if archivedAt.Valid || currentSessionState != expectedSessionState ||
+		(requirePrimary && !currentSessionIsPrimary) {
 		return oldState, false, false, nil
+	}
+	requirePrimaryValue := 0
+	if requirePrimary {
+		requirePrimaryValue = 1
 	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
@@ -1330,8 +1416,9 @@ func (r *Repository) tryUpdateTaskStateIfSessionState(
 			WHERE task_sessions.id = ?
 			  AND task_sessions.task_id = tasks.id
 			  AND task_sessions.state = ?
+			  AND (? = 0 OR task_sessions.is_primary = 1)
 		  )
-	`), state, time.Now().UTC(), taskID, oldState, sessionID, expectedSessionState)
+	`), state, time.Now().UTC(), taskID, oldState, sessionID, expectedSessionState, requirePrimaryValue)
 	if err != nil {
 		if isRetryableStateRaceError(err) {
 			return oldState, false, true, nil

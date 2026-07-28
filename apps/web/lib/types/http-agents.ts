@@ -10,8 +10,6 @@ export type {
   AgentProfilePayload,
   AgentRole,
   AgentStatus,
-  AgentSubscriptionUsage,
-  AgentSubscriptionUsageResponse,
   BillingType,
   CLIFlag,
   UtilizationWindow,
@@ -200,6 +198,12 @@ export type LoginCommand = {
   description?: string;
 };
 
+export type RuntimeUpdate = {
+  supported: boolean;
+  package: string;
+  current_version?: string;
+};
+
 export type AvailableAgent = {
   name: string;
   display_name: string;
@@ -215,6 +219,7 @@ export type AvailableAgent = {
   permission_settings?: Record<string, PermissionSetting>;
   passthrough_config?: PassthroughConfig;
   login_command?: LoginCommand;
+  runtime_update?: RuntimeUpdate;
   updated_at: string;
 };
 

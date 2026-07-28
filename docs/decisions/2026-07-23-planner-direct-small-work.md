@@ -1,6 +1,6 @@
 # Planner Direct Small Work
 
-**Status:** accepted
+**Status:** superseded by [Single-Session Model Switching](2026-07-26-single-session-model-switching.md)
 **Date:** 2026-07-23
 **Area:** workflow
 

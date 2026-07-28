@@ -20,10 +20,11 @@ import { useActiveTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prPanelLabel, prTaskKey } from "@/components/github/pr-utils";
 import { usePRFeedback } from "@/hooks/domains/github/use-pr-feedback";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { getGitHubMutationActor } from "@/lib/github-auth";
 import { useCommentsStore, isPRFeedbackComment } from "@/lib/state/slices/comments";
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useToast } from "@/components/toast-provider";
-import { submitPRReview } from "@/lib/api/domains/github-api";
+import { submitPRReview } from "@/lib/api/domains/github-pr-api";
 import type { TaskPR, PRFeedback } from "@/lib/types/github";
 import {
   formatTimeAgo,
@@ -38,6 +39,7 @@ import { ReviewStateBadge } from "./pr-reviews-section";
 import { ChecksSection } from "./pr-checks-section";
 import { ReviewsSection } from "./pr-reviews-section";
 import { CommentsSection } from "./pr-comments-section";
+import { usePRScopedReviewRequest } from "./use-pr-scoped-review-request";
 
 // --- Dockview panel wrapper ---
 
@@ -215,8 +217,6 @@ function derivePanelMetrics(taskPR: TaskPR, feedback: PRFeedback | null): PRPane
   };
 }
 
-// --- Main content ---
-
 function DescriptionSection({ body }: { body: string }) {
   if (!body) return null;
   return (
@@ -237,11 +237,12 @@ export function shouldHideApproveButton(
   taskPR: TaskPR,
   feedback: PRFeedback | null,
   currentUser: string | null,
+  hasMutationActor = !!currentUser?.trim(),
 ): boolean {
   const liveState = feedback?.pr.state ?? taskPR.state;
   if (liveState !== "open") return true;
   const normalizedUser = currentUser?.trim().toLowerCase();
-  if (!normalizedUser) return true;
+  if (!normalizedUser) return !hasMutationActor;
   const prAuthor = feedback?.pr.author_login ?? taskPR.author_login;
   if (prAuthor?.trim().toLowerCase() === normalizedUser) return true;
   return (
@@ -251,11 +252,17 @@ export function shouldHideApproveButton(
   );
 }
 
+export function shouldShowReRequestReviewAction(prState: string, reviewState: string): boolean {
+  return prState === "open" && reviewState === "DISMISSED";
+}
+
 function ApproveButton({
+  workspaceId,
   taskPR,
   feedback,
   onRefresh,
 }: {
+  workspaceId: string | null;
   taskPR: TaskPR;
   feedback: PRFeedback | null;
   onRefresh: () => void;
@@ -268,13 +275,19 @@ function ApproveButton({
   // no identity to compare against the PR author.
   const { status } = useGitHubStatus();
   const currentUser = status?.username ?? null;
+  const mutationActor = getGitHubMutationActor(status);
 
-  if (shouldHideApproveButton(taskPR, feedback, currentUser)) return null;
+  if (shouldHideApproveButton(taskPR, feedback, currentUser, !!mutationActor)) return null;
 
   const handleApprove = async () => {
+    if (!workspaceId) return;
     setSubmitting(true);
     try {
-      await submitPRReview(taskPR.owner, taskPR.repo, taskPR.pr_number, "APPROVE");
+      await submitPRReview(
+        workspaceId,
+        { owner: taskPR.owner, repo: taskPR.repo, number: taskPR.pr_number },
+        "APPROVE",
+      );
       toast({ description: "PR approved", variant: "success" });
       onRefresh();
     } catch (e) {
@@ -297,14 +310,28 @@ function ApproveButton({
       disabled={submitting}
     >
       <IconCheck className="h-3.5 w-3.5" />
-      {submitting ? "Approving..." : "Approve PR"}
+      {submitting ? "Approving..." : `Approve as ${mutationActor}`}
     </Button>
   );
 }
 
 export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
-  const { feedback, loading, refresh } = usePRFeedback(taskPR.owner, taskPR.repo, taskPR.pr_number);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const { feedback, loading, refresh } = usePRFeedback(
+    workspaceId,
+    taskPR.owner,
+    taskPR.repo,
+    taskPR.pr_number,
+  );
   const { addAsContext } = useAddPRFeedbackAsContext(sessionId, taskPR.pr_number);
+  const { toast } = useToast();
+  const reviewRequest = usePRScopedReviewRequest(taskPR, {
+    workspaceId,
+    requestedReviewers: feedback?.pr.requested_reviewers ?? [],
+    reviews: feedback?.reviews ?? [],
+    refresh,
+    toast,
+  });
 
   useSyncLivePRState(taskPR, feedback);
 
@@ -340,6 +367,7 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
   return (
     <div className="flex flex-col h-full">
       <PRHeader
+        workspaceId={workspaceId}
         taskPR={taskPR}
         feedback={feedback}
         metrics={metrics}
@@ -350,7 +378,7 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
       />
       <Separator />
       <ScrollArea className="flex-1 overflow-hidden">
-        <div className="p-3 space-y-1">
+        <div className="box-border w-0 min-w-full max-w-full overflow-x-hidden p-3 space-y-1">
           {loading && !feedback && (
             <div className="flex items-center justify-center py-8">
               <IconLoader2 className="h-6 w-6 text-blue-500 animate-spin" />
@@ -361,11 +389,14 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
               <DescriptionSection body={feedback.pr.body ?? ""} />
               <ReviewsSection
                 reviews={feedback.reviews ?? []}
-                requestedReviewers={feedback.pr.requested_reviewers ?? []}
+                requestedReviewers={reviewRequest.requestedReviewers}
                 prUrl={taskPR.pr_url}
                 reviewState={metrics.reviewState}
                 pendingReviewCount={metrics.pendingReviewCount}
                 onAddAsContext={(msg) => addAsContext("review", msg)}
+                canReRequest={shouldShowReRequestReviewAction(feedback.pr.state, "DISMISSED")}
+                requestingReviewers={reviewRequest.requestingReviewers}
+                onReRequest={reviewRequest.reRequest}
               />
               <ChecksSection
                 checks={feedback.checks ?? []}
@@ -391,8 +422,6 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
     </div>
   );
 }
-
-// --- Header ---
 
 function StateBadge({ state }: { state: string }) {
   const styles: Record<string, string> = {
@@ -505,6 +534,7 @@ function HeaderStatsLine({ taskPR, metrics }: { taskPR: TaskPR; metrics: PRPanel
 }
 
 function PRHeader({
+  workspaceId,
   taskPR,
   feedback,
   metrics,
@@ -513,6 +543,7 @@ function PRHeader({
   onResolveConflicts,
   conflictQueued,
 }: {
+  workspaceId: string | null;
   taskPR: TaskPR;
   feedback: PRFeedback | null;
   metrics: PRPanelMetrics;
@@ -534,7 +565,12 @@ function PRHeader({
         <div className="flex-1 min-w-0">
           <HeaderTitleRow taskPR={taskPR} loading={loading} onRefresh={onRefresh} />
         </div>
-        <ApproveButton taskPR={taskPR} feedback={feedback} onRefresh={onRefresh} />
+        <ApproveButton
+          workspaceId={workspaceId}
+          taskPR={taskPR}
+          feedback={feedback}
+          onRefresh={onRefresh}
+        />
         <PRMergeButton taskPR={taskPR} onMerged={onRefresh} />
       </div>
       <div className="flex items-center gap-1.5 flex-wrap">

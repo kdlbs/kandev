@@ -14,8 +14,8 @@ import (
 )
 
 // uploadCredentials reads the remote_credentials metadata and uploads the selected
-// credential files to the sprite. Also handles gh_cli_token auto-detect,
-// secret-based auth via remote_auth_secrets, and agent auth setup scripts.
+// credential files to the sprite. It also handles secret-based auth via
+// remote_auth_secrets and agent auth setup scripts.
 func (r *SpritesExecutor) uploadCredentials(
 	ctx context.Context,
 	sprite *sprites.Sprite,
@@ -40,7 +40,8 @@ func (r *SpritesExecutor) uploadCredentials(
 		return fmt.Errorf("failed to parse remote_credentials: %w", err)
 	}
 
-	// Handle gh_cli_token: detect locally and inject as env var
+	// Ignore the retired host-global gh token method in stale profiles. GitHub
+	// automation credentials are supplied by the workspace credential broker.
 	selectedMethodIDs = r.resolveGHToken(selectedMethodIDs, req)
 
 	if len(selectedMethodIDs) == 0 {
@@ -119,22 +120,10 @@ func (r *SpritesExecutor) runAuthSetupScripts(
 	}
 }
 
-// resolveGHToken handles the gh_cli_token credential: detects the token locally
-// and injects it as GITHUB_TOKEN in the request env. Returns filtered credential IDs.
+// resolveGHToken filters the retired host-global gh token method from stale
+// profiles. Explicit secret-backed GITHUB_TOKEN values are resolved separately.
 func (r *SpritesExecutor) resolveGHToken(credentialIDs []string, req *ExecutorCreateRequest) []string {
-	if !containsID(credentialIDs, "gh_cli_token") {
-		return credentialIDs
-	}
-	token, err := DetectGHToken()
-	if err != nil {
-		r.logger.Warn("failed to detect gh token", zap.Error(err))
-	} else {
-		if req.Env == nil {
-			req.Env = make(map[string]string)
-		}
-		req.Env["GITHUB_TOKEN"] = token
-		r.logger.Debug("set GITHUB_TOKEN from local gh auth token")
-	}
+	_ = req
 	return removeID(credentialIDs, "gh_cli_token")
 }
 
@@ -214,15 +203,6 @@ func (r *SpritesExecutor) resolveRemoteAuthHomeDir(
 	}
 	r.logger.Debug("resolved remote auth home", zap.String("home_dir", home))
 	return home, nil
-}
-
-func containsID(ids []string, target string) bool {
-	for _, id := range ids {
-		if id == target {
-			return true
-		}
-	}
-	return false
 }
 
 func removeID(ids []string, target string) []string {

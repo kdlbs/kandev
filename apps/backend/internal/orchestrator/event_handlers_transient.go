@@ -239,6 +239,16 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 				zap.String("execution_id", execID),
 				zap.Error(err))
 		}
+		// handleAgentFailed terminal-marked this exact execution before the
+		// retry was scheduled, so no later frame may reclaim activity even when
+		// runtime teardown times out. Retirement is safe and idempotent on both
+		// stop outcomes.
+		s.retireExecutionActivityAndPublish(
+			context.WithoutCancel(ctx),
+			taskID,
+			sessionID,
+			execID,
+		)
 	}
 	if ctx.Err() != nil {
 		return
@@ -331,6 +341,16 @@ func (s *Service) cancelAllTransientRetries() {
 // and surfaces the manual recovery banner so they can Resume or Start fresh.
 // Returns true if a retry loop was active.
 func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID string) bool {
+	// Reports "nothing to cancel" on denial: the bool return carries no error
+	// channel, and a foreign session must not be distinguishable from an idle
+	// one. Guard first — resetTransientRetry below mutates retry state.
+	//
+	// Both IDs: taskID is handed to handleRecoverableFailure, which writes
+	// against that task, so the session check alone would leave it free to
+	// point at someone else's.
+	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
+		return false
+	}
 	_, active := s.transientRetries.Load(sessionID)
 	s.resetTransientRetry(sessionID)
 	if !active {

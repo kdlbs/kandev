@@ -1,5 +1,8 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
 import { resolvePRDiffView, usePRDiff, type KeyedPRDiffState } from "./use-pr-diff";
 
 const requestMock = vi.hoisted(() => vi.fn());
@@ -18,6 +21,13 @@ function deferred<T>() {
 beforeEach(() => {
   requestMock.mockReset();
 });
+
+function wrapper({ children }: { children: ReactNode }) {
+  const initialState = {
+    workspaces: { activeId: "workspace-1" },
+  } as unknown as Partial<AppState>;
+  return createElement(StateProvider, { initialState, children });
+}
 
 const staleState: KeyedPRDiffState = {
   sourceKey: "acme/app/1/old",
@@ -61,7 +71,7 @@ describe("usePRDiff request ownership", () => {
     );
     const { result, rerender } = renderHook(
       ({ number }) => usePRDiff("acme", "app", number, "synced"),
-      { initialProps: { number: 1 } },
+      { initialProps: { number: 1 }, wrapper },
     );
 
     rerender({ number: 2 });

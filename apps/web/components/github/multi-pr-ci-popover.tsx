@@ -7,6 +7,7 @@ import { PRCIPopover } from "@/components/github/pr-ci-popover";
 import { getPRStatusColor, pickDefaultPR } from "@/components/github/pr-task-icon";
 import { prIdentitySlug } from "@/components/github/pr-utils";
 import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-popover";
+import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
 /**
@@ -15,7 +16,8 @@ import type { TaskPR } from "@/lib/types/github";
  * PR (keyed by id) so the hook count stays stable as the list changes.
  */
 function PRFeedbackWarmer({ pr }: { pr: TaskPR }) {
-  usePRFeedbackBackgroundSync(pr);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  usePRFeedbackBackgroundSync(workspaceId, pr);
   return null;
 }
 
@@ -80,10 +82,12 @@ export function MultiPRCIPopover({
   prs,
   enabled,
   onOpenDetailPanel,
+  refreshTaskPR,
 }: {
   prs: TaskPR[];
   enabled: boolean;
   onOpenDetailPanel?: (pr: TaskPR) => void;
+  refreshTaskPR?: () => void;
 }) {
   // `overrideId` is only set when the user activates a tab. The displayed PR is
   // derived: honour the override while it still exists, otherwise fall back to
@@ -140,6 +144,7 @@ export function MultiPRCIPopover({
           pr={selected}
           enabled={enabled}
           onOpenDetailPanel={onOpenDetailPanel ? () => onOpenDetailPanel(selected) : undefined}
+          refreshTaskPR={refreshTaskPR}
         />
       </div>
     </div>

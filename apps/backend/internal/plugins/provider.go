@@ -77,6 +77,15 @@ func Provide(cfg *config.Config, dbPool *db.Pool, secrets SecretVault, eventBus 
 		log.Warn("plugins: marketplace init failed (non-fatal)", zap.Error(err))
 	}
 
+	if settingsStore, err := newSettingsStore(dbPool); err != nil {
+		// Non-fatal: without the settings store the auto-update default reads as
+		// off and per-plugin toggles are rejected, but install/enable/etc. all
+		// still work.
+		log.Warn("plugins: settings store init failed (non-fatal)", zap.Error(err))
+	} else {
+		svc.SetSettings(settingsStore)
+	}
+
 	rt := runtime.NewManager(dir, svc.handleStatusChange, log)
 	svc.SetRuntime(rt)
 

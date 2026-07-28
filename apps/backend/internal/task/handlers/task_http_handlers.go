@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -16,12 +17,116 @@ import (
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepository "github.com/kandev/kandev/internal/task/repository"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
+
+type httpWorkspaceSourcesRequest struct {
+	Sources []json.RawMessage `json:"sources"`
+}
+
+type workspaceSourceJSON struct {
+	Kind           string `json:"kind"`
+	RepositoryID   string `json:"repository_id"`
+	LocalPath      string `json:"local_path"`
+	GitHubURL      string `json:"github_url"`
+	RemoteURL      string `json:"remote_url"`
+	Provider       string `json:"provider"`
+	ProviderRepoID string `json:"provider_repo_id"`
+	ProviderOwner  string `json:"provider_owner"`
+	ProviderName   string `json:"provider_name"`
+	BaseBranch     string `json:"base_branch"`
+	CheckoutBranch string `json:"checkout_branch"`
+	DisplayName    string `json:"display_name"`
+}
+
+func (h *TaskHandlers) httpAttachWorkspaceSources(c *gin.Context) {
+	var body httpWorkspaceSourcesRequest
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || len(body.Sources) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sources is required"})
+		return
+	}
+	sources, err := parseHTTPWorkspaceSources(body.Sources)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	result, err := h.service.AttachWorkspaceSources(c.Request.Context(), service.AttachWorkspaceSourcesRequest{TaskID: c.Param("id"), Sources: sources})
+	if err != nil {
+		h.writeWorkspaceSourceError(c, err)
+		return
+	}
+	response := gin.H{"task_id": result.Task.ID, "repositories": result.Task.Repositories, "workspace_folders": result.Task.WorkspaceFolders, "workspace_path": result.WorkspacePath, "session_ids": result.SessionIDs}
+	c.JSON(http.StatusOK, response)
+}
+
+func parseHTTPWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInput, error) {
+	sources := make([]service.WorkspaceSourceInput, 0, len(raw))
+	for _, item := range raw {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(item, &fields); err != nil {
+			return nil, fmt.Errorf("source must be an object")
+		}
+		var kind string
+		if err := json.Unmarshal(fields["kind"], &kind); err != nil {
+			return nil, fmt.Errorf("source kind is required")
+		}
+		allowed := map[string]bool{"kind": true, "local_path": true}
+		switch kind {
+		case string(service.WorkspaceSourceRepository):
+			for _, key := range []string{"repository_id", "remote_url", "github_url", "provider", "provider_repo_id", "provider_owner", "provider_name", "base_branch", "checkout_branch"} {
+				allowed[key] = true
+			}
+		case string(service.WorkspaceSourceFolder):
+			allowed["display_name"] = true
+		default:
+			return nil, fmt.Errorf("unsupported workspace source kind %q", kind)
+		}
+		for key := range fields {
+			if !allowed[key] {
+				return nil, fmt.Errorf("field %q is not allowed for %s source", key, kind)
+			}
+		}
+		var source workspaceSourceJSON
+		if err := json.Unmarshal(item, &source); err != nil {
+			return nil, err
+		}
+		sources = append(sources, service.WorkspaceSourceInput{Kind: service.WorkspaceSourceKind(source.Kind), RepositoryID: source.RepositoryID, LocalPath: source.LocalPath, GitHubURL: source.GitHubURL, RemoteURL: source.RemoteURL, Provider: source.Provider, ProviderRepoID: source.ProviderRepoID, ProviderOwner: source.ProviderOwner, ProviderName: source.ProviderName, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch, DisplayName: source.DisplayName})
+	}
+	return sources, nil
+}
+
+func workspaceSourceHTTPStatus(err error) int {
+	switch {
+	case errors.Is(err, service.ErrInvalidWorkspaceSource):
+		return http.StatusBadRequest
+	case errors.Is(err, taskrepo.ErrTaskNotFound), errors.Is(err, taskrepository.ErrRepositoryNotFound), errors.Is(err, service.ErrTaskRepositoryNotFound):
+		return http.StatusNotFound
+	case errors.Is(err, service.ErrWorkspaceSourceConflict), errors.Is(err, service.ErrWorkspaceSourceActive):
+		return http.StatusConflict
+	case errors.Is(err, service.ErrUnsupportedWorkspaceSource), errors.Is(err, service.ErrWorkspaceSourceMaterialize):
+		return http.StatusUnprocessableEntity
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+func (h *TaskHandlers) writeWorkspaceSourceError(c *gin.Context, err error) {
+	status := workspaceSourceHTTPStatus(err)
+	if status == http.StatusInternalServerError {
+		h.logger.Error("attach workspace sources failed", zap.Error(err))
+		c.JSON(status, gin.H{"error": "request failed"})
+		return
+	}
+	c.JSON(status, gin.H{"error": err.Error()})
+}
 
 func (h *TaskHandlers) httpListTasks(c *gin.Context) {
 	tasks, err := h.service.ListTasks(c.Request.Context(), c.Param("id"))
@@ -96,6 +201,7 @@ func buildTaskDTOsWithSessionInfo(
 	ctx context.Context,
 	svc *service.Service,
 	log *logger.Logger,
+	activityProvider dto.ForegroundActivityProvider,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
@@ -113,7 +219,7 @@ func buildTaskDTOsWithSessionInfo(
 	if err != nil {
 		return nil, err
 	}
-	pendingActionsBySession, err := pendingActionsForWaitingPrimarySessions(ctx, svc, primarySessionInfoMap)
+	pendingActionsBySession, err := pendingActionsForInputCapableSessions(ctx, svc, sessionsByTask)
 	if err != nil {
 		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(err))
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
@@ -134,7 +240,7 @@ func buildTaskDTOsWithSessionInfo(
 			sessionCount = &n
 		}
 		si := extractSessionInfo(primarySessionInfoMap[task.ID])
-		result = append(result, dto.FromTaskWithSessionInfo(
+		taskDTO := dto.FromTaskWithSessionInfo(
 			task,
 			primarySessionID,
 			sessionCount,
@@ -146,7 +252,10 @@ func buildTaskDTOsWithSessionInfo(
 			si.workingDirectory,
 			si.sessionState,
 			pendingActionPtr(si.sessionID, pendingActionsBySession),
-		))
+		)
+		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
+		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
+		result = append(result, taskDTO)
 	}
 	return result, nil
 }
@@ -201,21 +310,48 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 	return si
 }
 
-func pendingActionsForWaitingPrimarySessions(
+func pendingActionsForInputCapableSessions(
 	ctx context.Context,
 	svc *service.Service,
-	primarySessionInfoMap map[string]*models.TaskSession,
+	sessionsByTask map[string][]*models.TaskSession,
 ) (map[string]models.TaskPendingAction, error) {
-	sessionIDs := make([]string, 0, len(primarySessionInfoMap))
-	for _, info := range primarySessionInfoMap {
-		if info != nil && info.State == models.TaskSessionStateWaitingForInput {
-			sessionIDs = append(sessionIDs, info.ID)
+	sessionIDs := make([]string, 0)
+	for _, sessions := range sessionsByTask {
+		for _, session := range sessions {
+			if isInputCapableSession(session) {
+				sessionIDs = append(sessionIDs, session.ID)
+			}
 		}
 	}
 	if len(sessionIDs) == 0 {
 		return map[string]models.TaskPendingAction{}, nil
 	}
 	return svc.GetPendingActionsForSessions(ctx, sessionIDs)
+}
+
+func isInputCapableSession(session *models.TaskSession) bool {
+	return session != nil && (session.State == models.TaskSessionStateRunning || session.State == models.TaskSessionStateWaitingForInput)
+}
+
+func taskPendingActionPtr(sessions []*models.TaskSession, actions map[string]models.TaskPendingAction) *string {
+	var clarification bool
+	for _, session := range sessions {
+		if !isInputCapableSession(session) {
+			continue
+		}
+		switch actions[session.ID] {
+		case models.TaskPendingActionPermission:
+			value := string(models.TaskPendingActionPermission)
+			return &value
+		case models.TaskPendingActionClarification:
+			clarification = true
+		}
+	}
+	if clarification {
+		value := string(models.TaskPendingActionClarification)
+		return &value
+	}
+	return nil
 }
 
 func pendingActionPtr(
@@ -234,7 +370,7 @@ func pendingActionPtr(
 }
 
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, tasks)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {
@@ -243,7 +379,7 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, []*models.Task{task})
+	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, h.foregroundActivity, []*models.Task{task})
 	if err != nil {
 		h.logger.Error("failed to build task DTO with session info", zap.Error(err))
 		c.JSON(http.StatusOK, dto.FromTask(task))
@@ -262,7 +398,9 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	ids := make([]string, 0, len(sessions))
 	for _, session := range sessions {
-		sessionDTOs = append(sessionDTOs, dto.FromTaskSessionSummary(session))
+		summary := dto.FromTaskSessionSummary(session)
+		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
+		sessionDTOs = append(sessionDTOs, summary)
 		ids = append(ids, session.ID)
 	}
 	// Resolve the per-session tool_call counts so the frontend can render
@@ -304,8 +442,10 @@ func (h *TaskHandlers) httpGetTaskSession(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
+	sessionDTO := dto.FromTaskSession(session)
+	dto.EnrichForegroundActivity(&sessionDTO, h.foregroundActivity)
 	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
-		Session: dto.FromTaskSession(session),
+		Session: sessionDTO,
 	})
 }
 
@@ -324,8 +464,10 @@ func (h *TaskHandlers) httpDismissLastAgentError(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
+	sessionDTO := dto.FromTaskSession(session)
+	dto.EnrichForegroundActivity(&sessionDTO, h.foregroundActivity)
 	c.JSON(http.StatusOK, dto.GetTaskSessionResponse{
-		Session: dto.FromTaskSession(session),
+		Session: sessionDTO,
 	})
 }
 
@@ -333,6 +475,11 @@ func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "session id is required"})
+		return
+	}
+	// Per-user scoping: the caller must own the session's workspace.
+	if err := h.service.AuthorizeSessionAccess(c.Request.Context(), sessionID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}
 
@@ -355,8 +502,10 @@ func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 func (h *TaskHandlers) httpApproveSession(c *gin.Context) {
 	result, err := h.service.ApproveSession(c.Request.Context(), c.Param("id"))
 	if err != nil {
-		h.logger.Error("failed to approve session", zap.String("session_id", c.Param("id")), zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		// Route not-found through the shared mapper so a per-user scoping
+		// denial answers 404 like every other session route, rather than
+		// surfacing as a 500 that distinguishes "yours" from "someone else's".
+		handleNotFound(c, h.logger, err, "task session not found")
 		return
 	}
 
@@ -1009,6 +1158,8 @@ type httpUpdateTaskRequest struct {
 	Repositories []httpTaskRepositoryInput `json:"repositories,omitempty"`
 	Position     *int                      `json:"position,omitempty"`
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
+	// ParentID nests the task under another task. "" clears the parent.
+	ParentID *string `json:"parent_id,omitempty"`
 }
 
 func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
@@ -1060,6 +1211,7 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 		Repositories: convertUpdateRepositories(body.Repositories != nil, repos),
 		Position:     body.Position,
 		Metadata:     body.Metadata,
+		ParentID:     body.ParentID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not updated")

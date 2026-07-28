@@ -4,6 +4,7 @@ import { TaskRenameDialog } from "./task-rename-dialog";
 import { TaskArchiveConfirmDialog } from "./task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
 import { TaskDetachTargetConfirmDialog } from "./task-detach-confirm-dialog";
+import { NewSubtaskDialog } from "./new-subtask-dialog";
 import { TaskExternalLinkDialog } from "./task-external-link-dialog";
 import { TaskGitHubIssueDialog } from "./task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "./task-github-pr-dialog";
@@ -26,6 +27,9 @@ export type SidebarDialogsActions = {
   renamingTask: Target;
   setRenamingTask: (next: Target) => void;
   handleRenameSubmit: (newTitle: string) => Promise<void> | void;
+  creatingSubtask: Target;
+  setCreatingSubtask: (next: Target) => void;
+  handleCreateSubtask: (taskId: string, taskTitle: string) => void;
   archivingTask: Target;
   setArchivingTask: (next: Target) => void;
   archivingTaskId: string | null;
@@ -49,6 +53,25 @@ export type SidebarDialogsActions = {
   setLinkingExternalIssueTask: (next: SidebarExternalLinkTarget | null) => void;
 };
 
+function SidebarSubtaskDialog({
+  target,
+  onTargetChange,
+}: {
+  target: Target;
+  onTargetChange: (next: Target) => void;
+}) {
+  return (
+    <NewSubtaskDialog
+      open={target !== null}
+      onOpenChange={(open) => {
+        if (!open) onTargetChange(null);
+      }}
+      parentTaskId={target?.id ?? ""}
+      parentTaskTitle={target?.title ?? ""}
+    />
+  );
+}
+
 export function SidebarDialogs({
   actions,
   repositories,
@@ -62,6 +85,8 @@ export function SidebarDialogs({
     renamingTask,
     setRenamingTask,
     handleRenameSubmit,
+    creatingSubtask,
+    setCreatingSubtask,
     archivingTask,
     setArchivingTask,
     archivingTaskId,
@@ -86,6 +111,7 @@ export function SidebarDialogs({
         currentTitle={renamingTask?.title ?? ""}
         onSubmit={handleRenameSubmit}
       />
+      <SidebarSubtaskDialog target={creatingSubtask} onTargetChange={setCreatingSubtask} />
       <TaskArchiveConfirmDialog
         open={archivingTask !== null}
         onOpenChange={(open) => {
@@ -152,6 +178,7 @@ export function SidebarLinkDialogs({
     <>
       {linkingPullRequestTask && (
         <TaskGitHubPRDialog
+          workspaceId={workspaceId}
           open={true}
           onOpenChange={(open) => {
             if (!open) setLinkingPullRequestTask(null);

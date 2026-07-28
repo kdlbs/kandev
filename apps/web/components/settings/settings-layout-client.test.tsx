@@ -30,8 +30,11 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/components/page-topbar", () => ({
-  PageTopbar: ({ actions }: { actions?: ReactNode }) => (
-    <div data-testid="page-topbar-actions">{actions}</div>
+  PageTopbar: ({ actions, title }: { actions?: ReactNode; title: string }) => (
+    <div>
+      <span data-testid="page-topbar-title">{title}</span>
+      <div data-testid="page-topbar-actions">{actions}</div>
+    </div>
   ),
 }));
 

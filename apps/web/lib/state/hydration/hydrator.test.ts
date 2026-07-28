@@ -346,3 +346,13 @@ describe("hydrateState — sidebar views from user settings", () => {
     });
   });
 });
+
+describe("hydrateState — system slice", () => {
+  it("leaves the system slice untouched when the caller supplies no system fields", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {});
+    });
+
+    expect(result.system).toEqual(defaultState.system);
+  });
+});

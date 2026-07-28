@@ -53,6 +53,12 @@ func apiReadCapability(resource string) string {
 	return "api_read:" + resource
 }
 
+// apiWriteCapability formats resource as the api_write:<resource> capability
+// name permissionDenied expects for the Host data API's write RPCs (ADR 0043).
+func apiWriteCapability(resource string) string {
+	return "api_write:" + resource
+}
+
 // Pagination: Page.Cursor is a decimal string offset into the server-side
 // result set. It is an implementation detail plugins must treat as opaque
 // (per ADR 0043's "opaque cursor" convention) — nothing here promises it
@@ -182,13 +188,12 @@ type messageDataSource interface {
 // this falls back to the embedded Unimplemented reader rather than a nil
 // pointer dereference.
 
+// Tasks returns the task accessor. Unlike the read-only accessors below, it
+// mixes read (List/Get, api_read:tasks) and write (Create/Update,
+// api_write:tasks) methods whose capabilities gate independently, so the gate
+// cannot live at the accessor — each method checks its own capability (reads
+// here, writes in host_write.go).
 func (h *pluginHost) Tasks() pluginsdk.TaskReader {
-	if !h.capabilities.CanRead(resourceTasks) {
-		return deniedTaskReader{}
-	}
-	if h.taskData == nil {
-		return h.UnimplementedHostData.Tasks()
-	}
 	return taskReader{host: h}
 }
 
@@ -242,27 +247,15 @@ func (h *pluginHost) Repositories() pluginsdk.RepositoryReader {
 	return repositoryReader{host: h}
 }
 
+// Messages mixes read (List, api_read:messages) and write (Send,
+// api_write:messages) with independent capabilities, so — like Tasks() — the
+// gate can't live at the accessor; each method checks its own capability (List
+// here, Send in host_write.go).
 func (h *pluginHost) Messages() pluginsdk.MessageReader {
-	if !h.capabilities.CanRead(resourceMessages) {
-		return deniedMessageReader{}
-	}
-	if h.messageData == nil {
-		return h.UnimplementedHostData.Messages()
-	}
 	return messageReader{host: h}
 }
 
 // ── Denied readers ──────────────────────────────────────────────────────
-
-type deniedTaskReader struct{}
-
-func (deniedTaskReader) List(context.Context, pluginsdk.TaskFilter, pluginsdk.Page) ([]pluginsdk.Task, *pluginsdk.PageInfo, error) {
-	return nil, nil, permissionDenied(apiReadCapability(resourceTasks))
-}
-
-func (deniedTaskReader) Get(context.Context, string) (*pluginsdk.Task, error) {
-	return nil, permissionDenied(apiReadCapability(resourceTasks))
-}
 
 type deniedSessionReader struct{}
 
@@ -302,12 +295,6 @@ func (deniedRepositoryReader) List(context.Context, string, pluginsdk.Page) ([]p
 	return nil, nil, permissionDenied(apiReadCapability(resourceRepositories))
 }
 
-type deniedMessageReader struct{}
-
-func (deniedMessageReader) List(context.Context, pluginsdk.MessageFilter, pluginsdk.Page) ([]pluginsdk.Message, *pluginsdk.PageInfo, error) {
-	return nil, nil, permissionDenied(apiReadCapability(resourceMessages))
-}
-
 // ── Real readers ────────────────────────────────────────────────────────
 //
 // Only ever returned once the resource's capability gate has passed (see the
@@ -324,6 +311,12 @@ const taskFetchPageSize = 1000
 type taskReader struct{ host *pluginHost }
 
 func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page pluginsdk.Page) ([]pluginsdk.Task, *pluginsdk.PageInfo, error) {
+	if !r.host.capabilities.CanRead(resourceTasks) {
+		return nil, nil, permissionDenied(apiReadCapability(resourceTasks))
+	}
+	if r.host.taskData == nil {
+		return r.host.UnimplementedHostData.Tasks().List(ctx, filter, page)
+	}
 	workspaceIDs, err := r.host.resolveWorkspaceIDs(ctx, filter.WorkspaceIDs)
 	if err != nil {
 		return nil, nil, err
@@ -342,6 +335,12 @@ func (r taskReader) List(ctx context.Context, filter pluginsdk.TaskFilter, page 
 // doesn't resolve to a task, so the in-process contract matches exactly what
 // a real plugin observes over the wire via grpcHostServer.GetTask.
 func (r taskReader) Get(ctx context.Context, id string) (*pluginsdk.Task, error) {
+	if !r.host.capabilities.CanRead(resourceTasks) {
+		return nil, permissionDenied(apiReadCapability(resourceTasks))
+	}
+	if r.host.taskData == nil {
+		return r.host.UnimplementedHostData.Tasks().Get(ctx, id)
+	}
 	task, err := r.host.taskData.GetTask(ctx, id)
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {
@@ -500,6 +499,12 @@ type messageReader struct{ host *pluginHost }
 // messageModelToDTO (kandev-system blocks stripped) before it reaches the
 // plugin.
 func (r messageReader) List(ctx context.Context, filter pluginsdk.MessageFilter, page pluginsdk.Page) ([]pluginsdk.Message, *pluginsdk.PageInfo, error) {
+	if !r.host.capabilities.CanRead(resourceMessages) {
+		return nil, nil, permissionDenied(apiReadCapability(resourceMessages))
+	}
+	if r.host.messageData == nil {
+		return r.host.UnimplementedHostData.Messages().List(ctx, filter, page)
+	}
 	// Each session/task/type value becomes its own SQL bind parameter; cap
 	// their combined count well under SQLite's host-parameter limit
 	// (~500-999) so a large filter fails fast with a clear InvalidArgument

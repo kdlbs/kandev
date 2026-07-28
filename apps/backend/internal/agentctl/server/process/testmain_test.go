@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
@@ -64,6 +65,24 @@ func runFixture(spec string) {
 			fmt.Fprintf(os.Stderr, "fixture: sleep: bad seconds %q\n", parts[1])
 			os.Exit(2)
 		}
+		time.Sleep(time.Duration(secs) * time.Second)
+	case "sleep-ignore-signals":
+		// Like sleep, but ignores the graceful-shutdown interrupt (SIGINT on
+		// Unix) so the process cannot exit during stopProcess's graceful
+		// window. That makes the signal-escalation test deterministic: with
+		// proc.done never closing, a pre-cancelled context always wins the
+		// select and the SIGKILL escalation path is taken. SIGKILL (via
+		// killProcessGroup) is uncatchable, so cleanup still reaps it.
+		if len(parts) != 2 {
+			fmt.Fprintln(os.Stderr, "fixture: sleep-ignore-signals takes 1 arg")
+			os.Exit(2)
+		}
+		secs, err := strconv.Atoi(parts[1])
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "fixture: sleep-ignore-signals: bad seconds %q\n", parts[1])
+			os.Exit(2)
+		}
+		signal.Ignore(os.Interrupt)
 		time.Sleep(time.Duration(secs) * time.Second)
 	case "echo":
 		fmt.Println(strings.Join(parts[1:], " "))

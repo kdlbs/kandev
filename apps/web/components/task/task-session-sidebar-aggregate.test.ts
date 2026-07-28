@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   aggregateSidebarTasks,
   buildPendingFlags,
-  readPendingFlags,
+  readTaskPendingFlags,
   type SidebarStepInfo,
   type WorkflowSnapshotMap,
 } from "./task-session-sidebar-aggregate";
@@ -158,67 +158,27 @@ describe("aggregateSidebarTasks", () => {
   });
 });
 
-describe("buildPendingFlags / readPendingFlags", () => {
-  it("flags a session with a pending permission request", () => {
-    const flags = buildPendingFlags({ "sess-1": [makePermissionRequest("p1")] }, ["sess-1"]);
-    expect(readPendingFlags(flags, "sess-1")).toEqual({ clarification: false, permission: true });
-  });
-
-  it("does not flag a session whose permission request is already resolved", () => {
-    const flags = buildPendingFlags({ "sess-1": [makePermissionRequest("p1", "approved")] }, [
-      "sess-1",
-    ]);
-    expect(readPendingFlags(flags, "sess-1")).toEqual({ clarification: false, permission: false });
-  });
-
-  it("only computes flags for the requested session ids", () => {
+describe("buildPendingFlags / readTaskPendingFlags", () => {
+  it("aggregates permission from a secondary waiting session", () => {
     const flags = buildPendingFlags(
-      { "sess-1": [makePermissionRequest("p1")], "sess-2": [makePermissionRequest("p2")] },
-      ["sess-1"],
+      { primary: [], secondary: [makePermissionRequest("secondary-permission")] },
+      ["primary", "secondary"],
     );
-    expect(readPendingFlags(flags, "sess-1").permission).toBe(true);
-    expect(readPendingFlags(flags, "sess-2").permission).toBe(false);
-  });
-
-  it("returns all-false for a null/unknown session", () => {
-    expect(readPendingFlags({}, null)).toEqual({ clarification: false, permission: false });
-    expect(readPendingFlags({}, "missing")).toEqual({ clarification: false, permission: false });
-  });
-
-  it("falls back to the snapshot pending action when messages are not loaded", () => {
     expect(
-      readPendingFlags({}, "sess-1", {
-        primarySessionState: "WAITING_FOR_INPUT",
-        primarySessionPendingAction: "clarification",
-      }),
-    ).toEqual({ clarification: true, permission: false });
-  });
-
-  it("falls back to pending permission from the snapshot", () => {
-    expect(
-      readPendingFlags({}, "sess-1", {
-        primarySessionState: "WAITING_FOR_INPUT",
-        primarySessionPendingAction: "permission",
-      }),
+      readTaskPendingFlags(flags, [
+        { id: "primary", state: "STARTING" },
+        { id: "secondary", state: "WAITING_FOR_INPUT" },
+      ]),
     ).toEqual({ clarification: false, permission: true });
   });
 
-  it("prefers loaded messages over a stale snapshot pending action", () => {
-    const flags = buildPendingFlags({ "sess-1": [] }, ["sess-1"]);
-    expect(
-      readPendingFlags(flags, "sess-1", {
-        primarySessionState: "WAITING_FOR_INPUT",
-        primarySessionPendingAction: "clarification",
-      }),
-    ).toEqual({ clarification: false, permission: false });
-  });
-
-  it("does not use the snapshot pending action after the session moves on", () => {
-    expect(
-      readPendingFlags({}, "sess-1", {
-        primarySessionState: "RUNNING",
-        primarySessionPendingAction: "clarification",
-      }),
-    ).toEqual({ clarification: false, permission: false });
+  it("excludes stale pending input from non-input-capable sessions", () => {
+    const flags = buildPendingFlags({ starting: [makePermissionRequest("stale-permission")] }, [
+      "starting",
+    ]);
+    expect(readTaskPendingFlags(flags, [{ id: "starting", state: "STARTING" }])).toEqual({
+      clarification: false,
+      permission: false,
+    });
   });
 });

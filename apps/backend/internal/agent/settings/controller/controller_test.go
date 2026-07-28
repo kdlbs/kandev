@@ -2,8 +2,10 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -168,6 +170,26 @@ func TestController_PreviewAgentCommand_StandardCommand(t *testing.T) {
 	for _, cmdPart := range result.Command {
 		if cmdPart == "--model" {
 			t.Errorf("PreviewAgentCommand() should not emit --model, got %v", result.Command)
+		}
+	}
+}
+
+func TestController_PreviewAgentCommand_RejectsInvalidCommandPrefix(t *testing.T) {
+	controller := newTestController(map[string]agents.Agent{
+		"test-agent": &testAgent{
+			id:      "test-agent",
+			name:    "test-agent",
+			enabled: true,
+			runtime: &agents.RuntimeConfig{Cmd: agents.NewCommand("test-cli")},
+		},
+	})
+
+	for _, prefix := range []string{`greywall "unterminated`, `'' --arg`, `--not-a-launcher`} {
+		_, err := controller.PreviewAgentCommand(context.Background(), "test-agent", CommandPreviewRequest{
+			CommandPrefix: prefix,
+		})
+		if !errors.Is(err, ErrInvalidCommandPrefix) {
+			t.Errorf("prefix %q: expected ErrInvalidCommandPrefix, got %v", prefix, err)
 		}
 	}
 }
@@ -437,6 +459,11 @@ func TestBuildCommandString(t *testing.T) {
 			cmd:      []string{},
 			expected: "",
 		},
+		{
+			name:     "empty argument",
+			cmd:      []string{"node", "-e", ""},
+			expected: `node -e ""`,
+		},
 	}
 
 	for _, tt := range tests {
@@ -611,16 +638,15 @@ func TestDetectAgents_E2EMockPropagatesSupportsMCP(t *testing.T) {
 	}
 }
 
-// TestController_PreviewAgentCommand_CopilotPrefersNativeBinary verifies the
-// command preview reflects the local copilot CLI when it is on PATH — the
-// preview assumes the default standalone host — and falls back to npx when it
-// is absent. Regresses the report that the preview always showed npx.
-func TestController_PreviewAgentCommand_CopilotPrefersNativeBinary(t *testing.T) {
+// TestController_PreviewAgentCommand_CopilotKeepsManagedPackage verifies that
+// a globally installed Copilot CLI does not make the command preview bypass
+// the managed npm runtime.
+func TestController_PreviewAgentCommand_CopilotKeepsManagedPackage(t *testing.T) {
 	controller := newTestController(map[string]agents.Agent{
 		"copilot-acp": agents.NewCopilotACP(),
 	})
 
-	// copilot on PATH → preview shows the native binary.
+	// A copilot binary on PATH must not change the previewed launch command.
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "copilot"), []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatalf("write fake copilot: %v", err)
@@ -630,17 +656,8 @@ func TestController_PreviewAgentCommand_CopilotPrefersNativeBinary(t *testing.T)
 	if err != nil {
 		t.Fatalf("PreviewAgentCommand() error = %v", err)
 	}
-	if got := res.Command; len(got) == 0 || got[0] != "copilot" {
-		t.Errorf("preview with copilot on PATH should start with copilot, got %v", got)
-	}
-
-	// copilot absent → preview falls back to npx.
-	t.Setenv("PATH", t.TempDir())
-	res, err = controller.PreviewAgentCommand(context.Background(), "copilot-acp", CommandPreviewRequest{})
-	if err != nil {
-		t.Fatalf("PreviewAgentCommand() error = %v", err)
-	}
-	if got := res.Command; len(got) == 0 || got[0] != "npx" {
-		t.Errorf("preview without copilot on PATH should start with npx, got %v", got)
+	want := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
+	if got := res.Command; !slices.Equal(got, want) {
+		t.Errorf("preview with copilot on PATH = %v, want %v", got, want)
 	}
 }

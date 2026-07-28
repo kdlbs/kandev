@@ -25,7 +25,7 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
   // Worker-scoped: complete onboarding once per worker and expose the
   // resulting workspace/agent/project IDs to all tests in the suite.
   officeSeed: [
-    async ({ officeApi, seedData }, use) => {
+    async ({ officeApi, apiClient, seedData }, use) => {
       const result = await officeApi.completeOnboarding({
         workspaceName: "E2E Workspace",
         taskPrefix: "E2E",
@@ -33,11 +33,20 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
         agentProfileId: seedData.agentProfileId,
         executorPreference: "local_pc",
       });
+      const { workspaces } = await apiClient.listWorkspaces();
+      const workflowId = workspaces.find(
+        (workspace) => workspace.id === result.workspaceId,
+      )?.office_workflow_id;
+      if (!workflowId) {
+        throw new Error(
+          `E2E office seed failed: workspace ${result.workspaceId} has no office workflow`,
+        );
+      }
       await use({
         workspaceId: result.workspaceId,
         agentId: result.agentId,
         projectId: result.projectId,
-        workflowId: seedData.workflowId,
+        workflowId,
       });
     },
     { scope: "worker" },

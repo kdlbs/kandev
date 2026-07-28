@@ -16,6 +16,7 @@ uncovered command.
 | `.github/workflows/**` | `python3 .github/scripts/lint-action-pinning_test.py` plus applicable harness lint |
 | `scripts/**`, `.github/scripts/**` | sibling syntax/test when obvious; otherwise `make test-scripts` |
 | `apps/backend/**` | `make fmt-backend`, `make test-backend`, `make lint-backend` |
+| Eligible narrow pure helper in `apps/web/**` | changed-file Prettier/ESLint when uncovered, package-local typecheck, and the helper's colocated test file |
 | `apps/web/**` | generate web metadata, `make fmt-web`, `make typecheck-web`, `make test-web`, `make lint-web` |
 | `apps/cli/**` | workspace format, CLI TypeScript check/build, `make test-cli` |
 | `apps/desktop/**` excluding `src-tauri` | desktop TypeScript check and the directly affected desktop smoke/test |
@@ -28,6 +29,29 @@ build/toolchain/dependency lockfiles, Makefiles, profiles, generated contracts,
 release tooling, migrations/shared schemas, or unusually broad plan
 implementation. Multiple known rows are not automatically ambiguous: run their
 union when ownership and dependents are clear.
+
+## Narrow Pure Web Helper
+
+Use the narrow row only when all of the following are proven from the diff and
+source:
+
+- The scope changes exactly one non-TSX `apps/web` helper and its colocated
+  `*.test.ts`; it changes no configuration, generated artifact, shared package,
+  API client, store, component, hook, or other production file.
+- The test directly imports and exercises the helper. The helper and its direct
+  dependencies are deterministic and do not render React, use hooks or stores,
+  access browser/DOM globals, or perform network, filesystem, timer, or
+  process-side effects.
+- The change does not alter an acceptance flow that needs integration or E2E
+  evidence. Any uncertainty, extra dependent, or indirect side effect uses the
+  generic `apps/web/**` row instead.
+
+For an eligible helper, run its test file through the web package's test command
+and run `cd apps/web && pnpm run typecheck`. If hook evidence does not cover
+the changed-file format/lint checks, run Prettier and ESLint against only the
+two changed paths. Report this as `changed-scope PASS (narrow pure helper)`,
+including the eligibility evidence and exact test path. This is a local
+proportional check; PR CI remains the authoritative package matrix.
 
 Do not run E2E unless acceptance or changed behavior requires it; targeted E2E
 is separate evidence. A changed-scope pass permits commit/push, while PR CI

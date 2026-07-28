@@ -1,6 +1,9 @@
 package agents
 
-import "testing"
+import (
+	"slices"
+	"testing"
+)
 
 // TestCopilotACP_PermissionSettings_Curated verifies the four curated flag
 // suggestions surfaced to the profile-creation UI. `allow_all_tools` is
@@ -47,7 +50,7 @@ func TestCopilotACP_BuildCommand_NoCLIFlagSpecialCasing(t *testing.T) {
 	ag := NewCopilotACP()
 	cmd := ag.BuildCommand(CommandOptions{})
 	got := cmd.Args()
-	want := []string{"npx", "-y", "@github/copilot", "--acp"}
+	want := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
 	if len(got) != len(want) {
 		t.Fatalf("argv length mismatch\n  got:  %#v\n  want: %#v", got, want)
 	}
@@ -58,12 +61,29 @@ func TestCopilotACP_BuildCommand_NoCLIFlagSpecialCasing(t *testing.T) {
 	}
 }
 
-// TestCopilotACP_BuildCommand_PreferNativeBinary verifies that when the
-// lifecycle has found the standalone `copilot` CLI in the execution
-// environment, BuildCommand emits it directly instead of `npx -y <pkg>` —
-// skipping the npm registry round-trip that makes launches slow behind a
-// private registry.
-func TestCopilotACP_BuildCommand_PreferNativeBinary(t *testing.T) {
+func TestCopilotACP_UsesManagedPackageOnEveryNPMCommandSurface(t *testing.T) {
+	ag := NewCopilotACP()
+	wantACP := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
+	wantPassthrough := []string{"npx", "--yes", "--prefer-offline", "@github/copilot"}
+
+	if got := ag.Runtime().Cmd.Args(); !slices.Equal(got, wantACP) {
+		t.Fatalf("Runtime Cmd = %#v, want %#v", got, wantACP)
+	}
+	if got := ag.InferenceConfig().Command.Args(); !slices.Equal(got, wantACP) {
+		t.Fatalf("Inference Command = %#v, want %#v", got, wantACP)
+	}
+	if got := ag.PassthroughConfig().PassthroughCmd.Args(); !slices.Equal(got, wantPassthrough) {
+		t.Fatalf("Passthrough Cmd = %#v, want %#v", got, wantPassthrough)
+	}
+	if got, want := ag.InstallScript(), "npm install -g @github/copilot"; got != want {
+		t.Fatalf("InstallScript = %q, want %q", got, want)
+	}
+}
+
+// TestCopilotACP_BuildCommand_KeepsManagedPackageWhenNativeBinaryIsPresent
+// prevents a globally installed Copilot binary from bypassing the managed npm
+// runtime selected for capability discovery and future launches.
+func TestCopilotACP_BuildCommand_KeepsManagedPackageWhenNativeBinaryIsPresent(t *testing.T) {
 	ag := NewCopilotACP()
 
 	if name := ag.NativeBinaryName(); name != "copilot" {
@@ -71,7 +91,7 @@ func TestCopilotACP_BuildCommand_PreferNativeBinary(t *testing.T) {
 	}
 
 	native := ag.BuildCommand(CommandOptions{PreferNativeBinary: true}).Args()
-	wantNative := []string{"copilot", "--acp"}
+	wantNative := []string{"npx", "--yes", "--prefer-offline", "@github/copilot", "--acp"}
 	if len(native) != len(wantNative) {
 		t.Fatalf("native argv mismatch\n  got:  %#v\n  want: %#v", native, wantNative)
 	}

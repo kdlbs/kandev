@@ -171,6 +171,30 @@ Service-layer permission checks run on every mutating endpoint. Task scope is en
 
 When a CEO calls `POST /office/agents`: must have `can_create_agents`; must specify `role` (defaults applied automatically); may pass `permissions` overrides, but cannot grant permissions it doesn't have itself (no privilege escalation).
 
+### Required operator boundary (not yet implemented)
+
+The no-JWT UI convention must not apply to execution-profile mutations.
+Launcher definitions, executable/prefix argv, CLI configuration, and
+environment values are operator control-plane settings. Once operator
+authentication is implemented, creating, updating, or deleting those resources
+requires an authenticated operator principal; an omitted credential and an
+Office agent JWT are both rejected. Operator credentials are never included in
+Office runtime environment, workspace files, executor metadata, logs, or
+unauthenticated boot/runtime APIs. Full-detail profile and MCP reads containing
+literal environment values, headers, or resolved secrets are operator-only;
+agent-facing discovery uses a redacted catalog shape. Agent/workspace preview
+content runs on an origin that cannot exercise ambient operator credentials or
+read operator session/bootstrap state. Until these requirements are enforced,
+launcher prefixes are customization rather than an isolation boundary.
+Decision:
+[ADR-2026-07-24-operator-owned-agent-launcher-settings](../../decisions/2026-07-24-operator-owned-agent-launcher-settings.md).
+
+The interim risk-reduction guard requires a per-boot SPA token on
+state-changing agent/settings requests and rejects Office bearer tokens. Because
+an intentional agent can fetch and replay the unauthenticated boot payload,
+this guard is a CSRF and accidental-mutation interlock only; it does not satisfy
+the operator-boundary scenarios below.
+
 ### Hire flow
 
 When the CEO (or any instance with `can_create_agents`) creates a new agent instance, a hire request is submitted:
@@ -220,7 +244,11 @@ A run carries an explicit capability scope. Capabilities include: post comment, 
 
 ### Environment variables
 
-Injected before each agent session:
+The Office scheduler injects the runtime environment before each Office agent
+turn. These values are runtime credentials, not operator configuration:
+users do not create them, copy them from settings, or reuse them between
+sessions. Regular Kanban/task-mode sessions do not receive this environment
+and use their injected Kandev MCP tools instead.
 
 | Variable | Value | Purpose |
 |---|---|---|
@@ -236,6 +264,14 @@ Injected before each agent session:
 | `KANDEV_WAKE_PAYLOAD_JSON` | Inline JSON | Pre-computed task context |
 | `KANDEV_WAKE_PAYLOAD_PATH` | Workspace-relative JSON file path | Pre-computed task context when too large for inline env |
 | `KANDEV_CLI` | Path to agentctl | CLI binary for API operations |
+
+An Office-mode launch requires `KANDEV_CLI`, `KANDEV_API_URL`,
+`KANDEV_API_KEY`, `KANDEV_AGENT_ID`, `KANDEV_WORKSPACE_ID`, `KANDEV_RUN_ID`,
+and the task-bound `KANDEV_TASK_ID`. Kandev fails the launch before starting
+the agent process when that signed run context is incomplete or bound to a
+different task. Generic task/session start paths must not manufacture,
+persist, or accept user-supplied substitutes for these values; only the
+internal Office scheduler adapter supplies the task-bound launch map.
 
 `KANDEV_CLI` resolves per executor:
 - **Docker** (`local_docker`): `/usr/local/bin/agentctl` (baked into the image).
@@ -512,7 +548,9 @@ Skill list (name, description, source type, which agents use each skill), inline
 - **Budget exhaustion**: agent's budget reaches zero. Status auto-transitions to `paused` with `pause_reason="budget"`. Active sessions complete the current turn but no further prompts are dispatched. Surfaces as a banner on the agent card. See [costs](./costs.md).
 - **Concurrency saturation**: agent at `max_concurrent_sessions`. Scheduler skips claiming wakeups for this agent; wakeups remain in `queued` indefinitely until a slot frees up. No retry, no expiry.
 - **Stale MCP tool reference**: agent in `ModeOffice` calls a tool not in the mode (e.g. a kanban tool from an old skill). MCP server returns `"Tool not available in office mode. Use $KANDEV_CLI instead."`.
+- **Missing Office launch context**: a generic task/session path attempts to start or resume an Office-owned task without the scheduler-injected CLI path, API URL, signed run token, task-bound identity, or run ID. Kandev fails closed before starting or relaunching the agent process and directs the caller to start or wake the task through Office. It never asks the user to configure or paste these credentials.
 - **CLI auth failure**: agentctl call returns 401 because the JWT is expired or invalid. The CLI exits non-zero with structured error. Agent sees a clear failure and can surface it via comment.
+- **CLI invoked outside Office**: `agentctl kandev` cannot find `KANDEV_API_URL` or `KANDEV_API_KEY`. The CLI exits non-zero and explains that these values are injected automatically for Office runs; regular task sessions use Kandev MCP tools.
 - **Adapter without skill discovery**: agent type has no known `ProjectSkillDir`. Skill `SKILL.md` content appended to the system prompt as fallback.
 - **Skill registry edit while session runs**: the running session is unaffected (file already written). Next session for that agent picks up updated content.
 - **Worktree deletion**: when the worktree is deleted at session end, all injected skill directories are removed automatically. No explicit cleanup hook needed.
@@ -566,6 +604,29 @@ There are no TTLs on agent rows, runtime rows, instructions, skills, run history
 - **GIVEN** an agent run scoped to task `KAN-1`, **WHEN** the agent posts a comment on `KAN-1`, **THEN** Office records an agent-authored comment tied to that run context.
 
 - **GIVEN** an agent run scoped to task `KAN-1`, **WHEN** the agent tries to update `KAN-2` without explicit scope, **THEN** the runtime denies the action and no task mutation is attempted.
+
+The following operator-boundary scenarios are acceptance criteria that must
+pass before launcher settings are described as an isolation boundary:
+
+- **GIVEN** a running Office agent that can reach the backend, **WHEN** it
+  submits an execution-profile mutation with its runtime JWT or without a
+  credential, **THEN** the backend rejects the request and persists no launcher
+  or environment change.
+
+- **GIVEN** an authenticated operator authorized for the target profile,
+  **WHEN** the settings UI saves an execution-profile change, **THEN** the
+  backend persists the change without exposing the operator credential to any
+  agent runtime surface.
+
+- **GIVEN** an Office agent requests execution-profile discovery, **WHEN** the
+  backend returns the agent-facing catalog, **THEN** the response contains no
+  literal profile environment values, MCP environment values, MCP headers, or
+  resolved secret material.
+
+- **GIVEN** agent-controlled JavaScript is rendered in a task preview, **WHEN**
+  it attempts to use the operator session, **THEN** browser origin isolation
+  prevents it from reading operator state or issuing an authenticated
+  control-plane mutation.
 
 - **GIVEN** an agent run with `create_subtask` capability and mutation scope for a parent task, **WHEN** it creates a subtask under that parent, **THEN** Office creates the task through the runtime action surface and preserves the caller agent identity.
 
@@ -621,7 +682,11 @@ There are no TTLs on agent rows, runtime rows, instructions, skills, run history
 
 - **GIVEN** an office agent in ModeOffice, **WHEN** its first-turn system context is generated, **THEN** every advertised MCP tool is registered in ModeOffice and `step_complete_kandev` is absent.
 
+- **GIVEN** an Office-owned task without a scheduler-prepared signed run context, **WHEN** a generic manual or workflow task/session path attempts to start it in ModeOffice, **THEN** Kandev starts no agent process and returns an error directing the caller to start or wake the task through Office.
+
 - **GIVEN** a regular kanban task (non-office), **WHEN** a user starts a session, **THEN** ModeTask is used with the full Kanban MCP surface, including `step_complete_kandev`. No Office CLI capability changes that behavior.
+
+- **GIVEN** a regular task-mode session, **WHEN** an agent invokes `agentctl kandev` without Office runtime credentials, **THEN** the CLI explains that `KANDEV_API_URL` and `KANDEV_API_KEY` are injected automatically only for Office runs and directs the agent to its Kandev MCP tools.
 
 - **GIVEN** a regular Kanban task on a step with a default agent profile, **WHEN** the runner projection resolves that profile, **THEN** the profile selects the execution identity without changing Office ownership or the session's `ModeTask` MCP surface.
 

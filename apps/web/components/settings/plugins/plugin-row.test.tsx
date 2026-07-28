@@ -47,19 +47,23 @@ function updateEntry(): MarketplaceEntry {
 
 const noop = () => undefined;
 
+// baseProps carries the always-required callbacks/flags so each test only
+// spells out the props it is actually asserting on.
+const baseProps = {
+  busy: false,
+  autoUpdateDefault: false,
+  autoUpdateBusy: false,
+  onEnable: noop,
+  onDisable: noop,
+  onUninstall: noop,
+  onSetAutoUpdate: noop,
+};
+
 describe("PluginRow update button", () => {
   it("shows an Update button with the new version and fires onUpdate", () => {
     const onUpdate = vi.fn();
     render(
-      <PluginRow
-        plugin={plugin()}
-        busy={false}
-        update={updateEntry()}
-        onEnable={noop}
-        onDisable={noop}
-        onUninstall={noop}
-        onUpdate={onUpdate}
-      />,
+      <PluginRow {...baseProps} plugin={plugin()} update={updateEntry()} onUpdate={onUpdate} />,
     );
     const button = screen.getByTestId("plugin-update-acme");
     expect(button.textContent).toContain("Update to v2.0.0");
@@ -68,15 +72,7 @@ describe("PluginRow update button", () => {
   });
 
   it("renders no Update button when there is no pending update", () => {
-    render(
-      <PluginRow
-        plugin={plugin()}
-        busy={false}
-        onEnable={noop}
-        onDisable={noop}
-        onUninstall={noop}
-      />,
-    );
+    render(<PluginRow {...baseProps} plugin={plugin()} />);
     expect(screen.queryByTestId("plugin-update-acme")).toBeNull();
   });
 });
@@ -85,11 +81,8 @@ describe("PluginRow repo link", () => {
   it("renders a Repo link when the plugin declares an http(s) repo_url", () => {
     render(
       <PluginRow
+        {...baseProps}
         plugin={plugin({ repo_url: "https://github.com/kdlbs/kandev-plugin-acme" })}
-        busy={false}
-        onEnable={noop}
-        onDisable={noop}
-        onUninstall={noop}
       />,
     );
     const link = screen.getByTestId("plugin-repo-link");
@@ -97,28 +90,57 @@ describe("PluginRow repo link", () => {
   });
 
   it("renders no Repo link when the plugin declares no repo_url", () => {
-    render(
-      <PluginRow
-        plugin={plugin()}
-        busy={false}
-        onEnable={noop}
-        onDisable={noop}
-        onUninstall={noop}
-      />,
-    );
+    render(<PluginRow {...baseProps} plugin={plugin()} />);
     expect(screen.queryByTestId("plugin-repo-link")).toBeNull();
   });
 
   it("renders no Repo link for a non-http(s) repo_url scheme", () => {
     render(
       <PluginRow
+        {...baseProps}
         plugin={plugin({ repo_url: "javascript:alert(document.cookie)" })}
-        busy={false}
-        onEnable={noop}
-        onDisable={noop}
-        onUninstall={noop}
       />,
     );
     expect(screen.queryByTestId("plugin-repo-link")).toBeNull();
+  });
+});
+
+describe("PluginRow auto-update toggle", () => {
+  it("reflects the global default when the plugin has no override", () => {
+    render(<PluginRow {...baseProps} plugin={plugin({ auto_update: null })} autoUpdateDefault />);
+    const toggle = screen.getByTestId("plugin-auto-update-acme");
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    // No override → no "override" badge and no Reset affordance.
+    expect(screen.queryByTestId("plugin-auto-update-reset-acme")).toBeNull();
+  });
+
+  it("prefers the per-plugin override over the global default", () => {
+    render(<PluginRow {...baseProps} plugin={plugin({ auto_update: false })} autoUpdateDefault />);
+    const toggle = screen.getByTestId("plugin-auto-update-acme");
+    expect(toggle.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByTestId("plugin-auto-update-reset-acme")).toBeTruthy();
+  });
+
+  it("sets an explicit override when toggled", () => {
+    const onSetAutoUpdate = vi.fn();
+    const p = plugin({ auto_update: null });
+    render(
+      <PluginRow
+        {...baseProps}
+        plugin={p}
+        autoUpdateDefault={false}
+        onSetAutoUpdate={onSetAutoUpdate}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("plugin-auto-update-acme"));
+    expect(onSetAutoUpdate).toHaveBeenCalledWith(p, true);
+  });
+
+  it("clears the override via Reset", () => {
+    const onSetAutoUpdate = vi.fn();
+    const p = plugin({ auto_update: true });
+    render(<PluginRow {...baseProps} plugin={p} onSetAutoUpdate={onSetAutoUpdate} />);
+    fireEvent.click(screen.getByTestId("plugin-auto-update-reset-acme"));
+    expect(onSetAutoUpdate).toHaveBeenCalledWith(p, null);
   });
 });

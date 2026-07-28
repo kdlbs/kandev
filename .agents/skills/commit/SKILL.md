@@ -7,17 +7,16 @@ description: Stage and commit changes using Conventional Commits. Use when there
 
 ## Planner Entry
 
-The planner may stage and commit routine changes directly after their focused
-implementation checks pass. Final delegated `verify` runs on the committed
-artifact before push. Return the hook receipt defined below so `verify` can
-avoid repeating checks that successful hooks already covered.
+Stage and commit changes in the primary conversation after the task-defined
+implementation checks pass. Do not add broad post-commit `/verify` before push
+by default. Preserve the hook receipt as normal commit evidence.
 
 Create a git commit following this project's Conventional Commits convention. These messages are used by git-cliff (`cliff.toml`) to auto-generate changelogs and release notes. PRs are squash-merged, so the PR title becomes the commit on `main` — CI validates it via `pr-title.yml`.
 
 ## Available skills
 
-- **`verify` worker** — The planner runs this post-commit, pre-push gate with
-  the hook receipt and last verified SHA.
+- **`/pr-fixup`** — Use after the PR opens only for CI or actionable reviewer
+  findings.
 
 ## Format
 
@@ -96,7 +95,7 @@ explicitly requests task tracking.
    Never use `--no-verify`, `SKIP`, or another hook-bypass option or
    environment variable. A bypassed commit is allowed only when the user
    explicitly requests it, and its receipt must say `bypass: true`; it never
-   qualifies for hook-aware verification omissions.
+qualifies as a successful hook receipt.
 
 4. **Stage files:** Stage relevant files (prefer specific files over `git add -A`).
    - **Splitting commits with new files:** When introducing a brand-new file alongside the file that uses it, stage them together. The Go lint pre-commit hook stashes *unstaged* changes before linting but keeps *untracked* files in the working tree — so a new helper committed alone, while its (still-unstaged) caller sits in the working tree, lints as `unused` and rejects the commit.
@@ -104,6 +103,15 @@ explicitly requests task tracking.
 5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.
    If a formatter changes files and prevents the commit, review and re-stage
    those files, then create a new commit attempt; do not use `--amend`.
+   Capture the normal hook stream in a temporary log while committing and use
+   that log to record each hook ID and result. Do not infer hook results from a
+   condensed launcher summary. For example:
+   ```bash
+   COMMIT_LOG="$(mktemp "${TMPDIR:-/tmp}/kandev-commit.XXXXXX.log")"
+   set -o pipefail
+   git commit -m "type(scope): description" 2>&1 | tee "$COMMIT_LOG"
+   ```
+   Remove the temporary log after copying the receipt into the handoff.
 
 6. **Return a hook receipt:** After a successful commit, report:
    ```text
