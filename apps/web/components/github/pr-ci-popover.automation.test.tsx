@@ -182,6 +182,8 @@ describe("PRCIPopover automation toggles", () => {
     expect(
       screen.getByText("Wake the agent when review work ends. Choose either or both outcomes."),
     ).not.toBeNull();
+    expect(screen.getByTestId("ci-review-requested-help")).not.toBeNull();
+    expect(screen.getByTestId("ci-pr-terminal-help")).not.toBeNull();
   });
 
   it("opens review follow-up when lifecycle automation is enabled", () => {

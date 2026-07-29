@@ -122,11 +122,17 @@ test.describe("PR CI automation options", () => {
     await expect(popover.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(popover.getByRole("switch", { name: "PR merged" })).toBeVisible();
     await expect(popover.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();
+    await popover.getByTestId("ci-review-requested-help").hover();
     await expect(
-      popover.getByText("Wake the agent for any new request, including re-review after changes."),
+      testPage
+        .getByRole("tooltip")
+        .getByText("Wake the agent for any new request, including re-review after changes."),
     ).toBeVisible();
+    await popover.getByTestId("ci-pr-terminal-help").hover();
     await expect(
-      popover.getByText("Wake the agent when review work ends. Choose either or both outcomes."),
+      testPage
+        .getByRole("tooltip")
+        .getByText("Wake the agent when review work ends. Choose either or both outcomes."),
     ).toBeVisible();
 
     await popover.getByRole("switch", { name: "Auto-fix CI and address comments" }).click();

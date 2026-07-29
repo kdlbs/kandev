@@ -275,10 +275,13 @@ Files:
 - `apps/web/components/github/review-watch-dialog.tsx`
 - a focused Review Watch dialog/component test if needed
 
-Use the visible switch label `Your review is requested` with inline copy that
-clarifies it covers any new request, including re-review after changes. Keep
-merged and closed as separate switches, grouped under a shared explanation
-that both wake the agent when review work ends. Extend the existing automation
+Use the visible switch label `Your review is requested` with on-demand help
+(hover tooltip on fine pointers, tap popover on touch, plus a screen-reader
+description) clarifying it covers any new request, including re-review after
+changes. Keep merged and closed as separate compact switches sharing the same
+style of on-demand explanation that both wake the agent when review work ends;
+no inline descriptions or visible group header, so the rows stay single-line.
+Extend the existing automation
 help text with workspace-connected-account scope and the quiet first baseline.
 Do not add lifecycle prompt edit buttons; the existing edit action remains
 explicitly auto-fix-only.

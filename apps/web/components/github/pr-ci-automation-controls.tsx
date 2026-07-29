@@ -168,7 +168,6 @@ function CIAutomationRow({
   disabled,
   onCheckedChange,
   help,
-  description,
   describedBy,
 }: {
   id: string;
@@ -177,32 +176,23 @@ function CIAutomationRow({
   disabled: boolean;
   onCheckedChange: (checked: boolean) => void;
   help?: ReactNode;
-  description?: string;
   describedBy?: string;
 }) {
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
-  const descriptionId = description ? `${id}-description` : describedBy;
 
   return (
     <div className={`flex items-center justify-between gap-3 px-1 ${minHeight}`}>
-      <div className="flex min-w-0 flex-1 items-start gap-1.5">
-        <div className="min-w-0 flex-1">
-          <Label htmlFor={id} className="block cursor-pointer text-xs leading-5">
-            {label}
-          </Label>
-          {description ? (
-            <div id={descriptionId} className="text-[11px] leading-relaxed text-muted-foreground">
-              {description}
-            </div>
-          ) : null}
-        </div>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <Label htmlFor={id} className="min-w-0 cursor-pointer text-xs leading-5">
+          {label}
+        </Label>
         {help}
       </div>
       <Switch
         id={id}
         aria-label={label}
-        aria-describedby={descriptionId}
+        aria-describedby={describedBy}
         checked={checked}
         disabled={disabled}
         onCheckedChange={onCheckedChange}
@@ -241,14 +231,15 @@ function CIAutomationErrorRow({
   );
 }
 
-function CIAutoFixRoundHelpButton({
-  state,
-  maxRounds,
+function CIAutomationHelpButton({
+  ariaLabel,
+  testId,
+  children,
 }: {
-  state: TaskCIPRAutomationState | undefined;
-  maxRounds: number | null | undefined;
+  ariaLabel: string;
+  testId: string;
+  children: ReactNode;
 }) {
-  const round = autoFixRoundForState(state, maxRounds);
   const { isFinePointer } = useResponsiveBreakpoint();
   const [open, setOpen] = useState(false);
   const trigger = (
@@ -256,23 +247,12 @@ function CIAutoFixRoundHelpButton({
       type="button"
       variant="ghost"
       size="icon"
-      data-testid="ci-auto-fix-round-help"
+      data-testid={testId}
       className="h-5 w-5 cursor-help text-muted-foreground hover:text-foreground"
-      aria-label="Explain auto-fix rounds"
+      aria-label={ariaLabel}
     >
       <IconInfoCircle className="h-3.5 w-3.5" />
     </Button>
-  );
-  const explanation = (
-    <span data-testid="ci-auto-fix-round-explanation">
-      Auto-fix has used {round.current} of {round.max} rounds for this PR. A round is counted when
-      Kandev sends or queues a CI auto-fix message. Kandev waits for all PR checks to finish before
-      starting a new CI auto-fix turn, so the agent gets the final failed checks and current
-      comments together. Updating an already queued auto-fix message does not use another round.
-      When this is at {round.max}/{round.max} and there is no pending auto-fix message left to
-      update, Kandev pauses auto-fix for this PR so it cannot loop forever. Disable and re-enable
-      auto-fix after manual review to start over.
-    </span>
   );
   if (!isFinePointer) {
     return (
@@ -284,7 +264,7 @@ function CIAutoFixRoundHelpButton({
           portal={false}
           className="max-w-[280px] text-xs leading-relaxed"
         >
-          {explanation}
+          {children}
         </PopoverContent>
       </Popover>
     );
@@ -293,9 +273,32 @@ function CIAutoFixRoundHelpButton({
     <Tooltip>
       <TooltipTrigger asChild>{trigger}</TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[280px] text-xs leading-relaxed">
-        {explanation}
+        {children}
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+function CIAutoFixRoundHelpButton({
+  state,
+  maxRounds,
+}: {
+  state: TaskCIPRAutomationState | undefined;
+  maxRounds: number | null | undefined;
+}) {
+  const round = autoFixRoundForState(state, maxRounds);
+  return (
+    <CIAutomationHelpButton testId="ci-auto-fix-round-help" ariaLabel="Explain auto-fix rounds">
+      <span data-testid="ci-auto-fix-round-explanation">
+        Auto-fix has used {round.current} of {round.max} rounds for this PR. A round is counted when
+        Kandev sends or queues a CI auto-fix message. Kandev waits for all PR checks to finish
+        before starting a new CI auto-fix turn, so the agent gets the final failed checks and
+        current comments together. Updating an already queued auto-fix message does not use another
+        round. When this is at {round.max}/{round.max} and there is no pending auto-fix message left
+        to update, Kandev pauses auto-fix for this PR so it cannot loop forever. Disable and
+        re-enable auto-fix after manual review to start over.
+      </span>
+    </CIAutomationHelpButton>
   );
 }
 
@@ -311,6 +314,7 @@ function PRAgentPromptRows({
   patchOption: (patch: TaskCIAutomationPatch) => void;
 }) {
   const terminalHelpID = `task-pr-terminal-help-${taskId}`;
+  const terminalHelp = "Wake the agent when review work ends. Choose either or both outcomes.";
   return (
     <>
       <ReviewRequestedPromptRow
@@ -319,12 +323,9 @@ function PRAgentPromptRows({
         disabled={disabled}
         patchOption={patchOption}
       />
-      <div id={terminalHelpID} className="mx-1 mt-1 border-t border-border/60 pt-2">
-        <div className="text-xs font-medium text-foreground">Final PR state</div>
-        <div className="text-[11px] leading-relaxed text-muted-foreground">
-          Wake the agent when review work ends. Choose either or both outcomes.
-        </div>
-      </div>
+      <span id={terminalHelpID} className="sr-only">
+        {terminalHelp}
+      </span>
       <CIAutomationRow
         id={`task-pr-merged-prompt-${taskId}`}
         label="PR merged"
@@ -332,6 +333,14 @@ function PRAgentPromptRows({
         checked={Boolean(options?.prompt_on_merged)}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ prompt_on_merged: checked })}
+        help={
+          <CIAutomationHelpButton
+            testId="ci-pr-terminal-help"
+            ariaLabel="Explain final PR state notifications"
+          >
+            {terminalHelp}
+          </CIAutomationHelpButton>
+        }
       />
       <CIAutomationRow
         id={`task-pr-closed-prompt-${taskId}`}
@@ -408,15 +417,30 @@ function ReviewRequestedPromptRow({
   disabled: boolean;
   patchOption: (patch: TaskCIAutomationPatch) => void;
 }) {
+  const helpID = `task-pr-review-requested-prompt-${taskId}-description`;
+  const help = "Wake the agent for any new request, including re-review after changes.";
   return (
-    <CIAutomationRow
-      id={`task-pr-review-requested-prompt-${taskId}`}
-      label="Your review is requested"
-      description="Wake the agent for any new request, including re-review after changes."
-      checked={Boolean(options?.prompt_on_review_requested)}
-      disabled={disabled}
-      onCheckedChange={(checked) => patchOption({ prompt_on_review_requested: checked })}
-    />
+    <>
+      <span id={helpID} className="sr-only">
+        {help}
+      </span>
+      <CIAutomationRow
+        id={`task-pr-review-requested-prompt-${taskId}`}
+        label="Your review is requested"
+        describedBy={helpID}
+        checked={Boolean(options?.prompt_on_review_requested)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ prompt_on_review_requested: checked })}
+        help={
+          <CIAutomationHelpButton
+            testId="ci-review-requested-help"
+            ariaLabel="Explain review request notifications"
+          >
+            {help}
+          </CIAutomationHelpButton>
+        }
+      />
+    </>
   );
 }
 

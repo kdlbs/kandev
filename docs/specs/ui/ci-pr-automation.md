@@ -34,10 +34,13 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
   task-wide behavior and remain reachable on desktop and mobile. When any of
   its three options is enabled, the section opens so active automation is not
   concealed.
-- The review-request switch explains: `Wake the agent for any new request,
-  including re-review after changes.` The two terminal switches are grouped
-  under a shared explanation that they wake the agent when review work ends,
-  while remaining independently configurable.
+- Lifecycle switches stay compact single-line rows. Their explanations live in
+  on-demand help affordances (hover tooltip on fine pointers, tap popover on
+  touch) and screen-reader descriptions, not inline copy: the review-request
+  switch explains `Wake the agent for any new request, including re-review
+  after changes.`, and the two terminal switches share an explanation that they
+  wake the agent when review work ends while remaining independently
+  configurable.
 - `Auto-fix CI & address comments` causes Kandev to send or queue an agent prompt when a linked PR gets actionable CI or review feedback.
 - `Auto-merge when ready` causes Kandev to merge a linked PR only when the PR is open and not a draft, checks are passing, review requirements are satisfied, unresolved review threads are cleared, and the PR is cleanly mergeable.
 - `Your review is requested` follows the GitHub account connected to the task's

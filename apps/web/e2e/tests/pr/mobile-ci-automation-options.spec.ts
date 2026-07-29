@@ -130,12 +130,21 @@ test.describe("mobile PR CI automation options", () => {
     await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "PR merged" })).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();
+    const helpPopover = drawer.locator('[data-slot="popover-content"]');
+    await drawer.getByTestId("ci-review-requested-help").tap();
     await expect(
-      drawer.getByText("Wake the agent for any new request, including re-review after changes."),
+      helpPopover.getByText(
+        "Wake the agent for any new request, including re-review after changes.",
+      ),
     ).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await drawer.getByTestId("ci-pr-terminal-help").tap();
     await expect(
-      drawer.getByText("Wake the agent when review work ends. Choose either or both outcomes."),
+      helpPopover.getByText(
+        "Wake the agent when review work ends. Choose either or both outcomes.",
+      ),
     ).toBeVisible();
+    await testPage.keyboard.press("Escape");
 
     for (const name of ["Your review is requested", "PR merged", "PR closed without merging"]) {
       const rowBox = await drawer.getByRole("switch", { name }).locator("..").boundingBox();
