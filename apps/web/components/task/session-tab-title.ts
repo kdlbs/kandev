@@ -33,11 +33,7 @@ function resolveModelTitle(
     // active/current model switches are reflected immediately in the tab title.
     modelLabel = optionName(modelConfig, modelId);
   }
-  const extras = args.configOptions
-    .filter((option) => !isModelConfigOption(option))
-    .map((option) => optionName(option, option.currentValue))
-    .filter(Boolean);
-  return [modelLabel, ...extras].join(" / ");
+  return modelLabel;
 }
 
 export function resolveSessionTabTitle(args: ResolveSessionTabTitleArgs): string | null {

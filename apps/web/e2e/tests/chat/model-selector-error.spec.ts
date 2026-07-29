@@ -172,6 +172,7 @@ test.describe("Chat model selector — persistence", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -197,7 +198,10 @@ test.describe("Chat model selector — persistence", () => {
     await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
 
     const agentTab = session.sessionTabBySessionId(task.session_id);
-    await expect(agentTab).toContainText("Mock Smart", { timeout: 5_000 });
+    await expect(agentTab).toHaveText("Mock Smart", { timeout: 5_000 });
+    await prCapture.screenshot("desktop-agent-tab-model-only", {
+      caption: "Desktop agent tab shows only the selected model",
+    });
     await expect
       .poll(async () => {
         const { sessions } = await apiClient.listTaskSessions(task.id);
@@ -219,7 +223,7 @@ test.describe("Chat model selector — persistence", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
     await expect(trigger).toContainText("Mock Smart", { timeout: 15_000 });
-    await expect(agentTab).toContainText("Mock Smart", { timeout: 15_000 });
+    await expect(agentTab).toHaveText("Mock Smart", { timeout: 15_000 });
   });
 
   test("completed turn metadata keeps changed options after a page reload", async ({
