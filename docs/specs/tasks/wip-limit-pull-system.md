@@ -1,7 +1,7 @@
 ---
 status: accepted
 created: 2026-07-27
-updated: 2026-07-28
+updated: 2026-07-29
 owner: kandev
 ---
 
@@ -47,6 +47,12 @@ GitHub-specific retry logic.
 - A promoted task follows the destination step's normal `on_enter` behavior.
   If the original create request explicitly requested an agent start, that
   deferred launch intent also becomes eligible when the task is promoted.
+- A single accepted create must auto-start at most one agent session, even when
+  creation synchronously promotes the task into an auto-start destination. A
+  watcher's synchronous auto-start and the promotion's event-driven auto-start
+  must not both launch. This applies whether the destination has capacity at
+  creation (direct admission) or opens capacity during the same create call
+  (feeder placement immediately promoted). See "Auto-start idempotency" below.
 - The Kanban board shows queued state on each affected task and continues to
   show WIP consumption as `admitted/limit`. The total number of cards may be
   larger than the admitted count.
@@ -65,6 +71,36 @@ Kandev attempts that feeder only. If the feeder is itself WIP-full, creation
 returns the existing capacity conflict and creates nothing; Kandev does not
 walk a chain of feeders. This remains an explicit assumption because the user
 did not choose a recursive policy.
+
+### Auto-start idempotency
+
+When a task is created for an auto-start destination step, two independent code
+paths can each try to launch the agent:
+
+- the integration watcher (e.g. GitHub PR review) calls the start path
+  synchronously after `CreateTask` returns, because the returned task reflects
+  its post-promotion placement (`queued_for_step_id` cleared, resident in the
+  auto-start destination);
+- the promotion that ran inside that same `CreateTask` publishes the normal
+  `task.moved` / `task.queue_promoted` event, whose handler independently
+  auto-starts a task that is admitted in an auto-start step.
+
+Both paths resolve to the same task in the same admitted state, so without a
+shared guard each mints its own session. This produces two agents for one
+review task, which the "start exactly once" contract forbids.
+
+- The two auto-start paths must share one race-safe, per-task claim. Whichever
+  path claims first launches; the other observes the claim and does nothing.
+- The claim is atomic against concurrent claimers (same mechanism class as the
+  existing deferred-launch metadata claim) so the two paths cannot both succeed
+  even when they run within milliseconds of each other.
+- A user-initiated start after the task has genuinely finished its automated run
+  is not blocked by this claim: the guard scopes to the automated
+  create-and-promote launch, not to every future launch of the task.
+- If the claiming path's launch fails, the claim is released so the task can be
+  retried instead of being left permanently unstarted.
+- The guard is independent of whether the task was directly admitted or promoted
+  from a feeder; both admission routes are covered.
 
 ## Data model
 
@@ -237,6 +273,12 @@ destination.
 - **GIVEN** a full destination and a configured feeder that is also WIP-full,
   **WHEN** a new task targets the destination, **THEN** creation returns a
   conflict and no task is persisted; a second feeder is not traversed.
+- **GIVEN** an auto-start `Review` step with a WIP limit and a `pull_from_step_id`
+  feeder that has capacity, **WHEN** a GitHub review watch creates a task that is
+  placed in the feeder and immediately promoted into `Review` during the same
+  create call, **THEN** exactly one agent session is auto-started for that task,
+  even though both the watcher's synchronous start and the promotion's
+  event-driven start attempt to launch it.
 - **GIVEN** a same-step queued task with an explicit `start_agent` request,
   **WHEN** the backend restarts before capacity opens, **THEN** the task remains
   queued with no runtime resources and starts exactly once after promotion.
@@ -271,3 +313,6 @@ See
 
 See
 [`../../plans/wip-overflow-queues/plan.md`](../../plans/wip-overflow-queues/plan.md).
+
+Auto-start idempotency repair (single agent per review task):
+[`../../plans/review-watcher-double-autostart/plan.md`](../../plans/review-watcher-double-autostart/plan.md).
