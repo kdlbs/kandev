@@ -285,7 +285,7 @@ func TestDrainQueuedMessage_LifecycleEntryRemainsDurableUntilPromptAcceptance(t 
 		}
 	})
 
-	_, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
+	queued, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
 		ctx, "s1", "t1", "merged lifecycle prompt", "", messagequeue.QueuedByWorkflow,
 		false, nil,
 		map[string]interface{}{"origin": githubPRAutomationOrigin},
@@ -300,13 +300,21 @@ func TestDrainQueuedMessage_LifecycleEntryRemainsDurableUntilPromptAcceptance(t 
 	}
 	<-resolveEntered
 
-	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
-		t.Errorf("durable lifecycle entries before final claim = %d, want 1", got)
+	if !svc.messageQueue.IsCurrentLifecycleReservation(ctx, queued) {
+		t.Error("durable lifecycle row missing from storage before final claim")
+	}
+	// The reservation is in flight, not pending: showing it would duplicate the
+	// prompt the drain is already delivering.
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
+		t.Errorf("pending entries before final claim = %d, want 0", got)
 	}
 	close(allowResolve)
 	<-promptEntered
-	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
-		t.Errorf("durable lifecycle entries before PromptAgent acceptance = %d, want 1", got)
+	if !svc.messageQueue.IsCurrentLifecycleReservation(ctx, queued) {
+		t.Error("durable lifecycle row missing from storage before PromptAgent acceptance")
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
+		t.Errorf("pending entries before PromptAgent acceptance = %d, want 0", got)
 	}
 	close(acceptPrompt)
 }

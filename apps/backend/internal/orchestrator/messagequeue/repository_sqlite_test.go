@@ -107,6 +107,45 @@ func TestSQLiteRepository_TakeHeadFIFO(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ReserveHeadMarksLifecycleRowInFlight(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	msg := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "pr merged", QueuedBy: QueuedByWorkflow,
+		Metadata: map[string]interface{}{MetadataLifecycleDurable: true},
+	}
+	if err := repo.Insert(ctx, msg, 0); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	reserved, err := repo.ReserveHead(ctx, "s1")
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if reserved == nil {
+		t.Fatal("reserve: nil head")
+	}
+	// The caller's copy stays unmarked so a requeue rewrites a pending row.
+	if reserved.IsReservedInFlight() {
+		t.Error("reserved copy should not carry the in-flight marker")
+	}
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected the reserved row to survive, got %d entries", len(entries))
+	}
+	if !entries[0].IsReservedInFlight() {
+		t.Errorf("stored row missing the in-flight marker: %+v", entries[0].Metadata)
+	}
+	if !entries[0].IsDurableLifecycle() {
+		t.Error("stored row lost its durable lifecycle marker")
+	}
+}
+
 func TestSQLiteRepository_AppendOrInsertTail(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

@@ -254,14 +254,19 @@ func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*Qu
 		return nil, nil
 	}
 	head := list[0]
-	if !head.IsDurableLifecycle() {
-		r.entries[sessionID] = list[1:]
-		if len(r.entries[sessionID]) == 0 {
-			delete(r.entries, sessionID)
-			delete(r.nextPosition, sessionID)
-		}
-	}
 	out := *head
+	if head.IsDurableLifecycle() {
+		// Mirror the SQLite reservation: the stored row is flagged in flight so
+		// queue status stops listing it, while the returned copy keeps the
+		// unmarked metadata a requeue would write back.
+		head.Metadata = markReservedMetadata(head.Metadata)
+		return &out, nil
+	}
+	r.entries[sessionID] = list[1:]
+	if len(r.entries[sessionID]) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	}
 	return &out, nil
 }
 

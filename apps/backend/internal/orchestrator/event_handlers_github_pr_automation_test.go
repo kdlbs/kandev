@@ -233,6 +233,36 @@ func TestDispatchTaskPRAgentPrompt_CoalescesBusyObservationsByStablePRKey(t *tes
 	}
 }
 
+// The chat message recorded on delivery inherits the queued entry's metadata,
+// so the automation badge has to live there — queued_by only reaches the queue
+// ghost and would leave the delivered prompt looking user-typed.
+func TestDispatchTaskPRAgentPrompt_TagsPromptAsAutomationForChatBadge(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	pr := &github.TaskPR{TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42}
+
+	if _, err := svc.dispatchTaskPRAgentPrompt(ctx, pr, "pr merged", taskPRAgentEventMerged); err != nil {
+		t.Fatalf("dispatch lifecycle prompt: %v", err)
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 {
+		t.Fatalf("pending lifecycle entries = %d, want 1", status.Count)
+	}
+	metadata := status.Entries[0].Metadata
+	if got, _ := metadata["workflow_message"].(bool); !got {
+		t.Errorf("workflow_message = %v, want true so the delivered message keeps its origin badge", metadata["workflow_message"])
+	}
+	if got := metadata["workflow_step_name"]; got != taskPRAgentBadgeLabel {
+		t.Errorf("workflow_step_name = %v, want %q", got, taskPRAgentBadgeLabel)
+	}
+	if got, _ := metadata["auto_start"].(bool); !got {
+		t.Errorf("auto_start = %v, want true", metadata["auto_start"])
+	}
+}
+
 func TestDispatchTaskPRAgentPrompt_KeepsDistinctPREventsFIFO(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

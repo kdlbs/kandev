@@ -13,6 +13,10 @@ import (
 )
 
 const (
+	// taskPRAgentBadgeLabel names the automation in the chat origin badge so a
+	// lifecycle prompt is not mistaken for a user message.
+	taskPRAgentBadgeLabel = "PR automation"
+
 	taskPRAgentEventReviewRequested = "review_requested"
 	taskPRAgentEventMerged          = "merged"
 	taskPRAgentEventClosed          = "closed"
@@ -246,7 +250,13 @@ func canonicalTaskPRURL(pr *github.TaskPR) (string, error) {
 }
 
 func taskPRAgentPromptMetadata(pr *github.TaskPR, event, prURL string) map[string]interface{} {
-	metadata := NewUserMessageMeta().WithAutoStart(true).ToMap()
+	// The automation badge must survive delivery: the queue ghost derives its
+	// origin cue from queued_by, but the persisted chat message only has this
+	// metadata, so tag it explicitly or the prompt reads as user-typed.
+	metadata := NewUserMessageMeta().
+		WithAutoStart(true).
+		WithWorkflowStep("", taskPRAgentBadgeLabel, "").
+		ToMap()
 	if metadata == nil {
 		metadata = map[string]interface{}{}
 	}

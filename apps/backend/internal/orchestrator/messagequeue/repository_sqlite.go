@@ -583,6 +583,18 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 		return nil, fmt.Errorf("reserve head: %w", err)
 	}
 	if msg.IsDurableLifecycle() {
+		// Keep the row for crash recovery but stop reporting it as pending.
+		// The returned copy keeps the unmarked metadata so a later requeue
+		// rewrites the row back into a visible pending entry.
+		reservedJSON, err := marshalMetadata(markReservedMetadata(msg.Metadata))
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE queued_messages SET metadata_json = ? WHERE id = ? AND session_id = ?
+		`), reservedJSON, msg.ID, sessionID); err != nil {
+			return nil, fmt.Errorf("mark lifecycle reservation in flight: %w", err)
+		}
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}

@@ -48,6 +48,15 @@ const MetadataLifecycleDurable = "lifecycle_durable_until_accepted"
 // so stale retries cannot revive work after an archive then unarchive.
 const MetadataLifecycleGeneration = "lifecycle_queue_generation"
 
+// MetadataLifecycleReserved marks a durable lifecycle entry that ReserveHead
+// already handed to a dispatch attempt. The row stays in storage for crash
+// recovery, but it is no longer a pending message, so queue status hides it —
+// otherwise the delivered prompt and its own reservation row are both visible
+// and the reservation looks like a stuck duplicate. Cleared implicitly: a
+// requeue rewrites the row's metadata from the in-memory copy, which never
+// carries the flag.
+const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
+
 // QueueFullErrorCode is the well-known WS / MCP error code surfaced when an
 // insert would exceed the per-session cap. Shared between the user-side WS
 // handlers and the inter-task MCP handler so the wire contract stays in sync.
@@ -95,6 +104,27 @@ func (m *QueuedMessage) IsDurableLifecycle() bool {
 	}
 	origin, _ := m.Metadata["origin"].(string)
 	return origin == "github_pr_automation"
+}
+
+// IsReservedInFlight reports whether this durable row was already reserved for
+// a dispatch attempt and should not be shown as a pending queue entry.
+func (m *QueuedMessage) IsReservedInFlight() bool {
+	if m == nil || !m.IsDurableLifecycle() {
+		return false
+	}
+	reserved, _ := m.Metadata[MetadataLifecycleReserved].(bool)
+	return reserved
+}
+
+// markReservedMetadata returns a copy of metadata carrying the in-flight
+// reservation marker.
+func markReservedMetadata(metadata map[string]interface{}) map[string]interface{} {
+	marked := make(map[string]interface{}, len(metadata)+1)
+	for k, v := range metadata {
+		marked[k] = v
+	}
+	marked[MetadataLifecycleReserved] = true
+	return marked
 }
 
 // MessageAttachment represents an attachment (image) in a queued message.

@@ -388,12 +388,18 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 			zap.Error(err))
 		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: s.maxPerSession}
 	}
-	if entries == nil {
-		entries = []QueuedMessage{}
+	pending := make([]QueuedMessage, 0, len(entries))
+	for _, entry := range entries {
+		// A reserved lifecycle row is already being delivered; listing it next
+		// to the message it produced reads as a stuck duplicate.
+		if entry.IsReservedInFlight() {
+			continue
+		}
+		pending = append(pending, entry)
 	}
 	return &QueueStatus{
-		Entries: entries,
-		Count:   len(entries),
+		Entries: pending,
+		Count:   len(pending),
 		Max:     s.maxPerSession,
 	}
 }
