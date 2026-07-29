@@ -5,6 +5,8 @@ import {
   getGlobalSidebarWidth,
   getManualRightWidth,
   getOpenFileTabs,
+  getStoredAutoScrollEnabled,
+  getStoredAutoScrollTop,
   markPRClosedBannerDismissed,
   markPRMergedBannerDismissed,
   restoreAttachmentPreview,
@@ -12,6 +14,8 @@ import {
   setManualRightWidth,
   clearManualRightWidth,
   setOpenFileTabs,
+  setStoredAutoScrollEnabled,
+  setStoredAutoScrollTop,
   wasPRClosedBannerDismissed,
   wasPRMergedBannerDismissed,
 } from "./local-storage";
@@ -245,5 +249,43 @@ describe("chat draft attachment storage", () => {
     });
 
     expect(restored.deliveryMode).toBe("path");
+  });
+});
+
+describe("transcript auto-scroll storage", () => {
+  beforeEach(() => {
+    window.sessionStorage.clear();
+  });
+
+  it("returns null for a session with no recorded preference", () => {
+    expect(getStoredAutoScrollEnabled("session-a")).toBeNull();
+  });
+
+  it("persists the enabled preference per session and reads it back", () => {
+    setStoredAutoScrollEnabled("session-a", false);
+
+    expect(getStoredAutoScrollEnabled("session-a")).toBe(false);
+    expect(getStoredAutoScrollEnabled("session-b")).toBeNull();
+  });
+
+  it("persists the last scrollTop per session and reads it back", () => {
+    setStoredAutoScrollTop("session-a", 480);
+
+    expect(getStoredAutoScrollTop("session-a")).toBe(480);
+    expect(getStoredAutoScrollTop("session-b")).toBeNull();
+  });
+
+  it("clears both the enabled preference and scrollTop via cleanupTaskStorage", () => {
+    setStoredAutoScrollEnabled("session-a", false);
+    setStoredAutoScrollTop("session-a", 480);
+    setStoredAutoScrollEnabled("session-b", false);
+    setStoredAutoScrollTop("session-b", 200);
+
+    cleanupTaskStorage("task-a", ["session-a"]);
+
+    expect(getStoredAutoScrollEnabled("session-a")).toBeNull();
+    expect(getStoredAutoScrollTop("session-a")).toBeNull();
+    expect(getStoredAutoScrollEnabled("session-b")).toBe(false);
+    expect(getStoredAutoScrollTop("session-b")).toBe(200);
   });
 });

@@ -3,10 +3,22 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, memo } from "react";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useAppStoreApi } from "@/components/state-provider";
+import { getStoredAutoScrollTop } from "@/lib/local-storage";
 import type { Message } from "@/lib/types/http";
+import type { RenderItem } from "@/hooks/use-processed-messages";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { MessageListFooter } from "./message-list-footer";
+import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
+import {
+  shouldAutoScrollOnMessagesChange,
+  shouldAutoScrollOnWorkingStart,
+  shouldCatchUpOnAutoScrollEnable,
+  hasTranscriptProgressedPastView,
+  resolveNativeInitialScrollTop,
+  isPrependUpdate,
+} from "./transcript-auto-scroll";
 import {
   type MessageListProps,
   MessageListStatus,
@@ -20,15 +32,19 @@ import {
 
 /**
  * Continuously captures scroll state via scroll listener.
- * On prepend (itemCount increases), restores scroll position so the user
- * stays at the same visual spot.
+ * On a genuine prepend (older messages loaded above the current view, so the
+ * first rendered item's identity changes), restores scroll position so the
+ * user stays at the same visual spot. A plain append (new item count grows
+ * but the first item is unchanged) is left alone — that's the auto-scroll
+ * hook's concern, not this one's.
  */
 function useScrollPositionOnPrepend(
   scrollRef: React.RefObject<HTMLDivElement | null>,
-  itemCount: number,
+  items: RenderItem[],
 ) {
   const scrollState = useRef({ scrollHeight: 0, scrollTop: 0 });
-  const prevItemCount = useRef(itemCount);
+  const prevItemCountRef = useRef(items.length);
+  const prevFirstKeyRef = useRef<string | null>(items.length > 0 ? getItemKey(items[0]) : null);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -44,17 +60,24 @@ function useScrollPositionOnPrepend(
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el || itemCount <= prevItemCount.current) {
-      prevItemCount.current = itemCount;
-      return;
-    }
+    const nextFirstKey = items.length > 0 ? getItemKey(items[0]) : null;
+    const prepend =
+      !!el &&
+      isPrependUpdate({
+        prevItemCount: prevItemCountRef.current,
+        nextItemCount: items.length,
+        prevFirstKey: prevFirstKeyRef.current,
+        nextFirstKey,
+      });
+    prevItemCountRef.current = items.length;
+    prevFirstKeyRef.current = nextFirstKey;
+    if (!el || !prepend) return;
     const prev = scrollState.current;
     const delta = el.scrollHeight - prev.scrollHeight;
     if (delta > 0) {
       el.scrollTop = prev.scrollTop + delta;
     }
-    prevItemCount.current = itemCount;
-  }, [itemCount, scrollRef]);
+  }, [items, scrollRef]);
 }
 
 /**
@@ -121,29 +144,50 @@ function useLazyLoadSentinel(
 
 /**
  * Auto-scrolls to bottom when new messages arrive (if user is near bottom)
- * or when the agent starts working (isWorking transitions to true).
+ * or when the agent starts working (isWorking transitions to true) — unless
+ * auto-scroll is disabled for this session, in which case both are
+ * suppressed and the current position is continuously persisted so it
+ * survives a dockview panel remount. Re-enabling catches the view up to the
+ * bottom if the transcript progressed past it while disabled.
+ *
+ * Returns `isNearBottomRef` so the caller's initial-scroll effect can keep it
+ * in sync after applying the resolved initial scrollTop.
  */
 function useAutoScroll(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   messages: Message[],
   isWorking: boolean,
+  sessionId: string | null,
+  enabled: boolean,
 ) {
+  const storeApi = useAppStoreApi();
   const isNearBottomRef = useRef(true);
   const prevIsWorkingRef = useRef(isWorking);
+  const prevEnabledRef = useRef(enabled);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    const captureScrollTop = () => {
+      if (sessionId) storeApi.getState().setTranscriptScrollTop(sessionId, el.scrollTop);
+    };
     const onScroll = () => {
       isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
+      captureScrollTop();
     };
     el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [scrollRef]);
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      // Final capture on unmount so a disabled session's exact position
+      // survives a dockview panel teardown/remount (e.g. navigating away
+      // and back), even if no scroll event fired right before it.
+      captureScrollTop();
+    };
+  }, [scrollRef, sessionId]);
 
-  // When isWorking transitions to true, force scroll to bottom
+  // When isWorking transitions to true, force scroll to bottom (unless disabled)
   useEffect(() => {
-    if (isWorking && !prevIsWorkingRef.current) {
+    if (isWorking && !prevIsWorkingRef.current && shouldAutoScrollOnWorkingStart(enabled)) {
       const el = scrollRef.current;
       if (el) {
         el.scrollTop = el.scrollHeight;
@@ -151,18 +195,82 @@ function useAutoScroll(
       }
     }
     prevIsWorkingRef.current = isWorking;
-  }, [isWorking, scrollRef]);
+  }, [isWorking, scrollRef, enabled]);
 
-  // Auto-scroll on new messages if near bottom
+  // Auto-scroll on new messages if near bottom (unless disabled)
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     // Skip auto-scroll when a layout rebuild scroll restore is pending
     if (useDockviewStore.getState().pendingChatScrollTop !== null) return;
-    if (isNearBottomRef.current) {
+    if (shouldAutoScrollOnMessagesChange(enabled, isNearBottomRef.current)) {
       el.scrollTop = el.scrollHeight;
     }
-  }, [messages, scrollRef]);
+  }, [messages, scrollRef, enabled]);
+
+  // Catch up to the bottom when the user re-enables auto-scroll, but only if
+  // the transcript actually progressed past the current view while disabled.
+  useEffect(() => {
+    const wasEnabled = prevEnabledRef.current;
+    prevEnabledRef.current = enabled;
+    if (wasEnabled === enabled) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const isAtBottom = !hasTranscriptProgressedPastView({
+      scrollTop: el.scrollTop,
+      scrollHeight: el.scrollHeight,
+      clientHeight: el.clientHeight,
+    });
+    if (shouldCatchUpOnAutoScrollEnable({ wasEnabled, nowEnabled: enabled, isAtBottom })) {
+      el.scrollTop = el.scrollHeight;
+      isNearBottomRef.current = true;
+    }
+  }, [enabled, scrollRef]);
+
+  return isNearBottomRef;
+}
+
+/**
+ * Applies the initial scrollTop once items are available: bottom when
+ * enabled, or the last captured offset for this session when disabled (see
+ * resolveNativeInitialScrollTop). Skips while a dockview layout-rebuild
+ * restore is pending — that separate mechanism owns the position.
+ */
+function useInitialScrollPosition(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  itemCount: number,
+  sessionId: string | null,
+  enabled: boolean,
+  isNearBottomRef: React.RefObject<boolean>,
+) {
+  const storeApi = useAppStoreApi();
+  const didInitialScroll = useRef(false);
+  useEffect(() => {
+    if (didInitialScroll.current || itemCount === 0) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const hasPendingLayoutRestore = useDockviewStore.getState().pendingChatScrollTop !== null;
+    const savedScrollTop = sessionId
+      ? (storeApi.getState().transcriptAutoScroll.scrollTopBySessionId[sessionId] ??
+        getStoredAutoScrollTop(sessionId) ??
+        undefined)
+      : undefined;
+    const scrollTop = resolveNativeInitialScrollTop({
+      enabled,
+      hasPendingLayoutRestore,
+      savedScrollTop,
+      scrollHeight: el.scrollHeight,
+    });
+    if (scrollTop !== null) {
+      el.scrollTop = scrollTop;
+      isNearBottomRef.current = !hasTranscriptProgressedPastView({
+        scrollTop,
+        scrollHeight: el.scrollHeight,
+        clientHeight: el.clientHeight,
+      });
+    }
+    didInitialScroll.current = true;
+  }, [itemCount, sessionId, enabled, isNearBottomRef, storeApi]);
 }
 
 function useScrollToMessage() {
@@ -200,26 +308,18 @@ export const NativeMessageList = memo(function NativeMessageList({
   const streamingMessageId = getStreamingAgentMessageId(messages);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
   const handleScrollToMessage = useScrollToMessage();
+  const autoScrollEnabled = useTranscriptAutoScrollEnabled(sessionId);
 
-  useScrollPositionOnPrepend(scrollRef, items.length);
+  useScrollPositionOnPrepend(scrollRef, items);
   const sentinelRef = useLazyLoadSentinel(scrollRef, hasMore, isLoadingMore, loadMore);
-  useAutoScroll(scrollRef, messages, isWorking);
-
-  // Scroll to bottom on initial load
-  const didInitialScroll = useRef(false);
-  useEffect(() => {
-    if (didInitialScroll.current || items.length === 0) return;
-    const el = scrollRef.current;
-    if (!el) return;
-    // If a layout rebuild scroll restore is pending, skip initial scroll
-    // (the restore handler will set the correct position)
-    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
-      didInitialScroll.current = true;
-      return;
-    }
-    el.scrollTop = el.scrollHeight;
-    didInitialScroll.current = true;
-  }, [items.length]);
+  const isNearBottomRef = useAutoScroll(
+    scrollRef,
+    messages,
+    isWorking,
+    sessionId,
+    autoScrollEnabled,
+  );
+  useInitialScrollPosition(scrollRef, items.length, sessionId, autoScrollEnabled, isNearBottomRef);
 
   return (
     <SessionPanelContent ref={scrollRef} className="relative p-4 chat-message-list">

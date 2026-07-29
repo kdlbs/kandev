@@ -5,6 +5,7 @@ import { IconArrowRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TodoIndicator } from "./todo-indicator";
+import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
@@ -322,6 +323,9 @@ function ChatStatusBar({
   const showTodos = todoItems.length > 0;
   const showProceed = !!nextStepName && !isAgentBusy;
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
+  // Auto-scroll toggle only needs a session (quick-chat/ephemeral sessions
+  // have a transcript with no taskId); Share additionally needs a taskId.
+  const showRightControls = !!sessionId;
   // PRMergedBanner returns null internally when not applicable
   return (
     <div
@@ -337,9 +341,12 @@ function ChatStatusBar({
           different avoids a duplicate-sibling-key collision. */}
       {taskId && <PRMergedBanner key={`${taskId}-merged`} taskId={taskId} />}
       {taskId && <PRClosedBanner key={`${taskId}-closed`} taskId={taskId} />}
-      {canShare && taskId && sessionId && (
-        <div className="ml-auto shrink-0">
-          <ShareButton taskId={taskId} sessionId={sessionId} iconOnly />
+      {showRightControls && (
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
+          {canShare && taskId && sessionId && (
+            <ShareButton taskId={taskId} sessionId={sessionId} iconOnly />
+          )}
         </div>
       )}
       {showProceed && (
@@ -349,7 +356,7 @@ function ChatStatusBar({
               type="button"
               variant="outline"
               size="sm"
-              className={`${canShare ? "" : "ml-auto "}h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary`}
+              className={`${showRightControls ? "" : "ml-auto "}h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary`}
               onClick={onProceed}
               disabled={isMoving}
               data-testid="proceed-next-step"

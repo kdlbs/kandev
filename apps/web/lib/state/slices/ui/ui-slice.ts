@@ -4,6 +4,8 @@ import {
   setLocalStorage,
   setStoredCollapsedSubtaskParents,
   setStoredQuickChatName,
+  setStoredAutoScrollEnabled,
+  setStoredAutoScrollTop,
 } from "@/lib/local-storage";
 import { buildDismissedAgentErrors } from "./dismissed-agent-errors-actions";
 import {
@@ -78,6 +80,11 @@ export const defaultUIState: UISliceState = {
     isTaskSwitcherOpen: false,
   },
   chatInput: { planModeBySessionId: {} },
+  transcriptAutoScroll: {
+    enabledBySessionId: {},
+    scrollTopBySessionId: {},
+    virtuosoStateBySessionId: {},
+  },
   reviewPRSelection: { selectedKeyByTaskId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], checks: [], healthy: true, loaded: false, loading: false },
@@ -414,6 +421,20 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   setPlanMode: (sessionId, enabled) =>
     set((draft) => {
       draft.chatInput.planModeBySessionId[sessionId] = enabled;
+    }),
+  setTranscriptAutoScrollEnabled: (sessionId, enabled) =>
+    set((draft) => {
+      draft.transcriptAutoScroll.enabledBySessionId[sessionId] = enabled;
+      setStoredAutoScrollEnabled(sessionId, enabled);
+    }),
+  setTranscriptScrollTop: (sessionId, scrollTop) =>
+    set((draft) => {
+      draft.transcriptAutoScroll.scrollTopBySessionId[sessionId] = scrollTop;
+      setStoredAutoScrollTop(sessionId, scrollTop);
+    }),
+  setTranscriptVirtuosoState: (sessionId, state) =>
+    set((draft) => {
+      draft.transcriptAutoScroll.virtuosoStateBySessionId[sessionId] = state;
     }),
   setReviewPRSelection: (taskId, selectedKey) =>
     set((draft) => {

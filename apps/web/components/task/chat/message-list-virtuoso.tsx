@@ -2,13 +2,16 @@
 
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState, memo } from "react";
-import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
+import { Virtuoso, type VirtuosoHandle, type StateSnapshot } from "react-virtuoso";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
+import { useAppStoreApi } from "@/components/state-provider";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
 import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { MessageListFooter } from "./message-list-footer";
+import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
+import { resolveFollowOutput, shouldCatchUpOnAutoScrollEnable } from "./transcript-auto-scroll";
 import {
   type MessageListProps,
   MessageListStatus,
@@ -36,6 +39,8 @@ type VirtuosoBodyProps = MessageListProps & {
   loadMore: () => Promise<number>;
   Header: () => React.ReactNode;
   Footer: () => React.ReactNode;
+  /** Whether the transcript auto-scroll toggle is enabled for this session. */
+  enabled: boolean;
 };
 
 function computeFirstItemIndex(prevKeys: string[], prevIndex: number, keys: string[]): number {
@@ -189,13 +194,11 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   return { virtuosoRef, itemCount, firstItemIndex, handleStartReached, computeItemKey, renderItem };
 }
 
-const FOLLOW_SMOOTH = "smooth" as const;
-const followOutput = (isAtBottom: boolean) => (isAtBottom ? FOLLOW_SMOOTH : false);
-
 function VirtuosoBody(props: VirtuosoBodyProps) {
-  const { scrollParent, Header, Footer } = props;
+  const { scrollParent, Header, Footer, sessionId, enabled } = props;
   const { virtuosoRef, itemCount, firstItemIndex, handleStartReached, computeItemKey, renderItem } =
     useVirtuosoCallbacks(props);
+  const storeApi = useAppStoreApi();
 
   // Captured once on mount — `initialTopMostItemIndex` only takes effect on
   // Virtuoso's first render, so logging it here tells us which item Virtuoso
@@ -215,6 +218,61 @@ function VirtuosoBody(props: VirtuosoBodyProps) {
     });
   }, [itemCount, firstItemIndex, props.hasMore, props.activeTurnId, props.lastTurnGroupId]);
 
+  // Virtuoso's own atBottom tracking, reused both to gate `followOutput` and
+  // to decide whether re-enabling should catch the view up to the bottom.
+  const isAtBottomRef = useRef(true);
+  const handleAtBottomStateChange = useCallback((isAtBottom: boolean) => {
+    isAtBottomRef.current = isAtBottom;
+  }, []);
+  const resolvedFollowOutput = useCallback(
+    (isAtBottom: boolean) => resolveFollowOutput(enabled, isAtBottom),
+    [enabled],
+  );
+
+  const captureSnapshot = useCallback(() => {
+    if (!sessionId) return;
+    virtuosoRef.current?.getState((state) => {
+      storeApi.getState().setTranscriptVirtuosoState(sessionId, state);
+    });
+  }, [sessionId, storeApi, virtuosoRef]);
+
+  // Capture a restorable snapshot on unmount, so a remounted Virtuoso
+  // instance (e.g. navigating away and back while disabled) can pick up
+  // exactly where the user left off.
+  useEffect(() => captureSnapshot, [captureSnapshot]);
+
+  const prevEnabledRef = useRef(enabled);
+  useEffect(() => {
+    const wasEnabled = prevEnabledRef.current;
+    prevEnabledRef.current = enabled;
+    if (wasEnabled === enabled) return;
+    if (!enabled) {
+      // Disabling: snapshot immediately, in addition to the unmount capture
+      // above, so a remount that happens without an intervening re-render
+      // still restores this exact position.
+      captureSnapshot();
+      return;
+    }
+    // Re-enabling: catch up to the bottom only if content progressed past
+    // view while disabled.
+    if (
+      shouldCatchUpOnAutoScrollEnable({
+        wasEnabled,
+        nowEnabled: enabled,
+        isAtBottom: isAtBottomRef.current,
+      })
+    ) {
+      virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + itemCount - 1, align: "end" });
+    }
+  }, [enabled, captureSnapshot, firstItemIndex, itemCount, virtuosoRef]);
+
+  // Restore the saved position on first mount when disabled. Lazy-initialized
+  // so it's read once at mount time, not on every render.
+  const [restoreStateFrom] = useState<StateSnapshot | undefined>(() => {
+    if (enabled || !sessionId) return undefined;
+    return storeApi.getState().transcriptAutoScroll.virtuosoStateBySessionId[sessionId];
+  });
+
   return (
     <Virtuoso
       ref={virtuosoRef}
@@ -224,9 +282,11 @@ function VirtuosoBody(props: VirtuosoBodyProps) {
       totalCount={itemCount}
       firstItemIndex={firstItemIndex}
       initialTopMostItemIndex={itemCount - 1}
+      restoreStateFrom={restoreStateFrom}
       computeItemKey={computeItemKey}
       itemContent={renderItem}
-      followOutput={followOutput}
+      followOutput={resolvedFollowOutput}
+      atBottomStateChange={handleAtBottomStateChange}
       startReached={handleStartReached}
       increaseViewportBy={200}
       atBottomThreshold={100}
@@ -467,6 +527,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
   const { activeTurnId } = useSessionTurn(sessionId);
   const effectiveActiveTurnId = getEffectiveActiveTurnId(activeTurnId, isWorking);
   const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
+  const autoScrollEnabled = useTranscriptAutoScrollEnabled(sessionId);
 
   // Track which render branch fires and how itemCount/messageCount transition.
   // See useVirtuosoDebugSnapshot for details on the remote-executor scroll bug.
@@ -531,6 +592,7 @@ export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: Mess
           loadMore={loadMore}
           Header={Header}
           Footer={Footer}
+          enabled={autoScrollEnabled}
         />
       )}
     </SessionPanelContent>

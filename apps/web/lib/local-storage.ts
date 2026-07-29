@@ -652,6 +652,28 @@ export function setChatInputHeight(sessionId: string, height: number): void {
   setSessionStorage(`${CHAT_INPUT_HEIGHT_KEY}.${sessionId}`, height);
 }
 
+// --- Transcript auto-scroll toggle (sessionStorage, per session) ---
+// Survives reload + task switch within the tab session, resets on tab close.
+const AUTO_SCROLL_ENABLED_PREFIX = "kandev.transcript-auto-scroll-enabled.";
+
+export function getStoredAutoScrollEnabled(sessionId: string): boolean | null {
+  return getSessionStorage<boolean | null>(`${AUTO_SCROLL_ENABLED_PREFIX}${sessionId}`, null);
+}
+
+export function setStoredAutoScrollEnabled(sessionId: string, enabled: boolean): void {
+  setSessionStorage(`${AUTO_SCROLL_ENABLED_PREFIX}${sessionId}`, enabled);
+}
+
+const AUTO_SCROLL_TOP_PREFIX = "kandev.transcript-auto-scroll-top.";
+
+export function getStoredAutoScrollTop(sessionId: string): number | null {
+  return getSessionStorage<number | null>(`${AUTO_SCROLL_TOP_PREFIX}${sessionId}`, null);
+}
+
+export function setStoredAutoScrollTop(sessionId: string, scrollTop: number): void {
+  setSessionStorage(`${AUTO_SCROLL_TOP_PREFIX}${sessionId}`, scrollTop);
+}
+
 // --- Task storage cleanup ---
 
 /**
@@ -699,6 +721,8 @@ export function cleanupTaskStorage(
     removeSessionStorage(`kandev.contextFiles.${sessionId}`);
     removeSessionStorage(`kandev.comments.${sessionId}`);
     removeSessionStorage(`kandev.messageFavorites.${sessionId}`);
+    removeSessionStorage(`${AUTO_SCROLL_ENABLED_PREFIX}${sessionId}`);
+    removeSessionStorage(`${AUTO_SCROLL_TOP_PREFIX}${sessionId}`);
   }
 }
 

@@ -1,5 +1,6 @@
 import type { ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
+import type { StateSnapshot } from "react-virtuoso";
 import type {
   FilterClause,
   GroupKey,
@@ -51,6 +52,17 @@ export type MobileSessionState = {
 
 export type ChatInputState = {
   planModeBySessionId: Record<string, boolean>;
+};
+
+export type TranscriptAutoScrollState = {
+  /** Per-session auto-scroll preference. Absent = enabled (the default). */
+  enabledBySessionId: Record<string, boolean>;
+  /** Last known scrollTop for the native renderer, captured continuously so
+   *  a disabled session's position survives a dockview panel remount. */
+  scrollTopBySessionId: Record<string, number>;
+  /** Last captured Virtuoso state snapshot (scroll offset + measured item
+   *  sizes) for the virtuoso renderer, captured on disable/unmount. */
+  virtuosoStateBySessionId: Record<string, StateSnapshot>;
 };
 
 export type ReviewPRSelectionState = {
@@ -155,6 +167,7 @@ export type UISliceState = {
   mobileKanban: MobileKanbanState;
   mobileSession: MobileSessionState;
   chatInput: ChatInputState;
+  transcriptAutoScroll: TranscriptAutoScrollState;
   reviewPRSelection: ReviewPRSelectionState;
   documentPanel: DocumentPanelState;
   systemHealth: SystemHealthState;
@@ -205,6 +218,9 @@ export type UISliceActions = {
   setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setTranscriptAutoScrollEnabled: (sessionId: string, enabled: boolean) => void;
+  setTranscriptScrollTop: (sessionId: string, scrollTop: number) => void;
+  setTranscriptVirtuosoState: (sessionId: string, state: StateSnapshot) => void;
   setReviewPRSelection: (taskId: string, selectedKey: string) => void;
   setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
   setSystemHealth: (response: SystemHealthResponse) => void;

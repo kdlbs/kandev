@@ -221,6 +221,7 @@ export type AppState = KanbanSlice & {
   mobileKanban: (typeof defaultUIState)["mobileKanban"];
   mobileSession: (typeof defaultUIState)["mobileSession"];
   chatInput: (typeof defaultUIState)["chatInput"];
+  transcriptAutoScroll: (typeof defaultUIState)["transcriptAutoScroll"];
   reviewPRSelection: (typeof defaultUIState)["reviewPRSelection"];
   documentPanel: (typeof defaultUIState)["documentPanel"];
   systemHealth: (typeof defaultUIState)["systemHealth"];
@@ -317,6 +318,9 @@ export type AppState = KanbanSlice & {
   setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setTranscriptAutoScrollEnabled: UIA["setTranscriptAutoScrollEnabled"];
+  setTranscriptScrollTop: UIA["setTranscriptScrollTop"];
+  setTranscriptVirtuosoState: UIA["setTranscriptVirtuosoState"];
   setReviewPRSelection: UIA["setReviewPRSelection"];
   setActiveDocument: (sessionId: string, doc: UISliceTypes.ActiveDocument | null) => void;
   setSystemHealth: (response: SystemHealthResponse) => void;
