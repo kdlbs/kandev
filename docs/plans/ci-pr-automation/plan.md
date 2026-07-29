@@ -11,7 +11,7 @@ status: building
 Add task-level PR automation options to the existing GitHub PR CI popover. The backend owns durable options, per-PR dedupe/checkpoints, default prompt resolution, and automation execution from existing PR watch events. The frontend adds API/state/hooks and renders controls plus a task-specific prompt editor in the existing desktop popover and mobile drawer. E2E verifies the visible controls and the automation behavior against mocked PR states.
 
 The 2026-07-23 extension adds agent prompts for review requested, merged,
-and closed transitions. Per ADR-0049, it expands this subsystem and its
+and closed transitions. Per ADR-0051, it expands this subsystem and its
 existing menu/MCP boundaries rather than introducing generic task-bound GitHub
 query automations.
 

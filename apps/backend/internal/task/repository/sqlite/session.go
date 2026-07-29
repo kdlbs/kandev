@@ -403,7 +403,7 @@ func (r *Repository) ClaimPromptableTaskSessionIfActive(ctx context.Context, id 
 	}
 
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_sessions SET state = ?, updated_at = ?
+		UPDATE task_sessions SET state = ?, completed_at = NULL, updated_at = ?
 		WHERE id = ? AND state = ?
 		  AND EXISTS (SELECT 1 FROM tasks WHERE tasks.id = task_sessions.task_id AND tasks.archived_at IS NULL)
 	`), models.TaskSessionStateRunning, time.Now().UTC(), id, state)
@@ -446,11 +446,14 @@ func (r *Repository) classifyPromptableTaskSessionClaim(
 		FROM task_sessions ts JOIN tasks t ON t.id = ts.task_id
 		WHERE ts.id = ?
 	`), id).Scan(&state, &active)
-	if errors.Is(err, sql.ErrNoRows) || !active {
+	if errors.Is(err, sql.ErrNoRows) {
 		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
 	}
 	if err != nil {
 		return models.PromptableTaskSessionClaim{}, err
+	}
+	if !active {
+		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
 	}
 	return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionBusy}, nil
 }

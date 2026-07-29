@@ -56,6 +56,13 @@ func TestHandleAgentReady_PassthroughLifecycleReservationBlocksConcurrentDrain(t
 
 	deferred := make(chan struct{})
 	releaseDeferred := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseDeferred:
+		default:
+			close(releaseDeferred)
+		}
+	})
 	svc.afterReadyLifecycleReservation = func() {
 		close(deferred)
 		<-releaseDeferred
@@ -143,6 +150,13 @@ func TestHandleAgentReady_PassthroughLifecycleArchiveBeforeDeferredDispatchHasNo
 
 	reserved := make(chan struct{})
 	releaseDispatch := make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-releaseDispatch:
+		default:
+			close(releaseDispatch)
+		}
+	})
 	svc.afterReadyLifecycleReservation = func() {
 		close(reserved)
 		<-releaseDispatch

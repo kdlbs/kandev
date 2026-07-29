@@ -43,7 +43,7 @@ git diff --check -- docs
 - `apps/backend/internal/orchestrator/event_handlers_github_pr_automation.go`
 - `apps/backend/internal/orchestrator/messagequeue/`
 - focused backend regression tests
-- `docs/decisions/0049-pr-agent-notifications-extend-task-pr-automation.md`
+- `docs/decisions/0051-pr-agent-notifications-extend-task-pr-automation.md`
 - `docs/specs/ui/ci-pr-automation.md`
 - `docs/plans/ci-pr-automation/`
 - `docs/public/integrations.md`

@@ -309,6 +309,8 @@ func (s *Service) applyBatchedNumberedWatch(
 		)
 		if holdErr != nil {
 			s.logger.Error("failed to check terminal PR automation", zap.String("id", w.ID), zap.Error(holdErr))
+			// Fail conservatively like stale task-PR state: suppress feedback
+			// until terminal lifecycle retention can be determined safely.
 			return PRWatchSyncResult{Watch: w, Status: status, Found: true, Changed: changed, SyncFailed: true}
 		}
 		if !hold {

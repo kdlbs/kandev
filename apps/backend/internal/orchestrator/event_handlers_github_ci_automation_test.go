@@ -28,6 +28,16 @@ type archiveBeforeLifecycleQueueRepo struct {
 	gets    int
 }
 
+type getTaskResultRepo struct {
+	repoStore
+	task *models.Task
+	err  error
+}
+
+func (r *getTaskResultRepo) GetTask(context.Context, string) (*models.Task, error) {
+	return r.task, r.err
+}
+
 // storeBackedLifecycleGitHubService keeps the handler's external GitHub
 // controls deterministic while sending lifecycle checkpoints and CI errors to
 // the real SQLite store. That makes precedence assertions observe the same
@@ -452,6 +462,20 @@ func TestHandleTaskPRLifecycleDeliveryFailureRecordsAndPublishesError(t *testing
 	}
 }
 
+func TestHandleTaskPRCIAutomationPropagatesTaskLookupError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	lookupErr := errors.New("task database unavailable")
+	svc.repo = &getTaskResultRepo{repoStore: repo, err: lookupErr}
+	svc.SetGitHubService(&mockGitHubService{})
+
+	err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{TaskID: "task-1"}, false)
+	if !errors.Is(err, lookupErr) {
+		t.Fatalf("handle lifecycle error = %v, want %v", err, lookupErr)
+	}
+}
+
 func TestHandleTaskPRLifecycleSuccessPublishesClearedErrorState(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -477,8 +501,8 @@ func TestHandleTaskPRLifecycleSuccessPublishesClearedErrorState(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handle lifecycle: %v", err)
 	}
-	if len(ghSvc.lifecyclePrompts) != 1 {
-		t.Fatalf("lifecycle prompts = %+v, want one accepted prompt", ghSvc.lifecyclePrompts)
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 1 {
+		t.Fatalf("lifecycle prompts = %+v, want one accepted prompt", prompts)
 	}
 	if stateUpdates != 1 {
 		t.Fatalf("state updates = %d, want 1 after lifecycle delivery clears error", stateUpdates)
@@ -505,8 +529,8 @@ func TestHandleTaskPRLifecycleSkipsArchivedTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handle lifecycle: %v", err)
 	}
-	if len(ghSvc.lifecyclePrompts) != 0 {
-		t.Fatalf("archived task received lifecycle prompts: %+v", ghSvc.lifecyclePrompts)
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 0 {
+		t.Fatalf("archived task received lifecycle prompts: %+v", prompts)
 	}
 }
 
@@ -531,8 +555,8 @@ func TestHandleTaskPRLifecycleTerminalPromptIgnoresReviewerResolutionFailure(t *
 	if err != nil {
 		t.Fatalf("handle lifecycle: %v", err)
 	}
-	if len(ghSvc.lifecyclePrompts) != 1 || ghSvc.lifecyclePrompts[0].Event != taskPRAgentEventMerged {
-		t.Fatalf("terminal lifecycle prompt = %+v, want merged prompt", ghSvc.lifecyclePrompts)
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 1 || prompts[0].Event != taskPRAgentEventMerged {
+		t.Fatalf("terminal lifecycle prompt = %+v, want merged prompt", prompts)
 	}
 }
 
@@ -560,11 +584,11 @@ func TestHandleTaskPRLifecycleReboundRequestedReviewEstablishesQuietBaseline(t *
 	if err != nil {
 		t.Fatalf("handle lifecycle: %v", err)
 	}
-	if len(ghSvc.lifecyclePrompts) != 0 {
-		t.Fatalf("rebound requested review prompted instead of baselining: %+v", ghSvc.lifecyclePrompts)
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 0 {
+		t.Fatalf("rebound requested review prompted instead of baselining: %+v", prompts)
 	}
-	if ghSvc.lifecycleRebindCalls != 1 {
-		t.Fatalf("reviewer rebind calls = %d, want 1", ghSvc.lifecycleRebindCalls)
+	if calls := ghSvc.lifecycleRebindCallCount(); calls != 1 {
+		t.Fatalf("reviewer rebind calls = %d, want 1", calls)
 	}
 }
 
@@ -595,8 +619,8 @@ func TestHandleTaskPRCIAutomationEvaluatesLifecycleWhenAutoFixBlocksMerge(t *tes
 	if err != nil {
 		t.Fatalf("handle automation: %v", err)
 	}
-	if len(ghSvc.lifecyclePrompts) != 1 || ghSvc.lifecyclePrompts[0].Event != taskPRAgentEventReviewRequested {
-		t.Fatalf("lifecycle prompts = %+v, want review-requested prompt despite auto-fix block", ghSvc.lifecyclePrompts)
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 1 || prompts[0].Event != taskPRAgentEventReviewRequested {
+		t.Fatalf("lifecycle prompts = %+v, want review-requested prompt despite auto-fix block", prompts)
 	}
 }
 
@@ -763,8 +787,8 @@ func TestHandleTaskPRCIAutomationRefreshFailureStillEvaluatesLifecycle(t *testin
 	if err := svc.handleTaskPRCIAutomation(ctx, &github.TaskPR{TaskID: "task-1", RepositoryID: "repo", Owner: "a", Repo: "b", PRNumber: 1, PRURL: "url", State: "merged"}); err != nil {
 		t.Fatalf("handle automation: %v", err)
 	}
-	if len(ghSvc.lifecyclePrompts) != 1 {
-		t.Fatalf("lifecycle prompts = %+v, want merged prompt after refresh failure", ghSvc.lifecyclePrompts)
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 1 {
+		t.Fatalf("lifecycle prompts = %+v, want merged prompt after refresh failure", prompts)
 	}
 }
 

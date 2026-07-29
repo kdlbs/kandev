@@ -119,7 +119,7 @@ rg -n -i 'lifecycle.*override|override.*lifecycle|archive.*retry|retry.*archive'
 - `apps/backend/internal/orchestrator/messagequeue/`
 - `apps/web/lib/types/github.ts`
 - `apps/web/lib/api/domains/github-api.test.ts`
-- `docs/decisions/0049-pr-agent-notifications-extend-task-pr-automation.md`
+- `docs/decisions/0051-pr-agent-notifications-extend-task-pr-automation.md`
 - `docs/specs/ui/ci-pr-automation.md`
 - `docs/plans/ci-pr-automation/`
 

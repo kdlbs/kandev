@@ -303,7 +303,7 @@ func (s *Service) shouldDeleteReviewTaskWithClient(
 	if reason == "" {
 		return false, ""
 	}
-	if policy == CleanupPolicyAlways || rpt.TaskID == "" || s.taskSessionChecker == nil {
+	if policy == CleanupPolicyAlways || rpt.TaskID == "" {
 		return true, reason
 	}
 	if s.store != nil {
@@ -316,6 +316,9 @@ func (s *Service) shouldDeleteReviewTaskWithClient(
 		if enabled {
 			return false, ""
 		}
+	}
+	if s.taskSessionChecker == nil {
+		return true, reason
 	}
 	hasUserMsg, err := s.taskSessionChecker.HasUserAuthoredMessage(ctx, rpt.TaskID)
 	if err != nil {

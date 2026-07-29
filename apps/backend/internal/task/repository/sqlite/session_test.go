@@ -196,6 +196,25 @@ func TestClaimPromptableTaskSessionIfActive(t *testing.T) {
 		require.Equal(t, models.TaskSessionStateRunning, persisted.State)
 	})
 
+	t.Run("clears completion timestamp when reclaiming a completed session", func(t *testing.T) {
+		repo := newRepoForSessionTests(t)
+		seedForMsgTest(t, repo, "task-completed", "session-completed", "turn-completed")
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-completed", models.TaskSessionStateCompleted, ""))
+
+		before, err := repo.GetTaskSession(ctx, "session-completed")
+		require.NoError(t, err)
+		require.NotNil(t, before.CompletedAt)
+
+		claim, err := repo.ClaimPromptableTaskSessionIfActive(ctx, "session-completed")
+		require.NoError(t, err)
+		require.Equal(t, models.PromptableTaskSessionClaimed, claim.Status)
+
+		persisted, err := repo.GetTaskSession(ctx, "session-completed")
+		require.NoError(t, err)
+		require.Equal(t, models.TaskSessionStateRunning, persisted.State)
+		require.Nil(t, persisted.CompletedAt)
+	})
+
 	t.Run("does not claim an archived task session", func(t *testing.T) {
 		repo := newRepoForSessionTests(t)
 		seedForMsgTest(t, repo, "task-archived", "session-archived", "turn-archived")
@@ -272,6 +291,21 @@ func TestClaimPromptableTaskSessionIfActive_ZeroRowAfterConcurrentBusyTransition
 	persisted, err := repo.GetTaskSession(ctx, "session-race")
 	require.NoError(t, err)
 	require.Equal(t, models.TaskSessionStateRunning, persisted.State)
+}
+
+func TestClassifyPromptableTaskSessionClaimPropagatesScanError(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-scan-error", "session-scan-error", "turn-scan-error")
+
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	_, err = tx.ExecContext(ctx, `ALTER TABLE tasks RENAME TO tasks_unavailable`)
+	require.NoError(t, err)
+
+	_, err = repo.classifyPromptableTaskSessionClaim(ctx, tx, "session-scan-error")
+	require.Error(t, err)
 }
 
 func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {

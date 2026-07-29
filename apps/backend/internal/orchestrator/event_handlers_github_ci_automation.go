@@ -84,11 +84,14 @@ func (s *Service) handleTaskPRCIAutomationWithRefresh(ctx context.Context, pr *g
 		return nil
 	}
 	task, err := s.repo.GetTask(ctx, pr.TaskID)
-	if errors.Is(err, taskrepo.ErrTaskNotFound) || task == nil || task.ArchivedAt != nil {
-		return nil
-	}
 	if err != nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return nil
+		}
 		return err
+	}
+	if task == nil || task.ArchivedAt != nil {
+		return nil
 	}
 	options, err := s.githubService.GetTaskCIOptionsResponse(ctx, pr.TaskID)
 	if err != nil {

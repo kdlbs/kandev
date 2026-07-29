@@ -41,7 +41,7 @@ node scripts/validate-public-docs.mjs
 
 ## Inputs
 
-- Approved spec and ADR-0049.
+- Approved spec and ADR-0051.
 - Plan: `Required PR handoff notes`.
 - Existing GitHub/GitLab integration sections in `docs/public/integrations.md`.
 

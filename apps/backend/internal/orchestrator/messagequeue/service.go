@@ -12,6 +12,7 @@ package messagequeue
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -402,6 +403,21 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 		Count:   len(pending),
 		Max:     s.maxPerSession,
 	}
+}
+
+// SnapshotSession returns the complete persisted queue state for rollback.
+// Unlike GetStatus, it includes durable lifecycle rows reserved by an in-flight
+// delivery so a later restore cannot erase them before acknowledgement.
+func (s *Service) SnapshotSession(ctx context.Context, sessionID string) ([]QueuedMessage, *PendingMove, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("snapshot queued messages: %w", err)
+	}
+	move, err := s.repo.GetPendingMove(ctx, sessionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("snapshot pending move: %w", err)
+	}
+	return entries, move, nil
 }
 
 // TransferSession moves any queued messages and pending move from one session

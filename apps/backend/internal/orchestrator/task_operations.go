@@ -3167,7 +3167,7 @@ func (s *Service) claimLifecycleTaskState(
 	if err != nil {
 		return "", false, err
 	}
-	if taskArchived(task) || task.AssigneeAgentProfileID != "" {
+	if task == nil || taskArchived(task) || task.AssigneeAgentProfileID != "" {
 		return "", false, nil
 	}
 	taskState, err := s.taskRepo.GetTask(ctx, taskID)

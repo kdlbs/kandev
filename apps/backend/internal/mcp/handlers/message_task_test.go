@@ -1322,6 +1322,45 @@ func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
 	assert.Empty(t, messages)
 }
 
+func TestTaskMessageReviewRollbackPreservesReservedLifecycleQueueEntry(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	_, _, accepted, err := orch.queue.QueueLifecycleMessageWithCoalesceKey(
+		ctx,
+		sess.ID,
+		target.ID,
+		"reserved lifecycle prompt",
+		"",
+		messagequeue.QueuedByWorkflow,
+		false,
+		nil,
+		nil,
+		"github-pr:repo:1:merged",
+		true,
+	)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	reserved, ok := orch.queue.ReserveQueued(ctx, sess.ID)
+	require.True(t, ok)
+
+	rollback := taskMessageReviewRollback{
+		changed: true,
+		sessions: []taskMessageSessionRollback{{
+			sessionID: sess.ID,
+		}},
+	}
+	require.NoError(t, rollback.captureQueues(ctx, orch.queue))
+	require.NoError(t, h.restoreTaskMessageQueues(ctx, rollback))
+
+	restored, ok, err := orch.queue.TakeQueuedEntry(ctx, sess.ID, reserved.ID)
+	require.NoError(t, err)
+	require.True(t, ok, "rollback must preserve lifecycle rows reserved by an in-flight delivery")
+	require.Equal(t, reserved.ID, restored.ID)
+}
+
 func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)

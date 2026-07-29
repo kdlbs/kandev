@@ -2266,22 +2266,26 @@ func (r *taskMessageReviewRollback) captureSessions(ctx context.Context, repo Se
 	return nil
 }
 
-func (r *taskMessageReviewRollback) captureQueues(ctx context.Context, queue *messagequeue.Service) {
+func (r *taskMessageReviewRollback) captureQueues(ctx context.Context, queue *messagequeue.Service) error {
 	if !r.changed || queue == nil || len(r.sessions) == 0 {
-		return
+		return nil
 	}
 	r.queues = make(map[string]taskMessageQueueRollback, len(r.sessions))
 	for _, session := range r.sessions {
-		status := queue.GetStatus(ctx, session.sessionID)
-		snapshot := taskMessageQueueRollback{
-			entries: cloneTaskMessageQueuedMessages(status.Entries),
+		entries, move, err := queue.SnapshotSession(ctx, session.sessionID)
+		if err != nil {
+			return err
 		}
-		if move, ok := queue.GetPendingMove(ctx, session.sessionID); ok {
+		snapshot := taskMessageQueueRollback{
+			entries: cloneTaskMessageQueuedMessages(entries),
+		}
+		if move != nil {
 			snapshot.hadPendingMove = true
 			snapshot.pendingMove = cloneTaskMessagePendingMove(move)
 		}
 		r.queues[session.sessionID] = snapshot
 	}
+	return nil
 }
 
 func (r *taskMessageReviewRollback) captureSelectedSession(session *models.TaskSession) {
@@ -2395,7 +2399,10 @@ func (h *Handlers) dispatchTaskMessage(ctx context.Context, taskID string, sessi
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
 			return taskMessageDispatchResult{}, err
 		}
-		reviewRollback.captureQueues(ctx, h.sessionLauncher.GetMessageQueue())
+		if err := reviewRollback.captureQueues(ctx, h.sessionLauncher.GetMessageQueue()); err != nil {
+			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)
+			return taskMessageDispatchResult{}, err
+		}
 		session, err := h.prepareSessionForTaskMessage(ctx, taskID, session, pinnedTarget)
 		if err != nil {
 			h.restoreTaskReviewForTaskMessage(ctx, taskID, reviewRollback)

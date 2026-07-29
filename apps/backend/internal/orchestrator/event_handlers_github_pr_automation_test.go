@@ -476,8 +476,8 @@ func TestEvalTaskPRLifecycle_RecordsCheckpointOnlyAfterQueueAcceptance(t *testin
 	if !errors.Is(err, queueErr) || delivered {
 		t.Fatalf("queue failure = delivered %v, err %v; want failed acceptance", delivered, err)
 	}
-	if len(ghSvc.lifecyclePrompts) != 0 {
-		t.Fatalf("checkpoint recorded after failed queue acceptance: %+v", ghSvc.lifecyclePrompts)
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 0 {
+		t.Fatalf("checkpoint recorded after failed queue acceptance: %+v", prompts)
 	}
 
 	svc.messageQueue = messagequeue.NewServiceMemory(testLogger())
@@ -485,8 +485,8 @@ func TestEvalTaskPRLifecycle_RecordsCheckpointOnlyAfterQueueAcceptance(t *testin
 	if err != nil || !delivered {
 		t.Fatalf("accepted queue = delivered %v, err %v", delivered, err)
 	}
-	if len(ghSvc.lifecyclePrompts) != 1 || ghSvc.lifecyclePrompts[0].SessionID != "session-1" {
-		t.Fatalf("checkpoint after accepted queue = %+v, want one accepted lifecycle prompt", ghSvc.lifecyclePrompts)
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 1 || prompts[0].SessionID != "session-1" {
+		t.Fatalf("checkpoint after accepted queue = %+v, want one accepted lifecycle prompt", prompts)
 	}
 }
 

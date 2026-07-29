@@ -225,9 +225,13 @@ func (m *mockGitHubService) GetTaskPRByRepoAndNumber(_ context.Context, taskID, 
 	return nil, nil
 }
 func (m *mockGitHubService) IsReviewRequestedForLogin(context.Context, string, string, int, string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.lifecycleRequested, m.lifecycleReviewErr
 }
 func (m *mockGitHubService) RebindTaskPRReviewer(context.Context, string) (string, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.lifecycleRebindCalls++
 	return m.lifecycleReviewer, m.lifecycleRebound, m.lifecycleReviewErr
 }
@@ -238,8 +242,20 @@ func (m *mockGitHubService) SetTaskPRObservedState(context.Context, string, stri
 	return nil
 }
 func (m *mockGitHubService) RecordTaskPRLifecyclePrompt(_ context.Context, prompt github.TaskPRLifecyclePrompt) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.lifecyclePrompts = append(m.lifecyclePrompts, prompt)
 	return nil
+}
+func (m *mockGitHubService) lifecyclePromptSnapshot() []github.TaskPRLifecyclePrompt {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]github.TaskPRLifecyclePrompt(nil), m.lifecyclePrompts...)
+}
+func (m *mockGitHubService) lifecycleRebindCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lifecycleRebindCalls
 }
 func (m *mockGitHubService) GetPRFeedback(context.Context, string, string, int) (*github.PRFeedback, error) {
 	m.prFeedbackCalls++
