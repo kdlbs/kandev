@@ -36,6 +36,7 @@ type ReviewDiffListProps = {
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
+  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 };
 
@@ -50,6 +51,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   onToggleReviewed,
   onDiscard,
   onOpenFile,
+  onPreviewMarkdown,
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -105,6 +107,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 onToggleReviewed={onToggleReviewed}
                 onDiscard={onDiscard}
                 onOpenFile={onOpenFile}
+                onPreviewMarkdown={onPreviewMarkdown}
                 sectionRef={fileRefs.get(key)}
                 scrollContainer={scrollContainerRef}
                 externalLinkContext={{
@@ -142,6 +145,7 @@ type FileDiffSectionProps = {
   onToggleReviewed: (key: string, reviewed: boolean) => void;
   onDiscard: (key: string) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
+  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
   /** Per-repo base branches + single-repo fallback, resolved once by the list
@@ -440,6 +444,22 @@ function useFileDiffDisplayControls(wordWrap: boolean) {
   };
 }
 
+function getMarkdownPreviewToggle({
+  file,
+  fragments,
+  onPreviewMarkdown,
+  onTogglePreview,
+}: {
+  file: ReviewFile;
+  fragments: string[];
+  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
+  onTogglePreview: () => void;
+}) {
+  if (fragments.length === 0) return undefined;
+  if (!onPreviewMarkdown) return onTogglePreview;
+  return () => onPreviewMarkdown(file.path, file.repository_name);
+}
+
 function FileDiffSection({
   file,
   fileKey,
@@ -453,6 +473,7 @@ function FileDiffSection({
   onToggleReviewed,
   onDiscard,
   onOpenFile,
+  onPreviewMarkdown,
   sectionRef,
   scrollContainer,
   externalLinkContext,
@@ -498,6 +519,12 @@ function FileDiffSection({
     externalLinkContext.baseBranchByRepo,
     externalLinkContext.fallbackBaseBranch,
   );
+  const onToggleMarkdownPreview = getMarkdownPreviewToggle({
+    file,
+    fragments: markdownPreviewContent.fragments,
+    onPreviewMarkdown,
+    onTogglePreview: handleToggleMarkdownPreview,
+  });
 
   return (
     <div ref={sectionRef} className="border-b border-border">
@@ -513,10 +540,8 @@ function FileDiffSection({
         onCheckboxChange={handleCheckboxChange}
         onDiscard={handleDiscard}
         onOpenFile={onOpenFile}
-        markdownPreview={markdownPreview}
-        onToggleMarkdownPreview={
-          markdownPreviewContent.fragments.length > 0 ? handleToggleMarkdownPreview : undefined
-        }
+        markdownPreview={!onPreviewMarkdown && markdownPreview}
+        onToggleMarkdownPreview={onToggleMarkdownPreview}
         onToggleCollapse={controls.handleToggleCollapse}
         onToggleExpandUnchanged={controls.handleToggleExpandUnchanged}
         onToggleWordWrap={controls.handleToggleWordWrap}
