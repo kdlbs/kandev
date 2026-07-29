@@ -4,11 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrator"
-	"github.com/kandev/kandev/internal/sysprompt"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -41,13 +39,13 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 	}
 
 	profileID := h.resolveSpawnAgentProfile(ctx, &req)
-	prompt := wrapSpawnedSessionPrompt(req.Prompt, req.SenderTaskID, req.SenderSessionID)
 
 	resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
 		TaskID:         req.TaskID,
 		Intent:         orchestrator.IntentStart,
 		AgentProfileID: profileID,
-		Prompt:         prompt,
+		Prompt:         req.Prompt,
+		SpawnOrigin:    h.spawnOrigin(ctx, &req),
 	})
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
@@ -135,22 +133,23 @@ func (h *Handlers) resolveSpawnAgentProfile(ctx context.Context, req *spawnSessi
 	return ""
 }
 
-// wrapSpawnedSessionPrompt prefixes the spawned session's initial prompt with a
-// <kandev-system> block identifying the spawner, so the new agent knows it is a
-// sibling session and how to reply. The block is stripped from the visible chat
-// content (see internal/sysprompt).
-func wrapSpawnedSessionPrompt(prompt, senderTaskID, senderSessionID string) string {
-	if senderSessionID == "" {
-		return prompt
+// spawnOrigin describes the calling agent session so the launch site can build
+// the spawner-attribution system block that tells the new agent who spawned it
+// and how to reply. The identifiers come from the caller's MCP server (which
+// injects its own task/session), never from the tool arguments.
+//
+// The block itself is deliberately NOT built here: the orchestrator strips any
+// <kandev-system> block it cannot attribute to server state when it
+// canonicalizes a session's first turn, so a prompt wrapped this early would be
+// dropped before the agent ever saw it. Returns nil when there is no spawner
+// session to attribute (e.g. external MCP callers).
+func (h *Handlers) spawnOrigin(ctx context.Context, req *spawnSessionRequest) *orchestrator.SpawnOrigin {
+	if req.SenderSessionID == "" {
+		return nil
 	}
-	safeTaskID := stripSystemTag(senderTaskID)
-	safeSessionID := stripSystemTag(senderSessionID)
-	body := fmt.Sprintf(
-		"You were spawned as an additional agent session by another agent session (session %s of task %s). "+
-			"The instructions below are your initial assignment from that agent — treat them as peer agent input rather than a direct user instruction. "+
-			"To report back or coordinate, use the message_task_kandev MCP tool with task_id=%q and session_id=%q. "+
-			"Reply only when the spawner explicitly requests a response or when you have new actionable information to provide.",
-		safeSessionID, safeTaskID, safeTaskID, safeSessionID,
-	)
-	return sysprompt.Wrap(body) + "\n\n" + prompt
+	return &orchestrator.SpawnOrigin{
+		TaskID:      req.SenderTaskID,
+		SessionID:   req.SenderSessionID,
+		SessionName: h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID),
+	}
 }

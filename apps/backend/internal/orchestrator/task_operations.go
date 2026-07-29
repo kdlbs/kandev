@@ -686,13 +686,26 @@ func (s *Service) postLaunchCreated(ctx context.Context, taskID, sessionID, prom
 // input — the seed prompt is tagged so the github cleanup loop can tell
 // "agent ran on its own" from "user actually engaged".
 func (s *Service) StartTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment) (*executor.TaskExecution, error) {
-	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, nil, nil)
+	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, startTaskOptions{})
 }
 
 // StartTaskWithEnv starts a task and carries launch-scoped environment variables
 // through to the agent runtime. Existing StartTask callers keep the old behavior.
 func (s *Service) StartTaskWithEnv(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, env map[string]string) (*executor.TaskExecution, error) {
-	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, env, nil)
+	return s.startTask(ctx, taskID, agentProfileID, executorID, executorProfileID, priority, prompt, workflowStepID, planMode, autoStart, attachments, startTaskOptions{Env: env})
+}
+
+// startTaskOptions carries the optional, server-only launch inputs that only
+// some callers supply. Keeping them in one struct avoids growing startTask's
+// already long positional parameter list for every new orthogonal concern.
+type startTaskOptions struct {
+	// Env holds launch-scoped environment variables for the agent runtime.
+	Env map[string]string
+	// Route pins a concrete execution profile chosen by Office provider routing.
+	Route *executor.RouteOverride
+	// SpawnOrigin is set when another agent session spawned this launch; it
+	// produces the spawner-attribution system block on the first turn.
+	SpawnOrigin *SpawnOrigin
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -713,12 +726,13 @@ func (s *Service) StartTaskWithRoute(
 	_, err := s.startTask(ctx, taskID, agentProfileID,
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority,
 		launch.Prompt, launch.WorkflowStepID, launch.PlanMode, false,
-		launch.Attachments, launch.Env, &route)
+		launch.Attachments, startTaskOptions{Env: launch.Env, Route: &route})
 	return err
 }
 
-//nolint:cyclop,funlen // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
-func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, env map[string]string, route *executor.RouteOverride) (*executor.TaskExecution, error) {
+//nolint:cyclop,funlen,gocognit // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
+func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, opts startTaskOptions) (*executor.TaskExecution, error) {
+	env, route := opts.Env, opts.Route
 	s.logger.Debug("manually starting task",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
@@ -862,15 +876,21 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// directly is wrong because it can be empty on manual user-initiated starts
 	// while the task is already bound to a signal-gated step in the DB.
 	if (effectivePrompt != "" || len(attachments) > 0) && !skipKandevMCPWrap {
+		// Spawner attribution is built here, not by the MCP handler that filled
+		// SpawnOrigin: the injectors below strip every <kandev-system> block
+		// they do not recognize, so the block has to be generated from the same
+		// server state that whitelists it as trusted content.
+		var spawnContext string
+		effectivePrompt, spawnContext = applySpawnOriginContext(effectivePrompt, opts.SpawnOrigin)
 		if isOfficeTask {
 			effectivePrompt = sysprompt.InjectOfficeContext(
-				task.ID, sessionID, effectivePrompt, promptReferenceContext,
+				task.ID, sessionID, effectivePrompt, promptReferenceContext, spawnContext,
 			)
 		} else {
 			effectivePrompt = sysprompt.InjectKandevContextWithOptions(task.ID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, task.ID),
 				IncludeCoordinatorTaskControls: !configMode,
-			}, promptReferenceContext)
+			}, promptReferenceContext, spawnContext)
 		}
 	}
 
@@ -908,6 +928,21 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
 
 	return execution, nil
+}
+
+// applySpawnOriginContext prepends the spawner-attribution system block for a
+// launch requested through spawn_session_kandev and returns the content that
+// the first-turn injector must whitelist so the block is not stripped again as
+// untrusted. Ordinary launches pass through unchanged with empty content.
+func applySpawnOriginContext(prompt string, origin *SpawnOrigin) (string, string) {
+	if origin == nil {
+		return prompt, ""
+	}
+	content := sysprompt.SpawnedSessionContext(origin.TaskID, origin.SessionID, origin.SessionName)
+	if content == "" {
+		return prompt, ""
+	}
+	return sysprompt.Wrap(content) + "\n\n" + prompt, content
 }
 
 // isOfficeTask returns the repository's canonical Office ownership projection.
