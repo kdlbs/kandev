@@ -441,3 +441,272 @@ func TestDeliverer_RefreshReturnsPromptlyDuringInFlightDelivery(t *testing.T) {
 	}
 	close(released)
 }
+
+// barrierSubject is the control subject the negative-delivery assertions
+// publish on after the event under test — see assertNotDelivered.
+const barrierSubject = "delivery_test.barrier"
+
+// newSubjectFixture wires a Deliverer with a single plugin subscribed to
+// pattern (plus the barrier subject used by assertNotDelivered) and returns
+// the bus plus the channel every delivered event lands on.
+func newSubjectFixture(t *testing.T, pattern string) (bus.EventBus, <-chan *pluginsdk.Event) {
+	t.Helper()
+
+	receivedCh := make(chan *pluginsdk.Event, 4)
+	transport := &fakeTransport{}
+	transport.setHandler(func(_ string, e *pluginsdk.Event) error {
+		receivedCh <- e
+		return nil
+	})
+
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	lister := &fakeLister{}
+	lister.set(PluginRecord{
+		ID:            "plug1",
+		EventSubjects: []string{pattern, barrierSubject},
+		Status:        store.StatusActive,
+	})
+
+	d := newTestDeliverer(t, eventBus, transport, lister)
+	d.Refresh()
+
+	return eventBus, receivedCh
+}
+
+// publishSubject publishes one event on subject stamped with eventType,
+// mirroring how kandev publishes per-session events: a suffixed subject
+// carrying the bare type constant.
+func publishSubject(t *testing.T, eventBus bus.EventBus, subject, eventType string) {
+	t.Helper()
+	ev := bus.NewEvent(eventType, "test", map[string]interface{}{"session_id": "sess-1"})
+	if err := eventBus.Publish(context.Background(), subject, ev); err != nil {
+		t.Fatalf("Publish(%s): %v", subject, err)
+	}
+}
+
+// publishForPattern subscribes a single plugin with pattern, publishes one
+// event on subject, and returns the delivered pluginsdk.Event (failing the
+// test if nothing arrives). Only used for the positive cases, so it never
+// waits out its timeout on a passing run.
+func publishForPattern(t *testing.T, pattern, subject, eventType string) *pluginsdk.Event {
+	t.Helper()
+
+	eventBus, receivedCh := newSubjectFixture(t, pattern)
+	publishSubject(t, eventBus, subject, eventType)
+
+	return requireNoTimeout(t, receivedCh, 2*time.Second,
+		fmt.Sprintf("delivery of %s to pattern %s", subject, pattern))
+}
+
+// assertNotDelivered asserts pattern does not receive an event published on
+// subject, without waiting out a wall clock window: after the event under
+// test it publishes a control event on barrierSubject, which the same plugin
+// also subscribes to. The memory bus enqueues synchronously inside Publish
+// and the worker drains its single queue in FIFO order, so the barrier
+// arriving first is proof the event under test was never enqueued.
+func assertNotDelivered(t *testing.T, pattern, subject, eventType string) {
+	t.Helper()
+
+	eventBus, receivedCh := newSubjectFixture(t, pattern)
+	publishSubject(t, eventBus, subject, eventType)
+	publishSubject(t, eventBus, barrierSubject, barrierSubject)
+
+	got := requireNoTimeout(t, receivedCh, 2*time.Second, "barrier delivery")
+	if got.EventType != barrierSubject {
+		t.Fatalf("pattern %q must not receive subject %q, got EventType %q", pattern, subject, got.EventType)
+	}
+}
+
+// TestDeliverer_DeliversPerSessionSuffixedSubject is the regression test for
+// the catch-22 that made every per-session-suffixed subject undeliverable:
+// the event is published on a 3-segment subject but stamped with the bare
+// 2-segment type constant, so re-checking the manifest pattern against
+// event.Type dropped it after the bus subscription had already matched.
+func TestDeliverer_DeliversPerSessionSuffixedSubject(t *testing.T) {
+	got := publishForPattern(t,
+		"session_prompt_usage.updated.*",
+		"session_prompt_usage.updated.sess-1",
+		"session_prompt_usage.updated")
+	if got.EventType != "session_prompt_usage.updated.sess-1" {
+		t.Errorf("EventType = %q, want the concrete published subject session_prompt_usage.updated.sess-1", got.EventType)
+	}
+	if got.Payload["session_id"] != "sess-1" {
+		t.Errorf("Payload[session_id] = %v, want sess-1", got.Payload["session_id"])
+	}
+}
+
+// TestDeliverer_PerSessionSubjectFamilies covers the rest of the suffixed
+// subject families the docs advertise as subscribable, including the
+// 3-segment base type file.change.notified (whose per-session subject has
+// four segments) and the per-run office subject.
+func TestDeliverer_PerSessionSubjectFamilies(t *testing.T) {
+	cases := []struct {
+		pattern   string
+		subject   string
+		eventType string
+	}{
+		{"shell.output.*", "shell.output.sess-1", "shell.output"},
+		{"shell.exit.*", "shell.exit.sess-1", "shell.exit"},
+		{"process.output.*", "process.output.sess-1", "process.output"},
+		{"process.status.*", "process.status.sess-1", "process.status"},
+		{"agent.stream.*", "agent.stream.sess-1", "agent.stream"},
+		{"git.event.*", "git.event.sess-1", "git.event"},
+		{"git.ws.*", "git.ws.sess-1", "git.ws"},
+		{"file.change.notified.*", "file.change.notified.sess-1", "file.change.notified"},
+		{"permission_request.received.*", "permission_request.received.sess-1", "permission_request.received"},
+		{"context_window.updated.*", "context_window.updated.sess-1", "context_window.updated"},
+		{"available_commands.updated.*", "available_commands.updated.sess-1", "available_commands.updated"},
+		{"session_mode.changed.*", "session_mode.changed.sess-1", "session_mode.changed"},
+		{"agent_capabilities.updated.*", "agent_capabilities.updated.sess-1", "agent_capabilities.updated"},
+		{"session_models.updated.*", "session_models.updated.sess-1", "session_models.updated"},
+		{"session_info.updated.*", "session_info.updated.sess-1", "session_info.updated"},
+		{"session_todos.updated.*", "session_todos.updated.sess-1", "session_todos.updated"},
+		// office.run.event_appended already publishes with Type == subject;
+		// it must keep working now that the subject is what gets matched.
+		{"office.run.event_appended.*", "office.run.event_appended.run-1", "office.run.event_appended.run-1"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.pattern, func(t *testing.T) {
+			got := publishForPattern(t, tc.pattern, tc.subject, tc.eventType)
+			if got.EventType != tc.subject {
+				t.Errorf("EventType = %q, want %q", got.EventType, tc.subject)
+			}
+		})
+	}
+}
+
+// TestDeliverer_SubjectUnrelatedToTypeIsDelivered covers the one shape where
+// the published subject is not even a suffixed form of the event's own type:
+// handleGitCommitCreated / handleGitCommitsReset / handleBranchSwitched in the
+// orchestrator publish on git.ws.<sessionId> while stamping events.GitEvent
+// ("git.event"). Matching on the subject makes these deliverable under
+// "git.ws.*"; matching on the type could never have delivered them at all.
+func TestDeliverer_SubjectUnrelatedToTypeIsDelivered(t *testing.T) {
+	got := publishForPattern(t, "git.ws.*", "git.ws.sess-1", "git.event")
+	if got.EventType != "git.ws.sess-1" {
+		t.Errorf("EventType = %q, want the concrete published subject git.ws.sess-1", got.EventType)
+	}
+
+	// ...and the type it carries must not make it match that type's pattern.
+	assertNotDelivered(t, "git.event.*", "git.ws.sess-1", "git.event")
+}
+
+// TestDeliverer_UnsuffixedSubscriptionsUnchanged pins the backward-compatible
+// half: subjects published unsuffixed have subject == type, so both exact
+// and wildcard 2-segment subscriptions still match and still see the same
+// EventType they saw before.
+func TestDeliverer_UnsuffixedSubscriptionsUnchanged(t *testing.T) {
+	cases := []struct {
+		name    string
+		pattern string
+		subject string
+	}{
+		{"exact", "task.created", "task.created"},
+		{"wildcard", "task.*", "task.created"},
+		{"three segment exact", "message.queue.status_changed", "message.queue.status_changed"},
+		{"three segment wildcard", "message.queue.*", "message.queue.status_changed"},
+		{"cross plugin wildcard", "plugin.other-plugin.*", "plugin.other-plugin.ping"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := publishForPattern(t, tc.pattern, tc.subject, tc.subject)
+			if got.EventType != tc.subject {
+				t.Errorf("EventType = %q, want %q", got.EventType, tc.subject)
+			}
+		})
+	}
+}
+
+// TestDeliverer_SegmentCountStrictnessPreserved proves the manifest re-check
+// still governs delivery after switching it to the concrete subject: NATS'
+// multi-segment ">" wildcard (which the underlying bus honors, and which
+// manifest.MatchSubject deliberately does not) must not deliver, and neither
+// must a pattern whose segment count differs from the subject's.
+func TestDeliverer_SegmentCountStrictnessPreserved(t *testing.T) {
+	cases := []struct {
+		name    string
+		pattern string
+		subject string
+	}{
+		// The bus subscription matches ">" but manifest.MatchSubject does not.
+		{"multi segment nats wildcard", "shell.>", "shell.output.sess-1"},
+		{"multi segment nats wildcard on unsuffixed", "task.>", "task.created"},
+		// Too few pattern segments for the subject.
+		{"two segment pattern vs three segment subject", "shell.*", "shell.output.sess-1"},
+		// Too many pattern segments for the subject.
+		{"three segment pattern vs two segment subject", "task.created.*", "task.created"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			assertNotDelivered(t, tc.pattern, tc.subject, tc.subject)
+		})
+	}
+}
+
+// TestDeliverer_WrongSessionSuffixNotDelivered checks a literal session id in
+// the pattern only receives that session's events.
+func TestDeliverer_WrongSessionSuffixNotDelivered(t *testing.T) {
+	assertNotDelivered(t, "shell.output.sess-other", "shell.output.sess-1", "shell.output")
+}
+
+// TestDeliverer_UnstampedEventFallsBackToType covers an Event handed to the
+// handler without going through Publish (no Subject stamped): matching falls
+// back to event.Type so nothing regresses for a bus implementation or test
+// that constructs deliveries by hand.
+func TestDeliverer_UnstampedEventFallsBackToType(t *testing.T) {
+	receivedCh := make(chan *pluginsdk.Event, 1)
+	transport := &fakeTransport{}
+	transport.setHandler(func(_ string, e *pluginsdk.Event) error {
+		receivedCh <- e
+		return nil
+	})
+
+	lister := &fakeLister{}
+	lister.set(PluginRecord{ID: "plug1", EventSubjects: []string{"task.*"}, Status: store.StatusActive})
+
+	captureBus := &handlerCapturingBus{MemoryEventBus: bus.NewMemoryEventBus(logger.Default())}
+	d := newTestDeliverer(t, captureBus, transport, lister)
+	d.Refresh()
+
+	handler := captureBus.handlerFor("task.*")
+	if handler == nil {
+		t.Fatal("deliverer did not subscribe to task.*")
+	}
+	// No Subject field: straight to the handler, as an unstamped event.
+	if err := handler(context.Background(), &bus.Event{ID: "e1", Type: "task.created"}); err != nil {
+		t.Fatalf("handler: %v", err)
+	}
+
+	got := requireNoTimeout(t, receivedCh, 2*time.Second, "event delivery")
+	if got.EventType != "task.created" {
+		t.Errorf("EventType = %q, want task.created", got.EventType)
+	}
+}
+
+// handlerCapturingBus records the handler registered for each subscription
+// pattern so a test can invoke it directly with a hand-built Event.
+type handlerCapturingBus struct {
+	*bus.MemoryEventBus
+
+	mu       sync.Mutex
+	handlers map[string]bus.EventHandler
+}
+
+func (b *handlerCapturingBus) Subscribe(subject string, handler bus.EventHandler) (bus.Subscription, error) {
+	b.mu.Lock()
+	if b.handlers == nil {
+		b.handlers = make(map[string]bus.EventHandler)
+	}
+	b.handlers[subject] = handler
+	b.mu.Unlock()
+	return b.MemoryEventBus.Subscribe(subject, handler)
+}
+
+func (b *handlerCapturingBus) handlerFor(subject string) bus.EventHandler {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.handlers[subject]
+}

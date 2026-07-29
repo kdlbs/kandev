@@ -93,6 +93,7 @@ function Providers({ children }: { children: ReactNode }) {
   );
 }
 
+// eslint-disable-next-line max-lines-per-function
 describe("StorageMaintenanceSettings", () => {
   afterEach(cleanup);
 
@@ -209,6 +210,37 @@ describe("StorageMaintenanceSettings", () => {
     rerender(<StorageMaintenanceSettings />);
 
     expect((screen.getByTestId(IDLE_PERIOD_TEST_ID) as HTMLInputElement).value).toBe("31");
+  });
+});
+
+describe("StorageMaintenanceSettings busy feedback", () => {
+  afterEach(cleanup);
+
+  beforeEach(() => {
+    mocks.useSystemJob.mockReturnValue(undefined);
+  });
+
+  it("explains busy activity and exposes the direct Run anyway action", () => {
+    const runAnyway = vi.fn();
+    mocks.useStorageMaintenance.mockReturnValue({
+      ...controller(overview),
+      busy: {
+        resources: [
+          { kind: "execution_running", label: "An agent execution is running" },
+          { kind: "test_command", label: "A test command is running" },
+        ],
+        forceAvailable: true,
+      },
+      runAnyway,
+    });
+
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    expect(screen.getByText("An agent execution is running")).toBeTruthy();
+    expect(screen.getByText("A test command is running")).toBeTruthy();
+    expect(screen.getByText(/may disrupt this active work/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Run anyway" }));
+    expect(runAnyway).toHaveBeenCalledTimes(1);
   });
 });
 

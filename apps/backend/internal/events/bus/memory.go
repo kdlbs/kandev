@@ -93,13 +93,21 @@ func NewMemoryEventBus(log *logger.Logger) *MemoryEventBus {
 	}
 }
 
-// Publish sends an event to all matching subscribers
+// Publish sends an event to all matching subscribers.
+//
+// The concrete subject is stamped onto event.Subject before dispatch so
+// handlers can tell which subject actually matched — event.Type alone is
+// not enough for the per-session/per-run suffixed subjects (see Event.Subject).
 func (b *MemoryEventBus) Publish(ctx context.Context, subject string, event *Event) error {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 
 	if b.closed {
 		return fmt.Errorf("event bus is closed")
+	}
+
+	if event != nil {
+		event.Subject = subject
 	}
 
 	// Track which queue groups we've already delivered to

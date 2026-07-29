@@ -29,7 +29,7 @@ func TestRunNowIgnoresQuietPeriodWithoutActiveTaskWork(t *testing.T) {
 		Jobs: tracker, Activity: coordinator, Providers: []CleanupProvider{provider},
 	})
 
-	jobID, err := operations.RunNow(context.Background(), nil)
+	jobID, err := operations.RunNow(context.Background(), nil, false)
 	if err != nil {
 		t.Fatalf("RunNow: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestRunNowInvalidatesOverviewAfterSuccess(t *testing.T) {
 		Overview:  overview,
 	})
 
-	jobID, err := operations.RunNow(context.Background(), nil)
+	jobID, err := operations.RunNow(context.Background(), nil, false)
 	if err != nil {
 		t.Fatalf("RunNow: %v", err)
 	}
@@ -101,13 +101,78 @@ func TestRunNowRejectsCurrentTaskActivity(t *testing.T) {
 		Jobs: jobs.NewTracker(nil, newOperationsTestLogger(t)), Activity: coordinator,
 	})
 
-	jobID, err := operations.RunNow(context.Background(), nil)
+	jobID, err := operations.RunNow(context.Background(), nil, false)
 	var busyErr *BusyError
 	if !errors.As(err, &busyErr) {
 		t.Fatalf("RunNow error = %v, want BusyError", err)
 	}
 	if jobID != "" {
 		t.Fatalf("busy RunNow job ID = %q, want empty", jobID)
+	}
+	if !busyErr.ForceAvailable || len(busyErr.Resources) != 1 || busyErr.Resources[0].Label == "" {
+		t.Fatalf("busy response = %#v, want labeled force-available resource", busyErr)
+	}
+}
+
+func TestRunNowForceRunsBesideCurrentTaskActivity(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	coordinator := activity.NewCoordinator(activity.Options{})
+	taskLease, err := coordinator.AcquireTask(context.Background(), activity.KindTestCommand)
+	if err != nil {
+		t.Fatalf("AcquireTask: %v", err)
+	}
+	defer taskLease.Release()
+	provider := &signallingCleanupProvider{called: make(chan struct{})}
+	tracker := jobs.NewTracker(nil, newOperationsTestLogger(t))
+	operations := NewOperations(OperationsConfig{
+		Settings: NewSettingsStore(rawSettings), Store: newStorageStore(t, pool), Jobs: tracker,
+		Activity: coordinator, Providers: []CleanupProvider{provider},
+	})
+
+	jobID, err := operations.RunNow(context.Background(), nil, true)
+	if err != nil {
+		t.Fatalf("forced RunNow: %v", err)
+	}
+	select {
+	case <-provider.called:
+	case <-time.After(time.Second):
+		t.Fatal("forced cleanup did not run beside active task")
+	}
+	waitForJobState(t, tracker, jobID, jobs.StateSucceeded)
+}
+
+func TestRunNowForceBlockedByExistingMaintenanceIsNotForceAvailable(t *testing.T) {
+	connection := newSQLite(t)
+	pool := db.NewPool(connection, connection)
+	rawSettings, err := systemsettings.NewStore(pool)
+	if err != nil {
+		t.Fatalf("new settings store: %v", err)
+	}
+	coordinator := activity.NewCoordinator(activity.Options{})
+	held, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
+	if err != nil {
+		t.Fatalf("TryAcquireMaintenance: %v", err)
+	}
+	defer held.Release()
+	operations := NewOperations(OperationsConfig{
+		Settings: NewSettingsStore(rawSettings), Store: newStorageStore(t, pool), Activity: coordinator,
+	})
+
+	jobID, err := operations.RunNow(context.Background(), nil, true)
+	var busyErr *BusyError
+	if !errors.As(err, &busyErr) {
+		t.Fatalf("forced RunNow error = %v, want BusyError", err)
+	}
+	if jobID != "" {
+		t.Fatalf("busy forced RunNow job ID = %q, want empty", jobID)
+	}
+	if busyErr.ForceAvailable || len(busyErr.Resources) != 1 || busyErr.Resources[0].Kind != activity.KindMaintenanceRunning {
+		t.Fatalf("busy response = %#v, want non-overridable maintenance resource", busyErr)
 	}
 }
 
@@ -129,7 +194,7 @@ func TestRunNowMarksPreemptedTrackedJobFailed(t *testing.T) {
 		Jobs: tracker, Activity: coordinator, Providers: []CleanupProvider{provider},
 	})
 
-	jobID, err := operations.RunNow(context.Background(), nil)
+	jobID, err := operations.RunNow(context.Background(), nil, false)
 	if err != nil {
 		t.Fatalf("RunNow: %v", err)
 	}

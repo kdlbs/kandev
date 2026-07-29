@@ -47,10 +47,10 @@ describe("getPinnedWidth — global sidebar width pref", () => {
     expect(getPinnedWidth(right(), TOTAL, undefined)).toBe(450);
   });
 
-  it("keeps the right pane near its old laptop width after the app sidebar is outside dockview", () => {
+  it("uses a narrower right pane on laptop-sized workbenches", () => {
     // MacBook Air-style viewport: 1280px total. The unified AppSidebar's
-    // 320px default leaves 960px for dockview; 1/3 restores the old 320px
-    // right pane that used to be computed as 25% of the full dockview.
-    expect(getPinnedWidth(right(), 960, undefined)).toBe(320);
+    // 320px default leaves 960px for dockview; 30% gives the right pane a
+    // roomier 288px default while retaining space for its tools.
+    expect(getPinnedWidth(right(), 960, undefined)).toBe(288);
   });
 });

@@ -147,15 +147,20 @@ func (s *Service) GetBlockers(ctx context.Context, taskID string) ([]string, err
 
 // GetBlocking returns all task IDs that the given task is blocking.
 // This is the reverse lookup: find all tasks where blockerTaskID = taskID.
+// Like GetBlockers, it returns the raw blocker edges: archived tasks are not
+// filtered out, so callers that only want active tasks must filter themselves.
 func (s *Service) GetBlocking(ctx context.Context, taskID string) ([]string, error) {
 	if s.blockers == nil {
 		return nil, fmt.Errorf("blocker repository not configured")
 	}
-	// We need to search across all tasks. For now, we use a pragmatic approach:
-	// query all tasks and check. This will be optimized with a dedicated query later.
-	// For the initial implementation, we return an empty list.
-	// TODO: Add a GetBlockingTasks query to the blocker repository
-	return []string{}, nil
+	ids, err := s.blockers.ListTasksBlockedBy(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		return []string{}, nil
+	}
+	return ids, nil
 }
 
 // checkCircularBlocker checks if adding blockerTaskID as a blocker to taskID

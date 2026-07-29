@@ -1,14 +1,43 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { DockviewApi } from "dockview-react";
-import { measureDockviewContainer } from "./dockview-measure";
+import {
+  measureDockviewContainer,
+  measureDockviewGridWidth,
+  registerDockviewRoot,
+  unregisterDockviewRoot,
+} from "./dockview-measure";
 
 function fakeApi(width: number, height: number): DockviewApi {
   return { width, height } as unknown as DockviewApi;
 }
 
 describe("measureDockviewContainer", () => {
+  const DV_CLASS = "dv-dockview";
+
   afterEach(() => {
     document.body.innerHTML = "";
+  });
+
+  it("measures the registered Dockview root instead of another mounted instance", () => {
+    const firstParent = document.createElement("div");
+    Object.defineProperty(firstParent, "clientWidth", { value: 300, configurable: true });
+    const first = document.createElement("div");
+    first.className = DV_CLASS;
+    firstParent.appendChild(first);
+    document.body.appendChild(firstParent);
+
+    const targetParent = document.createElement("div");
+    Object.defineProperty(targetParent, "clientWidth", { value: 900, configurable: true });
+    const target = document.createElement("div");
+    target.className = DV_CLASS;
+    targetParent.appendChild(target);
+    document.body.appendChild(targetParent);
+
+    const api = fakeApi(0, 0);
+    registerDockviewRoot(api, targetParent);
+
+    expect(measureDockviewGridWidth(api)).toBe(900);
+    unregisterDockviewRoot(api);
   });
 
   it("uses the live container size when it is laid out", () => {
@@ -16,7 +45,7 @@ describe("measureDockviewContainer", () => {
     Object.defineProperty(parent, "clientWidth", { value: 1500, configurable: true });
     Object.defineProperty(parent, "clientHeight", { value: 700, configurable: true });
     const dv = document.createElement("div");
-    dv.className = "dv-dockview";
+    dv.className = DV_CLASS;
     parent.appendChild(dv);
     document.body.appendChild(parent);
 
@@ -37,7 +66,7 @@ describe("measureDockviewContainer", () => {
     Object.defineProperty(parent, "clientWidth", { value: 80, configurable: true });
     Object.defineProperty(parent, "clientHeight", { value: 700, configurable: true });
     const dv = document.createElement("div");
-    dv.className = "dv-dockview";
+    dv.className = DV_CLASS;
     parent.appendChild(dv);
     document.body.appendChild(parent);
 

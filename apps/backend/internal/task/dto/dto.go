@@ -141,6 +141,9 @@ type TaskDTO struct {
 	Description                 string                   `json:"description"`
 	State                       v1.TaskState             `json:"state"`
 	Priority                    string                   `json:"priority"`
+	WIPAdmitted                 bool                     `json:"wip_admitted"`
+	QueuedForStepID             string                   `json:"queued_for_step_id,omitempty"`
+	QueuedAt                    *time.Time               `json:"queued_at,omitempty"`
 	Repositories                []TaskRepositoryDTO      `json:"repositories,omitempty"`
 	WorkspaceFolders            []TaskWorkspaceFolderDTO `json:"workspace_folders,omitempty"`
 	Position                    int                      `json:"position"`
@@ -661,6 +664,9 @@ func FromTaskWithSessionInfo(
 		Description:                 task.Description,
 		State:                       task.State,
 		Priority:                    task.Priority,
+		WIPAdmitted:                 task.WIPAdmitted,
+		QueuedForStepID:             task.QueuedForStepID,
+		QueuedAt:                    task.QueuedAt,
 		Repositories:                repositories,
 		WorkspaceFolders:            workspaceFolders,
 		Position:                    task.Position,

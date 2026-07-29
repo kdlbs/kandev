@@ -30,6 +30,13 @@ type acpAgentSpec struct {
 	installViaNpm   bool     // InstallScript starts with "npm install -g"
 	installScript   string   // expected InstallScript() value (empty = unchecked)
 	stripEnv        []string // expected Runtime().StripEnv (nil = unchecked)
+	// sessionDirTemplate is the agent's on-disk session root. Pinned per
+	// agent because it is derived from what the CLI actually writes (see the
+	// evidence comment on each Runtime()), not from a naming convention —
+	// Trae and Devin both diverge from the "{home}/.<agent>" shape, and a
+	// wrong value silently bind-mounts the wrong directory into the
+	// container.
+	sessionDirTemplate string
 }
 
 var newACPAgentSpecs = []struct {
@@ -38,38 +45,43 @@ var newACPAgentSpecs = []struct {
 }{
 	{func() Agent { return NewQwenACP() }, acpAgentSpec{
 		id: "qwen-acp", displayName: "Qwen", detectBinaries: []string{"qwen"},
-		expectedArgv:    []string{"npx", "-y", "@qwen-code/qwen-code", "--acp"},
-		inferenceArgv:   []string{"npx", "-y", "@qwen-code/qwen-code", "--acp"},
-		passthroughArgv: []string{"npx", "-y", "@qwen-code/qwen-code"},
-		installViaNpm:   true,
+		expectedArgv:       []string{"npx", "-y", "@qwen-code/qwen-code", "--acp"},
+		inferenceArgv:      []string{"npx", "-y", "@qwen-code/qwen-code", "--acp"},
+		passthroughArgv:    []string{"npx", "-y", "@qwen-code/qwen-code"},
+		installViaNpm:      true,
+		sessionDirTemplate: "{home}/.qwen",
 	}},
 	{func() Agent { return NewIFlowACP() }, acpAgentSpec{
 		id: "iflow-acp", displayName: "iFlow (beta)", detectBinaries: []string{"iflow"},
-		expectedArgv:    []string{"npx", "-y", "@iflow-ai/iflow-cli", "--experimental-acp"},
-		inferenceArgv:   []string{"npx", "-y", "@iflow-ai/iflow-cli", "--experimental-acp"},
-		passthroughArgv: []string{"npx", "-y", "@iflow-ai/iflow-cli"},
-		installViaNpm:   true,
+		expectedArgv:       []string{"npx", "-y", "@iflow-ai/iflow-cli", "--experimental-acp"},
+		inferenceArgv:      []string{"npx", "-y", "@iflow-ai/iflow-cli", "--experimental-acp"},
+		passthroughArgv:    []string{"npx", "-y", "@iflow-ai/iflow-cli"},
+		installViaNpm:      true,
+		sessionDirTemplate: "{home}/.iflow",
 	}},
 	{func() Agent { return NewDroidACP() }, acpAgentSpec{
 		id: "droid-acp", displayName: "Droid", detectBinaries: []string{"droid"},
-		expectedArgv:    []string{"npx", "-y", "droid", "exec", "--output-format", "acp"},
-		inferenceArgv:   []string{"npx", "-y", "droid", "exec", "--output-format", "acp"},
-		passthroughArgv: []string{"npx", "-y", "droid"},
-		installViaNpm:   true,
+		expectedArgv:       []string{"npx", "-y", "droid", "exec", "--output-format", "acp"},
+		inferenceArgv:      []string{"npx", "-y", "droid", "exec", "--output-format", "acp"},
+		passthroughArgv:    []string{"npx", "-y", "droid"},
+		installViaNpm:      true,
+		sessionDirTemplate: "{home}/.factory",
 	}},
 	{func() Agent { return NewKilocodeACP() }, acpAgentSpec{
 		id: "kilocode-acp", displayName: "Kilocode", detectBinaries: []string{"kilo", "kilocode"},
-		expectedArgv:    []string{"npx", "-y", "@kilocode/cli", "acp"},
-		inferenceArgv:   []string{"npx", "-y", "@kilocode/cli", "acp"},
-		passthroughArgv: []string{"npx", "-y", "@kilocode/cli"},
-		installViaNpm:   true,
+		expectedArgv:       []string{"npx", "-y", "@kilocode/cli", "acp"},
+		inferenceArgv:      []string{"npx", "-y", "@kilocode/cli", "acp"},
+		passthroughArgv:    []string{"npx", "-y", "@kilocode/cli"},
+		installViaNpm:      true,
+		sessionDirTemplate: "{home}/.kilocode",
 	}},
 	{func() Agent { return NewPiACP() }, acpAgentSpec{
 		id: "pi-acp", displayName: "Pi", detectBinaries: []string{"pi-acp", "pi"},
-		expectedArgv:    []string{"npx", "-y", "pi-acp"},
-		inferenceArgv:   []string{"npx", "-y", "pi-acp"},
-		passthroughArgv: []string{"npx", "-y", "pi-acp"},
-		installViaNpm:   true,
+		expectedArgv:       []string{"npx", "-y", "pi-acp"},
+		inferenceArgv:      []string{"npx", "-y", "pi-acp"},
+		passthroughArgv:    []string{"npx", "-y", "pi-acp"},
+		installViaNpm:      true,
+		sessionDirTemplate: "{home}/.pi",
 	}},
 	{func() Agent { return NewCursorACP() }, acpAgentSpec{
 		id: "cursor-acp", displayName: "Cursor", detectBinaries: []string{"cursor-agent"},
@@ -87,49 +99,56 @@ bash "$tmp"
 rm -f "$tmp"
 export PATH="$HOME/.local/bin:$PATH"
 grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"`,
+		sessionDirTemplate: "{home}/.cursor",
 	}},
 	{func() Agent { return NewKimiACP() }, acpAgentSpec{
 		id: "kimi-acp", displayName: "Kimi", detectBinaries: []string{"kimi"},
-		expectedArgv:    []string{"kimi", "acp"},
-		inferenceArgv:   []string{"kimi", "acp"},
-		passthroughArgv: []string{"kimi"},
-		installViaNpm:   false,
+		expectedArgv:       []string{"kimi", "acp"},
+		inferenceArgv:      []string{"kimi", "acp"},
+		passthroughArgv:    []string{"kimi"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.kimi",
 	}},
 	{func() Agent { return NewKiroACP() }, acpAgentSpec{
 		id: "kiro-acp", displayName: "Kiro", detectBinaries: []string{"kiro-cli-chat"},
-		expectedArgv:    []string{"kiro-cli-chat", "acp"},
-		inferenceArgv:   []string{"kiro-cli-chat", "acp"},
-		passthroughArgv: []string{"kiro-cli-chat"},
-		installViaNpm:   false,
+		expectedArgv:       []string{"kiro-cli-chat", "acp"},
+		inferenceArgv:      []string{"kiro-cli-chat", "acp"},
+		passthroughArgv:    []string{"kiro-cli-chat"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.kiro",
 	}},
 	{func() Agent { return NewQoderACP() }, acpAgentSpec{
 		id: "qoder-acp", displayName: "Qoder", detectBinaries: []string{"qodercli"},
-		expectedArgv:    []string{"qodercli", "--acp"},
-		inferenceArgv:   []string{"qodercli", "--acp"},
-		passthroughArgv: []string{"qodercli"},
-		installViaNpm:   false,
+		expectedArgv:       []string{"qodercli", "--acp"},
+		inferenceArgv:      []string{"qodercli", "--acp"},
+		passthroughArgv:    []string{"qodercli"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.qoder",
 	}},
 	{func() Agent { return NewTraeACP() }, acpAgentSpec{
 		id: "trae-acp", displayName: "Trae", detectBinaries: []string{"traecli"},
-		expectedArgv:    []string{"traecli", "acp", "serve"},
-		inferenceArgv:   []string{"traecli", "acp", "serve"},
-		passthroughArgv: []string{"traecli"},
-		installViaNpm:   false,
+		expectedArgv:       []string{"traecli", "acp", "serve"},
+		inferenceArgv:      []string{"traecli", "acp", "serve"},
+		passthroughArgv:    []string{"traecli"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.cache/trae-cli",
 	}},
 	{func() Agent { return NewOmpACP() }, acpAgentSpec{
 		id: "omp-acp", displayName: "omp", detectBinaries: []string{"omp"},
-		expectedArgv:    []string{"omp", "acp"},
-		inferenceArgv:   []string{"omp", "acp"},
-		passthroughArgv: []string{"omp"},
-		installViaNpm:   false,
+		expectedArgv:       []string{"omp", "acp"},
+		inferenceArgv:      []string{"omp", "acp"},
+		passthroughArgv:    []string{"omp"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.omp",
 	}},
 	{func() Agent { return NewDevinACP() }, acpAgentSpec{
 		id: "devin-acp", displayName: "Devin", detectBinaries: []string{"devin"},
-		expectedArgv:    []string{"devin", "acp"},
-		inferenceArgv:   []string{"devin", "acp"},
-		passthroughArgv: []string{"devin"},
-		installViaNpm:   false,
-		stripEnv:        []string{"ACP_BACKEND"},
+		expectedArgv:       []string{"devin", "acp"},
+		inferenceArgv:      []string{"devin", "acp"},
+		passthroughArgv:    []string{"devin"},
+		installViaNpm:      false,
+		stripEnv:           []string{"ACP_BACKEND"},
+		sessionDirTemplate: "{home}/.local/share/devin",
 	}},
 }
 
@@ -192,6 +211,30 @@ func TestNewACPAgents_AllCommandSurfaces(t *testing.T) {
 				t.Fatalf("%s does not implement PassthroughAgent", tc.spec.id)
 			}
 			assertArgvEqual(t, "PassthroughCmd", pa.PassthroughConfig().PassthroughCmd.Args(), tc.spec.passthroughArgv)
+		})
+	}
+}
+
+// TestNewACPAgents_SessionDirTemplate pins the session root each agent
+// declares. The lifecycle manager turns SessionDirTemplate into the
+// bind-mount source under <kandev-home>/agent-sessions/<instance>/, so an
+// unset value means an agent's own session state is quietly lost on every
+// container restart, and a wrong value mounts a directory the CLI never
+// reads.
+func TestNewACPAgents_SessionDirTemplate(t *testing.T) {
+	for _, tc := range newACPAgentSpecs {
+		t.Run(tc.spec.id, func(t *testing.T) {
+			rt := tc.new().Runtime()
+			if rt == nil {
+				t.Fatalf("Runtime() returned nil")
+			}
+			if got := rt.SessionConfig.SessionDirTemplate; got != tc.spec.sessionDirTemplate {
+				t.Errorf("SessionDirTemplate = %q, want %q", got, tc.spec.sessionDirTemplate)
+			}
+			if !strings.HasPrefix(tc.spec.sessionDirTemplate, "{home}/") {
+				t.Errorf("SessionDirTemplate %q must be {home}-relative; SessionDirHostPath only trims that prefix",
+					tc.spec.sessionDirTemplate)
+			}
 		})
 	}
 }

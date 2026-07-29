@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // MockClient backs the in-memory Client used by E2E tests. It is instance-aware:
@@ -203,10 +204,13 @@ func (m *MockClient) Reset() {
 // mockMatchesFilter applies the filter predicates that map to a per-issue
 // field, so E2E tests can assert the backend forwarded the filter rather than
 // silently returning everything. Deliberately NOT enforced (no per-issue
-// analog on SentryIssue): OrgSlug, Environment, and StatsPeriod. The real REST
-// client's URL building for those params is covered in rest_client_test.go.
+// analog on SentryIssue): OrgSlug and Environment. The real REST client's URL
+// building for those params is covered in rest_client_test.go. StatsPeriod IS
+// enforced here, against issue.FirstSeen — matching the real REST client's
+// `age:` search-token translation (statsPeriodAgeToken in rest_client.go), so
+// mock-backed tests can't pass while production silently ignores the window.
 func mockMatchesFilter(issue *SentryIssue, f SearchFilter) bool {
-	if f.ProjectSlug != "" && issue.ProjectSlug != f.ProjectSlug {
+	if len(f.ProjectSlugs) > 0 && !containsFold(f.ProjectSlugs, issue.ProjectSlug) {
 		return false
 	}
 	if len(f.Levels) > 0 && !containsFold(f.Levels, issue.Level) {
@@ -220,7 +224,30 @@ func mockMatchesFilter(issue *SentryIssue, f SearchFilter) bool {
 			return false
 		}
 	}
+	if window, ok := parseStatsPeriod(f.StatsPeriod); ok {
+		firstSeen, err := time.Parse(time.RFC3339, issue.FirstSeen)
+		// An issue with no/unparsable FirstSeen can't be judged against the
+		// window; fail open rather than silently dropping it.
+		if err == nil && time.Since(firstSeen) > window {
+			return false
+		}
+	}
 	return true
+}
+
+// parseStatsPeriod converts a StatsPeriod string ("24h", "7d", "2w") into a
+// time.Duration. ok is false for empty, unrecognized, or out-of-range input —
+// it shares parseStatsPeriodUnits (rest_client.go) with statsPeriodAgeToken,
+// which the real REST client uses to build the equivalent `age:` search
+// token, so the mock and the real client accept or reject the exact same
+// input.
+func parseStatsPeriod(period string) (time.Duration, bool) {
+	n, unit, ok := parseStatsPeriodUnits(period)
+	if !ok {
+		return 0, false
+	}
+	units := map[byte]time.Duration{'h': time.Hour, 'd': 24 * time.Hour, 'w': 7 * 24 * time.Hour}
+	return time.Duration(n) * units[unit], true
 }
 
 func containsFold(xs []string, target string) bool {

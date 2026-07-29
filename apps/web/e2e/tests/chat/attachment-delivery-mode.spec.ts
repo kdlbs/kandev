@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { assertMixedAttachmentLayout } from "../../helpers/mixed-attachment-layout";
 import { openTaskSession, waitForLatestSessionDone } from "../../helpers/session";
 
 type PersistedAttachment = {
@@ -38,6 +39,21 @@ async function waitForUserAttachment(
 }
 
 test.describe("chat attachment delivery mode", () => {
+  test("keeps a file attachment compact next to an image preview", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(90_000);
+    await assertMixedAttachmentLayout({
+      testPage,
+      apiClient,
+      seedData,
+      testInfo,
+      taskTitle: "Mixed attachment layout",
+    });
+  });
+
   test("shows a Prompt/File selector for supported images and sends unsupported files by path", async ({
     testPage,
     apiClient,

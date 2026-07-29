@@ -18,6 +18,7 @@ vi.mock("@/lib/logger/buffer", () => ({
 const bootstrap: ImproveKandevBootstrapResponse = {
   repository_id: "r1",
   workflow_id: "w1",
+  issue_workflow_id: "w2",
   branch: "main",
   bundle_dir: "/tmp/kandev-improve-abc",
   bundle_files: {

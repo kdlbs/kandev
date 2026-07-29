@@ -917,7 +917,7 @@ func ParseGitRemoteIdentity(remoteURL string) (origin, projectPath string) {
 	}
 	if strings.Contains(remoteURL, "@") && !strings.Contains(remoteURL, "://") {
 		_, remoteURL, _ = strings.Cut(remoteURL, "@")
-		host, path, ok := strings.Cut(remoteURL, ":")
+		host, path, ok := cutSCPHostPath(remoteURL)
 		if !ok {
 			return "", ""
 		}
@@ -928,6 +928,21 @@ func ParseGitRemoteIdentity(remoteURL string) (origin, projectPath string) {
 		return "", ""
 	}
 	return normalizeRemoteIdentity(parsed.Scheme, parsed.Host, parsed.Path)
+}
+
+// cutSCPHostPath splits an scp-style remote's "host:path" segment (the part
+// after "git@"), honoring bracketed IPv6 literals such as
+// "[::1]:group/project.git" whose embedded colons would otherwise be
+// mistaken for the host/path separator by a plain strings.Cut on ":".
+func cutSCPHostPath(rest string) (host, path string, ok bool) {
+	if strings.HasPrefix(rest, "[") {
+		closeIdx := strings.Index(rest, "]")
+		if closeIdx < 0 || closeIdx+1 >= len(rest) || rest[closeIdx+1] != ':' {
+			return "", "", false
+		}
+		return rest[:closeIdx+1], rest[closeIdx+2:], true
+	}
+	return strings.Cut(rest, ":")
 }
 
 func normalizeRemoteIdentity(scheme, host, path string) (string, string) {

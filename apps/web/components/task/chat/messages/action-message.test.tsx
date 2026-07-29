@@ -30,6 +30,7 @@ const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
 const RECOVERY_MESSAGE = "Agent encountered an error";
 const RESUME_TEST_ID = "recovery-resume-button";
+const STALL_CANCEL_TEST_ID = "stall-cancel-turn-button";
 
 function retryMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -90,15 +91,42 @@ function recoveryMessage(withParams = false): Message {
   } as Partial<Message>);
 }
 
+function stalledMessage(turnId = "turn-1"): Message {
+  return retryMessage({
+    turn_id: turnId,
+    content: "Still waiting on Start dev server.",
+    metadata: {
+      action_visibility: "running",
+      actions: [
+        {
+          type: "ws_request",
+          label: "Cancel turn",
+          test_id: STALL_CANCEL_TEST_ID,
+          params: { method: "agent.cancel", payload: { session_id: "sess-1" } },
+        },
+      ],
+    },
+  } as Partial<Message>);
+}
+
 /** ActionMessage reads session state from the store (keyed by comment.session_id),
  *  so seed it via the provider instead of passing a prop. */
-function renderAction(comment: Message, sessionState?: TaskSessionState, sessionError?: string) {
+function renderAction(
+  comment: Message,
+  sessionState?: TaskSessionState,
+  sessionError?: string,
+  activeTurnId?: string,
+) {
   const initialState: Partial<AppState> = sessionState
     ? {
         taskSessions: {
           items: {
             "sess-1": { state: sessionState, error_message: sessionError } as TaskSession,
           },
+        },
+        turns: {
+          bySession: {},
+          activeBySession: activeTurnId ? { "sess-1": activeTurnId } : {},
         },
       }
     : {};
@@ -169,6 +197,50 @@ describe("ActionMessage — transient retry (warning variant)", () => {
 
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
     expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — running stall notice", () => {
+  it("renders a neutral compact notice only while the session is running", () => {
+    renderAction(stalledMessage(), "RUNNING", undefined, "turn-1");
+
+    const notice = screen.getByTestId("running-action-notice");
+    expect(notice.className).toContain("text-muted-foreground");
+    expect(notice.className).not.toContain("text-amber");
+    expect(notice.className).not.toContain("text-red");
+    expect(notice.querySelector("svg")).toBeNull();
+    const button = screen.getByTestId(STALL_CANCEL_TEST_ID);
+    expect(button.className).toContain("min-h-11");
+    expect(button.className).not.toContain("w-full");
+  });
+
+  it("hides the running-only notice after the session settles", () => {
+    const { container } = renderAction(stalledMessage(), "WAITING_FOR_INPUT");
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("sends agent.cancel when Cancel turn is activated", async () => {
+    renderAction(stalledMessage(), "RUNNING", undefined, "turn-1");
+
+    fireEvent.click(screen.getByTestId(STALL_CANCEL_TEST_ID));
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith("agent.cancel", { session_id: "sess-1" }),
+    );
+  });
+
+  it("hides an old notice when a later turn is active", () => {
+    const { container } = renderAction(stalledMessage("turn-1"), "RUNNING", undefined, "turn-2");
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("hides a running-only notice without a turn ID", () => {
+    const message = stalledMessage();
+    message.turn_id = undefined;
+
+    const { container } = renderAction(message, "RUNNING", undefined, "turn-1");
+
+    expect(container.firstChild).toBeNull();
   });
 });
 

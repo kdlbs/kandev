@@ -2,6 +2,7 @@
 
 import { IconBrandGithub, IconBrandGitlab } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
 import { useExternalVcsFileLink } from "@/hooks/domains/workspace/use-external-vcs-file-link";
@@ -15,6 +16,8 @@ import type { ExternalVcsProvider } from "@/lib/utils/external-vcs-file-url";
 export type ExternalVcsFileLinkProps = UseExternalVcsFileLinkInput & {
   size?: "xs" | "sm" | "touch";
 };
+
+export type ExternalVcsFileMenuItemProps = UseExternalVcsFileLinkInput;
 
 const providerNames: Record<ExternalVcsProvider, string> = {
   github: "GitHub",
@@ -62,11 +65,15 @@ export function useExternalVcsFileStatus(
   return status?.files?.[filePath];
 }
 
+function externalLinkLabel(provider: ExternalVcsProvider): string {
+  return `Open file in ${providerNames[provider]}`;
+}
+
 export function ExternalVcsFileLink({ size = "xs", ...input }: ExternalVcsFileLinkProps) {
   const link = useExternalVcsFileLink(input);
   if (!link) return null;
 
-  const label = `Open file in ${providerNames[link.provider]}`;
+  const label = externalLinkLabel(link.provider);
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -84,5 +91,20 @@ export function ExternalVcsFileLink({ size = "xs", ...input }: ExternalVcsFileLi
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  );
+}
+
+export function ExternalVcsFileMenuItem(input: ExternalVcsFileMenuItemProps) {
+  const link = useExternalVcsFileLink(input);
+  if (!link) return null;
+
+  const label = externalLinkLabel(link.provider);
+  return (
+    <DropdownMenuItem asChild className="cursor-pointer">
+      <a href={link.url} target="_blank" rel="noopener noreferrer" aria-label={label} title={label}>
+        <ProviderIcon provider={link.provider} />
+        <span>{label}</span>
+      </a>
+    </DropdownMenuItem>
   );
 }

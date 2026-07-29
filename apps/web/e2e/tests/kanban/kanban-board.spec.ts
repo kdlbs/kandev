@@ -79,6 +79,8 @@ test.describe("Kanban board", () => {
     // 800px) that the centered search is visible.
     const search = testPage.getByTestId("kanban-header-search");
     await expect(search).toBeVisible();
+    const stageNavigator = testPage.getByTestId("desktop-kanban-stage-navigator");
+    await expect(stageNavigator).toHaveCount(0);
 
     // Open the preview - the header width drops below 800px and the centered
     // search must hide.
@@ -87,11 +89,13 @@ test.describe("Kanban board", () => {
     await card.click();
     await expect(testPage.getByTestId("task-preview-panel")).toBeVisible({ timeout: 10_000 });
     await expect(search).toBeHidden({ timeout: 5_000 });
+    await expect(stageNavigator).toHaveCount(0);
 
     // Closing the preview restores the full kanban width and brings the
     // search back.
     await testPage.keyboard.press("Escape");
     await expect(testPage.getByTestId("task-preview-panel")).toBeHidden({ timeout: 5_000 });
     await expect(search).toBeVisible({ timeout: 5_000 });
+    await expect(stageNavigator).toHaveCount(0);
   });
 });

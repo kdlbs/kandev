@@ -736,6 +736,8 @@ type RepoCloner interface {
 		owner, name, credentialHost, token string,
 	) (string, error)
 	ShouldRecloneForWorkspace(workspaceID, path string) bool
+	// SetOriginURL updates a Kandev-managed checkout remote without exposing credentials.
+	SetOriginURL(ctx context.Context, repositoryPath, originURL string) error
 	// BuildCloneURL constructs a protocol-aware clone URL for the given provider/owner/name.
 	BuildCloneURLWithHost(provider, host, owner, name string) (string, error)
 }

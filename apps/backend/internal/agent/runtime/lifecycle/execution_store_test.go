@@ -70,6 +70,20 @@ func TestExecutionStore_AddReplaceAfterRemove(t *testing.T) {
 	}
 }
 
+func TestExecutionStore_RemoveClearsRuntimeEnvironment(t *testing.T) {
+	store := NewExecutionStore()
+	execution := &AgentExecution{ID: "exec-1"}
+	execution.setRuntimeEnvironment(map[string]string{"BROKER": "runtime-only"})
+	if err := store.Add(execution); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
+
+	store.Remove(execution.ID)
+	if got := execution.RuntimeEnvironment(); got != nil {
+		t.Fatalf("RuntimeEnvironment() after Remove = %#v, want nil", got)
+	}
+}
+
 func TestExecutionStore_AddNoSessionIDAlwaysSucceeds(t *testing.T) {
 	store := NewExecutionStore()
 
@@ -103,5 +117,21 @@ func TestExecutionStore_BeginPromptAlwaysAdvancesGeneration(t *testing.T) {
 	}
 	if !store.OwnsPromptGeneration(exec.SessionID, exec.ID, 2) {
 		t.Fatal("replacement prompt must create generation 2 while already running")
+	}
+}
+
+func TestExecutionStore_BeginPromptClearsActiveTopLevelTool(t *testing.T) {
+	store := NewExecutionStore()
+	exec := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
+	if err := store.Add(exec); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	exec.setActiveTool(activeTopLevelTool{ToolCallID: "tool-1", Name: "shell"})
+
+	if _, err := store.BeginPrompt(exec.ID); err != nil {
+		t.Fatalf("BeginPrompt: %v", err)
+	}
+	if got := exec.activeToolSnapshot(); got != nil {
+		t.Fatalf("active tool after BeginPrompt = %#v, want nil", got)
 	}
 }

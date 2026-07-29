@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useRef } from "react";
+import { useEffect, useCallback, useRef, useState } from "react";
 import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
@@ -76,8 +76,16 @@ export function useTaskPR(taskId: string | null) {
   const prs = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
   const pr = getPrimaryTaskPR(prs ?? undefined);
   const setTaskPR = useAppStore((state) => state.setTaskPR);
+  const connectionStatus = useAppStore((state) => state.connection.status);
   const retryRef = useRef(0);
   const permanentRef = useRef(false);
+  // Tracks the previous connection status so the resync effect below only
+  // fires on the transition edge into `connected`, not on every re-render
+  // while already connected.
+  const prevConnectionStatusRef = useRef(connectionStatus);
+  // Bumped on each reconnect transition so the retry-polling effect below
+  // tears down and recreates its interval (see that effect's dependency list).
+  const [reconnectGeneration, setReconnectGeneration] = useState(0);
   // Monotonic counter incremented before each WS request, snapshotted in
   // the .then() closure. Mirrors useWorkspacePRs above. Without this, a
   // stale response from a previous taskId can land after the user
@@ -147,6 +155,14 @@ export function useTaskPR(taskId: string | null) {
   // Retry polling when no PR is in the store yet. permanentRef short-circuits
   // the interval entirely so a task whose repos are all dead doesn't tie up
   // the backend's gh throttle on every 5s tick.
+  //
+  // Depends on `reconnectGeneration` so a reconnect (see the effect below,
+  // which zeroes retryRef/permanentRef and bumps the generation on the
+  // transition edge) tears down and recreates the interval, starting a fresh
+  // 30s retry window. Without that dep, once the budget is exhausted the
+  // interval clears itself and merely resetting the refs never recreates it —
+  // a single empty resync would then leave the store empty and the
+  // "Pull Request" tab missing.
   useEffect(() => {
     if (!taskId || pr || permanentRef.current) return;
 
@@ -160,7 +176,27 @@ export function useTaskPR(taskId: string | null) {
     }, SYNC_RETRY_DELAY);
 
     return () => clearInterval(interval);
-  }, [taskId, pr, refresh]);
+  }, [taskId, pr, refresh, reconnectGeneration]);
+
+  // Reconnect-driven resync. A task can be opened while the WS is down (e.g. a
+  // transient dev HMR disconnect, or a task auto-created by the PR-review
+  // watcher that the user navigates to directly). In that window the freshness
+  // sync and every 5s retry queue/time out with nothing, so the store never
+  // learns about the PR and the auto "Pull Request" tab is never offered. When
+  // the socket comes back up, clear the exhausted retry/permanent state, refire
+  // the sync, and bump reconnectGeneration so the polling effect above restarts
+  // its (possibly already self-cleared) interval and runs a fresh 30s retry
+  // window. Guarded on the transition edge into `connected` so unrelated store
+  // updates don't refire.
+  useEffect(() => {
+    const prev = prevConnectionStatusRef.current;
+    prevConnectionStatusRef.current = connectionStatus;
+    if (!taskId || connectionStatus !== "connected" || prev === "connected") return;
+    retryRef.current = 0;
+    permanentRef.current = false;
+    refresh();
+    setReconnectGeneration((g) => g + 1);
+  }, [taskId, connectionStatus, refresh]);
 
   return { pr, prs: prs ?? [], refresh } as {
     pr: TaskPR | null;

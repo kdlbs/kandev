@@ -7,6 +7,7 @@ import { performEnvSwitch, type EnvSwitchParams } from "./dockview-env-switch";
 
 vi.mock("@/lib/local-storage", () => ({
   getEnvLayout: vi.fn(() => null),
+  getManualRightWidth: vi.fn(() => null),
 }));
 
 vi.mock("./dockview-layout-builders", () => ({
@@ -43,7 +44,7 @@ vi.mock("./layout-manager", () => {
   };
 });
 
-import { getEnvLayout } from "@/lib/local-storage";
+import { getEnvLayout, getManualRightWidth } from "@/lib/local-storage";
 import { getRootSplitview, savedLayoutMatchesLive } from "./layout-manager";
 import { applyLayoutFixups } from "./dockview-layout-builders";
 
@@ -74,6 +75,7 @@ function makeParams(): EnvSwitchParams {
 describe("performEnvSwitch — pinned column resize after fast-path", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(getManualRightWidth).mockReturnValue(null);
   });
 
   it("resizes sidebar and right to default widths when no saved layout exists", () => {
@@ -94,7 +96,7 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
     performEnvSwitch(makeParams());
 
     expect(resizeView).toHaveBeenCalledWith(0, 300); // sidebar default (global)
-    expect(resizeView).toHaveBeenCalledWith(2, 350); // right default
+    expect(resizeView).toHaveBeenCalledWith(2, 180); // responsive right cap
     // center column is at index 1 and is not pinned — must not be resized.
     expect(resizeView).not.toHaveBeenCalledWith(1, expect.anything());
   });
@@ -143,7 +145,7 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
     expect(resizeView).not.toHaveBeenCalledWith(0, 420);
   });
 
-  it("uses the saved size for RIGHT but the global width for the sidebar", () => {
+  it("uses the manual RIGHT preference but ignores serialized geometry", () => {
     // Cover the 3-column saved-layout path so the right column's
     // saved-size branch is exercised. The previous test exits the loop
     // before reaching the right column because sv.length = 2.
@@ -174,6 +176,7 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
     vi.mocked(getEnvLayout).mockReturnValue(
       savedLayout as unknown as ReturnType<typeof getEnvLayout>,
     );
+    vi.mocked(getManualRightWidth).mockReturnValue(420);
     vi.mocked(savedLayoutMatchesLive).mockReturnValue(true);
 
     const resizeView = vi.fn();
@@ -186,18 +189,15 @@ describe("performEnvSwitch — pinned column resize after fast-path", () => {
         }) as unknown as NonNullable<ReturnType<typeof getRootSplitview>>,
     );
 
-    performEnvSwitch(makeParams());
+    performEnvSwitch({ ...makeParams(), safeWidth: 1600 });
 
     // Sidebar ignores its saved size (420) → global default 300; the right
-    // column still restores its saved size (420). Center (index 1) is not
+    // column uses the separate manual preference (420). Center (index 1) is not
     // pinned and is skipped.
     expect(resizeView).toHaveBeenCalledWith(0, 300);
     expect(resizeView).toHaveBeenCalledWith(2, 420);
     expect(resizeView).not.toHaveBeenCalledWith(1, expect.anything());
 
-    // The saved right width is also forwarded to applyLayoutFixups so the
-    // fixups pass anchors the right target to the per-env saved width (420)
-    // rather than re-capturing dockview's transient post-fromJSON live size.
-    expect(applyLayoutFixups).toHaveBeenCalledWith(expect.anything(), 420);
+    expect(applyLayoutFixups).toHaveBeenCalledWith(expect.anything(), 420, 420);
   });
 });

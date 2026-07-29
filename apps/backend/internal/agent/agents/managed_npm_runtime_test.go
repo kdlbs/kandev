@@ -52,6 +52,13 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 	}
 }
 
+func TestManagedNPMRuntimeExecutionCacheKeyMatchesNPM(t *testing.T) {
+	spec := ManagedNPMRuntimeSpec{Package: "opencode-ai"}
+	if got := spec.ExecutionCacheKey(); got != "e2094862b59aac7b" {
+		t.Fatalf("ExecutionCacheKey = %q, want npm key e2094862b59aac7b", got)
+	}
+}
+
 func assertUnversionedPackage(t *testing.T, argv []string, wantPackage string) {
 	t.Helper()
 	packageArg := argv[3]

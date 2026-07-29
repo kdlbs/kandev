@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, cleanup } from "@testing-library/react";
+import { createElement, type ReactNode } from "react";
 import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import type { PluginRecord } from "@/lib/types/plugins";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import { CommandRegistryProvider } from "@/lib/commands/command-registry";
 
 let mockOverrides: StoredShortcutOverrides = {};
 let mockItems: PluginRecord[] = [];
@@ -60,6 +62,10 @@ function pressKey(
 const TOGGLE_KEYBINDING = { id: "toggle", default: "mod+shift+e", description: "Toggle" };
 /** A free combo (not used by any core shortcut) shared by two plugins bound to the same "open" id. */
 const OPEN_COMBO = "mod+shift+o";
+
+function commandRegistryWrapper({ children }: { children: ReactNode }) {
+  return createElement(CommandRegistryProvider, null, children);
+}
 
 function withToggleKeybinding(overrides: Partial<PluginRecord> = {}): PluginRecord {
   return makePlugin({ ui: { keybindings: [TOGGLE_KEYBINDING] }, ...overrides });
@@ -243,10 +249,13 @@ describe("core vs plugin shortcut precedence", () => {
     const pluginHandler = vi.fn();
     pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("open", pluginHandler);
 
-    renderHook(() => {
-      useAppShortcuts();
-      usePluginShortcuts();
-    });
+    renderHook(
+      () => {
+        useAppShortcuts();
+        usePluginShortcuts();
+      },
+      { wrapper: commandRegistryWrapper },
+    );
     const event = pressKey("b", { ctrlKey: true });
 
     expect(mockToggleAppSidebar).toHaveBeenCalledTimes(1);
@@ -259,10 +268,13 @@ describe("core vs plugin shortcut precedence", () => {
     const handler = vi.fn();
     pluginRegistry.forPlugin(PLUGIN_ID).registerKeybinding("toggle", handler);
 
-    renderHook(() => {
-      useAppShortcuts();
-      usePluginShortcuts();
-    });
+    renderHook(
+      () => {
+        useAppShortcuts();
+        usePluginShortcuts();
+      },
+      { wrapper: commandRegistryWrapper },
+    );
     pressKey("e", { ctrlKey: true, shiftKey: true });
 
     expect(handler).toHaveBeenCalledTimes(1);

@@ -138,7 +138,10 @@ func (m *Manager) GetPassthroughBuffer(ctx context.Context, sessionID string) (s
 // buildPassthroughEnv builds the environment map for a passthrough session,
 // including Kandev metadata and required credentials from the agent runtime config.
 func (m *Manager) buildPassthroughEnv(ctx context.Context, execution *AgentExecution, requiredEnv []string) map[string]string {
-	env := make(map[string]string)
+	env := execution.RuntimeEnvironment()
+	if env == nil {
+		env = make(map[string]string)
+	}
 	env["KANDEV_TASK_ID"] = execution.TaskID
 	env["KANDEV_SESSION_ID"] = execution.SessionID
 	env["KANDEV_AGENT_PROFILE_ID"] = execution.officeProfileID()

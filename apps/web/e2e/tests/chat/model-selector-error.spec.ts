@@ -168,6 +168,60 @@ test.describe("Chat model selector — RPC failure", () => {
  * session snapshot and SSR re-served the pre-change model on reload.
  */
 test.describe("Chat model selector — persistence", () => {
+  test("agent tab keeps the selected model title after reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Agent Tab Model Title Test",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("expected an auto-started session");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const trigger = testPage.getByRole("button", { name: "Session model settings" });
+    await trigger.click();
+    await testPage.getByRole("option", { name: /Mock Smart/ }).click();
+    await expect(trigger).toContainText("Mock Smart", { timeout: 5_000 });
+
+    const agentTab = session.sessionTabBySessionId(task.session_id);
+    await expect(agentTab).toContainText("Mock Smart", { timeout: 5_000 });
+    await expect
+      .poll(async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        const metadata = sessions.find((item) => item.id === task.session_id)?.metadata;
+        const runtime = metadata?.runtime_config as { model?: string } | undefined;
+        const selector = metadata?.acp_model_state as
+          | {
+              config_options?: Array<{ id?: string; current_value?: string }>;
+            }
+          | undefined;
+        const selectorModel = selector?.config_options?.find(
+          (option) => option.id === "model",
+        )?.current_value;
+        return `${runtime?.model}/${selectorModel}`;
+      })
+      .toBe("mock-smart/mock-smart");
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await expect(trigger).toContainText("Mock Smart", { timeout: 15_000 });
+    await expect(agentTab).toContainText("Mock Smart", { timeout: 15_000 });
+  });
+
   test("completed turn metadata keeps changed options after a page reload", async ({
     testPage,
     apiClient,

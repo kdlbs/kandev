@@ -247,6 +247,7 @@ export function analyzeStorage(options?: ApiRequestOptions): Promise<JobAcceptRe
 
 export function runStorageMaintenance(
   resources?: string[],
+  force = false,
   options?: ApiRequestOptions,
 ): Promise<JobAcceptResponse> {
   return fetchJson<JobAcceptResponse>(`${SYSTEM_BASE}/storage/run`, {
@@ -254,7 +255,10 @@ export function runStorageMaintenance(
     init: {
       ...(options?.init ?? {}),
       method: "POST",
-      body: JSON.stringify(resources?.length ? { resources } : {}),
+      body: JSON.stringify({
+        ...(resources?.length ? { resources } : {}),
+        ...(force ? { force: true } : {}),
+      }),
     },
   });
 }

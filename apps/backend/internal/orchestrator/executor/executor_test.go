@@ -2516,6 +2516,10 @@ func (c *recordingAuthenticatedCloner) EnsureWorkspaceClonedForProvider(
 
 func (c *recordingAuthenticatedCloner) ShouldRecloneForWorkspace(_, _ string) bool { return false }
 
+func (c *recordingAuthenticatedCloner) SetOriginURL(context.Context, string, string) error {
+	return nil
+}
+
 func (c *recordingAuthenticatedCloner) BuildCloneURLWithHost(_, _, _, _ string) (string, error) {
 	return "", nil
 }

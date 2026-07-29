@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"database/sql"
+	"slices"
+	"sort"
 	"strings"
 	"testing"
 
@@ -369,6 +371,122 @@ func TestBlocker_CRUD(t *testing.T) {
 	ids, _ = svc.GetBlockers(ctx, "task-1")
 	if len(ids) != 0 {
 		t.Errorf("expected empty, got %v", ids)
+	}
+}
+
+func TestGetBlocking_ReverseLookup(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.SetBlockerRepository(&mockBlockerRepo{})
+	ctx := context.Background()
+
+	// No blocker edges at all.
+	ids, err := svc.GetBlocking(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetBlocking: %v", err)
+	}
+	if ids == nil {
+		t.Error("expected non-nil empty slice, got nil")
+	}
+	if len(ids) != 0 {
+		t.Errorf("expected no blocked tasks, got %v", ids)
+	}
+
+	// One blocked task: task-2 is blocked by task-1.
+	if err := svc.AddBlocker(ctx, "task-2", "task-1"); err != nil {
+		t.Fatalf("AddBlocker: %v", err)
+	}
+	ids, err = svc.GetBlocking(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetBlocking: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != "task-2" {
+		t.Errorf("expected [task-2], got %v", ids)
+	}
+
+	// The reverse direction must not be confused with the forward one:
+	// task-2 blocks nothing, and task-1 is the blocker of task-2.
+	if ids, err = svc.GetBlocking(ctx, "task-2"); err != nil || len(ids) != 0 {
+		t.Errorf("GetBlocking(task-2) = %v, %v; want empty", ids, err)
+	}
+	if ids, err = svc.GetBlockers(ctx, "task-2"); err != nil || len(ids) != 1 || ids[0] != "task-1" {
+		t.Errorf("GetBlockers(task-2) = %v, %v; want [task-1]", ids, err)
+	}
+
+	// Several blocked tasks.
+	for _, blocked := range []string{"task-3", "task-4"} {
+		if err := svc.AddBlocker(ctx, blocked, "task-1"); err != nil {
+			t.Fatalf("AddBlocker(%s): %v", blocked, err)
+		}
+	}
+	ids, err = svc.GetBlocking(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetBlocking: %v", err)
+	}
+	sort.Strings(ids)
+	want := []string{"task-2", "task-3", "task-4"}
+	if !slices.Equal(ids, want) {
+		t.Errorf("expected %v, got %v", want, ids)
+	}
+
+	// Removing an edge removes it from the reverse lookup too.
+	if err := svc.RemoveBlocker(ctx, "task-3", "task-1"); err != nil {
+		t.Fatalf("RemoveBlocker: %v", err)
+	}
+	ids, _ = svc.GetBlocking(ctx, "task-1")
+	sort.Strings(ids)
+	if !slices.Equal(ids, []string{"task-2", "task-4"}) {
+		t.Errorf("expected [task-2 task-4] after removal, got %v", ids)
+	}
+}
+
+func TestGetBlocking_NoRepositoryConfigured(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	ctx := context.Background()
+
+	if _, err := svc.GetBlocking(ctx, "task-1"); err == nil {
+		t.Fatal("expected error when blocker repository is not configured")
+	}
+}
+
+// Archiving a task does not drop it from the reverse lookup: GetBlocking
+// mirrors GetBlockers and reports the raw blocker edges. Callers that only
+// want active tasks filter themselves.
+func TestGetBlocking_IncludesArchivedTasks(t *testing.T) {
+	svc, repo := setupOfficeTest(t)
+	svc.SetBlockerRepository(&mockBlockerRepo{})
+	ctx := context.Background()
+
+	blocker, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "Blocker", ProjectID: "proj-1",
+	})
+	if err != nil {
+		t.Fatalf("create blocker: %v", err)
+	}
+	blocked, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", Title: "Blocked", ProjectID: "proj-1",
+		BlockedBy: []string{blocker.ID},
+	})
+	if err != nil {
+		t.Fatalf("create blocked task: %v", err)
+	}
+
+	ids, err := svc.GetBlocking(ctx, blocker.ID)
+	if err != nil {
+		t.Fatalf("GetBlocking: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != blocked.ID {
+		t.Fatalf("expected [%s], got %v", blocked.ID, ids)
+	}
+
+	if err := repo.ArchiveTask(ctx, blocked.ID); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+	ids, err = svc.GetBlocking(ctx, blocker.ID)
+	if err != nil {
+		t.Fatalf("GetBlocking after archive: %v", err)
+	}
+	if len(ids) != 1 || ids[0] != blocked.ID {
+		t.Errorf("expected archived task %s to still be reported, got %v", blocked.ID, ids)
 	}
 }
 

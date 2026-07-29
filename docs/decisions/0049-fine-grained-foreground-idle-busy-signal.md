@@ -1,6 +1,6 @@
 # 0049: Fine-grained foreground-idle busy signal
 
-**Status:** accepted (amended 2026-07-26)
+**Status:** superseded by 2026-07-28-coarse-running-busy-signal
 **Date:** 2026-07-11
 **Area:** backend, frontend, protocol
 **Related:** [Background work liveness spec](../specs/platform/background-work-liveness.md)

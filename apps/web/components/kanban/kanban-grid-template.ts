@@ -1,6 +1,5 @@
-export const COMPACT_KANBAN_COLUMN_MIN_PX = 260;
+export const KANBAN_COLUMN_MIN_PX = 280;
 
-export function getKanbanColumnGridTemplate(stepCount: number, isCompactDesktop: boolean): string {
-  const minWidth = isCompactDesktop ? `${COMPACT_KANBAN_COLUMN_MIN_PX}px` : "0";
-  return `repeat(${stepCount}, minmax(${minWidth}, 1fr))`;
+export function getKanbanColumnGridTemplate(stepCount: number): string {
+  return `repeat(${stepCount}, minmax(${KANBAN_COLUMN_MIN_PX}px, 1fr))`;
 }

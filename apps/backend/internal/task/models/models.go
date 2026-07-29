@@ -93,10 +93,23 @@ const (
 	MetaKeyAgentProfileID    = "agent_profile_id"
 	MetaKeyExecutorID        = "executor_id"
 	MetaKeyExecutorProfileID = "executor_profile_id"
+	MetaKeyDeferredLaunch    = "deferred_launch"
 	// MetaKeyWorkspacePath is the optional host folder for repo-less tasks
 	// (set by CreateTask, read by the orchestrator when building a session).
 	// Centralised here so the set/read sites can't drift apart.
 	MetaKeyWorkspacePath = "workspace_path"
+	// MetaKeyAutoStartGuard is a permanent marker set at create time on tasks
+	// where both the watcher's synchronous Path B (autoStartReviewTask) and the
+	// promotion's event-driven Path A (autoStartTaskForStep) could both try to
+	// launch an agent. Its presence signals that the one-shot MetaKeyAutoStartClaimed
+	// token governs who may launch. Never removed after task creation.
+	MetaKeyAutoStartGuard = "auto_start_guard"
+	// MetaKeyAutoStartClaimed is a one-shot token set alongside MetaKeyAutoStartGuard.
+	// Both auto-start paths atomically remove this key; only the first removal
+	// succeeds and that path proceeds to StartTask. The other path skips launch
+	// because the winner will (or already did) handle it.
+	// Absent on ordinary (non-watcher) auto-start tasks, which launch normally.
+	MetaKeyAutoStartClaimed = "auto_start_claimed"
 )
 
 // TaskSession.Metadata key that records how the session came into existence.
@@ -447,15 +460,21 @@ const (
 
 // Task represents a task in the database
 type Task struct {
-	ID               string                 `json:"id"`
-	WorkspaceID      string                 `json:"workspace_id"`
-	WorkflowID       string                 `json:"workflow_id"`
-	WorkflowStepID   string                 `json:"workflow_step_id"`
-	Title            string                 `json:"title"`
-	Description      string                 `json:"description"`
-	State            v1.TaskState           `json:"state"`
-	Priority         string                 `json:"priority"`
-	Position         int                    `json:"position"` // Order within workflow step
+	ID             string       `json:"id"`
+	WorkspaceID    string       `json:"workspace_id"`
+	WorkflowID     string       `json:"workflow_id"`
+	WorkflowStepID string       `json:"workflow_step_id"`
+	Title          string       `json:"title"`
+	Description    string       `json:"description"`
+	State          v1.TaskState `json:"state"`
+	Priority       string       `json:"priority"`
+	Position       int          `json:"position"` // Order within workflow step
+	// WIPAdmitted indicates whether this task consumes an active slot in its
+	// current workflow step. Queued tasks remain visible but do not consume the
+	// destination step's WIP capacity.
+	WIPAdmitted      bool                   `json:"wip_admitted"`
+	QueuedForStepID  string                 `json:"queued_for_step_id,omitempty"`
+	QueuedAt         *time.Time             `json:"queued_at,omitempty"`
 	Metadata         map[string]interface{} `json:"metadata,omitempty"`
 	Repositories     []*TaskRepository      `json:"repositories,omitempty"`
 	WorkspaceFolders []*TaskWorkspaceFolder `json:"workspace_folders,omitempty"`

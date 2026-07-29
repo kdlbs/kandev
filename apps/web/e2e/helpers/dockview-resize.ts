@@ -139,6 +139,7 @@ async function loosenPinnedConstraints(
   );
 }
 
+// eslint-disable-next-line complexity
 export async function resizeColumnViaSplitview(
   page: Page,
   column: "sidebar" | "right",
@@ -167,6 +168,7 @@ export async function resizeColumnViaSplitview(
       : computeRightMaxPx(availableWidth, sidebarWidth);
   await loosenPinnedConstraints(page, column, runtimeCap);
   const result = await page.evaluate(
+    // eslint-disable-next-line complexity
     ({ col, target }) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const w = window as any;
@@ -178,7 +180,13 @@ export async function resizeColumnViaSplitview(
         throw new Error("cannot resize sidebar when hidden (index 0 is center column)");
       }
       const idx = col === "sidebar" ? 0 : sv.length - 1;
+      const sash =
+        col === "right"
+          ? (sv.sashes?.[sv.sashes.length - 1]?.container as HTMLElement | undefined)
+          : null;
+      sash?.dispatchEvent(new MouseEvent("mousedown", { button: 0, bubbles: true }));
       sv.resizeView(idx, target);
+      sash?.dispatchEvent(new MouseEvent("mouseup", { button: 0, bubbles: true }));
       const actual = sv.getViewSize(idx) as number;
       // Mirror the production sash-drag mouseup behavior: update the pinned
       // target so `enforcePinnedTargets` doesn't restore the old size on the

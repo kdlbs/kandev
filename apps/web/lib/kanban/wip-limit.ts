@@ -12,3 +12,9 @@ export function isOverWipLimit(taskCount: number, limit: number | null | undefin
   const normalizedLimit = normalizeWipLimit(limit);
   return normalizedLimit > 0 && taskCount > normalizedLimit;
 }
+
+export function countAdmittedTasks<
+  T extends { queuedForStepId?: string | null; wipAdmitted?: boolean | null },
+>(tasks: T[]): number {
+  return tasks.filter((task) => task.wipAdmitted === true || !task.queuedForStepId).length;
+}

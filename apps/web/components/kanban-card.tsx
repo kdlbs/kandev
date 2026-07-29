@@ -70,6 +70,10 @@ export interface Task {
   workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
   updatedAt?: string;
   createdAt?: string;
+  wipAdmitted?: boolean;
+  queuedForStepId?: string;
+  queuedForStepTitle?: string;
+  queuedAt?: string;
   issueUrl?: string;
   issueNumber?: number;
 }

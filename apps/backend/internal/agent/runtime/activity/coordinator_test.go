@@ -96,3 +96,63 @@ func TestMaintenanceAlreadyRunningReportsMaintenanceKind(t *testing.T) {
 		t.Fatalf("busy kinds = %v, want [%s]", busy, want)
 	}
 }
+
+func TestForcedMaintenanceIgnoresCurrentTaskButRemainsPreemptible(t *testing.T) {
+	coordinator := NewCoordinator(Options{})
+	activeTask, err := coordinator.AcquireTask(context.Background(), KindTestCommand)
+	if err != nil {
+		t.Fatalf("AcquireTask: %v", err)
+	}
+	defer activeTask.Release()
+
+	maintenance, busy, err := coordinator.TryAcquireMaintenanceForce(context.Background())
+	if err != nil {
+		t.Fatalf("TryAcquireMaintenanceForce: %v", err)
+	}
+	if len(busy) != 0 {
+		t.Fatalf("forced maintenance busy kinds = %v, want empty", busy)
+	}
+
+	admitted := make(chan *TaskLease, 1)
+	go func() {
+		lease, acquireErr := coordinator.AcquireTask(context.Background(), KindShellCommand)
+		if acquireErr == nil {
+			admitted <- lease
+		}
+	}()
+
+	select {
+	case <-maintenance.Context().Done():
+	case <-time.After(time.Second):
+		t.Fatal("new task admission did not preempt forced maintenance")
+	}
+	select {
+	case <-admitted:
+		t.Fatal("new task admitted before forced maintenance drained")
+	default:
+	}
+	maintenance.Release()
+	select {
+	case lease := <-admitted:
+		lease.Release()
+	case <-time.After(time.Second):
+		t.Fatal("new task was not admitted after forced maintenance drained")
+	}
+}
+
+func TestBusyResourcesExposeStableLabels(t *testing.T) {
+	coordinator := NewCoordinator(Options{})
+	lease, err := coordinator.AcquireTask(context.Background(), KindDockerImageBuild)
+	if err != nil {
+		t.Fatalf("AcquireTask: %v", err)
+	}
+	defer lease.Release()
+
+	resources := coordinator.BusyResources()
+	if len(resources) != 1 {
+		t.Fatalf("BusyResources = %v, want one resource", resources)
+	}
+	if resources[0].Kind != KindDockerImageBuild || resources[0].Label == "" {
+		t.Fatalf("BusyResources = %#v, want docker build resource with label", resources)
+	}
+}

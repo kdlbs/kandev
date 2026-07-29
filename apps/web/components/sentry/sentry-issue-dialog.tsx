@@ -221,7 +221,7 @@ function useDialogState(open: boolean, workspaceId?: string): DialogState {
 function toSearchFilter(filter: FilterState): SentrySearchFilter {
   return {
     orgSlug: filter.orgSlug,
-    projectSlug: filter.projectSlug || undefined,
+    projectSlugs: filter.projectSlug ? [filter.projectSlug] : undefined,
     environment: filter.environment || undefined,
     query: filter.query || undefined,
     statsPeriod: filter.statsPeriod,

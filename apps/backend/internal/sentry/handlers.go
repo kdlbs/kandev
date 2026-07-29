@@ -217,14 +217,26 @@ func (c *Controller) httpSearchIssues(ctx *gin.Context) {
 		return
 	}
 	q := ctx.Request.URL.Query()
+	projectSlugs := trimAll(q["projectSlug"])
+	if len(projectSlugs) > 1 {
+		// Sentry's project-scoped issue-search endpoint only accepts one
+		// project per request, and the browse dialog's UI is single-select
+		// (the plural filter is reserved for watcher polling, which fans a
+		// multi-project watch out into one request per project itself — see
+		// Service.CheckIssueWatch). Reject early with a clear message
+		// instead of round-tripping to Sentry for the REST client's generic
+		// "at most one project slug per request" 400.
+		writeErr(ctx, http.StatusBadRequest, "issue browse supports at most one project")
+		return
+	}
 	filter := SearchFilter{
-		OrgSlug:     q.Get("orgSlug"),
-		ProjectSlug: q.Get("projectSlug"),
-		Environment: q.Get("environment"),
-		Query:       q.Get("query"),
-		StatsPeriod: q.Get("statsPeriod"),
-		Levels:      trimAll(q["level"]),
-		Statuses:    trimAll(q["status"]),
+		OrgSlug:      q.Get("orgSlug"),
+		ProjectSlugs: projectSlugs,
+		Environment:  q.Get("environment"),
+		Query:        q.Get("query"),
+		StatsPeriod:  q.Get("statsPeriod"),
+		Levels:       trimAll(q["level"]),
+		Statuses:     trimAll(q["status"]),
 	}
 	result, err := c.service.SearchIssues(ctx.Request.Context(), workspaceID, c.instanceID(ctx), filter, q.Get("cursor"))
 	if err != nil {

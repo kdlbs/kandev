@@ -112,12 +112,11 @@ export function useCodeMirrorWalkthroughRange({
           clearWalkthroughEditorAnchor(anchorKey);
           return;
         }
+        setBox(measured.box);
         if (!isWalkthroughAnchorTargetVisible(view.dom, measured.viewportRect)) {
-          setBox(null);
           clearWalkthroughEditorAnchor(anchorKey);
           return;
         }
-        setBox(measured.box);
         setWalkthroughEditorAnchor({
           key: anchorKey,
           taskId,

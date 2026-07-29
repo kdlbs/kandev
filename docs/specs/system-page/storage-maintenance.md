@@ -1,7 +1,7 @@
 ---
-status: shipped
+status: building
 created: 2026-07-14
-updated: 2026-07-23
+updated: 2026-07-27
 owner: cfl
 ---
 
@@ -54,8 +54,13 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
   context, waits for the active provider operation to stop, and then proceeds. Maintenance
   never races a newly admitted task.
 - Manual **Run now** uses the same mutual-exclusion/current-activity gate, but does not wait out
-  the configured quiet period. It returns a visible busy result when task activity is current or
-  another maintenance run holds the gate, and has no force-while-busy mode.
+  the configured quiet period. When current Kandev activity blocks it, the page names each activity
+  type it found (for example, a running agent session or test command), warns that cleanup can
+  disrupt that work, and offers a distinct **Run anyway** action directly in the busy state.
+- **Run anyway** starts the requested manual cleanup alongside the activity that originally blocked
+  it. It skips only the current-activity admission check: it neither stops the activity nor allows
+  two storage-maintenance runs to overlap. New task work may still preempt the cleanup through the
+  normal maintenance cancellation path.
 - The Go-cache analysis row exposes a resource-specific **Clean Go cache** action only when the
   cache is Kandev-owned and above its configured maximum. That action submits an explicit
   `go_cache` selection through the same manual-run gate.
@@ -307,9 +312,13 @@ POST   /api/v1/system/storage/analyze
        -> 202 { job_id }
 
 POST   /api/v1/system/storage/run
-       body: { resources?: string[] }
+       body: { resources?: string[], force?: boolean }
        -> 202 { job_id }
-       -> 409 { error, busy_resources[] } when the idle gate is unavailable
+       -> 409 {
+            error: string,
+            busy_resources: [{ kind: string, label: string }],
+            force_available: boolean
+          } when current activity or another maintenance run holds the gate
 
 GET    /api/v1/system/storage/runs?limit=20
        -> { runs: StorageMaintenanceRun[] }
@@ -335,6 +344,13 @@ window and replaces the cached snapshot only when the forced analysis succeeds.
 
 Storage operations use the existing `system.job.update` WebSocket event and polling fallback.
 Job kinds are `storage-analysis`, `storage-cleanup`, and `storage-quarantine-delete`.
+
+`busy_resources` uses stable machine-readable `kind` values and plain-language `label` values.
+The response exposes activity categories, not task names, prompts, paths, or other session content.
+`force_available` is true only when `force: true` can bypass the reported current task activity;
+it is false when another storage-maintenance run already holds the install-wide maintenance lease.
+When `force: true` is accepted, the response remains the ordinary `202 { job_id }` cleanup-job
+contract.
 
 The task unarchive response may additionally include:
 
@@ -452,6 +468,14 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
   arrives, **THEN** the run is recorded as `skipped_busy` and no provider changes resources.
 - **GIVEN** maintenance holds the idle gate, **WHEN** a new task launch arrives, **THEN** maintenance
   is cancelled and the launch proceeds only after the active provider stops.
+- **GIVEN** a running agent session or command blocks manual cleanup, **WHEN** the user selects
+  **Run now**, **THEN** the page names the activity categories found, warns that cleanup can disrupt
+  them, and shows **Run anyway** without opening a confirmation dialog.
+- **GIVEN** a manual cleanup is blocked only by current task activity, **WHEN** the user selects
+  **Run anyway**, **THEN** Kandev starts the requested cleanup with `force: true` while the existing
+  activity continues and records the normal cleanup-job result.
+- **GIVEN** a manual cleanup is blocked by another storage-maintenance run, **WHEN** the user views
+  the busy feedback, **THEN** it identifies maintenance as the blocker and does not offer a bypass.
 - **GIVEN** an unreferenced task directory older than the orphan grace period contains
   `node_modules`, **WHEN** workspace cleanup runs with a successful authoritative inventory,
   **THEN** the whole task root moves to quarantine and its measured bytes appear in the run result.

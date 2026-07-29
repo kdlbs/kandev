@@ -3,6 +3,7 @@ import type {
   FileTreeResponse,
   FileContentResponse,
   FileSearchResponse,
+  WorkspaceContentSearchResponse,
 } from "@/lib/types/backend";
 
 /**
@@ -72,6 +73,20 @@ export async function searchWorkspaceFiles(
     session_id: sessionId,
     query,
     limit,
+  });
+}
+
+/** Search text content across every repository in the active task workspace. */
+export async function searchWorkspaceContent(
+  client: WebSocketClient,
+  sessionId: string,
+  query: string,
+  limitPerRepo: number = 50,
+): Promise<WorkspaceContentSearchResponse> {
+  return client.request<WorkspaceContentSearchResponse>("workspace.content.search", {
+    session_id: sessionId,
+    query,
+    limit_per_repo: limitPerRepo,
   });
 }
 

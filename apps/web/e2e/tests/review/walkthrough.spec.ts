@@ -180,12 +180,22 @@ test.describe("Code walkthrough", () => {
     await expect(card.getByTestId("walkthrough-step-file")).toContainText("walkthrough_a.txt");
     await expect(card.getByTestId("walkthrough-prev")).toBeDisabled();
 
+    const initialNavigation = await card.getByTestId("walkthrough-navigation").boundingBox();
+    if (!initialNavigation) throw new Error("walkthrough navigation missing before step change");
+
     const expectStep = async (n: number, text: string) => {
       await card.getByTestId("walkthrough-next").click();
       await expect(header).toContainText(`Step ${n} / 5`);
       await expect(body).toContainText(text);
     };
     await expectStep(2, "WALKTHROUGH_CHANGE_A");
+    const nextNavigation = await card.getByTestId("walkthrough-navigation").boundingBox();
+    if (!nextNavigation) throw new Error("walkthrough navigation missing after step change");
+    expect(Math.abs(nextNavigation.y - initialNavigation.y)).toBeLessThan(1);
+    const viewport = testPage.viewportSize();
+    if (viewport) {
+      expect(nextNavigation.y + nextNavigation.height).toBeLessThanOrEqual(viewport.height);
+    }
     await expectStep(3, "WALKTHROUGH_CHANGE_B");
     await expectStep(4, "WALKTHROUGH_CHANGE_C");
     await expectStep(5, "WALKTHROUGH_UNCHANGED");

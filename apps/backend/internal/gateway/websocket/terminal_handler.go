@@ -416,7 +416,25 @@ func (h *TerminalHandler) startUserShellProcess(
 		return "", http.StatusServiceUnavailable, err.Error()
 	}
 
-	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand}
+	// Export the executor profile's env vars (secrets revealed) so the terminal
+	// sees the same variables the agent subprocess and the repository setup
+	// script get. Best-effort: an unresolvable profile just yields no extras.
+	profileEnv := h.lifecycleMgr.ExecutorProfileEnvForSession(c.Request.Context(), sessionID, scopeID)
+	shellEnv := execution.RuntimeEnvironment()
+	if shellEnv == nil {
+		shellEnv = make(map[string]string, len(profileEnv))
+	}
+	// The effective runtime environment is authoritative: it includes managed
+	// Git credentials and the shim-first PATH selected for this execution.
+	// Profile resolution remains a best-effort fallback for recovered or older
+	// executions that do not have an in-memory runtime snapshot.
+	for key, value := range profileEnv {
+		if _, exists := shellEnv[key]; !exists {
+			shellEnv[key] = value
+		}
+	}
+
+	opts := &process.UserShellOptions{Label: label, InitialCommand: initialCommand, Env: shellEnv}
 
 	h.logger.Info("handleUserShellWS: calling StartUserShell",
 		zap.String("session_id", sessionID),
@@ -424,7 +442,9 @@ func (h *TerminalHandler) startUserShellProcess(
 		zap.String("working_dir", workingDir),
 		zap.String("preferred_shell", preferredShell),
 		zap.String("label", opts.Label),
-		zap.String("initial_command", opts.InitialCommand))
+		zap.String("initial_command", opts.InitialCommand),
+		zap.Int("profile_env_count", len(profileEnv)),
+		zap.Int("shell_env_count", len(shellEnv)))
 
 	info, err := interactiveRunner.StartUserShell(
 		c.Request.Context(), scopeID, sessionID, terminalID, workingDir, preferredShell, opts,

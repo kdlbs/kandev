@@ -787,7 +787,12 @@ func (c *Controller) httpUpdateReviewWatch(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"updated": true})
+	updated, err := c.service.GetReviewWatch(ctx.Request.Context(), id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, updated)
 }
 
 func (c *Controller) httpDeleteReviewWatch(ctx *gin.Context) {

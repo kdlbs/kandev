@@ -104,6 +104,10 @@ controls how GitHub HTTPS and `gh` authenticate *inside newly launched task proc
 - **Inherit executor Git credentials** does not install Kandev's broker helper or `gh` shim. Local
   and Worktree tasks use credentials already visible to the host Git process (including SSH).
   Docker, SSH, and cloud tasks use only credentials intentionally configured in that executor.
+  For Kandev-managed GitHub checkouts, Local and Worktree preparation also updates `origin` to the
+  host's configured `gh` clone protocol. Selecting SSH therefore lets Git conditional includes that
+  match `remote.*.url` apply; switching back to managed credentials restores the canonical HTTPS
+  origin. Repositories you registered from an existing local checkout are never rewritten.
 
 Selecting a GitHub CLI workspace connection does not implicitly select host Git credentials; use
 the explicit inheritance mode when that is the intended boundary. The Changes panel's branch

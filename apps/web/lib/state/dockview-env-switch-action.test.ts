@@ -9,6 +9,7 @@ vi.mock("@/lib/local-storage", () => ({
   setEnvMaximizeState: vi.fn(),
   removeEnvMaximizeState: vi.fn(),
   getGlobalSidebarWidth: vi.fn(() => null),
+  getManualRightWidth: vi.fn(() => null),
   setGlobalSidebarWidth: vi.fn(),
   clearGlobalSidebarWidth: vi.fn(),
 }));
@@ -277,5 +278,33 @@ describe("switchEnvLayout — maximize+sidebar-switch regression", () => {
 
   it("normalizes stale session panels when restoring a saved maximize layout", () => {
     testNormalizesStaleSessionPanelsOnSavedMaximize();
+  });
+
+  it("does not add Agent when the saved maximized group intentionally excludes it", () => {
+    vi.mocked(getEnvMaximizeState).mockReturnValueOnce({
+      preMaximizeLayout: { columns: [] },
+      maximizedDockviewJson: {
+        grid: {
+          root: {
+            type: "leaf",
+            size: 600,
+            data: { id: "group-right-bottom", views: ["terminal-default"] },
+          },
+          height: 600,
+          width: 800,
+          orientation: "HORIZONTAL",
+        },
+        panels: {
+          "terminal-default": { contentComponent: "terminal" },
+        },
+        activeGroup: "group-right-bottom",
+      },
+    });
+    const api = makeMockApi();
+    useDockviewStore.setState({ api, currentLayoutEnvId: "env-b" });
+
+    useDockviewStore.getState().switchEnvLayout("env-b", "env-a", "session-a");
+
+    expect(api.addPanel).not.toHaveBeenCalled();
   });
 });

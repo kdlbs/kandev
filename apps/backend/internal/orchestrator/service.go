@@ -49,9 +49,10 @@ var (
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	Scheduler  scheduler.SchedulerConfig
-	QueueSize  int
-	QueueGroup string
+	Scheduler                     scheduler.SchedulerConfig
+	QueueSize                     int
+	QueueGroup                    string
+	ClaudeBackgroundPromptHandoff bool
 }
 
 // DefaultServiceConfig returns default configuration
@@ -119,6 +120,10 @@ type TaskEventPublisher interface {
 	// changed — including a generating↔background flip that leaves the coarse
 	// state unchanged.
 	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
+}
+
+type taskQueuePromotionPublisher interface {
+	PublishTaskQueuePromoted(ctx context.Context, task *models.Task)
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.
@@ -455,8 +460,8 @@ type Service struct {
 	// foregroundActivity tracks, per session, whether the open turn is actively
 	// generating in the foreground or only waiting on a spawned background task
 	// (subagent / run-in-background shell). Keyed sessionID -> *turnActivity;
-	// see turn_activity.go. Consulted by checkSessionPromptable so a session
-	// that kicked off background work still accepts operator input.
+	// see turn_activity.go. This is best-effort accounting state and does not
+	// relax the coarse RUNNING admission policy.
 	// foregroundActivityMu protects record identity: lookups lock the selected
 	// record before releasing it, and execution teardown uses the same order
 	// before detaching an unused record.
@@ -670,6 +675,7 @@ func NewService(
 		OnAgentReady:           s.handleAgentReady,
 		OnAgentCompleted:       s.handleAgentCompleted,
 		OnAgentFailed:          s.handleAgentFailed,
+		OnAgentStalled:         s.handleAgentStalled,
 		OnAgentStopped:         s.handleAgentStopped,
 		OnAgentStreamEvent:     s.handleAgentStreamEvent,
 		OnACPSessionCreated:    s.handleACPSessionCreated,
@@ -677,6 +683,7 @@ func NewService(
 		OnGitEvent:             s.handleGitEvent,
 		OnContextWindowUpdated: s.handleContextWindowUpdated,
 		OnTaskMoved:            s.handleTaskMoved,
+		OnTaskQueuePromoted:    s.handleTaskQueuePromoted,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, cfg.QueueGroup, log)
 
@@ -856,6 +863,15 @@ func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task, old
 	s.taskEvents.PublishTaskUpdated(ctx, task, oldWorkflowIDs...)
 }
 
+func (s *Service) publishTaskQueuePromoted(ctx context.Context, task *models.Task) {
+	if s.taskEvents == nil || task == nil {
+		return
+	}
+	if publisher, ok := s.taskEvents.(taskQueuePromotionPublisher); ok {
+		publisher.PublishTaskQueuePromoted(ctx, task)
+	}
+}
+
 func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {
 	if s.taskEvents == nil || task == nil {
 		return
@@ -972,7 +988,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)
@@ -1116,8 +1132,8 @@ func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) 
 
 func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
 	// Foreground ownership ends with the turn, but detached background work can
-	// outlive it. Preserve those registrations and expose them as background-idle;
-	// full cleanup belongs to execution/session teardown paths.
+	// outlive it. Preserve those registrations for accounting; full cleanup
+	// belongs to execution/session teardown paths.
 	s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldTurnCompletion)
 
 	if s.turnService == nil {
@@ -1320,6 +1336,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// This does NOT launch any agent processes — sessions are recovered lazily
 	// when the user opens them (via task.session.status → task.session.resume).
 	s.reconcileSessionsOnStartup(ctx)
+	if s.workflowStore != nil {
+		s.workflowStore.ReconcileQueuedTasks(ctx)
+	}
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -1367,6 +1386,9 @@ func (s *Service) Start(ctx context.Context) error {
 	// Subscribe to ADR-0015 step-completion signals (out-of-band path:
 	// signal arrives after turn-end).
 	s.subscribeStepCompletionEvents()
+
+	// Reconcile queued tasks when WIP limits or feeder settings change.
+	s.subscribeWorkflowQueueEvents()
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil

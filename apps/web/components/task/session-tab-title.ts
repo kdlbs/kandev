@@ -42,10 +42,12 @@ function resolveModelTitle(
 
 export function resolveSessionTabTitle(args: ResolveSessionTabTitleArgs): string | null {
   if (args.customName) return args.customName;
+  const modelConfig = args.configOptions.find(isModelConfigOption);
+  const currentModelId = modelConfig?.currentValue || args.currentModelId;
   return (
+    resolveModelTitle(args, currentModelId) ??
     resolveModelTitle(args, args.activeModelId) ??
     args.agentLabel ??
-    resolveModelTitle(args, args.currentModelId) ??
     resolveModelTitle(args, args.snapshotModel)
   );
 }

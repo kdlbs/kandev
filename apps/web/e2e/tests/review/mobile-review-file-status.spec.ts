@@ -3,14 +3,14 @@ import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { SessionPage } from "../../pages/session-page";
 import path from "node:path";
 
-const MOBILE_FILE = "mobile-review-status-added.ts";
+const MOBILE_FILE = "packages/mobile/review/surfaces/deeply/nested/mobile-review-status-added.ts";
 const MOBILE_MOVED_FROM_FILE = "mobile-review-status-old-name.ts";
 const MOBILE_MOVED_FILE = "mobile-review-status-new-name.ts";
 
 test.describe("Review file status on mobile", () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test("shows status in the sticky header without horizontal overflow", async ({
+  test("uses a compact file header with a labelled mobile actions menu", async ({
     testPage,
     apiClient,
     seedData,
@@ -82,19 +82,33 @@ test.describe("Review file status on mobile", () => {
     await testPage.getByRole("button", { name: "Changes" }).tap();
     const changesPanel = testPage.getByTestId("mobile-changes-panel");
     await expect(changesPanel).toBeVisible();
-    await expect(testPage.getByTestId(`file-row-${MOBILE_FILE}`)).toBeVisible({ timeout: 20_000 });
+    await expect(
+      testPage.getByTestId(`file-row-${MOBILE_FILE.replace(/[/\\]/g, "-")}`),
+    ).toBeVisible({ timeout: 20_000 });
     await changesPanel.getByRole("button", { name: "Review", exact: true }).tap();
 
     const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(dialog).toBeVisible();
-    const header = dialog.getByTestId("review-file-header").filter({ hasText: MOBILE_FILE });
+    const header = dialog.locator(
+      `[data-testid="review-file-header"][data-file-path="${MOBILE_FILE}"]`,
+    );
     await expect(header).toBeVisible();
     const marker = header.getByRole("img", { name: "Added" });
     await expect(marker).toBeVisible();
+    await expect(header.getByText("+1", { exact: true })).toBeVisible();
 
-    const movedHeader = dialog
-      .getByTestId("review-file-header")
-      .filter({ hasText: MOBILE_MOVED_FILE });
+    const identityRow = header.getByTestId("review-file-identity");
+    const fileName = identityRow.locator("[data-review-file-name]");
+    await expect(fileName).toHaveText(path.basename(MOBILE_FILE));
+    await expect(header.getByTestId("review-file-actions")).toHaveCount(0);
+    const moreActions = header.getByRole("button", {
+      name: `More actions for ${MOBILE_FILE}`,
+    });
+    await expect(moreActions).toBeVisible();
+
+    const movedHeader = dialog.locator(
+      `[data-testid="review-file-header"][data-file-path="${MOBILE_MOVED_FILE}"]`,
+    );
     await expect(movedHeader).toBeVisible();
     await expect(
       movedHeader.getByRole("img", { name: `Moved from ${MOBILE_MOVED_FROM_FILE}` }),
@@ -103,24 +117,103 @@ test.describe("Review file status on mobile", () => {
       dialog.getByText(`Moved from ${MOBILE_MOVED_FROM_FILE}; no textual changes`),
     ).toBeVisible();
 
-    const headerGeometry = await header.evaluate((element) => {
+    const headerGeometry = await header.evaluate((element, filePath) => {
       const markerElement = element.querySelector<HTMLElement>('[data-file-status="added"]');
-      if (!markerElement) return null;
+      const identityElement = element.querySelector<HTMLElement>(
+        '[data-testid="review-file-identity"]',
+      );
+      const fileNameElement = element.querySelector<HTMLElement>("[data-review-file-name]");
+      const moreActionsElement = element.querySelector<HTMLElement>(
+        `[aria-label="More actions for ${filePath}"]`,
+      );
+      if (!markerElement || !identityElement || !fileNameElement || !moreActionsElement) {
+        return null;
+      }
       const headerBounds = element.getBoundingClientRect();
       const markerBounds = markerElement.getBoundingClientRect();
+      const fileNameBounds = fileNameElement.getBoundingClientRect();
+      const moreActionsBounds = moreActionsElement.getBoundingClientRect();
       return {
         scrollWidth: element.scrollWidth,
         clientWidth: element.clientWidth,
+        height: headerBounds.height,
         headerLeft: headerBounds.left,
         headerRight: headerBounds.right,
         markerLeft: markerBounds.left,
         markerRight: markerBounds.right,
+        fileNameLeft: fileNameBounds.left,
+        fileNameRight: fileNameBounds.right,
+        moreActionsLeft: moreActionsBounds.left,
+        moreActionsRight: moreActionsBounds.right,
+        moreActionsWidth: moreActionsBounds.width,
+        moreActionsHeight: moreActionsBounds.height,
       };
-    });
+    }, MOBILE_FILE);
     if (!headerGeometry) throw new Error("Mobile Review header geometry is unavailable");
     expect(headerGeometry.scrollWidth).toBeLessThanOrEqual(headerGeometry.clientWidth);
+    expect(headerGeometry.height).toBeLessThanOrEqual(64);
     expect(headerGeometry.markerLeft).toBeGreaterThanOrEqual(headerGeometry.headerLeft);
     expect(headerGeometry.markerRight).toBeLessThanOrEqual(headerGeometry.headerRight);
+    expect(headerGeometry.fileNameLeft).toBeGreaterThanOrEqual(headerGeometry.headerLeft);
+    expect(headerGeometry.fileNameRight).toBeLessThanOrEqual(headerGeometry.headerRight);
+    expect(headerGeometry.moreActionsLeft).toBeGreaterThanOrEqual(headerGeometry.headerLeft);
+    expect(headerGeometry.moreActionsRight).toBeLessThanOrEqual(headerGeometry.headerRight);
+    expect(headerGeometry.moreActionsWidth).toBeGreaterThanOrEqual(44);
+    expect(headerGeometry.moreActionsHeight).toBeGreaterThanOrEqual(44);
+
+    await moreActions.click();
+    const actionsMenu = testPage.getByTestId("review-file-actions-menu");
+    await expect(actionsMenu).toBeVisible();
+    await actionsMenu.evaluate((element) =>
+      Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => undefined)),
+      ),
+    );
+    const menuGeometry = await actionsMenu.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const items = Array.from(
+        element.querySelectorAll<HTMLElement>('[role^="menuitem"]'),
+        (item) => item.getBoundingClientRect(),
+      );
+      return {
+        left: bounds.left,
+        right: bounds.right,
+        top: bounds.top,
+        bottom: bounds.bottom,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        minItemHeight: Math.min(...items.map((item) => item.height)),
+      };
+    });
+    expect(menuGeometry.left).toBeGreaterThanOrEqual(0);
+    expect(menuGeometry.right).toBeLessThanOrEqual(menuGeometry.viewportWidth);
+    expect(menuGeometry.top).toBeGreaterThanOrEqual(0);
+    expect(menuGeometry.bottom).toBeLessThanOrEqual(menuGeometry.viewportHeight);
+    expect(menuGeometry.minItemHeight).toBeGreaterThanOrEqual(44);
+
+    await expect(actionsMenu.getByRole("menuitem", { name: "Copy diff" })).toBeVisible();
+    await expect(actionsMenu.getByRole("menuitem", { name: "Edit file" })).toBeVisible();
+    await expect(actionsMenu.getByRole("menuitem", { name: "Copy path" })).toBeVisible();
+    await expect(actionsMenu.getByRole("menuitem", { name: "Open folder" })).toBeVisible();
+    await expect(actionsMenu.getByRole("menuitem", { name: "Revert changes" })).toBeVisible();
+    await expect(
+      actionsMenu.getByRole("menuitemcheckbox", { name: "Expand unchanged lines" }),
+    ).toBeVisible();
+    const wrapLines = actionsMenu.getByRole("menuitemcheckbox", { name: "Wrap long lines" });
+    const initialWrapState = await wrapLines.getAttribute("aria-checked");
+    expect(["true", "false"]).toContain(initialWrapState);
+
+    await wrapLines.click();
+    await expect(actionsMenu).not.toBeVisible();
+    await moreActions.click();
+    await expect(
+      testPage
+        .getByTestId("review-file-actions-menu")
+        .getByRole("menuitemcheckbox", { name: "Wrap long lines" }),
+    ).toHaveAttribute("aria-checked", initialWrapState === "true" ? "false" : "true");
+    await testPage.keyboard.press("Escape");
 
     const checkbox = header.getByRole("checkbox");
     await checkbox.tap();

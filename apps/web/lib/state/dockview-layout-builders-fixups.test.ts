@@ -134,23 +134,21 @@ describe("applyLayoutFixups — pinned target capture", () => {
     applyLayoutFixups(api);
 
     expect(setPinnedTarget).toHaveBeenCalledWith("sidebar", 350);
-    expect(setPinnedTarget).toHaveBeenCalledWith("right", 350); // default, NOT live 400
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 441); // responsive default, NOT live 400
     expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400);
   });
 
-  it("anchors the pinned right target to the saved per-env width, not the live size", () => {
-    // A restore passes the env's saved right width; it wins over both the live
-    // size (400) and the default (350) so a deliberately-resized task restores
-    // its own remembered width. Also asserts that the column is physically
-    // resized to the stable width (not left at the transient live size).
+  it("treats legacy saved geometry as responsive default width", () => {
+    // A legacy restore has no manual-width marker. Its serialized width (420)
+    // must not become sticky when the workbench moves to another monitor.
     mockSplitview([350, 720, 400]);
     const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]);
 
     applyLayoutFixups(api, 420);
 
-    expect(setPinnedTarget).toHaveBeenCalledWith("right", 420);
-    expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400);
-    expect(mockResizeView).toHaveBeenCalledWith(2, 420);
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 441);
+    expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 420);
+    expect(mockResizeView).toHaveBeenCalledWith(2, 441);
   });
 
   it("derives the caps from api.width, not the window.innerWidth fallback", () => {
@@ -183,7 +181,7 @@ describe("applyLayoutFixups — pinned target capture", () => {
     mockSplitview([350, 200, 800]);
     const api = makeApi([SIDEBAR_GROUP, CENTER_GROUP, RIGHT_TOP_GROUP]);
 
-    applyLayoutFixups(api, 1200); // saved 1200 exceeds RIGHT_CAP (1029)
+    applyLayoutFixups(api, 1200, 1200); // manual 1200 exceeds RIGHT_CAP (1029)
 
     expect(setPinnedTarget).toHaveBeenCalledWith("right", RIGHT_CAP);
   });
@@ -197,7 +195,7 @@ describe("applyLayoutFixups — pinned target capture", () => {
     mockSplitview([720, 400]); // idx0 = center, idx1 = right
     const api = makeApi([CENTER_GROUP, RIGHT_TOP_GROUP, RIGHT_BOTTOM_GROUP]);
 
-    applyLayoutFixups(api, 420);
+    applyLayoutFixups(api, 420, 420);
 
     expect(setPinnedTarget).toHaveBeenCalledWith("right", 420);
     expect(mockResizeView).toHaveBeenCalledWith(1, 420);
@@ -209,7 +207,7 @@ describe("applyLayoutFixups — pinned target capture", () => {
 
     applyLayoutFixups(api);
 
-    expect(setPinnedTarget).toHaveBeenCalledWith("right", 350); // default
+    expect(setPinnedTarget).toHaveBeenCalledWith("right", 441); // responsive default
     expect(setPinnedTarget).not.toHaveBeenCalledWith("right", 400); // not live
   });
 });

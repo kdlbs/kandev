@@ -749,6 +749,18 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 	metadata := mergeWorkspaceMetadata(body.Metadata, wsPolicy.MetadataBlock())
+	var deferredLaunch map[string]interface{}
+	if body.StartAgent || body.PrepareSession {
+		intent := "prepare"
+		if body.StartAgent {
+			intent = "start"
+		}
+		deferredLaunch = map[string]interface{}{
+			"intent": intent, "agent_profile_id": body.AgentProfileID, "executor_id": body.ExecutorID,
+			"executor_profile_id": body.ExecutorProfileID, "prompt": description,
+			"plan_mode": body.PlanMode, "attachments": body.Attachments,
+		}
+	}
 
 	task, err := h.service.CreateTask(c.Request.Context(), &service.CreateTaskRequest{
 		WorkspaceID:    body.WorkspaceID,
@@ -761,6 +773,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Repositories:   convertToServiceRepos(repos),
 		Position:       body.Position,
 		Metadata:       metadata,
+		DeferredLaunch: deferredLaunch,
 		PlanMode:       body.PlanMode && !body.StartAgent,
 		ParentID:       body.ParentID,
 		WorkspacePath:  body.WorkspacePath,
@@ -790,12 +803,11 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	if !h.commitFreshBranch(c, task.ID, title, body.WorkspaceID, body.Repositories, repos) {
 		return
 	}
-
 	taskDTO := dto.FromTask(task)
 	response := createTaskResponse{TaskDTO: taskDTO}
 	// Use the backend-resolved workflow step ID (from the created task) instead of the request's
 	resolvedStepID := taskDTO.WorkflowStepID
-	h.handlePostCreateTaskSession(c, &response, taskDTO.ID, taskDTO.Description, body, resolvedStepID)
+	h.handlePostCreateTaskSession(c, &response, taskDTO.ID, taskDTO.Description, body, resolvedStepID, task.QueuedForStepID == "")
 	h.recordTaskCreateLastUsed(c.Request.Context(), body, repos)
 
 	// Associate PR with task if any repository input contains a PR URL
@@ -1056,7 +1068,11 @@ func (h *TaskHandlers) handlePostCreateTaskSession(
 	taskID, description string,
 	body httpCreateTaskRequest,
 	resolvedStepID string,
+	canLaunch bool,
 ) {
+	if !canLaunch {
+		return
+	}
 	if h.orchestrator == nil || body.AgentProfileID == "" {
 		return
 	}

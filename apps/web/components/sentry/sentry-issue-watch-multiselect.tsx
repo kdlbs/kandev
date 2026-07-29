@@ -1,6 +1,11 @@
 "use client";
 
+import { useState } from "react";
+import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@kandev/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { cn } from "@/lib/utils";
 import { levelBadgeClass, statusBadgeClass } from "./sentry-issue-common";
 import { LEVEL_OPTIONS, STATUS_OPTIONS } from "./sentry-issue-watch-form";
 import type { SentryLevel, SentryStatus } from "@/lib/types/sentry";
@@ -76,4 +81,91 @@ export function StatusMultiSelect({
       colorClass={statusBadgeClass}
     />
   );
+}
+
+export type ProjectMultiSelectOption = { id: string; label: string };
+
+// ProjectMultiSelect is a dropdown checklist: click the trigger to open a
+// searchable list, click a row to toggle it in/out of the selection. Unlike
+// LevelMultiSelect/StatusMultiSelect's inline badges, a workspace can have
+// dozens of Sentry projects, so a dropdown keeps the form compact. A match
+// means ANY selected project (same semantics as levels/statuses).
+export function ProjectMultiSelect({
+  options,
+  selected,
+  onChange,
+  placeholder = "Select projects",
+  disabled = false,
+}: {
+  options: ProjectMultiSelectOption[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const labelById = new Map(options.map((o) => [o.id, o.label]));
+
+  function toggle(id: string) {
+    onChange(selected.includes(id) ? selected.filter((s) => s !== id) : [...selected, id]);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled}
+          data-testid="sentry-watch-project-trigger"
+          className="flex h-9 w-full cursor-pointer items-center justify-between rounded-md border border-input bg-transparent px-3 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <ProjectMultiSelectSummary
+            selected={selected}
+            labelById={labelById}
+            placeholder={placeholder}
+          />
+          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-0">
+        <Command>
+          <CommandInput placeholder="Search projects..." />
+          <CommandList>
+            <CommandEmpty>No projects available.</CommandEmpty>
+            {options.map((opt) => {
+              const checked = selected.includes(opt.id);
+              return (
+                <CommandItem key={opt.id} value={opt.label} onSelect={() => toggle(opt.id)}>
+                  <IconCheck
+                    className={cn("mr-2 h-4 w-4", checked ? "opacity-100" : "opacity-0")}
+                  />
+                  <span className="truncate">{opt.label}</span>
+                </CommandItem>
+              );
+            })}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+function ProjectMultiSelectSummary({
+  selected,
+  labelById,
+  placeholder,
+}: {
+  selected: string[];
+  labelById: Map<string, string>;
+  placeholder: string;
+}) {
+  if (selected.length === 0) {
+    return <span className="truncate text-muted-foreground">{placeholder}</span>;
+  }
+  if (selected.length === 1) {
+    return <span className="truncate">{labelById.get(selected[0]) ?? selected[0]}</span>;
+  }
+  return <span className="truncate">{selected.length} projects selected</span>;
 }

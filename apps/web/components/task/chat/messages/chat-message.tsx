@@ -14,6 +14,7 @@ import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
+import { useMessageFavorite } from "@/hooks/domains/session/use-message-favorite";
 import { useUserMessageNavigation } from "@/hooks/use-message-navigation";
 import { SenderTaskBadge, type SenderTaskInfo } from "./sender-task-badge";
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
@@ -395,6 +396,42 @@ function UserContextBadges({
   );
 }
 
+type UserMessageAttachment = { type: string; data: string; mime_type: string; name?: string };
+
+/** Renders image previews and file chips attached to a user message. */
+function UserMessageAttachments({
+  imageAttachments,
+  fileAttachments,
+  hasContent,
+}: {
+  imageAttachments: UserMessageAttachment[];
+  fileAttachments: UserMessageAttachment[];
+  hasContent: boolean;
+}) {
+  return (
+    <div className={cn("flex flex-wrap gap-2", hasContent && "mb-2")}>
+      {imageAttachments.map((att, index) => (
+        <ImagePreviewDialog
+          key={index}
+          src={`data:${att.mime_type};base64,${att.data}`}
+          alt={`Attachment ${index + 1}`}
+          thumbnailClassName="max-h-48 max-w-full rounded-lg object-contain transition-opacity hover:opacity-90"
+        />
+      ))}
+      {fileAttachments.map((att, index) => (
+        <span
+          key={`file-${index}`}
+          data-testid="message-file-attachment"
+          className="inline-flex self-start items-center gap-1.5 rounded-full bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground"
+        >
+          <IconFile size={12} />
+          {att.name || "Attachment"}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function UserMessageContent({
   comment,
   showRaw,
@@ -406,6 +443,7 @@ function UserMessageContent({
 }: UserMessageProps) {
   const userNavigation = useUserMessageNavigation(sessionId ?? null, comment.id);
   const promptNames = usePromptMentionNames();
+  const { isFavorite, toggleFavorite } = useMessageFavorite(comment.session_id, comment.id);
   const entityReferences = useMemo(
     () => entityReferencesFromMetadata(comment.metadata),
     [comment.metadata],
@@ -434,27 +472,19 @@ function UserMessageContent({
           senderTask={senderTask}
           workflowMessage={workflowMessage}
         />
-        <div className="rounded-2xl bg-primary/30 px-4 py-2.5 overflow-hidden">
+        <div
+          data-testid="user-message-bubble"
+          className={cn(
+            "rounded-2xl px-4 py-2.5 overflow-hidden",
+            isFavorite ? "bg-yellow-200/50 dark:bg-yellow-500/10" : "bg-primary/30",
+          )}
+        >
           {hasAttachments && (
-            <div className={cn("flex flex-wrap gap-2", hasContent && "mb-2")}>
-              {imageAttachments.map((att, index) => (
-                <ImagePreviewDialog
-                  key={index}
-                  src={`data:${att.mime_type};base64,${att.data}`}
-                  alt={`Attachment ${index + 1}`}
-                  thumbnailClassName="max-h-48 max-w-full rounded-lg object-contain transition-opacity hover:opacity-90"
-                />
-              ))}
-              {fileAttachments.map((att, index) => (
-                <span
-                  key={`file-${index}`}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground"
-                >
-                  <IconFile size={12} />
-                  {att.name || "Attachment"}
-                </span>
-              ))}
-            </div>
+            <UserMessageAttachments
+              imageAttachments={imageAttachments}
+              fileAttachments={fileAttachments}
+              hasContent={hasContent}
+            />
           )}
           {renderUserMessageBody({
             hasContent,
@@ -476,6 +506,8 @@ function UserMessageContent({
           showNavigation={userNavigation.hasPrevious || userNavigation.hasNext}
           isRawView={showRaw}
           onToggleRaw={onToggleRaw}
+          isFavorite={isFavorite}
+          onToggleFavorite={toggleFavorite}
           onNavigatePrev={() => {
             if (userNavigation.previousId && onScrollToMessage)
               onScrollToMessage(userNavigation.previousId);

@@ -62,7 +62,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [runtime-cleanup](tasks/runtime-cleanup.md) | draft |
 | [archive-confirmation](tasks/archive-confirmation.md) | shipped |
 | [link-existing-task-github-issue](tasks/link-existing-task-github-issue.md) | building |
-| [wip-limit-pull-system](tasks/wip-limit-pull-system.md) | building |
+| [wip-limit-pull-system](tasks/wip-limit-pull-system.md) | draft |
 | [multi-branch](tasks/multi-branch/spec.md) | shipped |
 | [quick-chat-sessions](tasks/quick-chat-expiration.md) | shipped |
 | [quick-chat-repository-context](tasks/quick-chat-repository-context.md) | shipped |
@@ -129,11 +129,14 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [app-status-bar](ui/app-status-bar.md) | draft |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
+| [adaptive-kanban](ui/adaptive-kanban.md) | shipped |
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
 | [task-surface-refresh](ui/task-surface-refresh.md) | draft |
+| [walkthrough-navigation-layout](walkthrough-navigation-layout/spec.md) | shipped |
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
+| [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -151,10 +154,12 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 
 | Spec | Status |
 |---|---|
+| [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |
+| [agent-stall-recovery](agent-stall-recovery/spec.md) | draft |
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |
-| [improve-kandev](improve-kandev/spec.md) | draft |
+| [improve-kandev](improve-kandev/spec.md) | building |
 | [homebrew-core](homebrew-core/spec.md) | draft |
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
 | [desktop-tauri-app](desktop-tauri-app/spec.md) | shipped |

@@ -479,6 +479,44 @@ func TestSearchFiles_HidesOnlyRootOwnershipMarker(t *testing.T) {
 	}
 }
 
+func TestSearchFileCandidatesDoesNotMatchRepositoryName(t *testing.T) {
+	results := searchFileCandidates([]fileSearchCandidate{
+		{
+			path:           "web/docs/unrelated.txt",
+			repositoryName: "web",
+			matchPath:      "docs/unrelated.txt",
+		},
+		{
+			path:           "backend/src/web-client.ts",
+			repositoryName: "backend",
+			matchPath:      "src/web-client.ts",
+		},
+	}, "web", 20)
+
+	if len(results) != 1 || results[0].Path != "backend/src/web-client.ts" {
+		t.Fatalf("search results = %#v, want only the repo-relative filename match", results)
+	}
+}
+
+func TestSearchFileCandidatesBreaksTiesByRepositoryRelativePathLength(t *testing.T) {
+	results := searchFileCandidates([]fileSearchCandidate{
+		{
+			path:           "long-repository-name/a/query.go",
+			repositoryName: "long-repository-name",
+			matchPath:      "a/query.go",
+		},
+		{
+			path:           "x/much-longer/query.go",
+			repositoryName: "x",
+			matchPath:      "much-longer/query.go",
+		},
+	}, "query.go", 20)
+
+	if len(results) != 2 || results[0].Path != "long-repository-name/a/query.go" {
+		t.Fatalf("search results = %#v, want shortest repo-relative path first", results)
+	}
+}
+
 func TestGetFileTree_Symlinks(t *testing.T) {
 	tmpDir := t.TempDir()
 	wt := &WorkspaceTracker{workDir: tmpDir}

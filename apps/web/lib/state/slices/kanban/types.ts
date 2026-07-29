@@ -91,6 +91,9 @@ export type KanbanState = {
     workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
     updatedAt?: string;
     createdAt?: string;
+    wipAdmitted?: boolean;
+    queuedForStepId?: string;
+    queuedAt?: string;
     isPRReview?: boolean;
     isIssueWatch?: boolean;
     issueUrl?: string;

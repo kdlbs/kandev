@@ -4,6 +4,8 @@ import { createRef, type ReactNode } from "react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import type { ReviewFile } from "./types";
 
+const mocks = vi.hoisted(() => ({ isMobile: false }));
+
 // FileDiffViewer is heavy and irrelevant to the grouping test — stub it.
 vi.mock("@/components/diff", () => ({
   FileDiffViewer: ({ filePath }: { filePath: string }) => (
@@ -14,12 +16,18 @@ vi.mock("@/components/diff", () => ({
 
 vi.mock("@/components/editors/file-actions-dropdown", () => ({
   FileActionsDropdown: () => null,
+  FileActionsMenuItems: () => null,
 }));
 
 // External link resolution is unrelated to grouping and requires a fully
 // hydrated repository store, which this focused test intentionally omits.
 vi.mock("@/components/editors/external-vcs-file-link", () => ({
   ExternalVcsFileLink: () => null,
+  ExternalVcsFileMenuItem: () => null,
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isMobile: mocks.isMobile }),
 }));
 
 vi.mock("@/lib/ws/connection", () => ({ getWebSocketClient: () => null }));
@@ -42,7 +50,10 @@ vi.mock("@/components/toast-provider", () => ({
 
 import { ReviewDiffList } from "./review-diff-list";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mocks.isMobile = false;
+});
 
 function file(path: string, repo?: string): ReviewFile {
   return {
@@ -144,6 +155,7 @@ describe("ReviewDiffList — multi-repo grouping", () => {
 
 describe("ReviewDiffList — file status rendering", () => {
   it("shows moved status in the mobile header and honest copy for a patchless rename", () => {
+    mocks.isMobile = true;
     const movedFile = {
       ...file("new-name.ts"),
       diff: "",
@@ -153,7 +165,7 @@ describe("ReviewDiffList — file status rendering", () => {
     renderSingleFile(movedFile);
 
     const marker = screen.getByRole("img", { name: "Moved from old-name.ts" });
-    expect(marker.className).toContain("sm:hidden");
+    expect(marker.className).toContain("size-3.5");
     expect(screen.getByText("Moved from old-name.ts; no textual changes")).toBeTruthy();
   });
 

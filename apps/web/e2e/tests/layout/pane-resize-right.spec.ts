@@ -12,6 +12,67 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Right pane resize — container-proportional cap", () => {
+  test("opens with a narrower default width on a laptop viewport", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await openWideTask(testPage, apiClient, seedData, "Laptop default right width", {
+      width: 1280,
+      height: 900,
+    });
+
+    const initialWidth = await getDockviewGroupWidth(testPage, "files");
+
+    // 1280px minus the 320px app sidebar leaves a 960px task workbench.
+    // The default right pane should use 30% of that space, rather than the
+    // prior one-third proportion, leaving more room for the central task view.
+    expectApproxWidth(initialWidth, 288, 12);
+  });
+
+  test("recomputes automatic width across monitor changes and restores the large-screen ratio", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await openWideTask(testPage, apiClient, seedData, "Responsive right width", {
+      width: 2200,
+      height: 900,
+    });
+    const largeWidth = await getDockviewGroupWidth(testPage, "files");
+    expectApproxWidth(largeWidth, 450, 12);
+
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    await testPage.waitForTimeout(500);
+    const laptopWidth = await getDockviewGroupWidth(testPage, "files");
+    expectApproxWidth(laptopWidth, 288, 12);
+
+    await testPage.setViewportSize({ width: 2200, height: 900 });
+    await testPage.waitForTimeout(500);
+    expectApproxWidth(await getDockviewGroupWidth(testPage, "files"), largeWidth, 12);
+  });
+
+  test("preserves a manual width while switching between monitor sizes", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await openWideTask(testPage, apiClient, seedData, "Manual right width across monitors", {
+      width: 2200,
+      height: 900,
+    });
+    const manualWidth = await resizeColumnViaSplitview(testPage, "right", 360);
+    expectApproxWidth(manualWidth, 360, 12);
+
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    await testPage.waitForTimeout(500);
+    expectApproxWidth(await getDockviewGroupWidth(testPage, "files"), manualWidth, 12);
+
+    await testPage.setViewportSize({ width: 2200, height: 900 });
+    await testPage.waitForTimeout(500);
+    expectApproxWidth(await getDockviewGroupWidth(testPage, "files"), manualWidth, 12);
+  });
+
   test("resizes past the old 450px hard cap", async ({ testPage, apiClient, seedData }) => {
     await openWideTask(testPage, apiClient, seedData, "Right resize past old cap");
     const actual = await resizeColumnViaSplitview(testPage, "right", 700);

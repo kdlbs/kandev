@@ -141,4 +141,55 @@ test.describe("Pause → resume recovery", () => {
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
   });
+
+  test("a compact stalled notice cancels a running session without navigation", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Stalled notice recovery", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    const { session_id: sessionId } = await apiClient.seedTaskSession(task.id, {
+      state: "RUNNING",
+    });
+    await apiClient.seedSessionMessage(sessionId, {
+      type: "status",
+      content: "Still waiting on Start dev server.",
+      metadata: {
+        action_visibility: "running",
+        actions: [
+          {
+            type: "ws_request",
+            label: "Cancel turn",
+            test_id: "stall-cancel-turn-button",
+            params: { method: "agent.cancel", payload: { session_id: sessionId } },
+          },
+        ],
+      },
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const sessionUrl = testPage.url();
+    const notice = session.activeChat().getByTestId("running-action-notice");
+    const cancel = notice.getByTestId("stall-cancel-turn-button");
+
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText("Still waiting on Start dev server.");
+    await expect(notice.locator("svg")).toHaveCount(0);
+    const [noticeBox, cancelBox] = await Promise.all([notice.boundingBox(), cancel.boundingBox()]);
+    expect(noticeBox).not.toBeNull();
+    expect(cancelBox).not.toBeNull();
+    expect(noticeBox!.height).toBeLessThanOrEqual(48);
+    expect(cancelBox!.width).toBeLessThan(noticeBox!.width);
+
+    await cancel.click();
+
+    await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(notice).not.toBeVisible();
+    expect(testPage.url()).toBe(sessionUrl);
+  });
 });

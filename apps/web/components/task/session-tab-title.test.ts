@@ -3,6 +3,7 @@ import { resolveSessionTabTitle } from "./session-tab-title";
 
 const SPARK_MODEL_ID = "gpt-5.3-codex-spark";
 const SPARK_MODEL_NAME = "GPT-5.3-Codex-Spark";
+const DEFAULT_MODEL_ID = "mock-default";
 const PROFILE_LABEL = "GPT-5.5 (medium)";
 
 const baseArgs = {
@@ -41,16 +42,60 @@ describe("resolveSessionTabTitle", () => {
     ).toBe(SPARK_MODEL_NAME);
   });
 
-  it("keeps the saved profile label when ACP reports its baseline model", () => {
+  it("uses the authoritative current model over the saved profile label", () => {
     expect(
       resolveSessionTabTitle({
         ...baseArgs,
         currentModelId: SPARK_MODEL_ID,
         modelOptions: [{ id: SPARK_MODEL_ID, name: SPARK_MODEL_NAME }],
       }),
-    ).toBe(PROFILE_LABEL);
+    ).toBe(SPARK_MODEL_NAME);
   });
 
+  it("uses the live model config value when the generic current model is stale", () => {
+    expect(
+      resolveSessionTabTitle({
+        ...baseArgs,
+        currentModelId: DEFAULT_MODEL_ID,
+        configOptions: [
+          {
+            type: "select",
+            id: "model",
+            name: "Model",
+            currentValue: SPARK_MODEL_ID,
+            options: [
+              { value: DEFAULT_MODEL_ID, name: "Mock Default" },
+              { value: SPARK_MODEL_ID, name: SPARK_MODEL_NAME },
+            ],
+          },
+        ],
+      }),
+    ).toBe(SPARK_MODEL_NAME);
+  });
+
+  it("prefers a provider-updated model config over a stale active model", () => {
+    expect(
+      resolveSessionTabTitle({
+        ...baseArgs,
+        activeModelId: DEFAULT_MODEL_ID,
+        configOptions: [
+          {
+            type: "select",
+            id: "model",
+            name: "Model",
+            currentValue: SPARK_MODEL_ID,
+            options: [
+              { value: DEFAULT_MODEL_ID, name: "Mock Default" },
+              { value: SPARK_MODEL_ID, name: SPARK_MODEL_NAME },
+            ],
+          },
+        ],
+      }),
+    ).toBe(SPARK_MODEL_NAME);
+  });
+});
+
+describe("resolveSessionTabTitle fallbacks", () => {
   it("includes non-model config selections in the title", () => {
     expect(
       resolveSessionTabTitle({
@@ -62,7 +107,7 @@ describe("resolveSessionTabTitle", () => {
             type: "select",
             id: "model",
             name: "Model",
-            currentValue: "gpt-5.5",
+            currentValue: SPARK_MODEL_ID,
             options: [
               { value: "gpt-5.5", name: "GPT-5.5" },
               { value: SPARK_MODEL_ID, name: SPARK_MODEL_NAME },

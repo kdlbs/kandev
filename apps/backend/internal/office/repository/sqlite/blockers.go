@@ -40,12 +40,18 @@ func (r *Repository) DeleteTaskBlocker(ctx context.Context, taskID, blockerTaskI
 }
 
 // ListTasksBlockedBy returns task IDs that are blocked by the given task.
+// This is the reverse direction of ListTaskBlockers; results are ordered by
+// insertion time so callers see a stable list.
 func (r *Repository) ListTasksBlockedBy(ctx context.Context, blockerTaskID string) ([]string, error) {
 	var ids []string
 	err := r.ro.SelectContext(ctx, &ids, r.ro.Rebind(
-		`SELECT task_id FROM task_blockers WHERE blocker_task_id = ?`), blockerTaskID)
+		`SELECT task_id FROM task_blockers WHERE blocker_task_id = ? ORDER BY created_at, task_id`),
+		blockerTaskID)
 	if err != nil {
 		return nil, err
+	}
+	if ids == nil {
+		ids = []string{}
 	}
 	return ids, nil
 }

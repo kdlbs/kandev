@@ -87,10 +87,11 @@ func (a *QoderACP) Runtime() *RuntimeConfig {
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
 		SessionConfig: SessionConfig{
-			// TODO: set SessionDirTemplate once the Qoder session dir is
-			// confirmed. Without it, the Docker runtime skips mounting the
-			// session dir, so NativeSessionResume has no persistence across
-			// container restarts.
+			// Verified against qodercli 1.1.7: every user-level artifact
+			// (settings.json, .auth/, logs/sessions/<project>) is written
+			// under ~/.qoder, and the --config-dir flag relocates that single
+			// root wholesale — running with it leaves nothing else in $HOME.
+			SessionDirTemplate:  "{home}/.qoder",
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 		},

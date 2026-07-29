@@ -2,14 +2,18 @@ import type { DockviewReadyEvent, SerializedDockview } from "dockview-react";
 import type { StoreApi } from "zustand";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
-import { savedRightColumnWidth } from "@/lib/state/dockview-env-switch";
 import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
 import { measureDockviewContainer } from "@/lib/state/dockview-measure";
 import { isEnvScopedDockviewComponent } from "@/lib/state/dockview-env-scoped-components";
 import type { LayoutState } from "@/lib/state/layout-manager";
 import { setPinnedTarget } from "@/lib/state/layout-manager";
 import type { AppState } from "@/lib/state/store";
-import { getEnvLayout, getEnvMaximizeState, removeEnvMaximizeState } from "@/lib/local-storage";
+import {
+  getEnvLayout,
+  getEnvMaximizeState,
+  getManualRightWidth,
+  removeEnvMaximizeState,
+} from "@/lib/local-storage";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:restore");
@@ -157,17 +161,17 @@ type SavedMax = ReturnType<typeof getEnvMaximizeState>;
 function applySavedMaximize(
   api: DockviewReadyEvent["api"],
   savedMax: NonNullable<SavedMax>,
-  savedRightWidth?: number,
+  manualRightWidth?: number | null,
 ): void {
   api.fromJSON(savedMax.maximizedDockviewJson as SerializedDockview);
   const { width, height } = measureDockviewContainer(api);
   api.layout(width, height);
-  const ids = applyLayoutFixups(api);
+  const ids = applyLayoutFixups(api, undefined, manualRightWidth);
   // The maximize JSON is 2-column — captureRightTarget skips it (sv.length < 3).
   // Seed the right target directly so enforcePinnedTargets can snap the column
   // back to the saved width when the user exits maximize mode.
-  if (savedRightWidth !== undefined && savedRightWidth > 0) {
-    setPinnedTarget("right", savedRightWidth);
+  if (manualRightWidth !== undefined && manualRightWidth !== null && manualRightWidth > 0) {
+    setPinnedTarget("right", manualRightWidth);
   }
   useDockviewStore.setState({
     ...ids,
@@ -176,21 +180,17 @@ function applySavedMaximize(
   });
 }
 
-function applyFixupsWithMaximize(
-  api: DockviewReadyEvent["api"],
-  envId: string | null,
-  savedRightWidth?: number,
-): void {
+function applyFixupsWithMaximize(api: DockviewReadyEvent["api"], envId: string | null): void {
+  const manualRightWidth = getManualRightWidth(envId);
   const savedMax = envId ? getEnvMaximizeState(envId) : null;
   if (savedMax) {
-    applySavedMaximize(api, savedMax, savedRightWidth);
+    applySavedMaximize(api, savedMax, manualRightWidth);
   } else {
     const { width, height } = measureDockviewContainer(api);
     api.layout(width, height);
-    // Anchor the right column to its per-env saved width (see
-    // `captureRightTarget`) so a page reload restores the task's remembered
-    // width instead of resetting it to the default.
-    const ids = applyLayoutFixups(api, savedRightWidth);
+    // Anchor the right column to its per-env manual width when one exists;
+    // serialized geometry otherwise remains responsive to the current viewport.
+    const ids = applyLayoutFixups(api, undefined, manualRightWidth);
     useDockviewStore.setState(ids);
   }
 }
@@ -250,7 +250,7 @@ function tryRestoreEnvLayout(
     });
   }
   api.fromJSON(sanitized as SerializedDockview);
-  applyFixupsWithMaximize(api, envId, savedRightColumnWidth(sanitized as SerializedDockview));
+  applyFixupsWithMaximize(api, envId);
   return true;
 }
 

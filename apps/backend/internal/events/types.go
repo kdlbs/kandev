@@ -8,6 +8,7 @@ const (
 	TaskStateChanged               = "task.state_changed"
 	TaskDeleted                    = "task.deleted"
 	TaskMoved                      = "task.moved" // Manual step change via MoveTask
+	TaskQueuePromoted              = "task.queue_promoted"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
 )
 
@@ -167,6 +168,7 @@ const (
 	AgentReady             = "agent.ready"      // Agent finished a prompt turn, ready for follow-up
 	AgentCompleted         = "agent.completed"
 	AgentFailed            = "agent.failed"
+	AgentStalled           = "agent.stalled"
 	AgentStopped           = "agent.stopped"
 	AgentContextReset      = "agent.context_reset" // Agent subprocess restarted with fresh ACP session
 	AgentACPSessionCreated = "agent.acp_session_created"

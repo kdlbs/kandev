@@ -67,6 +67,13 @@ features:
     dev:  "false"
     e2e:  "false"
 
+  # High-risk Claude-only background prompt handoff experiment. Off in every
+  # profile so it is exercised only by contributors who deliberately opt in.
+  KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:
+    prod: "false"
+    dev:  "false"
+    e2e:  "false"
+
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production
 # leaves all of these unset (real APIs). Dev opts into the mock agent

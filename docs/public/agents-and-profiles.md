@@ -52,6 +52,9 @@ package updates but the follow-up probe requires authentication, the dialog
 reports the update plus the refresh error; authenticate the host agent and
 refresh again. Update job history is short-lived and does not survive a backend
 restart, and npm cache contents are not a durable Kandev installation record.
+When the first managed package update fails, Kandev removes only that
+package's extracted npm execution tree and retries the same update once; a
+repair or second failure is reported as failed and does not retry indefinitely.
 
 ### Add a custom terminal agent
 

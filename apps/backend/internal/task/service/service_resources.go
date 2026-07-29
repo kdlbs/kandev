@@ -754,11 +754,6 @@ func (s *Service) createRepository(
 	if resolveProvider {
 		resolveRepositoryProviderIdentity(repository)
 	}
-	if repository.LocalPath != "" && repository.RemoteURL == "" {
-		if origin := canonicalCloneOrigin(repository.LocalPath); origin != "" {
-			repository.RemoteURL = origin
-		}
-	}
 
 	if err := s.repoEntities.CreateRepository(ctx, repository); err != nil {
 		s.logger.Error("failed to create repository", zap.Error(err))
@@ -770,19 +765,42 @@ func (s *Service) createRepository(
 	return repository, nil
 }
 
-// resolveRepositoryProviderIdentity fills missing provider metadata from a local repository origin.
+// resolveRepositoryProviderIdentity fills missing provider metadata from a
+// local repository origin. RemoteURL is resolved independently of the
+// provider/host/owner/name fields: those are only tagged for the well-known
+// github.com/gitlab.com hosts (see ResolveGitRemoteProviderIdentity), but
+// self-hosted GitLab/GitHub Enterprise instances still need a populated
+// RemoteURL so downstream identity matching (e.g. GitLab MR-task linking)
+// has something to compare against instead of failing closed.
+//
+// canonicalCloneOrigin is tried first because it produces the exact
+// provider-canonical clone URL (e.g. the ".git"-suffixed GitHub/GitLab.com
+// form) that other code, including test fixtures rewriting Git's clone
+// transport via "insteadOf" config, matches against verbatim. The broader
+// ResolveGitRemoteIdentity-based fallback only runs when canonicalCloneOrigin
+// doesn't recognize the host (e.g. a self-hosted GitLab/GitHub Enterprise
+// instance), since it doesn't guarantee a byte-identical canonical form.
 func resolveRepositoryProviderIdentity(repository *models.Repository) {
-	if repository.LocalPath == "" || (repository.Provider != "" && repository.ProviderHost != "") {
+	if repository.LocalPath == "" {
 		return
 	}
-	p, h, o, n := ResolveGitRemoteProviderIdentity(repository.LocalPath)
-	if repository.Provider == "" {
-		repository.Provider = p
+	if repository.Provider == "" || repository.ProviderHost == "" {
+		p, h, o, n := ResolveGitRemoteProviderIdentity(repository.LocalPath)
+		if repository.Provider == "" {
+			repository.Provider = p
+		}
+		if repository.Provider != "" && (strings.HasPrefix(h, "http://") || strings.HasPrefix(h, "https://")) {
+			repository.ProviderHost = h
+			repository.ProviderOwner = o
+			repository.ProviderName = n
+		}
 	}
-	if repository.Provider != "" && (strings.HasPrefix(h, "http://") || strings.HasPrefix(h, "https://")) {
-		repository.ProviderHost = h
-		repository.ProviderOwner = o
-		repository.ProviderName = n
+	if repository.RemoteURL == "" {
+		if origin := canonicalCloneOrigin(repository.LocalPath); origin != "" {
+			repository.RemoteURL = origin
+		} else if origin, owner, name := ResolveGitRemoteIdentity(repository.LocalPath); origin != "" && owner != "" && name != "" {
+			repository.RemoteURL = origin + "/" + owner + "/" + name
+		}
 	}
 }
 

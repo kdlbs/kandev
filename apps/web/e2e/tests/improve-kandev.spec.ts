@@ -19,6 +19,7 @@ type BootstrapOverrides = {
   has_write_access?: boolean;
   fork_status?: ForkStatus;
   fork_message?: string;
+  issueWorkflowId?: string;
   /**
    * When provided, the bootstrap route handler awaits this promise before
    * fulfilling the response. Tests use it to keep the dialog in its
@@ -57,6 +58,7 @@ async function mockImproveKandevApis(
       body: JSON.stringify({
         repository_id: seed.repositoryId,
         workflow_id: seed.workflowId,
+        issue_workflow_id: overrides.issueWorkflowId ?? seed.workflowId,
         branch: "main",
         bundle_dir: bundleDir,
         bundle_files: {
@@ -82,6 +84,88 @@ async function mockImproveKandevApis(
 }
 
 test.describe("Improve Kandev dialog", () => {
+  test("dismissed intro is persisted and later opens the create dialog directly", async ({
+    testPage,
+    seedData,
+  }) => {
+    await mockImproveKandevApis(testPage, seedData);
+    await testPage.goto("/");
+
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
+    const introDialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
+    const dismissPreference = introDialog.getByTestId("improve-kandev-skip-intro");
+    await expect(dismissPreference).toBeVisible();
+    await dismissPreference.click();
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => window.localStorage.getItem("kandev.improveKandev.skipIntro")),
+      )
+      .toBe("true");
+
+    const contribute = testPage.getByTestId("improve-kandev-proceed");
+    await expect(contribute).toBeEnabled({ timeout: 10_000 });
+    await contribute.click();
+    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible({ timeout: 10_000 });
+
+    await testPage.keyboard.press("Escape");
+    await expect(testPage.getByTestId("create-task-dialog")).toBeHidden();
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
+
+    await expect(testPage.getByTestId("create-task-dialog")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByText("Preparing kandev repository…")).toHaveCount(0);
+    await expect(testPage.getByText(/Kandev is open source/)).toHaveCount(0);
+  });
+
+  test("Open issue creates a task in the report-only workflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const issueWorkflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Report Kandev issue",
+      "simple",
+    );
+    const issueSteps = await apiClient.listWorkflowSteps(issueWorkflow.id);
+    const issueStartStep =
+      issueSteps.steps.find((step) => step.is_start_step) ?? issueSteps.steps[0];
+    await mockImproveKandevApis(testPage, seedData, { issueWorkflowId: issueWorkflow.id });
+
+    await testPage.goto("/");
+    await testPage.getByTestId("sidebar-improve-kandev-button").click();
+    const contribute = testPage.getByTestId("improve-kandev-proceed");
+    await expect(contribute).toBeEnabled({ timeout: 10_000 });
+    await contribute.click();
+
+    const createDialog = testPage.getByTestId("create-task-dialog");
+    await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    const issueTab = createDialog.getByRole("tab", { name: "Open issue" });
+    await expect(issueTab).toBeVisible();
+    await issueTab.click();
+    await expect(
+      createDialog.getByText(/only create a GitHub issue.*will not implement/i),
+    ).toBeVisible();
+
+    const title = "Document task ownership in parallel sessions";
+    await createDialog.getByTestId("task-title-input").fill(title);
+    await createDialog
+      .getByTestId("task-description-input")
+      .fill("Users cannot tell which task owns a worktree when several agents run.");
+    const submit = createDialog.getByTestId("submit-start-agent");
+    await expect(submit).toBeEnabled({ timeout: 10_000 });
+    await submit.click();
+    await expect(createDialog).toBeHidden({ timeout: 10_000 });
+
+    await expect
+      .poll(async () => (await apiClient.listTasks(seedData.workspaceId)).tasks)
+      .toContainEqual(
+        expect.objectContaining({
+          title,
+          workflow_step_id: issueStartStep.id,
+        }),
+      );
+  });
+
   test("intro → create flow shows workflow preview, useful info, and fork banner", async ({
     testPage,
     seedData,
@@ -160,7 +244,7 @@ test.describe("Improve Kandev dialog", () => {
     ).toBeVisible();
   });
 
-  test("blocks contribution when account is detected as Enterprise Managed User", async ({
+  test("blocks implementation but allows issue reporting for an Enterprise Managed User", async ({
     testPage,
     seedData,
   }) => {
@@ -184,19 +268,15 @@ test.describe("Improve Kandev dialog", () => {
     await expect(contribute).toBeEnabled({ timeout: 10_000 });
     await contribute.click();
 
-    // Blocked dialog mounts in place of the task-create form. The message
-    // also fires as a toast, so scope the assertion to the dialog body.
-    const blockedDialog = testPage.getByRole("dialog", { name: "Improve Kandev" });
-    await expect(blockedDialog).toBeVisible({ timeout: 10_000 });
-    await expect(blockedDialog.getByText(blockedMessage)).toBeVisible();
+    const createDialog = testPage.getByTestId("create-task-dialog");
+    await expect(createDialog).toBeVisible({ timeout: 10_000 });
+    await expect(createDialog.getByText(blockedMessage)).toBeVisible();
+    await createDialog.getByTestId("task-title-input").fill("EMU contribution");
+    await createDialog.getByTestId("task-description-input").fill("Describe the problem");
+    await expect(createDialog.getByTestId("submit-start-agent")).toBeDisabled();
 
-    // The task-create form must NOT mount: there is nothing to submit and
-    // no fork should be attempted.
-    await expect(testPage.getByTestId("create-task-dialog")).toHaveCount(0);
-
-    // Close button is the only action; clicking it dismisses the dialog.
-    await testPage.getByTestId("improve-kandev-blocked-close").click();
-    await expect(blockedDialog).toBeHidden();
+    await createDialog.getByRole("tab", { name: "Open issue" }).click();
+    await expect(createDialog.getByTestId("submit-start-agent")).toBeEnabled({ timeout: 10_000 });
   });
 
   test("locked mode hides workflow picker and source-mode switch (URL / None)", async ({

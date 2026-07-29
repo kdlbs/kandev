@@ -133,13 +133,14 @@ A task created with **Create without starting agent** opens in a prepared workbe
 
 If the selected profile is unhealthy or incompatible with the executor, fix that configuration before launch. Starting an agent is separate from moving the task through its workflow; entry actions and turn-complete transitions can move or restart work afterward.
 
-When a session shows **Working in background**, its foreground turn has ended
-but recognized child work is still live. You can send a follow-up without
-waiting for that work to finish. Providers with an attested handoff, including
-Claude ACP, receive the follow-up immediately while the child may continue
-streaming. While the session still shows **Generating**, the provider retains
-foreground ownership and Kandev keeps another message queued until that
-ownership is released.
+By default, a running session keeps the coarse **Generating** state and queues
+another message even if Kandev detects background work. Operators can opt into
+the high-risk **Claude background prompt handoff** feature toggle for controlled
+testing. With that experiment enabled, a Claude Code session shows **Working in
+background** after its foreground yields while a recognized async subagent,
+`run_in_background` shell, or Monitor remains active. A follow-up is then sent
+immediately and the child may continue streaming. Other providers and
+foreground-generating Claude turns retain the coarse queueing behavior.
 
 ## Find and organize tasks
 
@@ -179,15 +180,17 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | **Allow manual move**     | Allows dragging a task into this step. Treat it as workflow UX, not as a security or approval boundary.                                                                                          |
 | **Show in command panel** | Includes tasks in this step in the default, empty-search **Cmd+K** task list. Typed task search currently searches every step and can also return archived tasks, regardless of this setting.    |
 | **Auto-archive**          | Archives inactive tasks after the configured number of hours. Enabling it starts at 24 hours; the minimum is 1.                                                                                  |
-| **WIP limit**             | Maximum active, non-archived, non-ephemeral tasks accepted by the step. `0` means unlimited. A move into a full step is rejected; reordering within the same step does not consume another slot. |
-| **Pull from**             | Optional feeder step. When capacity opens, Kandev pulls eligible work from that step. It requires a nonzero WIP limit.                                                                           |
+| **WIP limit**             | Maximum admitted active, non-archived, non-ephemeral tasks in the step. `0` means unlimited. Overflow remains visible as queued cards; manual moves into a full step are still rejected. |
+| **Pull from**             | Optional one-hop feeder step. When capacity opens or eligible work arrives in the feeder, Kandev promotes queued work from the destination first, then the feeder. A full feeder rejects new overflow creation. |
 
 The WIP check also applies when a task is created. It runs for an explicit
 `workflow_step_id` and for the workflow's resolved start step, and the
-admission check is atomic so concurrent creates cannot collectively exceed the
-limit. A full step returns a conflict that includes the step and limit; the
-rejected task, session, and task-created event are not persisted. Ephemeral
-tasks are not counted.
+admission check is atomic. When a limited step is full, the task is still
+created and visible: it is queued in that step when no feeder is configured,
+or placed in the configured feeder and tagged for the destination. Queued
+tasks do not start sessions or consume destination WIP until promoted. If the
+configured feeder is also full, creation returns a conflict. Ephemeral tasks
+are not counted.
 
 Integration watchers use the same admission rule. For example, a GitHub review
 watch targeting a `Review` step with a limit of two admits at most two newly
@@ -195,9 +198,9 @@ observed pull requests at a time. Pull requests that lose the capacity race
 remain eligible for a later poll; Kandev releases their temporary watch
 reservation and does not start an agent for them.
 
-Auto-archive is checked on a five-minute background interval and uses the task's last update time. Any task update postpones eligibility, so the archive is not guaranteed at the exact configured minute. Auto-archive affects the task itself, not its children.
+Auto-archive is checked on a five-minute background interval and uses the task's last update time. Any task update postpones eligibility, so the archive is not guaranteed at the exact configured minute. Archiving, deleting, or moving an admitted task opens capacity and promotes the oldest queued card. Auto-archive affects the task itself, not its children.
 
-Pull configuration rejects self-references, cycles, and cross-workflow feeders. Pulling runs when a task vacates the limited step and fills each newly open slot. Candidates are ordered by board position, then priority (`critical`, `high`, `medium`, `low`, `none`), creation time, and ID. A candidate whose move fails—for example because its session is running or starting—is skipped for that pull pass.
+Pull configuration rejects self-references, cycles, and cross-workflow feeders. Pulling runs when a task vacates the limited step and when eligible work is created in its feeder, filling each available slot. Candidates are ordered by board position, then priority (`critical`, `high`, `medium`, `low`, `none`), queue time, creation time, and ID. A candidate whose move fails—for example because its session is running or starting—is skipped for that pull pass.
 
 ### Configure events and transitions
 
@@ -294,7 +297,11 @@ To restore a task, open **List**, enable **Show archived**, and choose unarchive
 
 Delete is permanent. If **Also delete _N_ subtasks** is left unchecked, direct children become root tasks. If selected, descendants are deleted. The operation cannot be undone, and executor cleanup follows the same asynchronous, best-effort rules as archive.
 
-When a task still has an agent generating or background work outstanding, the confirmation dialog adds a still-working warning: proceeding discards work that is in progress. Delete always shows this warning; archive shows it only when the archive confirmation is enabled.
+When a task still has a `RUNNING` agent, the confirmation dialog adds a
+still-working warning: proceeding discards work that is in progress. Delete
+always shows this warning; archive shows it only when the archive confirmation
+is enabled. Best-effort detached-work accounting does not independently keep a
+settled task in the still-working state.
 
 ## Troubleshooting
 

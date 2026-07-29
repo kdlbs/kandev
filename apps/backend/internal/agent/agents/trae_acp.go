@@ -86,10 +86,16 @@ func (a *TraeACP) Runtime() *RuntimeConfig {
 		ResourceLimits: ResourceLimits{MemoryMB: 4096, CPUCores: 2.0, Timeout: time.Hour},
 		Protocol:       agent.ProtocolACP,
 		SessionConfig: SessionConfig{
-			// TODO: set SessionDirTemplate once the Trae session dir is
-			// confirmed. Without it, the Docker runtime skips mounting the
-			// session dir, so NativeSessionResume has no persistence across
-			// container restarts.
+			// Verified against Trae CLI 0.120.48 by driving `traecli acp
+			// serve` through session/new + session/prompt: the ACP session ID
+			// appears as ~/.cache/trae-cli/sessions/<sessionId>/, which is
+			// where the CLI persists conversation history and metadata.
+			// ~/.trae holds config only (traecli.yaml, skills, agents,
+			// commands) and the login token lives in the OS keyring, not a
+			// file, so neither belongs here. The published manual still
+			// documents the older ~/.cache/coco/ cache root; the shipped
+			// binary uses ~/.cache/trae-cli, so re-check this on upgrades.
+			SessionDirTemplate:  "{home}/.cache/trae-cli",
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 		},

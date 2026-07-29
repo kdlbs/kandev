@@ -1,6 +1,6 @@
 # ADR-2026-07-22-runtime-mutable-task-workspace-sources: Runtime-Mutable Task Workspace Sources
 
-**Status:** accepted
+**Status:** accepted (amended by ADR-2026-07-27-legacy-add-branch-live-rescan)
 **Date:** 2026-07-22
 **Area:** backend, frontend, protocol
 
@@ -23,12 +23,17 @@ separate `task_workspace_folders` relation rather than migrating every repositor
 polymorphic table. Services expose a combined source projection when callers need the complete
 workspace.
 
-A batch `AttachWorkspaceSources` service becomes the single mutation boundary for HTTP, UI, and
-MCP callers. It validates the entire batch, persists attachments transactionally, materializes them
-through an executor-capability interface, asks agentctl to adopt and rescan the effective workspace
-root, and publishes events only after success. Failure rolls back newly created durable records and
-owned filesystem entries without touching pre-existing sources. The legacy
-`add_branch_to_task_kandev` tool becomes a compatibility wrapper over a one-item batch.
+A batch `AttachWorkspaceSources` service becomes the mutation boundary for HTTP, UI, and the
+`add_workspace_sources_kandev` MCP tool. It validates the entire batch, persists attachments
+transactionally, materializes them through an executor-capability interface, asks agentctl to adopt
+and rescan the effective workspace root, and publishes events only after success. Failure rolls
+back newly created durable records and owned filesystem entries without touching pre-existing
+sources.
+
+The legacy `add_branch_to_task_kandev` tool retains its worktree-only live-rescan behavior. It may
+reuse transactional persistence helpers, but it does not use runtime workspace adoption or its
+idle/restart policy. See
+[ADR-2026-07-27-legacy-add-branch-live-rescan](2026-07-27-legacy-add-branch-live-rescan.md).
 
 Executor adapters own placement and transport:
 
@@ -39,15 +44,18 @@ Executor adapters own placement and transport:
 - agentctl owns workspace-root adoption, repository tracker reconciliation, and the file-tree
   refresh boundary common to every runtime.
 
-Source attachment is rejected while a turn or tool call is active. An idle environment may be
-restarted when its process working directory cannot be changed safely in place. Provider
+Batch workspace-source attachment is rejected while a turn or tool call is active. An idle
+environment may be restarted when its process working directory cannot be changed safely in place.
+The legacy worktree-only `add_branch_to_task_kandev` compatibility lane may run during its invoking
+turn and updates tracker scope without changing the agent process working directory. Provider
 credentials stay behind the existing backend/executor clone boundary and never enter persisted
 URLs or agent-visible source metadata.
 
 ## Consequences
 
-- The Files panel, MCP tools, and future automation use one source-attachment contract instead of
-  reimplementing worktree-specific behavior.
+- The Files panel, `add_workspace_sources_kandev`, and future batch automation use one
+  source-attachment contract. The legacy add-branch tool remains an explicit worktree-only
+  compatibility exception.
 - Existing repository, diff, PR, and branch consumers keep their current relational model.
 - Arbitrary folders can coexist with Git sources without pretending to be repositories.
 - Runtime backends must implement explicit source materialization and rollback capabilities;

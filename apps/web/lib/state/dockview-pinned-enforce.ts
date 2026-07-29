@@ -20,7 +20,10 @@
  */
 import type { DockviewApi } from "dockview-react";
 import { getRootSplitview, getPinnedTarget, computeSidebarMaxPx } from "./layout-manager";
+import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
+import { getManualRightWidth } from "@/lib/local-storage";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { measureDockviewGridWidth } from "./dockview-measure";
 
 const debugWidths = createDebugLogger("dockview:widths");
 
@@ -66,7 +69,16 @@ export type EnforcePinnedTargetsCtx = {
   /** Non-null when we are in (or restoring) a maximized-group state; skip
    *  enforcement so we don't fight the 2-column maximize overlay. */
   maximized: boolean;
+  envId?: string | null;
 };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolveRightTarget(api: DockviewApi, ctx: EnforcePinnedTargetsCtx, sv: any): number {
+  const sidebarWidth = ctx.sidebarVisible && sv.length >= 3 ? sv.getViewSize(0) : 0;
+  const persistedTarget =
+    getManualRightWidth(ctx.envId ?? null) ?? getPinnedTarget("right") ?? null;
+  return resolveResponsiveRightWidth(measureDockviewGridWidth(api), sidebarWidth, persistedTarget);
+}
 
 /**
  * Snap the pinned columns back to their recorded targets.
@@ -110,7 +122,8 @@ export function enforcePinnedTargets(api: DockviewApi, ctx: EnforcePinnedTargets
       restoreColumnToTarget(sv, 0, clamped);
     }
     if (ctx.rightPanelsVisible) {
-      restoreColumnToTarget(sv, sv.length - 1, getPinnedTarget("right"));
+      const target = resolveRightTarget(api, ctx, sv);
+      restoreColumnToTarget(sv, sv.length - 1, target);
     }
   } finally {
     enforcing = false;

@@ -46,6 +46,7 @@ type CreateTaskRequest struct {
 	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Position       int                    `json:"position"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
+	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
 	PlanMode       bool                   `json:"plan_mode,omitempty"`
 	IsEphemeral    bool                   `json:"is_ephemeral,omitempty"` // Ephemeral tasks are hidden from kanban, used for quick chat
 	ParentID       string                 `json:"parent_id,omitempty"`

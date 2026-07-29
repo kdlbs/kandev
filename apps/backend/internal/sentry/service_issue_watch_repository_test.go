@@ -25,7 +25,7 @@ func TestService_CreateIssueWatch_RepositoryBinding(t *testing.T) {
 			SentryInstanceID: instID,
 			WorkflowID:       "wf",
 			WorkflowStepID:   "step",
-			Filter:           SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"},
+			Filter:           SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"frontend"}},
 		}
 	}
 
@@ -102,7 +102,7 @@ func TestService_UpdateIssueWatch_RepositoryBinding(t *testing.T) {
 		SentryInstanceID: f.ensureInstance(t, "ws-1"),
 		WorkflowID:       "wf",
 		WorkflowStepID:   "step",
-		Filter:           SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"},
+		Filter:           SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"frontend"}},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -138,7 +138,7 @@ func TestService_UpdateIssueWatch_RebindAndDeletedRepo(t *testing.T) {
 	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
 		WorkspaceID: "ws-1", SentryInstanceID: f.ensureInstance(t, "ws-1"),
 		WorkflowID: "wf", WorkflowStepID: "step",
-		Filter: SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"},
+		Filter: SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"frontend"}},
 	})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -178,7 +178,7 @@ func TestService_IssueWatch_RejectsInvalidBaseBranch(t *testing.T) {
 		return &CreateIssueWatchRequest{
 			WorkspaceID: "ws-1", SentryInstanceID: instID,
 			WorkflowID: "wf", WorkflowStepID: "step",
-			Filter: SearchFilter{OrgSlug: "acme", ProjectSlug: "frontend"}, RepositoryID: "repo-1",
+			Filter: SearchFilter{OrgSlug: "acme", ProjectSlugs: []string{"frontend"}}, RepositoryID: "repo-1",
 		}
 	}
 

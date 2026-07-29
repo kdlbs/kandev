@@ -702,3 +702,66 @@ func TestMemoryEventBus_QueueMessageOrdering(t *testing.T) {
 		}
 	}
 }
+
+// TestMemoryEventBus_PublishStampsSubject pins the contract the plugin
+// deliverer depends on: the concrete subject an event was published on is
+// stamped onto the event, even when it differs from event.Type (which is
+// exactly the per-session case, e.g. type "shell.output" on subject
+// "shell.output.<sessionId>").
+func TestMemoryEventBus_PublishStampsSubject(t *testing.T) {
+	eventBus := NewMemoryEventBus(newTestLogger(t))
+	defer eventBus.Close()
+
+	receivedCh := make(chan *Event, 1)
+	sub, err := eventBus.Subscribe("shell.output.*", func(_ context.Context, e *Event) error {
+		receivedCh <- e
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer func() { _ = sub.Unsubscribe() }()
+
+	ev := NewEvent("shell.output", "test", map[string]interface{}{})
+	if ev.Subject != "" {
+		t.Errorf("NewEvent should not set Subject, got %q", ev.Subject)
+	}
+	if err := eventBus.Publish(context.Background(), "shell.output.sess-1", ev); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+
+	select {
+	case got := <-receivedCh:
+		if got.Subject != "shell.output.sess-1" {
+			t.Errorf("Subject = %q, want shell.output.sess-1", got.Subject)
+		}
+		if got.Type != "shell.output" {
+			t.Errorf("Type = %q, want the unchanged bare type shell.output", got.Type)
+		}
+		if got.EffectiveSubject() != "shell.output.sess-1" {
+			t.Errorf("EffectiveSubject() = %q, want shell.output.sess-1", got.EffectiveSubject())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the event")
+	}
+}
+
+func TestEvent_EffectiveSubject(t *testing.T) {
+	cases := []struct {
+		name  string
+		event *Event
+		want  string
+	}{
+		{"nil event", nil, ""},
+		{"stamped subject wins", &Event{Type: "shell.output", Subject: "shell.output.sess-1"}, "shell.output.sess-1"},
+		{"falls back to type", &Event{Type: "task.created"}, "task.created"},
+		{"empty both", &Event{}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.event.EffectiveSubject(); got != tc.want {
+				t.Errorf("EffectiveSubject() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

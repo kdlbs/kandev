@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 )
 
@@ -40,9 +41,13 @@ func (s *Store) ValidateTaskMRScope(ctx context.Context, workspaceID, taskID, re
 	return nil
 }
 
-// ValidateTaskMRRepositoryIdentity verifies the durable provider identity for
-// the repository selected by the task. Legacy rows without a provider host
-// fail closed because owner/name alone cannot distinguish GitLab instances.
+// ValidateTaskMRRepositoryIdentity verifies the repository selected by the
+// task identifies the same GitLab host and project as the MR. It accepts a
+// match against either the repository's durable provider identity or its
+// remote_url, since self-hosted GitLab repositories added as local clones
+// never get a durable provider identity (only github.com/gitlab.com are
+// tagged at discovery time) yet still carry a resolvable remote_url. Rows
+// with neither signal resolving to a GitLab identity fail closed.
 func (s *Store) ValidateTaskMRRepositoryIdentity(
 	ctx context.Context,
 	workspaceID, taskID, repositoryID, configuredHost, projectPath string,
@@ -51,13 +56,18 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 		return ErrTaskMRRepositoryMismatch
 	}
 	var identity struct {
-		Provider string `db:"provider"`
-		Host     string `db:"provider_host"`
-		Owner    string `db:"provider_owner"`
-		Name     string `db:"provider_name"`
+		Provider  string `db:"provider"`
+		Host      string `db:"provider_host"`
+		Owner     string `db:"provider_owner"`
+		Name      string `db:"provider_name"`
+		RemoteURL string `db:"remote_url"`
 	}
 	err := s.ro.GetContext(ctx, &identity, `
-		SELECT r.provider, r.provider_host, r.provider_owner, r.provider_name
+		SELECT COALESCE(r.provider, '') AS provider,
+			COALESCE(r.provider_host, '') AS provider_host,
+			COALESCE(r.provider_owner, '') AS provider_owner,
+			COALESCE(r.provider_name, '') AS provider_name,
+			COALESCE(r.remote_url, '') AS remote_url
 		FROM task_repositories tr
 		JOIN repositories r ON r.id = tr.repository_id
 		JOIN tasks t ON t.id = tr.task_id
@@ -74,18 +84,67 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 	if err != nil {
 		return ErrTaskMRRepositoryMismatch
 	}
-	gotHost, err := normalizeHostOrigin(identity.Host)
-	if err != nil {
-		return ErrTaskMRRepositoryMismatch
-	}
-	gotProject := strings.Trim(strings.TrimSpace(identity.Owner+"/"+identity.Name), "/")
 	wantProject := strings.Trim(strings.TrimSpace(projectPath), "/")
-	if !strings.EqualFold(identity.Provider, "gitlab") ||
-		!strings.EqualFold(gotHost, wantHost) ||
-		!strings.EqualFold(gotProject, wantProject) {
-		return ErrTaskMRRepositoryMismatch
+
+	type candidate struct{ host, project string }
+	var candidates []candidate
+	if strings.EqualFold(identity.Provider, "gitlab") {
+		if gotHost, err := normalizeHostOrigin(identity.Host); err == nil {
+			gotProject := strings.Trim(strings.TrimSpace(identity.Owner+"/"+identity.Name), "/")
+			candidates = append(candidates, candidate{host: gotHost, project: gotProject})
+		}
 	}
-	return nil
+	if remoteURLHost, remoteProject := parseGitLabRemoteURLIdentity(identity.RemoteURL); remoteURLHost != "" {
+		if gotHost, err := normalizeHostOrigin(remoteURLHost); err == nil {
+			candidates = append(candidates, candidate{host: gotHost, project: remoteProject})
+		}
+	}
+	for _, c := range candidates {
+		if sameGitLabHost(c.host, wantHost) && strings.EqualFold(c.project, wantProject) {
+			return nil
+		}
+	}
+	return ErrTaskMRRepositoryMismatch
+}
+
+func sameGitLabHost(left, right string) bool {
+	leftURL, leftErr := validateHost(strings.TrimSpace(left))
+	rightURL, rightErr := validateHost(strings.TrimSpace(right))
+	if leftErr != nil || rightErr != nil {
+		return false
+	}
+	return strings.EqualFold(hostWithoutDefaultPort(leftURL), hostWithoutDefaultPort(rightURL))
+}
+
+// sameConfiguredOrigin reports whether candidate and configured identify the
+// same GitLab web origin: same scheme, and hosts equal once each side's
+// implicit default port is stripped. Used to validate an incoming MR URL's
+// origin against the workspace's configured GitLab host, so an explicit
+// "https://gitlab.example.com:443" on either side still matches the
+// equivalent unported form.
+func sameConfiguredOrigin(candidate, configured string) bool {
+	candidateURL, candidateErr := validateHost(strings.TrimSpace(candidate))
+	configuredURL, configuredErr := validateHost(strings.TrimSpace(configured))
+	if candidateErr != nil || configuredErr != nil {
+		return false
+	}
+	return strings.EqualFold(candidateURL.Scheme, configuredURL.Scheme) &&
+		strings.EqualFold(hostWithoutDefaultPort(candidateURL), hostWithoutDefaultPort(configuredURL))
+}
+
+// hostWithoutDefaultPort strips a scheme's implicit default port (":443" for
+// https, ":80" for http) so an explicitly-ported origin like
+// "https://gitlab.example.com:443" compares equal to the equivalent
+// "https://gitlab.example.com" without one.
+func hostWithoutDefaultPort(u *url.URL) string {
+	switch u.Scheme {
+	case mentionHTTPSScheme:
+		return strings.TrimSuffix(u.Host, ":443")
+	case mentionHTTPScheme:
+		return strings.TrimSuffix(u.Host, ":80")
+	default:
+		return u.Host
+	}
 }
 
 // ResolveTaskMRRepository validates an explicit repository or infers the sole

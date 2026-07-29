@@ -75,3 +75,53 @@ describe("MessageActions timestamp tooltip on touch devices", () => {
     expect(screen.getByText(expectedAbsoluteTime)).not.toBeNull();
   });
 });
+
+describe("MessageActions favorite toggle", () => {
+  it("renders a star button reflecting isFavorite and calls onToggleFavorite when clicked", () => {
+    const onToggleFavorite = vi.fn();
+    render(
+      <StateProvider>
+        <MessageActions
+          message={assistantMessage()}
+          isFavorite={false}
+          onToggleFavorite={onToggleFavorite}
+        />
+      </StateProvider>,
+    );
+
+    const star = screen.getByRole("button", { name: /mark message as favorite/i });
+    expect(star.getAttribute("aria-pressed")).toBe("false");
+
+    fireEvent.click(star);
+
+    expect(onToggleFavorite).toHaveBeenCalledTimes(1);
+
+    expect(star.className).toMatch(/\bmin-h-11\b/);
+    expect(star.className).toMatch(/\bmin-w-11\b/);
+  });
+
+  it("shows a filled star and 'remove from favorites' label when isFavorite is true", () => {
+    render(
+      <StateProvider>
+        <MessageActions
+          message={assistantMessage()}
+          isFavorite={true}
+          onToggleFavorite={() => {}}
+        />
+      </StateProvider>,
+    );
+
+    const star = screen.getByRole("button", { name: /remove message from favorites/i });
+    expect(star.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("omits the favorite button entirely when onToggleFavorite is not provided", () => {
+    render(
+      <StateProvider>
+        <MessageActions message={assistantMessage()} />
+      </StateProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: /favorite/i })).toBeNull();
+  });
+});

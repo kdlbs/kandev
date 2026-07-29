@@ -100,7 +100,16 @@ type BranchMaterializer interface {
 	// task_repositories row. Best-effort: when no active session exists yet
 	// the implementation may choose to no-op and let the next session launch
 	// create the worktree via the standard multi-repo prepare path.
-	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) error
+	MaterializeBranch(ctx context.Context, taskID, taskRepositoryID string) (*BranchMaterializationResult, error)
+}
+
+// BranchMaterializationResult describes the live worktree created for a
+// branch attachment. A nil result with a nil error means materialization was
+// intentionally deferred until the next session launch; callers must check
+// for a nil result rather than empty path fields.
+type BranchMaterializationResult struct {
+	WorktreePath      string
+	TaskWorkspacePath string
 }
 
 // GitArchiveCapture captures git state (commits, cumulative diff) when a task is archived.
@@ -128,6 +137,12 @@ type WorkflowStepGetter interface {
 	// GetNextStepByPosition returns the next step after the given position for a workflow.
 	// Returns nil if there is no next step (i.e., current step is the last one).
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
+}
+
+// workflowStepLister is an optional extension used to find WIP steps that
+// pull work from a feeder when new work arrives in that feeder.
+type workflowStepLister interface {
+	ListStepsByWorkflow(ctx context.Context, workflowID string) ([]*wfmodels.WorkflowStep, error)
 }
 
 // PRTaskResolver resolves which tasks are associated with a GitHub PR number.

@@ -104,10 +104,23 @@ The read-only `pr-poller` is the sole repository-defined exception: use it only
 after the user explicitly asks to wait for or monitor PR updates.
 
 Use the user's strong model for specs, plans, task files, and high-risk design.
+When the user asks to proceed with feature planning, produce the spec, plan,
+and task files as one design package; pause after a spec only when the user
+explicitly requests spec review or a material open question prevents planning.
 At the completed-plan checkpoint, ask the user to manually switch the main
 session to a lower-cost implementation model. Detailed feature, fix,
 validation, and delegation routing lives in the relevant skills, especially
 `planner-orchestration`.
+
+Workflow-generated phase text such as `[IMPROVE PHASE]`, "implement the
+requested change", TDD checklists, verification commands, or commit steps does
+not opt a feature or behavior-changing fix out of spec-driven development. If
+the request does not reference an approved spec, plan, and task file, run
+`spec-driven-development` through the plan/task checkpoint and stop before
+production or permanent test changes. Continue directly to implementation only
+when approved task artifacts already exist, or when the user explicitly says
+to skip planning; a generic implementation envelope is not that explicit
+opt-out.
 
 ### Kandev Task Creation
 
@@ -164,4 +177,4 @@ For developing in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, e
 
 ---
 
-**Last Updated**: 2026-07-21
+**Last Updated**: 2026-07-27

@@ -2,15 +2,27 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReviewFile } from "./types";
 
+const mocks = vi.hoisted(() => ({ isMobile: false }));
+
 vi.mock("./review-diff-toolbar", () => ({
   FileDiffToolbar: (props: Record<string, unknown>) => (
     <span data-testid="review-toolbar-props" data-props={JSON.stringify(props)} />
   ),
 }));
 
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isMobile: mocks.isMobile }),
+}));
+
 import { ReviewDiffHeader } from "./review-diff-header";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  mocks.isMobile = false;
+});
+
+const SESSION_ID = "session-1";
+const TOOLBAR_PROPS_TEST_ID = "review-toolbar-props";
 
 const file: ReviewFile = {
   path: "src/app.ts",
@@ -31,7 +43,7 @@ describe("ReviewDiffHeader external context", () => {
         file={file}
         isReviewed={false}
         isStale={false}
-        sessionId="session-1"
+        sessionId={SESSION_ID}
         collapsed={false}
         wordWrap={false}
         expandUnchanged={false}
@@ -47,7 +59,7 @@ describe("ReviewDiffHeader external context", () => {
       />,
     );
 
-    const props = JSON.parse(screen.getByTestId("review-toolbar-props").dataset.props ?? "{}");
+    const props = JSON.parse(screen.getByTestId(TOOLBAR_PROPS_TEST_ID).dataset.props ?? "{}");
     expect(props).toMatchObject({
       filePath: "src/app.ts",
       repositoryId: "repo-2",
@@ -64,7 +76,7 @@ describe("ReviewDiffHeader external context", () => {
         file={file}
         isReviewed={false}
         isStale={false}
-        sessionId="session-1"
+        sessionId={SESSION_ID}
         collapsed={false}
         wordWrap={false}
         expandUnchanged={false}
@@ -79,7 +91,7 @@ describe("ReviewDiffHeader external context", () => {
       />,
     );
 
-    const props = JSON.parse(screen.getByTestId("review-toolbar-props").dataset.props ?? "{}");
+    const props = JSON.parse(screen.getByTestId(TOOLBAR_PROPS_TEST_ID).dataset.props ?? "{}");
     expect(props).not.toHaveProperty("publishedBranch");
     expect(props).not.toHaveProperty("publishedPullRequestNumber");
   });
@@ -90,7 +102,7 @@ describe("ReviewDiffHeader external context", () => {
         file={{ ...file, repository_id: "repo-1" }}
         isReviewed={false}
         isStale={false}
-        sessionId="session-1"
+        sessionId={SESSION_ID}
         collapsed={false}
         wordWrap={false}
         expandUnchanged={false}
@@ -106,10 +118,68 @@ describe("ReviewDiffHeader external context", () => {
       />,
     );
 
-    const props = JSON.parse(screen.getByTestId("review-toolbar-props").dataset.props ?? "{}");
+    const props = JSON.parse(screen.getByTestId(TOOLBAR_PROPS_TEST_ID).dataset.props ?? "{}");
     expect(props).toMatchObject({
       publishedBranch: "contributor:feature/share",
     });
     expect(props).not.toHaveProperty("publishedPullRequestNumber");
+  });
+});
+
+describe("ReviewDiffHeader responsive composition", () => {
+  it("uses one compact mobile header with the toolbar embedded as the overflow trigger", () => {
+    mocks.isMobile = true;
+    render(
+      <ReviewDiffHeader
+        file={{
+          ...file,
+          path: "packages/frontend/review/deeply/nested/mobile-file-bar.tsx",
+        }}
+        isReviewed={false}
+        isStale={false}
+        sessionId={SESSION_ID}
+        collapsed={false}
+        wordWrap={false}
+        expandUnchanged={false}
+        baseBranchByRepo={{ frontend: "main" }}
+        onCheckboxChange={vi.fn()}
+        onDiscard={vi.fn()}
+        onToggleCollapse={vi.fn()}
+        onToggleExpandUnchanged={vi.fn()}
+        onToggleWordWrap={vi.fn()}
+      />,
+    );
+
+    const identity = screen.getByTestId("review-file-identity");
+    const toolbar = screen.getByTestId(TOOLBAR_PROPS_TEST_ID);
+    expect(identity.contains(toolbar)).toBe(true);
+    expect(screen.queryByTestId("review-file-actions")).toBeNull();
+    expect(screen.getByText("mobile-file-bar.tsx")).toBeTruthy();
+    expect(document.querySelector("[data-review-file-directory]")?.textContent).toBe(
+      "packages/frontend/review/deeply/nested",
+    );
+  });
+
+  it("keeps the desktop toolbar in its existing inline actions slot", () => {
+    render(
+      <ReviewDiffHeader
+        file={file}
+        isReviewed={false}
+        isStale={false}
+        sessionId={SESSION_ID}
+        collapsed={false}
+        wordWrap={false}
+        expandUnchanged={false}
+        baseBranchByRepo={{ frontend: "main" }}
+        onCheckboxChange={vi.fn()}
+        onDiscard={vi.fn()}
+        onToggleCollapse={vi.fn()}
+        onToggleExpandUnchanged={vi.fn()}
+        onToggleWordWrap={vi.fn()}
+      />,
+    );
+
+    const actions = screen.getByTestId("review-file-actions");
+    expect(actions.contains(screen.getByTestId(TOOLBAR_PROPS_TEST_ID))).toBe(true);
   });
 });

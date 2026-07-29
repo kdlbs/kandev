@@ -79,8 +79,16 @@ func verifyCreatedOwnedDirectoryLink(root, link string) error {
 }
 
 // EnsureOwnedDirectoryLink returns an existing matching live link or creates
-// it. A non-link/collision, or a link to another canonical directory, fails
-// closed and is never replaced.
+// it. A non-link/collision, or a link to another directory, fails closed and is
+// never replaced.
+//
+// The existing link is matched by filesystem identity, not by resolved path.
+// filepath.EvalSymlinks does not traverse a Windows junction — it returns the
+// link's own normalized path — so a path comparison rejected every unchanged
+// junction as a target mismatch, and each relaunch or resume of a task with
+// workspace source links failed. os.Stat follows a junction and a Unix symlink
+// alike, and os.SameFile compares volume and file index, which is also immune
+// to 8.3 short paths and path case.
 func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
 	link := filepath.Join(root, name)
 	info, err := os.Lstat(link)
@@ -88,15 +96,15 @@ func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
 		if !isPlatformDirectoryLink(info, link) {
 			return "", false, fmt.Errorf("owned link entry already exists: %s", name)
 		}
-		actual, err := filepath.EvalSymlinks(link)
+		actual, err := os.Stat(link)
 		if err != nil {
 			return "", false, fmt.Errorf("resolve owned link: %w", err)
 		}
-		expected, err := filepath.EvalSymlinks(target)
+		expected, err := os.Stat(target)
 		if err != nil {
-			return "", false, fmt.Errorf("canonicalize link target: %w", err)
+			return "", false, fmt.Errorf("inspect link target: %w", err)
 		}
-		if filepath.Clean(actual) != filepath.Clean(expected) {
+		if !os.SameFile(actual, expected) {
 			return "", false, fmt.Errorf("owned link target mismatch: %s", name)
 		}
 		return link, false, nil
@@ -106,6 +114,55 @@ func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
 	}
 	created, err := CreateOwnedDirectoryLink(root, name, target)
 	return created, err == nil, err
+}
+
+// IsSelfReferentialDirectoryLink reports whether root/name is a platform
+// directory link whose target is root itself — the shape an earlier release
+// planted inside a user's own repository for local-executor tasks, and which
+// EnsureOwnedDirectoryLink then accepts as valid forever.
+//
+// It deliberately only reports. Such an entry cannot be shown to be
+// Kandev-owned: Kandev writes no ownership marker into user-owned sources, and
+// a user (or the repository itself) may keep a link of the same name and target
+// on purpose, so removing it could destroy content that is not ours. Nor could
+// a stat-then-remove sequence close the window between the check and the
+// unlink. Callers surface it and leave removal to the user.
+func IsSelfReferentialDirectoryLink(root, name string) (bool, error) {
+	if !isOwnedDirectoryLinkPath(root, name) {
+		return false, fmt.Errorf("invalid owned link path")
+	}
+	link, err := ownedDirectoryLinkPath(root, name)
+	if err != nil {
+		return false, err
+	}
+	info, err := os.Lstat(link)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect owned link entry: %w", err)
+	}
+	if !isPlatformDirectoryLink(info, link) {
+		return false, nil
+	}
+	return linkTargetsRoot(root, link)
+}
+
+// linkTargetsRoot compares filesystem identity, not resolved path text.
+// filepath.EvalSymlinks does not traverse a Windows junction — it returns the
+// link's own normalized path — so a path comparison never matches. os.Stat
+// follows a junction and a Unix symlink alike, and os.SameFile then compares
+// volume and file index, which also absorbs 8.3 short paths and case.
+func linkTargetsRoot(root, link string) (bool, error) {
+	linkInfo, err := os.Stat(link)
+	if err != nil {
+		return false, fmt.Errorf("resolve owned link: %w", err)
+	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		return false, fmt.Errorf("resolve owned root: %w", err)
+	}
+	return os.SameFile(linkInfo, rootInfo), nil
 }
 
 func mkdirOwned(root string) error {

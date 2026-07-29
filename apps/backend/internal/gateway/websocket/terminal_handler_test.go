@@ -15,8 +15,10 @@ import (
 	"github.com/gin-gonic/gin"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
 
 func TestStripTerminalResponses(t *testing.T) {
@@ -255,4 +257,137 @@ func testTerminalLogger(t *testing.T) *logger.Logger {
 		t.Fatalf("create logger: %v", err)
 	}
 	return log
+}
+
+type stubExecutorProfileReader struct {
+	session *taskmodels.TaskSession
+	env     *taskmodels.TaskEnvironment
+	profile *taskmodels.ExecutorProfile
+}
+
+func (s *stubExecutorProfileReader) GetTaskSession(_ context.Context, _ string) (*taskmodels.TaskSession, error) {
+	return s.session, nil
+}
+
+func (s *stubExecutorProfileReader) GetTaskEnvironment(_ context.Context, _ string) (*taskmodels.TaskEnvironment, error) {
+	return s.env, nil
+}
+
+func (s *stubExecutorProfileReader) GetExecutorProfile(_ context.Context, _ string) (*taskmodels.ExecutorProfile, error) {
+	return s.profile, nil
+}
+
+// A shell terminal opened on a workspace must start with the executor profile's
+// env vars exported — the agent subprocess and the repository setup script both
+// get them, and the terminal was the remaining gap.
+func TestStartUserShellProcessExportsExecutorProfileEnv(t *testing.T) {
+	log := testTerminalLogger(t)
+	manager := lifecycle.NewManager(
+		nil,
+		bus.NewMemoryEventBus(log),
+		nil,
+		nil,
+		nil,
+		nil,
+		lifecycle.ExecutorFallbackDeny,
+		t.TempDir(),
+		log,
+	)
+	manager.SetExecutorProfileReader(&stubExecutorProfileReader{
+		session: &taskmodels.TaskSession{ID: "session-1", ExecutorProfileID: "prof-1"},
+		env:     &taskmodels.TaskEnvironment{ID: "env-1", ExecutorProfileID: "prof-1"},
+		profile: &taskmodels.ExecutorProfile{
+			ID:      "prof-1",
+			EnvVars: []taskmodels.ProfileEnvVar{{Key: "FONTAWESOME_NPM_AUTH_TOKEN", Value: "fa-secret-value"}},
+		},
+	})
+	handler := NewTerminalHandler(manager, nil, nil, log)
+	runner := process.NewInteractiveRunner(nil, log, 2*1024*1024)
+	t.Cleanup(func() {
+		_ = runner.StopUserShell(context.Background(), "env-1", "term-1")
+	})
+
+	execution := &lifecycle.AgentExecution{
+		ID:                "exec-1",
+		SessionID:         "session-1",
+		TaskEnvironmentID: "env-1",
+		WorkspacePath:     t.TempDir(),
+	}
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/terminal/environment/env-1?terminalId=term-1", nil)
+
+	processID, status, errMsg := handler.startUserShellProcess(c, execution, "env-1", "term-1", runner)
+	if errMsg != "" {
+		t.Fatalf("startUserShellProcess() status=%d error=%q", status, errMsg)
+	}
+
+	env, ok := runner.StartEnvForTesting(processID)
+	if !ok {
+		t.Fatalf("process %q not registered", processID)
+	}
+	if env["FONTAWESOME_NPM_AUTH_TOKEN"] != "fa-secret-value" {
+		t.Fatalf("shell env = %#v, want executor-profile var exported", env)
+	}
+}
+
+func TestStartUserShellProcessExportsEffectiveRuntimeEnv(t *testing.T) {
+	log := testTerminalLogger(t)
+	manager := lifecycle.NewManager(
+		nil,
+		bus.NewMemoryEventBus(log),
+		nil,
+		nil,
+		nil,
+		nil,
+		lifecycle.ExecutorFallbackDeny,
+		t.TempDir(),
+		log,
+	)
+	handler := NewTerminalHandler(manager, nil, nil, log)
+	runner := process.NewInteractiveRunner(nil, log, 2*1024*1024)
+	t.Cleanup(func() {
+		_ = runner.StopUserShell(context.Background(), "env-1", "term-1")
+	})
+
+	execution := (&lifecycle.ExecutorInstance{
+		InstanceID:    "exec-1",
+		WorkspacePath: t.TempDir(),
+	}).ToAgentExecution(&lifecycle.ExecutorCreateRequest{
+		SessionID:         "session-1",
+		TaskEnvironmentID: "env-1",
+		WorkspacePath:     t.TempDir(),
+		Env: map[string]string{
+			"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "http://127.0.0.1:9876",
+			"GIT_CONFIG_COUNT":                    "1",
+			"GIT_CONFIG_KEY_0":                    "credential.helper",
+			"GIT_CONFIG_VALUE_0":                  "!agentctl git-credential",
+			"PATH":                                "/tmp/kandev-shim:/usr/bin",
+		},
+	})
+
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/terminal/environment/env-1?terminalId=term-1", nil)
+
+	processID, status, errMsg := handler.startUserShellProcess(c, execution, "env-1", "term-1", runner)
+	if errMsg != "" {
+		t.Fatalf("startUserShellProcess() status=%d error=%q", status, errMsg)
+	}
+	env, ok := runner.StartEnvForTesting(processID)
+	if !ok {
+		t.Fatalf("process %q not registered", processID)
+	}
+	for key, want := range map[string]string{
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "http://127.0.0.1:9876",
+		"GIT_CONFIG_COUNT":                    "1",
+		"GIT_CONFIG_KEY_0":                    "credential.helper",
+		"GIT_CONFIG_VALUE_0":                  "!agentctl git-credential",
+		"PATH":                                "/tmp/kandev-shim:/usr/bin",
+	} {
+		if env[key] != want {
+			t.Fatalf("shell env[%q] = %q, want %q (env=%#v)", key, env[key], want, env)
+		}
+	}
 }

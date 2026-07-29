@@ -1392,6 +1392,47 @@ func TestHandleAgentEvent_UpdatesLastActivityAt(t *testing.T) {
 	}
 }
 
+func TestHandleAgentEvent_TracksActiveTopLevelTool(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:       "tool_call",
+		ToolCallID: "top-level-tool",
+		ToolName:   "shell",
+		ToolTitle:  "Start dev server",
+		ToolStatus: "in_progress",
+	})
+
+	if got := execution.activeToolSnapshot(); got == nil ||
+		got.ToolCallID != "top-level-tool" || got.Title != "Start dev server" {
+		t.Fatalf("active top-level tool = %#v, want Start dev server", got)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             "tool_call",
+		ToolCallID:       "subagent-tool",
+		ToolName:         "shell",
+		ToolTitle:        "Run subagent command",
+		ParentToolCallID: "top-level-tool",
+		ToolStatus:       "in_progress",
+	})
+
+	if got := execution.activeToolSnapshot(); got == nil || got.ToolCallID != "top-level-tool" {
+		t.Fatalf("subagent tool replaced top-level tool: %#v", got)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:       "tool_update",
+		ToolCallID: "top-level-tool",
+		ToolStatus: toolStatusComplete,
+	})
+
+	if got := execution.activeToolSnapshot(); got != nil {
+		t.Fatalf("terminal update left active top-level tool: %#v", got)
+	}
+}
+
 // TestHandleAgentEvent_PromptDoneChDoesNotBlockWhenFull verifies that signaling
 // promptDoneCh with a full channel (no receiver) doesn't block the event handler.
 func TestHandleAgentEvent_PromptDoneChDoesNotBlockWhenFull(t *testing.T) {

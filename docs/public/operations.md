@@ -77,7 +77,9 @@ The supported SQLite layout for the System database and restore pages is the der
 
 Open **Settings > System > Storage** to inspect Kandev-managed disk usage and configure cleanup.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
-while task resources are active or another maintenance run owns the cleanup gate.
+while another maintenance run owns the cleanup gate. If task resources are active, the page names
+the active work and offers **Run anyway** after an explicit disruption warning. Use that override
+only when the active task work can tolerate cleanup running alongside it.
 
 Storage analysis results are cached in the running backend for 15 minutes, so page reloads and
 policy saves reuse the displayed snapshot instead of scanning disk again. The page shows when that
@@ -265,6 +267,7 @@ These metrics are lightweight UI observability. Set alerts, retention, CPU/memor
 
 - **Office mode** — experimental, medium risk, and off in the production profile by default.
 - **App status bar** — stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins.
+- **Claude background prompt handoff** — experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
 - **Debug mode** — high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
 
 Each requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.

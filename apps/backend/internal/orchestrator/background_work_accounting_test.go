@@ -33,7 +33,7 @@ func (b *blockingRetirementEventBus) Publish(
 ) error {
 	if subject == eventtypes.TaskSessionActivityChanged {
 		data, _ := event.Data.(map[string]interface{})
-		if value, present := data["foreground_activity"]; present && value == nil {
+		if count, present := data["active_subagent_count"]; present && count == 0 {
 			b.once.Do(func() { close(b.retirementEntered) })
 			<-b.releaseRetirement
 		}
@@ -99,7 +99,7 @@ func TestActiveSubagentCount_DerivesOnlyLiveSubagentRegistrations(t *testing.T) 
 	}
 }
 
-func TestBackgroundCompletion_IntermediateSubagentPublishesBackground(t *testing.T) {
+func TestBackgroundCompletion_IntermediateSubagentPublishesGenerating(t *testing.T) {
 	repo := setupTestRepo(t)
 	const taskID, sessionID, executionID = "task-intermediate", "session-intermediate", "execution-intermediate"
 	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
@@ -126,11 +126,83 @@ func TestBackgroundCompletion_IntermediateSubagentPublishesBackground(t *testing
 		t.Fatalf("published events = %d, want 1", len(recorded.events))
 	}
 	data, _ := recorded.events[0].event.Data.(map[string]interface{})
-	if got := data["foreground_activity"]; got != string(v1.ForegroundActivityBackground) {
-		t.Fatalf("published foreground activity = %#v, want background", got)
+	if got := data["foreground_activity"]; got != string(v1.ForegroundActivityGenerating) {
+		t.Fatalf("published foreground activity = %#v, want generating", got)
 	}
 	if got := data["active_subagent_count"]; got != 1 {
 		t.Fatalf("published active subagent count = %#v, want 1", got)
+	}
+}
+
+func TestBackgroundCompletion_SettledSessionClearsActivityForCountOnlyUpdate(t *testing.T) {
+	repo := setupTestRepo(t)
+	const taskID, sessionID, executionID = "task-settled-intermediate", "session-settled-intermediate", "execution-settled-intermediate"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	recorded := &recordingEventBus{}
+	svc.eventBus = recorded
+	svc.registerBackgroundWorkKind(
+		sessionID, "tool-one", executionID, "child-one", streams.BackgroundWorkKindSubagent,
+	)
+	svc.registerBackgroundWorkKind(
+		sessionID, "tool-two", executionID, "child-two", streams.BackgroundWorkKindSubagent,
+	)
+	svc.markForegroundIdle(sessionID)
+
+	publication, changed := svc.completeBackgroundWorkSnapshot(
+		sessionID, executionID, "child-one", string(v1.ForegroundActivityBackground),
+	)
+	if !changed {
+		t.Fatal("intermediate settled completion must publish the count-only transition")
+	}
+	svc.publishForegroundActivitySnapshot(t.Context(), taskID, sessionID, publication)
+
+	if len(recorded.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(recorded.events))
+	}
+	data, _ := recorded.events[0].event.Data.(map[string]interface{})
+	if got := data["foreground_activity"]; got != nil {
+		t.Fatalf("settled session activity = %#v, want nil", got)
+	}
+	if got := data["active_subagent_count"]; got != 1 {
+		t.Fatalf("settled session active subagent count = %#v, want 1", got)
+	}
+}
+
+func TestBackgroundCompletion_EnabledClaudeSettledSessionPublishesBackground(t *testing.T) {
+	repo := setupTestRepo(t)
+	const taskID, sessionID, executionID = "task-settled-claude", "session-settled-claude", "execution-settled-claude"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	enableClaudeBackgroundPromptHandoffForTest(t, svc)
+	setSessionAgentNameForTest(t, svc, sessionID, "claude-acp")
+	recorded := &recordingEventBus{}
+	svc.eventBus = recorded
+	svc.registerBackgroundWorkKind(
+		sessionID, "tool-one", executionID, "child-one", streams.BackgroundWorkKindSubagent,
+	)
+	svc.registerBackgroundWorkKind(
+		sessionID, "tool-two", executionID, "child-two", streams.BackgroundWorkKindSubagent,
+	)
+	svc.markForegroundIdle(sessionID)
+
+	publication, changed := svc.completeBackgroundWorkSnapshot(
+		sessionID, executionID, "child-one", string(v1.ForegroundActivityBackground),
+	)
+	if !changed {
+		t.Fatal("intermediate enabled Claude completion must publish the count-only transition")
+	}
+	svc.publishForegroundActivitySnapshot(t.Context(), taskID, sessionID, publication)
+
+	if len(recorded.events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(recorded.events))
+	}
+	data, _ := recorded.events[0].event.Data.(map[string]interface{})
+	if got := data["foreground_activity"]; got != string(v1.ForegroundActivityBackground) {
+		t.Fatalf("enabled Claude settled activity = %#v, want background", got)
+	}
+	if got := data["active_subagent_count"]; got != 1 {
+		t.Fatalf("enabled Claude settled active subagent count = %#v, want 1", got)
 	}
 }
 
@@ -201,7 +273,7 @@ func TestBackgroundCompletion_UnidentifiedRetiresOldestOfMultipleWorkloadsFIFO(t
 	if !svc.hasBackgroundTask(sessionID, "tool-two") {
 		t.Fatal("unidentified completion must leave the remaining workload live")
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("completion with a live remainder changed visible activity to %q", got)
 	}
 }
@@ -241,7 +313,7 @@ func TestBackgroundCompletion_TwoUnidentifiedCompletionsRetireBothWorkloadsFIFO(
 	if !svc.hasBackgroundTask(sessionID, "tool-second") {
 		t.Fatal("first ID-less completion retired the second-registered workload out of FIFO order")
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("session left background-idle with a live remainder, got %q", got)
 	}
 
@@ -251,7 +323,7 @@ func TestBackgroundCompletion_TwoUnidentifiedCompletionsRetireBothWorkloadsFIFO(
 	if svc.hasBackgroundTask(sessionID, "tool-second") {
 		t.Fatal("second ID-less completion did not retire the last remaining workload")
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("session did not leave background after final completion, got %q", got)
 	}
 }
@@ -279,18 +351,18 @@ func TestBackgroundCompletion_UnidentifiedSuccessorCycleRetiresSoleSessionWork(t
 		t.Fatal("ID-less successor-cycle notification did not retire sole session workload")
 	}
 
-	activityClears := 0
+	activityUpdates := 0
 	for _, record := range recorded.events {
 		if record.subject != eventtypes.TaskSessionActivityChanged {
 			continue
 		}
 		data, _ := record.event.Data.(map[string]interface{})
-		if value, present := data["foreground_activity"]; present && value == nil {
-			activityClears++
+		if count, present := data["active_subagent_count"]; present && count == 0 {
+			activityUpdates++
 		}
 	}
-	if activityClears != 1 || len(taskEvents.activityTaskIDs) != 2 {
-		t.Fatalf("sole completion clear cardinality: session=%d task=%v", activityClears, taskEvents.activityTaskIDs)
+	if activityUpdates != 1 || len(taskEvents.activityTaskIDs) != 2 {
+		t.Fatalf("sole completion update cardinality: session=%d task=%v", activityUpdates, taskEvents.activityTaskIDs)
 	}
 
 	// The same ID-less notification re-delivered after retirement is a no-op.
@@ -385,7 +457,7 @@ func TestExecutionTeardown_StaleToolOwnershipIsNotVisibleToReusedSuccessorID(t *
 		},
 	})
 
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("stale predecessor tool ownership changed successor activity to %q", got)
 	}
 }
@@ -477,7 +549,7 @@ func TestExecutionStop_RetiresOnlyOwnedBackgroundWorkAndPublishesFinalTransition
 	); got != toolOwnershipChild {
 		t.Fatalf("successor tool ownership = %d, want child", got)
 	}
-	if got := svc.ForegroundActivity("session-stop-accounting"); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue("session-stop-accounting"); got != v1.ForegroundActivityBackground {
 		t.Fatalf("successor background work should remain visible, got %q", got)
 	}
 
@@ -487,7 +559,7 @@ func TestExecutionStop_RetiresOnlyOwnedBackgroundWorkAndPublishesFinalTransition
 	if svc.hasBackgroundTask("session-stop-accounting", "tool-new") {
 		t.Fatal("final stopped execution left its background registration behind")
 	}
-	if got := svc.ForegroundActivity("session-stop-accounting"); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue("session-stop-accounting"); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("final execution cleanup left stale background activity: %q", got)
 	}
 	if _, ok := turnActivityRecord(t, svc, "session-stop-accounting"); ok {
@@ -507,7 +579,7 @@ func TestExecutionStop_RetiresOnlyOwnedBackgroundWorkAndPublishesFinalTransition
 		activityValues = append(activityValues, data["foreground_activity"])
 		subagentCounts = append(subagentCounts, data["active_subagent_count"].(int))
 	}
-	wantValues := []interface{}{"generating", "generating", "background", nil}
+	wantValues := []interface{}{"generating", "generating", "generating", nil}
 	if !slices.Equal(activityValues, wantValues) {
 		t.Fatalf("execution cleanup activity values = %#v, want %#v", activityValues, wantValues)
 	}
@@ -596,8 +668,8 @@ func TestExecutionCleanup_DelayedPublicationCannotOverwriteSuccessorActivity(t *
 		data, _ := record.event.Data.(map[string]interface{})
 		values = append(values, data["foreground_activity"])
 	}
-	if len(values) != 1 || values[0] != string(v1.ForegroundActivityBackground) {
-		t.Fatalf("activity publications = %#v, want only successor background", values)
+	if len(values) != 1 || values[0] != nil {
+		t.Fatalf("activity publications = %#v, want only successor clear", values)
 	}
 	if len(taskEvents.activityTaskIDs) != 1 {
 		t.Fatalf("task aggregate publications = %v, want successor only", taskEvents.activityTaskIDs)
@@ -666,7 +738,10 @@ func TestExecutionCleanup_PublicationDeliveryIsOrderedAcrossRecordGenerations(t 
 		values = append(values, data["foreground_activity"])
 		counts = append(counts, data["active_subagent_count"].(int))
 	}
-	want := []interface{}{nil, string(v1.ForegroundActivityBackground)}
+	want := []interface{}{
+		nil,
+		nil,
+	}
 	if !slices.Equal(values, want) {
 		t.Fatalf("cross-generation publications = %#v, want %#v", values, want)
 	}
@@ -817,8 +892,8 @@ func TestExecutionCleanup_DelayedNullCannotOverwriteClaimlessSuccessorStart(t *t
 			values = append(values, data["foreground_activity"])
 		}
 	}
-	if len(values) != 1 || values[0] != string(v1.ForegroundActivityGenerating) {
-		t.Fatalf("activity publications = %#v, want only successor generating", values)
+	if len(values) != 1 || values[0] != nil {
+		t.Fatalf("activity publications = %#v, want only successor clear", values)
 	}
 }
 
@@ -861,8 +936,8 @@ func TestBackgroundCompletion_IDLessSingletonDelayedNullCannotOverwriteSuccessor
 			values = append(values, data["foreground_activity"])
 		}
 	}
-	if len(values) != 1 || values[0] != string(v1.ForegroundActivityGenerating) {
-		t.Fatalf("activity publications = %#v, want only successor generating", values)
+	if len(values) != 1 || values[0] != nil {
+		t.Fatalf("activity publications = %#v, want only successor clear", values)
 	}
 }
 
@@ -905,10 +980,10 @@ func TestExecutionCleanup_AfterClaimlessBeginCannotCreateSuccessorNull(t *testin
 			values = append(values, data["foreground_activity"])
 		}
 	}
-	if len(values) != 1 || values[0] != string(v1.ForegroundActivityGenerating) {
-		t.Fatalf("activity publications = %#v, want only successor generating", values)
+	if len(values) != 1 || values[0] != nil {
+		t.Fatalf("activity publications = %#v, want only successor clear", values)
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("cleanup after begin displaced successor ownership: got %q", got)
 	}
 }
@@ -952,10 +1027,10 @@ func TestBackgroundCompletion_AfterClaimlessBeginCannotCreateSuccessorNull(t *te
 			values = append(values, data["foreground_activity"])
 		}
 	}
-	if len(values) != 1 || values[0] != string(v1.ForegroundActivityGenerating) {
-		t.Fatalf("activity publications = %#v, want only successor generating", values)
+	if len(values) != 1 || values[0] != nil {
+		t.Fatalf("activity publications = %#v, want only successor clear", values)
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityGenerating {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityGenerating {
 		t.Fatalf("completion after begin displaced successor ownership: got %q", got)
 	}
 }
@@ -1026,25 +1101,29 @@ func TestStopSessionPathPublishesStateAndTeardownActivityClears(t *testing.T) {
 		TaskID: taskID, SessionID: sessionID, AgentExecutionID: executionID,
 	})
 
-	var stateClears, activityClears int
+	var stateClears, activityRetirements int
 	for _, record := range recorded.events {
 		data, ok := record.event.Data.(map[string]interface{})
 		if !ok {
 			continue
 		}
-		value, present := data["foreground_activity"]
-		if !present || value != nil {
-			continue
-		}
 		switch record.subject {
 		case eventtypes.TaskSessionStateChanged:
-			stateClears++
+			if value, present := data["foreground_activity"]; present && value == nil {
+				stateClears++
+			}
 		case eventtypes.TaskSessionActivityChanged:
-			activityClears++
+			if count, present := data["active_subagent_count"]; present && count == 0 {
+				activityRetirements++
+			}
 		}
 	}
-	if stateClears != 1 || activityClears != 1 {
-		t.Fatalf("session.stop clear cardinality: state=%d activity=%d, want 1/1", stateClears, activityClears)
+	if stateClears != 1 || activityRetirements != 1 {
+		t.Fatalf(
+			"session.stop retirement cardinality: state=%d activity=%d, want 1/1",
+			stateClears,
+			activityRetirements,
+		)
 	}
 	// Two task-aggregate recomputes: the teardown activity clear, plus the
 	// republish when the session leaves RUNNING (republishTaskActivityOnSettle),
@@ -1131,7 +1210,7 @@ func countActivityClears(recorded *recordingEventBus) int {
 			continue
 		}
 		data, _ := record.event.Data.(map[string]interface{})
-		if value, present := data["foreground_activity"]; present && value == nil {
+		if count, present := data["active_subagent_count"]; present && count == 0 {
 			clears++
 		}
 	}
@@ -1356,7 +1435,7 @@ func TestBackgroundActivity_ClaudeMetadataOnlyChildUpdateDoesNotReopenForeground
 
 	svc.registerBackgroundTask(sessionID, "async-agent")
 	svc.markForegroundIdle(sessionID)
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("precondition activity = %q, want background", got)
 	}
 
@@ -1373,7 +1452,7 @@ func TestBackgroundActivity_ClaudeMetadataOnlyChildUpdateDoesNotReopenForeground
 		},
 	})
 
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("metadata-only child update changed activity to %q, want background", got)
 	}
 }
@@ -1413,7 +1492,7 @@ func TestBackgroundActivity_ClaudeCachedChildUpdateDoesNotReopenForeground(t *te
 		},
 	})
 
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("cached child update changed activity to %q, want background", got)
 	}
 }
@@ -1435,7 +1514,7 @@ func TestBackgroundActivity_UnknownToolUpdatePreservesActivity(t *testing.T) {
 		},
 	})
 
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("unknown tool update changed activity to %q, want background", got)
 	}
 }
@@ -1475,7 +1554,7 @@ func TestBackgroundWork_RegisteredFromInitialToolCallIsRetiredOnExecutionTeardow
 		},
 	})
 	svc.markForegroundIdle(sessionID)
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("initial tool_call registration did not surface as background, got %q", got)
 	}
 
@@ -1486,7 +1565,7 @@ func TestBackgroundWork_RegisteredFromInitialToolCallIsRetiredOnExecutionTeardow
 	if svc.hasBackgroundTask(sessionID, "tool-initial-call") {
 		t.Fatal("execution teardown left the initial tool_call registration behind")
 	}
-	if got := svc.ForegroundActivity(sessionID); got == v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got == v1.ForegroundActivityBackground {
 		t.Fatalf("session still reports background after owning execution died, got %q", got)
 	}
 }

@@ -61,11 +61,19 @@ manually moving files into the task workspace.
   the reason in touch-visible text rather than relying on a tooltip.
 - Existing conversations, task state, plan, sessions, and repository attachments remain intact.
 - Agents receive a batch `add_workspace_sources_kandev` MCP tool that uses the same validation and
-  materialization path. The existing `add_branch_to_task_kandev` tool remains as a compatibility
-  wrapper for one repository/branch source.
+  materialization path.
+- The existing worktree-only `add_branch_to_task_kandev` tool remains a live compatibility path
+  for one repository/branch source. It may run during the invoking agent turn, creates the new
+  worktree as a sibling under the Kandev-owned task root, promotes the persisted task workspace
+  path to that root, and refreshes Files and repository trackers without restarting the agent or
+  agentctl-managed workspace processes.
+- A legacy add-branch call does not nest the new worktree inside the current repository and does
+  not change the running agent or terminal working directory. Its MCP result returns the exact new
+  worktree path, the promoted task workspace path, and that the agent CWD did not change.
 
 Decisions: [ADR-2026-07-22-runtime-mutable-task-workspace-sources](../../decisions/2026-07-22-runtime-mutable-task-workspace-sources.md)
-and [ADR-2026-07-23-workspace-source-root-move-boundary](../../decisions/2026-07-23-workspace-source-root-move-boundary.md).
+[ADR-2026-07-23-workspace-source-root-move-boundary](../../decisions/2026-07-23-workspace-source-root-move-boundary.md),
+and [ADR-2026-07-27-legacy-add-branch-live-rescan](../../decisions/2026-07-27-legacy-add-branch-live-rescan.md).
 
 ## Data model
 
@@ -125,7 +133,28 @@ refresh the Files tree and repository trackers from those events rather than ass
 response is the only writer.
 
 `add_workspace_sources_kandev` accepts the same source union and defaults `task_id` to the current
-task. `add_branch_to_task_kandev` translates its existing arguments to a one-item repository batch.
+task.
+
+`add_branch_to_task_kandev` preserves its existing request arguments and returns:
+
+```json
+{
+  "id": "task-repository-id",
+  "task_id": "task-id",
+  "repository_id": "repository-id",
+  "base_branch": "main",
+  "checkout_branch": "feature/example",
+  "position": 1,
+  "worktree_path": "/absolute/task-root/repository-feature-example",
+  "task_workspace_path": "/absolute/task-root",
+  "agent_cwd_changed": false
+}
+```
+
+`worktree_path` and `task_workspace_path` are omitted when a pre-launch attachment succeeds but
+materialization is intentionally deferred until the task launches. `agent_cwd_changed` is always
+false. A live call returns the materialized sibling path so the invoking agent can address it
+without inferring a directory name.
 
 ## Permissions
 
@@ -139,7 +168,8 @@ persisted in source URLs or copied into agent-visible metadata.
 
 | Condition                                                      | Observable behavior                                                                                                                                 |
 | -------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A turn or tool call is active                                  | The UI disables the action when known; a racing request returns `409` without mutation.                                                             |
+| A turn or tool call is active for batch attachment             | The UI disables the action when known; a racing batch request returns `409` without mutation.                                                       |
+| The invoking agent calls legacy add-branch during its turn     | The worktree is created and trackers refresh without stopping the active agent, terminals, or workspace processes.                                  |
 | Any source is invalid or duplicated                            | The full batch is rejected before persistence or materialization.                                                                                   |
 | A host materializer fails                                      | New filesystem entries and source records are rolled back; existing task contents remain.                                                           |
 | A container/remote repository clone fails                      | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source.           |
@@ -201,6 +231,19 @@ must be retried.
 - **GIVEN** an active agent turn, **WHEN** the user attempts to add sources, **THEN** no source is
   attached, the **Add Repositories to workspace** menu item explains that the task must be idle
   first, and **Open workspace folder** remains available.
+- **GIVEN** an active worktree-executor agent whose CWD is the initial repository, **WHEN** it calls
+  `add_branch_to_task_kandev`, **THEN** Kandev creates the new repository/branch worktree as a
+  sibling under the task root, promotes the persisted workspace path, refreshes Files and
+  repository trackers, and does not restart the agent or change its CWD.
+- **GIVEN** a live legacy add-branch materialization, **WHEN** the MCP result returns, **THEN** it
+  includes the absolute new `worktree_path`, the promoted `task_workspace_path`, and
+  `agent_cwd_changed: false`.
+- **GIVEN** the original repository has no pending changes, **WHEN** a legacy add-branch call creates
+  a sibling worktree, **THEN** Git status in the original repository does not report the sibling as
+  an untracked or changed path.
+- **GIVEN** a live legacy add-branch materialization fails, **WHEN** the MCP call returns an error,
+  **THEN** the new `task_repositories` row and any newly created repository entity are rolled back
+  while the agent and existing processes continue running.
 - **GIVEN** the same repository/branch or canonical folder is already attached, **WHEN** it is
   submitted again, **THEN** the request returns a conflict naming the duplicate and leaves the task
   unchanged.
@@ -218,7 +261,12 @@ must be retried.
 - Removing or detaching sources after they have been attached.
 - Promoting a repository-less task into a repository-backed task.
 - Copying, mounting, or synchronizing arbitrary host folders into container or remote executors.
-- Attaching sources while an agent turn or tool call is running.
+- Running batch workspace-source attachment while an agent turn or tool call is active; the legacy
+  worktree-only `add_branch_to_task_kandev` compatibility path is the explicit exception.
+- Changing the running agent or terminal CWD during a legacy add-branch call.
+- Nesting a new Git repository or worktree inside the current repository.
+- Expanding or bypassing a provider-owned filesystem sandbox when it excludes the returned sibling
+  path.
 - Reordering sources after attachment.
 - Sharing task-creation state, its mode switch, or its **None**/scratch semantics with Add sources;
   only the repository picker leaves are shared.
@@ -227,4 +275,5 @@ must be retried.
 
 ## Implementation plan
 
-See [Attach Workspace Sources plan](../../plans/attach-workspace-sources/plan.md).
+See [Attach Workspace Sources plan](../../plans/attach-workspace-sources/plan.md) and the
+[live add-branch compatibility repair plan](../../plans/restore-live-add-branch/plan.md).

@@ -42,7 +42,7 @@ A profile stores:
 - an MCP policy JSON object;
 - runtime-specific configuration.
 
-Literal environment values are stored with the profile. Use secret references for credentials. Resolved values and copied credential files normally become accessible to the agent and commands in that environment. SSH is narrower: its remote agent process receives only the credential allowlist documented below, not arbitrary profile variables.
+Literal environment values are stored with the profile. Use secret references for credentials. Resolved values and copied credential files normally become accessible to the agent and commands in that environment, including repository setup scripts and the terminal panel's shells. A terminal that is already open keeps the environment it started with; open a new terminal after changing the profile. SSH is narrower: its remote agent process and terminals receive only the credential allowlist documented below, not arbitrary profile variables.
 
 The MCP editor checks only that the value is a JSON object. Its presets cover stdio, HTTP, and SSE transport allowances, server allowlists, and URL rewrites. Test restrictive policies with the actual MCP servers the agent needs; see [Automation and MCP](automation-and-mcp.md).
 
@@ -98,6 +98,12 @@ Managed Docker, Sprites, and SSH launches probe the exact credential-resolution 
 the executor before clone or agent startup and require its `204 No Content` readiness response.
 Network failures, redirects, proxy routing errors, and broker server errors stop launch instead of
 falling back to another GitHub credential.
+
+A newly opened task terminal and a CLI-passthrough agent tab use the same task-scoped Git and
+GitHub CLI routing as the agent that owns the execution. This applies only after the task
+ownership check and does not change **Inherit executor Git credentials** mode. A terminal that is
+already open keeps the environment from its launch; reopen it after a new session launch, resume,
+or a Git credential-policy change.
 
 ## Worktree
 

@@ -586,3 +586,47 @@ describe("ChatMessage image attachments", () => {
     expect(preview.getAttribute("src")).toBe(`data:image/png;base64,${PNG_BASE64}`);
   });
 });
+
+describe("ChatMessage favorite toggle", () => {
+  it("toggles the star and applies a light-yellow background on the user message bubble", () => {
+    render(
+      <StateProvider>
+        <ChatMessage comment={userMessage({ content: "hello" })} label="Message" className="" />
+      </StateProvider>,
+    );
+
+    const star = screen.getByRole("button", { name: /mark message as favorite/i });
+    const bubble = screen.getByTestId("user-message-bubble");
+    expect(bubble.className).not.toMatch(/yellow/);
+
+    fireEvent.click(star);
+
+    expect(screen.getByRole("button", { name: /remove message from favorites/i })).toBe(star);
+    expect(bubble.className).toMatch(/yellow/);
+
+    fireEvent.click(star);
+
+    expect(screen.getByRole("button", { name: /mark message as favorite/i })).toBe(star);
+    expect(bubble.className).not.toMatch(/yellow/);
+  });
+
+  it("toggles the star and applies a light-yellow background on an agent message", () => {
+    render(
+      <StateProvider>
+        <ChatMessage
+          comment={userMessage({ author_type: "agent", content: "hello from agent" })}
+          label="Message"
+          className=""
+        />
+      </StateProvider>,
+    );
+
+    const star = screen.getByRole("button", { name: /mark message as favorite/i });
+    const highlight = screen.getByTestId("agent-message-highlight");
+    expect(highlight.className).not.toMatch(/yellow/);
+
+    fireEvent.click(star);
+
+    expect(highlight.className).toMatch(/yellow/);
+  });
+});

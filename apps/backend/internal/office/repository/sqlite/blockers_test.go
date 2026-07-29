@@ -2,6 +2,7 @@ package sqlite_test
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -36,6 +37,70 @@ func TestTaskBlocker_CRUD(t *testing.T) {
 	blockers, _ = repo.ListTaskBlockers(ctx, "task-1")
 	if len(blockers) != 0 {
 		t.Errorf("count after delete = %d, want 0", len(blockers))
+	}
+}
+
+func TestListTasksBlockedBy(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	// No edges yet: empty, non-nil result.
+	ids, err := repo.ListTasksBlockedBy(ctx, "task-3")
+	if err != nil {
+		t.Fatalf("ListTasksBlockedBy: %v", err)
+	}
+	if ids == nil {
+		t.Error("expected non-nil empty slice, got nil")
+	}
+	if len(ids) != 0 {
+		t.Errorf("expected no blocked tasks, got %v", ids)
+	}
+
+	// task-1 and task-2 are blocked by task-3; task-2 is also blocked by task-4.
+	for _, b := range []*models.TaskBlocker{
+		{TaskID: "task-1", BlockerTaskID: "task-3"},
+		{TaskID: "task-2", BlockerTaskID: "task-3"},
+		{TaskID: "task-2", BlockerTaskID: "task-4"},
+	} {
+		if err := repo.CreateTaskBlocker(ctx, b); err != nil {
+			t.Fatalf("create blocker: %v", err)
+		}
+	}
+
+	// One blocked task.
+	ids, err = repo.ListTasksBlockedBy(ctx, "task-4")
+	if err != nil {
+		t.Fatalf("ListTasksBlockedBy: %v", err)
+	}
+	if !slices.Equal(ids, []string{"task-2"}) {
+		t.Errorf("blocked by task-4 = %v, want [task-2]", ids)
+	}
+
+	// Several blocked tasks, ordered by insertion time.
+	ids, err = repo.ListTasksBlockedBy(ctx, "task-3")
+	if err != nil {
+		t.Fatalf("ListTasksBlockedBy: %v", err)
+	}
+	if !slices.Equal(ids, []string{"task-1", "task-2"}) {
+		t.Errorf("blocked by task-3 = %v, want [task-1 task-2]", ids)
+	}
+
+	// A task that only appears on the blocked side blocks nothing.
+	ids, err = repo.ListTasksBlockedBy(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("ListTasksBlockedBy: %v", err)
+	}
+	if len(ids) != 0 {
+		t.Errorf("blocked by task-1 = %v, want none", ids)
+	}
+
+	// Deleting an edge removes it from the reverse lookup.
+	if err := repo.DeleteTaskBlocker(ctx, "task-1", "task-3"); err != nil {
+		t.Fatalf("DeleteTaskBlocker: %v", err)
+	}
+	ids, _ = repo.ListTasksBlockedBy(ctx, "task-3")
+	if !slices.Equal(ids, []string{"task-2"}) {
+		t.Errorf("blocked by task-3 after delete = %v, want [task-2]", ids)
 	}
 }
 

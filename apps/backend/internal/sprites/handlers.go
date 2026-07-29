@@ -184,7 +184,9 @@ func (h *Handler) wsStatus(ctx context.Context, msg *ws.Message) (*ws.Message, e
 	var payload struct {
 		SecretID string `json:"secret_id"`
 	}
-	_ = msg.ParsePayload(&payload)
+	if err := msg.ParsePayload(&payload); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
+	}
 	return ws.NewResponse(msg.ID, msg.Action, h.getStatus(ctx, payload.SecretID))
 }
 
@@ -192,7 +194,9 @@ func (h *Handler) wsListInstances(ctx context.Context, msg *ws.Message) (*ws.Mes
 	var payload struct {
 		SecretID string `json:"secret_id"`
 	}
-	_ = msg.ParsePayload(&payload)
+	if err := msg.ParsePayload(&payload); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
+	}
 	instances, err := h.listInstances(ctx, payload.SecretID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
@@ -218,7 +222,9 @@ func (h *Handler) wsTest(ctx context.Context, msg *ws.Message) (*ws.Message, err
 	var payload struct {
 		SecretID string `json:"secret_id"`
 	}
-	_ = msg.ParsePayload(&payload)
+	if err := msg.ParsePayload(&payload); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload", nil)
+	}
 	return ws.NewResponse(msg.ID, msg.Action, h.testConnection(ctx, payload.SecretID))
 }
 

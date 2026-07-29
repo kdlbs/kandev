@@ -13,6 +13,7 @@ export type ForkStatus = "writable" | "ready" | "blocked_emu" | "unknown";
 export type ImproveKandevBootstrapResponse = {
   repository_id: string;
   workflow_id: string;
+  issue_workflow_id: string;
   branch: string;
   bundle_dir: string;
   bundle_files: {

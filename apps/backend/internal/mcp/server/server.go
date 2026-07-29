@@ -640,7 +640,7 @@ func (s *Server) registerAddBranchToTaskTool() {
 		mcp.NewTool("add_branch_to_task_kandev",
 			mcp.WithDescription(`Attach an additional (repository, branch) worktree to an existing task.
 
-Use this when the task should open more than one PR — same repo with different branches, or a second repository entirely. The new branch gets its own worktree under the task directory and behaves like any other multi-repo entry for changes, PRs, and review surfaces.
+Use this when the task should open more than one PR — same repo with different branches, or a second repository entirely. The new branch gets its own sibling worktree under the task directory and behaves like any other multi-repo entry for changes, PRs, and review surfaces. The running agent and terminals keep their current working directory; use the returned worktree_path for the exact new location. task_workspace_path is the promoted task root used by the Files tree.
 
 IMPORTANT:
 - Only works on tasks running the WORKTREE executor. Tasks on docker / sprites / local-pc / SSH / remote_docker reject this tool because sibling worktrees are a git-worktree-specific layout — other executors bind one workspace path per task and the new branch would silently never appear on disk.

@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable max-lines -- create and edit submit flows share one lifecycle boundary. */
+
 import { useCallback, FormEvent } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { updateTask } from "@/lib/api";
@@ -24,6 +26,17 @@ import {
 
 const GENERIC_ERROR_MESSAGE = "An error occurred";
 const DUPLICATE_REPO_TITLE = "Duplicate repository";
+
+function notifyQueuedTask(
+  response: { queued_for_step_id?: string | null },
+  notify: (input: { title: string; description: string }) => unknown,
+) {
+  if (!response.queued_for_step_id) return;
+  notify({
+    title: "Task queued",
+    description: "The workflow step is at its WIP limit; this task will start when capacity opens.",
+  });
+}
 
 // eslint-disable-next-line max-lines-per-function
 export function useTaskSubmitHandlers({
@@ -348,6 +361,7 @@ export function useTaskSubmitHandlers({
       };
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, opts.consented);
       if (!taskResponse) return;
+      notifyQueuedTask(taskResponse, toast);
       const newSessionId = taskResponse.session_id ?? taskResponse.primary_session_id ?? null;
       const willNavigate =
         (opts.withAgent && isPassthroughProfile) || !!(opts.planMode && newSessionId);
@@ -572,6 +586,7 @@ export function useTaskSubmitHandlers({
       };
       const taskResponse = await createTaskWithFreshBranchRetry(buildPayload, consent);
       if (!taskResponse) return;
+      notifyQueuedTask(taskResponse, toast);
       onSuccess?.(taskResponse, "create");
       clearDraft();
       queueTaskCreateLastUsedFromPayload(submittedPayload);

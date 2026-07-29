@@ -8,6 +8,7 @@ import {
   removeEnvMaximizeState,
   clearGlobalSidebarWidth,
   setGlobalSidebarWidth,
+  getManualRightWidth,
 } from "@/lib/local-storage";
 import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
@@ -280,7 +281,8 @@ function syncPinnedWidthsFromApi(api: DockviewApi, set: StoreSet): void {
   try {
     const state = fromDockviewApi(api);
     if (state.columns.length !== sv.length) return;
-    const { rightPanelsVisible } = useDockviewStore.getState();
+    const { rightPanelsVisible, currentLayoutEnvId } = useDockviewStore.getState();
+    if (getManualRightWidth(currentLayoutEnvId) === null) return;
     const updates = collectPinnedWidthUpdates(state.columns, (i) => sv.getViewSize(i), {
       rightPanelsVisible,
     });
@@ -416,6 +418,7 @@ function enforceFromStore(api: DockviewApi, get: StoreGet): void {
     sidebarVisible: s.sidebarVisible,
     rightPanelsVisible: s.rightPanelsVisible,
     maximized: s.preMaximizeLayout !== null,
+    envId: s.currentLayoutEnvId,
   });
 }
 
@@ -685,7 +688,7 @@ function restoreMaximizeFromStorage(
     // wrong width on subsequent restores.
     const { width, height } = measureDockviewContainer(api);
     api.layout(width, height);
-    const ids = applyLayoutFixups(api);
+    const ids = applyLayoutFixups(api, undefined, getManualRightWidth(envId));
     const preMax = saved.preMaximizeLayout as unknown as LayoutState;
     // The maximized layout is `[sidebar?, maximized]` — the non-sidebar group
     // is the one being maximized, which `resolveGroupIds` returns as
@@ -833,7 +836,12 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
     const effectiveOld = oldEnvId ?? currentLayoutEnvId;
     saveOutgoingEnv(api, effectiveOld, preMaximizeLayout, get().pinnedWidths);
     set({ preMaximizeLayout: null, maximizedGroupId: null });
-    set({ isRestoringLayout: true, currentLayoutEnvId: newEnvId });
+    const manualRightWidth = getManualRightWidth(newEnvId);
+    set({
+      isRestoringLayout: true,
+      currentLayoutEnvId: newEnvId,
+      pinnedWidths: manualRightWidth === null ? new Map() : new Map([["right", manualRightWidth]]),
+    });
     try {
       if (restoreMaximizeFromStorage(api, newEnvId, set, activeSessionId, currentSessionIds))
         return;

@@ -1,0 +1,67 @@
+# Internal workflow TEMPLATE definition — NOT the portable import/export format.
+# Format reference: docs/workflow-import-export.md
+id: report-kandev-issue
+name: Report Kandev Issue
+description: >-
+  Hidden one-step workflow that gathers the information required by the
+  kdlbs/kandev issue forms and publishes a GitHub issue without changing code.
+hidden: true
+
+steps:
+  - id: open-issue
+    name: Open issue
+    position: 0
+    color: bg-amber-500
+    is_start_step: true
+    show_in_command_panel: false
+    allow_manual_move: true
+    prompt: |
+      [REPORT ISSUE PHASE]
+      Gather a complete report from the user and publish it as a GitHub issue
+      in `kdlbs/kandev`. This workflow only reports the problem or request.
+      Do not implement code, create a branch, commit, push, or open a pull
+      request.
+
+      {{task_prompt}}
+
+      STEP 1: READ THE REPOSITORY REPORTING RULES
+      - Read `AGENTS.md`, `.github/ISSUE_TEMPLATE/config.yml`, and the current
+        `.github/ISSUE_TEMPLATE/bug_report.yml` and `feature_request.yml`.
+      - Classify the report as a bug or feature request. If it describes a
+        security vulnerability, do not publish it publicly; direct the user to
+        the private security-advisory link from the repository configuration.
+
+      STEP 2: GATHER EVERY REQUIRED FIELD
+      - Compare the task description with every required field in the matching
+        issue form.
+      - Use `ask_user_question_kandev` to ask concise follow-up questions for
+        all missing or ambiguous information. Ask in batches and repeat until
+        every required field has a concrete answer.
+      - Never invent environment details, reproduction steps, expected or
+        actual behavior, acceptance criteria, confirmations, or other missing
+        facts.
+      - Remind the user to remove secrets, tokens, private repository URLs,
+        private prompts, customer data, and other sensitive information from
+        text, logs, and attachments.
+
+      STEP 3: CHECK FOR DUPLICATES
+      Search existing open and closed `kdlbs/kandev` issues for the same
+      behavior. If a likely duplicate exists, show it to the user and use
+      `ask_user_question_kandev` to confirm whether to add context there or
+      continue with a new issue.
+
+      STEP 4: PREVIEW AND CONFIRM
+      If STEP 1 classified this as a security vulnerability, skip STEP 4 and
+      STEP 5 entirely. Point the user to the private security-advisory link
+      from the repository configuration and stop.
+      Draft a title and body whose headings and answers follow the matching
+      repository issue template. Show the complete public text to the user and
+      use `ask_user_question_kandev` to obtain explicit publication approval.
+
+      STEP 5: PUBLISH
+      After approval, write the body to a temporary Markdown file and run
+      `gh issue create --repo kdlbs/kandev` with the matching title, label, and
+      body file. Report the resulting issue URL to the user and stop.
+    events:
+      on_enter:
+        - type: auto_start_agent

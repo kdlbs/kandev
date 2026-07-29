@@ -86,6 +86,20 @@ Messages show peer attribution, and Kandev gives the receiving agent hidden repl
 
 Desktop panel groups can host agent chat, files, terminals, Changes, the task plan, previews, and GitHub pull-request detail. Use **+** to add a panel. Mobile exposes sessions, files, terminal, and changes through task navigation and sheets. Its task switcher opens as an inset bottom card, and the current-session control shows the active agent's icon and name.
 
+Press **Cmd+Shift+F** on macOS or **Ctrl+Shift+F** elsewhere to search the
+contents of every file in the active task workspace. Results are grouped by
+repository and show the repository-relative path, line number, and matching
+line; selecting one opens that repository's file at the match. Content search
+includes tracked files and untracked files that are not ignored. Use
+**Cmd/Ctrl+Shift+K** when you want to search only file names and paths across
+all repositories in the active task. The palette keeps **Commands**, **Files**,
+and **Contents** visible as compact tabs beside the search field while an active
+task workbench is open; elsewhere the palette remains command-only and leaves
+the workspace-search shortcuts untouched. Click a mode or press **Tab** /
+**Shift+Tab** to switch without clearing your query or moving focus from the
+search field. File matches are grouped by repository. Hover a mode to see its
+direct shortcut.
+
 Open **Settings > General > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell. Changing the default does not replace a layout already saved for a task; choose **Reset Layout** from the workbench layout menu when you want that task to adopt the latest default.
 
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
@@ -144,7 +158,7 @@ Pending inline comments are scoped to the current review session but persist onl
 
 ## Generate a walkthrough
 
-Select **Walkthrough** from Changes or Review. Kandev sends the built-in `changes-walkthrough` prompt to the active session. If the agent is actively generating, the request queues; if it is idle — or only waiting on background work it spawned — it starts a new turn immediately. The agent must have task MCP and must call `show_walkthrough_kandev` with an ordered list of file and line anchors.
+Select **Walkthrough** from Changes or Review. Kandev sends the built-in `changes-walkthrough` prompt to the active session. If the agent is actively generating, the request queues; if it is idle, it starts a new turn immediately. A running Claude Code session that is only waiting on recognized background work also starts immediately when the high-risk **Claude background prompt handoff** experiment is enabled; the default behavior queues it. The agent must have task MCP and must call `show_walkthrough_kandev` with an ordered list of file and line anchors.
 
 <DocsVideo
   webm="./media/feature-guides/code-walkthrough.webm"

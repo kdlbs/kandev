@@ -2,23 +2,28 @@ package orchestrator
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
-	"github.com/kandev/kandev/internal/task/models"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // countingReviewTaskCreator records how many times CreateReviewTask was called.
 type countingReviewTaskCreator struct {
-	calls  int
-	err    error
-	errs   []error
-	taskID string
+	calls    int
+	err      error
+	errs     []error
+	taskID   string
+	metadata map[string]interface{} // extra metadata added to returned task
 }
 
-func (c *countingReviewTaskCreator) CreateReviewTask(_ context.Context, _ *ReviewTaskRequest) (*models.Task, error) {
+func (c *countingReviewTaskCreator) CreateReviewTask(_ context.Context, _ *ReviewTaskRequest) (*taskmodels.Task, error) {
 	c.calls++
 	if len(c.errs) > 0 {
 		err := c.errs[0]
@@ -32,7 +37,7 @@ func (c *countingReviewTaskCreator) CreateReviewTask(_ context.Context, _ *Revie
 	if id == "" {
 		id = "task-created"
 	}
-	return &models.Task{ID: id}, nil
+	return &taskmodels.Task{ID: id, Metadata: c.metadata}, nil
 }
 
 // newReviewEvent builds a NewReviewPREvent for createReviewTask tests.
@@ -42,6 +47,7 @@ func newReviewEvent() *github.NewReviewPREvent {
 		WorkspaceID:    "ws1",
 		WorkflowID:     "wf1",
 		WorkflowStepID: "step1",
+		AgentProfileID: testAgentProfileID,
 		PR: &github.PR{
 			Number: 42, Title: "Some PR", HTMLURL: "https://gh/acme/widget/pull/42",
 			RepoOwner: "acme", RepoName: "widget",
@@ -176,6 +182,277 @@ func TestCreateReviewTask_WIPRejectionIsRetriedOnLaterPoll(t *testing.T) {
 	}
 }
 
+// --- Auto-start idempotency regression tests ---
+
+// seedReviewTask inserts a workspace, workflow, and task row into the real SQLite
+// repo so that StartTask (which reads the task) can proceed. The task carries
+// MetaKeyAutoStartClaimed so both auto-start paths compete for the same token.
+// testAgentProfileID is a stable profile ID used in auto-start regression tests.
+// It must be non-empty so executor.PrepareSession doesn't return ErrNoAgentProfileID.
+const testAgentProfileID = "test-profile-1"
+
+func seedReviewTask(t *testing.T, repo interface {
+	CreateWorkspace(context.Context, *taskmodels.Workspace) error
+	CreateWorkflow(context.Context, *taskmodels.Workflow) error
+	CreateTask(context.Context, *taskmodels.Task) error
+}, taskID, stepID string) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	_ = repo.CreateWorkspace(ctx, &taskmodels.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx, &taskmodels.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	task := &taskmodels.Task{
+		ID:             taskID,
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: stepID,
+		Title:          "Review PR #42",
+		Description:    "Review this PR",
+		State:          v1.TaskStateInProgress,
+		Metadata: map[string]interface{}{
+			taskmodels.MetaKeyAutoStartGuard:   true,
+			taskmodels.MetaKeyAutoStartClaimed: true,
+			taskmodels.MetaKeyAgentProfileID:   testAgentProfileID,
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := repo.CreateTask(ctx, task); err != nil {
+		t.Fatalf("seedReviewTask: %v", err)
+	}
+}
+
+// TestAutoStart_BothPathsFireExactlyOnce is the regression test for the
+// duplicate-agent bug: a review task placed into a feeder and immediately
+// promoted (so both the watcher's synchronous Path B and the promotion's
+// event-driven Path A see an admitted, auto-start-eligible task) must launch
+// exactly one agent session.
+func TestAutoStart_BothPathsFireExactlyOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-review-42"
+	const stepID = "step-review"
+
+	sg := newMockStepGetter()
+	sg.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Review", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+		},
+	}
+
+	seedReviewTask(t, repo, taskID, stepID)
+
+	// mockTaskRepo must also contain the task so startTask's s.scheduler.GetTask lookup succeeds.
+	// Include agent_profile_id so executor.PrepareSession doesn't return ErrNoAgentProfileID.
+	// Include auto_start_guard so autoStartTaskForStep knows to compete for the claim token.
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID:    taskID,
+		State: v1.TaskStateInProgress,
+		Metadata: map[string]interface{}{
+			taskmodels.MetaKeyAutoStartGuard:   true,
+			taskmodels.MetaKeyAutoStartClaimed: true,
+			taskmodels.MetaKeyAgentProfileID:   testAgentProfileID,
+		},
+	}
+
+	var launchCount atomic.Int32
+	launched := make(chan struct{}, 2) // buffered so neither sender blocks
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launchCount.Add(1)
+			launched <- struct{}{}
+			return &executor.LaunchAgentResponse{}, nil
+		},
+	}
+
+	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
+
+	// Load the DB task (which has the MetaKeyAutoStartClaimed token in metadata).
+	dbTask, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+
+	// Path B: watcher's synchronous auto-start on an admitted task with the token.
+	svc.autoStartReviewTask(ctx, newReviewEvent(), dbTask)
+
+	// Path A: promotion event-driven auto-start on the same task.
+	// autoStartTaskForStep spawns a goroutine — we synchronise via the launched channel.
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.queue_promoted")
+
+	// Wait for exactly one launch. Allow 2 seconds for the async goroutine.
+	deadline := time.After(2 * time.Second)
+	select {
+	case <-launched:
+	case <-deadline:
+		t.Fatal("timed out waiting for at least one launch")
+	}
+
+	// Give any erroneous second launch a short window to arrive.
+	select {
+	case <-launched:
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if got := launchCount.Load(); got != 1 {
+		t.Errorf("expected exactly 1 LaunchAgent call, got %d", got)
+	}
+
+	sessions, err := repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(sessions) != 1 {
+		t.Errorf("expected exactly 1 session in DB, got %d", len(sessions))
+	}
+}
+
+// TestAutoStart_ClaimIsAtomic verifies that two competing calls to claimAutoStart
+// for the same task produce exactly one winner.
+func TestAutoStart_ClaimIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-claim-atomic"
+	seedReviewTask(t, repo, taskID, "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	first := svc.claimAutoStart(ctx, taskID, "test")
+	second := svc.claimAutoStart(ctx, taskID, "test")
+
+	if !first {
+		t.Error("first claimAutoStart should have succeeded")
+	}
+	if second {
+		t.Error("second claimAutoStart should have failed (token already removed)")
+	}
+}
+
+// TestAutoStart_ClaimIsRaceSafe drives the two production auto-start paths'
+// claim through a barrier so both goroutines contend for the single token at
+// once, then joins both results and asserts exactly one winner. The sequential
+// TestAutoStart_ClaimIsAtomic only proves the token disappears after the first
+// call; it would still pass under a non-atomic read-then-delete that lets two
+// concurrent callers both win. This exercises the real read-modify-write under
+// contention against the SQLite repo's conditional UPDATE.
+func TestAutoStart_ClaimIsRaceSafe(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-claim-race"
+	seedReviewTask(t, repo, taskID, "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	// Release both claimers at the same instant so their RemoveTaskMetadataKey
+	// calls overlap. Results are joined through a buffered channel.
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	for range 2 {
+		go func() {
+			<-start
+			results <- svc.claimAutoStart(ctx, taskID, "test")
+		}()
+	}
+	close(start)
+
+	winners := 0
+	for range 2 {
+		if <-results {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("expected exactly one concurrent claim winner, got %d", winners)
+	}
+}
+
+// TestAutoStart_FailedLaunchRestoresClaim verifies that when an auto-start
+// launch fails, restoreAutoStartClaim puts the token back so a later trigger
+// can retry.
+func TestAutoStart_FailedLaunchRestoresClaim(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-restore-claim"
+	seedReviewTask(t, repo, taskID, "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	// Claim succeeds — simulate a failed launch.
+	if !svc.claimAutoStart(ctx, taskID, "test") {
+		t.Fatal("initial claim should succeed")
+	}
+
+	// Restore the claim.
+	svc.restoreAutoStartClaim(ctx, taskID, "test")
+
+	// A subsequent claim should succeed again.
+	if !svc.claimAutoStart(ctx, taskID, "test") {
+		t.Error("claim after restore should succeed")
+	}
+}
+
+// TestAutoStart_NoTokenDoesNotBlock verifies that autoStartTaskForStep still
+// launches a task that has no MetaKeyAutoStartClaimed token (ordinary auto-start
+// tasks unrelated to the review watcher).
+func TestAutoStart_NoTokenDoesNotBlock(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-no-token"
+	const stepID = "step-review"
+
+	sg := newMockStepGetter()
+	sg.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Review", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterAutoStartAgent}},
+		},
+	}
+
+	// Seed a task WITHOUT the auto-start-claimed token.
+	now := time.Now().UTC()
+	ctx2 := context.Background()
+	_ = repo.CreateWorkspace(ctx2, &taskmodels.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateWorkflow(ctx2, &taskmodels.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now})
+	_ = repo.CreateTask(ctx2, &taskmodels.Task{
+		ID: taskID, WorkspaceID: "ws1", WorkflowID: "wf1", WorkflowStepID: stepID,
+		Title: "T", Description: "D", State: v1.TaskStateInProgress,
+		Metadata:  map[string]interface{}{taskmodels.MetaKeyAgentProfileID: testAgentProfileID},
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	// Also seed the task in mockTaskRepo so startTask's scheduler.GetTask lookup succeeds.
+	// Include agent_profile_id so executor.PrepareSession doesn't return ErrNoAgentProfileID.
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID:    taskID,
+		State: v1.TaskStateInProgress,
+		Metadata: map[string]interface{}{
+			taskmodels.MetaKeyAgentProfileID: testAgentProfileID,
+		},
+	}
+
+	launched := make(chan struct{}, 1)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			launched <- struct{}{}
+			return &executor.LaunchAgentResponse{}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, sg, taskRepo, agentMgr)
+
+	svc.autoStartTaskForStep(ctx, taskID, stepID, "task.moved")
+
+	select {
+	case <-launched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("autoStartTaskForStep should launch a task with no token")
+	}
+}
+
 func TestReviewWatchLifecycle_BootReadyStaysOnReviewUntilTurnComplete(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -205,7 +482,7 @@ func TestReviewWatchLifecycle_BootReadyStaysOnReviewUntilTurnComplete(t *testing
 		t.Fatalf("boot-ready must not advance review task, got step %q", bootTask.WorkflowStepID)
 	}
 
-	if err := repo.UpdateTaskSessionState(ctx, "review-session", models.TaskSessionStateRunning, ""); err != nil {
+	if err := repo.UpdateTaskSessionState(ctx, "review-session", taskmodels.TaskSessionStateRunning, ""); err != nil {
 		t.Fatalf("mark review turn running: %v", err)
 	}
 	task, err := repo.GetTask(ctx, "review-task")

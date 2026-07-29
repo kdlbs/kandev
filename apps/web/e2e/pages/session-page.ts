@@ -1368,6 +1368,11 @@ export class SessionPage {
     return this.sessionTabByText(text).locator(".tabler-icon-star").first();
   }
 
+  /** Primary star icon inside a session tab identified by its session ID. */
+  primaryStarInSessionTab(sessionId: string): Locator {
+    return this.sessionTabBySessionId(sessionId).locator(".tabler-icon-star").first();
+  }
+
   /** "Move to next step" button in the chat status bar. */
   proceedNextStepButton(): Locator {
     return this.page.getByTestId("proceed-next-step");

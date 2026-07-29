@@ -28,6 +28,12 @@ __pycache__/
 *.swp
 *.swo
 *~
+
+# Editor/merge scratch copies. These never compile and only pollute grep
+# results for whoever works on the real file next.
+*.backup
+*.bak
+*.orig
 .DS_Store
 Thumbs.db
 

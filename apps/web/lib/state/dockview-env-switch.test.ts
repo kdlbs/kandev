@@ -6,8 +6,15 @@ import {
 } from "./dockview-env-switch";
 import type { SerializedDockview } from "dockview-react";
 
+const { CANONICAL_CENTER_GROUP_ID, RIGHT_TOP_GROUP_ID, RIGHT_BOTTOM_GROUP_ID } = vi.hoisted(() => ({
+  CANONICAL_CENTER_GROUP_ID: "group-center",
+  RIGHT_TOP_GROUP_ID: "group-right-top",
+  RIGHT_BOTTOM_GROUP_ID: "group-right-bottom",
+}));
+
 vi.mock("@/lib/local-storage", () => ({
   getEnvLayout: vi.fn(() => null),
+  getManualRightWidth: vi.fn(() => null),
 }));
 
 vi.mock("./dockview-layout-builders", () => ({
@@ -25,9 +32,16 @@ vi.mock("./layout-manager", () => ({
   layoutStructuresMatch: vi.fn(() => false),
   getRootSplitview: vi.fn(() => null),
   getPinnedWidth: vi.fn(() => 350),
+  isCenterCandidateGroupId: vi.fn(
+    (groupId: string) =>
+      groupId !== "group-sidebar" &&
+      groupId !== RIGHT_TOP_GROUP_ID &&
+      groupId !== RIGHT_BOTTOM_GROUP_ID,
+  ),
   setPinnedTarget: vi.fn(),
-  RIGHT_TOP_GROUP: "group-right-top",
-  RIGHT_BOTTOM_GROUP: "group-right-bottom",
+  CENTER_GROUP: CANONICAL_CENTER_GROUP_ID,
+  RIGHT_TOP_GROUP: RIGHT_TOP_GROUP_ID,
+  RIGHT_BOTTOM_GROUP: RIGHT_BOTTOM_GROUP_ID,
 }));
 
 import { getEnvLayout } from "@/lib/local-storage";
@@ -511,6 +525,79 @@ describe("performEnvSwitch slow-path session tab restoration", () => {
   });
 });
 
+describe("performEnvSwitch missing Agent restoration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("restores and activates Agent in an empty center group", () => {
+    const savedLayout = makeHealthyLayoutWith({});
+    vi.mocked(getEnvLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(false);
+
+    const setActive = vi.fn();
+    const centerGroup = { id: CANONICAL_CENTER_GROUP_ID, panels: [] };
+    const addPanel = vi.fn(() => ({
+      id: NEW_SESSION_PANEL_ID,
+      api: { component: "chat", setActive },
+      group: centerGroup,
+    }));
+    const api = {
+      ...makeMockApi(),
+      panels: [],
+      groups: [centerGroup],
+      getPanel: vi.fn(() => null),
+      addPanel,
+    } as unknown as EnvSwitchParams["api"];
+
+    performEnvSwitch(makeParams({ api }));
+
+    expect(addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: NEW_SESSION_PANEL_ID,
+        position: expect.objectContaining({ referenceGroup: centerGroup.id }),
+        inactive: false,
+      }),
+    );
+    expect(setActive).toHaveBeenCalledOnce();
+  });
+
+  it("restores Agent beside a saved active Plan tab without stealing focus", () => {
+    const savedLayout = makeHealthyLayoutWith({ plan: { contentComponent: "plan" } });
+    vi.mocked(getEnvLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(false);
+
+    const setActive = vi.fn();
+    const planPanel = { id: "plan", api: { component: "plan", isActive: true } };
+    const centerGroup = { id: CANONICAL_CENTER_GROUP_ID, panels: [] };
+    const planGroup = { id: "center-secondary", panels: [planPanel] };
+    const addPanel = vi.fn(() => ({
+      id: NEW_SESSION_PANEL_ID,
+      api: { component: "chat", setActive },
+      group: centerGroup,
+    }));
+    const api = {
+      ...makeMockApi(),
+      activePanel: planPanel,
+      panels: [planPanel],
+      groups: [centerGroup, planGroup],
+      getPanel: vi.fn((id: string) => (id === "plan" ? planPanel : null)),
+      addPanel,
+    } as unknown as EnvSwitchParams["api"];
+
+    performEnvSwitch(makeParams({ api }));
+
+    expect(addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: NEW_SESSION_PANEL_ID,
+        position: expect.objectContaining({ referenceGroup: centerGroup.id }),
+        inactive: true,
+      }),
+    );
+    expect(setActive).not.toHaveBeenCalled();
+  });
+});
+
 describe("performEnvSwitch fast-path active view restoration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -583,7 +670,7 @@ describe("savedRightColumnWidth", () => {
   it("returns the saved right size for a 3-column layout (sidebar+center+right)", () => {
     const saved = makeSaved([
       { id: "group-sidebar", size: 300 },
-      { id: "group-center", size: 1000 },
+      { id: CANONICAL_CENTER_GROUP_ID, size: 1000 },
       { id: "group-right-top", size: 300 },
     ]);
     expect(savedRightColumnWidth(saved)).toBe(300);
@@ -594,7 +681,7 @@ describe("savedRightColumnWidth", () => {
     // caused the right column to fall back to ~450 default on env switch
     // instead of restoring the user's narrow width.
     const saved = makeSaved([
-      { id: "group-center", size: 1380 },
+      { id: CANONICAL_CENTER_GROUP_ID, size: 1380 },
       { id: "group-right-top", size: 220 },
     ]);
     expect(savedRightColumnWidth(saved)).toBe(220);
@@ -605,7 +692,7 @@ describe("savedRightColumnWidth", () => {
     // mistake the center for the right column.
     const saved = makeSaved([
       { id: "group-sidebar", size: 300 },
-      { id: "group-center", size: 1300 },
+      { id: CANONICAL_CENTER_GROUP_ID, size: 1300 },
     ]);
     expect(savedRightColumnWidth(saved)).toBeUndefined();
   });

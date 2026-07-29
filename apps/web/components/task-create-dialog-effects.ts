@@ -30,19 +30,33 @@ export { decideAgentProfileAutopick } from "@/components/task-create-dialog-auto
 
 const selectionDebug = createDebugLogger("task-create:selection");
 
-export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string | null) {
-  const { selectedWorkflowId, setFetchedSteps } = fs;
+export function useWorkflowStepsEffect(
+  fs: DialogFormState,
+  open: boolean,
+  workflowId: string | null,
+  effectiveWorkflowId: string | null,
+) {
+  const { setFetchedSteps } = fs;
   useEffect(() => {
-    if (!selectedWorkflowId || selectedWorkflowId === workflowId) {
-      void Promise.resolve().then(() => setFetchedSteps(null));
+    void Promise.resolve().then(() => setFetchedSteps(null));
+    if (!open || !effectiveWorkflowId || effectiveWorkflowId === workflowId) {
       return;
     }
     let cancelled = false;
-    listWorkflowSteps(selectedWorkflowId)
+    listWorkflowSteps(effectiveWorkflowId)
       .then((response) => {
         if (cancelled) return;
         const sorted = [...response.steps].sort((a, b) => a.position - b.position);
-        setFetchedSteps(sorted.map((s) => ({ id: s.id, title: s.name, events: s.events })));
+        setFetchedSteps(
+          sorted.map((s) => ({
+            id: s.id,
+            title: s.name,
+            workflowId: effectiveWorkflowId,
+            position: s.position,
+            is_start_step: s.is_start_step,
+            events: s.events,
+          })),
+        );
       })
       .catch(() => {
         if (!cancelled) setFetchedSteps(null);
@@ -50,7 +64,7 @@ export function useWorkflowStepsEffect(fs: DialogFormState, workflowId: string |
     return () => {
       cancelled = true;
     };
-  }, [selectedWorkflowId, workflowId, setFetchedSteps]);
+  }, [effectiveWorkflowId, open, workflowId, setFetchedSteps]);
 }
 
 export function useDiscoverReposEffect(
@@ -536,7 +550,8 @@ export function useGitHubUrlErrorEffect(fs: DialogFormState, open: boolean) {
 }
 
 export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreateEffectsArgs) {
-  const { open, workspaceId, workflowId, repositories, repositoriesLoading } = args;
+  const { open, workspaceId, workflowId, effectiveWorkflowId, repositories, repositoriesLoading } =
+    args;
   const {
     agentProfiles,
     compatibleAgentProfiles,
@@ -547,7 +562,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     workflows,
     isLocalExecutor,
   } = args;
-  useWorkflowStepsEffect(fs, workflowId);
+  useWorkflowStepsEffect(fs, open, workflowId, effectiveWorkflowId);
   useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles, {
     lastUsedAgentProfileId: args.lastUsedAgentProfileId,
     authLoaded,

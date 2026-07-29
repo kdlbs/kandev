@@ -89,12 +89,14 @@ func (a *KiroACP) Runtime() *RuntimeConfig {
 		Protocol:       agent.ProtocolACP,
 		UserSkillDir:   ".kiro/skills",
 		SessionConfig: SessionConfig{
-			// TODO: set SessionDirTemplate once the Kiro session dir is
-			// confirmed (likely "{home}/.kiro"). Without it, the Docker
-			// runtime skips mounting the session dir, so NativeSessionResume
-			// has no persistence across container restarts. ACP-native
-			// session/load still works in standalone mode where the host
-			// home dir is the working filesystem.
+			// Verified against Kiro CLI 2.15.0 by driving `kiro-cli-chat acp`
+			// through session/new: each ACP session is persisted as
+			// ~/.kiro/sessions/cli/<sessionId>.{json,jsonl}. KIRO_HOME
+			// relocates the directory. Note ~/.kiro carries config + sessions
+			// only — the login token lives in the separate
+			// ~/.local/share/kiro-cli/data.sqlite3 (auth_kv table), so this
+			// mount persists resumable sessions but not authentication.
+			SessionDirTemplate:  "{home}/.kiro",
 			NativeSessionResume: true,
 			CanRecover:          &canRecover,
 		},

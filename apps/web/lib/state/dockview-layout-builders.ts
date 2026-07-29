@@ -15,6 +15,7 @@ import {
 } from "./layout-manager";
 import type { LayoutGroupIds } from "./layout-manager";
 import { getGlobalSidebarWidth } from "@/lib/local-storage";
+import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 // Re-export for consumers that import from this module
@@ -61,7 +62,12 @@ function captureCallerChain(): string {
  *  Apply loose runtime caps so the user can drag freely; the just-restored
  *  widths become the new pinned targets, and `enforcePinnedTargets` restores
  *  the column to that target on every subsequent rebalance. */
-export function applyLayoutFixups(api: DockviewApi, savedRightWidth?: number): LayoutGroupIds {
+export function applyLayoutFixups(
+  api: DockviewApi,
+  /** Retained for callers restoring legacy layouts; manual width is authoritative. */
+  _savedRightWidth?: number,
+  manualRightWidth?: number | null,
+): LayoutGroupIds {
   const sv = getRootSplitviewImpl(api);
   captureSidebarTarget(api, sv);
 
@@ -70,7 +76,7 @@ export function applyLayoutFixups(api: DockviewApi, savedRightWidth?: number): L
   const oldFiles = api.getPanel("all-files");
   if (oldFiles) oldFiles.api.setTitle("Files");
 
-  captureRightTarget(api, sv, savedRightWidth);
+  captureRightTarget(api, sv, manualRightWidth);
 
   logFixupsCapture(api, sv);
 
@@ -127,19 +133,15 @@ function captureSidebarTarget(api: DockviewApi, sv: any): void {
 }
 
 /** Resolve the pinned right column's target width (clamped to the cap): the
- *  per-env SAVED width when the restore supplies one, else the column default
- *  for the current measured layout. Never the live splitview size — see
+ *  per-env MANUAL width when the user has dragged the sash, else the responsive
+ *  column default for the current measured layout. Never the live splitview size — see
  *  `captureRightTarget`. */
 function resolveRightTarget(
   cap: number,
   totalWidth: number | undefined,
-  savedRightWidth: number | undefined,
+  manualRightWidth: number | null | undefined,
 ): number {
-  if (savedRightWidth !== undefined && savedRightWidth > 0) return Math.min(savedRightWidth, cap);
-  const width =
-    totalWidth ??
-    (typeof window !== "undefined" && window.innerWidth > 0 ? window.innerWidth : cap);
-  return Math.min(getPinnedWidth({ id: "right", pinned: true, groups: [] }, width, undefined), cap);
+  return Math.min(resolveResponsiveRightWidth(totalWidth, 0, manualRightWidth ?? null, cap), cap);
 }
 
 /** Constrain the default layout's right column groups and record the side
@@ -147,7 +149,7 @@ function resolveRightTarget(
  *
  *  For the DEFAULT preset (the right column is pinned — identified by the
  *  well-known RIGHT_TOP_GROUP), the target is anchored to a STABLE width: the
- *  per-env saved width passed by the restore, or the column default when none.
+ *  per-env manual width passed by the restore, or the responsive default when none.
  *  It is deliberately NOT read from the live splitview: dockview's
  *  post-`fromJSON` proportional rebalance reports a transient/rescaled size,
  *  and persisting that as the target ratcheted the right column wider on every
@@ -171,7 +173,12 @@ function resolveRightTarget(
  *  stripped) is excluded because neither right group exists in `api.groups`
  *  and `sv.length < 3` — its last splitview child is the CENTER column. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function captureRightTarget(api: DockviewApi, sv: any, savedRightWidth?: number): void {
+function captureRightTarget(
+  api: DockviewApi,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sv: any,
+  manualRightWidth?: number | null,
+): void {
   // Constrain the default preset's right column groups (stable well-known IDs).
   // Other presets' side columns aren't pinned and carry no max-width cap.
   // Use the measured grid width, not the window.innerWidth fallback (see
@@ -191,7 +198,7 @@ function captureRightTarget(api: DockviewApi, sv: any, savedRightWidth?: number)
   // both 3-column (sidebar+center+right) and 2-column (center+right, sidebar
   // hidden) layouts since the right column is always at sv.length-1.
   if (api.groups.some((g) => g.id === RIGHT_TOP_GROUP || g.id === RIGHT_BOTTOM_GROUP)) {
-    const target = resolveRightTarget(rightCap, measuredWidth, savedRightWidth);
+    const target = resolveRightTarget(rightCap, measuredWidth, manualRightWidth);
     const cur = sv.getViewSize(idx);
     if (typeof cur === "number" && cur > 0 && Math.abs(cur - target) > 1) {
       try {

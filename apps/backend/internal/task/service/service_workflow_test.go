@@ -42,6 +42,16 @@ func (f *fakeWorkflowStepGetter) GetNextStepByPosition(_ context.Context, workfl
 	return next, nil
 }
 
+func (f *fakeWorkflowStepGetter) ListStepsByWorkflow(_ context.Context, workflowID string) ([]*wfmodels.WorkflowStep, error) {
+	steps := make([]*wfmodels.WorkflowStep, 0, len(f.steps))
+	for _, step := range f.steps {
+		if step.WorkflowID == workflowID {
+			steps = append(steps, step)
+		}
+	}
+	return steps, nil
+}
+
 type testStepNotFound struct{}
 
 func (testStepNotFound) Error() string { return "step not found" }
@@ -564,13 +574,20 @@ func TestService_MoveTaskPullsNextFeederTaskOnVacate(t *testing.T) {
 	}
 
 	movedEvents := 0
+	queuePromotedEvents := 0
 	for _, event := range eventBus.GetPublishedEvents() {
 		if event.Type == events.TaskMoved {
 			movedEvents++
 		}
+		if event.Type == events.TaskQueuePromoted {
+			queuePromotedEvents++
+		}
 	}
 	if movedEvents != 2 {
 		t.Fatalf("task.moved events = %d, want 2", movedEvents)
+	}
+	if queuePromotedEvents != 0 {
+		t.Fatalf("feeder promotion queue-promoted events = %d, want 0", queuePromotedEvents)
 	}
 }
 

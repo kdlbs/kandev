@@ -87,7 +87,7 @@ type OverviewRefresher interface {
 	Refresh(context.Context) (OverviewSnapshot, error)
 }
 
-func (o *Operations) RunNow(ctx context.Context, resources []string) (string, error) {
+func (o *Operations) RunNow(ctx context.Context, resources []string, force bool) (string, error) {
 	settings, err := o.config.Settings.GetSettings(ctx)
 	if err != nil {
 		return "", err
@@ -96,13 +96,13 @@ func (o *Operations) RunNow(ctx context.Context, resources []string) (string, er
 	if err != nil {
 		return "", err
 	}
-	if err := o.preflight(ctx); err != nil {
+	if err := o.preflight(ctx, force); err != nil {
 		return "", err
 	}
 	return o.startTracked(ctx, JobKindCleanup, func(jobCtx context.Context, id string) (map[string]any, error) {
 		runner := NewRunner(RunnerConfig{
 			Activity: o.config.Activity, Store: o.config.Store, Providers: providers,
-			NewID: func() string { return id }, Overview: o.config.Overview,
+			Force: force, NewID: func() string { return id }, Overview: o.config.Overview,
 		})
 		run, runErr := runner.Run(jobCtx, RunTriggerManual, settings)
 		return runResultMap(run), runErr
@@ -150,10 +150,20 @@ func (o *Operations) invalidateOverview() {
 	}
 }
 
-func (o *Operations) preflight(ctx context.Context) error {
-	lease, busy, err := o.config.Activity.TryAcquireMaintenance(ctx, 0)
+func (o *Operations) preflight(ctx context.Context, force bool) error {
+	var lease *activity.MaintenanceLease
+	var busy []activity.Kind
+	var err error
+	if force {
+		lease, busy, err = o.config.Activity.TryAcquireMaintenanceForce(ctx)
+	} else {
+		lease, busy, err = o.config.Activity.TryAcquireMaintenance(ctx, 0)
+	}
 	if errors.Is(err, activity.ErrBusy) {
-		return &BusyError{Resources: busy}
+		return &BusyError{
+			Resources:      activity.BusyResourcesForKinds(busy),
+			ForceAvailable: forceAvailable(busy),
+		}
 	}
 	if err != nil {
 		return err

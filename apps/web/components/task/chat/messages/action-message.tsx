@@ -38,6 +38,7 @@ const ICON_MAP: Record<string, React.ElementType> = {
 
 type ActionMeta = {
   actions?: MessageAction[];
+  action_visibility?: "running";
   variant?: string;
   recovery_actions?: boolean;
   is_auth_error?: boolean;
@@ -55,20 +56,44 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // Read session state from the store instead of receiving it as a prop, so a
   // state transition doesn't re-render every message in the list (only the
   // rare action messages that actually depend on it).
-  const sessionState = useAppStore((state) =>
-    comment.session_id
-      ? (state.taskSessions.items[comment.session_id]?.state ?? undefined)
-      : undefined,
-  );
-  const sessionError = useAppStore((state) =>
-    comment.session_id
-      ? (state.taskSessions.items[comment.session_id]?.error_message as string | undefined)
-      : undefined,
-  );
-  const [recoveryRequested, setRecoveryRequested] = useState(false);
+  const { sessionState, sessionError, activeTurnId } = useActionMessageSession(comment.session_id);
   const metadata = comment.metadata as ActionMeta | undefined;
-  const isWarning = metadata?.variant === "warning";
   const message = comment.content || "An error occurred";
+
+  if (metadata?.action_visibility === "running") {
+    if (sessionState !== "RUNNING" || !comment.turn_id || activeTurnId !== comment.turn_id) {
+      return null;
+    }
+    return (
+      <RunningActionNotice actions={metadata.actions} message={message} taskId={comment.task_id} />
+    );
+  }
+
+  return (
+    <SettledActionMessage
+      metadata={metadata}
+      message={message}
+      sessionError={sessionError}
+      sessionState={sessionState}
+      taskId={comment.task_id}
+    />
+  );
+});
+
+function SettledActionMessage({
+  metadata,
+  message,
+  sessionError,
+  sessionState,
+  taskId,
+}: {
+  metadata: ActionMeta | undefined;
+  message: string;
+  sessionError?: string;
+  sessionState?: TaskSessionState;
+  taskId?: string;
+}) {
+  const [recoveryRequested, setRecoveryRequested] = useState(false);
 
   // A waiting session can still need recovery, so only hide this persisted
   // card after its own Resume request is acknowledged (or the session starts).
@@ -79,17 +104,18 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
     return (
       <MissingBranchRecovery
         metadata={metadata}
-        taskId={comment.task_id}
+        taskId={taskId}
         fallbackMessage={message}
         technicalDetails={sessionError}
       />
     );
   }
 
-  const iconClass = isWarning ? "text-amber-500" : "text-red-500";
-  const textClass = isWarning
-    ? "text-amber-600 dark:text-amber-400"
-    : "text-red-600 dark:text-red-400";
+  const iconClass = metadata?.variant === "warning" ? "text-amber-500" : "text-red-500";
+  const textClass =
+    metadata?.variant === "warning"
+      ? "text-amber-600 dark:text-amber-400"
+      : "text-red-600 dark:text-red-400";
 
   return (
     <div className="w-full">
@@ -103,7 +129,7 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
           {metadata?.actions && metadata.actions.length > 0 && (
             <ActionButtons
               actions={metadata.actions}
-              taskId={comment.task_id}
+              taskId={taskId}
               onRecoveryRequested={
                 metadata.recovery_actions ? () => setRecoveryRequested(true) : undefined
               }
@@ -113,7 +139,42 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       </div>
     </div>
   );
-});
+}
+
+function useActionMessageSession(sessionId: Message["session_id"]) {
+  const sessionState = useAppStore((state) =>
+    sessionId ? (state.taskSessions.items[sessionId]?.state ?? undefined) : undefined,
+  );
+  const sessionError = useAppStore((state) =>
+    sessionId
+      ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
+      : undefined,
+  );
+  const activeTurnId = useAppStore((state) =>
+    sessionId ? (state.turns.activeBySession[sessionId] ?? undefined) : undefined,
+  );
+  return { sessionState, sessionError, activeTurnId };
+}
+
+function RunningActionNotice({
+  actions,
+  message,
+  taskId,
+}: {
+  actions?: MessageAction[];
+  message: string;
+  taskId?: string;
+}) {
+  return (
+    <div
+      data-testid="running-action-notice"
+      className="flex min-w-0 items-center gap-2 py-1 text-muted-foreground"
+    >
+      <span className="min-w-0 flex-1 truncate text-xs">{message}</span>
+      {actions && actions.length > 0 && <ActionButtons actions={actions} taskId={taskId} compact />}
+    </div>
+  );
+}
 
 function MissingBranchRecovery({
   metadata,
@@ -227,19 +288,28 @@ function ActionButtons({
   actions,
   taskId,
   onRecoveryRequested,
+  compact = false,
 }: {
   actions: MessageAction[];
   taskId?: string;
   onRecoveryRequested?: () => void;
+  compact?: boolean;
 }) {
   return (
-    <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+    <div
+      className={cn(
+        compact
+          ? "flex shrink-0 items-center"
+          : "mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center",
+      )}
+    >
       {actions.map((action, i) => (
         <ActionButton
           key={action.test_id ?? i}
           action={action}
           messageTaskId={taskId}
           onCompleted={onRecoveryRequested}
+          compact={compact}
         />
       ))}
     </div>
@@ -250,10 +320,12 @@ function ActionButton({
   action,
   messageTaskId,
   onCompleted,
+  compact = false,
 }: {
   action: MessageAction;
   messageTaskId?: string;
   onCompleted?: () => void;
+  compact?: boolean;
 }): ReactElement | null {
   const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
@@ -312,10 +384,12 @@ function ActionButton({
 
   const button = (
     <Button
-      variant="outline"
+      variant={compact ? "ghost" : "outline"}
       size="sm"
       className={cn(
-        "h-auto min-h-11 w-full gap-1.5 text-xs cursor-pointer sm:min-h-8 sm:w-auto",
+        compact
+          ? "h-auto min-h-11 shrink-0 px-2 text-xs cursor-pointer sm:min-h-8"
+          : "h-auto min-h-11 w-full gap-1.5 text-xs cursor-pointer sm:min-h-8 sm:w-auto",
         isDestructive && "text-destructive hover:text-destructive",
       )}
       disabled={disabled}

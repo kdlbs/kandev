@@ -179,6 +179,11 @@ Language-server subprocesses run on the Kandev backend host with the task worksp
 
 The task terminal is a PTY in the task environment. Local tasks run through the local environment; Docker, SSH, and other remote executors route the terminal to their configured runtime.
 
+When the workspace uses managed GitHub credentials, a new terminal receives the same task-scoped
+Git and GitHub CLI routing as its agent. **Inherit executor Git credentials** leaves that routing
+to the selected executor instead. The environment is fixed when the PTY starts, so reopen a
+terminal after a session resume or credential-policy change.
+
 On desktop, select **+ > Terminals > New Terminal**. Parked terminal sessions can appear in the same menu for reopening. The tab context menu offers **Rename** and **Terminate**, not a separate Close action. Selecting the tab's **X** deletes the terminal and asks for confirmation when it is busy. Removing the panel through layout management can instead park it and keep its PTY alive; terminating a live terminal or deleting a parked entry destroys it. On mobile, select **Terminal** in task navigation and use the terminal picker to create another.
 
 Do not confuse a user terminal with a CLI-passthrough agent tab: both use PTYs, but only the agent tab is the agent's native interface. `Cmd/Ctrl+J` toggles the bottom terminal area.
