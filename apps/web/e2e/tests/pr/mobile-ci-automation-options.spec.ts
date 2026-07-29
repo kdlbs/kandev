@@ -88,9 +88,14 @@ async function interceptLifecycleError(
 }
 
 async function interceptTallPRFeedback(testPage: import("@playwright/test").Page) {
-  await testPage.route(`**/api/v1/github/prs/${OWNER}/${REPO}/${PR_NUMBER}`, async (route) => {
-    await route.fulfill({ json: { checks: manyRunningChecks(30) } });
-  });
+  // Match on pathname: the feedback request carries a workspace_id query the
+  // glob form would not match.
+  await testPage.route(
+    (url) => url.pathname === `/api/v1/github/prs/${OWNER}/${REPO}/${PR_NUMBER}`,
+    async (route) => {
+      await route.fulfill({ json: { checks: manyRunningChecks(30) } });
+    },
+  );
 }
 
 test.describe("mobile PR CI automation options", () => {
