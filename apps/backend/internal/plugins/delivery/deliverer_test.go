@@ -442,15 +442,17 @@ func TestDeliverer_RefreshReturnsPromptlyDuringInFlightDelivery(t *testing.T) {
 	close(released)
 }
 
-// publishForPattern subscribes a single plugin with pattern, publishes one
-// event on subject stamped with eventType (mirroring how kandev publishes
-// per-session events: a suffixed subject carrying the bare type constant),
-// and returns the delivered pluginsdk.Event or nil if nothing was delivered
-// within window.
-func publishForPattern(t *testing.T, pattern, subject, eventType string, window time.Duration) *pluginsdk.Event {
+// barrierSubject is the control subject the negative-delivery assertions
+// publish on after the event under test — see assertNotDelivered.
+const barrierSubject = "delivery_test.barrier"
+
+// newSubjectFixture wires a Deliverer with a single plugin subscribed to
+// pattern (plus the barrier subject used by assertNotDelivered) and returns
+// the bus plus the channel every delivered event lands on.
+func newSubjectFixture(t *testing.T, pattern string) (bus.EventBus, <-chan *pluginsdk.Event) {
 	t.Helper()
 
-	receivedCh := make(chan *pluginsdk.Event, 1)
+	receivedCh := make(chan *pluginsdk.Event, 4)
 	transport := &fakeTransport{}
 	transport.setHandler(func(_ string, e *pluginsdk.Event) error {
 		receivedCh <- e
@@ -459,21 +461,59 @@ func publishForPattern(t *testing.T, pattern, subject, eventType string, window 
 
 	eventBus := bus.NewMemoryEventBus(logger.Default())
 	lister := &fakeLister{}
-	lister.set(PluginRecord{ID: "plug1", EventSubjects: []string{pattern}, Status: store.StatusActive})
+	lister.set(PluginRecord{
+		ID:            "plug1",
+		EventSubjects: []string{pattern, barrierSubject},
+		Status:        store.StatusActive,
+	})
 
 	d := newTestDeliverer(t, eventBus, transport, lister)
 	d.Refresh()
 
+	return eventBus, receivedCh
+}
+
+// publishSubject publishes one event on subject stamped with eventType,
+// mirroring how kandev publishes per-session events: a suffixed subject
+// carrying the bare type constant.
+func publishSubject(t *testing.T, eventBus bus.EventBus, subject, eventType string) {
+	t.Helper()
 	ev := bus.NewEvent(eventType, "test", map[string]interface{}{"session_id": "sess-1"})
 	if err := eventBus.Publish(context.Background(), subject, ev); err != nil {
-		t.Fatalf("Publish: %v", err)
+		t.Fatalf("Publish(%s): %v", subject, err)
 	}
+}
 
-	select {
-	case got := <-receivedCh:
-		return got
-	case <-time.After(window):
-		return nil
+// publishForPattern subscribes a single plugin with pattern, publishes one
+// event on subject, and returns the delivered pluginsdk.Event (failing the
+// test if nothing arrives). Only used for the positive cases, so it never
+// waits out its timeout on a passing run.
+func publishForPattern(t *testing.T, pattern, subject, eventType string) *pluginsdk.Event {
+	t.Helper()
+
+	eventBus, receivedCh := newSubjectFixture(t, pattern)
+	publishSubject(t, eventBus, subject, eventType)
+
+	return requireNoTimeout(t, receivedCh, 2*time.Second,
+		fmt.Sprintf("delivery of %s to pattern %s", subject, pattern))
+}
+
+// assertNotDelivered asserts pattern does not receive an event published on
+// subject, without waiting out a wall clock window: after the event under
+// test it publishes a control event on barrierSubject, which the same plugin
+// also subscribes to. The memory bus enqueues synchronously inside Publish
+// and the worker drains its single queue in FIFO order, so the barrier
+// arriving first is proof the event under test was never enqueued.
+func assertNotDelivered(t *testing.T, pattern, subject, eventType string) {
+	t.Helper()
+
+	eventBus, receivedCh := newSubjectFixture(t, pattern)
+	publishSubject(t, eventBus, subject, eventType)
+	publishSubject(t, eventBus, barrierSubject, barrierSubject)
+
+	got := requireNoTimeout(t, receivedCh, 2*time.Second, "barrier delivery")
+	if got.EventType != barrierSubject {
+		t.Fatalf("pattern %q must not receive subject %q, got EventType %q", pattern, subject, got.EventType)
 	}
 }
 
@@ -486,11 +526,7 @@ func TestDeliverer_DeliversPerSessionSuffixedSubject(t *testing.T) {
 	got := publishForPattern(t,
 		"session_prompt_usage.updated.*",
 		"session_prompt_usage.updated.sess-1",
-		"session_prompt_usage.updated",
-		2*time.Second)
-	if got == nil {
-		t.Fatal("no delivery for a 3-segment wildcard subscription to a per-session subject")
-	}
+		"session_prompt_usage.updated")
 	if got.EventType != "session_prompt_usage.updated.sess-1" {
 		t.Errorf("EventType = %q, want the concrete published subject session_prompt_usage.updated.sess-1", got.EventType)
 	}
@@ -532,10 +568,7 @@ func TestDeliverer_PerSessionSubjectFamilies(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.pattern, func(t *testing.T) {
-			got := publishForPattern(t, tc.pattern, tc.subject, tc.eventType, 2*time.Second)
-			if got == nil {
-				t.Fatalf("no delivery for pattern %q on subject %q", tc.pattern, tc.subject)
-			}
+			got := publishForPattern(t, tc.pattern, tc.subject, tc.eventType)
 			if got.EventType != tc.subject {
 				t.Errorf("EventType = %q, want %q", got.EventType, tc.subject)
 			}
@@ -562,10 +595,7 @@ func TestDeliverer_UnsuffixedSubscriptionsUnchanged(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := publishForPattern(t, tc.pattern, tc.subject, tc.subject, 2*time.Second)
-			if got == nil {
-				t.Fatalf("no delivery for pattern %q on subject %q", tc.pattern, tc.subject)
-			}
+			got := publishForPattern(t, tc.pattern, tc.subject, tc.subject)
 			if got.EventType != tc.subject {
 				t.Errorf("EventType = %q, want %q", got.EventType, tc.subject)
 			}
@@ -595,9 +625,7 @@ func TestDeliverer_SegmentCountStrictnessPreserved(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := publishForPattern(t, tc.pattern, tc.subject, tc.subject, 150*time.Millisecond); got != nil {
-				t.Fatalf("pattern %q must not receive subject %q, got EventType %q", tc.pattern, tc.subject, got.EventType)
-			}
+			assertNotDelivered(t, tc.pattern, tc.subject, tc.subject)
 		})
 	}
 }
@@ -605,13 +633,7 @@ func TestDeliverer_SegmentCountStrictnessPreserved(t *testing.T) {
 // TestDeliverer_WrongSessionSuffixNotDelivered checks a literal session id in
 // the pattern only receives that session's events.
 func TestDeliverer_WrongSessionSuffixNotDelivered(t *testing.T) {
-	if got := publishForPattern(t,
-		"shell.output.sess-other",
-		"shell.output.sess-1",
-		"shell.output",
-		150*time.Millisecond); got != nil {
-		t.Fatalf("delivered another session's event: %q", got.EventType)
-	}
+	assertNotDelivered(t, "shell.output.sess-other", "shell.output.sess-1", "shell.output")
 }
 
 // TestDeliverer_UnstampedEventFallsBackToType covers an Event handed to the
