@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -93,12 +94,12 @@ func getTaskMRRepositoryRemoteURL(t *testing.T, store *Store, repositoryID strin
 // file with a "[remote \"origin\"]" section).
 func seedLocalGitCheckout(t *testing.T, dir, remoteURL string) {
 	t.Helper()
-	gitDir := dir + "/.git"
+	gitDir := filepath.Join(dir, ".git")
 	if err := os.MkdirAll(gitDir, 0o755); err != nil {
 		t.Fatalf("mkdir git dir: %v", err)
 	}
 	config := "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = " + remoteURL + "\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
-	if err := os.WriteFile(gitDir+"/config", []byte(config), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte(config), 0o644); err != nil {
 		t.Fatalf("write git config: %v", err)
 	}
 }

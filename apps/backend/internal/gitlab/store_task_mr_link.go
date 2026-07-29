@@ -255,8 +255,6 @@ func resolveLocalCommonGitDir(gitDir string) string {
 }
 
 // parseLocalGitConfigOriginURL extracts the "origin" remote's url from raw
-// git config file content.
-// parseLocalGitConfigOriginURL extracts the "origin" remote's url from raw
 // git config file content. Tolerant of the whitespace-around-"=" and
 // key-casing variations git itself accepts ("url = x", "url=x", "URL\t=\tx"),
 // since hand-edited or tool-written configs don't always match the exact
