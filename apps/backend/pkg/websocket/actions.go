@@ -259,6 +259,7 @@ const (
 	ActionWorkspaceFileDelete        = "workspace.file.delete"
 	ActionWorkspaceFileRename        = "workspace.file.rename"
 	ActionWorkspaceFilesSearch       = "workspace.files.search"
+	ActionWorkspaceContentSearch     = "workspace.content.search"
 	ActionWorkspaceFileChanges       = "session.workspace.file.changes" // Notification
 
 	// Shell actions

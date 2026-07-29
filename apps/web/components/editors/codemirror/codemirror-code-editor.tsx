@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import CodeMirror, { type ReactCodeMirrorRef } from "@uiw/react-codemirror";
 import type { EditorView } from "@codemirror/view";
 import { Button } from "@kandev/ui/button";
@@ -26,8 +26,13 @@ import {
   ExternalVcsFileLink,
   useExternalVcsFileStatus,
 } from "@/components/editors/external-vcs-file-link";
+import { registerCodeMirrorCursorRevealer } from "@/hooks/file-editor-cursor";
 import { useCodeMirrorEditorState } from "./use-codemirror-editor-state";
 import { useCodeMirrorWalkthroughRange } from "./use-codemirror-walkthrough-range";
+import {
+  revealCodeMirrorCursor,
+  revealPendingCodeMirrorCursor,
+} from "./codemirror-cursor-navigation";
 
 const SAVE_SHORTCUT =
   typeof navigator !== "undefined" && navigator.platform.includes("Mac") ? "\u2318" : "Ctrl";
@@ -356,6 +361,15 @@ function useCodeMirrorCodeEditorSetup(props: FileEditorContentProps) {
     path,
     repo,
   });
+  useEffect(() => {
+    if (editorView) revealPendingCodeMirrorCursor(editorView, path, repo);
+  });
+  useEffect(() => {
+    if (!editorView) return;
+    return registerCodeMirrorCursorRevealer(path, repo, (line, column) =>
+      revealCodeMirrorCursor(editorView, line, column),
+    );
+  }, [editorView, path, repo]);
   const handleCreateEditor = useCallback((view: EditorView) => setEditorView(view), []);
   return { wrapperRef, editorAreaRef, editorRef, state, walkthroughRange, handleCreateEditor };
 }

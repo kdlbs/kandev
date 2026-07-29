@@ -24,6 +24,22 @@ type AgentEventPayload struct {
 	PromptGeneration   uint64     `json:"prompt_generation,omitempty"`
 }
 
+// AgentStalledPayload describes a prompt that has stopped receiving agent events.
+// It is advisory only; the lifecycle remains running until the provider completes
+// or the user cancels the turn.
+type AgentStalledPayload struct {
+	AgentExecutionID string        `json:"agent_execution_id"`
+	TaskID           string        `json:"task_id"`
+	SessionID        string        `json:"session_id"`
+	PromptGeneration uint64        `json:"prompt_generation"`
+	LastActivityAt   time.Time     `json:"last_activity_at"`
+	StalledFor       time.Duration `json:"stalled_for"`
+	ToolCallID       string        `json:"tool_call_id,omitempty"`
+	ToolName         string        `json:"tool_name,omitempty"`
+	ToolTitle        string        `json:"tool_title,omitempty"`
+	ToolStatus       string        `json:"tool_status,omitempty"`
+}
+
 // AgentctlEventPayload is the payload for agentctl lifecycle events (starting, ready, error).
 type AgentctlEventPayload struct {
 	TaskID            string `json:"task_id"`

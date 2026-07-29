@@ -12,6 +12,45 @@ const START_ENABLED_TIMEOUT = 30_000;
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 
 test.describe("Task creation", () => {
+  test("hidden workflow task detail does not leak into standard task creation", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const hidden = await apiClient.e2eCreateHiddenWorkflow(
+      seedData.workspaceId,
+      "Hidden task-detail workflow",
+    );
+    const hiddenStart = await apiClient.createWorkflowStep(hidden.id, "Improve", 0, {
+      is_start_step: true,
+    });
+    const sourceTask = await apiClient.createTask(seedData.workspaceId, "Hidden source task", {
+      description: "Source task in the hidden workflow",
+      workflow_id: hidden.id,
+      workflow_step_id: hiddenStart.id,
+    });
+
+    await testPage.goto(`/t/${sourceTask.id}`);
+    await testPage.getByTestId("create-task-button").first().click();
+
+    const dialog = testPage.getByTestId("create-task-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByTestId("task-title-input").fill("Visible workflow task");
+    await dialog.getByTestId("task-description-input").fill("Created from hidden task detail");
+    await expect(dialog.getByTestId(START_AGENT_TEST_ID)).toBeEnabled({
+      timeout: START_ENABLED_TIMEOUT,
+    });
+    await dialog.getByTestId("submit-start-agent-chevron").click();
+    await testPage.getByTestId("submit-create-without-agent").click();
+
+    await expect
+      .poll(() => getTaskIdFromPage(testPage), { timeout: 15_000 })
+      .not.toBe(sourceTask.id);
+    const createdTaskId = await getTaskIdFromPage(testPage);
+    const createdTask = await apiClient.getTask(createdTaskId);
+    expect(createdTask.workflow_step_id).toBe(seedData.startStepId);
+  });
+
   test("selects the single visible workflow when hidden workflows are loaded", async ({
     testPage,
     apiClient,

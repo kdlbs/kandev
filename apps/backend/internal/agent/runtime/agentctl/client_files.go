@@ -80,6 +80,45 @@ func (c *Client) SearchFiles(ctx context.Context, query string, limit int) (*Fil
 	return &result, nil
 }
 
+// SearchWorkspaceContent searches matching lines in every task repository.
+func (c *Client) SearchWorkspaceContent(
+	ctx context.Context,
+	query string,
+	limit int,
+) (*WorkspaceContentSearchResponse, error) {
+	reqURL := fmt.Sprintf(
+		"%s/api/v1/workspace/content-search?q=%s&limit_per_repo=%d",
+		c.baseURL,
+		url.QueryEscape(query),
+		limit,
+	)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create content search request: %w", err)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search workspace content: %w", err)
+	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			c.logger.Debug("failed to close content search response body", zap.Error(err))
+		}
+	}()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("workspace content search failed with status %d", resp.StatusCode)
+	}
+
+	var result WorkspaceContentSearchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode content search response: %w", err)
+	}
+	if result.Error != "" {
+		return nil, fmt.Errorf("workspace content search error: %s", result.Error)
+	}
+	return &result, nil
+}
+
 // RequestFileContent requests file content via HTTP GET.
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
 func (c *Client) RequestFileContent(ctx context.Context, path, repo string) (*FileContentResponse, error) {
@@ -324,11 +363,13 @@ func (c *Client) RenameFile(ctx context.Context, oldPath, newPath, repo string) 
 	return &response, nil
 }
 
-// FileSearchResponse represents a response with matching files
-type FileSearchResponse struct {
-	Files []string `json:"files"`
-	Error string   `json:"error,omitempty"`
-}
+type (
+	FileSearchResult               = streams.FileSearchResult
+	FileSearchResponse             = streams.FileSearchResponse
+	WorkspaceContentMatchRange     = streams.WorkspaceContentMatchRange
+	WorkspaceContentSearchResult   = streams.WorkspaceContentSearchResult
+	WorkspaceContentSearchResponse = streams.WorkspaceContentSearchResponse
+)
 
 // CopyFilesRequest is the body for POST /workspace/copy-files. Mirrors the
 // agentctl-side api.CopyFilesRequest shape — kept local rather than imported

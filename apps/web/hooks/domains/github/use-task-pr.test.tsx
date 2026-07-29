@@ -16,9 +16,18 @@ vi.mock("@/lib/api/domains/github-api", () => ({
 }));
 
 import { useTaskPR } from "./use-task-pr";
+import { useAppStoreApi } from "@/components/state-provider";
 
 function wrapper({ children }: { children: ReactNode }) {
   return createElement(StateProvider, null, children);
+}
+
+// Renders the hook alongside the store api so a test can drive
+// `connection.status` transitions the way `useWebSocket` does in prod.
+function useTaskPRWithStore(taskId: string | null) {
+  const result = useTaskPR(taskId);
+  const store = useAppStoreApi();
+  return { result, store };
 }
 
 beforeEach(() => {
@@ -78,5 +87,95 @@ describe("useTaskPR — permanent flag", () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(requestMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("useTaskPR — reconnect resync", () => {
+  // Reproduces the missing "Pull Request" tab: the task is opened while the
+  // WS is down, all 6 retry attempts elapse without a response, and the store
+  // never learns about the PR. When the socket later reconnects, the hook must
+  // reset the exhausted retry window and refire the sync so the tab appears.
+  it("resyncs when the connection transitions to connected after retries are exhausted", async () => {
+    // No PR ever comes back while "disconnected", so the retry loop runs to
+    // exhaustion (initial call + 6 retries).
+    requestMock.mockResolvedValue({ prs: [] });
+
+    const { result } = renderHook(() => useTaskPRWithStore("task-1"), { wrapper });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // Burn through the full retry budget (6 * 5s).
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000 * 6);
+    });
+    const callsAfterExhaustion = requestMock.mock.calls.length;
+
+    // The socket comes up; useWebSocket flips the store to "connected".
+    await act(async () => {
+      result.current.store.getState().setConnectionStatus("connected", null);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(requestMock.mock.calls.length).toBeGreaterThan(callsAfterExhaustion);
+  });
+
+  // Resetting the retry refs on reconnect is not enough on its own: once the
+  // retry budget is exhausted the 5s interval clears itself, and simply zeroing
+  // retryRef doesn't recreate it. If the single reconnect sync returns empty,
+  // the store stays empty and the tab never appears. The polling interval must
+  // restart on reconnect so a fresh 30s window of 5s retries runs.
+  it("restarts the 5s retry polling after reconnect when the resync returns empty", async () => {
+    requestMock.mockResolvedValue({ prs: [] });
+
+    const { result } = renderHook(() => useTaskPRWithStore("task-1"), { wrapper });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // Advance past the clearing tick (7 * 5s = 35s): the 6 retries fire and the
+    // 7th tick hits the budget guard and clears the interval, so no interval is
+    // live when the socket reconnects.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000 * 7);
+    });
+    const callsAfterExhaustion = requestMock.mock.calls.length;
+
+    // Reconnect: the resync fires once immediately (still empty).
+    await act(async () => {
+      result.current.store.getState().setConnectionStatus("connected", null);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const callsAfterReconnect = requestMock.mock.calls.length;
+    expect(callsAfterReconnect).toBeGreaterThan(callsAfterExhaustion);
+
+    // A fresh polling window must now run: advancing another 5s tick fires
+    // another retry. Without restarting the interval this stays flat.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(requestMock.mock.calls.length).toBeGreaterThan(callsAfterReconnect);
+  });
+
+  // A no-op status write (already-connected re-render) must not refire, or
+  // every unrelated store update would spam the backend sync.
+  it("does not refire while the status stays connected", async () => {
+    requestMock.mockResolvedValue({ prs: [] });
+
+    const { result } = renderHook(() => useTaskPRWithStore("task-1"), { wrapper });
+
+    await act(async () => {
+      result.current.store.getState().setConnectionStatus("connected", null);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const callsAfterConnect = requestMock.mock.calls.length;
+
+    // Re-assert the same status: no transition edge, so no new sync.
+    await act(async () => {
+      result.current.store.getState().setConnectionStatus("connected", null);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    expect(requestMock.mock.calls.length).toBe(callsAfterConnect);
   });
 });

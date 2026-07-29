@@ -3,6 +3,7 @@ import { SHORTCUTS, type KeyboardShortcut } from "./constants";
 export type ConfigurableShortcutId =
   | "SEARCH"
   | "FILE_SEARCH"
+  | "CONTENT_SEARCH"
   | "QUICK_CHAT"
   | "BOTTOM_TERMINAL"
   | "TOGGLE_SIDEBAR"
@@ -39,6 +40,7 @@ export const CONFIGURABLE_SHORTCUTS: Record<
 > = {
   SEARCH: { label: "Command Panel", default: SHORTCUTS.SEARCH },
   FILE_SEARCH: { label: "File Search", default: SHORTCUTS.FILE_SEARCH },
+  CONTENT_SEARCH: { label: "Search Task Contents", default: SHORTCUTS.CONTENT_SEARCH },
   QUICK_CHAT: { label: "Quick Chat", default: SHORTCUTS.QUICK_CHAT },
   BOTTOM_TERMINAL: { label: "Toggle Bottom Terminal", default: SHORTCUTS.BOTTOM_TERMINAL },
   TOGGLE_SIDEBAR: { label: "Toggle Sidebar", default: UNBOUND_SHORTCUT },

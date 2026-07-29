@@ -132,6 +132,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/workspace/file/rename", s.handleFileRename)
 		api.DELETE("/workspace/file", s.handleFileDelete)
 		api.GET("/workspace/search", s.handleFileSearch)
+		api.GET("/workspace/content-search", s.handleWorkspaceContentSearch)
 
 		// Batched copy of files from the host (used by remote executors —
 		// Docker, Sprites — to seed the workspace with gitignored config

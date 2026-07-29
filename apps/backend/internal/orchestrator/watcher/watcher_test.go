@@ -303,6 +303,48 @@ func TestAgentEventHandling(t *testing.T) {
 	})
 }
 
+func TestWatcherDispatchesAgentStalled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := newMockEventBus()
+		var received lifecycle.AgentStalledPayload
+		var handled bool
+		var mu sync.Mutex
+		w := NewWatcher(eventBus, EventHandlers{
+			OnAgentStalled: func(_ context.Context, payload lifecycle.AgentStalledPayload) {
+				mu.Lock()
+				received = payload
+				handled = true
+				mu.Unlock()
+			},
+		}, "orchestrator-test", createTestLogger())
+		if err := w.Start(context.Background()); err != nil {
+			t.Fatalf("start watcher: %v", err)
+		}
+		t.Cleanup(func() { _ = w.Stop() })
+
+		event := bus.NewEvent(events.AgentStalled, "test", map[string]interface{}{
+			"agent_execution_id": "agent-456",
+			"task_id":            "task-123",
+			"session_id":         "session-789",
+			"prompt_generation":  7,
+			"tool_title":         "Start dev server",
+		})
+		if err := eventBus.Publish(context.Background(), events.AgentStalled, event); err != nil {
+			t.Fatalf("publish stalled event: %v", err)
+		}
+		synctest.Wait()
+
+		mu.Lock()
+		defer mu.Unlock()
+		if !handled {
+			t.Fatal("OnAgentStalled handler was not called")
+		}
+		if received.SessionID != "session-789" || received.ToolTitle != "Start dev server" {
+			t.Fatalf("received stalled payload = %#v", received)
+		}
+	})
+}
+
 func TestAgentStreamEventHandling(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		eventBus := newMockEventBus()

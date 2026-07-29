@@ -156,16 +156,33 @@ test.describe("Command Panel", () => {
     await expect(testPage.getByRole("heading", { name: /Create Pull Request/ })).toBeVisible();
   });
 
-  test("Cmd+Shift+K opens file search mode with appropriate placeholder", async ({ testPage }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+  test("Cmd+Shift+K opens file search inside a task workbench", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "File Search Shortcut E2E",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    await new SessionPage(testPage).waitForLoad();
 
     await openFileSearch(testPage);
     const dialog = commandDialog(testPage);
     await expect(dialog).toBeVisible({ timeout: 5_000 });
 
-    // Should show the "Files" back-button breadcrumb
-    await expect(dialog.getByRole("button", { name: /Files/ })).toBeVisible();
+    await expect(dialog.getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
 
     // Should show empty state for file search
     await expect(dialog.getByText("Type to search files...")).toBeVisible();
@@ -280,9 +297,24 @@ test.describe("Command Panel", () => {
     await expect(dialog).not.toBeVisible({ timeout: 3_000 });
   });
 
-  test("Backspace in file search mode returns to commands mode", async ({ testPage }) => {
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
+  test("Backspace keeps the empty file-search scope active", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "File Search Backspace E2E",
+      seedData.agentProfileId,
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+      },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    await new SessionPage(testPage).waitForLoad();
 
     // Open file search mode
     await openFileSearch(testPage);
@@ -290,14 +322,18 @@ test.describe("Command Panel", () => {
     await expect(dialog).toBeVisible({ timeout: 5_000 });
     await expect(dialog.getByText("Type to search files...")).toBeVisible();
 
-    // Focus the input and press backspace on empty input to go back to commands mode
+    // Files is a peer scope, not a nested command mode, so an empty Backspace
+    // should remain in place instead of acting as hidden "back" navigation.
     const input = dialog.getByRole("combobox");
     await input.focus();
     await input.press("Backspace");
 
-    // Should now show the commands mode (navigation commands visible)
-    await expect(dialog.getByText("Navigation")).toBeVisible({ timeout: 5_000 });
-    await expect(dialog.getByText("Go to Home")).toBeVisible({ timeout: 3_000 });
+    await expect(dialog.getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(dialog.getByText("Type to search files...")).toBeVisible();
+    await expect(dialog.getByText("Navigation")).toHaveCount(0);
   });
 
   test("Cmd+K toggles the panel open and closed", async ({ testPage }) => {

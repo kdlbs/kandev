@@ -2,39 +2,44 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
+import { usePathname } from "@/lib/routing/client-router";
 import { useCommands, useCommandPanelOpen } from "@/lib/commands/command-registry";
 import type { CommandPanelMode, CommandItem as CommandItemType } from "@/lib/commands/types";
 import { findFirstMatchingCommand, selectCommandSearchResult } from "@/lib/commands/search";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
-import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
-import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
+import { useCommandPanelShortcuts } from "@/hooks/use-command-panel-shortcuts";
+import { useContentSearchResultOpener } from "@/hooks/use-content-search-result-opener";
+import { useWorkspaceContentSearch } from "@/hooks/domains/session/use-workspace-content-search";
 import { useAppStore } from "@/components/state-provider";
+import {
+  isCommandPanelScopeMode,
+  type CommandPanelScopeMode,
+} from "@/components/command-panel-scope-switcher";
 
 import { listTasksByWorkspace } from "@/lib/api";
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
+import type { FileSearchResult } from "@/lib/types/backend";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { searchWorkspaceFiles } from "@/lib/ws/workspace-files";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { getContentSearchResultValue } from "@/components/workspace-content-search";
+import { getFileName } from "@/lib/utils/file-path";
+import { isTaskWorkspaceSearchAvailable } from "@/lib/commands/task-workspace-search";
 import {
   CommandPanelView,
   MODE_COMMANDS,
+  MODE_SEARCH_CONTENT,
   MODE_SEARCH_FILES,
   getFileResultValue,
   getTaskResultValue,
 } from "@/components/command-panel-footer";
 
-function getFileName(filePath: string) {
-  return filePath.split("/").pop() ?? filePath;
-}
-
-function useCommandPanelState() {
-  const [mode, setMode] = useState<CommandPanelMode>(MODE_COMMANDS);
+function useCommandPanelState(mode: CommandPanelMode, setMode: (mode: CommandPanelMode) => void) {
   const [search, setSearch] = useState("");
   const [inputCommand, setInputCommand] = useState<CommandItemType | null>(null);
   const [taskResults, setTaskResults] = useState<Task[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [fileResults, setFileResults] = useState<string[]>([]);
+  const [fileResults, setFileResults] = useState<FileSearchResult[]>([]);
   const [isSearchingFiles, setIsSearchingFiles] = useState(false);
   const [selectedValue, setSelectedValue] = useState("");
   return {
@@ -57,27 +62,33 @@ function useCommandPanelState() {
   };
 }
 
-function useCommandPanelEffectRefs() {
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const fileDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  return { debounceRef, abortRef, fileDebounceRef };
-}
-
 type FileSearchEffectOptions = {
   mode: CommandPanelMode;
   search: string;
+  workspaceSearchAvailable: boolean;
   activeSessionId: string | null;
-  setFileResults: (files: string[]) => void;
+  setFileResults: (files: FileSearchResult[]) => void;
   setIsSearchingFiles: (searching: boolean) => void;
   fileDebounceRef: React.RefObject<ReturnType<typeof setTimeout> | null>;
 };
 
 function useFileSearchEffect(opts: FileSearchEffectOptions) {
-  const { mode, search, activeSessionId, setFileResults, setIsSearchingFiles, fileDebounceRef } =
-    opts;
+  const {
+    mode,
+    search,
+    workspaceSearchAvailable,
+    activeSessionId,
+    setFileResults,
+    setIsSearchingFiles,
+    fileDebounceRef,
+  } = opts;
   useEffect(() => {
-    if (mode !== MODE_SEARCH_FILES || !search.trim() || !activeSessionId) {
+    if (
+      !workspaceSearchAvailable ||
+      mode !== MODE_SEARCH_FILES ||
+      !search.trim() ||
+      !activeSessionId
+    ) {
       setFileResults([]);
       setIsSearchingFiles(false);
       return;
@@ -94,8 +105,8 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
       try {
         const res = await searchWorkspaceFiles(client, activeSessionId, search.trim(), 10);
         if (!cancelled) {
-          const files = res.files ?? [];
-          setFileResults(files);
+          const results = res.results ?? (res.files ?? []).map((path) => ({ path }));
+          setFileResults(results);
         }
       } catch {
         if (!cancelled) setFileResults([]);
@@ -107,7 +118,15 @@ function useFileSearchEffect(opts: FileSearchEffectOptions) {
       cancelled = true;
       if (fileDebounceRef.current) clearTimeout(fileDebounceRef.current);
     };
-  }, [activeSessionId, fileDebounceRef, mode, search, setFileResults, setIsSearchingFiles]);
+  }, [
+    activeSessionId,
+    fileDebounceRef,
+    mode,
+    search,
+    setFileResults,
+    setIsSearchingFiles,
+    workspaceSearchAvailable,
+  ]);
 }
 
 const ARCHIVED_STATES = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
@@ -242,13 +261,26 @@ function useInlineTaskSearchEffect(opts: InlineTaskSearchOptions) {
   ]);
 }
 
-function useCommandPanelEffects(
-  open: boolean,
-  state: ReturnType<typeof useCommandPanelState>,
-  workspaceId: string | null,
-  activeSessionId: string | null,
-  steps: { id: string; position: number; show_in_command_panel?: boolean }[],
-) {
+type CommandPanelEffectsOptions = {
+  open: boolean;
+  state: ReturnType<typeof useCommandPanelState>;
+  workspaceId: string | null;
+  activeSessionId: string | null;
+  workspaceSearchAvailable: boolean;
+  steps: { id: string; position: number; show_in_command_panel?: boolean }[];
+  modeRequestVersion: number;
+};
+
+function useCommandPanelEffects(options: CommandPanelEffectsOptions) {
+  const {
+    open,
+    state,
+    workspaceId,
+    activeSessionId,
+    workspaceSearchAvailable,
+    steps,
+    modeRequestVersion,
+  } = options;
   const {
     mode,
     search,
@@ -261,7 +293,24 @@ function useCommandPanelEffects(
     setIsSearchingFiles,
     setSelectedValue,
   } = state;
-  const { fileDebounceRef } = useCommandPanelEffectRefs();
+  const fileDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousRequestVersion = useRef(modeRequestVersion);
+  useEffect(() => {
+    if (previousRequestVersion.current === modeRequestVersion) return;
+    previousRequestVersion.current = modeRequestVersion;
+    setSearch("");
+    setInputCommand(null);
+    setTaskResults([]);
+    setFileResults([]);
+    setSelectedValue("");
+  }, [
+    modeRequestVersion,
+    setFileResults,
+    setInputCommand,
+    setSearch,
+    setSelectedValue,
+    setTaskResults,
+  ]);
   useEffect(() => {
     if (!open) {
       const t = setTimeout(() => {
@@ -289,6 +338,7 @@ function useCommandPanelEffects(
   useFileSearchEffect({
     mode,
     search,
+    workspaceSearchAvailable,
     activeSessionId,
     setFileResults,
     setIsSearchingFiles,
@@ -300,6 +350,7 @@ function useFirstResultSelection(
   open: boolean,
   state: ReturnType<typeof useCommandPanelState>,
   commands: CommandItemType[],
+  contentResults: ReturnType<typeof useWorkspaceContentSearch>["results"],
 ) {
   const { mode, search, taskResults, fileResults, setSelectedValue } = state;
   const previousCommandsRef = useRef(commands);
@@ -333,12 +384,18 @@ function useFirstResultSelection(
 
     if (mode === MODE_SEARCH_FILES) {
       const firstFile = fileResults[0];
-      setSelectedValue(firstFile ? getFileResultValue(firstFile) : "");
+      setSelectedValue(firstFile ? getFileResultValue(firstFile.path) : "");
+      return;
+    }
+
+    if (mode === MODE_SEARCH_CONTENT) {
+      const firstResult = contentResults[0];
+      setSelectedValue(firstResult ? getContentSearchResultValue(firstResult) : "");
       return;
     }
 
     setSelectedValue("");
-  }, [commands, fileResults, mode, open, search, setSelectedValue, taskResults]);
+  }, [commands, contentResults, fileResults, mode, open, search, setSelectedValue, taskResults]);
 }
 
 function useCommandPanelHandlers(
@@ -416,7 +473,7 @@ function useCommandPanelHandlers(
         inputCommand.onInputSubmit(search.trim());
         return;
       }
-      if (mode !== MODE_COMMANDS && e.key === "Backspace" && !search) {
+      if (!isCommandPanelScopeMode(mode) && e.key === "Backspace" && !search) {
         e.preventDefault();
         setMode(MODE_COMMANDS);
         setSearch("");
@@ -425,6 +482,11 @@ function useCommandPanelHandlers(
     },
     [mode, search, inputCommand, setOpen, setMode, setSearch, setInputCommand],
   );
+
+  const onScopeChange = (nextMode: CommandPanelScopeMode) => {
+    setMode(nextMode);
+    setInputCommand(null);
+  };
 
   const goBack = useCallback(() => {
     setMode(MODE_COMMANDS);
@@ -440,20 +502,28 @@ function useCommandPanelHandlers(
     handleTaskSelect,
     handleFileSelect,
     handleKeyDown,
+    onScopeChange,
     goBack,
   };
 }
 
 export function CommandPanel() {
-  const { open, setOpen } = useCommandPanelOpen();
+  const { open, setOpen, mode: panelMode, setMode, modeRequestVersion } = useCommandPanelOpen();
   const commands = useCommands();
+  const pathname = usePathname();
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const workspaceSearchAvailable = useAppStore((state) =>
+    isTaskWorkspaceSearchAvailable(state, pathname),
+  );
+  const worktreePath = useAppStore((s) =>
+    activeSessionId ? (s.taskSessions.items[activeSessionId]?.worktree_path ?? null) : null,
+  );
   const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const repositories = workspaceId ? (reposByWorkspace[workspaceId] ?? []) : [];
 
-  const state = useCommandPanelState();
+  const state = useCommandPanelState(panelMode, setMode);
   const {
     mode,
     search,
@@ -467,35 +537,34 @@ export function CommandPanel() {
     setSearch,
   } = state;
 
-  useCommandPanelEffects(open, state, workspaceId, activeSessionId, kanbanSteps);
-  useFirstResultSelection(open, state, commands);
+  useCommandPanelEffects({
+    open,
+    state,
+    workspaceId,
+    activeSessionId,
+    workspaceSearchAvailable,
+    steps: kanbanSteps,
+    modeRequestVersion,
+  });
+  const {
+    results: contentResults,
+    isSearching: isSearchingContent,
+    error: contentSearchError,
+  } = useWorkspaceContentSearch({
+    enabled: open && workspaceSearchAvailable && mode === MODE_SEARCH_CONTENT,
+    query: search,
+    sessionId: activeSessionId,
+  });
+  useFirstResultSelection(open, state, commands, contentResults);
 
-  const openRef = useRef(open);
-  useEffect(() => {
-    openRef.current = open;
-  }, [open]);
-
-  const toggleCommands = useCallback(() => setOpen(!openRef.current), [setOpen]);
-
-  const openFileSearch = useCallback(() => {
-    if (openRef.current && state.mode === MODE_SEARCH_FILES) {
-      setOpen(false);
-    } else {
-      state.setMode(MODE_SEARCH_FILES);
-      state.setSearch("");
-      setOpen(true);
-    }
-  }, [setOpen, state]);
-
-  const keyboardShortcuts = useAppStore((s) => s.userSettings.keyboardShortcuts);
-  const searchShortcut = getShortcut("SEARCH", keyboardShortcuts);
-  const fileSearchShortcut = getShortcut("FILE_SEARCH", keyboardShortcuts);
-
-  const commandPanelShortcut = getShortcut("COMMAND_PANEL", keyboardShortcuts);
-  useKeyboardShortcut(searchShortcut, toggleCommands);
-  useKeyboardShortcut(commandPanelShortcut, toggleCommands);
-  useKeyboardShortcut(SHORTCUTS.COMMAND_PANEL_SHIFT, toggleCommands);
-  useKeyboardShortcut(fileSearchShortcut, openFileSearch);
+  useCommandPanelShortcuts({
+    open,
+    setOpen,
+    mode,
+    workspaceSearchAvailable,
+    setMode,
+    setSearch,
+  });
 
   const {
     grouped,
@@ -505,8 +574,10 @@ export function CommandPanel() {
     handleTaskSelect,
     handleFileSelect,
     handleKeyDown,
+    onScopeChange,
     goBack,
   } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps, repositories);
+  const handleContentSelect = useContentSearchResultOpener(setOpen, worktreePath);
 
   return (
     <CommandPanelView
@@ -519,10 +590,17 @@ export function CommandPanel() {
       search={search}
       setSearch={setSearch}
       handleKeyDown={handleKeyDown}
+      onScopeChange={onScopeChange}
       goBack={goBack}
       fileResults={fileResults}
       isSearchingFiles={isSearchingFiles}
       handleFileSelect={handleFileSelect}
+      contentResults={contentResults}
+      isSearchingContent={isSearchingContent}
+      contentSearchError={contentSearchError}
+      activeSessionId={activeSessionId}
+      workspaceSearchAvailable={workspaceSearchAvailable}
+      handleContentSelect={handleContentSelect}
       commands={commands}
       grouped={grouped}
       handleSelect={handleSelect}

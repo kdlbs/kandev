@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/coder/acp-go-sdk"
@@ -1732,6 +1733,58 @@ func TestWaitForPromptDone_IgnoresSupersededGenerationSignal(t *testing.T) {
 	if result == nil || result.StopReason != "end_turn" {
 		t.Fatalf("result = %+v, want replacement completion", result)
 	}
+}
+
+func TestWaitForPromptDone_PublishesSingleStall(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		eventBus := &MockEventBusWithTracking{}
+		sm := NewSessionManager(newSessionTestLogger(), make(chan struct{}))
+		sm.eventPublisher = NewEventPublisher(eventBus, newSessionTestLogger())
+		execution := &AgentExecution{
+			ID:           "test-exec",
+			TaskID:       "test-task",
+			SessionID:    "test-session",
+			promptDoneCh: make(chan PromptCompletionSignal, 1),
+		}
+		execution.lastActivityAt = time.Now()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		waitResult := make(chan error, 1)
+		go func() {
+			_, err := sm.waitForPromptDone(ctx, execution, 7)
+			waitResult <- err
+		}()
+
+		time.Sleep(5 * time.Minute)
+		synctest.Wait()
+		if got := countPublishedEvents(eventBus, "agent.stalled"); got != 1 {
+			t.Fatalf("published stalled events = %d, want 1", got)
+		}
+
+		time.Sleep(2 * time.Minute)
+		synctest.Wait()
+		if got := countPublishedEvents(eventBus, "agent.stalled"); got != 1 {
+			t.Fatalf("published stalled events after later checks = %d, want 1", got)
+		}
+
+		cancel()
+		if err := <-waitResult; !errors.Is(err, context.Canceled) {
+			t.Fatalf("waitForPromptDone error = %v, want context canceled", err)
+		}
+	})
+}
+
+func countPublishedEvents(eventBus *MockEventBusWithTracking, subject string) int {
+	eventBus.mu.Lock()
+	defer eventBus.mu.Unlock()
+	var count int
+	for _, event := range eventBus.PublishedEvents {
+		if event.Subject == subject {
+			count++
+		}
+	}
+	return count
 }
 
 func TestSendPrompt_TriggerTimeCancelReleaseReturnsErrCancelEscalated(t *testing.T) {

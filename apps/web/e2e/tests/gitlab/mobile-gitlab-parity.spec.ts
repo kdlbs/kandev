@@ -210,6 +210,7 @@ test.describe("Mobile GitLab parity", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     test.setTimeout(120_000);
     await apiClient.configureGitLab(seedData.workspaceId);
@@ -269,6 +270,9 @@ test.describe("Mobile GitLab parity", () => {
     await save.tap();
     await expect(mobileList.getByText("Paused", { exact: true })).toBeVisible();
     await expect(check).toBeDisabled();
+    await prCapture.screenshot("mobile-review-watch-paused", {
+      caption: "Mobile review watch remains paused after saving",
+    });
     await assertLocatorWithinViewportX(mobileList, "mobile watch list");
     await assertNoDocumentHorizontalOverflow(testPage, "GitLab mobile watch settings");
   });

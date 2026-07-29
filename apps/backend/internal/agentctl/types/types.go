@@ -34,16 +34,21 @@ type (
 	FileInfo                    = streams.FileInfo
 
 	// File stream types
-	FileChangeNotification = streams.FileChangeNotification
-	FileListUpdate         = streams.FileListUpdate
-	FileEntry              = streams.FileEntry
-	FileTreeNode           = streams.FileTreeNode
-	FileTreeRequest        = streams.FileTreeRequest
-	FileTreeResponse       = streams.FileTreeResponse
-	FileContentRequest     = streams.FileContentRequest
-	FileContentResponse    = streams.FileContentResponse
-	FileSearchRequest      = streams.FileSearchRequest
-	FileSearchResponse     = streams.FileSearchResponse
+	FileChangeNotification         = streams.FileChangeNotification
+	FileListUpdate                 = streams.FileListUpdate
+	FileEntry                      = streams.FileEntry
+	FileTreeNode                   = streams.FileTreeNode
+	FileTreeRequest                = streams.FileTreeRequest
+	FileTreeResponse               = streams.FileTreeResponse
+	FileContentRequest             = streams.FileContentRequest
+	FileContentResponse            = streams.FileContentResponse
+	FileSearchRequest              = streams.FileSearchRequest
+	FileSearchResult               = streams.FileSearchResult
+	FileSearchResponse             = streams.FileSearchResponse
+	WorkspaceContentSearchRequest  = streams.WorkspaceContentSearchRequest
+	WorkspaceContentMatchRange     = streams.WorkspaceContentMatchRange
+	WorkspaceContentSearchResult   = streams.WorkspaceContentSearchResult
+	WorkspaceContentSearchResponse = streams.WorkspaceContentSearchResponse
 
 	// Shell stream types
 	ShellMessage        = streams.ShellMessage
@@ -83,6 +88,8 @@ const (
 	FileOpRename  = streams.FileOpRename
 	FileOpChmod   = streams.FileOpChmod
 	FileOpRefresh = streams.FileOpRefresh
+
+	WorkspaceContentSearchMaxQueryRunes = streams.WorkspaceContentSearchMaxQueryRunes
 
 	// Shell message types
 	ShellMsgTypeInput  = streams.ShellMsgTypeInput

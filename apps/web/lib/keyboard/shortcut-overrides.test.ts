@@ -14,6 +14,7 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     const ids = Object.keys(CONFIGURABLE_SHORTCUTS);
     expect(ids).toContain("SEARCH");
     expect(ids).toContain("FILE_SEARCH");
+    expect(ids).toContain("CONTENT_SEARCH");
     expect(ids).toContain("QUICK_CHAT");
     expect(ids).toContain("BOTTOM_TERMINAL");
     expect(ids).toContain("TOGGLE_SIDEBAR");
@@ -27,10 +28,12 @@ describe("CONFIGURABLE_SHORTCUTS", () => {
     expect(ids).toContain("VOICE_INPUT_TOGGLE");
     expect(ids).toContain("REVERSE_SEARCH");
     expect(ids).toContain("OPEN_TASK_PR");
-    expect(ids).toHaveLength(15);
+    expect(ids).toHaveLength(16);
   });
 
   it("each entry has a label and default matching SHORTCUTS", () => {
+    expect(CONFIGURABLE_SHORTCUTS.CONTENT_SEARCH.label).toBe("Search Task Contents");
+    expect(CONFIGURABLE_SHORTCUTS.CONTENT_SEARCH.default).toBe(SHORTCUTS.CONTENT_SEARCH);
     expect(CONFIGURABLE_SHORTCUTS.BOTTOM_TERMINAL.label).toBe("Toggle Bottom Terminal");
     expect(CONFIGURABLE_SHORTCUTS.BOTTOM_TERMINAL.default).toBe(SHORTCUTS.BOTTOM_TERMINAL);
 
