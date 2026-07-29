@@ -181,6 +181,9 @@ export type UserSettingsState = {
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
+  showAnchoredPromptBar: boolean;
+  showScrollToLastPrompt: boolean;
+  showScrollToStart: boolean;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];

@@ -9,6 +9,16 @@ import {
   type ChatSubmitResult,
 } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
+import {
+  type MessageListHandle,
+  type LastPromptEdge,
+  getLastUserMessageId,
+  getFirstUserMessageId,
+  resolveLastPromptControls,
+  shouldLoadMoreForTranscriptTarget,
+} from "@/components/task/chat/message-list-shared";
+import { AnchoredLastPromptBar } from "@/components/task/chat/anchored-last-prompt-bar";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
 import { ChatInputArea, useSubmitHandler, useChatPanelHandlers } from "./chat/chat-input-area";
@@ -20,6 +30,7 @@ import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
 import { useAppStore } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
@@ -188,7 +199,66 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   }, [pendingClarification, clarificationResetHeight]);
 
   const panelRef = useRef<HTMLDivElement>(null);
-  const { loadMore } = useLazyLoadMessages(resolvedSessionId);
+  const messageListRef = useRef<MessageListHandle>(null);
+  const lastPromptMessageId = useMemo(() => getLastUserMessageId(allMessages), [allMessages]);
+  const lastPromptMessage = useMemo(
+    () =>
+      lastPromptMessageId
+        ? (allMessages.find((message) => message.id === lastPromptMessageId) ?? null)
+        : null,
+    [allMessages, lastPromptMessageId],
+  );
+  const [lastPromptEdge, setLastPromptEdge] = useState<LastPromptEdge>("visible");
+  const showAnchoredPromptBar = useAppStore((state) => state.userSettings.showAnchoredPromptBar);
+  const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
+  const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
+  const { isMobile } = useResponsiveBreakpoint();
+  // The anchored bar is a desktop-only, opt-in affordance; mobile always
+  // falls back to the scroll button.
+  const showAnchoredBar = !isMobile && showAnchoredPromptBar;
+  const { anchoredBarVisible, scrollButtonEligible, scrollDirection } =
+    resolveLastPromptControls(lastPromptEdge);
+  const showScrollButton =
+    showScrollToLastPrompt && Boolean(lastPromptMessageId) && scrollButtonEligible;
+  const scrollToLastPrompt = useCallback(() => {
+    if (lastPromptMessageId) {
+      messageListRef.current?.scrollToMessage(lastPromptMessageId, { align: "start" });
+    }
+  }, [lastPromptMessageId]);
+  const firstMessageId = useMemo(() => getFirstUserMessageId(allMessages), [allMessages]);
+  const [isFirstMessageHidden, setIsFirstMessageHidden] = useState(false);
+  const showScrollToStartButton =
+    showScrollToStart && Boolean(firstMessageId) && isFirstMessageHidden;
+  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(resolvedSessionId);
+  // A paginated session's `firstMessageId` only reflects the oldest message in
+  // the currently loaded page while `hasMore` is true — jumping there directly
+  // lands on a partial-page boundary, not the transcript's real start. Drain
+  // older pages first so `firstMessageId` (derived from `allMessages` above,
+  // which grows as pages prepend) has settled on the true first prompt by the
+  // time the scroll fires.
+  const [pendingScrollToStart, setPendingScrollToStart] = useState(false);
+  useDrainOlderMessages(resolvedSessionId, pendingScrollToStart && hasMore);
+  useEffect(() => {
+    if (!pendingScrollToStart || hasMore) return;
+    setPendingScrollToStart(false);
+    if (firstMessageId) {
+      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
+    }
+  }, [pendingScrollToStart, hasMore, firstMessageId]);
+  const scrollToStart = useCallback(() => {
+    if (hasMore) {
+      setPendingScrollToStart(true);
+      return;
+    }
+    if (firstMessageId) {
+      messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
+    }
+  }, [hasMore, firstMessageId]);
+  useEffect(() => {
+    if (!isLoadingMore && shouldLoadMoreForTranscriptTarget("last_prompt", allMessages, hasMore)) {
+      void loadMore();
+    }
+  }, [allMessages, hasMore, isLoadingMore, loadMore]);
   const search = useSessionSearch(resolvedSessionId, loadMore);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
@@ -218,6 +288,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     >
       <PanelBody padding={false} className="relative">
         <MessageList
+          ref={messageListRef}
           items={groupedItems}
           messages={allMessages}
           footerActionMessages={footerActionMessages}
@@ -230,6 +301,20 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           sessionState={session?.state}
           worktreePath={session?.worktree_path}
           onOpenFile={onOpenFile}
+          lastPromptMessageId={lastPromptMessageId}
+          onLastPromptEdgeChange={setLastPromptEdge}
+          firstMessageId={firstMessageId}
+          onFirstMessageHiddenChange={setIsFirstMessageHidden}
+          stickyPromptBar={
+            showAnchoredBar && lastPromptMessage ? (
+              <AnchoredLastPromptBar
+                promptText={lastPromptMessage.content}
+                isVisible={anchoredBarVisible}
+                onScrollUp={scrollToLastPrompt}
+                showScrollToLastPrompt={showScrollToLastPrompt}
+              />
+            ) : undefined
+          }
         />
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
@@ -255,6 +340,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         panelState={panelState}
         isSending={isSending}
         hideSessionsDropdown={hideSessionsDropdown}
+        showScrollToLastPrompt={showScrollButton}
+        onScrollToLastPrompt={scrollToLastPrompt}
+        lastPromptScrollDirection={scrollDirection}
+        showScrollToStart={showScrollToStartButton}
+        onScrollToStart={scrollToStart}
       />
     </PanelRoot>
   );
@@ -315,6 +405,11 @@ type ChatFooterProps = {
   panelState: ReturnType<typeof useChatPanelState>;
   isSending: boolean;
   hideSessionsDropdown?: boolean;
+  showScrollToLastPrompt: boolean;
+  onScrollToLastPrompt: () => void;
+  lastPromptScrollDirection: "up" | "down";
+  showScrollToStart: boolean;
+  onScrollToStart: () => void;
 };
 
 function ChatFooter({
@@ -329,6 +424,11 @@ function ChatFooter({
   panelState,
   isSending,
   hideSessionsDropdown,
+  showScrollToLastPrompt,
+  onScrollToLastPrompt,
+  lastPromptScrollDirection,
+  showScrollToStart,
+  onScrollToStart,
 }: ChatFooterProps) {
   if (isArchived) {
     return (
@@ -349,6 +449,11 @@ function ChatFooter({
       panelState={panelState}
       isSending={isSending}
       hideSessionsDropdown={hideSessionsDropdown}
+      showScrollToLastPrompt={showScrollToLastPrompt}
+      onScrollToLastPrompt={onScrollToLastPrompt}
+      lastPromptScrollDirection={lastPromptScrollDirection}
+      showScrollToStart={showScrollToStart}
+      onScrollToStart={onScrollToStart}
     />
   );
 }

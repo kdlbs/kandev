@@ -184,7 +184,6 @@ async function fetchAndStoreMessages(
     limit: INITIAL_FETCH_LIMIT,
     sort: "desc" as const,
   };
-  debug("message.list request", requestParams);
   const response = await client.request<MessageListResponse>("message.list", requestParams, 10000);
   const fetched = [...(response.messages ?? [])].reverse();
   logFetchSummary(sessionId, fetched, response, requestParams.limit);
