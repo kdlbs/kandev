@@ -550,6 +550,7 @@ func (c *MockController) addRepoFiles(ctx *gin.Context) {
 // to skip the corresponding TaskPR column update.
 type associateTaskPRRequest struct {
 	TaskID                  string `json:"task_id"`
+	WorkspaceID             string `json:"workspace_id,omitempty"`
 	Owner                   string `json:"owner"`
 	Repo                    string `json:"repo"`
 	PRNumber                int    `json:"pr_number"`
@@ -608,6 +609,7 @@ func (c *MockController) associateTaskPR(ctx *gin.Context) {
 func buildTaskPRFromRequest(req *associateTaskPRRequest, now time.Time) *TaskPR {
 	tp := &TaskPR{
 		TaskID:         req.TaskID,
+		WorkspaceID:    req.WorkspaceID,
 		Owner:          req.Owner,
 		Repo:           req.Repo,
 		PRNumber:       req.PRNumber,
