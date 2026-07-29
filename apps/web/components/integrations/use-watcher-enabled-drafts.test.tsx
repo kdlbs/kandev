@@ -49,6 +49,37 @@ function ReconciliationHarness({ save }: { save: (enabled: boolean) => Promise<v
   );
 }
 
+function InFlightReconciliationHarness({
+  onSaveReady,
+}: {
+  onSaveReady: (resolve: () => void) => void;
+}) {
+  const [items, setItems] = useState([watch]);
+  const drafts = useWatcherEnabledDrafts({
+    id: "test-watches",
+    items,
+    saveEnabled: (_watch, _enabled) =>
+      new Promise<void>((resolve) => {
+        onSaveReady(resolve);
+      }),
+  });
+  return (
+    <>
+      <button onClick={() => drafts.toggleEnabled(drafts.items[0])}>
+        {drafts.items[0].enabled ? "Disable" : "Enable"}
+      </button>
+      <button
+        data-testid="authoritative-paused"
+        onClick={() => setItems([{ ...watch, enabled: false }])}
+      />
+      <button
+        data-testid="authoritative-active"
+        onClick={() => setItems([{ ...watch, enabled: true }])}
+      />
+    </>
+  );
+}
+
 describe("useWatcherEnabledDrafts", () => {
   it("returns to a clean state when a watcher is toggled twice", () => {
     const save = vi.fn().mockResolvedValue(undefined);
@@ -129,6 +160,24 @@ describe("useWatcherEnabledDrafts", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Enable" })).toBeTruthy());
 
     fireEvent.click(screen.getByTestId("authoritative-paused"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Enable" })).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("authoritative-active"));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Disable" })).toBeTruthy());
+  });
+
+  it("reconciles when authoritative data catches up before save resolves", async () => {
+    let resolveSave = () => {};
+    render(
+      <SettingsSaveProvider>
+        <InFlightReconciliationHarness onSaveReady={(resolve) => (resolveSave = resolve)} />
+      </SettingsSaveProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable" }));
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+    fireEvent.click(screen.getByTestId("authoritative-paused"));
+    resolveSave();
     await waitFor(() => expect(screen.getByRole("button", { name: "Enable" })).toBeTruthy());
 
     fireEvent.click(screen.getByTestId("authoritative-active"));

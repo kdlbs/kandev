@@ -31,7 +31,7 @@ export function useWatcherEnabledDrafts<T extends EnabledItem>({
       }
       return changed ? next : current;
     });
-  }, [items]);
+  }, [items, saved]);
   const changes = useMemo(
     () =>
       items
