@@ -12,7 +12,7 @@ import { useSettingsSaveContributor } from "./settings-save-provider";
 /**
  * Edits the per-user preference that controls transcript unread dividers and
  * read-cursor updates. It participates in the shared Settings save/discard
- * lifecycle so the change becomes visible locally only after persistence.
+ * lifecycle and commits the persisted preference to the app store on save.
  */
 export function UnreadDividerSettings() {
   const unreadDivider = useAppStore((state) => state.userSettings.unreadDivider);
