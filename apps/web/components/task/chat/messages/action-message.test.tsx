@@ -91,8 +91,9 @@ function recoveryMessage(withParams = false): Message {
   } as Partial<Message>);
 }
 
-function stalledMessage(): Message {
+function stalledMessage(turnId = "turn-1"): Message {
   return retryMessage({
+    turn_id: turnId,
     content: "Still waiting on Start dev server.",
     metadata: {
       action_visibility: "running",
@@ -110,13 +111,22 @@ function stalledMessage(): Message {
 
 /** ActionMessage reads session state from the store (keyed by comment.session_id),
  *  so seed it via the provider instead of passing a prop. */
-function renderAction(comment: Message, sessionState?: TaskSessionState, sessionError?: string) {
+function renderAction(
+  comment: Message,
+  sessionState?: TaskSessionState,
+  sessionError?: string,
+  activeTurnId?: string,
+) {
   const initialState: Partial<AppState> = sessionState
     ? {
         taskSessions: {
           items: {
             "sess-1": { state: sessionState, error_message: sessionError } as TaskSession,
           },
+        },
+        turns: {
+          bySession: {},
+          activeBySession: activeTurnId ? { "sess-1": activeTurnId } : {},
         },
       }
     : {};
@@ -192,7 +202,7 @@ describe("ActionMessage — transient retry (warning variant)", () => {
 
 describe("ActionMessage — running stall notice", () => {
   it("renders a neutral compact notice only while the session is running", () => {
-    renderAction(stalledMessage(), "RUNNING");
+    renderAction(stalledMessage(), "RUNNING", undefined, "turn-1");
 
     const notice = screen.getByTestId("running-action-notice");
     expect(notice.className).toContain("text-muted-foreground");
@@ -210,13 +220,18 @@ describe("ActionMessage — running stall notice", () => {
   });
 
   it("sends agent.cancel when Cancel turn is activated", async () => {
-    renderAction(stalledMessage(), "RUNNING");
+    renderAction(stalledMessage(), "RUNNING", undefined, "turn-1");
 
     fireEvent.click(screen.getByTestId(STALL_CANCEL_TEST_ID));
 
     await waitFor(() =>
       expect(requestMock).toHaveBeenCalledWith("agent.cancel", { session_id: "sess-1" }),
     );
+  });
+
+  it("hides an old notice when a later turn is active", () => {
+    const { container } = renderAction(stalledMessage("turn-1"), "RUNNING", undefined, "turn-2");
+    expect(container.firstChild).toBeNull();
   });
 });
 

@@ -8,6 +8,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -19,7 +20,28 @@ const (
 // handleAgentStalled persists an advisory recovery affordance without changing
 // the prompt, session, or task lifecycle.
 func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.AgentStalledPayload) {
-	if s.messageCreator == nil || payload.TaskID == "" || payload.SessionID == "" {
+	if s.messageCreator == nil || s.repo == nil || payload.TaskID == "" || payload.SessionID == "" {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil || session == nil || session.State != models.TaskSessionStateRunning {
+		return
+	}
+	generationOwner, ok := s.agentManager.(interface {
+		OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	})
+	if !ok || payload.PromptGeneration == 0 || !generationOwner.OwnsPromptGeneration(
+		payload.SessionID,
+		payload.AgentExecutionID,
+		payload.PromptGeneration,
+	) {
+		return
+	}
+	turnID, err := s.peekActiveTurnID(ctx, payload.SessionID)
+	if err != nil {
+		return
+	}
+	if s.turnService != nil && turnID == "" {
 		return
 	}
 	metadata := map[string]interface{}{
@@ -42,7 +64,7 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 		stallNoticeContent(payload),
 		payload.SessionID,
 		string(v1.MessageTypeStatus),
-		s.getActiveTurnID(payload.SessionID),
+		turnID,
 		metadata,
 		false,
 	); err != nil {

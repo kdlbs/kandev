@@ -13,7 +13,8 @@ spec: "../../specs/agent-stall-recovery/spec.md"
 ## Acceptance
 
 - `action_visibility: running` messages render while the session is `RUNNING`
-  and hide after it settles.
+  only when their `turn_id` matches the active turn, and hide after settlement
+  or when a later turn becomes active.
 - Existing recovery messages keep their current visibility behavior.
 - The running-only notice is one inline row with muted neutral copy, no alert
   icon, warning/error color, tinted background, border, or stacked action area.

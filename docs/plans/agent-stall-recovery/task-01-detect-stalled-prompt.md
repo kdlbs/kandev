@@ -21,7 +21,7 @@ spec: "../../specs/agent-stall-recovery/spec.md"
 
 ## Verification
 
-- `cd apps/backend && go test -race -run 'TestHandleAgentEvent_TracksActiveTopLevelTool|TestWaitForPromptDone_PublishesSingleStall' ./internal/agent/runtime/lifecycle`
+- `make -C apps/backend test` (regressions: `TestHandleAgentEvent_TracksActiveTopLevelTool` and `TestWaitForPromptDone_PublishesSingleStall` in `internal/agent/runtime/lifecycle`)
 
 The `testing/synctest` regression must first fail because no `agent.stalled`
 event is published, then pass without shortening production durations.

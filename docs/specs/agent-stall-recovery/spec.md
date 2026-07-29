@@ -38,9 +38,9 @@ the turn.
 - On phones, **Cancel turn** remains inline and content-width rather than
   becoming a full-width row, while retaining a minimum 44px touch height.
   Activating it uses the existing `agent.cancel` request.
-- The notice remains visible and actionable while the affected session is
-  `RUNNING`, including after a page reload, and is hidden when the session
-  leaves `RUNNING`.
+- The notice remains visible and actionable while the affected prompt's
+  `turn_id` is the active turn in a `RUNNING` session, including after a page
+  reload. It is hidden when that turn settles or a later turn becomes active.
 - Detection alone does not change task state, session state, prompt admission,
   or process liveness.
 - The backend logs the first stall detected for a prompt generation and does
@@ -69,6 +69,9 @@ the turn.
 - **GIVEN** a notice already exists for the active prompt generation,
   **WHEN** subsequent watchdog checks observe the same stall, **THEN** Kandev
   creates no duplicate notice and emits no repeated stall log.
+- **GIVEN** a persisted notice belongs to an earlier prompt generation,
+  **WHEN** a later prompt is `RUNNING`, **THEN** the earlier notice is not
+  rendered and a delayed stall event cannot create a new notice for it.
 - **GIVEN** a stall notice is visible, **WHEN** the user activates
   **Cancel turn**, **THEN** the existing cancellation path settles the turn and
   the session becomes available for new input without a backend restart.

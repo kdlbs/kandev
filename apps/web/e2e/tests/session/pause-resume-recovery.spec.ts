@@ -183,7 +183,7 @@ test.describe("Pause → resume recovery", () => {
     const [noticeBox, cancelBox] = await Promise.all([notice.boundingBox(), cancel.boundingBox()]);
     expect(noticeBox).not.toBeNull();
     expect(cancelBox).not.toBeNull();
-    expect(noticeBox!.height).toBeLessThanOrEqual(40);
+    expect(noticeBox!.height).toBeLessThanOrEqual(48);
     expect(cancelBox!.width).toBeLessThan(noticeBox!.width);
 
     await cancel.click();

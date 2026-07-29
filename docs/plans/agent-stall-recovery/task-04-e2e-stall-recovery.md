@@ -25,11 +25,14 @@ spec: "../../specs/agent-stall-recovery/spec.md"
 
 ## Verification
 
-- `cd apps/web && pnpm e2e:run tests/session/pause-resume-recovery.spec.ts`
-- `cd apps/web && pnpm e2e:run tests/session/mobile-pause-resume-recovery.spec.ts -- --project=mobile-chrome`
+- `cd apps && pnpm --filter @kandev/web e2e:run tests/session/pause-resume-recovery.spec.ts`
+- `cd apps && pnpm --filter @kandev/web e2e:run tests/session/mobile-pause-resume-recovery.spec.ts -- --project=mobile-chrome`
 
 Each E2E scenario must first fail because the running-only notice is hidden,
 then pass against freshly built backend and Vite artifacts.
+
+The browser scenarios seed the persisted notice for deterministic coverage;
+the real five-minute watchdog boundary is covered by the lifecycle synctest.
 
 ## Files likely touched
 

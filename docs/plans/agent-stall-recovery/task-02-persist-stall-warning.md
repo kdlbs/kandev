@@ -21,8 +21,7 @@ spec: "../../specs/agent-stall-recovery/spec.md"
 
 ## Verification
 
-- `cd apps/backend && go test -race -run 'TestHandleAgentStalled' ./internal/orchestrator`
-- `cd apps/backend && go test -race -run 'TestWatcher.*AgentStalled' ./internal/orchestrator/watcher`
+- `make -C apps/backend test` (regressions: `TestHandleAgentStalled` in `internal/orchestrator` and `TestWatcher.*AgentStalled` in `internal/orchestrator/watcher`)
 
 The handler test must first fail because no notice is persisted, then pass
 with exact metadata assertions and unchanged session state.

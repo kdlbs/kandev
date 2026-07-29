@@ -210,6 +210,12 @@ func (e *AgentExecution) clearActiveTool(toolCallID string) {
 	e.activeToolMu.Unlock()
 }
 
+func (e *AgentExecution) resetActiveTool() {
+	e.activeToolMu.Lock()
+	e.activeTool = nil
+	e.activeToolMu.Unlock()
+}
+
 func (e *AgentExecution) activeToolSnapshot() *activeTopLevelTool {
 	e.activeToolMu.RLock()
 	defer e.activeToolMu.RUnlock()

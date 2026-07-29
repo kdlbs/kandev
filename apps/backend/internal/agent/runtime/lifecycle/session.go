@@ -619,7 +619,7 @@ func (sm *SessionManager) waitForPromptDone(
 			lastActivity := execution.lastActivityAt
 			execution.lastActivityAtMu.Unlock()
 
-			if elapsed > 5*time.Minute && !stallReported {
+			if elapsed >= 5*time.Minute && !stallReported {
 				sm.logger.Warn("agent stall detected: no events received",
 					zap.String("execution_id", execution.ID),
 					zap.Duration("elapsed_since_last_event", elapsed),

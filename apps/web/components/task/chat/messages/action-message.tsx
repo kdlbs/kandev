@@ -56,12 +56,14 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // Read session state from the store instead of receiving it as a prop, so a
   // state transition doesn't re-render every message in the list (only the
   // rare action messages that actually depend on it).
-  const { sessionState, sessionError } = useActionMessageSession(comment.session_id);
+  const { sessionState, sessionError, activeTurnId } = useActionMessageSession(comment.session_id);
   const metadata = comment.metadata as ActionMeta | undefined;
   const message = comment.content || "An error occurred";
 
   if (metadata?.action_visibility === "running") {
-    if (sessionState !== "RUNNING") return null;
+    if (sessionState !== "RUNNING" || !comment.turn_id || activeTurnId !== comment.turn_id) {
+      return null;
+    }
     return (
       <RunningActionNotice actions={metadata.actions} message={message} taskId={comment.task_id} />
     );
@@ -148,7 +150,10 @@ function useActionMessageSession(sessionId: Message["session_id"]) {
       ? (state.taskSessions.items[sessionId]?.error_message as string | undefined)
       : undefined,
   );
-  return { sessionState, sessionError };
+  const activeTurnId = useAppStore((state) =>
+    sessionId ? (state.turns.activeBySession[sessionId] ?? undefined) : undefined,
+  );
+  return { sessionState, sessionError, activeTurnId };
 }
 
 function RunningActionNotice({

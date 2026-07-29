@@ -220,6 +220,7 @@ func (s *ExecutionStore) BeginPrompt(executionID string) (uint64, error) {
 func beginExecutionPrompt(execution *AgentExecution) uint64 {
 	execution.promptGeneration++
 	execution.Status = v1.AgentStatusRunning
+	execution.resetActiveTool()
 	return execution.promptGeneration
 }
 

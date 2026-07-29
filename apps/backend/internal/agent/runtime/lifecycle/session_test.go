@@ -1756,7 +1756,7 @@ func TestWaitForPromptDone_PublishesSingleStall(t *testing.T) {
 			waitResult <- err
 		}()
 
-		time.Sleep(6 * time.Minute)
+		time.Sleep(5 * time.Minute)
 		synctest.Wait()
 		if got := countPublishedEvents(eventBus, "agent.stalled"); got != 1 {
 			t.Fatalf("published stalled events = %d, want 1", got)

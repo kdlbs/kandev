@@ -61,6 +61,9 @@ waits, force-releases a stuck prompt, and reconciles the session to
   with `session_id`, label **Cancel turn**, neutral styling, and stable
   `stall-cancel-turn-button` test ID. The copy says Kandev is still waiting; it
   does not assert that the tool failed.
+- Validate that the session is still `RUNNING` and that the event's immutable
+  execution/prompt-generation identity is current before persisting. Assign
+  the notice the active `turn_id` without lazily creating a successor turn.
 - If message persistence fails, log the error and leave the running prompt
   untouched.
 
@@ -73,7 +76,8 @@ waits, force-releases a stuck prompt, and reconciles the session to
 - Update
   `apps/web/components/task/chat/messages/action-message.tsx` so ordinary
   recovery messages keep their current settled-session visibility, while
-  `action_visibility: running` messages render only during `RUNNING`.
+  `action_visibility: running` messages render only during `RUNNING` when their
+  persisted `turn_id` matches the active turn.
 - Add the optional visibility metadata contract to
   `apps/web/components/task/chat/types.ts`.
 - Render a running-only message as one inline row: muted `text-xs` copy, no
@@ -191,8 +195,9 @@ requires them; the task-level commands remain the TDD evidence for each change.
   lifecycle state by itself.
 - Tool titles are already user-visible display data; raw command arguments must
   not be copied into the notice.
-- The notice is persisted once per prompt generation so reloads retain it. It
-  remains historical/actionable while that generation is still `RUNNING` and
-  disappears when the session settles.
+- The notice is persisted once per prompt generation and assigned the active
+  turn ID so reloads retain it only for the affected turn. A delayed event is
+  rejected when the session has settled or execution/generation ownership has
+  moved on; a later `RUNNING` turn cannot resurrect the old notice.
 - No schema migration, public HTTP endpoint, configurable timeout, automatic
   process termination, or relaxed `RUNNING` prompt-admission rule is planned.

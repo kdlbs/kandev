@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
@@ -16,11 +17,16 @@ func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get session before handling stall: %v", err)
 	}
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+	}
+	agentMgr.currentPromptGeneration.Store(7)
 	svc := createTestServiceWithScheduler(
 		repo,
 		newMockStepGetter(),
 		newMockTaskRepo(),
-		&mockAgentManager{repoForExecutionLookup: repo},
+		agentMgr,
 	)
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
@@ -67,5 +73,44 @@ func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
 	}
 	if after.State != before.State {
 		t.Fatalf("session state changed from %q to %q", before.State, after.State)
+	}
+}
+
+func TestHandleAgentStalled_RejectsSettledOrStalePrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{currentPromptExecutionID: "execution-1"}
+	agentMgr.currentPromptGeneration.Store(7)
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	payload := lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+	}
+
+	if err := repo.UpdateTaskSessionState(ctx, "session-1", models.TaskSessionStateWaitingForInput, ""); err != nil {
+		t.Fatalf("settle session: %v", err)
+	}
+	svc.handleAgentStalled(ctx, payload)
+	if len(messages.sessionMessages) != 0 {
+		t.Fatalf("settled session messages = %d, want 0", len(messages.sessionMessages))
+	}
+	if err := repo.UpdateTaskSessionState(ctx, "session-1", models.TaskSessionStateRunning, ""); err != nil {
+		t.Fatalf("resume session: %v", err)
+	}
+	agentMgr.currentPromptGeneration.Store(8)
+	svc.handleAgentStalled(ctx, payload)
+	if len(messages.sessionMessages) != 0 {
+		t.Fatalf("stale generation messages = %d, want 0", len(messages.sessionMessages))
+	}
+}
+
+func TestStallNoticeContentFallsBackWithoutTool(t *testing.T) {
+	if got := stallNoticeContent(lifecycle.AgentStalledPayload{}); got != "Still waiting for the agent." {
+		t.Fatalf("stallNoticeContent() = %q, want generic fallback", got)
 	}
 }
