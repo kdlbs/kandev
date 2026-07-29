@@ -19,20 +19,15 @@ import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
 import { useToast } from "@/components/toast-provider";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
-import { useAppStore } from "@/components/state-provider";
 import { fetchAndOpenFile } from "../file-browser-hooks";
+import { useMobileMRSelection } from "./use-mobile-mr-selection";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
-import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selection";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 import { prTaskKey } from "@/components/github/pr-utils";
 import { ReviewPRSelector } from "@/components/review/review-pr-selector";
-import {
-  MRDetailPanelComponent,
-  mrTaskKey,
-  selectExplicitPanelMR,
-} from "@/components/gitlab/mr-detail-panel";
+import { MRDetailPanelComponent, mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 
 export type MobileReviewSource = "github" | "gitlab" | null;
 
@@ -423,57 +418,6 @@ export function useMobilePanelHandlers({
     handleOpenFile,
     handlePanelChangeAndClearSheet,
   };
-}
-
-function useMobileMRSelection(
-  activeTaskId: string | null,
-  effectiveSessionId: string | null,
-  requestedPanel: MobileSessionPanel,
-  changePanel: (panel: MobileSessionPanel) => void,
-  hasGitHubPR: boolean,
-) {
-  const mrs = useTaskMRs(activeTaskId);
-  const reviewSourcesResolved = useAppStore((state) => {
-    const workspaceId = state.workspaces.activeId;
-    return !!workspaceId && Object.hasOwn(state.taskMRs.byWorkspaceId, workspaceId);
-  });
-  const reviewMRKey = useAppStore((state) =>
-    effectiveSessionId
-      ? (state.mobileSession.reviewMRKeyBySessionId?.[effectiveSessionId] ?? null)
-      : null,
-  );
-  const setMobileSessionReview = useAppStore((state) => state.setMobileSessionReview);
-  const selectedMR = selectExplicitPanelMR(mrs, reviewMRKey);
-
-  useEffect(() => {
-    const hasInvalidReviewPreference =
-      !hasGitHubPR &&
-      requestedPanel === "review" &&
-      (!reviewMRKey || (reviewSourcesResolved && !selectedMR));
-    if (effectiveSessionId && hasInvalidReviewPreference) {
-      setMobileSessionReview(effectiveSessionId, null);
-    }
-  }, [
-    effectiveSessionId,
-    requestedPanel,
-    hasGitHubPR,
-    reviewMRKey,
-    reviewSourcesResolved,
-    selectedMR,
-    setMobileSessionReview,
-  ]);
-
-  const handlePanelChange = useCallback(
-    (panel: MobileSessionPanel) => {
-      if (panel === "review" && effectiveSessionId && !selectedMR) {
-        const primaryMR = mrs[0];
-        if (primaryMR) setMobileSessionReview(effectiveSessionId, mrTaskKey(primaryMR));
-      }
-      changePanel(panel);
-    },
-    [changePanel, effectiveSessionId, mrs, selectedMR, setMobileSessionReview],
-  );
-  return { mrs, selectedMR, handlePanelChange };
 }
 
 type SessionMobileFooterProps = {

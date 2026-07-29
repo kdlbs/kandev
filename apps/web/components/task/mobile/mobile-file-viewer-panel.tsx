@@ -8,7 +8,7 @@ import { FileViewerContent } from "../file-viewer-content";
 import { MarkdownPreviewContent } from "../markdown-preview-content";
 import { FileImageViewer } from "../file-image-viewer";
 import { FileBinaryViewer } from "../file-binary-viewer";
-import { getFileCategory } from "@/lib/utils/file-types";
+import { getFileCategory, isMarkdownFile } from "@/lib/utils/file-types";
 import { useAppStore } from "@/components/state-provider";
 import type { OpenFileTab } from "@/lib/types/backend";
 import {
@@ -22,11 +22,6 @@ type MobileFileViewerPanelProps = {
   onClose: () => void;
   initialMarkdownPreview?: boolean;
 };
-
-function isMarkdownFile(path: string): boolean {
-  const ext = path.split(".").pop()?.toLowerCase();
-  return ext === "md" || ext === "mdx";
-}
 
 function resolveViewerKind(file: OpenFileTab): "image" | "binary" | "text" {
   if (!file.isBinary) return "text";

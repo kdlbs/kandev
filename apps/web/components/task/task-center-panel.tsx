@@ -37,6 +37,7 @@ import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { PRDetailContent } from "@/components/github/pr-detail-panel";
 import { MRDetailPanelComponent, mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
+import { upsertOpenFileTab } from "./task-center-panel-file-tabs";
 
 import type { SelectedDiff } from "./task-layout";
 
@@ -143,11 +144,7 @@ function useFileTabOperations({
 
   const addFileTab = useCallback(
     (fileTab: OpenFileTab) => {
-      setOpenFileTabs((prev) => {
-        if (prev.some((t) => t.path === fileTab.path)) return prev;
-        const maxTabs = 4;
-        return prev.length >= maxTabs ? [...prev.slice(1), fileTab] : [...prev, fileTab];
-      });
+      setOpenFileTabs((prev) => upsertOpenFileTab(prev, fileTab));
       setLeftTab(`file:${fileTab.path}`);
     },
     [setOpenFileTabs, setLeftTab],

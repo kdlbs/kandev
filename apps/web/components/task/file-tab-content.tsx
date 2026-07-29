@@ -5,17 +5,12 @@ import { FileEditorContent } from "./file-editor-content";
 import { FileImageViewer } from "./file-image-viewer";
 import { FileBinaryViewer } from "./file-binary-viewer";
 import type { OpenFileTab } from "@/lib/types/backend";
-import { getFileCategory } from "@/lib/utils/file-types";
+import { getFileCategory, isMarkdownFile } from "@/lib/utils/file-types";
 import { FileViewerExternalLink } from "./file-viewer-header";
 
 function resolveTabCategory(tab: OpenFileTab): "image" | "binary" | "text" {
   if (!tab.isBinary) return "text";
   return getFileCategory(tab.path) === "image" ? "image" : "binary";
-}
-
-function isMarkdownFile(path: string): boolean {
-  const ext = path.split(".").pop()?.toLowerCase();
-  return ext === "md" || ext === "mdx";
 }
 
 export function FileTabContent({

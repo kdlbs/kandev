@@ -34,6 +34,7 @@ import {
 } from "@/components/editors/external-vcs-file-link";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { isMarkdownFile } from "@/lib/utils/file-types";
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
 const iconBtnActive = "h-6 w-6 p-0 cursor-pointer bg-muted opacity-100";
@@ -41,11 +42,6 @@ const iconBtnDestructive =
   "h-6 w-6 p-0 cursor-pointer opacity-60 hover:text-destructive hover:opacity-100";
 const mobileMenuItem = "cursor-pointer gap-3 text-sm";
 const mobileMenuIcon = "size-4 text-muted-foreground";
-
-function isMarkdownPath(filePath: string): boolean {
-  const ext = filePath.split(".").pop()?.toLowerCase();
-  return ext === "md" || ext === "mdx";
-}
 
 export type FileDiffToolbarProps = {
   diff: string;
@@ -244,7 +240,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
             Edit file
           </DropdownMenuItem>
         )}
-        {onPreviewMarkdown && isMarkdownPath(filePath) && (
+        {onPreviewMarkdown && isMarkdownFile(filePath) && (
           <DropdownMenuItem
             className={mobileMenuItem}
             onSelect={() => onPreviewMarkdown(filePath, repo)}
@@ -340,7 +336,7 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
         onToggleViewMode={handleToggleViewMode}
         onToggleWordWrap={onToggleWordWrap}
       />
-      {onPreviewMarkdown && isMarkdownPath(filePath) && (
+      {onPreviewMarkdown && isMarkdownFile(filePath) && (
         <ToolbarIconBtn
           onClick={() => onPreviewMarkdown(filePath, repo)}
           tooltip="Preview markdown"
