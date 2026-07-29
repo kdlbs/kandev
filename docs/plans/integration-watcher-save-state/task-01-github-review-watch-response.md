@@ -21,7 +21,7 @@ spec: "../../specs/ui/settings-manual-save.md"
 ## Verification
 
 ```bash
-cd apps/backend && go test -run TestHttpUpdateReviewWatchReturnsUpdatedWatch ./internal/github
+make -C apps/backend test
 ```
 
 ## Files likely touched

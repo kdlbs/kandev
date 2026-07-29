@@ -1,5 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
 
+type ReviewWatchesResponse = {
+  watches: Array<{ id: string; enabled: boolean }>;
+};
+
 test.describe("GitHub workspace settings", () => {
   test("keeps review watch pause and resume visible after save", async ({
     testPage,
@@ -41,9 +45,7 @@ test.describe("GitHub workspace settings", () => {
         "GET",
         `/api/v1/github/watches/review?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
       );
-      const pausedBody = (await pausedResponse.json()) as {
-        watches: Array<{ id: string; enabled: boolean }>;
-      };
+      const pausedBody = (await pausedResponse.json()) as ReviewWatchesResponse;
       expect(pausedBody.watches.find((item) => item.id === watch.id)?.enabled).toBe(false);
 
       await toggle.click();
@@ -59,9 +61,7 @@ test.describe("GitHub workspace settings", () => {
         "GET",
         `/api/v1/github/watches/review?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
       );
-      const activeBody = (await activeResponse.json()) as {
-        watches: Array<{ id: string; enabled: boolean }>;
-      };
+      const activeBody = (await activeResponse.json()) as ReviewWatchesResponse;
       expect(activeBody.watches.find((item) => item.id === watch.id)?.enabled).toBe(true);
     } finally {
       await apiClient.deleteReviewWatch(watch.id, seedData.workspaceId);

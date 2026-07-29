@@ -23,6 +23,7 @@ spec: "../../specs/ui/settings-manual-save.md"
 ## Verification
 
 ```bash
+cd apps && pnpm install --frozen-lockfile
 cd apps/web && pnpm e2e:run tests/integrations/github-workspace-settings.spec.ts -- --grep "keeps review watch pause and resume visible after save"
 cd apps/web && pnpm e2e:run tests/gitlab/mobile-gitlab-parity.spec.ts -- --project=mobile-chrome --grep "watch controls remain touch sized and persist a pause"
 ```
@@ -30,6 +31,7 @@ cd apps/web && pnpm e2e:run tests/gitlab/mobile-gitlab-parity.spec.ts -- --proje
 ## Files likely touched
 
 - `apps/web/e2e/tests/integrations/github-workspace-settings.spec.ts`
+- `apps/web/e2e/tests/gitlab/mobile-gitlab-parity.spec.ts`
 
 ## Dependencies
 
