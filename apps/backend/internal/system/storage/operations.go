@@ -24,6 +24,7 @@ type GoCacheAdopter interface {
 type QuarantineController interface {
 	Restore(context.Context, string) (QuarantineEntry, error)
 	PermanentDelete(context.Context, string, string) (QuarantineEntry, error)
+	Purge(context.Context, QuarantinePurgeScope, string) (QuarantinePurgeResult, error)
 }
 
 type OperationsConfig struct {
@@ -141,6 +142,35 @@ func (o *Operations) DeleteQuarantine(ctx context.Context, id, confirmation stri
 			o.invalidateOverview()
 		}
 		return map[string]any{"entry": entry}, err
+	}), nil
+}
+
+func (o *Operations) PurgeQuarantine(
+	ctx context.Context,
+	scope QuarantinePurgeScope,
+	confirmation string,
+) (string, error) {
+	switch scope {
+	case QuarantinePurgeScopeEligible:
+		if confirmation != "DELETE ELIGIBLE" {
+			return "", validationError("eligible quarantine purge requires DELETE ELIGIBLE confirmation")
+		}
+	case QuarantinePurgeScopeAll:
+		if confirmation != "DELETE ALL NOW" {
+			return "", validationError("forced quarantine purge requires DELETE ALL NOW confirmation")
+		}
+	default:
+		return "", validationError("unknown quarantine purge scope %q", scope)
+	}
+	if o.config.Quarantine == nil {
+		return "", errors.New("quarantine provider is unavailable")
+	}
+	return o.startTracked(ctx, JobKindQuarantineDelete, func(jobCtx context.Context, _ string) (map[string]any, error) {
+		result, err := o.config.Quarantine.Purge(jobCtx, scope, confirmation)
+		if result.Deleted > 0 {
+			o.invalidateOverview()
+		}
+		return valueMap(result), err
 	}), nil
 }
 

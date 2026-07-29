@@ -319,6 +319,54 @@ func TestDeleteQuarantineInvalidatesOverviewAfterSuccess(t *testing.T) {
 	}
 }
 
+func TestPurgeQuarantineValidatesScopeAndConfirmation(t *testing.T) {
+	controller := &recordingQuarantineController{}
+	operations := NewOperations(OperationsConfig{Quarantine: controller})
+	for _, test := range []struct {
+		scope        QuarantinePurgeScope
+		confirmation string
+	}{
+		{QuarantinePurgeScopeEligible, "DELETE ALL NOW"},
+		{QuarantinePurgeScopeAll, "DELETE ELIGIBLE"},
+		{"unknown", "DELETE ELIGIBLE"},
+	} {
+		if jobID, err := operations.PurgeQuarantine(context.Background(), test.scope, test.confirmation); !errors.Is(err, ErrValidation) || jobID != "" {
+			t.Fatalf("PurgeQuarantine(%q, %q) = (%q, %v), want validation error and no job", test.scope, test.confirmation, jobID, err)
+		}
+	}
+	if controller.purgeCalls != 0 {
+		t.Fatalf("purge calls = %d, want 0", controller.purgeCalls)
+	}
+}
+
+func TestPurgeQuarantineTracksPartialResultAndInvalidatesOverview(t *testing.T) {
+	overview := &recordingRefreshOverview{}
+	controller := &recordingQuarantineController{
+		purgeResult: QuarantinePurgeResult{
+			Scope: QuarantinePurgeScopeEligible, Considered: 2, Deleted: 1, DeletedBytes: 42,
+			Protected: 1, ProtectedBytes: 8, Failed: 0, FailedBytes: 0,
+		},
+		purgeErr: errors.New("one entry failed"),
+	}
+	tracker := jobs.NewTracker(nil, newOperationsTestLogger(t))
+	operations := NewOperations(OperationsConfig{
+		Jobs: tracker, Overview: overview, Quarantine: controller,
+	})
+
+	jobID, err := operations.PurgeQuarantine(context.Background(), QuarantinePurgeScopeEligible, "DELETE ELIGIBLE")
+	if err != nil {
+		t.Fatalf("PurgeQuarantine: %v", err)
+	}
+	waitForJobState(t, tracker, jobID, jobs.StateFailed)
+	job := tracker.Get(jobID)
+	if job.Result["deleted"] != float64(1) || job.Result["deleted_bytes"] != float64(42) {
+		t.Fatalf("job result = %#v, want partial purge result", job.Result)
+	}
+	if overview.invalidateCalls != 1 {
+		t.Fatalf("overview invalidations = %d, want 1", overview.invalidateCalls)
+	}
+}
+
 func TestAnalyzeForcesOverviewRefresh(t *testing.T) {
 	connection := newSQLite(t)
 	pool := db.NewPool(connection, connection)
@@ -369,6 +417,9 @@ func waitForJobState(t *testing.T, tracker *jobs.Tracker, id string, state jobs.
 
 type recordingQuarantineController struct {
 	deleteCalls int
+	purgeCalls  int
+	purgeResult QuarantinePurgeResult
+	purgeErr    error
 }
 
 type recordingGoCacheAdopter struct{}
@@ -447,6 +498,15 @@ func (c *recordingQuarantineController) PermanentDelete(
 ) (QuarantineEntry, error) {
 	c.deleteCalls++
 	return QuarantineEntry{}, nil
+}
+
+func (c *recordingQuarantineController) Purge(
+	context.Context,
+	QuarantinePurgeScope,
+	string,
+) (QuarantinePurgeResult, error) {
+	c.purgeCalls++
+	return c.purgeResult, c.purgeErr
 }
 
 func newOperationsTestLogger(t *testing.T) *logger.Logger {

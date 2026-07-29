@@ -217,6 +217,10 @@ func (f *fakeStorageMutations) DeleteQuarantine(context.Context, string, string)
 	return "delete-job", f.deleteErr
 }
 
+func (f *fakeStorageMutations) PurgeQuarantine(context.Context, storage.QuarantinePurgeScope, string) (string, error) {
+	return "purge-job", nil
+}
+
 type emptyStorageOverview struct{}
 
 func (emptyStorageOverview) Get(context.Context) (storage.OverviewSnapshot, error) {

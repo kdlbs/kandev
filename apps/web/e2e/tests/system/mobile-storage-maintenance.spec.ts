@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { seedManagedGoCache } from "../../helpers/storage-maintenance";
@@ -172,5 +173,60 @@ test.describe("Mobile storage maintenance", () => {
       if (overviewRequestStarted) await overviewSettled;
       await testPage.unroute(overviewPattern, holdOverview);
     }
+  });
+
+  test("keeps both quarantine cleanup actions reachable on a phone", async ({
+    testPage,
+    prCapture,
+  }) => {
+    const entry = {
+      id: "mobile-protected",
+      resource_type: "task_workspace",
+      original_path: "/tmp/mobile-protected",
+      quarantine_path: "/tmp/trash/mobile-protected",
+      size_bytes: 1024,
+      state: "quarantined",
+      quarantined_at: "2026-07-29T00:00:00Z",
+      delete_after: new Date(Date.now() + 86_400_000).toISOString(),
+      last_error: "",
+      metadata: {},
+    };
+    await testPage.route("**/api/v1/system/storage/quarantine", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ entries: [entry] }),
+        });
+        return;
+      }
+      expect(route.request().method()).toBe("DELETE");
+      expect(route.request().postDataJSON()).toEqual({ scope: "all", confirm: "DELETE ALL NOW" });
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ job_id: "mobile-force-purge" }),
+      });
+    });
+    await testPage.goto("/settings/system/storage");
+    await expect(testPage.getByTestId("storage-quarantine-force-clear")).toBeVisible();
+    await testPage.getByTestId("storage-quarantine-card").scrollIntoViewIfNeeded();
+    await prCapture.screenshot("quarantine-actions", {
+      caption: "Mobile quarantine keeps both cleanup actions reachable",
+    });
+    if (process.env.CAPTURE_PR_ASSETS) {
+      await testPage.getByTestId("storage-quarantine-card").screenshot({
+        path: path.resolve(process.cwd(), ".pr-assets/mobile-quarantine-card.png"),
+      });
+    }
+    await testPage.getByTestId("storage-quarantine-force-clear").tap();
+    await testPage
+      .getByTestId("storage-quarantine-force-clear-confirm-confirmation")
+      .fill("DELETE ALL NOW");
+    await testPage.getByTestId("storage-quarantine-force-clear-confirm").tap();
+    await expect(testPage.getByText("Forced quarantine cleanup started")).toBeVisible();
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
   });
 });

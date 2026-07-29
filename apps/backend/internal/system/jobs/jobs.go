@@ -93,13 +93,13 @@ func (t *Tracker) run(ctx context.Context, job *Job, fn func(ctx context.Context
 
 	t.transition(ctx, job.ID, func(j *Job) {
 		j.EndedAt = time.Now().UTC()
+		j.Result = result
 		if err != nil {
 			j.State = StateFailed
 			j.Message = err.Error()
 			return
 		}
 		j.State = StateSucceeded
-		j.Result = result
 	})
 }
 

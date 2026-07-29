@@ -311,3 +311,20 @@ export function deleteStorageQuarantine(
     },
   );
 }
+
+export function purgeStorageQuarantine(
+  scope: "eligible" | "all",
+  options?: ApiRequestOptions,
+): Promise<JobAcceptResponse> {
+  return fetchJson<JobAcceptResponse>(`${SYSTEM_BASE}/storage/quarantine`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "DELETE",
+      body: JSON.stringify({
+        scope,
+        confirm: scope === "eligible" ? "DELETE ELIGIBLE" : "DELETE ALL NOW",
+      }),
+    },
+  });
+}

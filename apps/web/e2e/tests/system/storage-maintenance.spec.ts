@@ -252,4 +252,75 @@ test.describe("System storage maintenance", () => {
       { timeout: 20_000 },
     );
   });
+
+  test("shows quarantine deadlines and clears only eligible entries", async ({
+    testPage,
+    prCapture,
+  }) => {
+    const entries = [
+      {
+        id: "eligible-entry",
+        resource_type: "task_workspace",
+        original_path: "/tmp/eligible",
+        quarantine_path: "/tmp/trash/eligible",
+        size_bytes: 1024,
+        state: "quarantined",
+        quarantined_at: "2026-07-20T00:00:00Z",
+        delete_after: new Date(Date.now() - 60_000).toISOString(),
+        last_error: "",
+        metadata: {},
+      },
+      {
+        id: "protected-entry",
+        resource_type: "task_workspace",
+        original_path: "/tmp/protected",
+        quarantine_path: "/tmp/trash/protected",
+        size_bytes: 2048,
+        state: "quarantined",
+        quarantined_at: "2026-07-29T00:00:00Z",
+        delete_after: new Date(Date.now() + 86_400_000).toISOString(),
+        last_error: "",
+        metadata: {},
+      },
+    ];
+    await testPage.route("**/api/v1/system/storage/quarantine", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ entries }),
+        });
+        return;
+      }
+      expect(route.request().method()).toBe("DELETE");
+      expect(route.request().postDataJSON()).toEqual({
+        scope: "eligible",
+        confirm: "DELETE ELIGIBLE",
+      });
+      await route.fulfill({
+        status: 202,
+        contentType: "application/json",
+        body: JSON.stringify({ job_id: "eligible-purge" }),
+      });
+    });
+    await testPage.goto("/settings/system/storage");
+    await expect(
+      testPage.getByTestId("storage-quarantine-eligible-entry").getByText("Eligible now"),
+    ).toBeVisible();
+    await expect(testPage.getByText(/Protected until/)).toBeVisible();
+    await expect(testPage.getByTestId("storage-quarantine-protected-entry-delete")).toBeDisabled();
+    await testPage.getByTestId("storage-quarantine-card").scrollIntoViewIfNeeded();
+    await prCapture.screenshot("quarantine-deadlines", {
+      caption: "Desktop quarantine shows eligibility and protected retention deadlines",
+    });
+    await testPage.getByTestId("storage-quarantine-clear-eligible").click();
+    await testPage
+      .getByTestId("storage-quarantine-clear-eligible-confirm-confirmation")
+      .fill("DELETE ELIGIBLE");
+    await testPage.getByTestId("storage-quarantine-clear-eligible-confirm").click();
+    await expect(testPage.getByText("Eligible quarantine cleanup started")).toBeVisible();
+    await prCapture.screenshot("quarantine-clear-eligible", {
+      caption: "Desktop typed confirmation starts eligible-only quarantine cleanup",
+    });
+  });
 });

@@ -19,7 +19,7 @@ type ConfirmationDialogProps = {
   onOpenChange: (open: boolean) => void;
   title: string;
   description: string;
-  phrase: "DEDICATED" | "ADOPT" | "DELETE";
+  phrase: "DEDICATED" | "ADOPT" | "DELETE" | "DELETE ELIGIBLE" | "DELETE ALL NOW";
   actionLabel: string;
   actionTestId: string;
   destructive?: boolean;
@@ -109,6 +109,38 @@ export function PermanentDeleteDialog({
       phrase="DELETE"
       actionLabel="Delete permanently"
       actionTestId="storage-quarantine-delete-confirm"
+      destructive
+    />
+  );
+}
+
+export function QuarantinePurgeDialog({
+  scope,
+  eligibleCount,
+  protectedCount,
+  ...props
+}: Pick<ConfirmationDialogProps, "open" | "onOpenChange" | "onConfirm"> & {
+  scope: "eligible" | "all";
+  eligibleCount: number;
+  protectedCount: number;
+}) {
+  const eligible = scope === "eligible";
+  return (
+    <ConfirmationDialog
+      {...props}
+      title={eligible ? "Clear eligible quarantine" : "Force clear all quarantine"}
+      description={
+        eligible
+          ? `This will permanently remove ${eligibleCount} eligible item${eligibleCount === 1 ? "" : "s"}. ${protectedCount} protected item${protectedCount === 1 ? " remains" : "s remain"} until its retention deadline.`
+          : "This permanently removes every quarantined item immediately and cannot be undone. Every restore window will be lost."
+      }
+      phrase={eligible ? "DELETE ELIGIBLE" : "DELETE ALL NOW"}
+      actionLabel={eligible ? "Clear eligible" : "Force clear all"}
+      actionTestId={
+        eligible
+          ? "storage-quarantine-clear-eligible-confirm"
+          : "storage-quarantine-force-clear-confirm"
+      }
       destructive
     />
   );
