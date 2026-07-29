@@ -1682,8 +1682,8 @@ func (s *Service) ensureSessionRunning(ctx context.Context, sessionID string, se
 	// MCP tool-call timeout, etc.) would otherwise still abort these polling
 	// waits early with a misleading "context deadline exceeded" even though the
 	// resume is progressing fine in the background and would succeed within its
-	// own bounded timeouts (waitForSessionReady's 90s, waitForAgentPromptReady's
-	// 30s below).
+	// own bounded timeouts (waitForSessionReady's AgentLaunchTimeout launch
+	// budget, and waitForAgentPromptReady's 30s below).
 	if err := s.waitForSessionReady(resumeCtx, sessionID); err != nil {
 		return fmt.Errorf("session not ready after resume: %w", err)
 	}

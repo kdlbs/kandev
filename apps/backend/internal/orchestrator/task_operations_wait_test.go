@@ -4,7 +4,10 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -16,11 +19,12 @@ type deadlineRecordingRepo struct {
 	sessionExecutorStore
 	sawCall     bool
 	hadDeadline bool
+	deadline    time.Time
 }
 
 func (r *deadlineRecordingRepo) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
 	r.sawCall = true
-	_, r.hadDeadline = ctx.Deadline()
+	r.deadline, r.hadDeadline = ctx.Deadline()
 	return &models.TaskSession{ID: id, State: models.TaskSessionStateFailed, ErrorMessage: "forced-by-test"}, nil
 }
 
@@ -51,4 +55,27 @@ func TestWaitForSessionReady_BoundsQueriesWithNonCancellableContext(t *testing.T
 	if !rec.hadDeadline {
 		t.Error("GetTaskSession received a context WITHOUT a deadline — queries are unbounded (regression of cubic P2 fix)")
 	}
+}
+
+func TestWaitForSessionReady_UsesAgentLaunchTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		repo := setupTestRepo(t)
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+		rec := &deadlineRecordingRepo{sessionExecutorStore: svc.repo}
+		svc.repo = rec
+		startedAt := time.Now()
+
+		if err := svc.waitForSessionReady(context.WithoutCancel(context.Background()), "session1"); err == nil {
+			t.Fatal("expected error from the forced-failed session")
+		}
+
+		if !rec.hadDeadline {
+			t.Fatal("GetTaskSession received a context WITHOUT a deadline")
+		}
+		if got := rec.deadline.Sub(startedAt); got != constants.AgentLaunchTimeout {
+			t.Fatalf("waitForSessionReady deadline = %s, want %s", got, constants.AgentLaunchTimeout)
+		}
+	})
 }
