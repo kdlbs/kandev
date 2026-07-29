@@ -132,6 +132,50 @@ test.describe("Transcript auto-scroll toggle", () => {
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 10);
   });
 
+  test("disabling while genuinely at the bottom still freezes the view when new content arrives", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Auto-scroll Toggle Bottom Anchor",
+    );
+    await waitForOverflow(testPage);
+
+    const list = chatList(testPage);
+    // The renderer auto-scrolls to the bottom by default, so this should
+    // already hold — assert it explicitly so the test fails loudly if that
+    // assumption ever breaks instead of silently passing for the wrong
+    // reason.
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+        timeout: 5_000,
+        message: "expected to be at the bottom before disabling",
+      })
+      .toBeLessThan(5);
+    const bottomScrollTop = await list.evaluate((el) => el.scrollTop);
+
+    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    // A new message arrives while disabled from the true bottom. The
+    // browser's native bottom overflow-anchor must not override the
+    // toggle: without disabling it too, the anchor keeps itself pinned to
+    // the viewport, dragging scrollTop down to chase the new content.
+    await session.sendMessage('e2e:message("New content while disabled at bottom")');
+    await expect(session.chat.getByText("New content while disabled at bottom").last()).toBeVisible(
+      { timeout: 15_000 },
+    );
+
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollTop), { timeout: 2_000 })
+      .toBeLessThanOrEqual(bottomScrollTop + 2);
+  });
+
   test("preserves the frozen scroll position across navigating away and back", async ({
     testPage,
     apiClient,

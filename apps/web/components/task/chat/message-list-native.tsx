@@ -185,11 +185,13 @@ function useAutoScroll(
     };
   }, [scrollRef, sessionId]);
 
-  // When isWorking transitions to true, force scroll to bottom (unless disabled)
+  // When isWorking transitions to true, force scroll to bottom (unless
+  // disabled, or a layout rebuild scroll restore is pending — same guard
+  // as the messages-change effect below).
   useEffect(() => {
     if (isWorking && !prevIsWorkingRef.current && shouldAutoScrollOnWorkingStart(enabled)) {
       const el = scrollRef.current;
-      if (el) {
+      if (el && useDockviewStore.getState().pendingChatScrollTop === null) {
         el.scrollTop = el.scrollHeight;
         isNearBottomRef.current = true;
       }
@@ -433,8 +435,12 @@ export const NativeMessageList = memo(function NativeMessageList({
         footerActionMessages={footerActionMessages}
       />
 
-      {/* Bottom anchor — browser keeps scroll pinned here when new content appends */}
-      <div style={{ overflowAnchor: "auto", height: 1 }} />
+      {/* Bottom anchor — browser keeps scroll pinned here when new content
+          appends, but only while auto-scroll is enabled: without disabling
+          the anchor too, the browser's native scroll-anchoring keeps
+          tracking the bottom on its own and defeats the toggle for a user
+          who disables from the current bottom. */}
+      <div style={{ overflowAnchor: autoScrollEnabled ? "auto" : "none", height: 1 }} />
     </SessionPanelContent>
   );
 });

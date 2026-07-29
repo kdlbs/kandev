@@ -54,6 +54,17 @@ describe("isPrependUpdate", () => {
       }),
     ).toBe(false);
   });
+
+  it("is NOT a prepend for the empty-to-first-message transition (initial population, not a prepend)", () => {
+    expect(
+      isPrependUpdate({
+        prevItemCount: 0,
+        nextItemCount: 1,
+        prevFirstKey: null,
+        nextFirstKey: "msg-0",
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("shouldAutoScrollOnMessagesChange", () => {
@@ -203,21 +214,7 @@ describe("shouldCatchUpOnAutoScrollEnable", () => {
     ).toBe(true);
   });
 
-  it("does NOT catch up when the user was already scrolled away from the bottom before disabling and nothing new arrived (regression: disable while already scrolled up)", () => {
-    expect(
-      shouldCatchUpOnAutoScrollEnable({
-        wasEnabled: false,
-        nowEnabled: true,
-        appendedSinceDisable: false,
-        isAtBottom: false,
-      }),
-    ).toBe(false);
-  });
-
-  it("does NOT catch up when the user scrolled further away themselves while disabled, with no new content (regression: manual scroll is not progression)", () => {
-    // appendedSinceDisable is derived purely from message identity/updated_at
-    // — a manual scroll can never flip it, unlike a scrollTop/height-based
-    // baseline would.
+  it("does NOT catch up when nothing genuinely progressed while disabled — neither pre-existing unseen history nor the user scrolling further away themselves counts (appendedSinceDisable is derived purely from message identity/updated_at, so neither can flip it)", () => {
     expect(
       shouldCatchUpOnAutoScrollEnable({
         wasEnabled: false,

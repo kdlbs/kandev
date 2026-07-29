@@ -22,6 +22,7 @@ export function isPrependUpdate(params: {
   nextFirstKey: string | null;
 }): boolean {
   if (params.nextItemCount <= params.prevItemCount) return false;
+  if (params.prevFirstKey === null) return false;
   if (params.nextFirstKey === null) return false;
   return params.nextFirstKey !== params.prevFirstKey;
 }
