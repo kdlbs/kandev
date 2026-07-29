@@ -331,6 +331,44 @@ func TestAutoStart_ClaimIsAtomic(t *testing.T) {
 	}
 }
 
+// TestAutoStart_ClaimIsRaceSafe drives the two production auto-start paths'
+// claim through a barrier so both goroutines contend for the single token at
+// once, then joins both results and asserts exactly one winner. The sequential
+// TestAutoStart_ClaimIsAtomic only proves the token disappears after the first
+// call; it would still pass under a non-atomic read-then-delete that lets two
+// concurrent callers both win. This exercises the real read-modify-write under
+// contention against the SQLite repo's conditional UPDATE.
+func TestAutoStart_ClaimIsRaceSafe(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	const taskID = "task-claim-race"
+	seedReviewTask(t, repo, taskID, "step1")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	// Release both claimers at the same instant so their RemoveTaskMetadataKey
+	// calls overlap. Results are joined through a buffered channel.
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	for range 2 {
+		go func() {
+			<-start
+			results <- svc.claimAutoStart(ctx, taskID, "test")
+		}()
+	}
+	close(start)
+
+	winners := 0
+	for range 2 {
+		if <-results {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("expected exactly one concurrent claim winner, got %d", winners)
+	}
+}
+
 // TestAutoStart_FailedLaunchRestoresClaim verifies that when an auto-start
 // launch fails, restoreAutoStartClaim puts the token back so a later trigger
 // can retry.

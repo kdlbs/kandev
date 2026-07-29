@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/tasks/wip-limit-pull-system.md
 created: 2026-07-29
-status: draft
+status: complete
 ---
 
 # Implementation Plan: Single Auto-Start Per Review Task
@@ -127,8 +127,30 @@ Small fix — sequential, single task.
 
 ```
 Wave 1:
-- [ ] [task-01-shared-autostart-claim](task-01-shared-autostart-claim.md)
+- [x] [task-01-shared-autostart-claim](task-01-shared-autostart-claim.md)
 ```
+
+## Verification
+
+Implemented on branch `feature/fix-double-agents`. The shared race-safe claim
+(`MetaKeyAutoStartClaimed`) is set at review-task creation
+(`buildReviewTaskRequest`) alongside the `MetaKeyAutoStartGuard` marker; both
+`autoStartTaskForStep` (Path A) and `autoStartReviewTask` (Path B) compete for
+it via `claimAutoStart`, and a failed launch restores the token via
+`restoreAutoStartClaim`.
+
+Command:
+`cd apps/backend && go test -race -run 'AutoStart|ReviewTask' ./internal/orchestrator/...`
+— pass. Coverage includes both-paths-fire-once, sequential claim atomicity, a
+concurrent barrier claim (exactly one winner under contention), failed-launch
+restore, and no-token-does-not-block.
+
+Known limitation (tracked for follow-up): the guard is not cleared after the
+one-shot token is consumed, so a review task whose completed session is deleted
+and is then moved back into an auto-start step would find the guard present and
+the token gone, and Path A would skip that re-entry launch. Clearing the guard
+on success reopens the creation-time double-launch window, so a correct fix
+needs a launch-generation marker rather than a simple guard clear.
 
 ---
 

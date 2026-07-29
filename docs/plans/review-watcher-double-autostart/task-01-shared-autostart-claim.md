@@ -1,7 +1,7 @@
 ---
 id: "01-shared-autostart-claim"
 title: "Shared race-safe auto-start claim for review tasks"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -112,3 +112,38 @@ sequential
 On completion: summarize the change, list files touched, paste the `go test`
 result, note any blockers/risks, set this file's `status: done`, and tick the
 Wave 1 checkbox in `plan.md`.
+
+## Completion record
+
+Summary: added the one-shot `MetaKeyAutoStartClaimed` token (set at review-task
+creation in `buildReviewTaskRequest` alongside `MetaKeyAutoStartGuard`) and the
+`claimAutoStart` / `restoreAutoStartClaim` helpers. Path A
+(`autoStartTaskForStep`) and Path B (`autoStartReviewTask`) both compete for the
+token when the guard is present; only the winner launches, and a failed launch
+restores the token for retry. Ordinary (guardless) auto-start tasks are
+unaffected.
+
+Files touched:
+
+- `apps/backend/internal/task/models/models.go`
+- `apps/backend/internal/orchestrator/event_handlers_workflow.go`
+- `apps/backend/internal/orchestrator/event_handlers_github.go`
+- `apps/backend/internal/orchestrator/event_handlers_github_review_test.go`
+
+Test result:
+
+```
+cd apps/backend && go test -race -run 'AutoStart|ReviewTask|ReviewWatch' ./internal/orchestrator/
+ok  	github.com/kandev/kandev/internal/orchestrator
+```
+
+Covered: both-paths-fire-once, sequential claim atomicity, concurrent barrier
+claim (exactly one winner under contention), failed-launch restore, and
+no-token-does-not-block.
+
+Blockers/risks: the guard is intentionally left permanent. A review task whose
+completed session is deleted and is then moved back into an auto-start step
+would find the guard present and the token consumed, so Path A skips that
+re-entry launch. Clearing the guard on success reopens the creation-time
+double-launch race, so a proper fix needs a launch-generation marker; tracked
+as follow-up in `plan.md` rather than fixed here.
