@@ -1436,6 +1436,7 @@ export class ApiClient {
       id: number;
       author: string;
       author_avatar?: string;
+      author_is_bot?: boolean;
       body: string;
       path?: string;
       line?: number;
