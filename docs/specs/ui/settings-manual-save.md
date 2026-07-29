@@ -1,6 +1,7 @@
 ---
 status: shipped
 created: 2026-07-14
+updated: 2026-07-29
 owner: kandev
 supersedes: docs/specs/workflow-settings-autosave/spec.md
 ---
@@ -44,7 +45,11 @@ The manual-save rule applies to route-level persistent configuration, including:
 - appearance, resource metrics, keyboard shortcuts, terminal and shell, editors, notifications, voice mode, prompts, secrets, and changelog-notification configuration;
 - utility-agent selection/enabled state and the config-chat profile;
 - runtime feature-toggle overrides;
-- integration configuration forms, GitHub repository scope/action presets/default queries, and GitHub/Jira/Linear/Sentry watcher enabled state.
+- integration configuration forms, GitHub repository scope/action presets/default queries, and GitHub/GitLab/Jira/Linear/Sentry watcher enabled state.
+- After a watcher enabled-state save succeeds, every integration keeps the saved
+  Active or Paused state visible without requiring a page refresh. A delayed
+  integration-list refresh may reconcile the saved baseline but must not make
+  the row revert to its pre-save state.
 
 ### Immediate actions
 
@@ -96,6 +101,10 @@ Route navigation with dirty contributors opens an in-app confirmation with `Save
 - **GIVEN** a new workflow draft, **WHEN** the user reloads before saving, **THEN** no workflow was created and the draft is discarded.
 - **GIVEN** two dirty settings contributors and one save fails, **WHEN** Save completes, **THEN** the successful contributor is clean, the failed contributor remains dirty, and the action reports `Couldn't save`.
 - **GIVEN** a save is in flight, **WHEN** the user changes another field, **THEN** the completed request does not clear the newer dirty revision.
+- **GIVEN** an integration watcher is Active or Paused, **WHEN** the user changes
+  its enabled state and Save succeeds, **THEN** the row immediately shows the
+  saved state, the contributor becomes clean, and the state does not revert
+  while the integration list catches up.
 - **GIVEN** a dirty keyboard shortcut, **WHEN** the user presses Reset, **THEN** the default shortcut is shown locally and no persistence request occurs until Save.
 - **GIVEN** a dirty feature-toggle override, **WHEN** the user presses Reset to default, **THEN** the inherited value is staged and the runtime flag does not change until Save succeeds.
 - **GIVEN** a dirty color-theme draft, **WHEN** the user previews another theme and leaves with Discard, **THEN** the previously saved theme is restored.

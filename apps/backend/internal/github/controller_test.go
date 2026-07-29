@@ -481,6 +481,41 @@ func TestHttpTriggerReviewWatchPublishesNewPREvents(t *testing.T) {
 	}
 }
 
+func TestHttpUpdateReviewWatchReturnsUpdatedWatch(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	watch := &ReviewWatch{
+		WorkspaceID:         "ws-1",
+		WorkflowID:          "wf-1",
+		WorkflowStepID:      "step-1",
+		Enabled:             true,
+		PollIntervalSeconds: defaultWatchPollIntervalSec,
+		CleanupPolicy:       CleanupPolicyNever,
+	}
+	if err := store.CreateReviewWatch(context.Background(), watch); err != nil {
+		t.Fatalf("create review watch: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/github/watches/review/"+watch.ID+"?workspace_id=ws-1",
+		strings.NewReader(`{"enabled":false}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var updated ReviewWatch
+	if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updated.ID != watch.ID || updated.Enabled {
+		t.Fatalf("updated watch = %+v, want id %q and enabled=false", updated, watch.ID)
+	}
+}
+
 func TestHttpListReviewWatchesRequiresWorkspaceForRequests(t *testing.T) {
 	store := newTestStore(t)
 	watch := &ReviewWatch{WorkspaceID: "victim-workspace", Prompt: "secret review prompt"}
