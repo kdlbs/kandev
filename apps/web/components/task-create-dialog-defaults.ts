@@ -8,7 +8,7 @@ export function resolveTaskCreateWorkflowContext(
   allowHiddenWorkflow: boolean,
 ): { workflowId: string | null; defaultStepId: string | null } {
   const workflow = workflows.find((item) => item.id === workflowId);
-  if (allowHiddenWorkflow || !workflowId || workflow?.hidden === false) {
+  if (allowHiddenWorkflow || !workflowId || (workflow && !workflow.hidden)) {
     return { workflowId, defaultStepId };
   }
   return { workflowId: null, defaultStepId: null };

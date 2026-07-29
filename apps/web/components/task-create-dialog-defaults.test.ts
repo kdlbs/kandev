@@ -141,3 +141,21 @@ describe("computeDialogDefaultStepId", () => {
     ).toBe(VISIBLE_START_STEP_ID);
   });
 });
+
+describe("resolveTaskCreateWorkflowContext visibility defaults", () => {
+  it("treats a workflow with omitted hidden metadata as visible", () => {
+    const resolver = (
+      taskCreateDefaults as typeof taskCreateDefaults & {
+        resolveTaskCreateWorkflowContext?: WorkflowContextResolver;
+      }
+    ).resolveTaskCreateWorkflowContext;
+
+    expect(resolver).toBeTypeOf("function");
+    if (!resolver) return;
+
+    expect(resolver("legacy", "start", [{ id: "legacy" }], false)).toEqual({
+      workflowId: "legacy",
+      defaultStepId: "start",
+    });
+  });
+});

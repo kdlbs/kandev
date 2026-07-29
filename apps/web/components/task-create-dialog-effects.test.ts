@@ -129,6 +129,8 @@ describe("useWorkflowStepsEffect", () => {
     rerender({ open: true });
 
     await waitFor(() => expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledTimes(2));
+    expect(workflowApiMocks.listWorkflowSteps).toHaveBeenNthCalledWith(2, "visible");
+    await waitFor(() => expect(setFetchedSteps).toHaveBeenLastCalledWith([]));
   });
 });
 
