@@ -19,6 +19,7 @@ import {
   hasTranscriptAppendedSinceBaseline,
   resolveNativeInitialScrollTop,
   isPrependUpdate,
+  createFrameCoalescer,
 } from "./transcript-auto-scroll";
 import {
   type MessageListProps,
@@ -171,17 +172,22 @@ function useAutoScroll(
     const captureScrollTop = () => {
       if (sessionId) storeApi.getState().setTranscriptScrollTop(sessionId, el.scrollTop);
     };
+    // Coalesce persisted writes to at most one per animation frame — native
+    // scroll events can fire far more often than that, and each write is a
+    // synchronous sessionStorage.setItem plus a store update.
+    const coalescer = createFrameCoalescer(captureScrollTop);
     const onScroll = () => {
       isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
-      captureScrollTop();
+      coalescer.schedule();
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       el.removeEventListener("scroll", onScroll);
       // Final capture on unmount so a disabled session's exact position
       // survives a dockview panel teardown/remount (e.g. navigating away
-      // and back), even if no scroll event fired right before it.
-      captureScrollTop();
+      // and back), even if no scroll event fired right before it, and even
+      // if a coalesced write above was still pending.
+      coalescer.flush();
     };
   }, [scrollRef, sessionId]);
 

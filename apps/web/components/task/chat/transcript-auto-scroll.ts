@@ -142,6 +142,36 @@ export function resolveNativeInitialScrollTop(params: {
   return params.scrollHeight;
 }
 
+/**
+ * Coalesces frequent `schedule()` calls into at most one `run` execution per
+ * animation frame — e.g. persisting scroll position on every native `scroll`
+ * event is far more expensive (sync storage write + store update) than the
+ * events actually need. `flush` cancels any pending frame and runs `run`
+ * once immediately, guaranteeing a final call on cleanup even mid-frame.
+ */
+export function createFrameCoalescer(run: () => void): {
+  schedule: () => void;
+  flush: () => void;
+} {
+  let frameId: number | null = null;
+  return {
+    schedule: () => {
+      if (frameId !== null) return;
+      frameId = requestAnimationFrame(() => {
+        frameId = null;
+        run();
+      });
+    },
+    flush: () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+        frameId = null;
+      }
+      run();
+    },
+  };
+}
+
 const FOLLOW_SMOOTH = "smooth" as const;
 
 /**

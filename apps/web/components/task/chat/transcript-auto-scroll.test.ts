@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   shouldAutoScrollOnMessagesChange,
   shouldAutoScrollOnWorkingStart,
@@ -8,6 +8,7 @@ import {
   resolveNativeInitialScrollTop,
   resolveFollowOutput,
   isPrependUpdate,
+  createFrameCoalescer,
 } from "./transcript-auto-scroll";
 
 describe("isPrependUpdate", () => {
@@ -325,5 +326,87 @@ describe("resolveFollowOutput", () => {
 
   it("does not follow when enabled but scrolled away from the bottom", () => {
     expect(resolveFollowOutput(true, false)).toBe(false);
+  });
+});
+
+describe("createFrameCoalescer", () => {
+  let frameCallbacks: Map<number, () => void>;
+  let nextFrameId: number;
+  let pendingOrder: number[];
+
+  beforeEach(() => {
+    frameCallbacks = new Map();
+    pendingOrder = [];
+    nextFrameId = 1;
+    vi.stubGlobal("requestAnimationFrame", (cb: () => void) => {
+      const id = nextFrameId++;
+      frameCallbacks.set(id, cb);
+      pendingOrder.push(id);
+      return id;
+    });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => {
+      frameCallbacks.delete(id);
+      pendingOrder = pendingOrder.filter((pendingId) => pendingId !== id);
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function runPendingFrame() {
+    const id = pendingOrder.shift();
+    if (id === undefined) return;
+    const cb = frameCallbacks.get(id);
+    frameCallbacks.delete(id);
+    cb?.();
+  }
+
+  it("coalesces multiple schedule() calls within a frame into a single run() call", () => {
+    const run = vi.fn();
+    const coalescer = createFrameCoalescer(run);
+    coalescer.schedule();
+    coalescer.schedule();
+    coalescer.schedule();
+    expect(run).not.toHaveBeenCalled();
+    runPendingFrame();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("schedules a new frame after the previous one has fired", () => {
+    const run = vi.fn();
+    const coalescer = createFrameCoalescer(run);
+    coalescer.schedule();
+    runPendingFrame();
+    coalescer.schedule();
+    runPendingFrame();
+    expect(run).toHaveBeenCalledTimes(2);
+  });
+
+  it("flush() runs immediately and cancels a pending frame so it does not also fire", () => {
+    const run = vi.fn();
+    const coalescer = createFrameCoalescer(run);
+    coalescer.schedule();
+    coalescer.flush();
+    expect(run).toHaveBeenCalledTimes(1);
+    runPendingFrame();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("flush() with no pending frame still runs once", () => {
+    const run = vi.fn();
+    const coalescer = createFrameCoalescer(run);
+    coalescer.flush();
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it("schedule() after a flush() can schedule again", () => {
+    const run = vi.fn();
+    const coalescer = createFrameCoalescer(run);
+    coalescer.schedule();
+    coalescer.flush();
+    coalescer.schedule();
+    runPendingFrame();
+    expect(run).toHaveBeenCalledTimes(2);
   });
 });
