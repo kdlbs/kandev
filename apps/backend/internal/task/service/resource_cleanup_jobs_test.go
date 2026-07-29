@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -963,7 +964,7 @@ func TestTaskResourceCleanupMissingResourcesSucceed(t *testing.T) {
 		{
 			name:        "worktree",
 			environment: &models.TaskEnvironment{ID: "env-gone-worktree", WorktreeID: "worktree-gone"},
-			destroyer:   &stubDestroyer{worktreeErr: worktree.ErrWorktreeNotFound},
+			destroyer:   &stubDestroyer{worktreeErr: fmt.Errorf("worktree cleanup: %w", worktree.ErrWorktreeNotFound)},
 		},
 		{
 			name:        "task environment row",
