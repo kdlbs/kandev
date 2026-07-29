@@ -98,11 +98,14 @@ func TestNATSPublish_StampsSubject(t *testing.T) {
 	ev := NewEvent("shell.output", "test", map[string]interface{}{})
 
 	b := &NATSEventBus{logger: newTestLogger(t)}
-	// conn is nil, so Publish fails at the connection hop — the stamping
-	// happens before that and is what this test asserts.
-	_ = func() (err error) {
+	// No server here, so conn is nil and the send hop (b.conn.Publish) panics
+	// on the nil dereference. The recover is deliberate: stamping happens
+	// before the marshal/send, so the assertion below still holds, and if the
+	// implementation were ever rearranged to stamp after sending, this test
+	// would fail rather than silently pass.
+	func() {
 		defer func() { _ = recover() }()
-		return b.Publish(context.Background(), "shell.output.sess-1", ev)
+		_ = b.Publish(context.Background(), "shell.output.sess-1", ev)
 	}()
 
 	if ev.Subject != "shell.output.sess-1" {

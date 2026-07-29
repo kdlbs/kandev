@@ -576,6 +576,22 @@ func TestDeliverer_PerSessionSubjectFamilies(t *testing.T) {
 	}
 }
 
+// TestDeliverer_SubjectUnrelatedToTypeIsDelivered covers the one shape where
+// the published subject is not even a suffixed form of the event's own type:
+// handleGitCommitCreated / handleGitCommitsReset / handleBranchSwitched in the
+// orchestrator publish on git.ws.<sessionId> while stamping events.GitEvent
+// ("git.event"). Matching on the subject makes these deliverable under
+// "git.ws.*"; matching on the type could never have delivered them at all.
+func TestDeliverer_SubjectUnrelatedToTypeIsDelivered(t *testing.T) {
+	got := publishForPattern(t, "git.ws.*", "git.ws.sess-1", "git.event")
+	if got.EventType != "git.ws.sess-1" {
+		t.Errorf("EventType = %q, want the concrete published subject git.ws.sess-1", got.EventType)
+	}
+
+	// ...and the type it carries must not make it match that type's pattern.
+	assertNotDelivered(t, "git.event.*", "git.ws.sess-1", "git.event")
+}
+
 // TestDeliverer_UnsuffixedSubscriptionsUnchanged pins the backward-compatible
 // half: subjects published unsuffixed have subject == type, so both exact
 // and wildcard 2-segment subscriptions still match and still see the same

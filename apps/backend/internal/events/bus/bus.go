@@ -16,11 +16,16 @@ type Event struct {
 	// by EventBus.Publish. It is NOT always equal to Type: many per-session
 	// (and per-run) events are published on a suffixed subject while Type
 	// stays the bare event constant — e.g. Type "shell.output" published on
-	// subject "shell.output.<sessionId>". Subscribers that need to know
-	// which concrete subject matched (the plugin deliverer, which re-checks
-	// the subscriber's manifest pattern) must read Subject, not Type. Use
-	// EffectiveSubject to read it with a Type fallback for events that
-	// predate the stamping (or were constructed by hand in a test).
+	// subject "shell.output.<sessionId>". A few carry an unrelated type
+	// entirely (three git.ws publish sites in the orchestrator stamp
+	// "git.event"). Subscribers that need to know which concrete subject
+	// matched (the plugin deliverer, which re-checks the subscriber's
+	// manifest pattern) must read Subject, not Type. Use EffectiveSubject to
+	// read it with a Type fallback for events that predate the stamping (or
+	// were constructed by hand in a test).
+	//
+	// Because Publish stamps this in place, a single *Event must not be
+	// published to more than one subject concurrently — see EventBus.Publish.
 	Subject   string      `json:"subject,omitempty"`
 	Source    string      `json:"source"` // Service that produced the event
 	Timestamp time.Time   `json:"timestamp"`
@@ -65,7 +70,15 @@ type Subscription interface {
 
 // EventBus interface for event bus operations
 type EventBus interface {
-	// Publish sends an event to a subject
+	// Publish sends an event to a subject.
+	//
+	// Implementations stamp subject onto event.Subject in place before
+	// dispatching, so callers must not share one *Event across concurrent
+	// Publish calls on different subjects — build a fresh Event per publish
+	// (which every call site does today). Publishing the same pointer to
+	// several subjects sequentially is fine: the memory bus dispatches its
+	// handlers synchronously inside Publish, so each handler observes the
+	// subject it was published on.
 	Publish(ctx context.Context, subject string, event *Event) error
 
 	// Subscribe creates a subscription to a subject pattern
