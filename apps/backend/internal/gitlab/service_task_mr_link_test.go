@@ -104,6 +104,38 @@ func seedLocalGitCheckout(t *testing.T, dir, remoteURL string) {
 	}
 }
 
+// seedLocalGitWorktreeCheckout creates a linked worktree checkout at
+// worktreeDir: a ".git" *file* (not directory) containing a "gitdir:"
+// pointer into mainGitDir/worktrees/<name>, whose own "commondir" file
+// points back at mainGitDir where the origin remote is actually configured
+// (mirroring what `git worktree add` produces on disk).
+func seedLocalGitWorktreeCheckout(t *testing.T, worktreeDir, mainGitDir, remoteURL string) {
+	t.Helper()
+	if err := os.MkdirAll(mainGitDir, 0o755); err != nil {
+		t.Fatalf("mkdir main git dir: %v", err)
+	}
+	config := "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = " + remoteURL + "\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+	if err := os.WriteFile(filepath.Join(mainGitDir, "config"), []byte(config), 0o644); err != nil {
+		t.Fatalf("write main git config: %v", err)
+	}
+
+	worktreeGitDir := filepath.Join(mainGitDir, "worktrees", "wt")
+	if err := os.MkdirAll(worktreeGitDir, 0o755); err != nil {
+		t.Fatalf("mkdir worktree git dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(worktreeGitDir, "commondir"), []byte("../..\n"), 0o644); err != nil {
+		t.Fatalf("write commondir: %v", err)
+	}
+
+	if err := os.MkdirAll(worktreeDir, 0o755); err != nil {
+		t.Fatalf("mkdir worktree dir: %v", err)
+	}
+	gitFile := "gitdir: " + worktreeGitDir + "\n"
+	if err := os.WriteFile(filepath.Join(worktreeDir, ".git"), []byte(gitFile), 0o644); err != nil {
+		t.Fatalf("write .git pointer file: %v", err)
+	}
+}
+
 // setTaskMRRepositoryIdentityColumnsNull sets every provider identity column
 // (provider, provider_host, provider_owner, provider_name, remote_url) to
 // SQL NULL, mirroring rows persisted before those columns existed or by code
@@ -432,6 +464,43 @@ func TestAssociateExistingMRByURLBackfillsRemoteURLFromLocalCheckoutWhenLegacyRo
 
 	// Backfilled as a credential-free canonical "host/project" form, not the
 	// raw local remote (which may embed ssh/scp syntax or credentials).
+	got := getTaskMRRepositoryRemoteURL(t, store, "repo-1")
+	if got != host+"/clients/socodevi/laravel/co-up" {
+		t.Fatalf("remote_url not backfilled, got %q", got)
+	}
+}
+
+func TestAssociateExistingMRByURLBackfillsRemoteURLFromLocalWorktreeCheckoutWhenLegacyRowIsBlank(t *testing.T) {
+	// Covers the `git worktree add` on-disk shape: local_path/.git is a
+	// *file* containing a "gitdir:" pointer into the main checkout's
+	// "worktrees/<name>" directory, which in turn has a "commondir" file
+	// pointing back at the main checkout where the origin remote actually
+	// lives. resolveLocalGitDir/resolveLocalCommonGitDir must follow both
+	// indirections for the legacy-row fallback to work for worktree
+	// checkouts, not just plain clones.
+	const host = "https://gitlab.savoirfairelinux.com"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	root := t.TempDir()
+	mainGitDir := filepath.Join(root, "main", ".git")
+	worktreeDir := filepath.Join(root, "worktree")
+	seedLocalGitWorktreeCheckout(
+		t, worktreeDir, mainGitDir,
+		"git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/co-up.git",
+	)
+	setTaskMRRepositoryLocalPath(t, store, "repo-1", worktreeDir)
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+
 	got := getTaskMRRepositoryRemoteURL(t, store, "repo-1")
 	if got != host+"/clients/socodevi/laravel/co-up" {
 		t.Fatalf("remote_url not backfilled, got %q", got)
