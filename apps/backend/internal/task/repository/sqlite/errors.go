@@ -20,6 +20,10 @@ var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 // matches the supplied task id.
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
 
+// ErrTaskEnvironmentNotFound is returned when no task environment row matches
+// the supplied id. Callers should classify it with errors.Is.
+var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
+
 // ErrNoPrimarySession is returned by GetPrimarySessionByTaskID when the task
 // has no primary session row. Callers should use errors.Is to distinguish this
 // "not found" case from genuine backend/DB errors.

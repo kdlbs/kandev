@@ -242,7 +242,7 @@ operation_id      string     unique idempotency key for one lifecycle mutation
 task_id           string     indexed, no foreign key
 trigger           enum       archive | delete | cascade_archive | cascade_delete |
                              workspace_delete | quick_chat_expire | reconcile
-state             enum       pending | running | retry_wait | succeeded | cancelled
+state             enum       pending | running | retry_wait | succeeded | failed | cancelled
 resource_snapshot json       captured runtime/environment/worktree/path handles
 attempts          int        non-negative
 next_attempt_at   timestamp  nullable
@@ -392,7 +392,9 @@ records each provider result.
 ```text
 pending -> running -> succeeded
                    -> cancelled       archived task became active again
-                   -> retry_wait      bounded attempt failed
+                   -> retry_wait      attempts 1-7 failed; retry uses the
+                                      1m, 5m, 15m, 1h, 3h, 6h, 12h schedule
+                   -> failed          attempt 8 failed; terminal diagnostic
 retry_wait -> running                 next attempt or manual maintenance run
 ```
 
