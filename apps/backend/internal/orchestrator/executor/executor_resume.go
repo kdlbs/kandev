@@ -844,11 +844,33 @@ func (e *Executor) applyExecutorConfigToResumeRequest(ctx context.Context, req *
 	return execConfig
 }
 
+// isArchiveCancelledResumeSession reports whether session was cancelled by an
+// archive (Service.ArchiveTask's single-task path or HandoffService's cascade
+// archive) rather than an explicit user/coordinator stop. Mirrors
+// orchestrator.isArchiveCancelledSession — kept local to this package since
+// the two live on opposite sides of the executor/orchestrator boundary and
+// the check is two lines over already-exported models helpers.
+func isArchiveCancelledResumeSession(session *models.TaskSession) bool {
+	return session != nil &&
+		session.State == models.TaskSessionStateCancelled &&
+		models.IsArchiveCancelReason(session.ErrorMessage)
+}
+
 // applyRunningRecordToResumeRequest loads the ExecutorRunning record and applies
 // resume-related fields (remote reconnect, resume token) to the request.
 func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *LaunchAgentRequest, task *v1.Task, session *models.TaskSession, startAgent bool) *models.ExecutorRunning {
 	running, runErr := e.repo.GetExecutorRunningBySessionID(ctx, session.ID)
 	if runErr != nil || running == nil {
+		// Archive cleanup tears down the executors_running row entirely, so an
+		// archive-cancelled session reaches this point with running == nil —
+		// exactly the shape GetTaskSessionStatus's resumeReasonArchiveCancelledResumable
+		// auto-resumes once the task is unarchived. There is no resume token or
+		// running record to fall back on here, but the launch still must not
+		// replay task.Description as a fresh prompt — see the else-if branch
+		// below for the same guard on the running-record path.
+		if startAgent && isArchiveCancelledResumeSession(session) {
+			req.TaskDescription = ""
+		}
 		return nil
 	}
 
@@ -880,8 +902,11 @@ func (e *Executor) applyRunningRecordToResumeRequest(ctx context.Context, req *L
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
 			zap.Bool("has_resume_token", running.ResumeToken != ""))
-	} else if startAgent && session.State == models.TaskSessionStateWaitingForInput {
-		// Fresh-start resume (no resume token): don't auto-prompt with the task description.
+	} else if startAgent && (session.State == models.TaskSessionStateWaitingForInput || isArchiveCancelledResumeSession(session)) {
+		// Fresh-start resume (no resume token): don't auto-prompt with the task
+		// description. Also covers an archive-cancelled session whose running
+		// record survived cleanup but carries no token — same auto-resume shape
+		// as the running==nil branch above.
 		req.TaskDescription = ""
 		e.logger.Info("fresh-start resume, clearing task description to avoid auto-prompt",
 			zap.String("task_id", task.ID),
