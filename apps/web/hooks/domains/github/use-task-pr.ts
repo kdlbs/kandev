@@ -76,8 +76,13 @@ export function useTaskPR(taskId: string | null) {
   const prs = useAppStore((state) => (taskId ? (state.taskPRs.byTaskId[taskId] ?? null) : null));
   const pr = getPrimaryTaskPR(prs ?? undefined);
   const setTaskPR = useAppStore((state) => state.setTaskPR);
+  const connectionStatus = useAppStore((state) => state.connection.status);
   const retryRef = useRef(0);
   const permanentRef = useRef(false);
+  // Tracks the previous connection status so the resync effect below only
+  // fires on the transition edge into `connected`, not on every re-render
+  // while already connected.
+  const prevConnectionStatusRef = useRef(connectionStatus);
   // Monotonic counter incremented before each WS request, snapshotted in
   // the .then() closure. Mirrors useWorkspacePRs above. Without this, a
   // stale response from a previous taskId can land after the user
@@ -161,6 +166,23 @@ export function useTaskPR(taskId: string | null) {
 
     return () => clearInterval(interval);
   }, [taskId, pr, refresh]);
+
+  // Reconnect-driven resync. A task can be opened while the WS is down (e.g. a
+  // transient dev HMR disconnect, or a task auto-created by the PR-review
+  // watcher that the user navigates to directly). In that window the freshness
+  // sync and every 5s retry queue/time out with nothing, so the store never
+  // learns about the PR and the auto "Pull Request" tab is never offered. When
+  // the socket comes back up, clear the exhausted retry/permanent state and
+  // refire the sync so a fresh 30s retry window starts. Guarded on the
+  // transition edge into `connected` so unrelated store updates don't refire.
+  useEffect(() => {
+    const prev = prevConnectionStatusRef.current;
+    prevConnectionStatusRef.current = connectionStatus;
+    if (!taskId || connectionStatus !== "connected" || prev === "connected") return;
+    retryRef.current = 0;
+    permanentRef.current = false;
+    refresh();
+  }, [taskId, connectionStatus, refresh]);
 
   return { pr, prs: prs ?? [], refresh } as {
     pr: TaskPR | null;
