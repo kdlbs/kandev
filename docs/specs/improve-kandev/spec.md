@@ -53,7 +53,11 @@ the user's own agent picks up immediately — turning every report into a contri
   dialog. It is reachable only through the Improve Kandev entry point.
 - Hidden workflows do not count as choices in the standard task-create dialog.
   When the active workspace has exactly one visible workflow, the dialog uses
-  that workflow implicitly and omits the redundant workflow selector.
+  that workflow implicitly and omits the redundant workflow selector. This
+  remains true when the standard dialog is opened from a task-detail route
+  whose task belongs to a hidden workflow; only a feature wrapper that
+  explicitly locks the workflow may create another task in that hidden
+  workflow.
 - The `report-kandev-issue` workflow is also hidden and reachable only through
   the **Open issue** option. Its agent reads the repository's current bug-report
   or feature-request issue form, gathers every required field from the user,
@@ -141,6 +145,12 @@ the user's own agent picks up immediately — turning every report into a contri
   workflows, **WHEN** the user opens the standard task-create dialog without an
   explicit workflow, **THEN** the visible workflow is selected implicitly and
   the workflow selector does not appear.
+
+- **GIVEN** the user is viewing a task that belongs to a hidden Improve Kandev
+  workflow, **WHEN** they open the standard New Task dialog from either the
+  desktop sidebar or the mobile task drawer and create a task, **THEN** the new
+  task uses the workspace's visible workflow rather than inheriting the hidden
+  task-detail workflow.
 
 - **GIVEN** the user has not configured `gh auth`, **WHEN** they open the
   Improve Kandev dialog, **THEN** the dialog shows a blocking error referencing

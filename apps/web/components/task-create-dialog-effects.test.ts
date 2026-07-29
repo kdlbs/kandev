@@ -3,12 +3,20 @@ import { renderHook, waitFor } from "@testing-library/react";
 import {
   useDefaultSelectionsEffect,
   useWorkflowAgentProfileEffect,
+  useWorkflowStepsEffect,
 } from "./task-create-dialog-effects";
 import { decideAgentProfileAutopick } from "./task-create-dialog-autopick";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { Workspace } from "@/lib/types/http";
 const STORAGE_KEYS = { LAST_AGENT_PROFILE_ID: "kandev.dialog.lastAgentProfileId" } as const;
+const workflowApiMocks = vi.hoisted(() => ({
+  listWorkflowSteps: vi.fn(),
+}));
+
+vi.mock("@/lib/api/domains/workflow-api", () => ({
+  listWorkflowSteps: workflowApiMocks.listWorkflowSteps,
+}));
 
 // Minimal fake of DialogFormState - the hook destructures only three fields,
 // so the rest can be undefined behind an `as` cast and never read.
@@ -45,6 +53,58 @@ function makeProfile(id: string): AgentProfileOption {
 
 beforeEach(() => {
   localStorage.clear();
+  workflowApiMocks.listWorkflowSteps.mockReset();
+});
+
+describe("useWorkflowStepsEffect", () => {
+  it("loads the visible fallback steps when hidden task context was removed", async () => {
+    workflowApiMocks.listWorkflowSteps.mockResolvedValue({
+      steps: [
+        {
+          id: "visible-backlog",
+          workflow_id: "visible",
+          name: "Backlog",
+          position: 0,
+          is_start_step: false,
+        },
+        {
+          id: "visible-start",
+          workflow_id: "visible",
+          name: "In Progress",
+          position: 1,
+          is_start_step: true,
+        },
+      ],
+      total: 2,
+    });
+    const setFetchedSteps = vi.fn();
+    const fs = {
+      selectedWorkflowId: null,
+      setFetchedSteps,
+    } as unknown as DialogFormState;
+
+    renderHook(() => useWorkflowStepsEffect(fs, null, "visible"));
+
+    await waitFor(() => expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledWith("visible"));
+    await waitFor(() =>
+      expect(setFetchedSteps).toHaveBeenCalledWith([
+        {
+          id: "visible-backlog",
+          title: "Backlog",
+          position: 0,
+          is_start_step: false,
+          events: undefined,
+        },
+        {
+          id: "visible-start",
+          title: "In Progress",
+          position: 1,
+          is_start_step: true,
+          events: undefined,
+        },
+      ]),
+    );
+  });
 });
 
 describe("useWorkflowAgentProfileEffect", () => {

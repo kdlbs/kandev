@@ -1,6 +1,18 @@
 import type { DialogComputedArgs, StepType } from "@/components/task-create-dialog-types";
 import { computeEffectiveStepId } from "@/components/task-create-dialog-helpers";
 
+export function resolveTaskCreateWorkflowContext(
+  workflowId: string | null,
+  defaultStepId: string | null,
+  workflows: Array<{ id: string; hidden?: boolean }>,
+  allowHiddenWorkflow: boolean,
+): { workflowId: string | null; defaultStepId: string | null } {
+  if (allowHiddenWorkflow || !workflows.find((workflow) => workflow.id === workflowId)?.hidden) {
+    return { workflowId, defaultStepId };
+  }
+  return { workflowId: null, defaultStepId: null };
+}
+
 export function computeSingleWorkflowFallbackId(
   selectedWorkflowId: string | null,
   workflowId: string | null,
@@ -39,6 +51,18 @@ export function computeDialogDefaultStepId({
   effectiveWorkflowId,
   snapshots,
 }: ComputeDialogDefaultStepIdArgs): string | null {
+  if (effectiveWorkflowId && effectiveWorkflowId !== workflowId) {
+    const fetchedStartStep = fetchedSteps?.find((step) => step.is_start_step);
+    const fetchedFirstStep = fetchedSteps
+      ? [...fetchedSteps].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0]
+      : null;
+    return (
+      fetchedStartStep?.id ??
+      fetchedFirstStep?.id ??
+      computeSnapshotDefaultStepId(effectiveWorkflowId, snapshots)
+    );
+  }
+
   const switchedWorkflowWithoutFetchedSteps =
     Boolean(selectedWorkflowId) && selectedWorkflowId !== workflowId && !fetchedSteps;
   const computedStepId = switchedWorkflowWithoutFetchedSteps

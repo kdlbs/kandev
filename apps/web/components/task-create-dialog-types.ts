@@ -72,6 +72,8 @@ export type TaskRemoteRepoRow = {
 export type StepType = {
   id: string;
   title: string;
+  position?: number;
+  is_start_step?: boolean;
   events?: {
     on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
     on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -176,6 +178,7 @@ export type TaskCreateEffectsArgs = {
   open: boolean;
   workspaceId: string | null;
   workflowId: string | null;
+  effectiveWorkflowId: string | null;
   repositories: Repository[];
   repositoriesLoading: boolean;
   agentProfiles: AgentProfileOption[];
