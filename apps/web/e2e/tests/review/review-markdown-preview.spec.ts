@@ -14,6 +14,7 @@ test.describe("Review Markdown preview", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     fs.writeFileSync(path.join(repoDir, MARKDOWN_FILE), "# Review preview\n\nRendered content.");
@@ -56,5 +57,8 @@ test.describe("Review Markdown preview", () => {
     const preview = testPage.getByTestId("markdown-preview");
     await expect(preview).toBeVisible({ timeout: 15_000 });
     await expect(preview.locator("h1")).toHaveText("Review preview");
+    await prCapture.screenshot("rendered-markdown-preview", {
+      caption: "Desktop rendered Markdown preview from a review diff",
+    });
   });
 });

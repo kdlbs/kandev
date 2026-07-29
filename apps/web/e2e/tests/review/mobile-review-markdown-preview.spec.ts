@@ -14,6 +14,7 @@ test.describe("Review Markdown preview on mobile", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     const repoDir = path.join(backend.tmpDir, "repos", "e2e-repo");
     fs.writeFileSync(
@@ -65,5 +66,8 @@ test.describe("Review Markdown preview on mobile", () => {
     await expect(viewer.getByTestId("markdown-preview").locator("h1")).toHaveText(
       "Mobile review preview",
     );
+    await prCapture.screenshot("rendered-markdown-preview", {
+      caption: "Mobile rendered Markdown preview from a review diff",
+    });
   });
 });
