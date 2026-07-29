@@ -437,19 +437,21 @@ type TaskPR struct {
 
 // TaskCIOptions stores task-level PR automation preferences.
 type TaskCIOptions struct {
-	TaskID                  string    `json:"task_id" db:"task_id"`
-	AutoFixEnabled          bool      `json:"auto_fix_enabled" db:"auto_fix_enabled"`
-	AutoMergeEnabled        bool      `json:"auto_merge_enabled" db:"auto_merge_enabled"`
-	AutoFixPromptOverride   *string   `json:"auto_fix_prompt_override,omitempty" db:"auto_fix_prompt_override"`
-	PromptOnReviewRequested bool      `json:"prompt_on_review_requested" db:"prompt_on_review_requested"`
-	PromptOnMerged          bool      `json:"prompt_on_merged" db:"prompt_on_merged"`
-	PromptOnClosed          bool      `json:"prompt_on_closed" db:"prompt_on_closed"`
-	ReviewReviewerLogin     string    `json:"review_reviewer_login" db:"review_reviewer_login"`
-	ReviewPromptOverride    *string   `json:"review_prompt_override,omitempty" db:"review_prompt_override"`
-	MergedPromptOverride    *string   `json:"merged_prompt_override,omitempty" db:"merged_prompt_override"`
-	ClosedPromptOverride    *string   `json:"closed_prompt_override,omitempty" db:"closed_prompt_override"`
-	CreatedAt               time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt               time.Time `json:"updated_at" db:"updated_at"`
+	TaskID                  string  `json:"task_id" db:"task_id"`
+	AutoFixEnabled          bool    `json:"auto_fix_enabled" db:"auto_fix_enabled"`
+	AutoMergeEnabled        bool    `json:"auto_merge_enabled" db:"auto_merge_enabled"`
+	AutoFixPromptOverride   *string `json:"auto_fix_prompt_override,omitempty" db:"auto_fix_prompt_override"`
+	PromptOnReviewRequested bool    `json:"prompt_on_review_requested" db:"prompt_on_review_requested"`
+	PromptOnMerged          bool    `json:"prompt_on_merged" db:"prompt_on_merged"`
+	PromptOnClosed          bool    `json:"prompt_on_closed" db:"prompt_on_closed"`
+	ReviewReviewerLogin     string  `json:"review_reviewer_login" db:"review_reviewer_login"`
+	// Lifecycle override columns remain only to read and clear legacy rows during
+	// the additive schema migration. They are not part of the update or API model.
+	ReviewPromptOverride *string   `json:"-" db:"review_prompt_override"`
+	MergedPromptOverride *string   `json:"-" db:"merged_prompt_override"`
+	ClosedPromptOverride *string   `json:"-" db:"closed_prompt_override"`
+	CreatedAt            time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // TaskCIOptionsPatch is a partial update for task CI automation options.
@@ -461,16 +463,13 @@ type TaskCIOptionsPatch struct {
 	PromptOnMerged          *bool
 	PromptOnClosed          *bool
 	ReviewReviewerLogin     *string
-	ReviewPromptOverride    *string
-	MergedPromptOverride    *string
-	ClosedPromptOverride    *string
 }
 
 // HasAny reports whether the patch contains at least one requested field change.
 func (p TaskCIOptionsPatch) HasAny() bool {
 	return p.AutoFixEnabled != nil || p.AutoMergeEnabled != nil || p.AutoFixPromptOverride != nil ||
 		p.PromptOnReviewRequested != nil || p.PromptOnMerged != nil || p.PromptOnClosed != nil ||
-		p.ReviewPromptOverride != nil || p.MergedPromptOverride != nil || p.ClosedPromptOverride != nil
+		p.ReviewReviewerLogin != nil
 }
 
 // TaskCIOptionsResponse is the HTTP shape for task CI automation options.
@@ -486,12 +485,9 @@ type TaskCIOptionsResponse struct {
 	PromptOnMerged          bool                       `json:"prompt_on_merged"`
 	PromptOnClosed          bool                       `json:"prompt_on_closed"`
 	ReviewReviewerLogin     string                     `json:"review_reviewer_login"`
-	ReviewPromptOverride    *string                    `json:"review_prompt_override"`
-	MergedPromptOverride    *string                    `json:"merged_prompt_override"`
-	ClosedPromptOverride    *string                    `json:"closed_prompt_override"`
-	EffectiveReviewPrompt   string                     `json:"effective_review_prompt"`
-	EffectiveMergedPrompt   string                     `json:"effective_merged_prompt"`
-	EffectiveClosedPrompt   string                     `json:"effective_closed_prompt"`
+	EffectiveReviewPrompt   string                     `json:"-"`
+	EffectiveMergedPrompt   string                     `json:"-"`
+	EffectiveClosedPrompt   string                     `json:"-"`
 	UpdatedAt               time.Time                  `json:"updated_at"`
 	PRStates                []*TaskCIPRAutomationState `json:"pr_states"`
 }

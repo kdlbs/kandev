@@ -44,6 +44,13 @@ func (h *Handlers) handleGetTaskPRAutomation(ctx context.Context, msg *ws.Messag
 }
 
 func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(msg.Payload, &fields); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if hasLifecyclePromptOverride(fields) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "lifecycle prompt overrides are not supported", nil)
+	}
 	var req struct {
 		TaskID                  string  `json:"task_id"`
 		AutoFixEnabled          *bool   `json:"auto_fix_enabled"`
@@ -52,9 +59,6 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 		PromptOnReviewRequested *bool   `json:"prompt_on_review_requested"`
 		PromptOnMerged          *bool   `json:"prompt_on_merged"`
 		PromptOnClosed          *bool   `json:"prompt_on_closed"`
-		ReviewPromptOverride    *string `json:"review_prompt_override"`
-		MergedPromptOverride    *string `json:"merged_prompt_override"`
-		ClosedPromptOverride    *string `json:"closed_prompt_override"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -69,9 +73,6 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 		PromptOnReviewRequested: req.PromptOnReviewRequested,
 		PromptOnMerged:          req.PromptOnMerged,
 		PromptOnClosed:          req.PromptOnClosed,
-		ReviewPromptOverride:    req.ReviewPromptOverride,
-		MergedPromptOverride:    req.MergedPromptOverride,
-		ClosedPromptOverride:    req.ClosedPromptOverride,
 	}
 	if !patch.HasAny() {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "at least one PR automation option is required", nil)
@@ -90,4 +91,13 @@ func (h *Handlers) handleUpdateTaskPRAutomation(ctx context.Context, msg *ws.Mes
 		}
 	}
 	return ws.NewResponse(msg.ID, msg.Action, options)
+}
+
+func hasLifecyclePromptOverride(fields map[string]json.RawMessage) bool {
+	for _, field := range []string{"review_prompt_override", "merged_prompt_override", "closed_prompt_override"} {
+		if _, ok := fields[field]; ok {
+			return true
+		}
+	}
+	return false
 }

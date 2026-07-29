@@ -46,8 +46,10 @@ function CIAutomationInfoButton() {
       <TooltipContent side="top" align="end" className="max-w-[280px] text-xs leading-relaxed">
         Watches this task's linked pull request during the 1 minute PR refresh loop. Auto-fix queues
         task prompts for newly observed feedback, auto-merge waits for the PR to be ready, and the
-        notification switches prompt the task's agent when review is requested again or the PR
-        reaches a terminal state.
+        notification switches prompt the task's agent when the connected GitHub account's review
+        becomes requested or the PR reaches a terminal state. Review requests follow the connected
+        GitHub account and silently baseline its current request state before prompting only on a
+        later request.
       </TooltipContent>
     </Tooltip>
   );
@@ -174,8 +176,11 @@ function CIAutomationRow({
   onCheckedChange: (checked: boolean) => void;
   help?: ReactNode;
 }) {
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
+
   return (
-    <div className="flex min-h-7 items-center justify-between gap-3 px-1">
+    <div className={`flex items-center justify-between gap-3 px-1 ${minHeight}`}>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <Label htmlFor={id} className="min-w-0 cursor-pointer truncate text-xs">
           {label}
@@ -203,7 +208,10 @@ function CIAutomationErrorRow({
   onRetry: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-2 px-1 text-[11px] text-destructive">
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-2 px-1 text-[11px] text-destructive"
+    >
       <span className="min-w-0 flex-1 truncate">{error}</span>
       <Button
         type="button"
@@ -293,7 +301,7 @@ function PRAgentPromptRows({
     <>
       <CIAutomationRow
         id={`task-pr-review-requested-prompt-${taskId}`}
-        label="Prompt agent when review is requested"
+        label="Prompt agent when your review is requested"
         checked={Boolean(options?.prompt_on_review_requested)}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ prompt_on_review_requested: checked })}
@@ -424,6 +432,13 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
         disabled={disabled}
         patchOption={patchOption}
       />
+      {automationState?.last_error && (
+        <CIAutomationErrorRow
+          error={automationState.last_error}
+          loading={loading}
+          onRetry={retryLoad}
+        />
+      )}
       {error && <CIAutomationErrorRow error={error} loading={loading} onRetry={retryLoad} />}
       <CIAutomationPromptDialog
         open={promptOpen}

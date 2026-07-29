@@ -63,12 +63,6 @@ func (s *Service) GetTaskCIPRState(ctx context.Context, taskID, repositoryID str
 	return s.store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
 }
 
-func (s *Service) GetTaskPRByRepoAndNumber(
-	ctx context.Context, taskID, repositoryID string, prNumber int,
-) (*TaskPR, error) {
-	return s.store.GetTaskPRByRepoAndNumber(ctx, taskID, repositoryID, prNumber)
-}
-
 // RecordTaskCIFixAttempt records an auto-fix attempt.
 func (s *Service) RecordTaskCIFixAttempt(ctx context.Context, attempt TaskCIFixAttempt) error {
 	if s.store == nil {
@@ -149,6 +143,23 @@ func (s *Service) SetTaskPRReviewRequestState(
 	return s.store.SetTaskPRReviewRequestState(ctx, taskID, repositoryID, prNumber, requested)
 }
 
+// RebindTaskPRReviewer resolves the current GitHub login and atomically resets
+// the task's review-request baselines if the connected account changed.
+func (s *Service) RebindTaskPRReviewer(ctx context.Context, taskID string) (string, bool, error) {
+	if s.client == nil {
+		return "", false, fmt.Errorf("GitHub client is not available")
+	}
+	login, err := s.client.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return "", false, fmt.Errorf("resolve authenticated reviewer: %w", err)
+	}
+	changed, err := s.store.RebindTaskPRReviewer(ctx, taskID, login)
+	if err != nil {
+		return "", false, err
+	}
+	return login, changed, nil
+}
+
 func (s *Service) SetTaskPRObservedState(
 	ctx context.Context, taskID, repositoryID string, prNumber int, state string,
 ) error {
@@ -186,9 +197,9 @@ func (s *Service) buildTaskCIOptionsResponse(ctx context.Context, opts *TaskCIOp
 		return nil, err
 	}
 	effectivePrompt, usingDefault := s.effectiveCIAutoFixPrompt(ctx, opts)
-	reviewPrompt := s.effectiveTaskPRPrompt(ctx, opts.ReviewPromptOverride, "pr-review-requested")
-	mergedPrompt := s.effectiveTaskPRPrompt(ctx, opts.MergedPromptOverride, "pr-merged-final")
-	closedPrompt := s.effectiveTaskPRPrompt(ctx, opts.ClosedPromptOverride, "pr-closed-final")
+	reviewPrompt := effectiveTaskPRPrompt("pr-review-requested")
+	mergedPrompt := effectiveTaskPRPrompt("pr-merged-final")
+	closedPrompt := effectiveTaskPRPrompt("pr-closed-final")
 	return &TaskCIOptionsResponse{
 		TaskID:                  opts.TaskID,
 		AutoFixEnabled:          opts.AutoFixEnabled,
@@ -201,9 +212,6 @@ func (s *Service) buildTaskCIOptionsResponse(ctx context.Context, opts *TaskCIOp
 		PromptOnMerged:          opts.PromptOnMerged,
 		PromptOnClosed:          opts.PromptOnClosed,
 		ReviewReviewerLogin:     opts.ReviewReviewerLogin,
-		ReviewPromptOverride:    opts.ReviewPromptOverride,
-		MergedPromptOverride:    opts.MergedPromptOverride,
-		ClosedPromptOverride:    opts.ClosedPromptOverride,
 		EffectiveReviewPrompt:   reviewPrompt,
 		EffectiveMergedPrompt:   mergedPrompt,
 		EffectiveClosedPrompt:   closedPrompt,
@@ -212,17 +220,8 @@ func (s *Service) buildTaskCIOptionsResponse(ctx context.Context, opts *TaskCIOp
 	}, nil
 }
 
-func (s *Service) effectiveTaskPRPrompt(ctx context.Context, override *string, name string) string {
-	if override != nil {
-		if trimmed := strings.TrimSpace(*override); trimmed != "" {
-			return trimmed
-		}
-	}
-	fallback := promptcfg.Get(name)
-	if resolver := s.getPromptResolver(); resolver != nil {
-		return resolver.ResolvePromptContent(ctx, name, fallback)
-	}
-	return fallback
+func effectiveTaskPRPrompt(name string) string {
+	return promptcfg.Get(name)
 }
 
 func (s *Service) effectiveCIAutoFixPrompt(ctx context.Context, opts *TaskCIOptions) (string, bool) {

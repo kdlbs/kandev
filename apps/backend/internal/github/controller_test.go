@@ -1104,45 +1104,24 @@ func TestHttpTaskCIOptions_DefaultAndPatch(t *testing.T) {
 	}
 }
 
-func TestHttpTaskCIOptions_PatchesPRAgentPromptOptions(t *testing.T) {
-	router, _ := setupControllerStoreTest(t)
-	body := bytes.NewBufferString(`{
-		"prompt_on_review_requested": true,
-		"prompt_on_merged": true,
-		"prompt_on_closed": true,
-		"review_prompt_override": "Review {{pr.url}} again",
-		"merged_prompt_override": "Finalize merged {{pr.url}}",
-		"closed_prompt_override": "Finalize closed {{pr.url}}"
-	}`)
-	req := httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", body)
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	router.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var got map[string]interface{}
-	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	for _, key := range []string{
-		"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed",
+func TestHttpTaskCIOptions_RejectsLifecyclePromptOverrides(t *testing.T) {
+	for _, field := range []string{
+		"review_prompt_override",
+		"merged_prompt_override",
+		"closed_prompt_override",
 	} {
-		if got[key] != true {
-			t.Errorf("%s = %#v, want true", key, got[key])
-		}
-	}
-	if got["review_reviewer_login"] != "test-user" {
-		t.Errorf("review_reviewer_login = %#v, want test-user", got["review_reviewer_login"])
-	}
-	for key, want := range map[string]string{
-		"review_prompt_override": "Review {{pr.url}} again",
-		"merged_prompt_override": "Finalize merged {{pr.url}}",
-		"closed_prompt_override": "Finalize closed {{pr.url}}",
-	} {
-		if got[key] != want {
-			t.Errorf("%s = %#v, want %q", key, got[key], want)
-		}
+		t.Run(field, func(t *testing.T) {
+			router, _ := setupControllerStoreTest(t)
+			body := bytes.NewBufferString(`{"` + field + `":"untrusted prompt"}`)
+			req := httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", body)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			assertJSONError(t, w.Body.Bytes(), "lifecycle prompt overrides are not supported")
+		})
 	}
 }
 

@@ -108,12 +108,14 @@ const CLEANUP_POLICY_OPTIONS: Array<{ id: CleanupPolicy; label: string; descript
   {
     id: "auto",
     label: "Auto (recommended)",
-    description: "Delete merged/closed PR tasks unless you typed a message in them.",
+    description:
+      "Retain merged/closed PR tasks when they have user engagement or enabled PR lifecycle prompts; otherwise delete them.",
   },
   {
     id: "always",
     label: "Always delete",
-    description: "Delete on merge/close even if you engaged with the task.",
+    description:
+      "Always delete overrides retention: delete on merge/close even if the task has user engagement or enabled PR lifecycle prompts.",
   },
   {
     id: "never",

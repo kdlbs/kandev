@@ -2,8 +2,9 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"strconv"
+	"regexp"
 	"strings"
 
 	"github.com/kandev/kandev/internal/github"
@@ -15,12 +16,30 @@ const (
 	taskPRAgentEventReviewRequested = "review_requested"
 	taskPRAgentEventMerged          = "merged"
 	taskPRAgentEventClosed          = "closed"
+
+	taskPRAgentReviewRequestedPrompt = "Your review was requested on %s.\n\n" +
+		"Resume this task's PR review. Fetch the authoritative PR head and base from GitHub, " +
+		"then review the updated diff. Do not rely on the current local worktree being up to date."
+	taskPRAgentMergedPrompt = "The linked pull request %s was merged.\n\n" +
+		"Fetch the authoritative merged state, merge commit, and relevant commits from GitHub. " +
+		"Finish any final review bookkeeping, summarize the outcome, and archive this task when " +
+		"the work is complete. The local branch may be stale or deleted."
+	taskPRAgentClosedPrompt = "The linked pull request %s was closed without merging.\n\n" +
+		"Fetch the authoritative closed state and relevant commits from GitHub. Finish any final " +
+		"review bookkeeping, summarize the outcome, and archive this task when the work is complete. " +
+		"The local branch may be stale or deleted."
+)
+
+var (
+	githubOwnerPattern     = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$`)
+	githubRepoPattern      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$`)
+	errTaskPRAgentInactive = errors.New("task PR agent is inactive")
 )
 
 type taskPRAgentAutomationService interface {
-	GetTaskPRByRepoAndNumber(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskPR, error)
 	GetTaskCIOptionsResponse(ctx context.Context, taskID string) (*github.TaskCIOptionsResponse, error)
 	GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error)
+	RebindTaskPRReviewer(ctx context.Context, taskID string) (string, bool, error)
 	IsReviewRequestedForLogin(ctx context.Context, owner, repo string, prNumber int, login string) (bool, error)
 	SetTaskPRReviewRequestState(ctx context.Context, taskID, repositoryID string, prNumber int, requested bool) error
 	SetTaskPRObservedState(ctx context.Context, taskID, repositoryID string, prNumber int, state string) error
@@ -29,7 +48,6 @@ type taskPRAgentAutomationService interface {
 
 type taskPRAgentPromptDecision struct {
 	Event           string
-	Prompt          string
 	ReviewRequested *bool
 	ObservedState   string
 }
@@ -73,11 +91,9 @@ func decideTaskPRTerminalPrompt(
 	decision := taskPRAgentPromptDecision{ObservedState: prState}
 	if prState == "merged" && options.PromptOnMerged {
 		decision.Event = taskPRAgentEventMerged
-		decision.Prompt = options.EffectiveMergedPrompt
 	}
 	if prState == "closed" && options.PromptOnClosed {
 		decision.Event = taskPRAgentEventClosed
-		decision.Prompt = options.EffectiveClosedPrompt
 	}
 	return decision
 }
@@ -101,7 +117,6 @@ func decideTaskPRReviewPrompt(
 	decision.ReviewRequested = reviewRequested
 	if *reviewRequested {
 		decision.Event = taskPRAgentEventReviewRequested
-		decision.Prompt = options.EffectiveReviewPrompt
 	}
 	return decision
 }
@@ -109,53 +124,57 @@ func decideTaskPRReviewPrompt(
 func (s *Service) dispatchTaskPRAgentPrompt(
 	ctx context.Context, pr *github.TaskPR, prompt, event string,
 ) (string, error) {
-	session, err := s.resolveCIAutoFixSession(ctx, pr.TaskID, nil)
+	prURL, err := canonicalTaskPRURL(pr)
 	if err != nil {
 		return "", err
 	}
-	metadata := taskPRAgentPromptMetadata(pr, event)
+	session, err := s.resolveTaskPRAgentSession(ctx, pr.TaskID)
+	if err != nil {
+		return "", err
+	}
+	// Recheck immediately before the durable side effect: archive/delete can
+	// race the PR poll that started this lifecycle evaluation.
+	task, err := s.repo.GetTask(ctx, pr.TaskID)
+	if err != nil || task == nil || task.ArchivedAt != nil {
+		return "", fmt.Errorf("task is no longer active: %s", pr.TaskID)
+	}
+	if s.messageQueue == nil {
+		return "", fmt.Errorf("message queue is not configured")
+	}
+	metadata := taskPRAgentPromptMetadata(pr, event, prURL)
 	coalesceKey := fmt.Sprintf("github-pr:%s:%d:%s", pr.RepositoryID, pr.PRNumber, event)
-	switch session.State {
-	case models.TaskSessionStateCreated,
-		models.TaskSessionStateStarting,
-		models.TaskSessionStateRunning:
-		if s.messageQueue == nil {
-			return "", fmt.Errorf("message queue is not configured")
-		}
-		if _, _, err := s.messageQueue.QueueMessageWithCoalesceKey(
-			ctx, session.ID, pr.TaskID, prompt, "", messagequeue.QueuedByWorkflow,
-			false, nil, metadata, coalesceKey, true,
-		); err != nil {
-			return "", err
-		}
-		s.publishQueueStatusEvent(ctx, session.ID)
-	case models.TaskSessionStateWaitingForInput, models.TaskSessionStateIdle:
-		if err := s.recordTaskPRAgentUserMessage(ctx, session, prompt, metadata); err != nil {
-			return "", err
-		}
-		if _, err := s.PromptTask(ctx, pr.TaskID, session.ID, prompt, "", false, nil, true); err != nil {
-			return "", err
-		}
-	default:
-		return "", fmt.Errorf("session is not promptable: %s", session.State)
+	if _, _, accepted, err := s.messageQueue.QueueLifecycleMessageWithCoalesceKey(
+		ctx, session.ID, pr.TaskID, prompt, "", messagequeue.QueuedByWorkflow,
+		false, nil, metadata, coalesceKey, true,
+	); err != nil {
+		return "", err
+	} else if !accepted {
+		return "", errTaskPRAgentInactive
+	}
+	s.publishQueueStatusEvent(ctx, session.ID)
+	if ciAutomationSessionCanReceivePrompt(session) &&
+		(session.State == models.TaskSessionStateWaitingForInput || session.State == models.TaskSessionStateIdle) {
+		s.drainQueuedMessageForPromptableSession(ctx, session.ID)
 	}
 	return session.ID, nil
 }
 
-func (s *Service) recordTaskPRAgentUserMessage(
-	ctx context.Context, session *models.TaskSession, prompt string, metadata map[string]interface{},
-) error {
-	if s.messageCreator == nil {
-		return fmt.Errorf("message creator is not configured")
+func (s *Service) resolveTaskPRAgentSession(ctx context.Context, taskID string) (*models.TaskSession, error) {
+	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
 	}
-	turnID := s.getActiveTurnID(session.ID)
-	if turnID == "" {
-		s.startTurnForSession(ctx, session.ID)
-		turnID = s.getActiveTurnID(session.ID)
+	for _, session := range sessions {
+		if session.IsPrimary && ciAutomationSessionCanReceivePrompt(session) {
+			return session, nil
+		}
 	}
-	return s.messageCreator.CreateUserMessage(
-		ctx, session.TaskID, prompt, session.ID, turnID, metadata,
-	)
+	for _, session := range sessions {
+		if ciAutomationSessionCanReceivePrompt(session) {
+			return session, nil
+		}
+	}
+	return nil, fmt.Errorf("no promptable agent session for task: %s", taskID)
 }
 
 func currentTaskPRReviewRequest(
@@ -202,23 +221,31 @@ func stampTaskPRAgentObservations(
 	return nil
 }
 
-func renderTaskPRAgentPrompt(template string, pr *github.TaskPR) string {
-	repo := pr.Owner + "/" + pr.Repo
-	return strings.NewReplacer(
-		"{{pr.url}}", pr.PRURL,
-		"{{pr.link}}", pr.PRURL,
-		"{{pr.number}}", strconv.Itoa(pr.PRNumber),
-		"{{pr.title}}", pr.PRTitle,
-		"{{pr.repo}}", repo,
-		"{{pr.owner}}", pr.Owner,
-		"{{pr.name}}", pr.Repo,
-		"{{pr.branch}}", pr.HeadBranch,
-		"{{pr.base_branch}}", pr.BaseBranch,
-		"{{pr.state}}", pr.State,
-	).Replace(template)
+func taskPRAgentLifecyclePrompt(event string, pr *github.TaskPR) (string, error) {
+	prURL, err := canonicalTaskPRURL(pr)
+	if err != nil {
+		return "", err
+	}
+	switch event {
+	case taskPRAgentEventReviewRequested:
+		return fmt.Sprintf(taskPRAgentReviewRequestedPrompt, prURL), nil
+	case taskPRAgentEventMerged:
+		return fmt.Sprintf(taskPRAgentMergedPrompt, prURL), nil
+	case taskPRAgentEventClosed:
+		return fmt.Sprintf(taskPRAgentClosedPrompt, prURL), nil
+	default:
+		return "", fmt.Errorf("unsupported task PR lifecycle event: %s", event)
+	}
 }
 
-func taskPRAgentPromptMetadata(pr *github.TaskPR, event string) map[string]interface{} {
+func canonicalTaskPRURL(pr *github.TaskPR) (string, error) {
+	if pr == nil || !githubOwnerPattern.MatchString(pr.Owner) || !githubRepoPattern.MatchString(pr.Repo) || pr.PRNumber <= 0 {
+		return "", fmt.Errorf("invalid GitHub pull request identity")
+	}
+	return fmt.Sprintf("https://github.com/%s/%s/pull/%d", pr.Owner, pr.Repo, pr.PRNumber), nil
+}
+
+func taskPRAgentPromptMetadata(pr *github.TaskPR, event, prURL string) map[string]interface{} {
 	metadata := NewUserMessageMeta().WithAutoStart(true).ToMap()
 	if metadata == nil {
 		metadata = map[string]interface{}{}
@@ -231,6 +258,6 @@ func taskPRAgentPromptMetadata(pr *github.TaskPR, event string) map[string]inter
 	metadata["owner"] = pr.Owner
 	metadata["repo"] = pr.Repo
 	metadata["pr_number"] = pr.PRNumber
-	metadata["pr_url"] = pr.PRURL
+	metadata["pr_url"] = prURL
 	return metadata
 }

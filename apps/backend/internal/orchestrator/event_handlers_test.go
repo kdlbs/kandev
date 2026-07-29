@@ -252,6 +252,7 @@ type mockAgentManager struct {
 	// Passthrough stdin tracking
 	passthroughStdinCalls []passthroughStdinCall
 	passthroughStdinErr   error
+	passthroughStdinFunc  func(context.Context, string, string) error
 	markPassthroughCalls  []string // session IDs
 	markPassthroughErr    error
 
@@ -490,11 +491,16 @@ func (m *mockAgentManager) GetSessionAuthMethods(_ string) []streams.AuthMethodI
 func (m *mockAgentManager) IsPassthroughSession(_ context.Context, _ string) bool {
 	return m.isPassthrough
 }
-func (m *mockAgentManager) WritePassthroughStdin(_ context.Context, sessionID string, data string) error {
+func (m *mockAgentManager) WritePassthroughStdin(ctx context.Context, sessionID string, data string) error {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.passthroughStdinCalls = append(m.passthroughStdinCalls, passthroughStdinCall{SessionID: sessionID, Data: data})
-	return m.passthroughStdinErr
+	writeFunc := m.passthroughStdinFunc
+	err := m.passthroughStdinErr
+	m.mu.Unlock()
+	if writeFunc != nil {
+		return writeFunc(ctx, sessionID, data)
+	}
+	return err
 }
 func (m *mockAgentManager) ResolvePassthroughConfig(_ context.Context, _ string) (agents.PassthroughConfig, error) {
 	m.mu.Lock()
@@ -685,7 +691,7 @@ func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockSte
 	if mock, ok := agentMgr.(*mockAgentManager); ok && mock.repoForExecutionLookup == nil {
 		mock.repoForExecutionLookup = repo
 	}
-	return &Service{
+	svc := &Service{
 		logger:             log,
 		repo:               repo,
 		workflowStepGetter: stepGetter,
@@ -693,6 +699,10 @@ func createTestServiceWithAgent(repo *sqliterepo.Repository, stepGetter *mockSte
 		agentManager:       agentMgr,
 		messageQueue:       messagequeue.NewServiceMemory(log),
 	}
+	repo.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
+		_, _ = svc.messageQueue.PurgeTask(ctx, taskID)
+	})
+	return svc
 }
 
 // --- Tests ---
@@ -1490,7 +1500,7 @@ func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *moc
 	log := testLogger()
 	exec := executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{})
 	sched := scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, log, scheduler.SchedulerConfig{})
-	return &Service{
+	svc := &Service{
 		logger:             log,
 		repo:               repo,
 		workflowStepGetter: stepGetter,
@@ -1500,6 +1510,10 @@ func createTestServiceWithScheduler(repo *sqliterepo.Repository, stepGetter *moc
 		executor:           exec,
 		scheduler:          sched,
 	}
+	repo.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
+		_, _ = svc.messageQueue.PurgeTask(ctx, taskID)
+	})
+	return svc
 }
 
 func TestHandleAgentCompleted_CleansUpExecution(t *testing.T) {

@@ -1355,6 +1355,21 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	h, orch := newMessageTaskHandler(t, svc, repo)
 	queuedBeforeSwitch, err := orch.queue.QueueMessageWithMetadata(ctx, sess.ID, target.ID, "queued before switch", "", "agent", false, nil, nil)
 	require.NoError(t, err)
+	durableBeforeSwitch, _, accepted, err := orch.queue.QueueLifecycleMessageWithCoalesceKey(
+		ctx,
+		sess.ID,
+		target.ID,
+		"durable lifecycle before switch",
+		"",
+		messagequeue.QueuedByWorkflow,
+		false,
+		nil,
+		nil,
+		"github-pr:repo:1:merged",
+		true,
+	)
+	require.NoError(t, err)
+	require.True(t, accepted)
 	orch.queue.SetPendingMove(ctx, sess.ID, &messagequeue.PendingMove{
 		TaskID:         target.ID,
 		WorkflowID:     "workflow-1",
@@ -1425,11 +1440,13 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	require.NoError(t, err)
 	assert.Empty(t, messages)
 	status := orch.queue.GetStatus(ctx, sess.ID)
-	require.Equal(t, 1, status.Count)
+	require.Equal(t, 2, status.Count)
 	assert.Equal(t, "queued before switch", status.Entries[0].Content)
 	assert.Equal(t, queuedBeforeSwitch.ID, status.Entries[0].ID)
 	assert.Equal(t, queuedBeforeSwitch.Position, status.Entries[0].Position)
 	assert.Equal(t, queuedBeforeSwitch.QueuedAt, status.Entries[0].QueuedAt)
+	assert.Equal(t, durableBeforeSwitch.ID, status.Entries[1].ID)
+	assert.True(t, status.Entries[1].IsDurableLifecycle())
 	move, ok := orch.queue.TakePendingMove(ctx, sess.ID)
 	require.True(t, ok)
 	assert.Equal(t, "step-review", move.WorkflowStepID)

@@ -312,6 +312,39 @@ func TestSQLiteRepository_DeleteByID(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ClientMutationsRejectWorkflowOwnedEntry(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	msg := &QueuedMessage{
+		SessionID: "s1",
+		TaskID:    "t1",
+		Content:   "lifecycle prompt",
+		QueuedBy:  QueuedByWorkflow,
+		Metadata:  map[string]interface{}{"origin": "github_pr_automation"},
+	}
+	if err := repo.Insert(ctx, msg, 0); err != nil {
+		t.Fatalf("insert workflow entry: %v", err)
+	}
+
+	if err := repo.UpdateContent(
+		ctx, "s1", msg.ID, "hostile replacement", nil, QueuedByWorkflow,
+	); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("workflow-owned update error = %v, want ErrEntryNotFound", err)
+	}
+	if err := repo.DeleteByID(ctx, "s1", msg.ID); !errors.Is(err, ErrEntryNotFound) {
+		t.Errorf("workflow-owned delete error = %v, want ErrEntryNotFound", err)
+	}
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list workflow entries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Content != "lifecycle prompt" {
+		t.Fatalf("workflow entry changed after hostile mutations: %+v", entries)
+	}
+}
+
 // TestSQLiteRepository_TakeByID covers TakeByID's cross-session guard,
 // out-of-FIFO-order removal, idempotent re-take of an already-taken id, and
 // (unlike DeleteByID) that agent-authored entries are takeable.

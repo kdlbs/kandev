@@ -291,12 +291,6 @@ export type TaskCIAutomationOptions = {
   prompt_on_merged?: boolean;
   prompt_on_closed?: boolean;
   review_reviewer_login?: string;
-  review_prompt_override?: string | null;
-  merged_prompt_override?: string | null;
-  closed_prompt_override?: string | null;
-  effective_review_prompt?: string;
-  effective_merged_prompt?: string;
-  effective_closed_prompt?: string;
   updated_at: string;
   pr_states: TaskCIPRAutomationState[];
 };
@@ -308,9 +302,6 @@ export type TaskCIAutomationPatch = {
   prompt_on_review_requested?: boolean;
   prompt_on_merged?: boolean;
   prompt_on_closed?: boolean;
-  review_prompt_override?: string | null;
-  merged_prompt_override?: string | null;
-  closed_prompt_override?: string | null;
 };
 
 export type PRWatch = {

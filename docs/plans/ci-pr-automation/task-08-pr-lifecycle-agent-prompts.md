@@ -12,8 +12,8 @@ spec: "../../specs/ui/ci-pr-automation.md"
 
 ## Acceptance
 
-- Task PR options add re-review requested, merged, and closed prompt switches
-  with optional task prompt overrides.
+- Task PR options add re-review requested, merged, and closed boolean switches.
+  Lifecycle prompt text is immutable and server-owned.
 - Re-review silently baselines, fires on a later authenticated-reviewer
   false-to-true edge, and rearms after an observed false state.
 - Merged/closed prompt once per observed terminal entry; stable states remain

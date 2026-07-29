@@ -13,21 +13,17 @@ package orchestrator
 import (
 	"context"
 	"errors"
-	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
-	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/queue"
@@ -49,10 +45,9 @@ var (
 
 // ServiceConfig holds orchestrator service configuration
 type ServiceConfig struct {
-	Scheduler                     scheduler.SchedulerConfig
-	QueueSize                     int
-	QueueGroup                    string
-	ClaudeBackgroundPromptHandoff bool
+	Scheduler  scheduler.SchedulerConfig
+	QueueSize  int
+	QueueGroup string
 }
 
 // DefaultServiceConfig returns default configuration
@@ -115,15 +110,6 @@ type TurnService interface {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState)
-	// PublishTaskActivityIfChanged recomputes the task-level MOST-ACTIVE-WINS
-	// activity aggregate and emits task.updated only when its three-state value
-	// changed — including a generating↔background flip that leaves the coarse
-	// state unchanged.
-	PublishTaskActivityIfChanged(ctx context.Context, taskID string)
-}
-
-type taskQueuePromotionPublisher interface {
-	PublishTaskQueuePromoted(ctx context.Context, task *models.Task)
 }
 
 // WorkflowStepGetter retrieves workflow step information for prompt building.
@@ -132,17 +118,6 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error)
-}
-
-// PromptReferenceExpander resolves "@name" saved-prompt references embedded in
-// an effective prompt and returns both the expanded prompt and the exact
-// server-generated block content. Implemented by promptservice.Service.
-type PromptReferenceExpander interface {
-	AppendReferenceExpansionsWithContext(
-		ctx context.Context,
-		prompt string,
-		log *zap.Logger,
-	) (expandedPrompt, trustedContext string)
 }
 
 // repoStore is the repository interface accepted by NewService.
@@ -161,7 +136,6 @@ type repoStore interface {
 	UpdateTaskStateIfNotArchived(ctx context.Context, id string, state v1.TaskState) (v1.TaskState, bool, error)
 	GetPrimaryTaskRepository(ctx context.Context, taskID string) (*models.TaskRepository, error)
 	ListTaskRepositories(ctx context.Context, taskID string) ([]*models.TaskRepository, error)
-	ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error)
 	CreateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
@@ -192,6 +166,7 @@ type sessionExecutorStore interface {
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
+	ClaimPromptableTaskSessionIfActive(ctx context.Context, id string) (models.PromptableTaskSessionClaim, error)
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
 	UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error
@@ -273,22 +248,8 @@ type Service struct {
 	// Task service owns the rich payload; orchestrator delegates.
 	taskEvents TaskEventPublisher
 
-	// sessionAccessCheck enforces per-user workspace scoping on the
-	// session-keyed WS actions. Nil = unscoped. See SetSessionAccessChecker.
-	sessionAccessCheck func(ctx context.Context, sessionID string) error
-
-	// taskAccessCheck is the task-keyed sibling of sessionAccessCheck, for
-	// entry points that name a task rather than a session (session.launch,
-	// session.ensure). Nil = unscoped.
-	taskAccessCheck func(ctx context.Context, taskID string) error
-
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
-
-	// Prompt reference expander for resolving "@name" saved-prompt
-	// references in the effective workflow-step prompt. Nil-safe: when
-	// unset, buildWorkflowPrompt leaves the prompt unchanged.
-	promptExpander PromptReferenceExpander
 
 	// Workflow engine for typed state-machine evaluation of step transitions
 	workflowEngine *engine.Engine
@@ -319,11 +280,6 @@ type Service struct {
 	// Phase 8 dependencies — also nil-safe.
 	engineTaskCreator      engine.TaskCreator
 	engineWorkflowSwitcher engine.WorkflowSwitcher
-
-	// Native code review. When set, buildWorkflowCallbacks registers the
-	// run_code_review on_enter action. Nil-safe: without it the action kind
-	// simply has no callback and the engine treats it as a no-op.
-	reviewRunner ReviewRunner
 
 	// GitHub service for PR auto-detection on push
 	githubService GitHubService
@@ -457,21 +413,11 @@ type Service struct {
 	// in-flight dispatch at all is reason enough to defer.
 	dispatchingQueued sync.Map
 
-	// foregroundActivity tracks, per session, whether the open turn is actively
-	// generating in the foreground or only waiting on a spawned background task
-	// (subagent / run-in-background shell). Keyed sessionID -> *turnActivity;
-	// see turn_activity.go. This is best-effort accounting state and does not
-	// relax the coarse RUNNING admission policy.
-	// foregroundActivityMu protects record identity: lookups lock the selected
-	// record before releasing it, and execution teardown uses the same order
-	// before detaching an unused record.
-	foregroundActivityMu sync.Mutex
-	foregroundActivity   map[string]*turnActivity
-	// activityPublicationGuards serialize validation and event delivery by
-	// session across turnActivity record generations. Entries are reference
-	// counted and reclaimed when the last publisher/retirer releases them.
-	activityPublicationGuardsMu sync.Mutex
-	activityPublicationGuards   map[string]*activityPublicationGuard
+	// afterReadyLifecycleReservation is a deterministic test seam for the
+	// narrow interval after handleAgentReady releases its per-session guard
+	// and before it starts a deferred durable-lifecycle dispatch. Production
+	// leaves it nil, so the handler only pays a nil check.
+	afterReadyLifecycleReservation func()
 
 	// taskRuntimeStateMu serializes task-state flips derived from session
 	// runtime state. Without it, a completion/cancel path can check for active
@@ -594,8 +540,26 @@ func NewService(
 	// Create the scheduler with queue, executor, and task repository
 	sched := scheduler.NewScheduler(taskQueue, exec, taskRepo, log, cfg.Scheduler)
 
-	if msgQueue == nil {
+	usesDefaultEphemeralQueue := msgQueue == nil
+	if usesDefaultEphemeralQueue {
 		msgQueue = messagequeue.NewServiceMemory(log)
+	}
+	// Task-repository mutations purge the shared SQLite lifecycle queue in the
+	// same transaction. Only the fallback in-memory queue needs the post-commit
+	// callback; registering a supplied production queue here would purge the
+	// next generation accepted after an archive/unarchive race.
+	if usesDefaultEphemeralQueue {
+		registrar, ok := repo.(interface {
+			SetTaskQueuePurger(func(context.Context, string))
+		})
+		if ok {
+			registrar.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
+				if _, err := msgQueue.PurgeTask(ctx, taskID); err != nil {
+					svcLogger.Warn("failed to purge ephemeral task queue after task lifecycle mutation",
+						zap.String("task_id", taskID), zap.Error(err))
+				}
+			})
+		}
 	}
 
 	// Create the service (watcher will be created after we have handlers)
@@ -640,20 +604,13 @@ func NewService(
 		return nil
 	})
 	exec.SetOnTaskRuntimeStateReconcile(s.reconcileTaskStateForRuntime)
-	exec.SetOnEarlyLaunchTaskStateReconcile(s.reconcileTaskStateForEarlyLaunchFailure)
 	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
 		s.updateTaskSessionState(ctx, taskID, sessionID, state, errorMessage, true)
 		return nil
 	})
 	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
-	exec.SetOnSessionStarting(func(
-		ctx context.Context,
-		taskID string,
-		session *models.TaskSession,
-		expectedState models.TaskSessionState,
-		promoteTask bool,
-	) error {
-		return s.setSessionStarting(ctx, taskID, session, expectedState, promoteTask)
+	exec.SetOnSessionStarting(func(ctx context.Context, taskID string, session *models.TaskSession, promoteTask bool) error {
+		return s.setSessionStarting(ctx, taskID, session, promoteTask)
 	})
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
@@ -682,7 +639,6 @@ func NewService(
 		OnGitEvent:             s.handleGitEvent,
 		OnContextWindowUpdated: s.handleContextWindowUpdated,
 		OnTaskMoved:            s.handleTaskMoved,
-		OnTaskQueuePromoted:    s.handleTaskQueuePromoted,
 	}
 	s.watcher = watcher.NewWatcher(eventBus, handlers, cfg.QueueGroup, log)
 
@@ -722,30 +678,6 @@ func (s *Service) SetRepoCloner(cloner executor.RepoCloner, updater executor.Rep
 	s.executor.SetRepoCloner(cloner, updater)
 }
 
-// RepositoryHostCloner is the narrow host-materialization contract. It returns
-// only the persisted local path; clone credentials remain private to the
-// orchestrator executor pipeline.
-type RepositoryHostCloner interface {
-	EnsureRepositoryCloned(context.Context, *models.Repository) (string, error)
-}
-
-// EnsureRepositoryCloned delegates host cloning through the executor's
-// authenticated clone pipeline.
-func (s *Service) EnsureRepositoryCloned(ctx context.Context, repository *models.Repository) (string, error) {
-	return s.executor.EnsureRepositoryCloned(ctx, repository)
-}
-
-// SetGitHubCredentialBroker configures renewable workspace GitHub credentials
-// for executor git and gh operations.
-func (s *Service) SetGitHubCredentialBroker(issuer executor.GitHubCredentialLeaseIssuer, endpoint string) {
-	s.executor.SetGitHubCredentialBroker(issuer, endpoint)
-}
-
-// SetTaskGitCredentialPolicyResolver configures non-secret workspace policy lookup.
-func (s *Service) SetTaskGitCredentialPolicyResolver(resolver executor.TaskGitCredentialPolicyResolver) {
-	s.executor.SetTaskGitCredentialPolicyResolver(resolver)
-}
-
 // SetTurnService sets the turn service for tracking conversation turns.
 //
 // A "turn" represents a single conversation round-trip: user prompt → agent response.
@@ -780,76 +712,6 @@ func (s *Service) SetTaskEventPublisher(publisher TaskEventPublisher) {
 	s.taskEvents = publisher
 }
 
-// SetSessionAccessChecker installs the per-user workspace scoping check used by
-// the session-keyed WS actions (task session status, session PR check). Those
-// resolve sessions through the orchestrator's own repo handle rather than the
-// task service, so they do not inherit its authorize* checks and must ask here.
-//
-// The checker must return nil for contexts without a request identity, so
-// internal callers (event bus, schedulers) stay unscoped. Nil leaves every
-// session-keyed action unscoped, which is the pre-auth behavior.
-func (s *Service) SetSessionAccessChecker(check func(ctx context.Context, sessionID string) error) {
-	s.sessionAccessCheck = check
-}
-
-// SetTaskAccessChecker installs the task-keyed sibling of
-// SetSessionAccessChecker, used by the entry points that name a task rather
-// than a session. Same contract: nil for identity-less internal callers.
-func (s *Service) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
-	s.taskAccessCheck = check
-}
-
-// authorizeSession applies the configured per-user session check. No-op when
-// unwired.
-func (s *Service) authorizeSession(ctx context.Context, sessionID string) error {
-	if s.sessionAccessCheck == nil || sessionID == "" {
-		return nil
-	}
-	return s.sessionAccessCheck(ctx, sessionID)
-}
-
-// authorizeTask applies the configured per-user task check. No-op when unwired.
-func (s *Service) authorizeTask(ctx context.Context, taskID string) error {
-	if s.taskAccessCheck == nil || taskID == "" {
-		return nil
-	}
-	return s.taskAccessCheck(ctx, taskID)
-}
-
-// authorizeTaskSessionPair guards an entry point that accepts BOTH a task and a
-// session ID.
-//
-// Checking only the session is not enough: the caller can pass one of their own
-// sessions to satisfy that check while pointing taskID at another user's task,
-// which the method then uses for its task-scoped work (GetTaskPR, repository
-// resolution, PR-watch creation, recoverable-failure handling). Both IDs are
-// authorized, and the pair is required to be consistent so the two arguments
-// cannot describe different tasks.
-//
-// The pair check is skipped when the session cannot be loaded: by then both IDs
-// are already authorized, so a mismatch is a caller bug rather than a
-// cross-user leak, and failing here would change behavior for identity-less
-// internal callers.
-func (s *Service) authorizeTaskSessionPair(ctx context.Context, taskID, sessionID string) error {
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
-		return err
-	}
-	if err := s.authorizeTask(ctx, taskID); err != nil {
-		return err
-	}
-	if taskID == "" || sessionID == "" || s.repo == nil {
-		return nil
-	}
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil {
-		return nil //nolint:nilerr // both IDs authorized; consistency is best-effort
-	}
-	if session.TaskID != taskID {
-		return fmt.Errorf("session %s does not belong to task %s", sessionID, taskID)
-	}
-	return nil
-}
-
 // publishTaskUpdated forwards to the configured TaskEventPublisher.
 // No-op when the publisher isn't wired (tests, or before SetTaskEventPublisher
 // has been called during startup). Pass the pre-move workflow ID when the
@@ -862,30 +724,11 @@ func (s *Service) publishTaskUpdated(ctx context.Context, task *models.Task, old
 	s.taskEvents.PublishTaskUpdated(ctx, task, oldWorkflowIDs...)
 }
 
-func (s *Service) publishTaskQueuePromoted(ctx context.Context, task *models.Task) {
-	if s.taskEvents == nil || task == nil {
-		return
-	}
-	if publisher, ok := s.taskEvents.(taskQueuePromotionPublisher); ok {
-		publisher.PublishTaskQueuePromoted(ctx, task)
-	}
-}
-
 func (s *Service) publishTaskStateChanged(ctx context.Context, task *models.Task, oldState v1.TaskState) {
 	if s.taskEvents == nil || task == nil {
 		return
 	}
 	s.taskEvents.PublishTaskStateChanged(ctx, task, oldState)
-}
-
-// publishTaskActivityIfChanged forwards a per-session activity flip to the task
-// service, which recomputes the task-level aggregate and emits task.updated only
-// when the aggregated value actually changes. No-op when the publisher isn't wired.
-func (s *Service) publishTaskActivityIfChanged(ctx context.Context, taskID string) {
-	if s.taskEvents == nil || taskID == "" {
-		return
-	}
-	s.taskEvents.PublishTaskActivityIfChanged(ctx, taskID)
 }
 
 func (s *Service) publishTaskMoved(ctx context.Context, task *models.Task, fromWorkflowID, fromStepID, toStepID, sessionID string) {
@@ -960,15 +803,6 @@ func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.initWorkflowEngine()
 }
 
-// SetPromptReferenceExpander sets the collaborator used to resolve "@name"
-// saved-prompt references embedded in workflow-step prompts.
-//
-// If not set: buildWorkflowPrompt leaves any "@name" references in the
-// effective prompt unexpanded.
-func (s *Service) SetPromptReferenceExpander(e PromptReferenceExpander) {
-	s.promptExpander = e
-}
-
 // ClarificationCanceller detaches in-memory clarification waiters when an agent's
 // turn completes while questions are still pending in the DB.
 type ClarificationCanceller interface {
@@ -987,7 +821,7 @@ func (s *Service) initWorkflowEngine() {
 	if s.workflowStepGetter == nil {
 		return
 	}
-	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved, s.publishTaskQueuePromoted)
+	store := newWorkflowStore(s.repo, s.workflowStepGetter, s.agentManager, s.publishTaskUpdated, s.logger, s.publishTaskMoved)
 	callbacks := buildWorkflowCallbacks(s)
 	s.workflowStore = store
 	s.workflowEngine = engine.New(store, callbacks, s.engineOptions...)
@@ -1013,13 +847,6 @@ func (s *Service) SetEngineParticipantStore(store engine.ParticipantStore) {
 func (s *Service) SetEngineDecisionStore(store engine.DecisionStore) {
 	s.engineDecisions = store
 	s.engineOptions = append(s.engineOptions, engine.WithDecisionStore(store))
-	s.reinitWorkflowEngine()
-}
-
-// SetReviewRunner wires the native code-review runner, enabling the
-// run_code_review workflow step action.
-func (s *Service) SetReviewRunner(runner ReviewRunner) {
-	s.reviewRunner = runner
 	s.reinitWorkflowEngine()
 }
 
@@ -1084,19 +911,27 @@ func (s *Service) WorkflowEngine() *engine.Engine {
 // starts turn X (DB only) → PromptTask → startTurnForSession → would create turn Y
 // (DB + activeTurns), leaving X open forever because nothing tracks it.
 func (s *Service) startTurnForSession(ctx context.Context, sessionID string) string {
+	turnID, _ := s.startTurnForSessionWithOwnership(ctx, sessionID)
+	return turnID
+}
+
+// startTurnForSessionWithOwnership returns whether this dispatch created the
+// active turn. Callers that must compensate a failed dispatch may only close a
+// turn they created; an adopted turn belongs to an earlier dispatch.
+func (s *Service) startTurnForSessionWithOwnership(ctx context.Context, sessionID string) (string, bool) {
 	if s.turnService == nil {
-		return ""
+		return "", false
 	}
 
 	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
 		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
-			return turnID
+			return turnID, false
 		}
 	}
 
 	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); turn != nil {
 		s.activeTurns.Store(sessionID, turn.ID)
-		return turn.ID
+		return turn.ID, false
 	} else if err != nil {
 		// A real DB read failure here would otherwise be silently dropped, and
 		// we'd fall through to StartTurn — potentially writing a duplicate next
@@ -1112,11 +947,11 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 		s.logger.Warn("failed to start turn",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return ""
+		return "", false
 	}
 
 	s.activeTurns.Store(sessionID, turn.ID)
-	return turn.ID
+	return turn.ID, true
 }
 
 // completeTurnForSession closes any open turn for the session.
@@ -1126,15 +961,6 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 // query the DB for any open turn and close it. Loops to mop up multiple
 // zombies (e.g. left over from before this fix) with a small sanity bound.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
-	s.completeTurnForTaskSession(ctx, "", sessionID)
-}
-
-func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
-	// Foreground ownership ends with the turn, but detached background work can
-	// outlive it. Preserve those registrations for accounting; full cleanup
-	// belongs to execution/session teardown paths.
-	s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldTurnCompletion)
-
 	if s.turnService == nil {
 		return
 	}
@@ -1174,6 +1000,31 @@ func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessio
 			zap.String("session_id", sessionID),
 			zap.Int("max_iterations", maxIterations))
 	}
+}
+
+// completeTurnIfCurrent closes turnID only when it is still sessionID's active
+// turn. Lifecycle delivery uses this after a visible-message persistence
+// failure so it cannot complete a turn that existed before this dispatch or a
+// successor created concurrently.
+func (s *Service) completeTurnIfCurrent(ctx context.Context, sessionID, turnID string) {
+	if s.turnService == nil || turnID == "" {
+		return
+	}
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to look up active turn after lifecycle message persistence failure",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if turn == nil || turn.ID != turnID {
+		return
+	}
+	if err := s.turnService.CompleteTurn(ctx, turnID); err != nil {
+		s.logger.Warn("failed to complete lifecycle turn after message persistence failure",
+			zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
+		return
+	}
+	s.activeTurns.CompareAndDelete(sessionID, turnID)
 }
 
 // getActiveTurnID returns the active turn ID for a session.
@@ -1335,9 +1186,6 @@ func (s *Service) Start(ctx context.Context) error {
 	// This does NOT launch any agent processes — sessions are recovered lazily
 	// when the user opens them (via task.session.status → task.session.resume).
 	s.reconcileSessionsOnStartup(ctx)
-	if s.workflowStore != nil {
-		s.workflowStore.ReconcileQueuedTasks(ctx)
-	}
 
 	// Start the watcher first to begin receiving events
 	if err := s.watcher.Start(ctx); err != nil {
@@ -1385,9 +1233,6 @@ func (s *Service) Start(ctx context.Context) error {
 	// Subscribe to ADR-0015 step-completion signals (out-of-band path:
 	// signal arrives after turn-end).
 	s.subscribeStepCompletionEvents()
-
-	// Reconcile queued tasks when WIP limits or feeder settings change.
-	s.subscribeWorkflowQueueEvents()
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil
@@ -1725,35 +1570,14 @@ func canResumeRunning(running *models.ExecutorRunning) bool {
 	return models.IsAlwaysResumableRuntime(running.Runtime)
 }
 
-func isMissingBranchError(err error) bool {
-	for current := err; current != nil; current = errors.Unwrap(current) {
-		if isMissingBranchMessage(current.Error()) {
-			return true
-		}
-	}
-	return false
-}
-
-func isMissingBranchMessage(message string) bool {
-	msg := strings.ToLower(message)
-	if strings.Contains(msg, "couldn't find remote ref") {
-		return true
-	}
-	if strings.Contains(msg, "pathspec") && strings.Contains(msg, "did not match") &&
-		!strings.Contains(msg, "fetch branch failed") {
-		return true
-	}
-
-	const missingBranchMarker = "not found locally or on remote"
-	markerIndex := strings.Index(msg, missingBranchMarker)
-	if markerIndex < 0 || !strings.Contains(msg[:markerIndex], "branch") {
+func isMissingMergedPRBranchError(err error) bool {
+	if err == nil {
 		return false
 	}
-
-	// The worktree layer appends the underlying fetch failure after this marker.
-	// Only the marker by itself is evidence that the remote branch is missing.
-	detail := strings.TrimSpace(msg[markerIndex+len(missingBranchMarker):])
-	return detail == ""
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "couldn't find remote ref") ||
+		(strings.Contains(msg, "not found locally or on remote") && strings.Contains(msg, "branch")) ||
+		(strings.Contains(msg, "pathspec") && strings.Contains(msg, "did not match"))
 }
 
 var (
@@ -1762,267 +1586,38 @@ var (
 	pathspecBranchPattern = regexp.MustCompile(`pathspec '([^']+)'`)
 )
 
-const launchFailurePRLookupTimeout = time.Second
-
 func extractMissingBranchName(err error) string {
-	branch := ""
-	for current := err; current != nil; current = errors.Unwrap(current) {
-		msg := current.Error()
-		if match := quotedBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
-			branch = strings.TrimSpace(match[1])
-			continue
-		}
-		if match := remoteRefPattern.FindStringSubmatch(msg); len(match) == 2 {
-			branch = strings.TrimSpace(match[1])
-			continue
-		}
-		if match := pathspecBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
-			branch = strings.TrimSpace(match[1])
-		}
-	}
-	return branch
-}
-
-const missingPRBranchRecoveryClaimKey = "missing_pr_branch_recovery_claimed"
-
-type failedSessionMetadataClaimer interface {
-	SetSessionMetadataKeyIfAbsentIfState(
-		ctx context.Context,
-		sessionID, key string,
-		value interface{},
-		expectedState models.TaskSessionState,
-	) (bool, error)
-}
-
-type failedSessionMetadataClaimReleaser interface {
-	RemoveSessionMetadataKeyIfState(
-		ctx context.Context,
-		sessionID, key string,
-		expectedState models.TaskSessionState,
-	) (bool, error)
-}
-
-func (s *Service) matchingTaskPRState(ctx context.Context, taskID, repositoryID, branch string) string {
-	repositoryID = strings.TrimSpace(repositoryID)
-	if s.githubService == nil || repositoryID == "" || branch == "" {
+	if err == nil {
 		return ""
 	}
-	lookupCtx, cancel := context.WithTimeout(ctx, launchFailurePRLookupTimeout)
-	defer cancel()
-	prsByTask, err := s.githubService.ListTaskPRs(lookupCtx, []string{taskID})
-	if err != nil {
-		s.logger.Debug("failed to load task PR state for missing branch guidance",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return ""
+	msg := err.Error()
+	if match := quotedBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
+		return strings.TrimSpace(match[1])
 	}
-	prs := prsByTask[taskID]
-	if state, found := taskPRState(prs, repositoryID, branch); found {
-		return state
+	if match := remoteRefPattern.FindStringSubmatch(msg); len(match) == 2 {
+		return strings.TrimSpace(match[1])
 	}
-	state, found := taskPRState(prs, "", branch)
-	if !found || !s.hasOnlyTaskRepository(lookupCtx, taskID, repositoryID) {
-		return ""
+	if match := pathspecBranchPattern.FindStringSubmatch(msg); len(match) == 2 {
+		return strings.TrimSpace(match[1])
 	}
-	return state
+	return ""
 }
 
-func taskPRState(prs []*github.TaskPR, repositoryID, branch string) (string, bool) {
-	matched := false
-	state := ""
-	for _, pr := range prs {
-		if pr == nil || strings.TrimSpace(pr.RepositoryID) != repositoryID || strings.TrimSpace(pr.HeadBranch) != branch {
-			continue
-		}
-		if matched {
-			return "", true
-		}
-		matched = true
-		state = strings.ToLower(strings.TrimSpace(pr.State))
-		if state != githubPRStateOpen && state != githubPRStateClosed && state != githubPRStateMerged {
-			return "", true
-		}
-	}
-	return state, matched
-}
-
-func (s *Service) hasOnlyTaskRepository(ctx context.Context, taskID, repositoryID string) bool {
-	store, ok := s.repo.(interface {
-		ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
-	})
-	if !ok {
-		return false
-	}
-	repositories, err := store.ListTaskRepositories(ctx, taskID)
-	if err != nil {
-		s.logger.Debug("failed to load task repositories for legacy PR guidance",
-			zap.String("task_id", taskID),
-			zap.Error(err))
-		return false
-	}
-	return len(repositories) == 1 && repositories[0] != nil &&
-		strings.TrimSpace(repositories[0].RepositoryID) == repositoryID
-}
-
-// repositoryForMissingBranchFailure derives the failed repository from the
-// task's checkout configuration when environment preparation failed before the
-// executor constructed its repository-scoped launch request. It deliberately
-// returns no match for an empty or ambiguous branch so destructive recovery
-// actions remain scoped to the repository that actually failed.
-func (s *Service) repositoryForMissingBranchFailure(ctx context.Context, taskID, branch string) (string, string) {
-	branch = strings.TrimSpace(branch)
-	if branch == "" {
-		return "", branch
-	}
-	store, ok := s.repo.(interface {
-		ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error)
-	})
-	if !ok {
-		return "", branch
-	}
-	repositories, err := store.ListTaskRepositories(ctx, taskID)
-	if err != nil {
-		s.logger.Debug("failed to load task repositories for missing-branch guidance",
-			zap.String("task_id", taskID), zap.Error(err))
-		return "", branch
-	}
-
-	prNumber := missingBranchPRNumber(branch)
-	var repositoryID string
-	resolvedBranch := branch
-	for _, repository := range repositories {
-		if repository == nil || !taskRepositoryMatchesMissingBranch(repository, branch, prNumber) {
-			continue
-		}
-		if repositoryID != "" {
-			return "", branch
-		}
-		repositoryID = strings.TrimSpace(repository.RepositoryID)
-		if checkoutBranch := strings.TrimSpace(repository.CheckoutBranch); checkoutBranch != "" {
-			resolvedBranch = checkoutBranch
-		}
-	}
-	return repositoryID, resolvedBranch
-}
-
-var missingBranchPRRefPattern = regexp.MustCompile(`^pull/(\d+)/head$`)
-
-func missingBranchPRNumber(branch string) int {
-	match := missingBranchPRRefPattern.FindStringSubmatch(strings.TrimSpace(branch))
-	if len(match) != 2 {
-		return 0
-	}
-	number, err := strconv.Atoi(match[1])
-	if err != nil || number <= 0 {
-		return 0
-	}
-	return number
-}
-
-func taskRepositoryMatchesMissingBranch(repository *models.TaskRepository, branch string, prNumber int) bool {
-	if strings.TrimSpace(repository.CheckoutBranch) == branch {
-		return true
-	}
-	return prNumber > 0 && taskRepositoryPRNumber(repository.Metadata) == prNumber
-}
-
-func taskRepositoryPRNumber(metadata map[string]interface{}) int {
-	if metadata == nil {
-		return 0
-	}
-	switch value := metadata["pr_number"].(type) {
-	case int:
-		return value
-	case int64:
-		return int(value)
-	case float64:
-		if value > 0 && value == float64(int(value)) {
-			return int(value)
-		}
-	}
-	return 0
-}
-
-// handleSessionLaunchFailed creates branch guidance only after the caller has
-// persisted FAILED. The claim is stored on the session because prepare, start,
-// and resume may race.
-func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, sessionID, repositoryID string, launchErr error) {
-	if s.messageCreator == nil || !isMissingBranchError(launchErr) {
+func (s *Service) handleSessionLaunchFailed(ctx context.Context, taskID, sessionID string, launchErr error) {
+	if s.messageCreator == nil || !isMissingMergedPRBranchError(launchErr) {
 		return
 	}
-	recoveryCtx := context.WithoutCancel(ctx)
-	rawBranch := extractMissingBranchName(launchErr)
-	displayBranch := routingerr.Sanitize(rawBranch)
-	resolvedRepositoryID, resolvedBranch := s.repositoryForMissingBranchFailure(recoveryCtx, taskID, rawBranch)
-	if repositoryID == "" {
-		repositoryID = resolvedRepositoryID
-	}
-	if repositoryID != "" && repositoryID == resolvedRepositoryID {
-		rawBranch = resolvedBranch
-		displayBranch = routingerr.Sanitize(resolvedBranch)
-	}
-	prState := s.matchingTaskPRState(recoveryCtx, taskID, repositoryID, rawBranch)
-	if prState == githubPRStateOpen {
-		return
-	}
-	claimer, ok := s.repo.(failedSessionMetadataClaimer)
-	if !ok {
-		s.logger.Warn("session repository cannot claim missing-branch recovery",
-			zap.String("task_id", taskID), zap.String("session_id", sessionID))
-		return
-	}
-	claimed, err := claimer.SetSessionMetadataKeyIfAbsentIfState(
-		recoveryCtx, sessionID, missingPRBranchRecoveryClaimKey, true, models.TaskSessionStateFailed,
-	)
-	if err != nil {
-		s.logger.Warn("failed to claim missing-branch recovery",
-			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
-		return
-	}
-	if !claimed {
-		return
-	}
-	if err := s.createMissingPRBranchRecoveryMessage(
-		recoveryCtx, taskID, sessionID, displayBranch, prState,
-	); err != nil {
-		releaser, ok := s.repo.(failedSessionMetadataClaimReleaser)
-		if !ok {
-			s.logger.Warn("session repository cannot release missing-branch recovery claim after message failure",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID))
-			return
-		}
-		if _, releaseErr := releaser.RemoveSessionMetadataKeyIfState(
-			recoveryCtx, sessionID, missingPRBranchRecoveryClaimKey, models.TaskSessionStateFailed,
-		); releaseErr != nil {
-			s.logger.Warn("failed to release missing-branch recovery claim after message failure",
-				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(releaseErr))
-		}
-	}
-}
 
-func (s *Service) createMissingPRBranchRecoveryMessage(
-	ctx context.Context,
-	taskID, sessionID, branch, prState string,
-) error {
-	content := "Kandev couldn't fetch the requested branch from the configured repository. Verify the task's repository branch or PR link, then retry."
+	branch := extractMissingBranchName(launchErr)
+	content := "This task references a PR branch that no longer exists on remote (likely merged and deleted)."
 	if branch != "" {
-		content = "Kandev couldn't fetch branch \"" + branch + "\" from the configured repository. Verify the task's repository branch or PR link, then retry."
-	}
-	authoritativeMissingBranch := prState == githubPRStateClosed || prState == githubPRStateMerged
-	if authoritativeMissingBranch {
-		content = "This task references a PR branch that no longer exists on remote."
-		if branch != "" {
-			content = "The remote PR branch \"" + branch + "\" no longer exists."
-		}
+		content = "The remote PR branch \"" + branch + "\" no longer exists (likely merged and deleted)."
 	}
 	metadata := map[string]interface{}{
 		"variant":        "warning",
-		"failure_kind":   "branch_fetch_failed",
+		"failure_kind":   "missing_pr_branch",
 		"missing_branch": branch,
-	}
-	if authoritativeMissingBranch {
-		metadata["failure_kind"] = "missing_pr_branch"
-		metadata["actions"] = []map[string]interface{}{
+		"actions": []map[string]interface{}{
 			{
 				actionMetaKeyType:    "archive_task",
 				actionMetaKeyLabel:   "Archive task",
@@ -2038,8 +1633,9 @@ func (s *Service) createMissingPRBranchRecoveryMessage(
 				actionMetaKeyIcon:    "trash",
 				actionMetaKeyTestID:  "missing-branch-delete-button",
 			},
-		}
+		},
 	}
+	s.suppressToast.Store(sessionID, true)
 	msgCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	if err := s.messageCreator.CreateSessionMessage(
@@ -2056,10 +1652,7 @@ func (s *Service) createMissingPRBranchRecoveryMessage(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return err
 	}
-	s.suppressToast.Store(sessionID, true)
-	return nil
 }
 
 // IsRunning returns true if the service is running

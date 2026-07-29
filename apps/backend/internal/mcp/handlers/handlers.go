@@ -2702,7 +2702,9 @@ func (h *Handlers) restoreSelectedTaskMessageSession(ctx context.Context, repo t
 		return errTaskMessageRollbackSuperseded
 	}
 	if primaryID != "" && rollback.selectedID != primaryID {
-		h.clearTaskMessageQueue(ctx, rollback.selectedID)
+		if err := h.restoreTaskMessageQueueOwner(ctx, rollback.selectedID, primaryID); err != nil {
+			return err
+		}
 	}
 	return repo.DeleteTaskSession(ctx, rollback.selectedID)
 }
@@ -2740,17 +2742,12 @@ func (h *Handlers) restoreTaskMessageQueue(ctx context.Context, queue *messagequ
 	return queue.RestoreSession(ctx, sessionID, cloneTaskMessageQueuedMessages(snapshot.entries), pendingMove)
 }
 
-func (h *Handlers) clearTaskMessageQueue(ctx context.Context, sessionID string) {
+func (h *Handlers) restoreTaskMessageQueueOwner(ctx context.Context, selectedID, primaryID string) error {
 	queue := h.sessionLauncher.GetMessageQueue()
 	if queue == nil {
-		return
+		return nil
 	}
-	if _, err := queue.CancelAll(ctx, sessionID); err != nil {
-		h.logger.Warn("failed to clear task message queue during rollback",
-			zap.String("session_id", sessionID),
-			zap.Error(err))
-	}
-	_, _ = queue.TakePendingMove(ctx, sessionID)
+	return queue.TransferSession(ctx, selectedID, primaryID)
 }
 
 func restoreTaskMessageSessionSnapshot(ctx context.Context, repo taskMessageSessionRollbackRepository, rollback taskMessageSessionRollback) error {

@@ -232,6 +232,7 @@ func (s *Server) getTaskPRAutomationHandler() server.ToolHandlerFunc {
 		); err != nil {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
+		removeLifecyclePromptFields(result)
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
@@ -241,6 +242,9 @@ func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		payload := map[string]interface{}{"task_id": s.taskID}
 		args := req.GetArguments()
+		if hasLifecyclePromptOverrideArgument(args) {
+			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
+		}
 		for _, key := range []string{
 			"auto_fix_enabled", "auto_merge_enabled",
 			"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed",
@@ -249,10 +253,7 @@ func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 				payload[key] = value
 			}
 		}
-		for _, key := range []string{
-			"auto_fix_prompt_override", "review_prompt_override",
-			"merged_prompt_override", "closed_prompt_override",
-		} {
+		for _, key := range []string{"auto_fix_prompt_override"} {
 			if value, ok := args[key].(string); ok {
 				payload[key] = value
 			}
@@ -266,6 +267,24 @@ func (s *Server) updateTaskPRAutomationHandler() server.ToolHandlerFunc {
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func hasLifecyclePromptOverrideArgument(args map[string]interface{}) bool {
+	for _, field := range []string{"review_prompt_override", "merged_prompt_override", "closed_prompt_override"} {
+		if _, ok := args[field]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func removeLifecyclePromptFields(result map[string]interface{}) {
+	for _, field := range []string{
+		"review_prompt_override", "merged_prompt_override", "closed_prompt_override",
+		"effective_review_prompt", "effective_merged_prompt", "effective_closed_prompt",
+	} {
+		delete(result, field)
 	}
 }
 

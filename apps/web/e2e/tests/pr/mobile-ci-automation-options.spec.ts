@@ -8,6 +8,14 @@ const REPO = "demo";
 const PR_NUMBER = 145;
 const PR_URL = `https://github.com/${OWNER}/${REPO}/pull/${PR_NUMBER}`;
 
+function manyRunningChecks(count: number) {
+  return Array.from({ length: count }, (_, index) => ({
+    name: `Mobile lifecycle check ${index + 1}/${count} / run`,
+    status: "in_progress",
+    html_url: `https://example.com/checks/${index + 1}`,
+  }));
+}
+
 async function seedTaskWithPR(apiClient: ApiClient, seedData: SeedData, title: string) {
   await apiClient.mockGitHubReset();
   await apiClient.mockGitHubSetUser("test-user");
@@ -42,6 +50,49 @@ async function seedTaskWithPR(apiClient: ApiClient, seedData: SeedData, title: s
   return task.id;
 }
 
+async function interceptLifecycleError(
+  testPage: import("@playwright/test").Page,
+  repositoryId: string,
+) {
+  await testPage.route("**/api/v1/github/tasks/*/ci-options", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const options = (await response.json()) as { pr_states?: Array<Record<string, unknown>> };
+    await route.fulfill({
+      response,
+      json: {
+        ...options,
+        pr_states: [
+          ...(options.pr_states ?? []).filter(
+            (state) =>
+              (state.repository_id !== repositoryId && state.repository_id !== "") ||
+              state.pr_number !== PR_NUMBER,
+          ),
+          {
+            repository_id: repositoryId,
+            pr_number: PR_NUMBER,
+            last_error: "Lifecycle prompt could not be delivered to a task session.",
+          },
+          {
+            repository_id: "",
+            pr_number: PR_NUMBER,
+            last_error: "Lifecycle prompt could not be delivered to a task session.",
+          },
+        ],
+      },
+    });
+  });
+}
+
+async function interceptTallPRFeedback(testPage: import("@playwright/test").Page) {
+  await testPage.route(`**/api/v1/github/prs/${OWNER}/${REPO}/${PR_NUMBER}`, async (route) => {
+    await route.fulfill({ json: { checks: manyRunningChecks(30) } });
+  });
+}
+
 test.describe("mobile PR CI automation options", () => {
   test("drawer exposes automation controls and task prompt settings link", async ({
     testPage,
@@ -65,7 +116,7 @@ test.describe("mobile PR CI automation options", () => {
     ).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
     await expect(
-      drawer.getByRole("switch", { name: "Prompt agent when review is requested" }),
+      drawer.getByRole("switch", { name: "Prompt agent when your review is requested" }),
     ).toBeVisible();
     await expect(
       drawer.getByRole("switch", { name: "Prompt agent when PR is merged" }),
@@ -73,6 +124,16 @@ test.describe("mobile PR CI automation options", () => {
     await expect(
       drawer.getByRole("switch", { name: "Prompt agent when PR is closed" }),
     ).toBeVisible();
+
+    for (const name of [
+      "Prompt agent when your review is requested",
+      "Prompt agent when PR is merged",
+      "Prompt agent when PR is closed",
+    ]) {
+      const rowBox = await drawer.getByRole("switch", { name }).locator("..").boundingBox();
+      expect(rowBox).not.toBeNull();
+      expect(rowBox!.height).toBeGreaterThanOrEqual(44);
+    }
 
     await drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }).tap();
     await drawer.getByRole("switch", { name: "Prompt agent when PR is closed" }).tap();
@@ -93,5 +154,52 @@ test.describe("mobile PR CI automation options", () => {
     await expect(promptDialog.getByTestId("ci-auto-fix-pr-feedback-help")).toContainText(
       "new or changed review comments",
     );
+  });
+
+  test("drawer contains lifecycle errors without horizontal document overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const taskId = await seedTaskWithPR(
+      apiClient,
+      seedData,
+      "CI automation mobile lifecycle error",
+    );
+    await interceptLifecycleError(testPage, seedData.repositoryId);
+    await interceptTallPRFeedback(testPage);
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.tapPRStatusChip();
+
+    const drawer = session.prStatusChipDrawer();
+    await expect(
+      drawer.getByRole("switch", { name: "Prompt agent when your review is requested" }),
+    ).toBeVisible();
+    await expect(drawer.getByRole("alert")).toContainText(
+      "Lifecycle prompt could not be delivered to a task session.",
+    );
+    await expect(drawer.getByTestId("pr-workflow-row")).toHaveCount(30);
+
+    const scrollBody = drawer.locator("[data-vaul-no-drag]");
+    await expect(scrollBody).toHaveCSS("overflow-y", "auto");
+    const [drawerBox, scrollMetrics, documentMetrics] = await Promise.all([
+      drawer.boundingBox(),
+      scrollBody.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+      })),
+      testPage.evaluate(() => ({
+        clientWidth: document.documentElement.clientWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+      })),
+    ]);
+    expect(drawerBox).not.toBeNull();
+    expect(drawerBox!.x).toBeGreaterThanOrEqual(0);
+    expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(documentMetrics.clientWidth);
+    expect(scrollMetrics.scrollHeight).toBeGreaterThan(scrollMetrics.clientHeight);
+    expect(documentMetrics.scrollWidth).toBeLessThanOrEqual(documentMetrics.clientWidth);
   });
 });

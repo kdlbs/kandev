@@ -7,9 +7,22 @@ import type { TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 
 const hookMocks = vi.hoisted(() => ({
   error: null as string | null,
+  options: null as TaskCIAutomationOptions | null,
   refreshMock: vi.fn(),
   updateMock: vi.fn(),
   resetPromptMock: vi.fn(),
+}));
+
+const responsiveMock = vi.hoisted(() => ({
+  isFinePointer: true,
+  isMobile: false,
+}));
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({
+    isFinePointer: responsiveMock.isFinePointer,
+    isMobile: responsiveMock.isMobile,
+  }),
 }));
 
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
@@ -28,7 +41,7 @@ vi.mock("@/hooks/domains/github/use-pr-ci-popover", () => ({
 
 vi.mock("@/hooks/domains/github/use-task-ci-options", () => ({
   useTaskCIAutomationOptions: () => ({
-    options: makeOptions(),
+    options: hookMocks.options ?? makeOptions(),
     loading: false,
     saving: false,
     error: hookMocks.error,
@@ -40,6 +53,8 @@ vi.mock("@/hooks/domains/github/use-task-ci-options", () => ({
 
 import { PRCIPopover } from "./pr-ci-popover";
 import { MultiPRCIPopover } from "./multi-pr-ci-popover";
+
+const MERGED_PROMPT_LABEL = "Prompt agent when PR is merged";
 
 function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
   return {
@@ -100,12 +115,19 @@ function renderPopover() {
   );
 }
 
-describe("PRCIPopover CI automation controls", () => {
+function resetHookMocks() {
+  hookMocks.error = null;
+  hookMocks.options = null;
+  hookMocks.refreshMock.mockReset();
+  hookMocks.updateMock.mockReset();
+  hookMocks.resetPromptMock.mockReset();
+  responsiveMock.isFinePointer = true;
+  responsiveMock.isMobile = false;
+}
+
+describe("PRCIPopover automation toggles", () => {
   beforeEach(() => {
-    hookMocks.error = null;
-    hookMocks.refreshMock.mockReset();
-    hookMocks.updateMock.mockReset();
-    hookMocks.resetPromptMock.mockReset();
+    resetHookMocks();
   });
 
   afterEach(() => {
@@ -118,8 +140,8 @@ describe("PRCIPopover CI automation controls", () => {
     expect(screen.getByLabelText("Explain CI automation options")).not.toBeNull();
     fireEvent.click(screen.getByLabelText("Auto-fix CI and address comments"));
     fireEvent.click(screen.getByLabelText("Auto-merge when ready"));
-    fireEvent.click(screen.getByLabelText("Prompt agent when review is requested"));
-    fireEvent.click(screen.getByLabelText("Prompt agent when PR is merged"));
+    fireEvent.click(screen.getByLabelText("Prompt agent when your review is requested"));
+    fireEvent.click(screen.getByLabelText(MERGED_PROMPT_LABEL));
     fireEvent.click(screen.getByLabelText("Prompt agent when PR is closed"));
 
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ auto_fix_enabled: true });
@@ -127,6 +149,66 @@ describe("PRCIPopover CI automation controls", () => {
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_review_requested: true });
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_merged: true });
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_closed: true });
+  });
+
+  it("keeps switch rows compact for fine-pointer desktop and touch-sized otherwise", () => {
+    renderPopover();
+    const desktopRow = screen.getByLabelText(MERGED_PROMPT_LABEL).parentElement;
+    expect(desktopRow?.classList.contains("min-h-7")).toBe(true);
+    expect(desktopRow?.classList.contains("min-h-11")).toBe(false);
+
+    cleanup();
+    responsiveMock.isMobile = true;
+    renderPopover();
+    const mobileRow = screen.getByLabelText(MERGED_PROMPT_LABEL).parentElement;
+    expect(mobileRow?.classList.contains("min-h-11")).toBe(true);
+
+    cleanup();
+    responsiveMock.isMobile = false;
+    responsiveMock.isFinePointer = false;
+    renderPopover();
+    const coarsePointerRow = screen.getByLabelText(MERGED_PROMPT_LABEL).parentElement;
+    expect(coarsePointerRow?.classList.contains("min-h-11")).toBe(true);
+  });
+});
+
+describe("PRCIPopover automation status", () => {
+  beforeEach(() => {
+    resetHookMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("renders the connected-account review label and selected PR error", () => {
+    hookMocks.options = makeOptions({
+      pr_states: [
+        {
+          task_id: "task-1",
+          repository_id: "",
+          pr_number: 1,
+          last_fix_signature: "",
+          last_fix_checkpoint_json: "",
+          last_fix_enqueued_at: null,
+          last_fix_session_id: null,
+          auto_fix_round_count: 0,
+          auto_fix_exhausted_at: null,
+          last_merge_signature: "",
+          last_merge_attempt_at: null,
+          last_error: "No promptable task session is available.",
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    });
+    renderPopover();
+
+    expect(screen.getByRole("alert").textContent).toContain(
+      "No promptable task session is available.",
+    );
+    expect(screen.getByLabelText("Prompt agent when your review is requested")).not.toBeNull();
+    expect(screen.queryByLabelText(/edit.*review/i)).toBeNull();
   });
 
   it("uses the PR title in the header and omits the redundant detail link", () => {
@@ -163,6 +245,16 @@ describe("PRCIPopover CI automation controls", () => {
     expect(onOpenDetailPanel).toHaveBeenCalledTimes(1);
     expect(onOpenDetailPanel).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }));
     expect(screen.queryByText("Open PR details")).toBeNull();
+  });
+});
+
+describe("PRCIPopover task prompts", () => {
+  beforeEach(() => {
+    resetHookMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   it("opens a task prompt dialog with a settings link and saves overrides", async () => {

@@ -62,6 +62,43 @@ async function openPromptDialog(session: SessionPage) {
   await editButton.click({ force: true });
 }
 
+async function interceptLifecycleError(
+  testPage: import("@playwright/test").Page,
+  repositoryId: string,
+) {
+  await testPage.route("**/api/v1/github/tasks/*/ci-options", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const response = await route.fetch();
+    const options = (await response.json()) as { pr_states?: Array<Record<string, unknown>> };
+    await route.fulfill({
+      response,
+      json: {
+        ...options,
+        pr_states: [
+          ...(options.pr_states ?? []).filter(
+            (state) =>
+              (state.repository_id !== repositoryId && state.repository_id !== "") ||
+              state.pr_number !== PR_NUMBER,
+          ),
+          {
+            repository_id: repositoryId,
+            pr_number: PR_NUMBER,
+            last_error: "Lifecycle prompt could not be delivered to a task session.",
+          },
+          {
+            repository_id: "",
+            pr_number: PR_NUMBER,
+            last_error: "Lifecycle prompt could not be delivered to a task session.",
+          },
+        ],
+      },
+    });
+  });
+}
+
 test.describe("PR CI automation options", () => {
   test("desktop popover persists toggles and task prompt overrides", async ({
     testPage,
@@ -79,7 +116,7 @@ test.describe("PR CI automation options", () => {
     ).toBeVisible();
     await expect(popover.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
     await expect(
-      popover.getByRole("switch", { name: "Prompt agent when review is requested" }),
+      popover.getByRole("switch", { name: "Prompt agent when your review is requested" }),
     ).toBeVisible();
     await expect(
       popover.getByRole("switch", { name: "Prompt agent when PR is merged" }),
@@ -103,6 +140,9 @@ test.describe("PR CI automation options", () => {
     await popover.getByLabel("Explain CI automation options").hover();
     await expect(testPage.getByText(/1 minute PR refresh loop/)).toBeVisible();
     await expect(testPage.getByText(/notification switches prompt the task's agent/)).toBeVisible();
+    await expect(
+      testPage.getByText(/connected GitHub account's review becomes requested/i),
+    ).toBeVisible();
 
     await openPromptDialog(session);
     const promptDialog = testPage.getByRole("dialog", { name: "Auto-fix prompt" });
@@ -140,5 +180,23 @@ test.describe("PR CI automation options", () => {
     await expect(
       reloaded.prTopbarPopover().getByRole("switch", { name: "Auto-merge when ready" }),
     ).toBeChecked();
+  });
+
+  test("desktop popover shows the selected PR lifecycle delivery error", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const taskId = await seedTaskWithPR(apiClient, seedData, "CI automation lifecycle error");
+    await interceptLifecycleError(testPage, seedData.repositoryId);
+
+    const session = await openTask(testPage, taskId);
+    const popover = session.prTopbarPopover();
+    await expect(
+      popover.getByRole("switch", { name: "Prompt agent when your review is requested" }),
+    ).toBeVisible();
+    await expect(popover.getByRole("alert")).toContainText(
+      "Lifecycle prompt could not be delivered to a task session.",
+    );
   });
 });

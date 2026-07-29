@@ -348,7 +348,7 @@ func (c *Controller) httpGetTaskCIOptions(ctx *gin.Context) {
 func (c *Controller) httpPatchTaskCIOptions(ctx *gin.Context) {
 	patch, err := parseTaskCIOptionsPatch(ctx)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if !patch.HasAny() {
@@ -421,35 +421,17 @@ func parseTaskCIOptionsPatch(ctx *gin.Context) (TaskCIOptionsPatch, error) {
 				return TaskCIOptionsPatch{}, err
 			}
 		case "review_prompt_override":
-			if err := unmarshalNullablePrompt(value, &patch.ReviewPromptOverride); err != nil {
-				return TaskCIOptionsPatch{}, err
-			}
+			return TaskCIOptionsPatch{}, errLifecyclePromptOverridesUnsupported
 		case "merged_prompt_override":
-			if err := unmarshalNullablePrompt(value, &patch.MergedPromptOverride); err != nil {
-				return TaskCIOptionsPatch{}, err
-			}
+			return TaskCIOptionsPatch{}, errLifecyclePromptOverridesUnsupported
 		case "closed_prompt_override":
-			if err := unmarshalNullablePrompt(value, &patch.ClosedPromptOverride); err != nil {
-				return TaskCIOptionsPatch{}, err
-			}
+			return TaskCIOptionsPatch{}, errLifecyclePromptOverridesUnsupported
 		}
 	}
 	return patch, nil
 }
 
-func unmarshalNullablePrompt(raw json.RawMessage, target **string) error {
-	if string(raw) == jsonNullLiteral {
-		empty := ""
-		*target = &empty
-		return nil
-	}
-	var prompt string
-	if err := json.Unmarshal(raw, &prompt); err != nil {
-		return err
-	}
-	*target = &prompt
-	return nil
-}
+var errLifecyclePromptOverridesUnsupported = errors.New("lifecycle prompt overrides are not supported")
 
 func (c *Controller) publishTaskCIOptionsUpdated(ctx context.Context, resp *TaskCIOptionsResponse) {
 	if c.service == nil || c.service.eventBus == nil || resp == nil {

@@ -535,7 +535,7 @@ If the child has no live execution, the call succeeds idempotently with status="
 	)
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("get_task_pr_automation_kandev",
-			"Get the current task's GitHub PR automation settings, including agent prompts for re-review requests, merge, and close.",
+			"Get the current task's GitHub PR automation settings, including lifecycle notification switches.",
 			json.RawMessage(`{"type":"object","properties":{}}`),
 		),
 		s.wrapHandler("get_task_pr_automation_kandev", s.getTaskPRAutomationHandler()),
@@ -549,9 +549,6 @@ If the child has no live execution, the call succeeds idempotently with status="
 			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
 			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked PR becomes merged")),
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked PR becomes closed without merge")),
-			mcp.WithString("review_prompt_override", mcp.Description("Custom prompt for review-requested event (empty string clears the override)")),
-			mcp.WithString("merged_prompt_override", mcp.Description("Custom prompt for merged event (empty string clears the override)")),
-			mcp.WithString("closed_prompt_override", mcp.Description("Custom prompt for closed event (empty string clears the override)")),
 		),
 		s.wrapHandler("update_task_pr_automation_kandev", s.updateTaskPRAutomationHandler()),
 	)

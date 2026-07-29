@@ -671,6 +671,30 @@ func TestWsUpdateMessage(t *testing.T) {
 		require.Len(t, entries, 1)
 		assert.Equal(t, "agent prompt", entries[0].Content)
 	})
+
+	t.Run("rejects user_id impersonating the workflow identity", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+		queued, err := svc.QueueMessageWithMetadata(
+			ctx, "s", "t", "lifecycle prompt", "", messagequeue.QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"},
+		)
+		require.NoError(t, err)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   queued.ID,
+				"content":    "hostile replacement",
+				"user_id":    messagequeue.QueuedByWorkflow,
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+
+		entries := svc.GetStatus(ctx, "s").Entries
+		require.Len(t, entries, 1)
+		assert.Equal(t, "lifecycle prompt", entries[0].Content)
+	})
 }
 
 func TestWsRemoveEntry(t *testing.T) {
@@ -724,6 +748,29 @@ func TestWsRemoveEntry(t *testing.T) {
 		status := svc.GetStatus(ctx, "s")
 		assert.Equal(t, 1, status.Count)
 		assert.Equal(t, "agent prompt", status.Entries[0].Content)
+	})
+
+	t.Run("returns entry_not_found for workflow-authored entries", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+
+		queued, err := svc.QueueMessageWithMetadata(
+			ctx, "s", "t", "lifecycle prompt", "", messagequeue.QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"},
+		)
+		require.NoError(t, err)
+
+		response, err := handlers.wsRemoveEntry(ctx,
+			createTestMessage(t, ws.ActionMessageQueueRemove, map[string]interface{}{
+				"session_id": "s",
+				"entry_id":   queued.ID,
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+
+		status := svc.GetStatus(ctx, "s")
+		require.Equal(t, 1, status.Count)
+		assert.Equal(t, "lifecycle prompt", status.Entries[0].Content)
 	})
 
 	t.Run("rejects missing session_id", func(t *testing.T) {

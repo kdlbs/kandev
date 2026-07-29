@@ -250,9 +250,24 @@ When a review watch is created, Kandev saves its verified target GitHub login. A
 
 An **Issue Watch** behaves similarly for issues. Its default search is `type:issue state:open`. Choose labels or provide a custom GitHub query; the custom query takes precedence over label selection.
 
-Both watch types default to the **Auto** cleanup policy: delete merged/closed tasks only when the user has not typed a message. **Always** deletes even after user engagement; **Never** retains every task. You can pause a watch, poll immediately, or clean completed work. Deleting a GitHub review or issue watch best-effort cascade-deletes the tasks it owns. **Reset** is also destructive: after its preview, it permanently cascade-deletes every watch-created task, including archived tasks, and clears cursor/deduplication state so current matches become eligible again. Review-watch reset schedules a re-import; issue-watch reset re-imports on its next poll. Reset is not a way to keep old tasks and rerun a query.
+Both watch types default to the **Auto** cleanup policy: delete merged/closed tasks only when the user has not typed a message. For a GitHub Review Watch task with any PR lifecycle prompt enabled, **Auto** instead retains the terminal task so that lifecycle delivery can finish. **Always delete** is the explicit override and deletes even after user engagement or enabled lifecycle prompts; **Never** retains every task. You can pause a watch, poll immediately, or clean completed work. Deleting a GitHub review or issue watch best-effort cascade-deletes the tasks it owns. **Reset** is also destructive: after its preview, it permanently cascade-deletes every watch-created task, including archived tasks, and clears cursor/deduplication state so current matches become eligible again. Review-watch reset schedules a re-import; issue-watch reset re-imports on its next poll. Reset is not a way to keep old tasks and rerun a query.
 
 Repository scope, authentication, and watch filters are workspace-specific. Repository scope constrains Kandev operations in addition to the repositories allowed by the selected credential; it cannot grant access the credential lacks. Explicit executor profile tokens remain a separate override and should be scoped independently. GitHub workspace configuration can be copied, but credentials, App installation bindings, personal identities, and watches are deliberately not copied.
+
+### Automate a linked pull request
+
+For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls are task-level booleans: **Auto-fix CI & address comments**, **Auto-merge when ready**, **Prompt agent when your review is requested**, **Prompt agent when PR is merged**, and **Prompt agent when PR is closed**. Enabling any control applies it to every PR linked to that task; Kandev tracks delivery and deduplication separately for each linked PR.
+
+This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
+
+**Prompt agent when your review is requested** matches the currently connected, installation-wide GitHub account. The first observation is a quiet baseline. Later transitions to a request for that account prompt the agent, and clearing a request rearms the next transition. If the connected GitHub account changes, Kandev quietly rebinds the task and re-establishes every linked PR's baseline; switching accounts does not itself create a prompt.
+
+Merged and closed options prompt once when their linked PR enters the selected terminal state. Kandev delivers lifecycle prompts to the task's active promptable session, preferring the primary session. It does not interrupt a busy session: it queues a message for delivery when that session is available. If the task has no promptable session, Kandev records the per-PR delivery error, creates no new session, and retries once a session becomes promptable.
+
+The UI edits the auto-fix prompt only. Lifecycle messages use immutable,
+server-owned templates that include only the linked PR's canonical URL; their
+text cannot be customized through the UI, HTTP, MCP, or storage. Destination
+workflow steps and GitLab lifecycle parity are follow-up work.
 
 ## GitLab
 

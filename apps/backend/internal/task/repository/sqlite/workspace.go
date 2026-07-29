@@ -181,6 +181,9 @@ func (r *Repository) deleteWorkspaceCascade(
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := r.purgeWorkspaceTaskQueuesInTx(ctx, tx, tasks); err != nil {
+		return nil, nil, err
+	}
 
 	rows, err := r.deleteWorkspaceCascadeRow(ctx, tx, id, expectedName)
 	if err != nil {
@@ -218,7 +221,19 @@ func (r *Repository) deleteWorkspaceCascade(
 	if err := tx.Commit(); err != nil {
 		return nil, nil, err
 	}
+	for _, task := range tasks {
+		r.notifyTaskQueuePurged(ctx, task.ID)
+	}
 	return tasks, workflows, nil
+}
+
+func (r *Repository) purgeWorkspaceTaskQueuesInTx(ctx context.Context, tx *sqlx.Tx, tasks []*models.Task) error {
+	for _, task := range tasks {
+		if err := r.purgeTaskQueueInTx(ctx, tx, task.ID); err != nil {
+			return fmt.Errorf("purge task queue for workspace cascade task %s: %w", task.ID, err)
+		}
+	}
+	return nil
 }
 
 func (r *Repository) deleteWorkspaceCascadeRow(

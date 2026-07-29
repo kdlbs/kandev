@@ -548,6 +548,9 @@ func (s *Store) initSchemaData(legacyUpgrade bool) error {
 	if err := s.backfillGitHubUserConnectionVersions(); err != nil {
 		return err
 	}
+	if err := s.clearLifecyclePromptOverrides(); err != nil {
+		return err
+	}
 	if err := s.migratePRTablesForMultiRepo(); err != nil {
 		return fmt.Errorf("migrate PR tables for multi-repo: %w", err)
 	}
@@ -566,6 +569,18 @@ func (s *Store) initSchemaData(legacyUpgrade bool) error {
 		}
 	}
 	return nil
+}
+
+func (s *Store) clearLifecyclePromptOverrides() error {
+	_, err := s.db.Exec(`
+		UPDATE github_task_ci_options
+		SET review_prompt_override = NULL,
+			merged_prompt_override = NULL,
+			closed_prompt_override = NULL
+		WHERE review_prompt_override IS NOT NULL
+			OR merged_prompt_override IS NOT NULL
+			OR closed_prompt_override IS NOT NULL`)
+	return err
 }
 
 func (s *Store) applyIdempotentSchemaIndexes() {
@@ -1701,9 +1716,6 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 	closedSet, closedValue := boolPatchValue(patch.PromptOnClosed)
 	promptSet := patch.AutoFixPromptOverride != nil
 	promptValue := normalizedPromptOverride(patch.AutoFixPromptOverride)
-	reviewPromptSet := patch.ReviewPromptOverride != nil
-	mergedPromptSet := patch.MergedPromptOverride != nil
-	closedPromptSet := patch.ClosedPromptOverride != nil
 	reviewerLoginSet := patch.ReviewReviewerLogin != nil
 	if _, err := tx.ExecContext(writeCtx, `
 		UPDATE github_task_ci_options SET
@@ -1714,17 +1726,11 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 			prompt_on_merged = CASE WHEN ? THEN ? ELSE prompt_on_merged END,
 			prompt_on_closed = CASE WHEN ? THEN ? ELSE prompt_on_closed END,
 			review_reviewer_login = CASE WHEN ? THEN ? ELSE review_reviewer_login END,
-			review_prompt_override = CASE WHEN ? THEN ? ELSE review_prompt_override END,
-			merged_prompt_override = CASE WHEN ? THEN ? ELSE merged_prompt_override END,
-			closed_prompt_override = CASE WHEN ? THEN ? ELSE closed_prompt_override END,
 			updated_at = ?
 		WHERE task_id = ?`,
 		autoFixSet, autoFixValue, autoMergeSet, autoMergeValue, promptSet, promptValue,
 		reviewSet, reviewValue, mergedSet, mergedValue, closedSet, closedValue,
 		reviewerLoginSet, normalizedString(patch.ReviewReviewerLogin),
-		reviewPromptSet, normalizedPromptOverride(patch.ReviewPromptOverride),
-		mergedPromptSet, normalizedPromptOverride(patch.MergedPromptOverride),
-		closedPromptSet, normalizedPromptOverride(patch.ClosedPromptOverride),
 		now, taskID); err != nil {
 		return nil, err
 	}
@@ -1764,6 +1770,40 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 		return nil, err
 	}
 	return s.GetTaskCIOptions(writeCtx, taskID)
+}
+
+// RebindTaskPRReviewer atomically updates the task's authenticated reviewer
+// login and quietly resets only its review-request baselines when it changes.
+func (s *Store) RebindTaskPRReviewer(ctx context.Context, taskID, login string) (bool, error) {
+	ctx = context.WithoutCancel(ctx)
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var current string
+	err = tx.GetContext(ctx, &current, `SELECT review_reviewer_login FROM github_task_ci_options WHERE task_id = ?`, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if strings.EqualFold(current, login) {
+		return false, tx.Commit()
+	}
+	now := time.Now().UTC()
+	if _, err := tx.ExecContext(ctx, `UPDATE github_task_ci_options SET review_reviewer_login = ?, updated_at = ? WHERE task_id = ?`, login, now, taskID); err != nil {
+		return false, err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE github_task_ci_pr_state SET review_request_initialized = 0, last_review_requested = 0, updated_at = ? WHERE task_id = ?`, now, taskID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // ListTaskCIPRStates returns CI automation state rows for a task.

@@ -1342,7 +1342,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLocked(ctx context.Conte
 	if s.messageQueue == nil || s.isQueuedDispatchInFlight(sessionID) {
 		return false
 	}
-	queuedMsg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
+	queuedMsg, ok := s.messageQueue.ReserveQueued(ctx, sessionID)
 	return s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok)
 }
 
