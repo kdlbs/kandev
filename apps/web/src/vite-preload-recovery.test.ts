@@ -85,8 +85,9 @@ function defineRetryTests() {
 
   it.each([
     ["expired", JSON.stringify({ attemptedAt: NOW - 60_000, href: HREF })],
+    ["future-dated", JSON.stringify({ attemptedAt: NOW + 1, href: HREF })],
     ["corrupt", "{not-json"],
-  ])("replaces an %s marker and retries once", (_description, initialMarker) => {
+  ])("replaces the %s marker and retries once", (_description, initialMarker) => {
     const memory = createMemoryStorage(initialMarker);
     const harness = createHarness(() => memory.storage);
 

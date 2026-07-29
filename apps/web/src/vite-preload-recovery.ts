@@ -42,7 +42,11 @@ function parseRecoveryMarker(value: string | null): RecoveryMarker | null {
 }
 
 function isRecent(marker: RecoveryMarker | null, now: number): boolean {
-  return marker !== null && now - marker.attemptedAt < PRELOAD_RECOVERY_TTL_MS;
+  return (
+    marker !== null &&
+    marker.attemptedAt <= now &&
+    now - marker.attemptedAt < PRELOAD_RECOVERY_TTL_MS
+  );
 }
 
 export function installVitePreloadRecovery({

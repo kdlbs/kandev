@@ -32,9 +32,9 @@ interface ApplyGate {
   manualCommands: string[];
 }
 
-interface UpdatesCardProps {
+type UpdatesCardProps = {
   reloadDocument?: () => void;
-}
+};
 
 function reloadCurrentDocument(): void {
   window.location.reload();
