@@ -17,6 +17,8 @@ import {
   quarantineDeleteAfter,
 } from "./storage-quarantine";
 
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 type Props = {
   entries: StorageQuarantineEntry[];
   deleteJobId?: string;
@@ -194,10 +196,8 @@ export function StorageQuarantineCard({
       .filter((deadline) => deadline > now.getTime())
       .sort((left, right) => left - right)[0];
     if (nextDeadline === undefined) return;
-    const timer = setTimeout(
-      () => setNow(new Date()),
-      Math.max(0, nextDeadline - now.getTime() + 1),
-    );
+    const delay = Math.min(MAX_TIMER_DELAY_MS, Math.max(0, nextDeadline - now.getTime() + 1));
+    const timer = setTimeout(() => setNow(new Date()), delay);
     return () => clearTimeout(timer);
   }, [entries, now]);
   const counts = quarantineCounts(entries, now);
