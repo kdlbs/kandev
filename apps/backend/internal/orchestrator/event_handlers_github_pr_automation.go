@@ -21,17 +21,9 @@ const (
 	taskPRAgentEventMerged          = "merged"
 	taskPRAgentEventClosed          = "closed"
 
-	taskPRAgentReviewRequestedPrompt = "Your review was requested on %s.\n\n" +
-		"Resume this task's PR review. Fetch the authoritative PR head and base from GitHub, " +
-		"then review the updated diff. Do not rely on the current local worktree being up to date."
-	taskPRAgentMergedPrompt = "The linked pull request %s was merged.\n\n" +
-		"Fetch the authoritative merged state, merge commit, and relevant commits from GitHub. " +
-		"Finish any final review bookkeeping, summarize the outcome, and archive this task when " +
-		"the work is complete. The local branch may be stale or deleted."
-	taskPRAgentClosedPrompt = "The linked pull request %s was closed without merging.\n\n" +
-		"Fetch the authoritative closed state and relevant commits from GitHub. Finish any final " +
-		"review bookkeeping, summarize the outcome, and archive this task when the work is complete. " +
-		"The local branch may be stale or deleted."
+	taskPRAgentReviewRequestedPrompt = "Your review was requested on %s."
+	taskPRAgentMergedPrompt          = "The linked pull request %s was merged."
+	taskPRAgentClosedPrompt          = "The linked pull request %s was closed without merging."
 )
 
 var (
@@ -44,7 +36,7 @@ type taskPRAgentAutomationService interface {
 	GetTaskCIOptionsResponse(ctx context.Context, taskID string) (*github.TaskCIOptionsResponse, error)
 	GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error)
 	RebindTaskPRReviewer(ctx context.Context, taskID string) (string, bool, error)
-	IsReviewRequestedForLogin(ctx context.Context, owner, repo string, prNumber int, login string) (bool, error)
+	IsReviewRequestedForLogin(ctx context.Context, workspaceID, owner, repo string, prNumber int, login string) (bool, error)
 	SetTaskPRReviewRequestState(ctx context.Context, taskID, repositoryID string, prNumber int, requested bool) error
 	SetTaskPRObservedState(ctx context.Context, taskID, repositoryID string, prNumber int, state string) error
 	RecordTaskPRLifecyclePrompt(ctx context.Context, prompt github.TaskPRLifecyclePrompt) error
@@ -195,7 +187,7 @@ func currentTaskPRReviewRequest(
 	if pr.PendingReviewCount > 0 {
 		var err error
 		requested, err = automation.IsReviewRequestedForLogin(
-			ctx, pr.Owner, pr.Repo, pr.PRNumber, options.ReviewReviewerLogin,
+			ctx, pr.WorkspaceID, pr.Owner, pr.Repo, pr.PRNumber, options.ReviewReviewerLogin,
 		)
 		if err != nil {
 			return nil, err

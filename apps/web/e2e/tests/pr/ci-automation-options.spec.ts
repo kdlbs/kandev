@@ -100,7 +100,7 @@ async function interceptLifecycleError(
 }
 
 test.describe("PR CI automation options", () => {
-  test("desktop popover persists toggles and task prompt overrides", async ({
+  test("desktop popover persists automation and lifecycle notification options", async ({
     testPage,
     apiClient,
     seedData,
@@ -119,22 +119,20 @@ test.describe("PR CI automation options", () => {
     await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
     await reviewFollowUp.click();
     await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "true");
+    await expect(popover.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
+    await expect(popover.getByRole("switch", { name: "PR merged" })).toBeVisible();
+    await expect(popover.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();
     await expect(
-      popover.getByRole("switch", { name: "Prompt agent when your review is requested" }),
+      popover.getByText("Wake the agent for any new request, including re-review after changes."),
     ).toBeVisible();
     await expect(
-      popover.getByRole("switch", { name: "Prompt agent when PR is merged" }),
-    ).toBeVisible();
-    await expect(
-      popover.getByRole("switch", { name: "Prompt agent when PR is closed" }),
+      popover.getByText("Wake the agent when review work ends. Choose either or both outcomes."),
     ).toBeVisible();
 
     await popover.getByRole("switch", { name: "Auto-fix CI and address comments" }).click();
     await popover.getByRole("switch", { name: "Auto-merge when ready" }).click();
-    await popover
-      .getByRole("switch", { name: "Prompt agent when your review is requested" })
-      .click();
-    await popover.getByRole("switch", { name: "Prompt agent when PR is merged" }).click();
+    await popover.getByRole("switch", { name: "Your review is requested" }).click();
+    await popover.getByRole("switch", { name: "PR merged" }).click();
 
     await expect
       .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
@@ -147,9 +145,9 @@ test.describe("PR CI automation options", () => {
 
     await popover.getByLabel("Explain CI automation options").hover();
     await expect(testPage.getByText(/1 minute PR refresh loop/)).toBeVisible();
-    await expect(testPage.getByText(/notification switches prompt the task's agent/)).toBeVisible();
+    await expect(testPage.getByText(/notification switches wake the task's agent/)).toBeVisible();
     await expect(
-      testPage.getByText(/connected GitHub account's review becomes requested/i),
+      testPage.getByText(/workspace's connected GitHub account is requested for review/i),
     ).toBeVisible();
 
     await openPromptDialog(session);
@@ -201,9 +199,7 @@ test.describe("PR CI automation options", () => {
     const session = await openTask(testPage, taskId);
     const popover = session.prTopbarPopover();
     await popover.getByTestId("ci-review-follow-up-trigger").click();
-    await expect(
-      popover.getByRole("switch", { name: "Prompt agent when your review is requested" }),
-    ).toBeVisible();
+    await expect(popover.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(popover.getByRole("alert")).toContainText(
       "Lifecycle prompt could not be delivered to a task session.",
     );

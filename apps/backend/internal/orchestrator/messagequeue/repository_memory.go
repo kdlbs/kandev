@@ -259,7 +259,9 @@ func (r *memoryRepository) ReserveHead(_ context.Context, sessionID string) (*Qu
 		// Mirror the SQLite reservation: the stored row is flagged in flight so
 		// queue status stops listing it, while the returned copy keeps the
 		// unmarked metadata a requeue would write back.
-		head.Metadata = markReservedMetadata(head.Metadata)
+		out.Metadata = clearReservedMetadata(head.Metadata)
+		out.reservedLifecycleDelivery = true
+		head.Metadata = markReservedMetadata(out.Metadata)
 		return &out, nil
 	}
 	r.entries[sessionID] = list[1:]

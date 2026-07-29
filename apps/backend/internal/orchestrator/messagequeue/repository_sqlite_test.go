@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -130,6 +131,9 @@ func TestSQLiteRepository_ReserveHeadMarksLifecycleRowInFlight(t *testing.T) {
 	if reserved.IsReservedInFlight() {
 		t.Error("reserved copy should not carry the in-flight marker")
 	}
+	if !reserved.IsReservedLifecycleDelivery() {
+		t.Error("reserved copy should carry process-local reservation evidence")
+	}
 
 	entries, err := repo.ListBySession(ctx, "s1")
 	if err != nil {
@@ -143,6 +147,88 @@ func TestSQLiteRepository_ReserveHeadMarksLifecycleRowInFlight(t *testing.T) {
 	}
 	if !entries[0].IsDurableLifecycle() {
 		t.Error("stored row lost its durable lifecycle marker")
+	}
+}
+
+func TestSQLiteRepository_ReserveAfterRestartReturnsRetryableLifecycleMetadata(t *testing.T) {
+	ctx := context.Background()
+	dbPath := filepath.Join(t.TempDir(), "queue.db")
+	openRepo := func() (Repository, *sqlx.DB) {
+		raw, err := sql.Open("sqlite3", dbPath+"?_foreign_keys=on")
+		if err != nil {
+			t.Fatalf("open sqlite: %v", err)
+		}
+		raw.SetMaxOpenConns(1)
+		raw.SetMaxIdleConns(1)
+		db := sqlx.NewDb(raw, "sqlite3")
+		repo, err := NewSQLiteRepository(db, db)
+		if err != nil {
+			_ = db.Close()
+			t.Fatalf("NewSQLiteRepository: %v", err)
+		}
+		return repo, db
+	}
+
+	repo, db := openRepo()
+	if _, err := db.Exec(`
+		CREATE TABLE tasks (
+			id TEXT PRIMARY KEY,
+			archived_at TIMESTAMP NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+		INSERT INTO tasks (id, archived_at, updated_at) VALUES ('t1', NULL, CURRENT_TIMESTAMP);
+	`); err != nil {
+		t.Fatalf("seed active task: %v", err)
+	}
+	msg := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "pr merged", QueuedBy: QueuedByWorkflow,
+		Metadata: map[string]interface{}{
+			MetadataLifecycleDurable:    true,
+			MetadataLifecycleGeneration: float64(0),
+			MetadataCoalesceKey:         "github-pr:repo:1:merged",
+		},
+	}
+	if err := repo.Insert(ctx, msg, 0); err != nil {
+		t.Fatalf("insert lifecycle row: %v", err)
+	}
+	if _, err := repo.ReserveHead(ctx, "s1"); err != nil {
+		t.Fatalf("initial reserve: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close before restart: %v", err)
+	}
+
+	repo, db = openRepo()
+	t.Cleanup(func() { _ = db.Close() })
+	reserved, err := repo.ReserveHead(ctx, "s1")
+	if err != nil {
+		t.Fatalf("reserve after restart: %v", err)
+	}
+	if reserved == nil {
+		t.Fatal("reserve after restart returned nil")
+	}
+	if reserved.IsReservedInFlight() {
+		t.Fatalf("returned reservation leaked transient marker: %+v", reserved.Metadata)
+	}
+	if !reserved.IsReservedLifecycleDelivery() {
+		t.Fatal("returned reservation lost process-local reservation evidence")
+	}
+
+	retried, _, err := repo.InsertOrReplaceLifecycleByCoalesceKey(
+		ctx, reserved, "github-pr:repo:1:merged", 0, false,
+	)
+	if err != nil {
+		t.Fatalf("requeue failed delivery: %v", err)
+	}
+	if retried.IsReservedInFlight() {
+		t.Fatalf("requeued copy retained transient marker: %+v", retried.Metadata)
+	}
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list retried lifecycle row: %v", err)
+	}
+	if len(entries) != 1 || entries[0].IsReservedInFlight() {
+		t.Fatalf("failed delivery was not visible for retry: %+v", entries)
 	}
 }
 

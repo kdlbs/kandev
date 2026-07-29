@@ -3109,6 +3109,9 @@ func (s *Service) acknowledgePromptClaim(
 	}
 	if err := afterClaim(); err != nil {
 		s.rollbackPromptClaim(ctx, taskID, sessionID, rollback)
+		if errors.Is(err, errLifecyclePromptReservationSuperseded) {
+			return err
+		}
 		return fmt.Errorf("%w: %v", errLifecyclePromptMessagePersistence, err)
 	}
 	return nil
@@ -3272,9 +3275,10 @@ func (s *Service) effectivePromptForSession(sessionID, prompt string, planMode b
 }
 
 var (
-	errLifecyclePromptInactive           = errors.New("lifecycle prompt task or session is inactive")
-	errLifecyclePromptClaim              = errors.New("lifecycle prompt claim failed")
-	errLifecyclePromptMessagePersistence = errors.New("lifecycle prompt message persistence failed")
+	errLifecyclePromptInactive              = errors.New("lifecycle prompt task or session is inactive")
+	errLifecyclePromptClaim                 = errors.New("lifecycle prompt claim failed")
+	errLifecyclePromptMessagePersistence    = errors.New("lifecycle prompt message persistence failed")
+	errLifecyclePromptReservationSuperseded = errors.New("lifecycle prompt reservation was superseded")
 )
 
 type lifecyclePromptReselectedError struct {

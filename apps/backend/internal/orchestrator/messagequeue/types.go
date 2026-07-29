@@ -90,6 +90,11 @@ type QueuedMessage struct {
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 	QueuedAt    time.Time              `json:"queued_at"`
 	QueuedBy    string                 `json:"queued_by"`
+
+	// reservedLifecycleDelivery is process-local evidence that ReserveHead
+	// retained this durable row for acknowledgement. It deliberately is not
+	// persisted in metadata, where a restart could leak it into a retry.
+	reservedLifecycleDelivery bool
 }
 
 // IsDurableLifecycle reports whether this entry uses reserve/ack delivery.
@@ -116,6 +121,12 @@ func (m *QueuedMessage) IsReservedInFlight() bool {
 	return reserved
 }
 
+// IsReservedLifecycleDelivery reports whether this copy came from the
+// reserve/ack path rather than a destructive legacy TakeHead call.
+func (m *QueuedMessage) IsReservedLifecycleDelivery() bool {
+	return m != nil && m.reservedLifecycleDelivery
+}
+
 // markReservedMetadata returns a copy of metadata carrying the in-flight
 // reservation marker.
 func markReservedMetadata(metadata map[string]interface{}) map[string]interface{} {
@@ -125,6 +136,18 @@ func markReservedMetadata(metadata map[string]interface{}) map[string]interface{
 	}
 	marked[MetadataLifecycleReserved] = true
 	return marked
+}
+
+// clearReservedMetadata removes the transient in-process delivery marker from
+// copies returned to dispatch or written back for retry.
+func clearReservedMetadata(metadata map[string]interface{}) map[string]interface{} {
+	cleared := make(map[string]interface{}, len(metadata))
+	for k, v := range metadata {
+		if k != MetadataLifecycleReserved {
+			cleared[k] = v
+		}
+	}
+	return cleared
 }
 
 // MessageAttachment represents an attachment (image) in a queued message.

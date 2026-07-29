@@ -184,7 +184,11 @@ func TestExecuteQueuedMessage_LifecycleMessagePersistenceFailureDoesNotDispatch(
 		t.Fatalf("active turn after visible-message persistence failure = %q, want none", activeTurn.ID)
 	}
 	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
-		t.Fatalf("visible-message persistence lifecycle retries = %d, want 1", got)
+		entries, _, snapshotErr := svc.messageQueue.SnapshotSession(ctx, "s1")
+		t.Fatalf(
+			"visible-message persistence lifecycle retries = %d, want 1; snapshot=%+v err=%v",
+			got, entries, snapshotErr,
+		)
 	}
 }
 
@@ -317,4 +321,164 @@ func TestDrainQueuedMessage_LifecycleEntryRemainsDurableUntilPromptAcceptance(t 
 		t.Errorf("pending entries before PromptAgent acceptance = %d, want 0", got)
 	}
 	close(acceptPrompt)
+}
+
+func TestExecuteQueuedMessage_LifecycleReservationPurgedAcrossArchiveUnarchiveDoesNotDispatch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	resolveEntered := make(chan struct{})
+	allowResolve := make(chan struct{})
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageCreator = &mockMessageCreator{}
+	svc.repo = &lifecycleResolveBarrierRepository{
+		repoStore:      repo,
+		resolveEntered: resolveEntered,
+		allowResolve:   allowResolve,
+	}
+	t.Cleanup(func() {
+		select {
+		case <-allowResolve:
+		default:
+			close(allowResolve)
+		}
+	})
+
+	_, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
+		ctx, "s1", "t1", "merged lifecycle prompt", "", messagequeue.QueuedByWorkflow,
+		false, nil, map[string]interface{}{"origin": githubPRAutomationOrigin},
+		"github-pr:repo:1:merged", true,
+	)
+	if err != nil || !accepted {
+		t.Fatalf("queue lifecycle entry: accepted=%v err=%v", accepted, err)
+	}
+	queued, ok := svc.messageQueue.ReserveQueued(ctx, "s1")
+	if !ok {
+		t.Fatal("reserve lifecycle entry")
+	}
+	svc.markQueuedDispatchInFlight("s1", queued.ID)
+	dispatchDone := make(chan struct{})
+	go func() {
+		svc.executeQueuedMessage("s1", queued)
+		close(dispatchDone)
+	}()
+	<-resolveEntered
+
+	if err := repo.ArchiveTask(ctx, "t1"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	if _, err := repo.UnarchiveTask(ctx, "t1"); err != nil {
+		t.Fatalf("unarchive task: %v", err)
+	}
+	close(allowResolve)
+	select {
+	case <-dispatchDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for stale lifecycle dispatch")
+	}
+
+	if got := len(agentMgr.capturedPromptCalls); got != 0 {
+		t.Fatalf("stale lifecycle prompts = %d, want 0", got)
+	}
+	if got := len(svc.messageCreator.(*mockMessageCreator).userMessages); got != 0 {
+		t.Fatalf("stale visible lifecycle messages = %d, want 0", got)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
+		t.Fatalf("stale lifecycle retries = %d, want 0", got)
+	}
+}
+
+func TestExecuteQueuedMessage_LifecycleReservationPurgedBeforeWorkflowSideEffects(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	sessionReadEntered := make(chan struct{})
+	allowSessionRead := make(chan struct{})
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "t1", v1.TaskStateReview)
+	steps := &countingLifecycleStepGetter{mockStepGetter: newMockStepGetter()}
+	svc := createTestServiceWithAgent(repo, steps.mockStepGetter, taskRepo, agentMgr)
+	svc.workflowStepGetter = steps
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageCreator = &mockMessageCreator{}
+	svc.repo = &lifecycleWorkflowBarrierRepository{
+		repoStore:          repo,
+		sessionReadEntered: sessionReadEntered,
+		allowSessionRead:   allowSessionRead,
+	}
+	t.Cleanup(func() {
+		select {
+		case <-allowSessionRead:
+		default:
+			close(allowSessionRead)
+		}
+	})
+
+	_, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
+		ctx, "s1", "t1", "review lifecycle prompt", "", messagequeue.QueuedByWorkflow,
+		false, nil, map[string]interface{}{"origin": githubPRAutomationOrigin},
+		"github-pr:repo:1:review_requested", true,
+	)
+	if err != nil || !accepted {
+		t.Fatalf("queue lifecycle entry: accepted=%v err=%v", accepted, err)
+	}
+	queued, ok := svc.messageQueue.ReserveQueued(ctx, "s1")
+	if !ok {
+		t.Fatal("reserve lifecycle entry")
+	}
+	svc.markQueuedDispatchInFlight("s1", queued.ID)
+	dispatchDone := make(chan struct{})
+	go func() {
+		svc.executeQueuedMessage("s1", queued)
+		close(dispatchDone)
+	}()
+	<-sessionReadEntered
+
+	if err := repo.ArchiveTask(ctx, "t1"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	if _, err := repo.UnarchiveTask(ctx, "t1"); err != nil {
+		t.Fatalf("unarchive task: %v", err)
+	}
+	close(allowSessionRead)
+	select {
+	case <-dispatchDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for stale lifecycle dispatch")
+	}
+
+	if steps.getStepCalls != 0 {
+		t.Fatalf("stale lifecycle workflow step lookups = %d, want 0", steps.getStepCalls)
+	}
+	if got := len(agentMgr.capturedPromptCalls); got != 0 {
+		t.Fatalf("stale lifecycle prompts = %d, want 0", got)
+	}
+	if got := len(svc.messageCreator.(*mockMessageCreator).userMessages); got != 0 {
+		t.Fatalf("stale visible lifecycle messages = %d, want 0", got)
+	}
 }

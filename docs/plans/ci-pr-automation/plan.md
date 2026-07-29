@@ -183,15 +183,16 @@ Add an atomic store operation such as
 `RebindTaskPRReviewer(ctx, taskID, login) (changed bool, err error)` that:
 
 - compares the saved `review_reviewer_login`;
-- updates it only when the connected GitHub login changed; and
+- updates it only when the task workspace's connected GitHub login changed; and
 - resets `review_request_initialized` / `last_review_requested` for every
   `github_task_ci_pr_state` row owned by the task in the same transaction,
   without changing terminal or CI checkpoints.
 
 Expose that operation through the GitHub service. Review-request evaluation
-resolves the current authenticated login before loading the per-PR checkpoint.
-A changed identity rebinds and then establishes a quiet baseline; auth failure
-does not mutate the saved login or checkpoints.
+resolves the task workspace's automation credential and authenticated login
+before loading the per-PR checkpoint; it never falls back to the service's
+ambient client. A changed identity rebinds and then establishes a quiet
+baseline; auth failure does not mutate the saved login or checkpoints.
 
 Route lifecycle evaluation and delivery failures through
 `RecordTaskCIError`, publish the refreshed `github.task_ci_options.updated`
@@ -274,11 +275,13 @@ Files:
 - `apps/web/components/github/review-watch-dialog.tsx`
 - a focused Review Watch dialog/component test if needed
 
-Change the visible switch label to
-`Prompt agent when your review is requested`. Extend the existing automation
-help text with the connected-account scope and quiet first baseline. Do not add
-lifecycle prompt edit buttons; the existing edit action remains explicitly
-auto-fix-only.
+Use the visible switch label `Your review is requested` with inline copy that
+clarifies it covers any new request, including re-review after changes. Keep
+merged and closed as separate switches, grouped under a shared explanation
+that both wake the agent when review work ends. Extend the existing automation
+help text with workspace-connected-account scope and the quiet first baseline.
+Do not add lifecycle prompt edit buttons; the existing edit action remains
+explicitly auto-fix-only.
 
 Resolve the selected PR's `TaskCIPRAutomationState` with the existing
 `findCIAutomationStateForPR` helper and render a compact, accessible error row
@@ -426,7 +429,9 @@ The settings page should list the seeded built-in `ci-auto-fix` prompt through t
   ownership is reserved from client mutation; one per-session dispatch guard
   prevents concurrent in-process duplicates. Restart before acknowledgement
   redelivers, and the external-acceptance-before-ack crash window is explicitly
-  at-least-once.
+  at-least-once. Returned reservation and retry copies strip the persisted
+  in-flight marker and carry only process-local reservation evidence, so a
+  failed post-restart attempt becomes visible again.
   **File:** `apps/backend/internal/orchestrator/messagequeue/`,
   `apps/backend/internal/orchestrator/handlers/queue_handlers.go`, and
   `apps/backend/internal/orchestrator/event_handlers_queue_test.go`

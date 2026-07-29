@@ -224,7 +224,7 @@ func (m *mockGitHubService) GetTaskPRByRepoAndNumber(_ context.Context, taskID, 
 	}
 	return nil, nil
 }
-func (m *mockGitHubService) IsReviewRequestedForLogin(context.Context, string, string, int, string) (bool, error) {
+func (m *mockGitHubService) IsReviewRequestedForLogin(context.Context, string, string, string, int, string) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lifecycleRequested, m.lifecycleReviewErr

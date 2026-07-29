@@ -50,8 +50,9 @@ vi.mock("@/hooks/domains/github/use-task-ci-options", () => ({
 import { PRCIPopover } from "./pr-ci-popover";
 import { MultiPRCIPopover } from "./multi-pr-ci-popover";
 
-const MERGED_PROMPT_LABEL = "Prompt agent when PR is merged";
-const REVIEW_REQUEST_PROMPT_LABEL = "Prompt agent when your review is requested";
+const MERGED_PROMPT_LABEL = "PR merged";
+const CLOSED_PROMPT_LABEL = "PR closed without merging";
+const REVIEW_REQUEST_PROMPT_LABEL = "Your review is requested";
 const REVIEW_FOLLOW_UP_TRIGGER = "ci-review-follow-up-trigger";
 
 function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
@@ -141,7 +142,7 @@ describe("PRCIPopover automation toggles", () => {
     fireEvent.click(screen.getByTestId(REVIEW_FOLLOW_UP_TRIGGER));
     fireEvent.click(screen.getByLabelText(REVIEW_REQUEST_PROMPT_LABEL));
     fireEvent.click(screen.getByLabelText(MERGED_PROMPT_LABEL));
-    fireEvent.click(screen.getByLabelText("Prompt agent when PR is closed"));
+    fireEvent.click(screen.getByLabelText(CLOSED_PROMPT_LABEL));
 
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ auto_fix_enabled: true });
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ auto_merge_enabled: true });
@@ -159,13 +160,28 @@ describe("PRCIPopover automation toggles", () => {
     expect(screen.getByLabelText("Auto-merge when ready")).not.toBeNull();
     expect(screen.queryByLabelText(REVIEW_REQUEST_PROMPT_LABEL)).toBeNull();
     expect(screen.queryByLabelText(MERGED_PROMPT_LABEL)).toBeNull();
-    expect(screen.queryByLabelText("Prompt agent when PR is closed")).toBeNull();
+    expect(screen.queryByLabelText(CLOSED_PROMPT_LABEL)).toBeNull();
 
     fireEvent.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByLabelText(REVIEW_REQUEST_PROMPT_LABEL)).not.toBeNull();
     expect(screen.getByLabelText(MERGED_PROMPT_LABEL)).not.toBeNull();
-    expect(screen.getByLabelText("Prompt agent when PR is closed")).not.toBeNull();
+    expect(screen.getByLabelText(CLOSED_PROMPT_LABEL)).not.toBeNull();
+    expect(
+      screen.getByLabelText(REVIEW_REQUEST_PROMPT_LABEL).getAttribute("aria-describedby"),
+    ).toBe("task-pr-review-requested-prompt-task-1-description");
+    expect(screen.getByLabelText(MERGED_PROMPT_LABEL).getAttribute("aria-describedby")).toBe(
+      "task-pr-terminal-help-task-1",
+    );
+    expect(screen.getByLabelText(CLOSED_PROMPT_LABEL).getAttribute("aria-describedby")).toBe(
+      "task-pr-terminal-help-task-1",
+    );
+    expect(
+      screen.getByText("Wake the agent for any new request, including re-review after changes."),
+    ).not.toBeNull();
+    expect(
+      screen.getByText("Wake the agent when review work ends. Choose either or both outcomes."),
+    ).not.toBeNull();
   });
 
   it("opens review follow-up when lifecycle automation is enabled", () => {

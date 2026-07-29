@@ -195,12 +195,17 @@ GitLab has a provider-specific linked-MR panel. It shows overview and branch sta
 
 ### GitHub PR automation
 
-The PR panel has two opt-in controls:
+The PR panel has two action controls:
 
 - **Auto-fix CI and address comments** waits for a check run to finish, then sends newly failed checks or review comments to the agent. It refreshes about once a minute, coalesces queued updates, and stops after 10 repair rounds for that PR. Disable and re-enable it after manual review to reset the limit.
 - **Auto-merge when ready** merges only after CI, required reviews, and mergeability are all ready.
 
-The repair prompt comes from the built-in `ci-auto-fix` saved prompt and can be overridden for the task. These controls currently operate on GitHub-linked PRs, require the GitHub integration and repository permissions, and do not bypass provider policy. Azure PR creation returns a URL but does not supply the same linked checks, review, or automation panel. See [Integrations](integrations.md).
+Open **Review follow-up** for three notification controls:
+
+- **Your review is requested** wakes the agent for any new request, including re-review after changes.
+- **PR merged** and **PR closed without merging** independently wake the agent when review work ends.
+
+Lifecycle messages only report the observed event and canonical PR URL; the task workflow and agent context decide what to do next. The repair prompt comes from the built-in `ci-auto-fix` saved prompt and can be overridden for the task. These controls currently operate on GitHub-linked PRs, require the GitHub integration and repository permissions, and do not bypass provider policy. Azure PR creation returns a URL but does not supply the same linked checks, review, or automation panel. See [Integrations](integrations.md).
 
 ## Share a session
 

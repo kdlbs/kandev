@@ -22,9 +22,9 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
 - The PR CI popover above the chat input shows five task-level automation controls:
   - `Auto-fix CI & address comments`
   - `Auto-merge when ready`
-  - `Prompt agent when your review is requested`
-  - `Prompt agent when PR is merged`
-  - `Prompt agent when PR is closed`
+  - `Your review is requested`
+  - `PR merged`
+  - `PR closed without merging`
 - The automation section includes an info icon or equivalent help affordance that explains what each control watches, how often Kandev checks watched PRs, how feedback snapshots prevent duplicate prompts, and how auto-merge decides readiness.
 - The same controls are available anywhere the task PR CI popover is rendered, including the normal chat input status bar and passthrough toolbar surfaces.
 - The shared desktop popover and mobile drawer keep auto-fix and auto-merge in
@@ -34,25 +34,31 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
   task-wide behavior and remain reachable on desktop and mobile. When any of
   its three options is enabled, the section opens so active automation is not
   concealed.
+- The review-request switch explains: `Wake the agent for any new request,
+  including re-review after changes.` The two terminal switches are grouped
+  under a shared explanation that they wake the agent when review work ends,
+  while remaining independently configurable.
 - `Auto-fix CI & address comments` causes Kandev to send or queue an agent prompt when a linked PR gets actionable CI or review feedback.
 - `Auto-merge when ready` causes Kandev to merge a linked PR only when the PR is open and not a draft, checks are passing, review requirements are satisfied, unresolved review threads are cleared, and the PR is cleanly mergeable.
-- `Prompt agent when your review is requested` follows the current connected
-  GitHub account. It silently baselines that account's current request state,
-  then sends or queues a task prompt on each later false-to-true request
-  transition. Observing the request clear rearms the next transition.
+- `Your review is requested` follows the GitHub account connected to the task's
+  workspace. It silently baselines that account's current request state, then
+  sends or queues a task notification on each later false-to-true request
+  transition. This includes an initial request observed after baselining and a
+  later re-review request after the prior request clears.
 - If the connected GitHub account changes, Kandev atomically binds the task to
   the new login and silently re-establishes every linked PR's review-request
   baseline. The identity change itself never produces a review-request prompt.
-- `Prompt agent when PR is merged` and `Prompt agent when PR is closed` send or
-  queue one prompt when the linked PR enters that terminal state. The first
+- `PR merged` and `PR closed without merging` send or queue one notification
+  when the linked PR enters that terminal state. The first
   complete observation also prompts when the option was enabled after the PR
   had already entered the subscribed terminal state. An observed open state
   rearms a later close.
 - The three lifecycle prompts are immutable, versioned, server-owned templates.
   Their only dynamic value is the linked PR's validated canonical GitHub URL;
   they never include GitHub titles, branches, comments, review text, or
-  caller-supplied content. The templates direct the agent to fetch
-  authoritative GitHub state rather than trust its local worktree.
+  caller-supplied content. Each template only reports the observed event. The
+  agent uses its task context and workflow instructions to decide what, if
+  anything, to do next.
 - Lifecycle prompt text is not configurable through the UI, HTTP, MCP, or
   storage. HTTP and current-task MCP expose only the three lifecycle booleans;
   the PR automation UI exposes the same switches.
@@ -296,9 +302,10 @@ Lifecycle prompt cycle for one task/PR:
 
 1. The existing PR watch poll synchronizes the linked PR and emits a lightweight
    lifecycle evaluation tick for tasks with lifecycle prompt options.
-2. Review-request evaluation resolves the current connected GitHub login. When
-   it differs from `review_reviewer_login`, Kandev atomically rebinds the login
-   and resets the task's review-request baselines without prompting.
+2. Review-request evaluation resolves the GitHub login connected to the task's
+   workspace. When it differs from `review_reviewer_login`, Kandev atomically
+   rebinds the login and resets the task's review-request baselines without
+   notifying.
 3. Kandev compares the current PR fact with the per-PR checkpoint.
 4. A qualifying edge renders the immutable server-owned template using only the
    validated canonical PR URL and calls the shared task prompt dispatcher with a
@@ -376,7 +383,7 @@ Auto-merge cycle for one task/PR:
 | Dependency / invariant                                                 | Behavior                                                                                                                                                                                                                                                        |
 | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GitHub auth is missing or invalid                                      | Controls remain visible but saving/enabling or automation execution surfaces an error; no auto-fix prompt, lifecycle prompt, or merge is attempted.                                                                                                             |
-| Connected GitHub login changes                                         | Kandev atomically rebinds `review_reviewer_login`, resets review-request baselines, and emits no prompt for the identity change itself. If identity lookup fails, it preserves the prior login and checkpoints and retries later.                                  |
+| Workspace GitHub login changes                                         | Kandev atomically rebinds `review_reviewer_login`, resets review-request baselines, and emits no notification for the identity change itself. If identity lookup fails, it preserves the prior login and checkpoints and retries later.                            |
 | PR is closed or merged                                                 | Auto-fix and auto-merge stop. The matching enabled terminal prompt remains eligible exactly once per observed terminal entry.                                                                                                                                   |
 | Full PR feedback fetch fails                                           | Auto-fix does not prompt; per-PR automation state records the error and the next materially changed lightweight status may retry.                                                                                                                               |
 | Task has no promptable session                                         | Auto-fix and lifecycle delivery record a per-PR error instead of creating a surprising new session. Lifecycle events remain unstamped and retry when a session becomes promptable.                                                                               |
@@ -472,6 +479,9 @@ Auto-merge cycle for one task/PR:
   before acknowledgement, **THEN** the durable row is eligible for
   redelivery; if the executor accepted immediately before the restart, the
   prompt may be delivered twice rather than lost.
+- **GIVEN** that restarted row still contains its prior in-flight marker,
+  **WHEN** redelivery fails, **THEN** the returned and requeued copies omit the
+  transient marker so the retry is visible and eligible to drain again.
 - **GIVEN** a lifecycle row is workflow-owned, **WHEN** a browser or MCP client
   attempts to impersonate a reserved identity or edit, cancel, append to, or
   remove that row, **THEN** Kandev rejects the mutation and preserves the row.

@@ -56,6 +56,21 @@ type fakeOrchestrator struct {
 	interruptSkippedNoError bool
 }
 
+type failingQueueSnapshotRepository struct {
+	messagequeue.Repository
+	failSessionID string
+}
+
+func (r *failingQueueSnapshotRepository) ListBySession(
+	ctx context.Context,
+	sessionID string,
+) ([]messagequeue.QueuedMessage, error) {
+	if sessionID == r.failSessionID {
+		return nil, errors.New("snapshot failed")
+	}
+	return r.Repository.ListBySession(ctx, sessionID)
+}
+
 // interruptCall records one InterruptForPeerMessage invocation.
 type interruptCall struct {
 	taskID, sessionID, entryID string
@@ -1359,6 +1374,32 @@ func TestTaskMessageReviewRollbackPreservesReservedLifecycleQueueEntry(t *testin
 	require.NoError(t, err)
 	require.True(t, ok, "rollback must preserve lifecycle rows reserved by an in-flight delivery")
 	require.Equal(t, reserved.ID, restored.ID)
+}
+
+func TestTaskMessageReviewRollbackCaptureQueuesIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	repo := &failingQueueSnapshotRepository{
+		Repository:    messagequeue.NewMemoryRepository(),
+		failSessionID: "session-2",
+	}
+	queue := messagequeue.NewService(
+		repo, messagequeue.DefaultMaxPerSession, testLogger(t),
+	)
+	original := map[string]taskMessageQueueRollback{
+		"existing": {entries: []messagequeue.QueuedMessage{{ID: "keep-me"}}},
+	}
+	rollback := taskMessageReviewRollback{
+		changed: true,
+		sessions: []taskMessageSessionRollback{
+			{sessionID: "session-1"},
+			{sessionID: "session-2"},
+		},
+		queues: original,
+	}
+
+	err := rollback.captureQueues(ctx, queue)
+	require.ErrorContains(t, err, "snapshot failed")
+	assert.Equal(t, original, rollback.queues, "failed capture must not publish a partial snapshot")
 }
 
 func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(t *testing.T) {

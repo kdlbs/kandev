@@ -154,7 +154,7 @@ func (s *Service) RequeueLifecycleMessageWithCoalesceKey(ctx context.Context, se
 }
 
 func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool) (*QueuedMessage, bool, bool, error) {
-	metadataCopy := copyMessageMetadata(metadata, 2)
+	metadataCopy := clearReservedMetadata(metadata)
 	generation, err := s.repo.LifecycleGeneration(ctx, taskID)
 	if err != nil {
 		return nil, false, false, err
@@ -239,7 +239,7 @@ func (s *Service) IsCurrentLifecycleReservation(ctx context.Context, msg *Queued
 	}
 	expectedGeneration, ok := lifecycleGenerationFromMetadata(msg.Metadata)
 	if !ok {
-		return false
+		expectedGeneration = 0
 	}
 	generation, err := s.repo.LifecycleGeneration(ctx, msg.TaskID)
 	if err != nil || generation != expectedGeneration {

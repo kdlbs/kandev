@@ -127,29 +127,25 @@ test.describe("mobile PR CI automation options", () => {
     expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
     await reviewFollowUp.tap();
     await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "true");
+    await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
+    await expect(drawer.getByRole("switch", { name: "PR merged" })).toBeVisible();
+    await expect(drawer.getByRole("switch", { name: "PR closed without merging" })).toBeVisible();
     await expect(
-      drawer.getByRole("switch", { name: "Prompt agent when your review is requested" }),
+      drawer.getByText("Wake the agent for any new request, including re-review after changes."),
     ).toBeVisible();
     await expect(
-      drawer.getByRole("switch", { name: "Prompt agent when PR is merged" }),
-    ).toBeVisible();
-    await expect(
-      drawer.getByRole("switch", { name: "Prompt agent when PR is closed" }),
+      drawer.getByText("Wake the agent when review work ends. Choose either or both outcomes."),
     ).toBeVisible();
 
-    for (const name of [
-      "Prompt agent when your review is requested",
-      "Prompt agent when PR is merged",
-      "Prompt agent when PR is closed",
-    ]) {
+    for (const name of ["Your review is requested", "PR merged", "PR closed without merging"]) {
       const rowBox = await drawer.getByRole("switch", { name }).locator("..").boundingBox();
       expect(rowBox).not.toBeNull();
       expect(rowBox!.height).toBeGreaterThanOrEqual(44);
     }
 
     await drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }).tap();
-    await drawer.getByRole("switch", { name: "Prompt agent when your review is requested" }).tap();
-    await drawer.getByRole("switch", { name: "Prompt agent when PR is closed" }).tap();
+    await drawer.getByRole("switch", { name: "Your review is requested" }).tap();
+    await drawer.getByRole("switch", { name: "PR closed without merging" }).tap();
     await expect
       .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
       .toMatchObject({
@@ -193,9 +189,7 @@ test.describe("mobile PR CI automation options", () => {
 
     const drawer = session.prStatusChipDrawer();
     await drawer.getByTestId("ci-review-follow-up-trigger").tap();
-    await expect(
-      drawer.getByRole("switch", { name: "Prompt agent when your review is requested" }),
-    ).toBeVisible();
+    await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
     await expect(drawer.getByRole("alert")).toContainText(
       "Lifecycle prompt could not be delivered to a task session.",
     );

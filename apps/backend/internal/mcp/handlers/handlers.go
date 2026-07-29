@@ -2270,7 +2270,7 @@ func (r *taskMessageReviewRollback) captureQueues(ctx context.Context, queue *me
 	if !r.changed || queue == nil || len(r.sessions) == 0 {
 		return nil
 	}
-	r.queues = make(map[string]taskMessageQueueRollback, len(r.sessions))
+	queues := make(map[string]taskMessageQueueRollback, len(r.sessions))
 	for _, session := range r.sessions {
 		entries, move, err := queue.SnapshotSession(ctx, session.sessionID)
 		if err != nil {
@@ -2283,8 +2283,9 @@ func (r *taskMessageReviewRollback) captureQueues(ctx context.Context, queue *me
 			snapshot.hadPendingMove = true
 			snapshot.pendingMove = cloneTaskMessagePendingMove(move)
 		}
-		r.queues[session.sessionID] = snapshot
+		queues[session.sessionID] = snapshot
 	}
+	r.queues = queues
 	return nil
 }
 

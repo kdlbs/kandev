@@ -80,6 +80,13 @@ type lifecycleResolveBarrierRepository struct {
 	once           sync.Once
 }
 
+type lifecycleWorkflowBarrierRepository struct {
+	repoStore
+	sessionReadEntered chan struct{}
+	allowSessionRead   chan struct{}
+	once               sync.Once
+}
+
 type hookedMessageCreator struct {
 	*mockMessageCreator
 	beforeCreate func()
@@ -149,6 +156,17 @@ func (r *lifecycleResolveBarrierRepository) ListTaskSessions(
 		<-r.allowResolve
 	})
 	return r.repoStore.ListTaskSessions(ctx, taskID)
+}
+
+func (r *lifecycleWorkflowBarrierRepository) GetTaskSession(
+	ctx context.Context,
+	sessionID string,
+) (*models.TaskSession, error) {
+	r.once.Do(func() {
+		close(r.sessionReadEntered)
+		<-r.allowSessionRead
+	})
+	return r.repoStore.GetTaskSession(ctx, sessionID)
 }
 
 func (m *hookedMessageCreator) CreateUserMessage(

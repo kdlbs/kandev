@@ -630,6 +630,13 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	// dispatchPromptAsync does for user-initiated messages. This allows
 	// workflow transitions (e.g. move_to_next) to fire on auto-started prompts.
 	if session, sErr := s.repo.GetTaskSession(promptCtx, queuedMsg.SessionID); sErr == nil {
+		if lifecyclePrompt && !s.lifecycleQueuedDispatchIsCurrent(promptCtx, queuedMsg) {
+			s.logger.Info("discarding stale lifecycle dispatch before workflow side effects",
+				zap.String("session_id", callerSessionID),
+				zap.String("task_id", queuedMsg.TaskID),
+				zap.String("queue_id", queuedMsg.ID))
+			return
+		}
 		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
 	}
 
@@ -641,6 +648,9 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	var afterClaim func() error
 	if lifecyclePrompt {
 		afterClaim = func() error {
+			if !s.lifecycleQueuedDispatchIsCurrent(promptCtx, queuedMsg) {
+				return errLifecyclePromptReservationSuperseded
+			}
 			return s.recordQueuedUserMessage(promptCtx, queuedMsg, attachments)
 		}
 	}
@@ -651,6 +661,13 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		claimEntryID, lifecyclePrompt, afterClaim)
+	if errors.Is(err, errLifecyclePromptReservationSuperseded) {
+		s.logger.Info("discarding stale lifecycle dispatch after final claim",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID))
+		return
+	}
 	if errors.Is(err, errLifecyclePromptInactive) {
 		s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
 		return
@@ -731,8 +748,16 @@ func (s *Service) lifecycleQueuedDispatchIsCurrent(
 	if err != nil || task == nil || task.ArchivedAt != nil {
 		return false
 	}
-	return !s.isQueuedDispatchInFlight(queuedMsg.SessionID) ||
-		s.isCurrentQueuedDispatch(queuedMsg.SessionID, queuedMsg.ID)
+	dispatchTracked := s.isQueuedDispatchInFlight(queuedMsg.SessionID)
+	if dispatchTracked && !s.isCurrentQueuedDispatch(queuedMsg.SessionID, queuedMsg.ID) {
+		return false
+	}
+	// Legacy/direct TakeQueued callers remove the row before execution, so
+	// there is no durable reservation left to validate. ReserveQueued marks
+	// its returned copy independently of persisted metadata so the check still
+	// applies after the final claim clears the dispatch token.
+	return !queuedMsg.IsReservedLifecycleDelivery() ||
+		(s.messageQueue != nil && s.messageQueue.IsCurrentLifecycleReservation(ctx, queuedMsg))
 }
 
 func (s *Service) acknowledgeLifecycleQueueEntry(

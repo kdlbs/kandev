@@ -12,9 +12,10 @@ spec: "../../specs/ui/ci-pr-automation.md"
 
 ## Acceptance
 
-- The shared automation controls label the switch `Prompt agent when your
-  review is requested`, explain connected-account/silent-baseline behavior,
-  and do not expose lifecycle prompt editing.
+- The shared automation controls label the switch `Your review is requested`,
+  explain that new requests include both initial review and re-review, group
+  the separate merged/closed switches under their shared value, and do not
+  expose lifecycle prompt editing.
 - The selected linked PR's non-empty `last_error` renders as a compact,
   accessible error row shared by the desktop popover and mobile drawer.
 - GitHub Review Watch cleanup copy explains that Auto retains tasks with user

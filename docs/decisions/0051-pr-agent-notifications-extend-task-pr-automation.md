@@ -22,8 +22,8 @@ Extend the existing GitHub task PR automation subsystem:
   `github_task_ci_pr_state`;
 - continue using `github_pr_watches` and its one-minute batched poller as the
   source of PR facts;
-- use the current installation-wide authenticated GitHub login to classify
-  review requests, and quietly rebind/reset baselines when that identity
+- resolve the task workspace's authenticated GitHub login to classify review
+  requests, and quietly rebind/reset baselines when that workspace identity
   changes;
 - deliver prompts through the orchestrator's existing single CI automation pass
   (same goroutine and in-flight map as auto-fix and auto-merge);
@@ -37,9 +37,9 @@ The PR Review workflow enables these options through MCP after its initial
 review. Review-requested is silently baselined and fires on a later
 false-to-true request edge. Merged and closed fire once per observed terminal
 entry. Stable states remain quiet, and an observed open state rearms a later
-close. Lifecycle templates are visible server-owned chat messages that direct
-the agent to retrieve authoritative GitHub state rather than trust a potentially
-stale local worktree.
+close. Lifecycle templates are visible server-owned factual notifications. They
+report only the observed event and canonical PR URL; the task's workflow and
+agent context decide what, if anything, to do next.
 
 Lifecycle delivery reuses the existing task session selection and durable
 message queue. It does not interrupt a busy turn, create a replacement session,
@@ -94,6 +94,9 @@ acknowledgement redelivers the durable lifecycle row. A crash after the
 external executor accepted the prompt but before acknowledgement can therefore
 produce a duplicate. This trade-off uses the existing queue and schema rather
 than adding a transactional outbox or provider acknowledgement protocol.
+Reservation copies carry process-local delivery evidence, while the persisted
+in-flight marker is stripped from every returned or requeued copy so a failed
+post-restart delivery becomes a visible retry.
 Delivery failures use the existing per-PR `last_error` and remain eligible for
 retry. Review-watch `cleanup_policy=auto` retains tasks with enabled lifecycle
 prompts, while `always` remains an explicit deletion override.
@@ -101,6 +104,7 @@ prompts, while `always` remains an explicit deletion override.
 Lifecycle prompts are immutable, versioned server-owned templates. Their only
 dynamic value is a validated canonical GitHub PR URL; they never interpolate PR
 titles, branches, comments, review text, or caller-supplied prompt content.
+They do not prescribe fetching, bookkeeping, archival, or another response.
 The three lifecycle controls are boolean-only through HTTP and current-task MCP.
 Legacy lifecycle-override columns remain additive migration compatibility data:
 startup clears existing values and runtime ignores them.
@@ -158,11 +162,14 @@ error.
   compatible.
 - Review tasks remain retained under `cleanup_policy=auto` while PR-agent
   prompt options express ongoing intent.
-- Reviewer-specific detection depends on the authenticated user-level review
-  request. Identity changes require an atomic quiet rebaseline; team-level
+- Reviewer-specific detection depends on the task workspace's authenticated
+  user-level review request. Workspace identity changes require an atomic quiet
+  rebaseline; ambient credentials must not influence this path, and team-level
   matching remains future work.
 - Lifecycle prompt text is not configurable through the UI, HTTP, MCP, or
-  storage; only its three task-level booleans are configurable.
+  storage; only its three task-level booleans are configurable. Merged and
+  closed remain separate controls because users may subscribe to either terminal
+  outcome even though both indicate that review work has ended.
 - Event-specific workflow-step destinations and GitLab lifecycle parity remain
   independent follow-up features.
 

@@ -256,18 +256,20 @@ Repository scope, authentication, and watch filters are workspace-specific. Repo
 
 ### Automate a linked pull request
 
-For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls are task-level booleans: **Auto-fix CI & address comments**, **Auto-merge when ready**, **Prompt agent when your review is requested**, **Prompt agent when PR is merged**, and **Prompt agent when PR is closed**. Enabling any control applies it to every PR linked to that task; Kandev tracks delivery and deduplication separately for each linked PR.
+For a task with linked GitHub pull requests, open the PR status control above the task chat input. The automation controls are task-level booleans: **Auto-fix CI & address comments**, **Auto-merge when ready**, **Your review is requested**, **PR merged**, and **PR closed without merging**. Enabling any control applies it to every PR linked to that task; Kandev tracks delivery and deduplication separately for each linked PR.
 
 This is a GitHub-only lifecycle feature. Kandev reuses the existing lightweight task PR poller, which checks watched linked PRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked PRs without waiting for the next poll.
 
-**Prompt agent when your review is requested** matches the currently connected, installation-wide GitHub account. The first observation is a quiet baseline. Later transitions to a request for that account prompt the agent, and clearing a request rearms the next transition. If the connected GitHub account changes, Kandev quietly rebinds the task and re-establishes every linked PR's baseline; switching accounts does not itself create a prompt.
+**Your review is requested** matches the GitHub account connected to the task's workspace. The first observation is a quiet baseline. Any later transition to a request for that account wakes the agent, including the first new request after baselining and a re-review request after changes. Clearing a request rearms the next transition. If the workspace's connected GitHub account changes, Kandev quietly rebinds the task and re-establishes every linked PR's baseline; switching accounts does not itself create a prompt.
 
-Merged and closed options prompt once when their linked PR enters the selected terminal state. Kandev delivers lifecycle prompts to the task's active promptable session, preferring the primary session. It does not interrupt a busy session: it queues a message for delivery when that session is available. If the task has no promptable session, Kandev records the per-PR delivery error, creates no new session, and retries once a session becomes promptable.
+**PR merged** and **PR closed without merging** are separate subscriptions to the same kind of follow-up: waking the agent when review work ends. Each notifies once when its linked PR enters the selected terminal state. Kandev delivers lifecycle notifications to the task's active promptable session, preferring the primary session. It does not interrupt a busy session: it queues a message for delivery when that session is available. If the task has no promptable session, Kandev records the per-PR delivery error, creates no new session, and retries once a session becomes promptable.
 
 The UI edits the auto-fix prompt only. Lifecycle messages use immutable,
 server-owned templates that include only the linked PR's canonical URL; their
-text cannot be customized through the UI, HTTP, MCP, or storage. Destination
-workflow steps and GitLab lifecycle parity are follow-up work.
+text cannot be customized through the UI, HTTP, MCP, or storage. They report the
+observed event without prescribing an action; the task workflow and agent
+context determine the response. Destination workflow steps and GitLab lifecycle
+parity are follow-up work.
 
 ## GitLab
 

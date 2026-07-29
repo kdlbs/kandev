@@ -47,10 +47,9 @@ function CIAutomationInfoButton() {
       <TooltipContent side="top" align="end" className="max-w-[280px] text-xs leading-relaxed">
         Watches this task's linked pull request during the 1 minute PR refresh loop. Auto-fix queues
         task prompts for newly observed feedback, auto-merge waits for the PR to be ready, and the
-        notification switches prompt the task's agent when the connected GitHub account's review
-        becomes requested or the PR reaches a terminal state. Review requests follow the connected
-        GitHub account and silently baseline its current request state before prompting only on a
-        later request.
+        notification switches wake the task's agent when the workspace's connected GitHub account is
+        requested for review or the PR reaches a terminal state. Review requests silently baseline
+        the account's current request state before notifying on a later request.
       </TooltipContent>
     </Tooltip>
   );
@@ -169,6 +168,8 @@ function CIAutomationRow({
   disabled,
   onCheckedChange,
   help,
+  description,
+  describedBy,
 }: {
   id: string;
   label: string;
@@ -176,21 +177,32 @@ function CIAutomationRow({
   disabled: boolean;
   onCheckedChange: (checked: boolean) => void;
   help?: ReactNode;
+  description?: string;
+  describedBy?: string;
 }) {
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
+  const descriptionId = description ? `${id}-description` : describedBy;
 
   return (
     <div className={`flex items-center justify-between gap-3 px-1 ${minHeight}`}>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5">
-        <Label htmlFor={id} className="min-w-0 cursor-pointer truncate text-xs">
-          {label}
-        </Label>
+      <div className="flex min-w-0 flex-1 items-start gap-1.5">
+        <div className="min-w-0 flex-1">
+          <Label htmlFor={id} className="block cursor-pointer text-xs leading-5">
+            {label}
+          </Label>
+          {description ? (
+            <div id={descriptionId} className="text-[11px] leading-relaxed text-muted-foreground">
+              {description}
+            </div>
+          ) : null}
+        </div>
         {help}
       </div>
       <Switch
         id={id}
         aria-label={label}
+        aria-describedby={descriptionId}
         checked={checked}
         disabled={disabled}
         onCheckedChange={onCheckedChange}
@@ -298,6 +310,7 @@ function PRAgentPromptRows({
   disabled: boolean;
   patchOption: (patch: TaskCIAutomationPatch) => void;
 }) {
+  const terminalHelpID = `task-pr-terminal-help-${taskId}`;
   return (
     <>
       <ReviewRequestedPromptRow
@@ -306,16 +319,24 @@ function PRAgentPromptRows({
         disabled={disabled}
         patchOption={patchOption}
       />
+      <div id={terminalHelpID} className="mx-1 mt-1 border-t border-border/60 pt-2">
+        <div className="text-xs font-medium text-foreground">Final PR state</div>
+        <div className="text-[11px] leading-relaxed text-muted-foreground">
+          Wake the agent when review work ends. Choose either or both outcomes.
+        </div>
+      </div>
       <CIAutomationRow
         id={`task-pr-merged-prompt-${taskId}`}
-        label="Prompt agent when PR is merged"
+        label="PR merged"
+        describedBy={terminalHelpID}
         checked={Boolean(options?.prompt_on_merged)}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ prompt_on_merged: checked })}
       />
       <CIAutomationRow
         id={`task-pr-closed-prompt-${taskId}`}
-        label="Prompt agent when PR is closed"
+        label="PR closed without merging"
+        describedBy={terminalHelpID}
         checked={Boolean(options?.prompt_on_closed)}
         disabled={disabled}
         onCheckedChange={(checked) => patchOption({ prompt_on_closed: checked })}
@@ -390,7 +411,8 @@ function ReviewRequestedPromptRow({
   return (
     <CIAutomationRow
       id={`task-pr-review-requested-prompt-${taskId}`}
-      label="Prompt agent when your review is requested"
+      label="Your review is requested"
+      description="Wake the agent for any new request, including re-review after changes."
       checked={Boolean(options?.prompt_on_review_requested)}
       disabled={disabled}
       onCheckedChange={(checked) => patchOption({ prompt_on_review_requested: checked })}

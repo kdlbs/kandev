@@ -25,7 +25,7 @@ func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch 
 	if s.store == nil {
 		return nil, errStoreUnavailable
 	}
-	if err := s.populateReviewReviewer(ctx, &patch); err != nil {
+	if err := s.populateReviewReviewer(ctx, taskID, &patch); err != nil {
 		return nil, err
 	}
 	opts, err := s.store.UpdateTaskCIOptions(ctx, taskID, patch)
@@ -35,7 +35,11 @@ func (s *Service) UpdateTaskCIOptions(ctx context.Context, taskID string, patch 
 	return s.buildTaskCIOptionsResponse(ctx, opts)
 }
 
-func (s *Service) populateReviewReviewer(ctx context.Context, patch *TaskCIOptionsPatch) error {
+func (s *Service) populateReviewReviewer(
+	ctx context.Context,
+	taskID string,
+	patch *TaskCIOptionsPatch,
+) error {
 	if patch.PromptOnReviewRequested == nil {
 		return nil
 	}
@@ -44,10 +48,11 @@ func (s *Service) populateReviewReviewer(ctx context.Context, patch *TaskCIOptio
 		patch.ReviewReviewerLogin = &empty
 		return nil
 	}
-	if s.client == nil {
-		return fmt.Errorf("GitHub client is not available")
+	resolved, err := s.resolveTaskPRAutomationClient(ctx, taskID)
+	if err != nil {
+		return err
 	}
-	login, err := s.client.GetAuthenticatedUser(ctx)
+	login, err := resolved.Client.GetAuthenticatedUser(ctx)
 	if err != nil {
 		return fmt.Errorf("resolve authenticated reviewer: %w", err)
 	}
@@ -112,12 +117,13 @@ func (s *Service) ClearTaskCIError(ctx context.Context, taskID, repositoryID str
 }
 
 func (s *Service) IsReviewRequestedForLogin(
-	ctx context.Context, owner, repo string, prNumber int, login string,
+	ctx context.Context, workspaceID, owner, repo string, prNumber int, login string,
 ) (bool, error) {
-	if s.client == nil {
-		return false, fmt.Errorf("GitHub client is not available")
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
+	if err != nil {
+		return false, err
 	}
-	pr, err := s.client.GetPR(ctx, owner, repo, prNumber)
+	pr, err := resolved.Client.GetPR(ctx, owner, repo, prNumber)
 	if err != nil {
 		return false, err
 	}
@@ -146,10 +152,11 @@ func (s *Service) SetTaskPRReviewRequestState(
 // RebindTaskPRReviewer resolves the current GitHub login and atomically resets
 // the task's review-request baselines if the connected account changed.
 func (s *Service) RebindTaskPRReviewer(ctx context.Context, taskID string) (string, bool, error) {
-	if s.client == nil {
-		return "", false, fmt.Errorf("GitHub client is not available")
+	resolved, err := s.resolveTaskPRAutomationClient(ctx, taskID)
+	if err != nil {
+		return "", false, err
 	}
-	login, err := s.client.GetAuthenticatedUser(ctx)
+	login, err := resolved.Client.GetAuthenticatedUser(ctx)
 	if err != nil {
 		return "", false, fmt.Errorf("resolve authenticated reviewer: %w", err)
 	}
@@ -158,6 +165,25 @@ func (s *Service) RebindTaskPRReviewer(ctx context.Context, taskID string) (stri
 		return "", false, err
 	}
 	return login, changed, nil
+}
+
+func (s *Service) resolveTaskPRAutomationClient(
+	ctx context.Context,
+	taskID string,
+) (*resolvedServiceClient, error) {
+	prs, err := s.store.ListTaskPRsByTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("load linked PR for authenticated reviewer: %w", err)
+	}
+	if len(prs) == 0 {
+		return nil, fmt.Errorf("resolve authenticated reviewer: task has no linked pull request")
+	}
+	pr := prs[0]
+	resolved, err := s.resolveAutomationClient(ctx, pr.WorkspaceID, pr.Owner, pr.Repo)
+	if err != nil {
+		return nil, fmt.Errorf("resolve authenticated reviewer: %w", err)
+	}
+	return resolved, nil
 }
 
 func (s *Service) SetTaskPRObservedState(

@@ -584,8 +584,9 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 	}
 	if msg.IsDurableLifecycle() {
 		// Keep the row for crash recovery but stop reporting it as pending.
-		// The returned copy keeps the unmarked metadata so a later requeue
-		// rewrites the row back into a visible pending entry.
+		// Strip a marker persisted by an interrupted prior process from the
+		// returned copy so a failed retry becomes visible again.
+		msg.Metadata = clearReservedMetadata(msg.Metadata)
 		reservedJSON, err := marshalMetadata(markReservedMetadata(msg.Metadata))
 		if err != nil {
 			return nil, err
@@ -598,6 +599,7 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
+		msg.reservedLifecycleDelivery = true
 		return msg, nil
 	}
 	res, err := tx.ExecContext(ctx, r.db.Rebind(`
