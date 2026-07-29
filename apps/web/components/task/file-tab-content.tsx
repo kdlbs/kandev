@@ -13,6 +13,11 @@ function resolveTabCategory(tab: OpenFileTab): "image" | "binary" | "text" {
   return getFileCategory(tab.path) === "image" ? "image" : "binary";
 }
 
+function isMarkdownFile(path: string): boolean {
+  const ext = path.split(".").pop()?.toLowerCase();
+  return ext === "md" || ext === "mdx";
+}
+
 export function FileTabContent({
   tab,
   activeSession,
@@ -22,6 +27,7 @@ export function FileTabContent({
   onFileChange,
   onFileSave,
   onFileDelete,
+  onToggleMarkdownPreview,
 }: {
   tab: OpenFileTab;
   activeSession: { worktree_path?: string | null; repository_id?: string | null } | null;
@@ -31,6 +37,7 @@ export function FileTabContent({
   onFileChange: (path: string, content: string) => void;
   onFileSave: (path: string) => void;
   onFileDelete: (path: string) => void;
+  onToggleMarkdownPreview?: () => void;
 }) {
   const category = resolveTabCategory(tab);
   const externalLink = (
@@ -73,6 +80,8 @@ export function FileTabContent({
           worktreePath={activeSession?.worktree_path ?? undefined}
           repo={tab.repo}
           enableComments={!!activeSessionId}
+          markdownPreview={isMarkdownFile(tab.path) ? tab.markdownPreview : false}
+          onToggleMarkdownPreview={onToggleMarkdownPreview}
           onChange={(newContent) => onFileChange(tab.path, newContent)}
           onSave={() => onFileSave(tab.path)}
           onDelete={() => onFileDelete(tab.path)}

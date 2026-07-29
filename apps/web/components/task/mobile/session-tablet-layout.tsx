@@ -15,6 +15,7 @@ import type { Repository } from "@/lib/types/http";
 import type { Layout } from "react-resizable-panels";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { TaskReviewDialogMount } from "../dockview-review-dialog";
+import { useTabletReviewPreview } from "./use-tablet-review-preview";
 
 const DEFAULT_TABLET_LAYOUT: Record<string, number> = {
   left: 60,
@@ -125,6 +126,7 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
 
   const hasDevScript = Boolean(repository?.dev_script?.trim());
   const sessionForPreview = effectiveSessionId;
+  const handlePreviewMarkdown = useTabletReviewPreview(effectiveSessionId, handleOpenFile);
 
   const topFilesPanel = <TaskFilesPanel onOpenFile={handleOpenFile} />;
 
@@ -190,7 +192,11 @@ export const SessionTabletLayout = memo(function SessionTabletLayout({
         workspaceId={workspaceId}
         workflowId={workflowId}
       />
-      <TaskReviewDialogMount taskId={activeTaskId} sessionId={effectiveSessionId} />
+      <TaskReviewDialogMount
+        taskId={activeTaskId}
+        sessionId={effectiveSessionId}
+        onPreviewMarkdown={handlePreviewMarkdown}
+      />
     </div>
   );
 });
