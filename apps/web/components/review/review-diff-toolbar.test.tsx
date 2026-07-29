@@ -26,7 +26,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: mocks.isMobile }),
 }));
 
-import { FileDiffToolbar } from "./review-diff-toolbar";
+import { FileDiffToolbar, type FileDiffToolbarProps } from "./review-diff-toolbar";
 
 afterEach(() => {
   cleanup();
@@ -38,8 +38,8 @@ function externalLinkProps() {
 }
 
 describe("Markdown preview actions", () => {
-  it("previews Markdown files with their repository context on desktop", () => {
-    const onPreviewMarkdown = vi.fn();
+  it("toggles an inline Markdown preview on desktop", () => {
+    const onToggleMarkdownPreview = vi.fn();
     render(
       <TooltipProvider>
         <FileDiffToolbar
@@ -50,7 +50,7 @@ describe("Markdown preview actions", () => {
           wordWrap={false}
           expandUnchanged={false}
           onDiscard={vi.fn()}
-          onPreviewMarkdown={onPreviewMarkdown}
+          onToggleMarkdownPreview={onToggleMarkdownPreview}
           onToggleExpandUnchanged={vi.fn()}
           onToggleWordWrap={vi.fn()}
           repo="frontend"
@@ -60,12 +60,12 @@ describe("Markdown preview actions", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Preview markdown" }));
 
-    expect(onPreviewMarkdown).toHaveBeenCalledWith("README.md", "frontend");
+    expect(onToggleMarkdownPreview).toHaveBeenCalledOnce();
   });
 
   it("keeps Markdown preview reachable from the mobile actions menu", () => {
     mocks.isMobile = true;
-    const onPreviewMarkdown = vi.fn();
+    const onToggleMarkdownPreview = vi.fn();
     render(
       <TooltipProvider>
         <FileDiffToolbar
@@ -76,7 +76,7 @@ describe("Markdown preview actions", () => {
           wordWrap={false}
           expandUnchanged={false}
           onDiscard={vi.fn()}
-          onPreviewMarkdown={onPreviewMarkdown}
+          onToggleMarkdownPreview={onToggleMarkdownPreview}
           onToggleExpandUnchanged={vi.fn()}
           onToggleWordWrap={vi.fn()}
           repo="frontend"
@@ -89,7 +89,33 @@ describe("Markdown preview actions", () => {
     fireEvent.click(trigger);
     fireEvent.click(screen.getByRole("menuitem", { name: "Preview markdown" }));
 
-    expect(onPreviewMarkdown).toHaveBeenCalledWith("README.md", "frontend");
+    expect(onToggleMarkdownPreview).toHaveBeenCalledOnce();
+  });
+
+  it("offers Show diff while a Markdown row is in preview mode", () => {
+    const onToggleMarkdownPreview = vi.fn();
+    const props: FileDiffToolbarProps & { markdownPreview: boolean } = {
+      diff: "# README",
+      filePath: "README.md",
+      sessionId: "session-1",
+      source: "pr",
+      wordWrap: false,
+      expandUnchanged: false,
+      onDiscard: vi.fn(),
+      onToggleMarkdownPreview,
+      onToggleExpandUnchanged: vi.fn(),
+      onToggleWordWrap: vi.fn(),
+      markdownPreview: true,
+    };
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar {...props} />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Show diff" }));
+
+    expect(onToggleMarkdownPreview).toHaveBeenCalledOnce();
   });
 });
 

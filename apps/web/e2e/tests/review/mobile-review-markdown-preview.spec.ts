@@ -9,7 +9,7 @@ const MARKDOWN_FILE = "mobile-review-preview.md";
 test.describe("Review Markdown preview on mobile", () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test("opens a changed Markdown file in rendered mode from the mobile Review menu", async ({
+  test("renders changed Markdown in the mobile Review dialog", async ({
     testPage,
     apiClient,
     seedData,
@@ -60,12 +60,14 @@ test.describe("Review Markdown preview on mobile", () => {
       .getByRole("menuitem", { name: "Preview markdown" })
       .tap();
 
-    await expect(dialog).not.toBeVisible();
-    const viewer = testPage.getByTestId("mobile-file-viewer-panel");
-    await expect(viewer).toBeVisible({ timeout: 15_000 });
-    await expect(viewer.getByTestId("markdown-preview").locator("h1")).toHaveText(
-      "Mobile review preview",
-    );
+    await expect(dialog).toBeVisible();
+    const preview = dialog.getByTestId("review-markdown-diff-preview");
+    await expect(preview).toBeVisible({ timeout: 15_000 });
+    await expect(preview.locator("h1")).toHaveText("Mobile review preview");
+    await header.getByRole("button", { name: `More actions for ${MARKDOWN_FILE}` }).tap();
+    await expect(
+      testPage.getByTestId("review-file-actions-menu").getByRole("menuitem", { name: "Show diff" }),
+    ).toBeVisible();
     await prCapture.screenshot("rendered-markdown-preview", {
       caption: "Mobile rendered Markdown preview from a review diff",
     });

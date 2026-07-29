@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/review-markdown-preview.md
 created: 2026-07-29
-status: approved
+status: done
 ---
 
 # Implementation Plan: Review Markdown Preview
@@ -83,7 +83,7 @@ desktop, tablet, and mobile.
 ## Implementation
 
 - [x] [task-01-review-markdown-preview](task-01-review-markdown-preview.md) — done
-- [ ] [task-02-inline-diff-markdown-preview](task-02-inline-diff-markdown-preview.md) — pending
+- [x] [task-02-inline-diff-markdown-preview](task-02-inline-diff-markdown-preview.md) — done
 
 ## Verification
 

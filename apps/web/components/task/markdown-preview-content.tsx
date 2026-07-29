@@ -326,6 +326,18 @@ function MarkdownPreviewCommentOverlays({
   );
 }
 
+export function MarkdownPreviewRenderer({ content }: { content: string }) {
+  return (
+    <ReactMarkdown
+      remarkPlugins={remarkPlugins}
+      rehypePlugins={[rehypeRaw, [rehypeSanitize, defaultSchema]]}
+      components={markdownPreviewComponents}
+    >
+      {content}
+    </ReactMarkdown>
+  );
+}
+
 export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   path,
   content,
@@ -393,13 +405,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
       <div ref={scrollRef} className="flex-1 overflow-auto p-6">
         <div ref={rootRef} className="markdown-body max-w-3xl" tabIndex={commentsEnabled ? 0 : -1}>
           <PreviewCommentContext.Provider value={previewCommentContextValue}>
-            <ReactMarkdown
-              remarkPlugins={remarkPlugins}
-              rehypePlugins={[rehypeRaw, [rehypeSanitize, defaultSchema]]}
-              components={markdownPreviewComponents}
-            >
-              {content}
-            </ReactMarkdown>
+            <MarkdownPreviewRenderer content={content} />
           </PreviewCommentContext.Provider>
         </div>
       </div>

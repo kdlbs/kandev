@@ -9,7 +9,6 @@ type TaskReviewDialogMountProps = {
   taskId: string | null;
   onSelectWalkthroughFile?: (path: string, repo?: string) => void;
   onOpenFile?: (path: string, repo?: string) => void;
-  onPreviewMarkdown?: (path: string, repo?: string) => void;
 };
 
 export function TaskReviewDialogMount({
@@ -17,7 +16,6 @@ export function TaskReviewDialogMount({
   taskId,
   onSelectWalkthroughFile,
   onOpenFile,
-  onPreviewMarkdown,
 }: TaskReviewDialogMountProps) {
   const review = useReviewDialog(sessionId);
 
@@ -34,7 +32,6 @@ export function TaskReviewDialogMount({
         baseBranch={review.baseBranch}
         onSendComments={review.handleReviewSendComments}
         onOpenFile={onOpenFile ?? review.reviewOpenFile}
-        onPreviewMarkdown={onPreviewMarkdown ?? review.reviewPreviewMarkdown}
         gitStatusFiles={review.reviewGitStatusFiles}
         cumulativeDiff={review.reviewCumulativeDiff}
         prs={review.reviewPRs}

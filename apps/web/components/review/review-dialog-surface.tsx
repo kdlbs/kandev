@@ -16,7 +16,6 @@ type ReviewDialogSurfaceProps = {
   sessionId: string;
   baseBranch?: string;
   onOpenFile?: (filePath: string, repo?: string) => void;
-  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
   prs: TaskPR[];
   selectedPR: TaskPR | null;
   onSelectPR?: (pr: TaskPR) => void;
@@ -30,7 +29,6 @@ type ReviewDialogSurfaceProps = {
 function ReviewDialogDiffContent({
   sessionId,
   onOpenFile,
-  onPreviewMarkdown,
   selectedPR,
   prDiffLoading,
   prDiffError,
@@ -40,7 +38,6 @@ function ReviewDialogDiffContent({
   ReviewDialogSurfaceProps,
   | "sessionId"
   | "onOpenFile"
-  | "onPreviewMarkdown"
   | "selectedPR"
   | "prDiffLoading"
   | "prDiffError"
@@ -67,7 +64,6 @@ function ReviewDialogDiffContent({
           onToggleReviewed={state.handleToggleReviewed}
           onDiscard={state.handleDiscard}
           onOpenFile={onOpenFile}
-          onPreviewMarkdown={onPreviewMarkdown}
           fileRefs={state.fileRefs}
         />
       ) : (

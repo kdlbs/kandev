@@ -9,7 +9,7 @@ const MARKDOWN_FILE = "review-preview.md";
 test.describe("Review Markdown preview", () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test("opens a changed Markdown file in rendered mode from the desktop Review dialog", async ({
+  test("renders changed Markdown in the desktop Review dialog", async ({
     testPage,
     apiClient,
     seedData,
@@ -53,10 +53,11 @@ test.describe("Review Markdown preview", () => {
     await expect(header.getByRole("button", { name: "Preview markdown" })).toBeVisible();
     await header.getByRole("button", { name: "Preview markdown" }).click();
 
-    await expect(dialog).not.toBeVisible();
-    const preview = testPage.getByTestId("markdown-preview");
+    await expect(dialog).toBeVisible();
+    const preview = dialog.getByTestId("review-markdown-diff-preview");
     await expect(preview).toBeVisible({ timeout: 15_000 });
     await expect(preview.locator("h1")).toHaveText("Review preview");
+    await expect(header.getByRole("button", { name: "Show diff" })).toBeVisible();
     await prCapture.screenshot("rendered-markdown-preview", {
       caption: "Desktop rendered Markdown preview from a review diff",
     });

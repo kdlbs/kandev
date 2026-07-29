@@ -18,7 +18,6 @@ export function SessionMobileReviewDialog({
       sessionId={sessionId}
       taskId={taskId}
       onOpenFile={onOpenFile}
-      onPreviewMarkdown={(path, repo) => onOpenFile(path, repo, true)}
       onSelectWalkthroughFile={onOpenFile}
     />
   );

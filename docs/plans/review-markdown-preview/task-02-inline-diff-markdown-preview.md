@@ -1,7 +1,7 @@
 ---
 id: "02-inline-diff-markdown-preview"
 title: "Render changed Markdown inside Review"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-review-markdown-preview"]
 plan: "plan.md"
@@ -28,11 +28,19 @@ pnpm --filter @kandev/web test -- --run \
   components/review/review-diff-toolbar.test.tsx \
   components/review/review-diff-list-grouping.test.tsx
 pnpm --dir web e2e:run tests/review/review-markdown-preview.spec.ts
-pnpm --dir web e2e:run tests/review/mobile-review-markdown-preview.spec.ts -- --project=mobile-chrome
+pnpm --dir web e2e:run -- --project=mobile-chrome tests/review/mobile-review-markdown-preview.spec.ts
 cd ..
 make fmt
 make typecheck test lint
 ```
+
+Completed 2026-07-29:
+
+- RED: parser test initially failed because `review-markdown-diff-preview` did not exist; desktop
+  and mobile E2E expectations also failed under the prior dialog-closing navigation behavior.
+- GREEN: focused Vitest (`18` assertions across parser, toolbar, and row-state coverage), desktop
+  Playwright, and `mobile-chrome` Playwright all passed.
+- Full verification passed: `make fmt`, then `make typecheck test lint`.
 
 ## Files likely touched
 
