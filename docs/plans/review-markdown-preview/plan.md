@@ -1,88 +1,98 @@
 ---
 spec: docs/specs/ui/review-markdown-preview.md
 created: 2026-07-29
-status: done
+status: approved
 ---
 
 # Implementation Plan: Review Markdown Preview
 
 ## Overview
 
-The Review file toolbar already renders `Preview markdown` for `.md` and `.mdx` paths when it
-receives a preview callback. The missing link is the expanded Review dialog: its mount supplies
-only the source-edit action. Wire the existing preview action through the dialog and keep the
-repository name attached; on mobile, route the same intent into the existing full-height file
-viewer with preview mode selected initially.
+The shipped action currently closes Review and opens a file-editor or mobile viewer. Replace that
+navigation with a row-local changed-content preview derived from the unified diff already present
+in `ReviewFile`. First add a tested parser that extracts honest new-side Markdown fragments, then
+wire the Review row and toolbar to toggle between the textual diff and the rendered fragments on
+desktop, tablet, and mobile.
 
 ## Frontend
 
-### Review action wiring
+### Diff-content extraction
 
-- Update `apps/web/components/task/use-review-dialog.ts` to expose
-  `useFileEditors().openFileInMarkdownPreview` beside the existing source-open action.
-- Thread a repository-aware `onPreviewMarkdown(filePath, repo?)` callback through
-  `dockview-review-dialog.tsx`, `review-dialog.tsx`, `review-dialog-surface.tsx`,
-  `review-diff-list.tsx`, `review-diff-header.tsx`, and `review-diff-toolbar.tsx`.
-- Keep the existing `.md`/`.mdx` guard and eye-icon/menu presentation; non-Markdown rows remain
-  unchanged.
+- Add a focused utility under `apps/web/components/review/` that parses the loaded unified diff
+  into new-side Markdown fragments.
+- Exclude diff headers, hunk headers, deleted lines, and newline markers. Treat complete
+  added/untracked diffs as one document; keep modified-file hunks separate.
+- Return whether the preview is complete or partial so the UI can label truncated or fragmented
+  content without implying it is the full file.
+
+### In-place Review rendering
+
+- Keep preview state local to each `FileDiffSection` in
+  `apps/web/components/review/review-diff-list.tsx`.
+- Replace `renderDiffContent(...)` with a Review-specific Markdown preview component while that row
+  is in preview mode. Reuse the existing sanitized Markdown rendering primitives rather than
+  introducing another renderer.
+- Change the Review toolbar contract from an external file-opening callback to an in-place toggle.
+  Show `Preview markdown` only when the parser reports renderable new-side content, and show
+  `Show diff` while preview mode is active.
+- Remove the Review-only preview callback chain and dialog-close behavior from
+  `review-dialog.tsx`, `review-dialog-surface.tsx`, and task-layout mounts. Preserve the independent
+  file-editor Markdown preview feature.
 
 ### Mobile behavior
 
-- Extend the file-opening state in
-  `apps/web/components/task/mobile/session-mobile-layout.tsx` so a caller can request that a
-  fetched Markdown file open with preview mode active.
-- Let `TaskReviewDialogMount` accept responsive file-open overrides. The mobile layout supplies
-  its existing file fetch/navigation handler for source editing and a preview-mode variant for
-  Markdown rendering; desktop keeps the Dockview-backed defaults.
-- Update `apps/web/components/task/mobile/mobile-file-viewer-panel.tsx` to accept an initial
-  Markdown-preview mode while retaining the existing in-view toggle.
+- Keep the existing 44 px `More actions` menu and replace its preview callback with the same
+  row-local toggle used on desktop.
+- Remove Review-specific mobile/tablet routing and stale-request logic that becomes unused once the
+  action no longer fetches or navigates.
 
 ### Mobile design contract
 
-- **Desktop outcome:** the eye action in the sticky review header opens a Dockview file panel in
-  rendered mode.
+- **Desktop outcome:** the eye action in the sticky review header replaces that row's diff with
+  rendered changed content; `Show diff` restores it.
 - **Mobile entry point:** the existing 44 px `More actions` button in the sticky review header.
-- **Nearest exemplar:** `MobileFileViewerPanel`, which contributes the dedicated full-height file
-  surface, fixed toolbar, and single internal content region.
-- **Hierarchy and primary action:** Review remains the current context until the user chooses
-  preview; the Files viewer then becomes the sole focal surface and renders the selected document.
-- **Presentation:** direct navigation to the existing full-height viewer, appropriate for dense
-  document content and repeated reading; no intermediate drawer is added beyond the existing
-  actions menu.
-- **Scrolling and safe area:** the existing mobile task layout owns `100dvh` and safe-area
-  offsets; the viewer retains its single `PanelBody` content owner.
-- **Shared versus responsive state:** file identity, fetch logic, repository scoping, and Markdown
-  rendering stay shared; only the mobile initial-view flag and navigation composition differ.
+- **Nearest exemplar:** the current mobile Review diff row, which already provides the full-width
+  content surface, sticky identity header, contained actions menu, and dialog-owned scrolling.
+- **Hierarchy and primary action:** Review remains the sole focal surface; preview changes only the
+  selected row's body and retains its header, reviewed checkbox, and return action.
+- **Presentation:** inline replacement fits a frequent comparison task and avoids an intermediate
+  navigation layer or stacked overlay.
+- **Scrolling and safe area:** `ReviewDiffList` remains the single vertical scroll owner. Rendered
+  fragments flow within the row and do not introduce a nested viewport scroller.
+- **Shared versus responsive state:** parsing, renderable-content detection, preview state, and
+  Markdown rendering are shared; only the existing desktop icon/mobile menu presentation differs.
 
 ## Tests
 
-- `apps/web/components/review/review-diff-toolbar.test.tsx`: prove `.md`/`.mdx` visibility,
-  non-Markdown absence, and repository-aware callback dispatch on desktop and mobile.
-- `apps/web/components/task/mobile/session-mobile-layout.test.tsx`: prove a review preview request
-  fetches the selected repository file, selects it, and navigates to Files with preview intent.
-- `apps/web/components/task/mobile/mobile-file-viewer-panel.test.tsx`: prove initial preview mode
-  renders the Markdown surface without requiring the source-view toggle.
+- `apps/web/components/review/review-markdown-diff-preview.test.ts`: prove complete added-file
+  extraction, separate modified hunks, deleted-line removal, marker removal, and partial metadata.
+- `apps/web/components/review/review-diff-toolbar.test.tsx`: prove preview/show-diff toggles on
+  desktop and mobile, and absence for non-Markdown or non-renderable diffs.
+- Add focused rendered coverage for `FileDiffSection`: activating preview replaces the diff with
+  sanitized Markdown fragments and restoring diff does not alter reviewed state.
 
 ## E2E Tests
 
 - `apps/web/e2e/tests/review/review-markdown-preview.spec.ts`: create a changed `.md` file, open
-  expanded Review, activate the desktop eye action, and assert the rendered heading is visible.
+  expanded Review, activate the desktop eye action, assert the dialog stays open and no file tab
+  appears, then restore the diff.
 - `apps/web/e2e/tests/review/mobile-review-markdown-preview.spec.ts`: create a changed `.md` file,
-  open Review from mobile Changes, choose the action from the file menu, and assert the rendered
-  heading in the full-height viewer.
+  open Review from mobile Changes, choose the action from the file menu, and assert rendered
+  changed content remains inside the Review dialog without navigating to Files.
 
 ## Implementation
 
 - [x] [task-01-review-markdown-preview](task-01-review-markdown-preview.md) — done
+- [ ] [task-02-inline-diff-markdown-preview](task-02-inline-diff-markdown-preview.md) — pending
 
 ## Verification
 
 ```bash
 cd apps && pnpm install --frozen-lockfile
 pnpm --filter @kandev/web test -- --run \
+  components/review/review-markdown-diff-preview.test.ts \
   components/review/review-diff-toolbar.test.tsx \
-  components/task/mobile/session-mobile-layout.test.tsx \
-  components/task/mobile/mobile-file-viewer-panel.test.tsx
+  components/review/review-diff-list-grouping.test.tsx
 pnpm --dir web e2e:run tests/review/review-markdown-preview.spec.ts
 pnpm --dir web e2e:run tests/review/mobile-review-markdown-preview.spec.ts -- --project=mobile-chrome
 cd ..
@@ -92,9 +102,8 @@ make typecheck test lint
 
 ## Risks
 
-- The same relative path can exist in multiple task repositories; every callback layer must
-  preserve `repository_name`.
-- Mobile file fetches are asynchronous and already cancel stale requests; preview intent must
-  remain paired with the winning request rather than leaking to a later source-open action.
-- The Review dialog closes when the responsive viewer takes focus; returning must preserve the
-  existing mobile navigation behavior rather than introducing a second overlay.
+- Unified diffs are partial by design. Modified hunks must remain visibly separate so the preview
+  never claims omitted lines are adjacent or reconstructs content it does not have.
+- Added/untracked diffs may be truncated; completeness must account for `diff_skip_reason`.
+- Removing the shipped navigation path must not remove the independent Markdown preview capability
+  from file editors or mobile file viewers.
