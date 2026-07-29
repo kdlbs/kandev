@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -281,6 +282,62 @@ func TestServiceUpdateTaskCIOptionsRebindsReviewerOnRepeatedReviewEnable(t *test
 	}
 	if state.LastFixSignature != "ci-checkpoint" || state.LastObservedPRState != "merged" || state.LastLifecycleEvent != "merged" {
 		t.Fatalf("rebind changed CI or terminal checkpoints: %+v", state)
+	}
+}
+
+func TestServiceUpdateTaskCIOptionsResolvesReviewerForWorkspacelessTaskPR(t *testing.T) {
+	store := newTestStore(t)
+	client := NewMockClient()
+	client.SetUser("reviewer-a")
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, testWorkspaceID)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1",
+		Owner: "acme", Repo: "widget", PRNumber: 42, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create workspaceless task PR: %v", err)
+	}
+	if err := store.CreatePRWatch(ctx, &PRWatch{
+		WorkspaceID: testWorkspaceID, SessionID: "session-1", TaskID: "task-1",
+		RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42, Branch: "feature",
+	}); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+
+	enabled := true
+	if _, err := svc.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{
+		PromptOnReviewRequested: &enabled,
+	}); err != nil {
+		t.Fatalf("enable review prompt: %v", err)
+	}
+	options, err := store.GetTaskCIOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("get options: %v", err)
+	}
+	if !options.PromptOnReviewRequested || options.ReviewReviewerLogin != "reviewer-a" {
+		t.Fatalf("options = %+v, want review prompt bound to reviewer-a", options)
+	}
+}
+
+func TestServiceUpdateTaskCIOptionsFailsWithoutAnyTaskWorkspace(t *testing.T) {
+	store := newTestStore(t)
+	client := NewMockClient()
+	client.SetUser("reviewer-a")
+	svc := newWorkspaceAuthenticatedTestService(t, client, store, testWorkspaceID)
+	ctx := context.Background()
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1",
+		Owner: "acme", Repo: "widget", PRNumber: 42, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("create workspaceless task PR: %v", err)
+	}
+
+	enabled := true
+	_, err := svc.UpdateTaskCIOptions(ctx, "task-1", TaskCIOptionsPatch{
+		PromptOnReviewRequested: &enabled,
+	})
+	if !errors.Is(err, ErrGitHubWorkspaceRequired) {
+		t.Fatalf("err = %v, want ErrGitHubWorkspaceRequired", err)
 	}
 }
 

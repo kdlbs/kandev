@@ -32,6 +32,7 @@ async function seedTaskWithPR(apiClient: ApiClient, seedData: SeedData, title: s
   );
   await apiClient.mockGitHubAssociateTaskPR({
     task_id: task.id,
+    workspace_id: seedData.workspaceId,
     owner: OWNER,
     repo: REPO,
     pr_number: PR_NUMBER,

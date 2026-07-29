@@ -179,11 +179,39 @@ func (s *Service) resolveTaskPRAutomationClient(
 		return nil, fmt.Errorf("resolve authenticated reviewer: task has no linked pull request")
 	}
 	pr := prs[0]
-	resolved, err := s.resolveAutomationClient(ctx, pr.WorkspaceID, pr.Owner, pr.Repo)
+	for _, candidate := range prs {
+		if strings.TrimSpace(candidate.WorkspaceID) != "" {
+			pr = candidate
+			break
+		}
+	}
+	workspaceID := strings.TrimSpace(pr.WorkspaceID)
+	if workspaceID == "" {
+		workspaceID, err = s.resolveTaskWatchWorkspace(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, pr.Owner, pr.Repo)
 	if err != nil {
 		return nil, fmt.Errorf("resolve authenticated reviewer: %w", err)
 	}
 	return resolved, nil
+}
+
+// resolveTaskWatchWorkspace recovers the workspace for linked PR rows written by
+// the workspace-less association path. The watch belongs to the same task, so
+// reviewer identity still resolves inside that task's own workspace and never
+// falls back to an ambient client.
+func (s *Service) resolveTaskWatchWorkspace(ctx context.Context, taskID string) (string, error) {
+	watch, err := s.store.GetPRWatchByTask(ctx, taskID)
+	if err != nil {
+		return "", fmt.Errorf("resolve authenticated reviewer workspace: %w", err)
+	}
+	if watch == nil || strings.TrimSpace(watch.WorkspaceID) == "" {
+		return "", fmt.Errorf("resolve authenticated reviewer: %w", ErrGitHubWorkspaceRequired)
+	}
+	return strings.TrimSpace(watch.WorkspaceID), nil
 }
 
 func (s *Service) SetTaskPRObservedState(
