@@ -23,6 +23,7 @@ spec: "../../specs/improve-kandev/spec.md"
 
 ## Verification
 
+- `cd apps && pnpm install --frozen-lockfile` (required once in a fresh worktree)
 - `cd apps && pnpm --filter @kandev/web test -- --run components/task-create-dialog-defaults.test.ts components/task-create-dialog-effects.test.ts`
 - `cd apps/web && pnpm run typecheck`
 - `cd apps/web && pnpm e2e:run tests/task/create-task.spec.ts -- --grep "hidden workflow task detail"`

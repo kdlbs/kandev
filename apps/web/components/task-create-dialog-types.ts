@@ -72,6 +72,8 @@ export type TaskRemoteRepoRow = {
 export type StepType = {
   id: string;
   title: string;
+  /** Workflow that supplied these fallback-only steps. */
+  workflowId?: string;
   position?: number;
   is_start_step?: boolean;
   events?: {

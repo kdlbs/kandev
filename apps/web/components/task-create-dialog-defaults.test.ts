@@ -3,6 +3,8 @@ import * as taskCreateDefaults from "./task-create-dialog-defaults";
 
 const { computeDialogDefaultStepId, computeSingleWorkflowFallbackId } = taskCreateDefaults;
 const HIDDEN_WORKFLOW_ID = "improve-kandev";
+const VISIBLE_WORKFLOW_ID = "visible";
+const VISIBLE_START_STEP_ID = "visible-start";
 
 type WorkflowContextResolver = (
   workflowId: string | null,
@@ -45,6 +47,13 @@ describe("resolveTaskCreateWorkflowContext", () => {
       allowHiddenWorkflow: false,
       expected: { workflowId: "kanban", defaultStepId: "backlog" },
     },
+    {
+      name: "drops unlocked workflow context whose metadata cannot be resolved",
+      workflowId: "not-yet-loaded",
+      defaultStepId: "start",
+      allowHiddenWorkflow: false,
+      expected: { workflowId: null, defaultStepId: null },
+    },
   ])("$name", ({ workflowId, defaultStepId, allowHiddenWorkflow, expected }) => {
     const resolver = (
       taskCreateDefaults as typeof taskCreateDefaults & {
@@ -76,18 +85,59 @@ describe("computeDialogDefaultStepId", () => {
         selectedWorkflowId: null,
         workflowId: null,
         fetchedSteps: [
-          { id: "visible-backlog", title: "Backlog", position: 0 },
           {
-            id: "visible-start",
+            id: "visible-backlog",
+            title: "Backlog",
+            workflowId: VISIBLE_WORKFLOW_ID,
+            position: 0,
+          },
+          {
+            id: VISIBLE_START_STEP_ID,
             title: "In Progress",
+            workflowId: VISIBLE_WORKFLOW_ID,
             position: 1,
             is_start_step: true,
           },
         ],
         defaultStepId: null,
-        effectiveWorkflowId: "visible",
+        effectiveWorkflowId: VISIBLE_WORKFLOW_ID,
         snapshots: {},
       }),
-    ).toBe("visible-start");
+    ).toBe(VISIBLE_START_STEP_ID);
+  });
+
+  it("ignores fetched steps from a previously selected workflow", () => {
+    expect(
+      computeDialogDefaultStepId({
+        selectedWorkflowId: VISIBLE_WORKFLOW_ID,
+        workflowId: null,
+        fetchedSteps: [
+          {
+            id: "previous-start",
+            title: "Previous start",
+            is_start_step: true,
+            workflowId: "previous",
+          },
+        ],
+        defaultStepId: null,
+        effectiveWorkflowId: VISIBLE_WORKFLOW_ID,
+        snapshots: {
+          [VISIBLE_WORKFLOW_ID]: {
+            workflowId: VISIBLE_WORKFLOW_ID,
+            workflowName: "Visible",
+            steps: [
+              {
+                id: VISIBLE_START_STEP_ID,
+                title: "Visible start",
+                color: "green",
+                position: 0,
+                is_start_step: true,
+              },
+            ],
+            tasks: [],
+          },
+        },
+      }),
+    ).toBe(VISIBLE_START_STEP_ID);
   });
 });

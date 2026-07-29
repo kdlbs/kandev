@@ -83,7 +83,7 @@ describe("useWorkflowStepsEffect", () => {
       setFetchedSteps,
     } as unknown as DialogFormState;
 
-    renderHook(() => useWorkflowStepsEffect(fs, null, "visible"));
+    renderHook(() => useWorkflowStepsEffect(fs, true, null, "visible"));
 
     await waitFor(() => expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledWith("visible"));
     await waitFor(() =>
@@ -94,6 +94,7 @@ describe("useWorkflowStepsEffect", () => {
           position: 0,
           is_start_step: false,
           events: undefined,
+          workflowId: "visible",
         },
         {
           id: "visible-start",
@@ -101,9 +102,33 @@ describe("useWorkflowStepsEffect", () => {
           position: 1,
           is_start_step: true,
           events: undefined,
+          workflowId: "visible",
         },
       ]),
     );
+  });
+
+  it("clears stale steps and retries the visible fallback when the dialog reopens", async () => {
+    workflowApiMocks.listWorkflowSteps.mockRejectedValueOnce(new Error("temporary failure"));
+    workflowApiMocks.listWorkflowSteps.mockResolvedValueOnce({ steps: [], total: 0 });
+    const setFetchedSteps = vi.fn();
+    const fs = {
+      selectedWorkflowId: null,
+      setFetchedSteps,
+    } as unknown as DialogFormState;
+
+    const { rerender } = renderHook(
+      ({ open }) => useWorkflowStepsEffect(fs, open, null, "visible"),
+      { initialProps: { open: true } },
+    );
+
+    await waitFor(() => expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(setFetchedSteps).toHaveBeenCalledWith(null));
+
+    rerender({ open: false });
+    rerender({ open: true });
+
+    await waitFor(() => expect(workflowApiMocks.listWorkflowSteps).toHaveBeenCalledTimes(2));
   });
 });
 

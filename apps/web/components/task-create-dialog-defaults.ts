@@ -7,7 +7,8 @@ export function resolveTaskCreateWorkflowContext(
   workflows: Array<{ id: string; hidden?: boolean }>,
   allowHiddenWorkflow: boolean,
 ): { workflowId: string | null; defaultStepId: string | null } {
-  if (allowHiddenWorkflow || !workflows.find((workflow) => workflow.id === workflowId)?.hidden) {
+  const workflow = workflows.find((item) => item.id === workflowId);
+  if (allowHiddenWorkflow || !workflowId || workflow?.hidden === false) {
     return { workflowId, defaultStepId };
   }
   return { workflowId: null, defaultStepId: null };
@@ -51,10 +52,13 @@ export function computeDialogDefaultStepId({
   effectiveWorkflowId,
   snapshots,
 }: ComputeDialogDefaultStepIdArgs): string | null {
+  const matchingFetchedSteps = fetchedSteps?.filter(
+    (step) => step.workflowId === effectiveWorkflowId,
+  );
   if (effectiveWorkflowId && effectiveWorkflowId !== workflowId) {
-    const fetchedStartStep = fetchedSteps?.find((step) => step.is_start_step);
-    const fetchedFirstStep = fetchedSteps
-      ? [...fetchedSteps].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0]
+    const fetchedStartStep = matchingFetchedSteps?.find((step) => step.is_start_step);
+    const fetchedFirstStep = matchingFetchedSteps
+      ? [...matchingFetchedSteps].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0]
       : null;
     return (
       fetchedStartStep?.id ??
@@ -64,10 +68,15 @@ export function computeDialogDefaultStepId({
   }
 
   const switchedWorkflowWithoutFetchedSteps =
-    Boolean(selectedWorkflowId) && selectedWorkflowId !== workflowId && !fetchedSteps;
+    Boolean(selectedWorkflowId) && selectedWorkflowId !== workflowId && !matchingFetchedSteps;
   const computedStepId = switchedWorkflowWithoutFetchedSteps
     ? null
-    : computeEffectiveStepId(selectedWorkflowId, workflowId, fetchedSteps, defaultStepId);
+    : computeEffectiveStepId(
+        selectedWorkflowId,
+        workflowId,
+        matchingFetchedSteps ?? null,
+        defaultStepId,
+      );
 
   return computedStepId ?? computeSnapshotDefaultStepId(effectiveWorkflowId, snapshots);
 }

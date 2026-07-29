@@ -32,13 +32,14 @@ const selectionDebug = createDebugLogger("task-create:selection");
 
 export function useWorkflowStepsEffect(
   fs: DialogFormState,
+  open: boolean,
   workflowId: string | null,
   effectiveWorkflowId: string | null,
 ) {
   const { setFetchedSteps } = fs;
   useEffect(() => {
-    if (!effectiveWorkflowId || effectiveWorkflowId === workflowId) {
-      void Promise.resolve().then(() => setFetchedSteps(null));
+    void Promise.resolve().then(() => setFetchedSteps(null));
+    if (!open || !effectiveWorkflowId || effectiveWorkflowId === workflowId) {
       return;
     }
     let cancelled = false;
@@ -50,6 +51,7 @@ export function useWorkflowStepsEffect(
           sorted.map((s) => ({
             id: s.id,
             title: s.name,
+            workflowId: effectiveWorkflowId,
             position: s.position,
             is_start_step: s.is_start_step,
             events: s.events,
@@ -62,7 +64,7 @@ export function useWorkflowStepsEffect(
     return () => {
       cancelled = true;
     };
-  }, [effectiveWorkflowId, workflowId, setFetchedSteps]);
+  }, [effectiveWorkflowId, open, workflowId, setFetchedSteps]);
 }
 
 export function useDiscoverReposEffect(
@@ -560,7 +562,7 @@ export function useTaskCreateDialogEffects(fs: DialogFormState, args: TaskCreate
     workflows,
     isLocalExecutor,
   } = args;
-  useWorkflowStepsEffect(fs, workflowId, effectiveWorkflowId);
+  useWorkflowStepsEffect(fs, open, workflowId, effectiveWorkflowId);
   useWorkflowAgentProfileEffect(fs, workflows, agentProfiles, compatibleAgentProfiles, {
     lastUsedAgentProfileId: args.lastUsedAgentProfileId,
     authLoaded,
