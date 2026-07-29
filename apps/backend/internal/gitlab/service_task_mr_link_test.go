@@ -23,7 +23,8 @@ func seedTaskMRLinkFixture(t *testing.T, store *Store, workspaceID, taskID, repo
 		provider_owner TEXT DEFAULT '',
 		provider_name TEXT DEFAULT '',
 		remote_url TEXT DEFAULT '',
-		local_path TEXT DEFAULT ''
+		local_path TEXT DEFAULT '',
+		updated_at TIMESTAMP
 	); CREATE TABLE IF NOT EXISTS task_repositories (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -618,7 +619,10 @@ func TestAssociateExistingMRByURLBackfillsCredentialFreeRemoteURLWhenLocalOrigin
 	svc, store, client := newTaskMRLinkService(t, host)
 	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
 	localPath := t.TempDir()
-	seedLocalGitCheckout(t, localPath, "https://oauth2:glpat-secrettoken@gitlab.savoirfairelinux.com/clients/socodevi/laravel/co-up.git")
+	seedLocalGitCheckout(
+		t, localPath,
+		"https://alice:apikey123@gitlab.savoirfairelinux.com/clients/socodevi/laravel/co-up.git",
+	)
 	setTaskMRRepositoryLocalPath(t, store, "repo-1", localPath)
 	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
 		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
@@ -633,8 +637,11 @@ func TestAssociateExistingMRByURLBackfillsCredentialFreeRemoteURLWhenLocalOrigin
 	}
 
 	got := getTaskMRRepositoryRemoteURL(t, store, "repo-1")
-	if strings.Contains(got, "secrettoken") || strings.Contains(got, "oauth2") {
-		t.Fatalf("backfilled remote_url leaked credentials: %q", got)
+	// Assert on the userinfo separator itself, not specific token/password
+	// substrings, so this stays correct regardless of the fake credential
+	// used above.
+	if strings.Contains(got, "@") {
+		t.Fatalf("backfilled remote_url leaked userinfo credentials: %q", got)
 	}
 	if got != host+"/clients/socodevi/laravel/co-up" {
 		t.Fatalf("backfilled remote_url = %q, want credential-free canonical form", got)

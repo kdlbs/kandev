@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ValidateTaskMRScope verifies that the task and optional repository belong to
@@ -190,9 +191,9 @@ func localCheckoutIdentityCandidate(localPath string) (candidate taskMRIdentityC
 func (s *Store) backfillRepositoryRemoteURL(ctx context.Context, repositoryID, remoteURL string) {
 	_, _ = s.db.ExecContext(ctx, `
 		UPDATE repositories
-		SET remote_url = ?
+		SET remote_url = ?, updated_at = ?
 		WHERE id = ? AND (remote_url IS NULL OR remote_url = '')`,
-		remoteURL, repositoryID)
+		remoteURL, time.Now().UTC(), repositoryID)
 }
 
 // resolveLocalGitOriginURL reads the "origin" remote URL directly from a
