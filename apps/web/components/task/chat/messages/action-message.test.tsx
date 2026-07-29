@@ -233,6 +233,15 @@ describe("ActionMessage — running stall notice", () => {
     const { container } = renderAction(stalledMessage("turn-1"), "RUNNING", undefined, "turn-2");
     expect(container.firstChild).toBeNull();
   });
+
+  it("hides a running-only notice without a turn ID", () => {
+    const message = stalledMessage();
+    message.turn_id = undefined;
+
+    const { container } = renderAction(message, "RUNNING", undefined, "turn-1");
+
+    expect(container.firstChild).toBeNull();
+  });
 });
 
 describe("ActionMessage — missing PR branch", () => {

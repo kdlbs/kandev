@@ -28,6 +28,11 @@ func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
 		newMockTaskRepo(),
 		agentMgr,
 	)
+	svc.turnService = &repoTurnService{repo: repo}
+	activeTurn, err := svc.turnService.StartTurn(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
 	messages := &mockMessageCreator{}
 	svc.messageCreator = messages
 
@@ -50,6 +55,9 @@ func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
 	}
 	if message.metadata["action_visibility"] != "running" {
 		t.Fatalf("action visibility = %v, want running", message.metadata["action_visibility"])
+	}
+	if message.turnID != activeTurn.ID {
+		t.Fatalf("notice turn ID = %q, want active turn %q", message.turnID, activeTurn.ID)
 	}
 	if _, hasVariant := message.metadata["variant"]; hasVariant {
 		t.Fatalf("notice metadata unexpectedly set a warning/error variant: %#v", message.metadata)
