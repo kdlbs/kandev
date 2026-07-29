@@ -3,6 +3,7 @@ package gitlab
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,7 +20,8 @@ func seedTaskMRLinkFixture(t *testing.T, store *Store, workspaceID, taskID, repo
 		provider_host TEXT DEFAULT '',
 		provider_owner TEXT DEFAULT '',
 		provider_name TEXT DEFAULT '',
-		remote_url TEXT DEFAULT ''
+		remote_url TEXT DEFAULT '',
+		local_path TEXT DEFAULT ''
 	); CREATE TABLE IF NOT EXISTS task_repositories (
 		id TEXT PRIMARY KEY,
 		task_id TEXT NOT NULL,
@@ -64,6 +66,40 @@ func setTaskMRRepositoryRemoteURL(t *testing.T, store *Store, repositoryID, remo
 		`UPDATE repositories SET remote_url = ? WHERE id = ?`, remoteURL, repositoryID,
 	); err != nil {
 		t.Fatalf("set repository remote_url: %v", err)
+	}
+}
+
+func setTaskMRRepositoryLocalPath(t *testing.T, store *Store, repositoryID, localPath string) {
+	t.Helper()
+	if _, err := store.db.Exec(
+		`UPDATE repositories SET local_path = ? WHERE id = ?`, localPath, repositoryID,
+	); err != nil {
+		t.Fatalf("set repository local_path: %v", err)
+	}
+}
+
+func getTaskMRRepositoryRemoteURL(t *testing.T, store *Store, repositoryID string) string {
+	t.Helper()
+	var remoteURL string
+	if err := store.db.Get(&remoteURL, `SELECT COALESCE(remote_url, '') FROM repositories WHERE id = ?`, repositoryID); err != nil {
+		t.Fatalf("get repository remote_url: %v", err)
+	}
+	return remoteURL
+}
+
+// seedLocalGitCheckout creates a minimal local git checkout at dir whose
+// origin remote is remoteURL, mirroring the on-disk shape
+// resolveLocalGitOriginURL reads (a ".git" directory containing a "config"
+// file with a "[remote \"origin\"]" section).
+func seedLocalGitCheckout(t *testing.T, dir, remoteURL string) {
+	t.Helper()
+	gitDir := dir + "/.git"
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatalf("mkdir git dir: %v", err)
+	}
+	config := "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = " + remoteURL + "\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+	if err := os.WriteFile(gitDir+"/config", []byte(config), 0o644); err != nil {
+		t.Fatalf("write git config: %v", err)
 	}
 }
 
@@ -365,6 +401,63 @@ func TestAssociateExistingMRByURLAcceptsRemoteURLWhenDurableIdentityEmpty(t *tes
 				t.Fatalf("AssociateExistingMRByURL: %v", err)
 			}
 		})
+	}
+}
+
+func TestAssociateExistingMRByURLBackfillsRemoteURLFromLocalCheckoutWhenLegacyRowIsBlank(t *testing.T) {
+	// Reproduces the persisted-bug shape found on a live instance: a
+	// repository row created before remote_url resolution existed has BOTH
+	// the durable provider identity AND remote_url blank, even though its
+	// local_path checkout still has a valid origin remote. This must
+	// succeed by falling back to the local git config, and must backfill
+	// remote_url so subsequent calls don't need the filesystem read.
+	const host = "https://gitlab.savoirfairelinux.com"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	localPath := t.TempDir()
+	seedLocalGitCheckout(t, localPath, "git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/co-up.git")
+	setTaskMRRepositoryLocalPath(t, store, "repo-1", localPath)
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+
+	got := getTaskMRRepositoryRemoteURL(t, store, "repo-1")
+	if got != "git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/co-up.git" {
+		t.Fatalf("remote_url not backfilled, got %q", got)
+	}
+}
+
+func TestAssociateExistingMRByURLRejectsLocalCheckoutPointingElsewhere(t *testing.T) {
+	// A legacy blank row whose local checkout's origin points to a different
+	// project must still fail closed, and must not backfill the wrong URL.
+	const host = "https://gitlab.savoirfairelinux.com"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	localPath := t.TempDir()
+	seedLocalGitCheckout(t, localPath, "git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/other-project.git")
+	setTaskMRRepositoryLocalPath(t, store, "repo-1", localPath)
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	_, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	)
+	if !errors.Is(err, ErrTaskMRRepositoryMismatch) {
+		t.Fatalf("error = %v, want ErrTaskMRRepositoryMismatch", err)
+	}
+	if got := getTaskMRRepositoryRemoteURL(t, store, "repo-1"); got != "" {
+		t.Fatalf("remote_url should stay blank on mismatch, got %q", got)
 	}
 }
 

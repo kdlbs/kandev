@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -46,8 +48,14 @@ func (s *Store) ValidateTaskMRScope(ctx context.Context, workspaceID, taskID, re
 // match against either the repository's durable provider identity or its
 // remote_url, since self-hosted GitLab repositories added as local clones
 // never get a durable provider identity (only github.com/gitlab.com are
-// tagged at discovery time) yet still carry a resolvable remote_url. Rows
-// with neither signal resolving to a GitLab identity fail closed.
+// tagged at discovery time) yet still carry a resolvable remote_url.
+//
+// Rows created before remote_url resolution existed (or where it otherwise
+// failed to populate) have neither signal. For those, as a last resort, this
+// re-derives the origin directly from the repository's local git checkout
+// (local_path) and, if it matches the MR, opportunistically backfills
+// remote_url so the local filesystem read isn't needed on subsequent calls.
+// Rows with no signal resolving to a GitLab identity fail closed.
 func (s *Store) ValidateTaskMRRepositoryIdentity(
 	ctx context.Context,
 	workspaceID, taskID, repositoryID, configuredHost, projectPath string,
@@ -61,13 +69,15 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 		Owner     string `db:"provider_owner"`
 		Name      string `db:"provider_name"`
 		RemoteURL string `db:"remote_url"`
+		LocalPath string `db:"local_path"`
 	}
 	err := s.ro.GetContext(ctx, &identity, `
 		SELECT COALESCE(r.provider, '') AS provider,
 			COALESCE(r.provider_host, '') AS provider_host,
 			COALESCE(r.provider_owner, '') AS provider_owner,
 			COALESCE(r.provider_name, '') AS provider_name,
-			COALESCE(r.remote_url, '') AS remote_url
+			COALESCE(r.remote_url, '') AS remote_url,
+			COALESCE(r.local_path, '') AS local_path
 		FROM task_repositories tr
 		JOIN repositories r ON r.id = tr.repository_id
 		JOIN tasks t ON t.id = tr.task_id
@@ -86,25 +96,160 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 	}
 	wantProject := strings.Trim(strings.TrimSpace(projectPath), "/")
 
-	type candidate struct{ host, project string }
-	var candidates []candidate
+	var candidates []taskMRIdentityCandidate
 	if strings.EqualFold(identity.Provider, "gitlab") {
 		if gotHost, err := normalizeHostOrigin(identity.Host); err == nil {
 			gotProject := strings.Trim(strings.TrimSpace(identity.Owner+"/"+identity.Name), "/")
-			candidates = append(candidates, candidate{host: gotHost, project: gotProject})
+			candidates = append(candidates, taskMRIdentityCandidate{host: gotHost, project: gotProject})
 		}
 	}
 	if remoteURLHost, remoteProject := parseGitLabRemoteURLIdentity(identity.RemoteURL); remoteURLHost != "" {
 		if gotHost, err := normalizeHostOrigin(remoteURLHost); err == nil {
-			candidates = append(candidates, candidate{host: gotHost, project: remoteProject})
+			candidates = append(candidates, taskMRIdentityCandidate{host: gotHost, project: remoteProject})
 		}
+	}
+	// Legacy rows: neither the durable identity nor remote_url resolved to
+	// anything. Fall back to reading the local checkout's origin directly,
+	// since local_path is the one signal every locally-cloned repository
+	// carries regardless of when it was added.
+	if localCandidate, ok := localCheckoutIdentityCandidate(identity.RemoteURL, identity.LocalPath); ok {
+		candidates = append(candidates, localCandidate)
 	}
 	for _, c := range candidates {
 		if sameGitLabHost(c.host, wantHost) && strings.EqualFold(c.project, wantProject) {
+			if c.remoteURL != "" {
+				s.backfillRepositoryRemoteURL(ctx, repositoryID, c.remoteURL)
+			}
 			return nil
 		}
 	}
 	return ErrTaskMRRepositoryMismatch
+}
+
+// taskMRIdentityCandidate is one (host, project) identity derived from a
+// repository row that an incoming MR's host/project can be checked against.
+// remoteURL is set only for candidates re-derived from a local checkout, so
+// the caller knows to backfill the repository row's remote_url on a match.
+type taskMRIdentityCandidate struct{ host, project, remoteURL string }
+
+// localCheckoutIdentityCandidate re-derives a GitLab (host, project) identity
+// from a repository's local git checkout, for legacy rows where both the
+// durable provider identity and remote_url are blank. ok is false when there
+// is nothing to fall back to (no local_path, or remote_url already set) or
+// the checkout's origin can't be parsed as a GitLab remote.
+func localCheckoutIdentityCandidate(remoteURL, localPath string) (candidate taskMRIdentityCandidate, ok bool) {
+	if remoteURL != "" || localPath == "" {
+		return taskMRIdentityCandidate{}, false
+	}
+	localRemoteURL := resolveLocalGitOriginURL(localPath)
+	remoteURLHost, remoteProject := parseGitLabRemoteURLIdentity(localRemoteURL)
+	if remoteURLHost == "" {
+		return taskMRIdentityCandidate{}, false
+	}
+	gotHost, err := normalizeHostOrigin(remoteURLHost)
+	if err != nil {
+		return taskMRIdentityCandidate{}, false
+	}
+	return taskMRIdentityCandidate{host: gotHost, project: remoteProject, remoteURL: localRemoteURL}, true
+}
+
+// backfillRepositoryRemoteURL persists a remote_url re-derived from a local
+// git checkout onto a legacy repository row so future MR-link checks (and
+// any other remote_url consumer) no longer need a filesystem read. Best
+// effort: failures are swallowed since the caller already has what it needs
+// to proceed with the current request.
+func (s *Store) backfillRepositoryRemoteURL(ctx context.Context, repositoryID, remoteURL string) {
+	_, _ = s.db.ExecContext(ctx, `
+		UPDATE repositories
+		SET remote_url = ?
+		WHERE id = ? AND (remote_url IS NULL OR remote_url = '')`,
+		remoteURL, repositoryID)
+}
+
+// resolveLocalGitOriginURL reads the "origin" remote URL directly from a
+// local git checkout's config, without depending on the task/service
+// package (see parseGitLabRemoteURLIdentity for the rationale: this package
+// stays self-contained to avoid a gitlab -> task/service import cycle).
+// Returns "" on any error, including non-existent paths and checkouts with
+// no origin remote.
+func resolveLocalGitOriginURL(repoPath string) string {
+	gitDir, err := resolveLocalGitDir(repoPath)
+	if err != nil {
+		return ""
+	}
+	commonDir := resolveLocalCommonGitDir(gitDir)
+	content, err := os.ReadFile(filepath.Join(commonDir, "config"))
+	if err != nil {
+		return ""
+	}
+	return parseLocalGitConfigOriginURL(string(content))
+}
+
+// resolveLocalGitDir resolves repoPath/.git to an absolute git directory,
+// following the "gitdir: <path>" pointer file used by worktree checkouts.
+func resolveLocalGitDir(repoPath string) (string, error) {
+	gitPath := filepath.Join(repoPath, ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return gitPath, nil
+	}
+	content, err := os.ReadFile(gitPath)
+	if err != nil {
+		return "", err
+	}
+	line := strings.TrimSpace(string(content))
+	gitDir, ok := strings.CutPrefix(line, "gitdir:")
+	if !ok {
+		return "", fmt.Errorf("invalid gitdir reference")
+	}
+	gitDir = strings.TrimSpace(gitDir)
+	if filepath.IsAbs(gitDir) {
+		return gitDir, nil
+	}
+	return filepath.Clean(filepath.Join(repoPath, gitDir)), nil
+}
+
+// resolveLocalCommonGitDir follows a worktree's "commondir" file back to the
+// main checkout's git directory, where its remotes are actually configured.
+func resolveLocalCommonGitDir(gitDir string) string {
+	content, err := os.ReadFile(filepath.Join(gitDir, "commondir"))
+	if err != nil {
+		return gitDir
+	}
+	commonDir := strings.TrimSpace(string(content))
+	if commonDir == "" {
+		return gitDir
+	}
+	if filepath.IsAbs(commonDir) {
+		return filepath.Clean(commonDir)
+	}
+	return filepath.Clean(filepath.Join(gitDir, commonDir))
+}
+
+// parseLocalGitConfigOriginURL extracts the "origin" remote's url from raw
+// git config file content.
+func parseLocalGitConfigOriginURL(config string) string {
+	inOrigin := false
+	for _, line := range strings.Split(config, "\n") {
+		line = strings.TrimSpace(line)
+		if line == `[remote "origin"]` {
+			inOrigin = true
+			continue
+		}
+		if strings.HasPrefix(line, "[") {
+			inOrigin = false
+			continue
+		}
+		if inOrigin {
+			if url, ok := strings.CutPrefix(line, "url = "); ok {
+				return url
+			}
+		}
+	}
+	return ""
 }
 
 func sameGitLabHost(left, right string) bool {
