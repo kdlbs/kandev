@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
-import { IconEdit, IconInfoCircle, IconRefresh } from "@tabler/icons-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { IconChevronDown, IconEdit, IconInfoCircle, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -299,12 +300,11 @@ function PRAgentPromptRows({
 }) {
   return (
     <>
-      <CIAutomationRow
-        id={`task-pr-review-requested-prompt-${taskId}`}
-        label="Prompt agent when your review is requested"
-        checked={Boolean(options?.prompt_on_review_requested)}
+      <ReviewRequestedPromptRow
+        taskId={taskId}
+        options={options}
         disabled={disabled}
-        onCheckedChange={(checked) => patchOption({ prompt_on_review_requested: checked })}
+        patchOption={patchOption}
       />
       <CIAutomationRow
         id={`task-pr-merged-prompt-${taskId}`}
@@ -321,6 +321,80 @@ function PRAgentPromptRows({
         onCheckedChange={(checked) => patchOption({ prompt_on_closed: checked })}
       />
     </>
+  );
+}
+
+function ReviewFollowUpSection({
+  taskId,
+  options,
+  disabled,
+  patchOption,
+}: {
+  taskId: string;
+  options: TaskCIAutomationOptions | null;
+  disabled: boolean;
+  patchOption: (patch: TaskCIAutomationPatch) => void;
+}) {
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const [open, setOpen] = useState(false);
+  const lifecycleEnabled = Boolean(
+    options?.prompt_on_review_requested || options?.prompt_on_merged || options?.prompt_on_closed,
+  );
+  const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
+
+  useEffect(() => {
+    if (lifecycleEnabled) setOpen(true);
+  }, [lifecycleEnabled]);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-testid="ci-review-follow-up-trigger"
+          aria-label="Toggle review follow-up automation"
+          className={`w-full cursor-pointer justify-between px-1 text-xs text-muted-foreground ${minHeight}`}
+        >
+          Review follow-up
+          <IconChevronDown
+            aria-hidden="true"
+            className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </Button>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="flex flex-col gap-1">
+        <PRAgentPromptRows
+          taskId={taskId}
+          options={options}
+          disabled={disabled}
+          patchOption={patchOption}
+        />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function ReviewRequestedPromptRow({
+  taskId,
+  options,
+  disabled,
+  patchOption,
+}: {
+  taskId: string;
+  options: TaskCIAutomationOptions | null;
+  disabled: boolean;
+  patchOption: (patch: TaskCIAutomationPatch) => void;
+}) {
+  return (
+    <CIAutomationRow
+      id={`task-pr-review-requested-prompt-${taskId}`}
+      label="Prompt agent when your review is requested"
+      checked={Boolean(options?.prompt_on_review_requested)}
+      disabled={disabled}
+      onCheckedChange={(checked) => patchOption({ prompt_on_review_requested: checked })}
+    />
   );
 }
 
@@ -349,6 +423,53 @@ function CIAutomationHeader({
         </Button>
       </div>
     </div>
+  );
+}
+
+function CIAutomationOptionRows({
+  pr,
+  options,
+  disabled,
+  patchOption,
+  automationState,
+}: {
+  pr: TaskPR;
+  options: TaskCIAutomationOptions | null;
+  disabled: boolean;
+  patchOption: (patch: TaskCIAutomationPatch) => void;
+  automationState: TaskCIPRAutomationState | undefined;
+}) {
+  return (
+    <>
+      <CIAutomationRow
+        id={`task-ci-auto-fix-${pr.task_id}`}
+        label="Auto-fix CI and address comments"
+        checked={Boolean(options?.auto_fix_enabled)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ auto_fix_enabled: checked })}
+        help={
+          options?.auto_fix_enabled ? (
+            <CIAutoFixRoundHelpButton
+              state={automationState}
+              maxRounds={options.auto_fix_max_rounds}
+            />
+          ) : null
+        }
+      />
+      <CIAutomationRow
+        id={`task-ci-auto-merge-${pr.task_id}`}
+        label="Auto-merge when ready"
+        checked={Boolean(options?.auto_merge_enabled)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ auto_merge_enabled: checked })}
+      />
+      <ReviewFollowUpSection
+        taskId={pr.task_id}
+        options={options}
+        disabled={disabled}
+        patchOption={patchOption}
+      />
+    </>
   );
 }
 
@@ -404,33 +525,12 @@ export function PRCIAutomationControls({ pr }: { pr: TaskPR }) {
       className="flex flex-col gap-1 border-t border-border/50 pt-2"
     >
       <CIAutomationHeader disabled={!options} onEditPrompt={openPromptEditor} />
-      <CIAutomationRow
-        id={`task-ci-auto-fix-${pr.task_id}`}
-        label="Auto-fix CI and address comments"
-        checked={Boolean(options?.auto_fix_enabled)}
-        disabled={disabled}
-        onCheckedChange={(checked) => patchOption({ auto_fix_enabled: checked })}
-        help={
-          options?.auto_fix_enabled ? (
-            <CIAutoFixRoundHelpButton
-              state={automationState}
-              maxRounds={options.auto_fix_max_rounds}
-            />
-          ) : null
-        }
-      />
-      <CIAutomationRow
-        id={`task-ci-auto-merge-${pr.task_id}`}
-        label="Auto-merge when ready"
-        checked={Boolean(options?.auto_merge_enabled)}
-        disabled={disabled}
-        onCheckedChange={(checked) => patchOption({ auto_merge_enabled: checked })}
-      />
-      <PRAgentPromptRows
-        taskId={pr.task_id}
+      <CIAutomationOptionRows
+        pr={pr}
         options={options}
         disabled={disabled}
         patchOption={patchOption}
+        automationState={automationState}
       />
       {automationState?.last_error && (
         <CIAutomationErrorRow

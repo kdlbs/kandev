@@ -120,6 +120,13 @@ test.describe("mobile PR CI automation options", () => {
       drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
     await expect(drawer.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
+    const reviewFollowUp = drawer.getByTestId("ci-review-follow-up-trigger");
+    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
+    const triggerBox = await reviewFollowUp.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+    await reviewFollowUp.tap();
+    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "true");
     await expect(
       drawer.getByRole("switch", { name: "Prompt agent when your review is requested" }),
     ).toBeVisible();
@@ -141,10 +148,15 @@ test.describe("mobile PR CI automation options", () => {
     }
 
     await drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }).tap();
+    await drawer.getByRole("switch", { name: "Prompt agent when your review is requested" }).tap();
     await drawer.getByRole("switch", { name: "Prompt agent when PR is closed" }).tap();
     await expect
       .poll(async () => apiClient.getTaskCIAutomationOptions(taskId))
-      .toMatchObject({ auto_fix_enabled: true, prompt_on_closed: true });
+      .toMatchObject({
+        auto_fix_enabled: true,
+        prompt_on_review_requested: true,
+        prompt_on_closed: true,
+      });
 
     await drawer.getByLabel("Edit auto-fix prompt for this task").tap();
     const promptDialog = testPage.getByRole("dialog", { name: "Auto-fix prompt" });
@@ -180,6 +192,7 @@ test.describe("mobile PR CI automation options", () => {
     await session.tapPRStatusChip();
 
     const drawer = session.prStatusChipDrawer();
+    await drawer.getByTestId("ci-review-follow-up-trigger").tap();
     await expect(
       drawer.getByRole("switch", { name: "Prompt agent when your review is requested" }),
     ).toBeVisible();

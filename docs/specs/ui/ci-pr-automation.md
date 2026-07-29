@@ -27,6 +27,13 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
   - `Prompt agent when PR is closed`
 - The automation section includes an info icon or equivalent help affordance that explains what each control watches, how often Kandev checks watched PRs, how feedback snapshots prevent duplicate prompts, and how auto-merge decides readiness.
 - The same controls are available anywhere the task PR CI popover is rendered, including the normal chat input status bar and passthrough toolbar surfaces.
+- The shared desktop popover and mobile drawer keep auto-fix and auto-merge in
+  the primary automation list. The three agent lifecycle prompt switches live
+  together in a collapsed `Review follow-up` section.
+- `Review follow-up` is presentation only. Its switches retain the same
+  task-wide behavior and remain reachable on desktop and mobile. When any of
+  its three options is enabled, the section opens so active automation is not
+  concealed.
 - `Auto-fix CI & address comments` causes Kandev to send or queue an agent prompt when a linked PR gets actionable CI or review feedback.
 - `Auto-merge when ready` causes Kandev to merge a linked PR only when the PR is open and not a draft, checks are passing, review requirements are satisfied, unresolved review threads are cleared, and the PR is cleanly mergeable.
 - `Prompt agent when your review is requested` follows the current connected

@@ -49,6 +49,11 @@ archive/delete cleanup purges reserved rows and advances a task-queue generation
 so stale accepted, reserved, or in-flight work cannot reappear after unarchive.
 This extends the existing queue without a new schema or subsystem.
 
+The 2026-07-29 UI refinement keeps all task-wide controls functional while
+grouping the three lifecycle prompt switches in a shared desktop/mobile
+`Review follow-up` disclosure. Auto-fix and auto-merge remain primary, and the
+disclosure opens whenever one of its options is enabled.
+
 ---
 
 ## Backend
@@ -560,6 +565,10 @@ Wave 10 (final lifecycle security remediation):
 Wave 11 (final review remediation):
 
 - [x] [task-19-final-review-remediation](task-19-final-review-remediation.md)
+
+Wave 12 (review follow-up presentation):
+
+- [x] [task-20-role-aware-automation-controls](task-20-role-aware-automation-controls.md)
 
 ---
 

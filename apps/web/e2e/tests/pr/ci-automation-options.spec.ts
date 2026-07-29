@@ -115,6 +115,10 @@ test.describe("PR CI automation options", () => {
       popover.getByRole("switch", { name: "Auto-fix CI and address comments" }),
     ).toBeVisible();
     await expect(popover.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
+    const reviewFollowUp = popover.getByTestId("ci-review-follow-up-trigger");
+    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
+    await reviewFollowUp.click();
+    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "true");
     await expect(
       popover.getByRole("switch", { name: "Prompt agent when your review is requested" }),
     ).toBeVisible();
@@ -127,6 +131,9 @@ test.describe("PR CI automation options", () => {
 
     await popover.getByRole("switch", { name: "Auto-fix CI and address comments" }).click();
     await popover.getByRole("switch", { name: "Auto-merge when ready" }).click();
+    await popover
+      .getByRole("switch", { name: "Prompt agent when your review is requested" })
+      .click();
     await popover.getByRole("switch", { name: "Prompt agent when PR is merged" }).click();
 
     await expect
@@ -134,6 +141,7 @@ test.describe("PR CI automation options", () => {
       .toMatchObject({
         auto_fix_enabled: true,
         auto_merge_enabled: true,
+        prompt_on_review_requested: true,
         prompt_on_merged: true,
       });
 
@@ -192,6 +200,7 @@ test.describe("PR CI automation options", () => {
 
     const session = await openTask(testPage, taskId);
     const popover = session.prTopbarPopover();
+    await popover.getByTestId("ci-review-follow-up-trigger").click();
     await expect(
       popover.getByRole("switch", { name: "Prompt agent when your review is requested" }),
     ).toBeVisible();
