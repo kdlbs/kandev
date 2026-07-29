@@ -45,6 +45,25 @@ describe("startup page websocket sync", () => {
 });
 
 describe("user settings websocket handler", () => {
+  it("updates LSP status location, normalizes unknown values, and preserves omissions", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ lsp_status_location: "status_bar" }),
+    );
+    expect(store.getState().userSettings.lspStatusLocation).toBe("status_bar");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.lspStatusLocation).toBe("status_bar");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        lsp_status_location: "sidebar",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.lspStatusLocation).toBe("toolbar");
+  });
+
   it("updates the List detail preference and preserves it when omitted", () => {
     const store = makeStore();
 

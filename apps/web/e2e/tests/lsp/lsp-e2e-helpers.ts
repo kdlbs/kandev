@@ -275,7 +275,9 @@ export async function openDesktopFile(
 }
 
 export async function openLspStatus(page: Page): Promise<Locator> {
-  const trigger = page.locator('[data-testid="lsp-status-button"]:visible');
+  const trigger = page
+    .locator('[data-testid="lsp-status-button"]:visible, [data-testid="app-status-lsp"]:visible')
+    .first();
   if ((await trigger.getAttribute("aria-expanded")) !== "true") {
     await trigger.click();
   }

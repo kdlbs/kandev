@@ -1,9 +1,72 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { lspClientManager, toLspLanguage, type LspStatus } from "@/lib/lsp/lsp-client-manager";
 import { EMPTY_LSP_PROGRESS, type LspProgressSnapshot } from "@/lib/lsp/lsp-progress";
 
 const DISABLED: LspStatus = { state: "disabled" };
+const startRequestGenerations = new Map<string, number>();
+
+function lspKey(sessionId: string | null, lspLanguage: string | null): string | null {
+  return sessionId && lspLanguage ? `${sessionId}:${lspLanguage}` : null;
+}
+
+function subscribeToLspKey(key: string | null, callback: () => void): () => void {
+  if (!key) return () => {};
+  return lspClientManager.onChange((changedKey) => {
+    if (changedKey === key) callback();
+  });
+}
+
+function requestLspStart(sessionId: string, lspLanguage: string): void {
+  const key = `${sessionId}:${lspLanguage}`;
+  startRequestGenerations.set(key, (startRequestGenerations.get(key) ?? 0) + 1);
+  lspClientManager.saveEnabledState(sessionId, lspLanguage);
+}
+
+function requestLspStop(sessionId: string, lspLanguage: string): void {
+  const key = `${sessionId}:${lspLanguage}`;
+  lspClientManager.stop(sessionId, lspLanguage);
+  startRequestGenerations.delete(key);
+  lspClientManager.clearEnabledState(sessionId, lspLanguage);
+}
+
+function toggleLsp(sessionId: string, lspLanguage: string): void {
+  const current = lspClientManager.getStatus(sessionId, lspLanguage);
+  if (
+    current.state === "disabled" ||
+    current.state === "error" ||
+    current.state === "unavailable"
+  ) {
+    requestLspStart(sessionId, lspLanguage);
+  } else if (
+    current.state === "ready" ||
+    current.state === "connecting" ||
+    current.state === "installing" ||
+    current.state === "starting"
+  ) {
+    requestLspStop(sessionId, lspLanguage);
+  }
+}
+
+export function useLspStatus(sessionId: string | null, lspLanguage: string | null) {
+  const key = lspKey(sessionId, lspLanguage);
+  const status = useSyncExternalStore(
+    (callback) => subscribeToLspKey(key, callback),
+    () =>
+      sessionId && lspLanguage ? lspClientManager.getStatus(sessionId, lspLanguage) : DISABLED,
+  );
+  const progress = useSyncExternalStore(
+    (callback) => subscribeToLspKey(key, callback),
+    () =>
+      sessionId && lspLanguage
+        ? lspClientManager.getProgress(sessionId, lspLanguage)
+        : EMPTY_LSP_PROGRESS,
+  );
+  const toggle = useCallback(() => {
+    if (sessionId && lspLanguage) toggleLsp(sessionId, lspLanguage);
+  }, [sessionId, lspLanguage]);
+  return { status, progress, toggle };
+}
 
 export function useLsp(
   sessionId: string | null,
@@ -18,37 +81,19 @@ export function useLsp(
   const lspServerConfigs = useAppStore((s) => s.userSettings.lspServerConfigs);
   const lspLanguage = toLspLanguage(monacoLanguage);
   const shouldAutoStart = lspLanguage ? lspAutoStartLanguages.includes(lspLanguage) : false;
-  const [retryGeneration, setRetryGeneration] = useState(0);
+  const key = lspKey(sessionId, lspLanguage);
   const isManuallyEnabled = useSyncExternalStore(
-    (cb) =>
-      lspClientManager.onChange((key) => {
-        if (key === `${sessionId}:${lspLanguage}`) cb();
-      }),
+    (callback) => subscribeToLspKey(key, callback),
     () =>
       sessionId && lspLanguage
         ? lspClientManager.isEnabledInStorage(sessionId, lspLanguage)
         : false,
   );
-
-  const status = useSyncExternalStore(
-    (cb) =>
-      lspClientManager.onChange((key) => {
-        if (key === `${sessionId}:${lspLanguage}`) cb();
-      }),
-    () =>
-      sessionId && lspLanguage ? lspClientManager.getStatus(sessionId, lspLanguage) : DISABLED,
+  const startRequestGeneration = useSyncExternalStore(
+    (callback) => subscribeToLspKey(key, callback),
+    () => (key ? (startRequestGenerations.get(key) ?? 0) : 0),
   );
-
-  const progress = useSyncExternalStore(
-    (cb) =>
-      lspClientManager.onChange((key) => {
-        if (key === `${sessionId}:${lspLanguage}`) cb();
-      }),
-    () =>
-      sessionId && lspLanguage
-        ? lspClientManager.getProgress(sessionId, lspLanguage)
-        : EMPTY_LSP_PROGRESS,
-  );
+  const { status, progress, toggle } = useLspStatus(sessionId, lspLanguage);
 
   // Each mounted matching editor owns one connection lease. Manual policy and
   // auto-start only decide whether the editor should acquire that lease.
@@ -62,30 +107,8 @@ export function useLsp(
     sessionId,
     lspLanguage,
     lspServerConfigs,
-    retryGeneration,
+    startRequestGeneration,
   ]);
-
-  // Manual toggle
-  const toggle = useCallback(() => {
-    if (!sessionId || !lspLanguage) return;
-    const current = lspClientManager.getStatus(sessionId, lspLanguage);
-    if (
-      current.state === "disabled" ||
-      current.state === "error" ||
-      current.state === "unavailable"
-    ) {
-      lspClientManager.saveEnabledState(sessionId, lspLanguage);
-      setRetryGeneration((generation) => generation + 1);
-    } else if (
-      current.state === "ready" ||
-      current.state === "connecting" ||
-      current.state === "installing" ||
-      current.state === "starting"
-    ) {
-      lspClientManager.stop(sessionId, lspLanguage);
-      lspClientManager.clearEnabledState(sessionId, lspLanguage);
-    }
-  }, [sessionId, lspLanguage]);
 
   return { status, progress, lspLanguage, toggle };
 }

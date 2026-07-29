@@ -78,6 +78,18 @@ func TestMapUserSettingsStateIncludesAppStatusBarOrder(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesLspStatusLocation(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{
+			LspStatusLocation: usermodels.LspStatusLocationStatusBar,
+		},
+	}, "workspace-1")
+
+	if got := state["lspStatusLocation"]; got != usermodels.LspStatusLocationStatusBar {
+		t.Fatalf("lspStatusLocation = %#v, want status_bar", got)
+	}
+}
+
 func TestMapUserSettingsStateIncludesSystemMetricsDisplayPreference(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{SystemMetricsDisplay: usermodels.SystemMetricsDisplaySettings{

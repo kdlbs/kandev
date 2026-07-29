@@ -2,6 +2,7 @@ import { act, cleanup, render } from "@testing-library/react";
 import { EditorState } from "@codemirror/state";
 import type { EditorView } from "@codemirror/view";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   consumePendingCursorPosition,
@@ -76,7 +77,7 @@ function createEditorView(content = CONTENT) {
   } as unknown as EditorView;
 }
 
-function renderEditor(props = baseProps) {
+function renderEditor(props: ComponentProps<typeof CodeMirrorCodeEditor> = baseProps) {
   return render(
     <TooltipProvider>
       <CodeMirrorCodeEditor {...props} />

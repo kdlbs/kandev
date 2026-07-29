@@ -18,6 +18,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
 import { EditableCard } from "@/components/settings/editable-card";
+import { LspStatusLocationSetting } from "@/components/settings/lsp-status-location-setting";
 import {
   EditorForm,
   type EditorFormState,
@@ -515,6 +516,7 @@ function getEditorsSaveRevision(state: EditorsSettingsState): string {
     defaultEditorId: state.defaultEditorId,
     lspAutoStartLanguages: state.lspAutoStartLanguages,
     lspAutoInstallLanguages: state.lspAutoInstallLanguages,
+    lspStatusLocation: state.lspStatusLocation,
     lspConfigStrings: state.lspConfigStrings,
   });
 }
@@ -577,6 +579,11 @@ export function EditorsSettings() {
             baselineLspAutoInstall={state.baselineLspAutoInstall}
             toggleAutoStart={toggleAutoStart}
             toggleAutoInstall={toggleAutoInstall}
+          />
+          <LspStatusLocationSetting
+            value={state.lspStatusLocation}
+            baseline={state.baselineLspStatusLocation}
+            onChange={state.setLspStatusLocation}
           />
           <LspServerConfigSection
             lspConfigStrings={state.lspConfigStrings}

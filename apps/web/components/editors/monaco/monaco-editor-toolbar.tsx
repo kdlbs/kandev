@@ -238,6 +238,7 @@ interface MonacoEditorToolbarProps {
   lspStatus: LspStatus;
   lspProgress: LspProgressSnapshot;
   lspLanguage: string | null;
+  showLspStatus?: boolean;
   onToggleLsp: () => void;
   onToggleWrap: () => void;
   onToggleDiffIndicators: () => void;
@@ -264,6 +265,7 @@ export function MonacoEditorToolbar({
   lspStatus,
   lspProgress,
   lspLanguage,
+  showLspStatus = true,
   onToggleLsp,
   onToggleWrap,
   onToggleDiffIndicators,
@@ -290,12 +292,14 @@ export function MonacoEditorToolbar({
             sessionId={sessionId}
             commentCount={commentCount}
           />
-          <LspStatusButton
-            status={lspStatus}
-            progress={lspProgress}
-            lspLanguage={lspLanguage}
-            onToggle={onToggleLsp}
-          />
+          {showLspStatus ? (
+            <LspStatusButton
+              status={lspStatus}
+              progress={lspProgress}
+              lspLanguage={lspLanguage}
+              onToggle={onToggleLsp}
+            />
+          ) : null}
           {(isDirty || hasVcsDiff) && (
             <DiffIndicatorsButton
               isVisible={showDiffIndicators}

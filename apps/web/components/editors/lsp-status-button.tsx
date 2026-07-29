@@ -32,7 +32,7 @@ import { getLspUnavailableSetupHint } from "@/lib/lsp/lsp-json-rpc";
 
 const ICON_CLASS = "h-3.5 w-3.5";
 
-function StatusIcon({
+export function LspStatusIcon({
   status,
   progress,
 }: {
@@ -61,7 +61,7 @@ function StatusIcon({
   }
 }
 
-function useLiveNow(enabled: boolean): number {
+export function useLspLiveNow(enabled: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (!enabled) return;
@@ -91,8 +91,8 @@ function ConnectionDetails({
         Connection
       </p>
       <div className="flex items-center gap-2">
-        <StatusIcon status={status} progress={progress} />
-        <span className="font-medium">{getLspConnectionLabel(status)}</span>
+        <LspStatusIcon status={status} progress={progress} />
+        <span className="font-medium">{getLspConnectionLabel(status, progress)}</span>
         <span className="ml-auto font-mono text-[0.625rem] text-muted-foreground">
           {lspLanguage}
         </span>
@@ -152,13 +152,15 @@ function ActiveProgress({
 function ProjectProgress({
   status,
   progress,
+  lspLanguage,
 }: {
   status: LspStatus;
   progress: LspProgressSnapshot;
+  lspLanguage: string;
 }) {
   const tracked = progress.active[0]?.startedAt ?? progress.initializingSince;
-  const now = useLiveNow(tracked !== null);
-  const view = getLspProgressView(status, progress, now);
+  const now = useLspLiveNow(tracked !== null);
+  const view = getLspProgressView(status, progress, now, lspLanguage);
 
   return (
     <section
@@ -166,6 +168,7 @@ function ProjectProgress({
       className="space-y-2"
       data-testid="lsp-project-progress"
       data-lsp-progress-kind={view.kind}
+      data-lsp-initialization-stage={view.kind === "initializing" ? view.stage : undefined}
       aria-live="polite"
     >
       <p
@@ -178,18 +181,31 @@ function ProjectProgress({
       {view.kind === "initializing" ? (
         <>
           <div className="flex items-start gap-2">
-            <IconLoader2
-              className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-blue-500"
-              aria-hidden
-            />
+            {view.stage === "long_running" ? (
+              <IconAlertTriangle
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500"
+                aria-hidden
+              />
+            ) : (
+              <IconLoader2
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-blue-500"
+                aria-hidden
+              />
+            )}
             <div className="space-y-1">
               <p className="font-medium">{view.title}</p>
               <p className="text-pretty text-muted-foreground">{view.description}</p>
             </div>
           </div>
           <p className="text-muted-foreground tabular-nums">Elapsed {view.elapsed}</p>
-          <p className="text-pretty text-muted-foreground">
-            Cross-file results may be incomplete until initialization finishes.
+          <p
+            className={
+              view.stage === "long_running"
+                ? "text-pretty text-amber-700 dark:text-amber-300"
+                : "text-pretty text-muted-foreground"
+            }
+          >
+            {view.guidance}
           </p>
         </>
       ) : null}
@@ -215,7 +231,7 @@ function ProjectProgress({
   );
 }
 
-function LspProgressDetails({
+export function LspProgressDetails({
   status,
   progress,
   lspLanguage,
@@ -233,7 +249,7 @@ function LspProgressDetails({
     <div className="space-y-3" data-testid="lsp-progress-details">
       <ConnectionDetails status={status} lspLanguage={lspLanguage} progress={progress} />
       <div className="border-t" />
-      <ProjectProgress status={status} progress={progress} />
+      <ProjectProgress status={status} progress={progress} lspLanguage={lspLanguage} />
       <Button
         type="button"
         variant={action.label === "Stop" ? "outline" : "default"}
@@ -265,7 +281,7 @@ function StatusTrigger({
   touch,
   ...triggerProps
 }: StatusTriggerProps) {
-  const label = `Language server: ${getLspConnectionLabel(status)}. Open status`;
+  const label = `Language server: ${getLspConnectionLabel(status, progress)}. Open status`;
   return (
     <Button
       type="button"
@@ -283,7 +299,7 @@ function StatusTrigger({
       aria-expanded={open}
       {...triggerProps}
     >
-      <StatusIcon status={status} progress={progress} />
+      <LspStatusIcon status={status} progress={progress} />
     </Button>
   );
 }
@@ -295,6 +311,47 @@ type LspStatusButtonProps = {
   onToggle: () => void;
 };
 
+export type LspStatusDetailsProps = {
+  status: LspStatus;
+  progress: LspProgressSnapshot;
+  lspLanguage: string;
+  onToggle: () => void;
+};
+
+export function LspStatusPopoverContent({
+  status,
+  progress,
+  lspLanguage,
+  onToggle,
+  align = "end",
+  side,
+}: LspStatusDetailsProps & Pick<ComponentProps<typeof PopoverContent>, "align" | "side">) {
+  return (
+    <PopoverContent
+      align={align}
+      side={side}
+      sideOffset={8}
+      className="w-80 gap-0 p-0"
+      data-testid="lsp-status-popover"
+      aria-label="Language server status"
+    >
+      <div className="border-b px-3 py-2.5">
+        <p className="font-medium">Language server</p>
+        <p className="text-muted-foreground">Connection and project analysis</p>
+      </div>
+      <div className="p-3">
+        <LspProgressDetails
+          status={status}
+          progress={progress}
+          lspLanguage={lspLanguage}
+          onToggle={onToggle}
+          touch={false}
+        />
+      </div>
+    </PopoverContent>
+  );
+}
+
 function LspStatusPopover({
   status,
   progress,
@@ -302,7 +359,7 @@ function LspStatusPopover({
   onToggle,
 }: LspStatusButtonProps & { lspLanguage: string }) {
   const [open, setOpen] = useState(false);
-  const tooltip = `Language server: ${getLspConnectionLabel(status)}`;
+  const tooltip = `Language server: ${getLspConnectionLabel(status, progress)}`;
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Tooltip open={open ? false : undefined}>
@@ -319,27 +376,12 @@ function LspStatusPopover({
         </TooltipTrigger>
         <TooltipContent>{tooltip}</TooltipContent>
       </Tooltip>
-      <PopoverContent
-        align="end"
-        sideOffset={8}
-        className="w-80 gap-0 p-0"
-        data-testid="lsp-status-popover"
-        aria-label="Language server status"
-      >
-        <div className="border-b px-3 py-2.5">
-          <p className="font-medium">Language server</p>
-          <p className="text-muted-foreground">Connection and project analysis</p>
-        </div>
-        <div className="p-3">
-          <LspProgressDetails
-            status={status}
-            progress={progress}
-            lspLanguage={lspLanguage}
-            onToggle={onToggle}
-            touch={false}
-          />
-        </div>
-      </PopoverContent>
+      <LspStatusPopoverContent
+        status={status}
+        progress={progress}
+        lspLanguage={lspLanguage}
+        onToggle={onToggle}
+      />
     </Popover>
   );
 }

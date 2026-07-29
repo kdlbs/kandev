@@ -252,6 +252,49 @@ func TestApplyLSPSettingsRejectsManualOnlyAutoInstallLanguage(t *testing.T) {
 	}
 }
 
+func TestApplyLspStatusLocation(t *testing.T) {
+	t.Run("omission preserves saved value", func(t *testing.T) {
+		settings := &models.UserSettings{LspStatusLocation: models.LspStatusLocationStatusBar}
+		if err := applyLSPSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply LSP settings: %v", err)
+		}
+		if settings.LspStatusLocation != models.LspStatusLocationStatusBar {
+			t.Fatalf("LspStatusLocation = %q, want status_bar", settings.LspStatusLocation)
+		}
+	})
+
+	t.Run("valid values are accepted", func(t *testing.T) {
+		for _, value := range []string{
+			models.LspStatusLocationToolbar,
+			models.LspStatusLocationStatusBar,
+		} {
+			settings := &models.UserSettings{LspStatusLocation: models.LspStatusLocationToolbar}
+			err := applyLSPSettings(settings, &UpdateUserSettingsRequest{
+				LspStatusLocation: ptr(value),
+			})
+			if err != nil {
+				t.Fatalf("apply %q: %v", value, err)
+			}
+			if settings.LspStatusLocation != value {
+				t.Fatalf("LspStatusLocation = %q, want %q", settings.LspStatusLocation, value)
+			}
+		}
+	})
+
+	t.Run("invalid value is rejected without mutation", func(t *testing.T) {
+		settings := &models.UserSettings{LspStatusLocation: models.LspStatusLocationToolbar}
+		err := applyLSPSettings(settings, &UpdateUserSettingsRequest{
+			LspStatusLocation: ptr("sidebar"),
+		})
+		if err == nil || !strings.Contains(err.Error(), "lsp_status_location") {
+			t.Fatalf("apply invalid location error = %v, want lsp_status_location validation", err)
+		}
+		if settings.LspStatusLocation != models.LspStatusLocationToolbar {
+			t.Fatalf("LspStatusLocation = %q after invalid patch, want toolbar", settings.LspStatusLocation)
+		}
+	})
+}
+
 func TestApplyBasicSettingsMCPTaskAgentProfileDefault(t *testing.T) {
 	t.Run("omission preserves saved value", func(t *testing.T) {
 		settings := &models.UserSettings{MCPTaskAgentProfileDefault: models.MCPTaskAgentProfileDefaultWorkspaceDefault}
@@ -1118,6 +1161,26 @@ func TestPublishUserSettingsEventIncludesAppStatusBarOrder(t *testing.T) {
 	}
 	if got, ok := eventData["app_status_bar_order"].(models.AppStatusBarOrder); !ok || fmt.Sprint(got) != fmt.Sprint(want) {
 		t.Fatalf("app_status_bar_order = %#v, want %#v", eventData["app_status_bar_order"], want)
+	}
+}
+
+func TestPublishUserSettingsEventIncludesLspStatusLocation(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(&recordingUserRepository{}, eventBus, log)
+	svc.publishUserSettingsEvent(context.Background(), &models.UserSettings{
+		LspStatusLocation: models.LspStatusLocationStatusBar,
+	})
+
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
+	}
+	if got := eventData["lsp_status_location"]; got != models.LspStatusLocationStatusBar {
+		t.Fatalf("lsp_status_location = %#v, want status_bar", got)
 	}
 }
 

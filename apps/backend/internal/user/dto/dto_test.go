@@ -80,6 +80,46 @@ func TestAppStatusBarOrderDTOAndPatchSemantics(t *testing.T) {
 	})
 }
 
+func TestLspStatusLocationDTOAndPatchSemantics(t *testing.T) {
+	t.Run("response normalizes missing and unknown values to toolbar", func(t *testing.T) {
+		for _, value := range []string{"", "future_location"} {
+			got := FromUserSettings(&models.UserSettings{LspStatusLocation: value}).LspStatusLocation
+			if got != models.LspStatusLocationToolbar {
+				t.Fatalf("LspStatusLocation = %q, want toolbar", got)
+			}
+		}
+	})
+
+	t.Run("response preserves status bar", func(t *testing.T) {
+		got := FromUserSettings(&models.UserSettings{
+			LspStatusLocation: models.LspStatusLocationStatusBar,
+		}).LspStatusLocation
+		if got != models.LspStatusLocationStatusBar {
+			t.Fatalf("LspStatusLocation = %q, want status_bar", got)
+		}
+	})
+
+	t.Run("omitted patch stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.LspStatusLocation != nil {
+			t.Fatalf("LspStatusLocation = %#v, want nil", req.LspStatusLocation)
+		}
+	})
+
+	t.Run("explicit patch is retained", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"lsp_status_location":"status_bar"}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.LspStatusLocation == nil || *req.LspStatusLocation != models.LspStatusLocationStatusBar {
+			t.Fatalf("LspStatusLocation = %#v, want status_bar", req.LspStatusLocation)
+		}
+	})
+}
+
 func TestUpdateUserSettingsRequestSystemMetricsDisplayPreservesOmittedFields(t *testing.T) {
 	var req UpdateUserSettingsRequest
 	if err := json.Unmarshal([]byte(`{"system_metrics_display":{"show_in_topbar":true}}`), &req); err != nil {

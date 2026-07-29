@@ -2,11 +2,19 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
+import { defaultFeaturesState } from "@/lib/state/slices/features/features-slice";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import { pluginRegistry } from "@/lib/plugins/registry";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import type { AppStatusBarSlotProps } from "@/lib/plugins/types";
 import { AppStatusDrawer } from "./app-status-drawer";
-import { APP_STATUS_CONNECTION_ID, APP_STATUS_METRICS_ID } from "./app-status-bar-order";
+import {
+  APP_STATUS_CONNECTION_ID,
+  APP_STATUS_LSP_ID,
+  APP_STATUS_METRICS_ID,
+} from "./app-status-bar-order";
+
+const lspHooks = vi.hoisted(() => ({ useLspStatus: vi.fn() }));
 
 vi.mock("@kandev/ui/drawer", () => ({
   Drawer: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -20,11 +28,41 @@ vi.mock("@kandev/ui/drawer", () => ({
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isMobile: true }),
+  useResponsiveBreakpoint: () => ({ isFinePointer: false, isMobile: true }),
+}));
+
+vi.mock("@/hooks/use-lsp", () => ({
+  useLspStatus: lspHooks.useLspStatus,
 }));
 
 const LEFT_PLUGIN_ID = "drawer-left";
 const RIGHT_PLUGIN_ID = "drawer-right";
+
+function renderPhoneLspDrawer() {
+  useDockviewStore.setState({ activeFilePath: "src/Main.kt", activeFileRepo: "app" });
+  render(
+    <StateProvider
+      initialState={{
+        features: { ...defaultFeaturesState.features, appStatusBar: true },
+        userSettings: {
+          ...defaultSettingsState.userSettings,
+          lspStatusLocation: "status_bar",
+        },
+      }}
+    >
+      <TooltipProvider>
+        <AppStatusDrawer
+          pathname="/tasks/task-1"
+          activeWorkspaceId="workspace-1"
+          activeTaskId="task-1"
+          activeSessionId="session-1"
+          open
+          onOpenChange={() => {}}
+        />
+      </TooltipProvider>
+    </StateProvider>,
+  );
+}
 
 function renderConnectionOnlyDrawer() {
   pluginRegistry
@@ -64,6 +102,8 @@ describe("AppStatusDrawer", () => {
     cleanup();
     pluginRegistry.unregisterPlugin(LEFT_PLUGIN_ID);
     pluginRegistry.unregisterPlugin(RIGHT_PLUGIN_ID);
+    useDockviewStore.setState({ activeFilePath: null, activeFileRepo: null });
+    lspHooks.useLspStatus.mockReset();
   });
 
   it("mirrors saved left then right order as non-draggable 44px rows", () => {
@@ -155,5 +195,12 @@ describe("AppStatusDrawer", () => {
       .getByTestId("app-status-drawer")
       .querySelectorAll<HTMLElement>("[data-status-item-id]");
     expect(Array.from(rows, (row) => row.dataset.statusItemId)).toEqual([APP_STATUS_CONNECTION_ID]);
+  });
+
+  it("does not mount an LSP status item or lease in the phone drawer", () => {
+    renderPhoneLspDrawer();
+
+    expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
+    expect(lspHooks.useLspStatus).not.toHaveBeenCalled();
   });
 });

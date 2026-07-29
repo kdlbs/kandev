@@ -6,6 +6,8 @@ export type LspLifecycleAction = {
   enabled: boolean;
 };
 
+export const LSP_LONG_INITIALIZATION_MS = 60_000;
+
 export type LspProgressView =
   | {
       kind: "active";
@@ -15,7 +17,14 @@ export type LspProgressView =
       elapsed: string;
       concurrentCount: number;
     }
-  | { kind: "initializing"; title: string; description: string; elapsed: string }
+  | {
+      kind: "initializing";
+      stage: "initialize_pending" | "long_running";
+      title: string;
+      description: string;
+      guidance: string;
+      elapsed: string;
+    }
   | {
       kind: "completed";
       title: string;
@@ -35,7 +44,7 @@ export function formatLspElapsed(elapsedMs: number): string {
   return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
-export function getLspConnectionLabel(status: LspStatus): string {
+export function getLspConnectionLabel(status: LspStatus, progress?: LspProgressSnapshot): string {
   switch (status.state) {
     case "disabled":
       return "Off";
@@ -44,7 +53,9 @@ export function getLspConnectionLabel(status: LspStatus): string {
     case "installing":
       return "Installing language server";
     case "starting":
-      return "Starting language server";
+      return progress?.initializingSince !== null && progress?.initializingSince !== undefined
+        ? "Server process started"
+        : "Starting language server";
     case "ready":
       return "Connected";
     case "stopping":
@@ -54,6 +65,27 @@ export function getLspConnectionLabel(status: LspStatus): string {
     case "error":
       return "Error";
   }
+}
+
+export function getLspCompactSummary(
+  status: LspStatus,
+  snapshot: LspProgressSnapshot,
+  now: number,
+): string {
+  const active = snapshot.active[0];
+  if (active) {
+    const suffix =
+      active.percentage === null
+        ? formatLspElapsed(now - active.startedAt)
+        : `${active.percentage}%`;
+    return `${active.title} · ${suffix}`;
+  }
+  if (snapshot.initializingSince !== null) {
+    return `${getLspConnectionLabel(status, snapshot)} · ${formatLspElapsed(
+      now - snapshot.initializingSince,
+    )}`;
+  }
+  return getLspConnectionLabel(status, snapshot);
 }
 
 export function getLspLifecycleAction(status: LspStatus): LspLifecycleAction {
@@ -70,10 +102,19 @@ export function getLspLifecycleAction(status: LspStatus): LspLifecycleAction {
   }
 }
 
+function getInitializationGuidance(longRunning: boolean, language?: string): string {
+  if (!longRunning) return "Cross-file features become available after initialization completes.";
+  if (language?.toLowerCase() === "kotlin") {
+    return "Kotlin LSP may be importing the Gradle project. Cross-file features remain unavailable until initialization completes.";
+  }
+  return "Cross-file features remain unavailable until initialization completes.";
+}
+
 export function getLspProgressView(
   status: LspStatus,
   snapshot: LspProgressSnapshot,
   now: number,
+  language?: string,
 ): LspProgressView {
   const active = snapshot.active[0];
   if (active) {
@@ -88,11 +129,17 @@ export function getLspProgressView(
   }
 
   if (snapshot.initializingSince !== null) {
+    const elapsedMs = Math.max(0, now - snapshot.initializingSince);
+    const longRunning = elapsedMs >= LSP_LONG_INITIALIZATION_MS;
     return {
       kind: "initializing",
-      title: "Preparing project…",
-      description: "Waiting for the language server to finish initializing.",
-      elapsed: formatLspElapsed(now - snapshot.initializingSince),
+      stage: longRunning ? "long_running" : "initialize_pending",
+      title: longRunning ? "Initialization is taking longer than usual" : "Server process started",
+      description: longRunning
+        ? "The server process is still running while Kandev waits for LSP initialize."
+        : "Waiting for the language server to respond to the LSP initialize request.",
+      guidance: getInitializationGuidance(longRunning, language),
+      elapsed: formatLspElapsed(elapsedMs),
     };
   }
 

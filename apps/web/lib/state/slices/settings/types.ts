@@ -10,6 +10,7 @@ import type {
   NotificationProvider,
   SavedLayout,
   ToolStatus,
+  LspStatusLocation,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
@@ -194,6 +195,7 @@ export type UserSettingsState = {
   lspAutoStartLanguages: string[];
   lspAutoInstallLanguages: string[];
   lspServerConfigs: Record<string, Record<string, unknown>>;
+  lspStatusLocation: LspStatusLocation;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
   sidebarActiveViewId: string | null;

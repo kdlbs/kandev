@@ -68,7 +68,7 @@ vi.mock("@/lib/lsp/lsp-client-manager", () => ({
   toLspLanguage: (language: string) => (language === "typescript" ? language : null),
 }));
 
-import { useLsp } from "./use-lsp";
+import { useLsp, useLspStatus } from "./use-lsp";
 
 const SESSION_ID = "session";
 const LANGUAGE = "typescript";
@@ -92,6 +92,36 @@ afterEach(() => {
 });
 
 describe("useLsp manual policy leases", () => {
+  it("lets a status-only subscriber control the mounted editor lease", async () => {
+    const editor = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
+    const status = renderHook(() => useLspStatus(SESSION_ID, LANGUAGE));
+
+    act(() => status.result.current.toggle());
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
+
+    act(() => {
+      mocks.state.status = {
+        state: "error",
+        reason: "server crashed",
+      } as typeof mocks.disabledStatus;
+      for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
+    });
+    act(() => status.result.current.toggle());
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      mocks.state.status = { state: "ready" } as typeof mocks.disabledStatus;
+      for (const listener of mocks.changeListeners) listener(`${SESSION_ID}:${LANGUAGE}`);
+    });
+    act(() => status.result.current.toggle());
+    expect(mocks.stop).toHaveBeenCalledOnce();
+    expect(mocks.clearEnabledState).toHaveBeenCalledOnce();
+
+    status.unmount();
+    expect(mocks.connect).toHaveBeenCalledTimes(2);
+    editor.unmount();
+  });
+
   it("gives every mounted matching editor a lease when manually enabled", async () => {
     const first = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
     const second = renderHook(() => useLsp(SESSION_ID, LANGUAGE));

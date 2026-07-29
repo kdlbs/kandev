@@ -3,12 +3,19 @@
 import { useMemo, type ReactNode } from "react";
 import { StatusSurfaceMetrics } from "@/components/system-metrics/status-surface-metrics";
 import { useAppStore } from "@/components/state-provider";
+import { useLspStatusPlacement } from "@/hooks/use-lsp-status-placement";
+import { getMonacoLanguage } from "@/lib/editor/language-map";
+import { toLspLanguage } from "@/lib/lsp/lsp-client-manager";
+import type { EffectiveLspStatusPlacement } from "@/lib/lsp/lsp-status-placement";
 import { usePluginRegistry, type PluginSlotRegistration } from "@/lib/plugins/registry";
 import type { AppStatusBarSlotProps } from "@/lib/plugins/types";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import { ConnectionStatusItem } from "./connection-status-item";
+import { LspStatusItem } from "./lsp-status-item";
 import { AppStatusBarPluginContribution } from "./app-status-bar-plugin-slots";
 import {
   APP_STATUS_CONNECTION_ID,
+  APP_STATUS_LSP_ID,
   APP_STATUS_METRICS_ID,
   type AppStatusItemDescriptor,
 } from "./app-status-bar-order";
@@ -34,8 +41,19 @@ export function useAppStatusItems(
 ): AppStatusItem[] {
   const registry = usePluginRegistry();
   const registryVersion = registry.getVersion();
+  const lspPlacement = useLspStatusPlacement();
+  const activeFilePath = useDockviewStore((state) => state.activeFilePath);
   const metricsEnabled = useAppStore(
     (state) => state.userSettings.systemMetricsDisplay.showInTopbar,
+  );
+  const activeLsp = useMemo(
+    () =>
+      resolveActiveLspStatusItem({
+        placement: lspPlacement,
+        activeSessionId: context.activeSessionId,
+        activeFilePath,
+      }),
+    [activeFilePath, context.activeSessionId, lspPlacement],
   );
 
   return useMemo(() => {
@@ -45,10 +63,31 @@ export function useAppStatusItems(
     return [
       connectionItem(),
       ...left.map((registration) => pluginItem(registration, "left", context)),
+      ...(activeLsp ? [lspItem(activeLsp)] : []),
       ...(metricsEnabled ? [metricsItem()] : []),
       ...right.map((registration) => pluginItem(registration, "right", context)),
     ];
-  }, [connectionOnly, context, metricsEnabled, registry, registryVersion]);
+  }, [activeLsp, connectionOnly, context, metricsEnabled, registry, registryVersion]);
+}
+
+type ActiveLspStatusItem = {
+  sessionId: string;
+  monacoLanguage: string;
+};
+
+export function resolveActiveLspStatusItem({
+  placement,
+  activeSessionId,
+  activeFilePath,
+}: {
+  placement: EffectiveLspStatusPlacement;
+  activeSessionId: string | null;
+  activeFilePath: string | null;
+}): ActiveLspStatusItem | null {
+  if (placement !== "status_bar" || !activeSessionId || !activeFilePath) return null;
+  const monacoLanguage = getMonacoLanguage(activeFilePath);
+  if (!toLspLanguage(monacoLanguage)) return null;
+  return { sessionId: activeSessionId, monacoLanguage };
 }
 
 function connectionItem(): AppStatusItem {
@@ -56,6 +95,14 @@ function connectionItem(): AppStatusItem {
     id: APP_STATUS_CONNECTION_ID,
     defaultSide: "left",
     render: ({ presentation }) => <ConnectionStatusItem presentation={presentation} />,
+  };
+}
+
+function lspItem(active: ActiveLspStatusItem): AppStatusItem {
+  return {
+    id: APP_STATUS_LSP_ID,
+    defaultSide: "right",
+    render: () => <LspStatusItem {...active} />,
   };
 }
 

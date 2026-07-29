@@ -188,10 +188,40 @@ test.describe("LSP file intelligence", () => {
     await expect(projectProgress).toHaveAttribute("data-lsp-progress-kind", "initializing", {
       timeout: 15_000,
     });
-    await expect(projectProgress).toContainText("Preparing project…");
+    await expect(projectProgress).toHaveAttribute(
+      "data-lsp-initialization-stage",
+      "initialize_pending",
+    );
+    await expect(projectProgress).toContainText("Server process started");
+    await expect(projectProgress).toContainText(
+      "Waiting for the language server to respond to the LSP initialize request.",
+    );
     await expect(projectProgress).toContainText(/Elapsed \d+s/);
     await expect(projectProgress.getByTestId("lsp-work-progress-bar")).toHaveCount(0);
     await expect(projectProgress).not.toContainText(/ETA|time remaining/i);
+    await expect(surface.getByTestId("lsp-lifecycle-action")).toHaveAttribute(
+      "data-lsp-action",
+      "stop",
+    );
+    await expect(surface.getByTestId("lsp-lifecycle-action")).toBeEnabled();
+
+    await testPage.clock.setFixedTime(Date.now() + 61_000);
+    await expect(projectProgress).toHaveAttribute("data-lsp-initialization-stage", "long_running", {
+      timeout: 5_000,
+    });
+    await expect(projectProgress).toContainText("Initialization is taking longer than usual");
+    await expect(projectProgress).toContainText("Kotlin LSP may be importing the Gradle project");
+    await expect(projectProgress).toContainText(
+      "Cross-file features remain unavailable until initialization completes.",
+    );
+    await expect(projectProgress.getByTestId("lsp-work-progress-bar")).toHaveCount(0);
+    await expect(projectProgress).not.toContainText(/ETA|time remaining|\d+%/i);
+    await expect(statusButton).toHaveAttribute("data-lsp-state", "starting");
+    await expect(surface.getByTestId("lsp-lifecycle-action")).toHaveAttribute(
+      "data-lsp-action",
+      "stop",
+    );
+    await expect(surface.getByTestId("lsp-lifecycle-action")).toBeEnabled();
 
     releaseFakeLspInitialization(backend);
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
@@ -201,6 +231,87 @@ test.describe("LSP file intelligence", () => {
     await expect(projectProgress.getByTestId("lsp-work-progress-bar")).toHaveCount(0);
 
     await performLspAction(testPage, "stop");
+  });
+
+  test("persists status-bar placement and follows the active editor", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    const initial = await apiClient.getUserSettings();
+    const initialLocation =
+      initial.settings.lsp_status_location === "status_bar" ? "status_bar" : "toolbar";
+    await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      lsp_status_location: "toolbar",
+    });
+
+    try {
+      await testPage.goto(EDITORS_SETTINGS_PATH);
+      await expect(testPage.getByRole("heading", { name: "Editors", exact: true })).toBeVisible();
+
+      const statusBarChoice = testPage.getByRole("radio", {
+        name: /Application status bar/,
+      });
+      await expect(statusBarChoice).not.toBeChecked();
+      await statusBarChoice.click();
+      await expect(
+        testPage.getByRole("radiogroup", { name: "LSP status location" }).locator(".."),
+      ).toHaveAttribute("data-settings-dirty", "true");
+
+      const floatingSave = testPage.getByTestId("settings-floating-save");
+      await floatingSave.getByRole("button", { name: "Save changes" }).click();
+      await expect(floatingSave).not.toBeVisible({ timeout: 15_000 });
+      expect((await apiClient.getUserSettings()).settings.lsp_status_location).toBe("status_bar");
+
+      await testPage.reload();
+      await expect(testPage.getByRole("radio", { name: /Application status bar/ })).toBeChecked();
+
+      installFakeKotlinLsp(backend);
+      const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
+        title: "Kotlin LSP Status Bar Placement",
+        filePaths: ["Main.kt", "README.md"],
+        fileContents: ['package e2e\n\nfun main() = println("status")\n', "# Unsupported editor\n"],
+      });
+      await openDesktopFile(testPage, task.session, task.filePaths[0]);
+
+      await expect(testPage.getByTestId("lsp-status-button")).toHaveCount(0);
+      const statusItem = testPage.getByTestId("app-status-lsp");
+      await expect(statusItem).toBeVisible();
+      await expect(statusItem).toHaveAttribute("data-lsp-language", "kotlin");
+      await expect(testPage.locator('[data-status-item-id="builtin:lsp"]')).toHaveAttribute(
+        "data-status-side",
+        "right",
+      );
+
+      await performLspAction(testPage, "start");
+      await expect(statusItem).toHaveAttribute("data-lsp-state", "ready", {
+        timeout: 15_000,
+      });
+      await expect(await openLspStatus(testPage)).toContainText(/kotlin/i);
+      const kotlinPreview = testPage.getByTestId("preview-tab-file-editor");
+      await kotlinPreview.dblclick();
+      await expect(kotlinPreview).not.toHaveAttribute(
+        "title",
+        "Double-click to keep this tab open",
+      );
+
+      await openDesktopFile(testPage, task.session, task.filePaths[1]);
+      await expect(statusItem).toHaveCount(0);
+      await task.session.clickSessionChatTab();
+      await expect(statusItem).toHaveCount(0);
+
+      await testPage
+        .locator(".dv-default-tab", { hasText: path.basename(task.filePaths[0]) })
+        .click();
+      await expect(statusItem).toHaveAttribute("data-lsp-state", "ready");
+      await performLspAction(testPage, "stop");
+      await expect(statusItem).toHaveAttribute("data-lsp-state", "disabled");
+    } finally {
+      await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+        lsp_status_location: initialLocation,
+      });
+    }
   });
 
   test("runs Kotlin intelligence through the task host", async ({

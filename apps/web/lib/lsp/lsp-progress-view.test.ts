@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import type { LspProgressSnapshot } from "./lsp-progress";
 import {
   formatLspElapsed,
+  getLspCompactSummary,
   getLspConnectionLabel,
   getLspLifecycleAction,
   getLspProgressView,
@@ -19,6 +20,37 @@ it("formats elapsed time without estimating time remaining", () => {
   expect(formatLspElapsed(9_900)).toBe("9s");
   expect(formatLspElapsed(65_000)).toBe("1m 05s");
   expect(formatLspElapsed(3_725_000)).toBe("1h 02m");
+});
+
+it("formats compact live summaries for the application status bar", () => {
+  expect(
+    getLspCompactSummary(
+      { state: "starting" },
+      { ...EMPTY_PROGRESS, initializingSince: 2_000 },
+      67_000,
+    ),
+  ).toBe("Server process started · 1m 05s");
+
+  expect(
+    getLspCompactSummary(
+      { state: "ready" },
+      {
+        ...EMPTY_PROGRESS,
+        active: [
+          {
+            token: "import",
+            title: "Importing project",
+            message: "Resolving modules",
+            percentage: 42,
+            startedAt: 2_000,
+          },
+        ],
+      },
+      67_000,
+    ),
+  ).toBe("Importing project · 42%");
+
+  expect(getLspCompactSummary({ state: "ready" }, EMPTY_PROGRESS, 67_000)).toBe("Connected");
 });
 
 it("keeps connection labels and lifecycle actions separate from project work", () => {
@@ -77,18 +109,45 @@ it("presents the oldest active server item without averaging concurrent work", (
   });
 });
 
-it("shows locally timed initialization without inventing server progress", () => {
-  expect(
-    getLspProgressView(
-      { state: "starting" },
-      { ...EMPTY_PROGRESS, initializingSince: 2_000 },
-      11_000,
-    ),
-  ).toEqual({
+it("discloses that the server process launched while initialize is pending", () => {
+  const progress = { ...EMPTY_PROGRESS, initializingSince: 2_000 };
+
+  expect(getLspConnectionLabel({ state: "starting" }, progress)).toBe("Server process started");
+  expect(getLspProgressView({ state: "starting" }, progress, 61_999, "kotlin")).toEqual({
     kind: "initializing",
-    title: "Preparing project…",
-    description: "Waiting for the language server to finish initializing.",
-    elapsed: "9s",
+    stage: "initialize_pending",
+    title: "Server process started",
+    description: "Waiting for the language server to respond to the LSP initialize request.",
+    guidance: "Cross-file features become available after initialization completes.",
+    elapsed: "59s",
+  });
+  expect(getLspLifecycleAction({ state: "starting" })).toEqual({
+    label: "Stop",
+    enabled: true,
+  });
+});
+
+it("warns at 60 seconds without timing out or inventing Kotlin progress", () => {
+  const view = getLspProgressView(
+    { state: "starting" },
+    { ...EMPTY_PROGRESS, initializingSince: 2_000 },
+    62_000,
+    "kotlin",
+  );
+
+  expect(view).toEqual({
+    kind: "initializing",
+    stage: "long_running",
+    title: "Initialization is taking longer than usual",
+    description: "The server process is still running while Kandev waits for LSP initialize.",
+    guidance:
+      "Kotlin LSP may be importing the Gradle project. Cross-file features remain unavailable until initialization completes.",
+    elapsed: "1m 00s",
+  });
+  expect(JSON.stringify(view).toLowerCase()).not.toMatch(/eta|time remaining|percentage|indexing/);
+  expect(getLspLifecycleAction({ state: "starting" })).toEqual({
+    label: "Stop",
+    enabled: true,
   });
 });
 
