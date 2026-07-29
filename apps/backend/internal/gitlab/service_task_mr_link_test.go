@@ -18,6 +18,7 @@ func seedTaskMRLinkFixture(t *testing.T, store *Store, workspaceID, taskID, repo
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,
 		provider TEXT DEFAULT '',
+		provider_repo_id TEXT DEFAULT '',
 		provider_host TEXT DEFAULT '',
 		provider_owner TEXT DEFAULT '',
 		provider_name TEXT DEFAULT '',
@@ -79,6 +80,20 @@ func setTaskMRRepositoryLocalPath(t *testing.T, store *Store, repositoryID, loca
 	}
 }
 
+// setTaskMRRepositoryProviderRepoID sets only provider_repo_id, leaving every
+// other identity column (provider/host/owner/name/remote_url) blank. Used to
+// verify hasNoDurableIdentitySignal treats provider_repo_id as a durable
+// identity signal on its own, since service-layer backfills can populate it
+// independently of the other provider_* columns.
+func setTaskMRRepositoryProviderRepoID(t *testing.T, store *Store, repositoryID, providerRepoID string) {
+	t.Helper()
+	if _, err := store.db.Exec(
+		`UPDATE repositories SET provider_repo_id = ? WHERE id = ?`, providerRepoID, repositoryID,
+	); err != nil {
+		t.Fatalf("set repository provider_repo_id: %v", err)
+	}
+}
+
 func getTaskMRRepositoryRemoteURL(t *testing.T, store *Store, repositoryID string) string {
 	t.Helper()
 	var remoteURL string
@@ -137,14 +152,15 @@ func seedLocalGitWorktreeCheckout(t *testing.T, worktreeDir, mainGitDir, remoteU
 }
 
 // setTaskMRRepositoryIdentityColumnsNull sets every provider identity column
-// (provider, provider_host, provider_owner, provider_name, remote_url) to
-// SQL NULL, mirroring rows persisted before those columns existed or by code
-// paths that never populated them. The production schema declares them
-// nullable, so ValidateTaskMRRepositoryIdentity must tolerate NULL scans.
+// (provider, provider_repo_id, provider_host, provider_owner, provider_name,
+// remote_url) to SQL NULL, mirroring rows persisted before those columns
+// existed or by code paths that never populated them. The production schema
+// declares them nullable, so ValidateTaskMRRepositoryIdentity must tolerate
+// NULL scans.
 func setTaskMRRepositoryIdentityColumnsNull(t *testing.T, store *Store, repositoryID string) {
 	t.Helper()
 	if _, err := store.db.Exec(`UPDATE repositories
-		SET provider = NULL, provider_host = NULL, provider_owner = NULL,
+		SET provider = NULL, provider_repo_id = NULL, provider_host = NULL, provider_owner = NULL,
 			provider_name = NULL, remote_url = NULL
 		WHERE id = ?`, repositoryID); err != nil {
 		t.Fatalf("null repository identity columns: %v", err)
@@ -542,6 +558,38 @@ func TestAssociateExistingMRByURLIgnoresLocalCheckoutWhenDurableIdentityAlreadyP
 	svc, store, client := newTaskMRLinkService(t, host)
 	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
 	setTaskMRRepositoryIdentity(t, store, "repo-1", host, "clients/socodevi/laravel/other-project")
+	localPath := t.TempDir()
+	seedLocalGitCheckout(t, localPath, "git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/co-up.git")
+	setTaskMRRepositoryLocalPath(t, store, "repo-1", localPath)
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	_, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	)
+	if !errors.Is(err, ErrTaskMRRepositoryMismatch) {
+		t.Fatalf("error = %v, want ErrTaskMRRepositoryMismatch", err)
+	}
+	if got := getTaskMRRepositoryRemoteURL(t, store, "repo-1"); got != "" {
+		t.Fatalf("remote_url should stay blank, got %q", got)
+	}
+}
+
+func TestAssociateExistingMRByURLIgnoresLocalCheckoutWhenOnlyProviderRepoIDIsSet(t *testing.T) {
+	// provider_repo_id is part of the durable provider identity and can be
+	// populated by service-layer backfills independently of the other
+	// provider_* columns and remote_url. A row carrying only
+	// provider_repo_id (every other identity column blank) already has an
+	// established identity and must not fall back to the local checkout,
+	// even though a naive "all other columns blank" check would treat it as
+	// a fully legacy row.
+	const host = "https://gitlab.savoirfairelinux.com"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryProviderRepoID(t, store, "repo-1", "12345")
 	localPath := t.TempDir()
 	seedLocalGitCheckout(t, localPath, "git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/co-up.git")
 	setTaskMRRepositoryLocalPath(t, store, "repo-1", localPath)

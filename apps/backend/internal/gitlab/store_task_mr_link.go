@@ -71,6 +71,7 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 	var identity taskMRRepositoryIdentityRow
 	err := s.ro.GetContext(ctx, &identity, `
 		SELECT COALESCE(r.provider, '') AS provider,
+			COALESCE(r.provider_repo_id, '') AS provider_repo_id,
 			COALESCE(r.provider_host, '') AS provider_host,
 			COALESCE(r.provider_owner, '') AS provider_owner,
 			COALESCE(r.provider_name, '') AS provider_name,
@@ -129,21 +130,24 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 // taskMRRepositoryIdentityRow is the repository identity data loaded for one
 // task-repository pair.
 type taskMRRepositoryIdentityRow struct {
-	Provider  string `db:"provider"`
-	Host      string `db:"provider_host"`
-	Owner     string `db:"provider_owner"`
-	Name      string `db:"provider_name"`
-	RemoteURL string `db:"remote_url"`
-	LocalPath string `db:"local_path"`
+	Provider       string `db:"provider"`
+	ProviderRepoID string `db:"provider_repo_id"`
+	Host           string `db:"provider_host"`
+	Owner          string `db:"provider_owner"`
+	Name           string `db:"provider_name"`
+	RemoteURL      string `db:"remote_url"`
+	LocalPath      string `db:"local_path"`
 }
 
 // hasNoDurableIdentitySignal reports whether the row carries absolutely no
-// identity signal: no durable provider/host/owner/name AND no remote_url.
-// Only such rows are eligible for the local-checkout fallback, so a row that
-// already identifies a (possibly different) repository can never be
-// overridden by a coincidentally-matching local checkout.
+// identity signal: no durable provider/provider_repo_id/host/owner/name AND
+// no remote_url. Only such rows are eligible for the local-checkout
+// fallback, so a row that already identifies a (possibly different)
+// repository can never be overridden by a coincidentally-matching local
+// checkout.
 func (r taskMRRepositoryIdentityRow) hasNoDurableIdentitySignal() bool {
-	return r.Provider == "" && r.Host == "" && r.Owner == "" && r.Name == "" && r.RemoteURL == ""
+	return r.Provider == "" && r.ProviderRepoID == "" && r.Host == "" && r.Owner == "" &&
+		r.Name == "" && r.RemoteURL == ""
 }
 
 // taskMRIdentityCandidate is one (host, project) identity derived from a
