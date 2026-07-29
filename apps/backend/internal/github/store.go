@@ -1717,6 +1717,9 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 	promptSet := patch.AutoFixPromptOverride != nil
 	promptValue := normalizedPromptOverride(patch.AutoFixPromptOverride)
 	reviewerLoginSet := patch.ReviewReviewerLogin != nil
+	reviewerChanged := reviewerLoginSet && !strings.EqualFold(
+		previous.ReviewReviewerLogin, normalizedString(patch.ReviewReviewerLogin),
+	)
 	if _, err := tx.ExecContext(writeCtx, `
 		UPDATE github_task_ci_options SET
 			auto_fix_enabled = CASE WHEN ? THEN ? ELSE auto_fix_enabled END,
@@ -1734,42 +1737,100 @@ func (s *Store) UpdateTaskCIOptions(ctx context.Context, taskID string, patch Ta
 		now, taskID); err != nil {
 		return nil, err
 	}
-	if autoFixSet && autoFixValue && !previous.AutoFixEnabled {
-		if _, err := tx.ExecContext(writeCtx, `
-			UPDATE github_task_ci_pr_state
-			SET auto_fix_round_count = 0,
-			    last_fix_signature = '',
-			    last_fix_checkpoint_json = '',
-			    last_fix_enqueued_at = NULL,
-			    last_fix_session_id = NULL,
-			    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
-			    auto_fix_exhausted_at = NULL,
-			    updated_at = ?
-			WHERE task_id = ?`, now, taskID); err != nil {
-			return nil, err
-		}
-	}
-	if reviewSet && reviewValue && !previous.PromptOnReviewRequested {
-		if _, err := tx.ExecContext(writeCtx, `
-			UPDATE github_task_ci_pr_state
-			SET review_request_initialized = 0, updated_at = ?
-			WHERE task_id = ?`, now, taskID); err != nil {
-			return nil, err
-		}
-	}
-	if (mergedSet && mergedValue && !previous.PromptOnMerged) ||
-		(closedSet && closedValue && !previous.PromptOnClosed) {
-		if _, err := tx.ExecContext(writeCtx, `
-			UPDATE github_task_ci_pr_state
-			SET last_observed_pr_state = '', updated_at = ?
-			WHERE task_id = ?`, now, taskID); err != nil {
-			return nil, err
-		}
+	if err := applyTaskCIOptionResets(
+		writeCtx, tx, taskID, now, previous, patch, reviewerChanged,
+	); err != nil {
+		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return s.GetTaskCIOptions(writeCtx, taskID)
+}
+
+func applyTaskCIOptionResets(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	now time.Time,
+	previous TaskCIOptions,
+	patch TaskCIOptionsPatch,
+	reviewerChanged bool,
+) error {
+	if shouldResetAutoFix(patch.AutoFixEnabled, previous.AutoFixEnabled) {
+		if err := resetTaskCIAutoFixState(ctx, tx, taskID, now); err != nil {
+			return err
+		}
+	}
+	if shouldResetReviewRequests(
+		patch.PromptOnReviewRequested, previous.PromptOnReviewRequested, reviewerChanged,
+	) {
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE github_task_ci_pr_state
+			SET review_request_initialized = 0, last_review_requested = 0, updated_at = ?
+			WHERE task_id = ?`, now, taskID); err != nil {
+			return err
+		}
+	}
+	if shouldResetTerminalPrompt(patch.PromptOnMerged, previous.PromptOnMerged) {
+		if err := resetTaskCITerminalCheckpoint(ctx, tx, taskID, "merged", now); err != nil {
+			return err
+		}
+	}
+	if shouldResetTerminalPrompt(patch.PromptOnClosed, previous.PromptOnClosed) {
+		return resetTaskCITerminalCheckpoint(ctx, tx, taskID, "closed", now)
+	}
+	return nil
+}
+
+func shouldResetAutoFix(patchValue *bool, wasEnabled bool) bool {
+	return patchValue != nil && *patchValue && !wasEnabled
+}
+
+func shouldResetReviewRequests(patchValue *bool, wasEnabled, reviewerChanged bool) bool {
+	return patchValue != nil && *patchValue && (!wasEnabled || reviewerChanged)
+}
+
+func shouldResetTerminalPrompt(patchValue *bool, wasEnabled bool) bool {
+	return patchValue != nil && *patchValue && !wasEnabled
+}
+
+func resetTaskCIAutoFixState(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID string,
+	now time.Time,
+) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE github_task_ci_pr_state
+		SET auto_fix_round_count = 0,
+		    last_fix_signature = '',
+		    last_fix_checkpoint_json = '',
+		    last_fix_enqueued_at = NULL,
+		    last_fix_session_id = NULL,
+		    last_error = CASE WHEN auto_fix_exhausted_at IS NOT NULL THEN NULL ELSE last_error END,
+		    auto_fix_exhausted_at = NULL,
+		    updated_at = ?
+		WHERE task_id = ?`, now, taskID)
+	return err
+}
+
+func resetTaskCITerminalCheckpoint(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID, state string,
+	now time.Time,
+) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE github_task_ci_pr_state
+		SET last_observed_pr_state = '',
+		    last_lifecycle_event = '',
+		    last_lifecycle_prompt_at = NULL,
+		    last_lifecycle_session_id = NULL,
+		    updated_at = ?
+		WHERE task_id = ? AND (last_observed_pr_state = ? OR last_lifecycle_event = ?)`,
+		now, taskID, state, state)
+	return err
 }
 
 // RebindTaskPRReviewer atomically updates the task's authenticated reviewer

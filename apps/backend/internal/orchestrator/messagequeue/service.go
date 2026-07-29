@@ -82,6 +82,26 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 	return msg, nil
 }
 
+// RestoreMessage restores a dequeued message at its original FIFO position
+// after a delivery failure. It preserves the entry's identity, position,
+// queued_at time, and queued_by ownership.
+func (s *Service) RestoreMessage(ctx context.Context, msg *QueuedMessage) (*QueuedMessage, error) {
+	if msg == nil {
+		return nil, errors.New("queued message is nil")
+	}
+	restored := *msg
+	restored.Metadata = copyMessageMetadata(msg.Metadata, 0)
+	if err := s.repo.Restore(ctx, &restored, s.maxPerSession); err != nil {
+		return nil, err
+	}
+	s.logger.Info("message restored at original queue position",
+		zap.String("session_id", restored.SessionID),
+		zap.String("task_id", restored.TaskID),
+		zap.String("entry_id", restored.ID),
+		zap.Int64("position", restored.Position))
+	return &restored, nil
+}
+
 // QueueMessageWithCoalesceKey replaces an existing pending entry with the same
 // coalesce key, session, and queued_by value. When no matching entry exists it
 // inserts a new tail entry if allowInsert is true; otherwise ErrEntryNotFound is

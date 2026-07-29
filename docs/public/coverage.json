@@ -208,6 +208,10 @@
         "/settings/integrations/linear",
         "/settings/integrations/sentry",
         "/settings/integrations/slack"
+      ],
+      "mcpTools": [
+        "get_task_pr_automation_kandev",
+        "update_task_pr_automation_kandev"
       ]
     },
     {

@@ -67,6 +67,16 @@ func (s *autoMergeFailureThenReviewRequestService) MergePR(context.Context, stri
 	return errors.New("GitHub unavailable")
 }
 
+func (s *autoMergeFailureThenReviewRequestService) MergePRForAutomation(
+	ctx context.Context,
+	_ string,
+	owner, repo string,
+	number int,
+	method string,
+) error {
+	return s.MergePR(ctx, owner, repo, number, method)
+}
+
 func (s *storeBackedLifecycleGitHubService) GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error) {
 	return s.store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
 }

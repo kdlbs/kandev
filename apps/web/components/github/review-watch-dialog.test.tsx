@@ -7,6 +7,7 @@ const store = {
   workflows: { items: [{ id: "workflow", name: "Delivery", hidden: false }] },
   agentProfiles: { items: [] },
   executors: { items: [] },
+  prompts: { items: [], loaded: true, loading: false },
 };
 
 vi.mock("@/components/state-provider", () => ({

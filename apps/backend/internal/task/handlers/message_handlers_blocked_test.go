@@ -288,6 +288,21 @@ func (r *messageAddSwitchRepo) GetTaskSession(_ context.Context, id string) (*mo
 	return nil, sql.ErrNoRows
 }
 
+func (r *messageAddSwitchRepo) ClaimPromptableTaskSessionIfActive(
+	_ context.Context,
+	id string,
+) (models.PromptableTaskSessionClaim, error) {
+	session, ok := r.sessions[id]
+	if !ok {
+		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
+	}
+	task, ok := r.tasks[session.TaskID]
+	if !ok || task.ArchivedAt != nil {
+		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
+	}
+	return claimPromptableTaskSession(r.sessions, id)
+}
+
 func (r *messageAddSwitchRepo) GetPrimarySessionByTaskID(_ context.Context, taskID string) (*models.TaskSession, error) {
 	session, ok := r.sessions[r.primaryID]
 	if !ok || session.TaskID != taskID {

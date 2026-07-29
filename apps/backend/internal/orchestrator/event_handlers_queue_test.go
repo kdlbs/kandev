@@ -18,6 +18,20 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func queuedReferenceFixture() v1.EntityReference {
+	return v1.EntityReference{
+		Version:  v1.EntityReferenceVersion,
+		Ref:      "mention:v1:kandev:task:workspace-1:task-2",
+		Provider: "kandev",
+		Kind:     "task",
+		ID:       "task-2",
+		Key:      "TASK-2",
+		Title:    "Referenced task",
+		URL:      "/t/task-2",
+		Scope:    "workspace-1",
+	}
+}
+
 type lifecycleClaimSequenceRepository struct {
 	repoStore
 	claimErrors []error

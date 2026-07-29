@@ -1,5 +1,7 @@
 package sqlite
 
+//revive:disable:file-length-limit // SQLite session regression coverage is intentionally scenario-heavy.
+
 import (
 	"context"
 	"database/sql"
@@ -1119,9 +1121,9 @@ func assertReapedSession(t *testing.T, repo *Repository, sessionID string, reape
 
 // TestCancelActiveTaskSessionsByTaskID verifies the archive reaper transitions
 // only the target task's still-active sessions to CANCELLED, leaves terminal
-// sessions and other tasks untouched, and reports the rows changed. It also
-// confirms the repo-delete guard reports the repository as free afterward —
-// the end-to-end purpose of the reap.
+// sessions and other tasks untouched, and reports exactly the sessions it
+// changed. It also confirms the repo-delete guard reports the repository as
+// free afterward — the end-to-end purpose of the reap.
 func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -1137,14 +1139,28 @@ func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	seedRepoLink(t, repo, "ws-r", "repo-other", "task-other", "sess-o1", "RUNNING")
 
 	reapedAfter := time.Now().UTC()
-	reaped, err := repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
+	sessions, err := repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if reaped != 4 {
-		t.Errorf("expected 4 active sessions reaped, got %d", reaped)
+	wantIDs := []string{"sess-r1", "sess-r2", "sess-r3", "sess-r4"}
+	var gotIDs []string
+	for _, sess := range sessions {
+		gotIDs = append(gotIDs, sess.ID)
+		if sess.TaskID != "task-r" {
+			t.Errorf("session %s TaskID = %q, want task-r", sess.ID, sess.TaskID)
+		}
+		if sess.State != models.TaskSessionStateCancelled {
+			t.Errorf("session %s State = %q, want CANCELLED", sess.ID, sess.State)
+		}
+		if sess.UpdatedAt.Before(reapedAfter) {
+			t.Errorf("session %s UpdatedAt = %s, want >= %s", sess.ID, sess.UpdatedAt, reapedAfter)
+		}
 	}
-	for _, sessionID := range []string{"sess-r1", "sess-r2", "sess-r3", "sess-r4"} {
+	if !sameStringSet(gotIDs, wantIDs) {
+		t.Errorf("cancelled ids = %v, want %v", gotIDs, wantIDs)
+	}
+	for _, sessionID := range wantIDs {
 		assertReapedSession(t, repo, sessionID, reapedAfter)
 	}
 	if got := sessionState(t, repo, "sess-r5"); got != "COMPLETED" {
@@ -1165,11 +1181,33 @@ func TestCancelActiveTaskSessionsByTaskID(t *testing.T) {
 	}
 
 	// Idempotent: a second call changes nothing.
-	reaped, err = repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
+	sessions, err = repo.CancelActiveTaskSessionsByTaskID(ctx, "task-r", "task archived")
 	if err != nil {
 		t.Fatalf("unexpected error on second call: %v", err)
 	}
-	if reaped != 0 {
-		t.Errorf("expected 0 rows on idempotent re-run, got %d", reaped)
+	if len(sessions) != 0 {
+		t.Errorf("expected 0 sessions on idempotent re-run, got %v", sessions)
 	}
+}
+
+// sameStringSet reports whether got and want contain the same strings,
+// ignoring order and duplicates count-for-count — used to compare the set of
+// cancelled session IDs against an expected set regardless of return order.
+func sameStringSet(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	set := make(map[string]int, len(want))
+	for _, s := range want {
+		set[s]++
+	}
+	for _, s := range got {
+		set[s]--
+	}
+	for _, count := range set {
+		if count != 0 {
+			return false
+		}
+	}
+	return true
 }

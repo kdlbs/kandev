@@ -283,6 +283,10 @@ func (s *Service) handleTaskPRCIAutoFix(ctx context.Context, pr *github.TaskPR, 
 	if err != nil || session == nil {
 		return s.handleCIAutoFixWithoutSession(ctx, pr, allowNewRound)
 	}
+	// Passthrough CI-fix sessions skip "@name" expansion: the prompt is typed
+	// straight into the agent CLI's TTY with no <kandev-system> stripping, so a
+	// hidden expansion block would leak into the terminal verbatim.
+	prompt = s.expandPromptReferences(ctx, prompt, session.IsPassthrough)
 	result, err := s.dispatchCIAutomationPromptForPR(ctx, session, pr, prompt, signature, allowNewRound)
 	if errors.Is(err, errCIAutoFixRoundCapReached) {
 		s.markCIAutoFixExhausted(ctx, pr)
@@ -610,7 +614,7 @@ func ciAutomationShouldIncludeFeedbackComment(pr *github.TaskPR, comment github.
 }
 
 func ciAutomationReadyToMerge(pr *github.TaskPR) bool {
-	if pr == nil || pr.State != "open" {
+	if pr == nil || pr.State != githubPRStateOpen {
 		return false
 	}
 	if pr.ChecksState != ciAutomationCheckSuccess || pr.MergeableState != "clean" {
