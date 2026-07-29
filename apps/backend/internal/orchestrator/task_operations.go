@@ -875,23 +875,17 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// repo lookup pulls the canonical step. Using the workflowStepID parameter
 	// directly is wrong because it can be empty on manual user-initiated starts
 	// while the task is already bound to a signal-gated step in the DB.
-	if (effectivePrompt != "" || len(attachments) > 0) && !skipKandevMCPWrap {
-		// Spawner attribution is built here, not by the MCP handler that filled
-		// SpawnOrigin: the injectors below strip every <kandev-system> block
-		// they do not recognize, so the block has to be generated from the same
-		// server state that whitelists it as trusted content.
-		var spawnContext string
-		effectivePrompt, spawnContext = applySpawnOriginContext(effectivePrompt, opts.SpawnOrigin)
-		if isOfficeTask {
-			effectivePrompt = sysprompt.InjectOfficeContext(
-				task.ID, sessionID, effectivePrompt, promptReferenceContext, spawnContext,
-			)
-		} else {
-			effectivePrompt = sysprompt.InjectKandevContextWithOptions(task.ID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
-				RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, task.ID),
-				IncludeCoordinatorTaskControls: !configMode,
-			}, promptReferenceContext, spawnContext)
-		}
+	if effectivePrompt != "" || len(attachments) > 0 {
+		effectivePrompt = s.applyLaunchPromptContext(ctx, launchPromptContext{
+			prompt:           effectivePrompt,
+			taskID:           task.ID,
+			sessionID:        sessionID,
+			isOfficeTask:     isOfficeTask,
+			isPassthrough:    skipKandevMCPWrap,
+			configMode:       configMode,
+			referenceContext: promptReferenceContext,
+			spawnOrigin:      opts.SpawnOrigin,
+		})
 	}
 
 	// Office tasks restrict the MCP toolset: kanban tools (move/update/list
@@ -930,19 +924,76 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	return execution, nil
 }
 
+// launchPromptContext carries what the first turn of a launch needs in order to
+// compose its system context.
+type launchPromptContext struct {
+	prompt           string
+	taskID           string
+	sessionID        string
+	isOfficeTask     bool
+	isPassthrough    bool
+	configMode       bool
+	referenceContext string
+	spawnOrigin      *SpawnOrigin
+}
+
+// applyLaunchPromptContext prepends the first-turn system context to a launch
+// prompt: the Kandev (or Office) MCP block, plus spawner attribution when the
+// launch came from spawn_session_kandev.
+//
+// Passthrough profiles get attribution only, as plain text — see
+// applySpawnOriginText for why they skip the MCP block entirely.
+func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptContext) string {
+	if p.isPassthrough {
+		return applySpawnOriginText(p.prompt, p.spawnOrigin)
+	}
+	// Spawner attribution is built here, not by the MCP handler that filled
+	// SpawnOrigin: the injectors below strip every <kandev-system> block they do
+	// not recognize, so the block has to be generated from the same server state
+	// that whitelists it as trusted content.
+	prompt, spawnContext := applySpawnOriginContext(p.prompt, p.spawnOrigin)
+	if p.isOfficeTask {
+		return sysprompt.InjectOfficeContext(
+			p.taskID, p.sessionID, prompt, p.referenceContext, spawnContext,
+		)
+	}
+	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
+		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
+		IncludeCoordinatorTaskControls: !p.configMode,
+	}, p.referenceContext, spawnContext)
+}
+
+// spawnOriginContent renders the spawner-attribution text for a launch requested
+// through spawn_session_kandev, or "" for ordinary launches.
+func spawnOriginContent(origin *SpawnOrigin) string {
+	if origin == nil {
+		return ""
+	}
+	return sysprompt.SpawnedSessionContext(origin.TaskID, origin.SessionID, origin.SessionName)
+}
+
 // applySpawnOriginContext prepends the spawner-attribution system block for a
 // launch requested through spawn_session_kandev and returns the content that
 // the first-turn injector must whitelist so the block is not stripped again as
 // untrusted. Ordinary launches pass through unchanged with empty content.
 func applySpawnOriginContext(prompt string, origin *SpawnOrigin) (string, string) {
-	if origin == nil {
-		return prompt, ""
-	}
-	content := sysprompt.SpawnedSessionContext(origin.TaskID, origin.SessionID, origin.SessionName)
+	content := spawnOriginContent(origin)
 	if content == "" {
 		return prompt, ""
 	}
 	return sysprompt.Wrap(content) + "\n\n" + prompt, content
+}
+
+// applySpawnOriginText prepends the same attribution as plain prompt text, for
+// passthrough profiles whose prompt reaches the agent through a TTY the user is
+// watching. There is no injector on that path to whitelist a system block, and
+// wrapping it would only put raw <kandev-system> markup on the terminal.
+func applySpawnOriginText(prompt string, origin *SpawnOrigin) string {
+	content := spawnOriginContent(origin)
+	if content == "" {
+		return prompt
+	}
+	return content + "\n\n" + prompt
 }
 
 // isOfficeTask returns the repository's canonical Office ownership projection.

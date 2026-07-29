@@ -1,6 +1,8 @@
 package orchestrator
 
 import (
+	"context"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -38,4 +40,37 @@ func TestApplySpawnOriginContext_NoOrigin(t *testing.T) {
 	prompt, trusted = applySpawnOriginContext("do the work", &SpawnOrigin{TaskID: "task-spawner"})
 	assert.Equal(t, "do the work", prompt)
 	assert.Empty(t, trusted)
+}
+
+// Passthrough profiles skip the Kandev MCP wrap entirely, so attribution has to
+// reach them as plain text — a <kandev-system> block would surface as raw markup
+// in the terminal, and dropping it would leave the spawned agent unable to reply.
+func TestApplySpawnOriginText_PlainForPassthrough(t *testing.T) {
+	origin := &SpawnOrigin{TaskID: "task-spawner", SessionID: "sess-spawner", SessionName: "planner"}
+
+	prompt := applySpawnOriginText("review the diff please", origin)
+	assert.NotContains(t, prompt, sysprompt.TagStart)
+	assert.NotContains(t, prompt, sysprompt.TagEnd)
+	assert.Contains(t, prompt, `session "planner" (sess-spawner)`)
+	assert.Contains(t, prompt, "message_task_kandev")
+	assert.True(t, strings.HasSuffix(prompt, "review the diff please"))
+
+	assert.Equal(t, "plain", applySpawnOriginText("plain", nil))
+}
+
+// The passthrough branch of the launch path must not reach the MCP injectors at
+// all, and must still hand the spawned agent its attribution.
+func TestApplyLaunchPromptContext_PassthroughKeepsAttributionWithoutMCPBlock(t *testing.T) {
+	out := (&Service{}).applyLaunchPromptContext(context.Background(), launchPromptContext{
+		prompt:        "review the diff please",
+		taskID:        "task-abc",
+		sessionID:     "sess-new",
+		isPassthrough: true,
+		spawnOrigin:   &SpawnOrigin{TaskID: "task-spawner", SessionID: "sess-spawner"},
+	})
+
+	assert.NotContains(t, out, sysprompt.TagStart)
+	assert.NotContains(t, out, "KANDEV MCP TOOLS")
+	assert.Contains(t, out, "session sess-spawner of task task-spawner")
+	assert.Contains(t, out, "review the diff please")
 }

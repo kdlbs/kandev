@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/orchestrator"
+	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -38,14 +39,15 @@ func (h *Handlers) handleSpawnSession(ctx context.Context, msg *ws.Message) (*ws
 		return errResp, nil
 	}
 
-	profileID := h.resolveSpawnAgentProfile(ctx, &req)
+	spawner := h.resolveSpawnerSession(ctx, &req)
+	profileID := h.resolveSpawnAgentProfile(ctx, &req, spawner)
 
 	resp, err := h.sessionLauncher.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
 		TaskID:         req.TaskID,
 		Intent:         orchestrator.IntentStart,
 		AgentProfileID: profileID,
 		Prompt:         req.Prompt,
-		SpawnOrigin:    h.spawnOrigin(ctx, &req),
+		SpawnOrigin:    spawnOriginFromSession(spawner),
 	})
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
@@ -112,19 +114,36 @@ func (h *Handlers) authorizeSpawnTarget(ctx context.Context, req *spawnSessionRe
 	return nil
 }
 
+// resolveSpawnerSession loads the calling agent's own session and verifies it
+// belongs to the task the caller claims to be spawning from. Everything derived
+// from the spawner — the inherited agent profile and the attribution baked into
+// the new session's first turn — comes from this record rather than from the
+// request, so a sender_session_id that is unknown or owned by a different task
+// cannot become launch attribution. Returns nil when there is no verifiable
+// spawner session (external MCP callers, or a mismatched claim).
+func (h *Handlers) resolveSpawnerSession(ctx context.Context, req *spawnSessionRequest) *models.TaskSession {
+	if req.SenderSessionID == "" || h.taskSvc == nil {
+		return nil
+	}
+	sess, err := h.taskSvc.GetTaskSession(ctx, req.SenderSessionID)
+	if err != nil || sess == nil || sess.TaskID != req.SenderTaskID {
+		return nil
+	}
+	return sess
+}
+
 // resolveSpawnAgentProfile picks the agent profile for a spawned session:
 // explicit value > spawner session's profile (same-task spawns) > target task's
 // primary session profile. An empty result is passed through to LaunchSession,
 // which applies its own task-level defaults or errors out.
-func (h *Handlers) resolveSpawnAgentProfile(ctx context.Context, req *spawnSessionRequest) string {
+func (h *Handlers) resolveSpawnAgentProfile(
+	ctx context.Context, req *spawnSessionRequest, spawner *models.TaskSession,
+) string {
 	if req.AgentProfileID != "" {
 		return req.AgentProfileID
 	}
-	if req.SenderSessionID != "" {
-		if sess, err := h.taskSvc.GetTaskSession(ctx, req.SenderSessionID); err == nil &&
-			sess != nil && sess.TaskID == req.TaskID && sess.AgentProfileID != "" {
-			return sess.AgentProfileID
-		}
+	if spawner != nil && spawner.TaskID == req.TaskID && spawner.AgentProfileID != "" {
+		return spawner.AgentProfileID
 	}
 	if primary, err := h.taskSvc.GetPrimarySession(ctx, req.TaskID); err == nil &&
 		primary != nil && primary.AgentProfileID != "" {
@@ -133,23 +152,21 @@ func (h *Handlers) resolveSpawnAgentProfile(ctx context.Context, req *spawnSessi
 	return ""
 }
 
-// spawnOrigin describes the calling agent session so the launch site can build
-// the spawner-attribution system block that tells the new agent who spawned it
-// and how to reply. The identifiers come from the caller's MCP server (which
-// injects its own task/session), never from the tool arguments.
+// spawnOriginFromSession describes the spawning session so the launch site can
+// tell the new agent who spawned it and how to reply. Identity comes from the
+// verified session row (see resolveSpawnerSession), never from the request.
 //
-// The block itself is deliberately NOT built here: the orchestrator strips any
-// <kandev-system> block it cannot attribute to server state when it
+// The attribution text itself is deliberately NOT built here: the orchestrator
+// strips any <kandev-system> block it cannot attribute to server state when it
 // canonicalizes a session's first turn, so a prompt wrapped this early would be
-// dropped before the agent ever saw it. Returns nil when there is no spawner
-// session to attribute (e.g. external MCP callers).
-func (h *Handlers) spawnOrigin(ctx context.Context, req *spawnSessionRequest) *orchestrator.SpawnOrigin {
-	if req.SenderSessionID == "" {
+// dropped before the agent ever saw it.
+func spawnOriginFromSession(spawner *models.TaskSession) *orchestrator.SpawnOrigin {
+	if spawner == nil {
 		return nil
 	}
 	return &orchestrator.SpawnOrigin{
-		TaskID:      req.SenderTaskID,
-		SessionID:   req.SenderSessionID,
-		SessionName: h.lookupSenderSessionName(ctx, req.SenderTaskID, req.SenderSessionID),
+		TaskID:      spawner.TaskID,
+		SessionID:   spawner.ID,
+		SessionName: spawner.Name,
 	}
 }
