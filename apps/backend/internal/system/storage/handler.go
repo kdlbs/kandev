@@ -174,7 +174,7 @@ type confirmationRequest struct {
 
 func (h *Handler) deleteQuarantine(c *gin.Context) {
 	var request confirmationRequest
-	if err := c.ShouldBindJSON(&request); err != nil || request.Confirm != "DELETE" {
+	if err := c.ShouldBindJSON(&request); err != nil || request.Confirm != QuarantineConfirmationDelete {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "quarantine deletion requires DELETE confirmation"})
 		return
 	}
@@ -193,8 +193,8 @@ func (h *Handler) deleteQuarantineBulk(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if (request.Scope == QuarantinePurgeScopeEligible && request.Confirm != "DELETE ELIGIBLE") ||
-		(request.Scope == QuarantinePurgeScopeAll && request.Confirm != "DELETE ALL NOW") ||
+	if (request.Scope == QuarantinePurgeScopeEligible && request.Confirm != QuarantineConfirmationEligible) ||
+		(request.Scope == QuarantinePurgeScopeAll && request.Confirm != QuarantineConfirmationForce) ||
 		(request.Scope != QuarantinePurgeScopeEligible && request.Scope != QuarantinePurgeScopeAll) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid quarantine purge scope or confirmation"})
 		return

@@ -123,7 +123,7 @@ func (o *Operations) RestoreQuarantine(ctx context.Context, id string) (Quaranti
 }
 
 func (o *Operations) DeleteQuarantine(ctx context.Context, id, confirmation string) (string, error) {
-	if confirmation != "DELETE" {
+	if confirmation != QuarantineConfirmationDelete {
 		return "", validationError("quarantine deletion requires DELETE confirmation")
 	}
 	if o.config.Quarantine == nil {
@@ -152,12 +152,12 @@ func (o *Operations) PurgeQuarantine(
 ) (string, error) {
 	switch scope {
 	case QuarantinePurgeScopeEligible:
-		if confirmation != "DELETE ELIGIBLE" {
-			return "", validationError("eligible quarantine purge requires DELETE ELIGIBLE confirmation")
+		if confirmation != QuarantineConfirmationEligible {
+			return "", validationError("eligible quarantine purge requires %s confirmation", QuarantineConfirmationEligible)
 		}
 	case QuarantinePurgeScopeAll:
-		if confirmation != "DELETE ALL NOW" {
-			return "", validationError("forced quarantine purge requires DELETE ALL NOW confirmation")
+		if confirmation != QuarantineConfirmationForce {
+			return "", validationError("forced quarantine purge requires %s confirmation", QuarantineConfirmationForce)
 		}
 	default:
 		return "", validationError("unknown quarantine purge scope %q", scope)

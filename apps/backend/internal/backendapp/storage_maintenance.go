@@ -202,7 +202,7 @@ type quarantineCleanupProvider struct {
 func (p quarantineCleanupProvider) Name() string { return "quarantine" }
 
 func (p quarantineCleanupProvider) Cleanup(ctx context.Context) (map[string]any, error) {
-	result, err := p.purger.Purge(ctx, storagepkg.QuarantinePurgeScopeEligible, "DELETE ELIGIBLE")
+	result, err := p.purger.Purge(ctx, storagepkg.QuarantinePurgeScopeEligible, storagepkg.QuarantineConfirmationEligible)
 	return toMap(result), err
 }
 
@@ -344,11 +344,11 @@ func (c *workspaceQuarantineController) Purge(
 	force := false
 	switch scope {
 	case storagepkg.QuarantinePurgeScopeEligible:
-		if confirmation != "DELETE ELIGIBLE" {
-			return result, fmt.Errorf("%w: eligible quarantine purge requires DELETE ELIGIBLE confirmation", storagepkg.ErrValidation)
+		if confirmation != storagepkg.QuarantineConfirmationEligible {
+			return result, fmt.Errorf("%w: eligible quarantine purge requires %s confirmation", storagepkg.ErrValidation, storagepkg.QuarantineConfirmationEligible)
 		}
 	case storagepkg.QuarantinePurgeScopeAll:
-		if confirmation != "DELETE ALL NOW" {
+		if confirmation != storagepkg.QuarantineConfirmationForce {
 			return result, storagepkg.ErrForceDeleteConfirmation
 		}
 		force = true
@@ -362,6 +362,9 @@ func (c *workspaceQuarantineController) Purge(
 	now := time.Now().UTC()
 	var purgeErrs []error
 	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
 		result.Considered++
 		if !force && now.Before(entry.DeleteAfter) {
 			result.Protected++
@@ -372,7 +375,7 @@ func (c *workspaceQuarantineController) Purge(
 		if force {
 			deleted, err = c.PermanentDeleteForce(ctx, entry.ID, confirmation)
 		} else {
-			deleted, err = c.PermanentDelete(ctx, entry.ID, "DELETE")
+			deleted, err = c.PermanentDelete(ctx, entry.ID, storagepkg.QuarantineConfirmationDelete)
 		}
 		if err != nil {
 			result.Failed++
@@ -593,10 +596,10 @@ func (c *workspaceQuarantineController) deleteGoCacheWithRetention(
 	force bool,
 ) (storagepkg.QuarantineEntry, error) {
 	if force {
-		if confirmation != "DELETE ALL NOW" {
+		if confirmation != storagepkg.QuarantineConfirmationForce {
 			return storagepkg.QuarantineEntry{}, storagepkg.ErrForceDeleteConfirmation
 		}
-	} else if confirmation != "DELETE" {
+	} else if confirmation != storagepkg.QuarantineConfirmationDelete {
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("%w: quarantine deletion requires DELETE confirmation", storagepkg.ErrValidation)
 	}
 	if err := c.validateGoCacheEntry(ctx, entry); err != nil {
@@ -612,7 +615,7 @@ func (c *workspaceQuarantineController) deleteGoCacheWithRetention(
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("delete quarantined Go cache: %w", err)
 	}
 	deleted, err := c.store.TransitionQuarantineEntry(
-		ctx, entry.ID, storagepkg.QuarantineStateDeleted, "",
+		context.WithoutCancel(ctx), entry.ID, storagepkg.QuarantineStateDeleted, "",
 	)
 	if err != nil {
 		return storagepkg.QuarantineEntry{}, fmt.Errorf("persist Go-cache deletion: %w", err)

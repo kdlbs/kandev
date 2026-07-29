@@ -195,6 +195,17 @@ Final E2E verification rebuilds production artifacts through:
 cd apps/web && pnpm e2e:run tests/system/storage-maintenance.spec.ts tests/system/mobile-storage-maintenance.spec.ts
 ```
 
+## Validation Evidence
+
+- Backend: `go test ./internal/system/... ./internal/backendapp` passed, including the storage
+  system, job tracker, route, and maintenance packages.
+- Frontend: 63 focused Vitest tests, `pnpm run typecheck`, and `pnpm run lint` passed.
+- Documentation: public-doc validation tests and the validator passed.
+- E2E: focused desktop Chromium and mobile-chrome quarantine flows passed against the production
+  bundle; the full PR E2E workflow also passed.
+- Review follow-up: cancellation, deadline refresh, shared confirmation constants, partial failed
+  job result documentation, and force-clear failure wording are covered by the remediation commit.
+
 ---
 
 ## Implementation Waves and Task Status

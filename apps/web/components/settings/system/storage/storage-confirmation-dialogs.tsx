@@ -12,7 +12,7 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { Input } from "@kandev/ui/input";
-import type { StorageQuarantineEntry } from "@/lib/types/system";
+import type { StorageQuarantineEntry, StorageQuarantinePurgeScope } from "@/lib/types/system";
 
 type ConfirmationDialogProps = {
   open: boolean;
@@ -120,7 +120,7 @@ export function QuarantinePurgeDialog({
   protectedCount,
   ...props
 }: Pick<ConfirmationDialogProps, "open" | "onOpenChange" | "onConfirm"> & {
-  scope: "eligible" | "all";
+  scope: StorageQuarantinePurgeScope;
   eligibleCount: number;
   protectedCount: number;
 }) {
@@ -131,8 +131,8 @@ export function QuarantinePurgeDialog({
       title={eligible ? "Clear eligible quarantine" : "Force clear all quarantine"}
       description={
         eligible
-          ? `This will permanently remove ${eligibleCount} eligible item${eligibleCount === 1 ? "" : "s"}. ${protectedCount} protected item${protectedCount === 1 ? " remains" : "s remain"} until its retention deadline.`
-          : "This permanently removes every quarantined item immediately and cannot be undone. Every restore window will be lost."
+          ? `This will permanently remove ${eligibleCount} eligible item${eligibleCount === 1 ? "" : "s"}. ${protectedCount} protected item${protectedCount === 1 ? " remains" : "s remain"} until ${protectedCount === 1 ? "its" : "their"} retention deadline${protectedCount === 1 ? "" : "s"}.`
+          : "This attempts to permanently remove every quarantined item immediately and cannot be undone for entries that succeed. Failed entries may remain visible and retryable."
       }
       phrase={eligible ? "DELETE ELIGIBLE" : "DELETE ALL NOW"}
       actionLabel={eligible ? "Clear eligible" : "Force clear all"}

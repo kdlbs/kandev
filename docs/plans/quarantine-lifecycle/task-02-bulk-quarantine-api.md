@@ -25,8 +25,11 @@ Expose eligible and forced bulk purge through the existing tracked System job co
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/system/storage
+make -C apps/backend test
 ```
+
+Completed: the storage API and operations tests passed before PR publication and are rerun with
+the remediation checks after review fixes.
 
 ## Files likely touched
 

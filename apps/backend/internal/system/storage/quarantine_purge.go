@@ -5,6 +5,10 @@ type QuarantinePurgeScope string
 const (
 	QuarantinePurgeScopeEligible QuarantinePurgeScope = "eligible"
 	QuarantinePurgeScopeAll      QuarantinePurgeScope = "all"
+
+	QuarantineConfirmationDelete   = "DELETE"
+	QuarantineConfirmationEligible = "DELETE ELIGIBLE"
+	QuarantineConfirmationForce    = "DELETE ALL NOW"
 )
 
 type QuarantinePurgeFailure struct {

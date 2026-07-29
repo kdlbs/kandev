@@ -28,6 +28,7 @@ import type {
   StorageBusyResource,
   StorageBusyResponse,
   StorageMaintenanceSettings,
+  StorageQuarantinePurgeScope,
   SystemJob,
 } from "@/lib/types/system";
 import { useSystemJob } from "./use-system-jobs";
@@ -198,7 +199,7 @@ function useStorageBulkDeleteAction(
   setDeleteJobId: Dispatch<SetStateAction<string | null>>,
 ) {
   return useCallback(
-    async (scope: "eligible" | "all") => {
+    async (scope: StorageQuarantinePurgeScope) => {
       clearBusy();
       return perform("purge", async () => {
         const accepted = await purgeStorageQuarantine(scope);

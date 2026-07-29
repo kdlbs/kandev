@@ -24,8 +24,11 @@ Implement the typed quarantine purge engine and add it to full storage maintenan
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/system/storage/workspaces ./internal/backendapp ./internal/system/storage
+make -C apps/backend test
 ```
+
+Completed: `go test ./internal/system/... ./internal/backendapp` passed before PR publication;
+the remediation reruns the focused storage packages after the review fixes.
 
 ## Files likely touched
 

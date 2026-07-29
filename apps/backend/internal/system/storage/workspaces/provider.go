@@ -358,10 +358,10 @@ func (p *Provider) permanentDelete(
 	force bool,
 ) (storage.QuarantineEntry, error) {
 	if force {
-		if confirmation != "DELETE ALL NOW" {
+		if confirmation != storage.QuarantineConfirmationForce {
 			return storage.QuarantineEntry{}, storage.ErrForceDeleteConfirmation
 		}
-	} else if confirmation != "DELETE" {
+	} else if confirmation != storage.QuarantineConfirmationDelete {
 		return storage.QuarantineEntry{}, ErrDeleteConfirmation
 	}
 	if p.config.Store == nil {
@@ -390,7 +390,7 @@ func (p *Provider) permanentDelete(
 		_, _ = p.config.Store.TransitionQuarantineEntry(ctx, id, storage.QuarantineStateFailed, err.Error())
 		return entry, fmt.Errorf("delete quarantined workspace: %w", err)
 	}
-	deleted, err := p.config.Store.TransitionQuarantineEntry(ctx, id, storage.QuarantineStateDeleted, "")
+	deleted, err := p.config.Store.TransitionQuarantineEntry(context.WithoutCancel(ctx), id, storage.QuarantineStateDeleted, "")
 	if err != nil {
 		return entry, fmt.Errorf("persist workspace deletion: %w", err)
 	}

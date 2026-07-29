@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { IconRestore, IconTrash } from "@tabler/icons-react";
-import type { StorageQuarantineEntry } from "@/lib/types/system";
+import type { StorageQuarantineEntry, StorageQuarantinePurgeScope } from "@/lib/types/system";
 import { JobProgressIndicator } from "../job-progress-indicator";
 import { PermanentDeleteDialog, QuarantinePurgeDialog } from "./storage-confirmation-dialogs";
 import { StorageActionButton } from "./storage-action-button";
@@ -14,6 +14,7 @@ import {
   formatQuarantineDeadline,
   isQuarantineEligible,
   quarantineCounts,
+  quarantineDeleteAfter,
 } from "./storage-quarantine";
 
 type Props = {
@@ -31,16 +32,18 @@ type Props = {
 
 function QuarantineEntryRow({
   entry,
+  now,
   disabledReason,
   onRestore,
   onDelete,
 }: {
   entry: StorageQuarantineEntry;
+  now: Date;
   disabledReason?: string;
   onRestore: (id: string) => Promise<void>;
   onDelete: (entry: StorageQuarantineEntry) => void;
 }) {
-  const eligible = isQuarantineEligible(entry);
+  const eligible = isQuarantineEligible(entry, now);
   return (
     <div className="min-w-0 rounded-lg border p-3" data-testid={`storage-quarantine-${entry.id}`}>
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -110,7 +113,7 @@ function QuarantineHeader({
   bulkDisabledReason?: string;
   schedulingEnabled: boolean;
   checkIntervalHours: number;
-  onPurge: (scope: "eligible" | "all") => void;
+  onPurge: (scope: StorageQuarantinePurgeScope) => void;
 }) {
   return (
     <CardHeader>
@@ -182,8 +185,22 @@ export function StorageQuarantineCard({
   onForceClearAll,
 }: Props) {
   const [deleteEntry, setDeleteEntry] = useState<StorageQuarantineEntry | null>(null);
-  const [purgeScope, setPurgeScope] = useState<"eligible" | "all" | null>(null);
-  const counts = quarantineCounts(entries);
+  const [purgeScope, setPurgeScope] = useState<StorageQuarantinePurgeScope | null>(null);
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const nextDeadline = entries
+      .map(quarantineDeleteAfter)
+      .map((deadline) => deadline.getTime())
+      .filter((deadline) => deadline > now.getTime())
+      .sort((left, right) => left - right)[0];
+    if (nextDeadline === undefined) return;
+    const timer = setTimeout(
+      () => setNow(new Date()),
+      Math.max(0, nextDeadline - now.getTime() + 1),
+    );
+    return () => clearTimeout(timer);
+  }, [entries, now]);
+  const counts = quarantineCounts(entries, now);
   const bulkDisabledReason =
     disabledReason ?? (deleteJobActive ? "A quarantine cleanup is still running." : undefined);
   return (
@@ -205,6 +222,7 @@ export function StorageQuarantineCard({
           <QuarantineEntryRow
             key={entry.id}
             entry={entry}
+            now={now}
             disabledReason={bulkDisabledReason}
             onRestore={onRestore}
             onDelete={setDeleteEntry}

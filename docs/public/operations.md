@@ -94,9 +94,11 @@ time, not an exact promise—the first successful scheduled or full manual maint
 deadline performs the purge, subject to the idle gate and any preemption.
 
 Use **Clear eligible** to remove only entries whose deadlines have passed. It reports protected
-entries that remain. **Force clear all** requires typing `DELETE ALL NOW` and permanently removes
-every active quarantine entry immediately, discarding all restore windows. This override bypasses
-only the retention timestamp; path, ownership, state, and filesystem safety checks still apply.
+entries that remain. **Force clear all** requires typing `DELETE ALL NOW` and attempts to permanently
+remove every active quarantine entry, discarding restore windows for entries that are successfully
+deleted. Safety-validation or deletion failures may leave entries visible and retryable. This
+override bypasses only the retention timestamp; path, ownership, state, and filesystem safety
+checks still apply.
 If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
 one of the quarantine actions when you want cleanup.
 
