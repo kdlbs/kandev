@@ -522,6 +522,8 @@ export type HydrationState = Omit<Partial<AppState>, "system"> & {
   system?: Partial<AppState["system"]>;
 };
 
+/** Creates the Zustand app store, hydrating from `initialState` and
+ * composing every domain slice (kanban, ui, workspace, settings, ...). */
 export function createAppStore(initialState?: HydrationState) {
   const merged = mergeInitialState(initialState);
 

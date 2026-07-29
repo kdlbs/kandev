@@ -79,7 +79,9 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       "Mobile Auto-scroll Toggle Freeze",
     );
 
-    const list = testPage.locator(".chat-message-list:visible").first();
+    const activeChat = session.activeChat();
+    const list = activeChat.locator(".chat-message-list");
+    await expect(list).toHaveCount(1);
     await expect
       .poll(async () => list.evaluate((el) => el.scrollHeight - el.clientHeight), {
         timeout: 15_000,
@@ -99,12 +101,11 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
 
     // A brand-new message arrives while scrolled away from the bottom and
     // disabled — the view must not jump.
-    await session.sendMessage('e2e:message("New content while disabled on mobile")');
-    await expect(session.chat.getByText("New content while disabled on mobile").last()).toBeVisible(
-      {
-        timeout: 15_000,
-      },
-    );
+    const marker = "New content while disabled on mobile";
+    await session.sendMessageViaButton(`e2e:message("${marker}")`);
+    await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
+      timeout: 15_000,
+    });
     await expect
       .poll(async () => list.evaluate((el) => el.scrollTop), { timeout: 2_000 })
       .toBeLessThan(targetScrollTop + 10);

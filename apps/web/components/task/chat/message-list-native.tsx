@@ -343,6 +343,8 @@ function useInitialScrollPosition(
   }, [itemCount, sessionId, enabled, isNearBottomRef, storeApi]);
 }
 
+/** Returns a stable callback that smooth-scrolls a given message into the
+ *  center of the viewport, given its rendered `msg-<id>` element. */
 function useScrollToMessage() {
   return useCallback((messageId: string) => {
     const el = document.getElementById(`msg-${messageId}`);
@@ -350,6 +352,12 @@ function useScrollToMessage() {
   }, []);
 }
 
+/**
+ * Renders the transcript as plain DOM nodes with `overflow-anchor` for
+ * scroll pinning. Wires together lazy-loading of older messages, the
+ * scroll-position-on-prepend fix-up, and the session's auto-scroll toggle
+ * (freeze/resume/catch-up) via the hooks defined above.
+ */
 export const NativeMessageList = memo(function NativeMessageList({
   items,
   messages,

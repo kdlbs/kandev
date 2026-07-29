@@ -47,6 +47,12 @@ type VirtuosoBodyProps = MessageListProps & {
   enabled: boolean;
 };
 
+/**
+ * Computes the next Virtuoso `firstItemIndex` when the underlying item keys
+ * change, keeping the previously-first item's absolute index stable as
+ * older messages are prepended (or the list is empty and just populated for
+ * the first time).
+ */
 function computeFirstItemIndex(prevKeys: string[], prevIndex: number, keys: string[]): number {
   if (prevKeys.length > 0 && keys.length > prevKeys.length) {
     const oldFirstKey = prevKeys[0];
@@ -68,6 +74,11 @@ function computeFirstItemIndex(prevKeys: string[], prevIndex: number, keys: stri
 
 type IndexState = { keys: string[]; firstItemIndex: number };
 
+/**
+ * Tracks a Virtuoso `firstItemIndex` that stays stable across renders as
+ * items are prepended, recomputing it via {@link computeFirstItemIndex}
+ * whenever the item keys change.
+ */
 function useStableFirstItemIndex(items: RenderItem[]) {
   const keys = useMemo(() => items.map(getItemKey), [items]);
 
@@ -106,6 +117,9 @@ function useStableFirstItemIndex(items: RenderItem[]) {
   return state.firstItemIndex;
 }
 
+/** Builds the imperative Virtuoso ref, item count/index bookkeeping, and
+ *  the `computeItemKey`/`itemContent`/scroll-to-message callbacks passed to
+ *  the underlying `<Virtuoso>` element. */
 function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   const {
     items,
@@ -312,6 +326,12 @@ function useVirtuosoAutoScrollLifecycle(params: {
   return { handleAtBottomStateChange, resolvedFollowOutput, restoreStateFrom };
 }
 
+/**
+ * Renders the `<Virtuoso>` element once a scroll parent is available,
+ * wiring together the stable item index, render callbacks, and the
+ * auto-scroll lifecycle (follow/catch-up/restore) from
+ * {@link useVirtuosoAutoScrollLifecycle}.
+ */
 function VirtuosoBody(props: VirtuosoBodyProps) {
   const { scrollParent, Header, Footer, sessionId, enabled, messages } = props;
   const { virtuosoRef, itemCount, firstItemIndex, handleStartReached, computeItemKey, renderItem } =
@@ -374,6 +394,8 @@ type VirtuosoSnapshot = {
   scrollParentReady: boolean;
 };
 
+/** Whether any field the Virtuoso debug snapshot tracks has changed since
+ *  the last render, used to gate debug-only logging. */
 function virtuosoSnapshotChanged(prev: VirtuosoSnapshot | null, next: VirtuosoSnapshot): boolean {
   if (!prev) return true;
   return (
@@ -393,6 +415,8 @@ type VirtuosoDebugExtras = {
   lastItemKey: string;
 };
 
+/** Logs a Virtuoso render-branch snapshot change/init for `chat:virtuoso`
+ *  debug tracing — a no-op unless debug logging is enabled. */
 function logVirtuosoSnapshotChange(
   prev: VirtuosoSnapshot | null,
   next: VirtuosoSnapshot,
@@ -578,6 +602,11 @@ function useVirtuosoHeaderFooter(args: HeaderFooterArgs) {
   return { Header, Footer, footerActions };
 }
 
+/**
+ * Windowed transcript renderer for very long conversations (1000+ messages),
+ * backed by react-virtuoso. Shows the loading/empty state until the scroll
+ * parent and initial page are ready, then delegates to {@link VirtuosoBody}.
+ */
 export const VirtuosoMessageList = memo(function VirtuosoMessageList(props: MessageListProps) {
   const {
     items,
