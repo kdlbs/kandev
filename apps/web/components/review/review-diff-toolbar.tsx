@@ -62,7 +62,7 @@ export type FileDiffToolbarProps = {
   expandUnchanged: boolean;
   onDiscard: () => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
-  onPreviewMarkdown?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
   onToggleExpandUnchanged: () => void;
   onToggleWordWrap: () => void;
   /** Multi-repo subpath (repository_name) so the Edit action opens the file
@@ -208,7 +208,6 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
     void navigator.clipboard.writeText(diff || "");
   }, [diff]);
   const [open, setOpen] = useState(false);
-  const fileName = filePath.split("/").pop() || filePath;
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -233,7 +232,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
         className="w-64"
       >
         <DropdownMenuLabel className="truncate font-medium text-foreground" title={filePath}>
-          {fileName}
+          {filePath.split("/").pop() || filePath}
         </DropdownMenuLabel>
         <DropdownMenuItem className={mobileMenuItem} onSelect={handleCopyDiff}>
           <IconCopy className={mobileMenuIcon} />
@@ -246,7 +245,10 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
           </DropdownMenuItem>
         )}
         {onPreviewMarkdown && isMarkdownPath(filePath) && (
-          <DropdownMenuItem className={mobileMenuItem} onSelect={() => onPreviewMarkdown(filePath)}>
+          <DropdownMenuItem
+            className={mobileMenuItem}
+            onSelect={() => onPreviewMarkdown(filePath, repo)}
+          >
             <IconEye className={mobileMenuIcon} />
             Preview markdown
           </DropdownMenuItem>
@@ -339,7 +341,10 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
         onToggleWordWrap={onToggleWordWrap}
       />
       {onPreviewMarkdown && isMarkdownPath(filePath) && (
-        <ToolbarIconBtn onClick={() => onPreviewMarkdown(filePath)} tooltip="Preview markdown">
+        <ToolbarIconBtn
+          onClick={() => onPreviewMarkdown(filePath, repo)}
+          tooltip="Preview markdown"
+        >
           <IconEye className="h-3.5 w-3.5" />
         </ToolbarIconBtn>
       )}

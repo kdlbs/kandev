@@ -37,6 +37,62 @@ function externalLinkProps() {
   return JSON.parse(screen.getByTestId("external-vcs-file-link-props").dataset.props ?? "{}");
 }
 
+describe("Markdown preview actions", () => {
+  it("previews Markdown files with their repository context on desktop", () => {
+    const onPreviewMarkdown = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar
+          diff="# README"
+          filePath="README.md"
+          sessionId="session-1"
+          source="pr"
+          wordWrap={false}
+          expandUnchanged={false}
+          onDiscard={vi.fn()}
+          onPreviewMarkdown={onPreviewMarkdown}
+          onToggleExpandUnchanged={vi.fn()}
+          onToggleWordWrap={vi.fn()}
+          repo="frontend"
+        />
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Preview markdown" }));
+
+    expect(onPreviewMarkdown).toHaveBeenCalledWith("README.md", "frontend");
+  });
+
+  it("keeps Markdown preview reachable from the mobile actions menu", () => {
+    mocks.isMobile = true;
+    const onPreviewMarkdown = vi.fn();
+    render(
+      <TooltipProvider>
+        <FileDiffToolbar
+          diff="# README"
+          filePath="README.md"
+          sessionId="session-1"
+          source="pr"
+          wordWrap={false}
+          expandUnchanged={false}
+          onDiscard={vi.fn()}
+          onPreviewMarkdown={onPreviewMarkdown}
+          onToggleExpandUnchanged={vi.fn()}
+          onToggleWordWrap={vi.fn()}
+          repo="frontend"
+        />
+      </TooltipProvider>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "More actions for README.md" });
+    fireEvent.pointerDown(trigger, { button: 0, ctrlKey: false });
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Preview markdown" }));
+
+    expect(onPreviewMarkdown).toHaveBeenCalledWith("README.md", "frontend");
+  });
+});
+
 describe("FileDiffToolbar", () => {
   it("forwards exact review file and PR revision context to the external action", () => {
     render(

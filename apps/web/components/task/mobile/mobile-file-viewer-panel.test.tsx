@@ -29,7 +29,9 @@ vi.mock("@/components/editors/external-vcs-file-link", () => ({
 vi.mock("../file-viewer-content", () => ({
   FileViewerContent: () => <span data-testid="file-content" />,
 }));
-vi.mock("../markdown-preview-content", () => ({ MarkdownPreviewContent: () => null }));
+vi.mock("../markdown-preview-content", () => ({
+  MarkdownPreviewContent: () => <span data-testid="markdown-preview" />,
+}));
 vi.mock("../file-image-viewer", () => ({ FileImageViewer: () => null }));
 vi.mock("../file-binary-viewer", () => ({ FileBinaryViewer: () => null }));
 
@@ -66,5 +68,26 @@ describe("MobileFileViewerPanel external file action", () => {
       repositoryName: "frontend",
       size: "touch",
     });
+  });
+
+  it("opens a Markdown file directly in preview mode when requested", () => {
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: "README.md",
+          name: "README.md",
+          content: "# README",
+          originalContent: "# README",
+          originalHash: "hash",
+          isDirty: false,
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+        initialMarkdownPreview
+      />,
+    );
+
+    expect(screen.getByTestId("markdown-preview")).toBeTruthy();
+    expect(screen.queryByTestId("file-content")).toBeNull();
   });
 });

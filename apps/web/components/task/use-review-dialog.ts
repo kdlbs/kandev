@@ -106,7 +106,8 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     taskRepositories.length,
     cumulativeRepositoryNames,
   );
-  const { openFile: reviewOpenFile } = useFileEditors();
+  const { openFile: reviewOpenFile, openFileInMarkdownPreview: reviewPreviewMarkdown } =
+    useFileEditors();
   const {
     prs: reviewPRs,
     selectedPR: reviewTaskPR,
@@ -168,6 +169,7 @@ export function useReviewDialog(effectiveSessionId: string | null) {
     reviewPRRepoName: reviewGitStatus.isMultiRepo ? reviewPRRepositoryName : undefined,
     reviewUseRepositoryKeys: reviewGitStatus.isMultiRepo,
     reviewOpenFile,
+    reviewPreviewMarkdown,
     handleReviewSendComments,
   };
 }

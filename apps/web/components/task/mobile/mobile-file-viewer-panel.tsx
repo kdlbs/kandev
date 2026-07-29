@@ -20,6 +20,7 @@ type MobileFileViewerPanelProps = {
   file: OpenFileTab;
   sessionId: string | null;
   onClose: () => void;
+  initialMarkdownPreview?: boolean;
 };
 
 function isMarkdownFile(path: string): boolean {
@@ -80,7 +81,12 @@ function MobileViewerBody({
   );
 }
 
-export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileViewerPanelProps) {
+export function MobileFileViewerPanel({
+  file,
+  sessionId,
+  onClose,
+  initialMarkdownPreview = false,
+}: MobileFileViewerPanelProps) {
   const activeSession = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
@@ -91,7 +97,7 @@ export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileVi
   const viewerKind = useMemo(() => resolveViewerKind(file), [file]);
   const markdownFile = isMarkdownFile(file.path);
 
-  const [markdownPreview, setMarkdownPreview] = useState(false);
+  const [markdownPreview, setMarkdownPreview] = useState(initialMarkdownPreview);
   const [lastPath, setLastPath] = useState(file.path);
 
   // Reset preview mode when the file changes so reopening a markdown file
@@ -99,7 +105,7 @@ export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileVi
   // Adjust state during render per React docs recommendation.
   if (lastPath !== file.path) {
     setLastPath(file.path);
-    setMarkdownPreview(false);
+    setMarkdownPreview(initialMarkdownPreview);
   }
 
   return (

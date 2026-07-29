@@ -170,7 +170,8 @@ export type ReviewDialogProps = {
   sessionId: string;
   baseBranch?: string;
   onSendComments: (comments: DiffComment[]) => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
+  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
   gitStatusFiles: Record<string, FileInfo> | null;
   cumulativeDiff: CumulativeDiff | null;
   prs?: TaskPR[];
@@ -502,6 +503,7 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
     sessionId,
     baseBranch,
     onOpenFile,
+    onPreviewMarkdown,
     prs = [],
     selectedPR = null,
     onSelectPR,
@@ -515,6 +517,13 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
     allFiles: s.allFiles,
   });
   useWalkthroughFileSelection(open, s.allFiles, s.filter, s.setFilter, s.handleSelectFile);
+  const handlePreviewMarkdown = useCallback(
+    (filePath: string, repo?: string) => {
+      onPreviewMarkdown?.(filePath, repo);
+      onOpenChange(false);
+    },
+    [onOpenChange, onPreviewMarkdown],
+  );
 
   return (
     <ReviewDialogSurface
@@ -523,6 +532,7 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
       sessionId={sessionId}
       baseBranch={baseBranch}
       onOpenFile={onOpenFile}
+      onPreviewMarkdown={onPreviewMarkdown ? handlePreviewMarkdown : undefined}
       prs={prs}
       selectedPR={selectedPR}
       onSelectPR={onSelectPR}

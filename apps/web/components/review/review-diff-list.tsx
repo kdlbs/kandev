@@ -34,7 +34,7 @@ type ReviewDiffListProps = {
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
-  onPreviewMarkdown?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 };
 
@@ -143,7 +143,7 @@ type FileDiffSectionProps = {
   onToggleReviewed: (key: string, reviewed: boolean) => void;
   onDiscard: (key: string) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
-  onPreviewMarkdown?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
   /** Per-repo base branches + single-repo fallback, resolved once by the list
