@@ -59,6 +59,14 @@ const resumeReasonErrorRecovery = "error_recovery"
 // from "agent_not_running" so log filtering can isolate FAILED auto-resumes.
 const resumeReasonFailedSessionResumable = "failed_session_resumable"
 
+// resumeReasonArchiveCancelledResumable is the resume reason returned when a
+// session cancelled by archiving (see models.IsArchiveCancelReason) is
+// resumable once its task is unarchived — the cancellation was a system side
+// effect of Service.ArchiveTask / HandoffService's cascade archive, not an
+// explicit user/coordinator stop, so it must recover like a FAILED session
+// instead of staying stuck on read-only workspace restore.
+const resumeReasonArchiveCancelledResumable = "archive_cancelled_resumable"
+
 var ErrAgentPromptInProgress = errors.New("agent is currently processing a prompt")
 var ErrAgentNotReadyForPrompt = errors.New("agent not ready for prompt")
 var ErrSessionResetInProgress = errors.New("session reset in progress")
@@ -1977,6 +1985,18 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 			}
 			return out, nil
 		}
+		// A session cancelled by archiving is a system side effect (Service.
+		// ArchiveTask / HandoffService cascade), not an explicit user stop —
+		// it must recover like a FAILED session once the task is unarchived
+		// instead of falling into the terminal-session block below. See
+		// models.IsArchiveCancelReason.
+		if isArchiveCancelledSession(session) {
+			out := s.validateResumeEligibility(session, resp)
+			if out.NeedsResume {
+				out.ResumeReason = resumeReasonArchiveCancelledResumable
+			}
+			return out, nil
+		}
 		// Don't auto-resume other terminal sessions (CANCELLED stays stopped, COMPLETED is done).
 		if !isActiveSessionState(session.State) {
 			resp.IsAgentRunning = false
@@ -2008,6 +2028,18 @@ func evaluateFreshStartResume(session *models.TaskSession, running *models.Execu
 		resp.IsResumable = true
 		resp.NeedsResume = true
 		resp.ResumeReason = "agent_not_running_fresh_start"
+		return resp
+	}
+	// The archive cleanup (Service.ArchiveTask / HandoffService cascade) tears
+	// down the ExecutorRunning row entirely, so an archive-cancelled session
+	// reaches this function with running == nil — exactly the shape an
+	// unarchive-then-open observes. Treat it as fresh-start resumable rather
+	// than falling through to read-only workspace restore.
+	if isArchiveCancelledSession(session) {
+		resp.IsAgentRunning = false
+		resp.IsResumable = true
+		resp.NeedsResume = true
+		resp.ResumeReason = resumeReasonArchiveCancelledResumable
 		return resp
 	}
 	resp.IsAgentRunning = false
@@ -2118,6 +2150,17 @@ func isErrorRecoveryState(session *models.TaskSession) bool {
 	return session != nil &&
 		session.State == models.TaskSessionStateWaitingForInput &&
 		session.ErrorMessage != ""
+}
+
+// isArchiveCancelledSession reports whether session was cancelled by an
+// archive (Service.ArchiveTask's single-task path or HandoffService's
+// cascade archive) rather than an explicit user/coordinator stop. Such
+// sessions must resume like a FAILED session once the owning task is
+// unarchived — see models.IsArchiveCancelReason and its two constants.
+func isArchiveCancelledSession(session *models.TaskSession) bool {
+	return session != nil &&
+		session.State == models.TaskSessionStateCancelled &&
+		models.IsArchiveCancelReason(session.ErrorMessage)
 }
 
 func shouldHealStuckStartingSession(session *models.TaskSession, running *models.ExecutorRunning) bool {
