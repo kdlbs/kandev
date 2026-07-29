@@ -160,19 +160,19 @@ by the previous one.
 
 Wave 1:
 
-- [ ] [Task 01: Detect and publish stalled prompts](task-01-detect-stalled-prompt.md)
+- [x] [Task 01: Detect and publish stalled prompts](task-01-detect-stalled-prompt.md)
 
 Wave 2:
 
-- [ ] [Task 02: Persist an actionable stall notice](task-02-persist-stall-warning.md)
+- [x] [Task 02: Persist an actionable stall notice](task-02-persist-stall-warning.md)
 
 Wave 3:
 
-- [ ] [Task 03: Render the notice during running sessions](task-03-render-running-warning.md)
+- [x] [Task 03: Render the notice during running sessions](task-03-render-running-warning.md)
 
 Wave 4:
 
-- [ ] [Task 04: Prove desktop and mobile recovery](task-04-e2e-stall-recovery.md)
+- [x] [Task 04: Prove desktop and mobile recovery](task-04-e2e-stall-recovery.md)
 
 ## Required workflow verification
 

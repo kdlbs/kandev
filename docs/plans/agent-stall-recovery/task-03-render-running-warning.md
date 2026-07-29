@@ -1,7 +1,7 @@
 ---
 id: "03-render-running-warning"
 title: "Render the notice during running sessions"
-status: pending
+status: done
 wave: 3
 depends_on: ["02-persist-stall-warning"]
 plan: "plan.md"

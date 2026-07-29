@@ -1,7 +1,7 @@
 ---
 id: "04-e2e-stall-recovery"
 title: "Prove desktop and mobile stall recovery"
-status: pending
+status: done
 wave: 4
 depends_on:
   - "02-persist-stall-warning"

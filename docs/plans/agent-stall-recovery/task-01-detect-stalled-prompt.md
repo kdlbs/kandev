@@ -1,7 +1,7 @@
 ---
 id: "01-detect-stalled-prompt"
 title: "Detect and publish stalled prompts"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

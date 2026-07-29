@@ -30,6 +30,7 @@ const CANCEL_TEST_ID = "recovery-cancel-retry-button";
 const TECHNICAL_DETAILS = "Technical details";
 const RECOVERY_MESSAGE = "Agent encountered an error";
 const RESUME_TEST_ID = "recovery-resume-button";
+const STALL_CANCEL_TEST_ID = "stall-cancel-turn-button";
 
 function retryMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -84,6 +85,23 @@ function recoveryMessage(withParams = false): Message {
                 },
               }
             : {}),
+        },
+      ],
+    },
+  } as Partial<Message>);
+}
+
+function stalledMessage(): Message {
+  return retryMessage({
+    content: "Still waiting on Start dev server.",
+    metadata: {
+      action_visibility: "running",
+      actions: [
+        {
+          type: "ws_request",
+          label: "Cancel turn",
+          test_id: STALL_CANCEL_TEST_ID,
+          params: { method: "agent.cancel", payload: { session_id: "sess-1" } },
         },
       ],
     },
@@ -169,6 +187,36 @@ describe("ActionMessage — transient retry (warning variant)", () => {
 
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
     expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
+  });
+});
+
+describe("ActionMessage — running stall notice", () => {
+  it("renders a neutral compact notice only while the session is running", () => {
+    renderAction(stalledMessage(), "RUNNING");
+
+    const notice = screen.getByTestId("running-action-notice");
+    expect(notice.className).toContain("text-muted-foreground");
+    expect(notice.className).not.toContain("text-amber");
+    expect(notice.className).not.toContain("text-red");
+    expect(notice.querySelector("svg")).toBeNull();
+    const button = screen.getByTestId(STALL_CANCEL_TEST_ID);
+    expect(button.className).toContain("min-h-11");
+    expect(button.className).not.toContain("w-full");
+  });
+
+  it("hides the running-only notice after the session settles", () => {
+    const { container } = renderAction(stalledMessage(), "WAITING_FOR_INPUT");
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("sends agent.cancel when Cancel turn is activated", async () => {
+    renderAction(stalledMessage(), "RUNNING");
+
+    fireEvent.click(screen.getByTestId(STALL_CANCEL_TEST_ID));
+
+    await waitFor(() =>
+      expect(requestMock).toHaveBeenCalledWith("agent.cancel", { session_id: "sess-1" }),
+    );
   });
 });
 

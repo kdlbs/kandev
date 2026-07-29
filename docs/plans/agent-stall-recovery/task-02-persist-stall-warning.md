@@ -1,7 +1,7 @@
 ---
 id: "02-persist-stall-warning"
 title: "Persist an actionable stall notice"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-detect-stalled-prompt"]
 plan: "plan.md"
