@@ -429,8 +429,10 @@ func TestAssociateExistingMRByURLBackfillsRemoteURLFromLocalCheckoutWhenLegacyRo
 		t.Fatalf("AssociateExistingMRByURL: %v", err)
 	}
 
+	// Backfilled as a credential-free canonical "host/project" form, not the
+	// raw local remote (which may embed ssh/scp syntax or credentials).
 	got := getTaskMRRepositoryRemoteURL(t, store, "repo-1")
-	if got != "git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/co-up.git" {
+	if got != host+"/clients/socodevi/laravel/co-up" {
 		t.Fatalf("remote_url not backfilled, got %q", got)
 	}
 }
@@ -458,6 +460,102 @@ func TestAssociateExistingMRByURLRejectsLocalCheckoutPointingElsewhere(t *testin
 	}
 	if got := getTaskMRRepositoryRemoteURL(t, store, "repo-1"); got != "" {
 		t.Fatalf("remote_url should stay blank on mismatch, got %q", got)
+	}
+}
+
+func TestAssociateExistingMRByURLIgnoresLocalCheckoutWhenDurableIdentityAlreadyPointsElsewhere(t *testing.T) {
+	// A repository row that already has a durable provider identity for a
+	// DIFFERENT project (remote_url blank, e.g. it predates remote_url
+	// resolution) must not be overridden by a coincidentally-matching local
+	// checkout: the durable identity is authoritative once it exists at all.
+	const host = "https://gitlab.savoirfairelinux.com"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", host, "clients/socodevi/laravel/other-project")
+	localPath := t.TempDir()
+	seedLocalGitCheckout(t, localPath, "git@gitlab.savoirfairelinux.com:clients/socodevi/laravel/co-up.git")
+	setTaskMRRepositoryLocalPath(t, store, "repo-1", localPath)
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	_, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	)
+	if !errors.Is(err, ErrTaskMRRepositoryMismatch) {
+		t.Fatalf("error = %v, want ErrTaskMRRepositoryMismatch", err)
+	}
+	if got := getTaskMRRepositoryRemoteURL(t, store, "repo-1"); got != "" {
+		t.Fatalf("remote_url should stay blank, got %q", got)
+	}
+}
+
+func TestAssociateExistingMRByURLBackfillsCredentialFreeRemoteURLWhenLocalOriginEmbedsCredentials(t *testing.T) {
+	// A local checkout's origin can legitimately embed userinfo credentials
+	// (e.g. an HTTPS remote with an inline PAT). Those must never be
+	// persisted to remote_url, which is returned in repository API payloads.
+	const host = "https://gitlab.savoirfairelinux.com"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	localPath := t.TempDir()
+	seedLocalGitCheckout(t, localPath, "https://oauth2:glpat-secrettoken@gitlab.savoirfairelinux.com/clients/socodevi/laravel/co-up.git")
+	setTaskMRRepositoryLocalPath(t, store, "repo-1", localPath)
+	client.SeedMR("clients/socodevi/laravel/co-up", &MR{
+		IID: 92, Title: "MR", WebURL: host + "/clients/socodevi/laravel/co-up/-/merge_requests/92",
+		State: "opened", CreatedAt: time.Now().UTC(),
+	})
+
+	if _, err := svc.AssociateExistingMRByURL(
+		context.Background(), "ws-1", "task-1", "repo-1",
+		host+"/clients/socodevi/laravel/co-up/-/merge_requests/92",
+	); err != nil {
+		t.Fatalf("AssociateExistingMRByURL: %v", err)
+	}
+
+	got := getTaskMRRepositoryRemoteURL(t, store, "repo-1")
+	if strings.Contains(got, "secrettoken") || strings.Contains(got, "oauth2") {
+		t.Fatalf("backfilled remote_url leaked credentials: %q", got)
+	}
+	if got != host+"/clients/socodevi/laravel/co-up" {
+		t.Fatalf("backfilled remote_url = %q, want credential-free canonical form", got)
+	}
+}
+
+func TestParseLocalGitConfigOriginURLToleratesWhitespaceAndCaseVariants(t *testing.T) {
+	tests := []struct {
+		name   string
+		config string
+		want   string
+	}{
+		{
+			name:   "canonical spacing",
+			config: "[remote \"origin\"]\n\turl = https://gitlab.example.com/g/p.git\n",
+			want:   "https://gitlab.example.com/g/p.git",
+		},
+		{
+			name:   "no spaces around equals",
+			config: "[remote \"origin\"]\n\turl=https://gitlab.example.com/g/p.git\n",
+			want:   "https://gitlab.example.com/g/p.git",
+		},
+		{
+			name:   "extra whitespace around equals",
+			config: "[remote \"origin\"]\n\turl    =    https://gitlab.example.com/g/p.git\n",
+			want:   "https://gitlab.example.com/g/p.git",
+		},
+		{
+			name:   "uppercase key",
+			config: "[remote \"origin\"]\n\tURL = https://gitlab.example.com/g/p.git\n",
+			want:   "https://gitlab.example.com/g/p.git",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := parseLocalGitConfigOriginURL(tt.config); got != tt.want {
+				t.Fatalf("parseLocalGitConfigOriginURL() = %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

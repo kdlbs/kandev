@@ -51,11 +51,16 @@ func (s *Store) ValidateTaskMRScope(ctx context.Context, workspaceID, taskID, re
 // tagged at discovery time) yet still carry a resolvable remote_url.
 //
 // Rows created before remote_url resolution existed (or where it otherwise
-// failed to populate) have neither signal. For those, as a last resort, this
-// re-derives the origin directly from the repository's local git checkout
-// (local_path) and, if it matches the MR, opportunistically backfills
-// remote_url so the local filesystem read isn't needed on subsequent calls.
-// Rows with no signal resolving to a GitLab identity fail closed.
+// failed to populate) have no signal at all: provider/provider_host/
+// provider_owner/provider_name AND remote_url are all blank. Only for those
+// rows, as a last resort, this re-derives the origin directly from the
+// repository's local git checkout (local_path) and, if it matches the MR,
+// opportunistically backfills remote_url so the local filesystem read isn't
+// needed on subsequent calls. The local-checkout fallback deliberately never
+// runs when the row already carries ANY durable identity signal (even one
+// that doesn't match the MR), so it can never override an already-known
+// repository's identity with an unrelated local checkout. Rows with no
+// signal resolving to a GitLab identity fail closed.
 func (s *Store) ValidateTaskMRRepositoryIdentity(
 	ctx context.Context,
 	workspaceID, taskID, repositoryID, configuredHost, projectPath string,
@@ -63,14 +68,7 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 	if repositoryID == "" {
 		return ErrTaskMRRepositoryMismatch
 	}
-	var identity struct {
-		Provider  string `db:"provider"`
-		Host      string `db:"provider_host"`
-		Owner     string `db:"provider_owner"`
-		Name      string `db:"provider_name"`
-		RemoteURL string `db:"remote_url"`
-		LocalPath string `db:"local_path"`
-	}
+	var identity taskMRRepositoryIdentityRow
 	err := s.ro.GetContext(ctx, &identity, `
 		SELECT COALESCE(r.provider, '') AS provider,
 			COALESCE(r.provider_host, '') AS provider_host,
@@ -108,17 +106,19 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 			candidates = append(candidates, taskMRIdentityCandidate{host: gotHost, project: remoteProject})
 		}
 	}
-	// Legacy rows: neither the durable identity nor remote_url resolved to
-	// anything. Fall back to reading the local checkout's origin directly,
-	// since local_path is the one signal every locally-cloned repository
-	// carries regardless of when it was added.
-	if localCandidate, ok := localCheckoutIdentityCandidate(identity.RemoteURL, identity.LocalPath); ok {
-		candidates = append(candidates, localCandidate)
+	// Legacy rows only: no durable identity signal at all. A row that
+	// already carries any provider/host/owner/name/remote_url value has an
+	// established identity, even if it doesn't match this MR, and must not
+	// be overridden by a coincidentally-matching local checkout.
+	if identity.hasNoDurableIdentitySignal() {
+		if localCandidate, ok := localCheckoutIdentityCandidate(identity.LocalPath); ok {
+			candidates = append(candidates, localCandidate)
+		}
 	}
 	for _, c := range candidates {
 		if sameGitLabHost(c.host, wantHost) && strings.EqualFold(c.project, wantProject) {
-			if c.remoteURL != "" {
-				s.backfillRepositoryRemoteURL(ctx, repositoryID, c.remoteURL)
+			if c.backfillRemoteURL != "" {
+				s.backfillRepositoryRemoteURL(ctx, repositoryID, c.backfillRemoteURL)
 			}
 			return nil
 		}
@@ -126,19 +126,43 @@ func (s *Store) ValidateTaskMRRepositoryIdentity(
 	return ErrTaskMRRepositoryMismatch
 }
 
+// taskMRRepositoryIdentityRow is the repository identity data loaded for one
+// task-repository pair.
+type taskMRRepositoryIdentityRow struct {
+	Provider  string `db:"provider"`
+	Host      string `db:"provider_host"`
+	Owner     string `db:"provider_owner"`
+	Name      string `db:"provider_name"`
+	RemoteURL string `db:"remote_url"`
+	LocalPath string `db:"local_path"`
+}
+
+// hasNoDurableIdentitySignal reports whether the row carries absolutely no
+// identity signal: no durable provider/host/owner/name AND no remote_url.
+// Only such rows are eligible for the local-checkout fallback, so a row that
+// already identifies a (possibly different) repository can never be
+// overridden by a coincidentally-matching local checkout.
+func (r taskMRRepositoryIdentityRow) hasNoDurableIdentitySignal() bool {
+	return r.Provider == "" && r.Host == "" && r.Owner == "" && r.Name == "" && r.RemoteURL == ""
+}
+
 // taskMRIdentityCandidate is one (host, project) identity derived from a
 // repository row that an incoming MR's host/project can be checked against.
-// remoteURL is set only for candidates re-derived from a local checkout, so
-// the caller knows to backfill the repository row's remote_url on a match.
-type taskMRIdentityCandidate struct{ host, project, remoteURL string }
+// backfillRemoteURL is set only for candidates re-derived from a local
+// checkout, so the caller knows to persist it onto the repository row on a
+// match. It deliberately holds a credential-free canonical "host/project"
+// value rather than the raw local remote URL, since the raw value may embed
+// userinfo credentials (e.g. "https://user:token@host/...") that must never
+// be persisted into a column returned by repository API payloads.
+type taskMRIdentityCandidate struct{ host, project, backfillRemoteURL string }
 
 // localCheckoutIdentityCandidate re-derives a GitLab (host, project) identity
-// from a repository's local git checkout, for legacy rows where both the
-// durable provider identity and remote_url are blank. ok is false when there
-// is nothing to fall back to (no local_path, or remote_url already set) or
-// the checkout's origin can't be parsed as a GitLab remote.
-func localCheckoutIdentityCandidate(remoteURL, localPath string) (candidate taskMRIdentityCandidate, ok bool) {
-	if remoteURL != "" || localPath == "" {
+// from a repository's local git checkout, for legacy rows where neither the
+// durable provider identity nor remote_url carries any signal. ok is false
+// when there is nothing to fall back to (no local_path) or the checkout's
+// origin can't be parsed as a GitLab remote.
+func localCheckoutIdentityCandidate(localPath string) (candidate taskMRIdentityCandidate, ok bool) {
+	if localPath == "" {
 		return taskMRIdentityCandidate{}, false
 	}
 	localRemoteURL := resolveLocalGitOriginURL(localPath)
@@ -150,7 +174,8 @@ func localCheckoutIdentityCandidate(remoteURL, localPath string) (candidate task
 	if err != nil {
 		return taskMRIdentityCandidate{}, false
 	}
-	return taskMRIdentityCandidate{host: gotHost, project: remoteProject, remoteURL: localRemoteURL}, true
+	backfillRemoteURL := strings.TrimRight(gotHost, "/") + "/" + strings.Trim(remoteProject, "/")
+	return taskMRIdentityCandidate{host: gotHost, project: remoteProject, backfillRemoteURL: backfillRemoteURL}, true
 }
 
 // backfillRepositoryRemoteURL persists a remote_url re-derived from a local
@@ -231,6 +256,11 @@ func resolveLocalCommonGitDir(gitDir string) string {
 
 // parseLocalGitConfigOriginURL extracts the "origin" remote's url from raw
 // git config file content.
+// parseLocalGitConfigOriginURL extracts the "origin" remote's url from raw
+// git config file content. Tolerant of the whitespace-around-"=" and
+// key-casing variations git itself accepts ("url = x", "url=x", "URL\t=\tx"),
+// since hand-edited or tool-written configs don't always match the exact
+// "url = " spacing git-init produces.
 func parseLocalGitConfigOriginURL(config string) string {
 	inOrigin := false
 	for _, line := range strings.Split(config, "\n") {
@@ -243,10 +273,15 @@ func parseLocalGitConfigOriginURL(config string) string {
 			inOrigin = false
 			continue
 		}
-		if inOrigin {
-			if url, ok := strings.CutPrefix(line, "url = "); ok {
-				return url
-			}
+		if !inOrigin {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(key), "url") {
+			return strings.TrimSpace(value)
 		}
 	}
 	return ""
