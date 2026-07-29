@@ -73,10 +73,10 @@ desktop, tablet, and mobile.
 
 ## E2E Tests
 
-- `apps/web/e2e/tests/review/review-markdown-preview.spec.ts`: create a changed `.md` file, open
+- `apps/web/e2e/tests/review/review-markdown-preview.spec.ts`: create changed `.md` and `.mdx` files, open
   expanded Review, activate the desktop eye action, assert the dialog stays open and no file tab
   appears, then restore the diff.
-- `apps/web/e2e/tests/review/mobile-review-markdown-preview.spec.ts`: create a changed `.md` file,
+- `apps/web/e2e/tests/review/mobile-review-markdown-preview.spec.ts`: create a changed `.md` or `.mdx` file,
   open Review from mobile Changes, choose the action from the file menu, and assert rendered
   changed content remains inside the Review dialog without navigating to Files.
 

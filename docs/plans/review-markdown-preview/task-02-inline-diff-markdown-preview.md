@@ -12,7 +12,7 @@ spec: "../../specs/ui/review-markdown-preview.md"
 
 ## Acceptance
 
-1. Desktop, tablet, and mobile keep the Review dialog open while toggling a Markdown row between
+1. Desktop, tablet, and mobile keep the Review dialog open while toggling a `.md` or `.mdx` row between
    its textual diff and a rendered changed-content preview; no file tab or Files viewer opens.
 2. Complete added/untracked diffs render as one document, while modified hunks remain separate and
    partial/truncated content is visibly labelled.
