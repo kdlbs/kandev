@@ -170,6 +170,8 @@ func TestSQLiteRepository_ReserveAfterRestartReturnsRetryableLifecycleMetadata(t
 	}
 
 	repo, db := openRepo()
+	firstDB := db
+	t.Cleanup(func() { _ = firstDB.Close() })
 	if _, err := db.Exec(`
 		CREATE TABLE tasks (
 			id TEXT PRIMARY KEY,
