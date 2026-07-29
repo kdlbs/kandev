@@ -16,7 +16,7 @@ spec: "../../specs/agent-stall-recovery/spec.md"
   generation-scoped `agent.stalled` event and remains in progress.
 - The event includes active top-level tool display identity when available;
   subagent tools do not replace it and terminal tool updates clear it.
-- The watchdog checks every 60 seconds and does not repeat the warning or log
+- The watchdog checks every 60 seconds and does not repeat the notice or log
   for the same prompt generation.
 
 ## Verification

@@ -17,11 +17,12 @@ whose providers emit no progress frames.
 
 Stall detection is advisory and recovery remains operator controlled:
 
-- After five minutes without agent events, Kandev presents one warning for the
-  active prompt generation and keeps the session `RUNNING`.
-- The warning identifies the active top-level tool when that information is
-  available, without exposing raw command arguments, and provides a prominent
-  **Cancel turn** action.
+- After five minutes without agent events, Kandev presents one neutral notice
+  for the active prompt generation and keeps the session `RUNNING`.
+- The notice identifies the active top-level tool when that information is
+  available, without exposing raw command arguments, and provides a compact
+  neutral **Cancel turn** action. Its wording and styling do not imply that a
+  quiet long-running tool has failed.
 - **Cancel turn** reuses the existing `agent.cancel` escalation path. That path
   bounds the ACP acknowledgement wait, releases a hung prompt, and reconciles
   the session to an input-ready state.
@@ -30,7 +31,7 @@ Stall detection is advisory and recovery remains operator controlled:
   defined by
   [ADR-2026-07-28-coarse-running-busy-signal](2026-07-28-coarse-running-busy-signal.md).
 - The watchdog checks once per 60 seconds and logs only the first detected stall
-  for a prompt generation; it does not repeat a warning every check.
+  for a prompt generation; it does not repeat a notice every check.
 
 The observable behavior is specified in
 [`docs/specs/agent-stall-recovery/spec.md`](../specs/agent-stall-recovery/spec.md).
@@ -44,7 +45,7 @@ input and lifecycle ownership remain conservative. A genuinely abandoned turn
 can remain `RUNNING` indefinitely if the user does not intervene.
 
 Lifecycle must retain enough in-memory top-level tool identity to enrich the
-warning, while the persisted warning message remains the durable UI record.
+notice, while the persisted notice message remains the durable UI record.
 
 ## Alternatives Considered
 

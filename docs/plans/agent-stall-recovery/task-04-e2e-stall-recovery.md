@@ -15,9 +15,11 @@ spec: "../../specs/agent-stall-recovery/spec.md"
 ## Acceptance
 
 - Desktop Playwright proves a running stalled session shows **Cancel turn** and
-  becomes input-ready after the action without navigation or restart.
+  becomes input-ready after the action without navigation or restart. The
+  notice is a neutral single inline row rather than an alert card.
 - Mobile Playwright performs the same recovery with `.tap()`, proves a minimum
-  44px action height, and finds no document horizontal overflow.
+  44px content-width action, verifies the seeded notice remains a compact row,
+  and finds no document horizontal overflow.
 - Tests use the E2E-only session/message seed helpers; they do not wait five
   wall-clock minutes or add production test hooks.
 
@@ -26,7 +28,7 @@ spec: "../../specs/agent-stall-recovery/spec.md"
 - `cd apps/web && pnpm e2e:run tests/session/pause-resume-recovery.spec.ts`
 - `cd apps/web && pnpm e2e:run tests/session/mobile-pause-resume-recovery.spec.ts -- --project=mobile-chrome`
 
-Each E2E scenario must first fail because the running-only warning is hidden,
+Each E2E scenario must first fail because the running-only notice is hidden,
 then pass against freshly built backend and Vite artifacts.
 
 ## Files likely touched

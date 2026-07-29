@@ -1,6 +1,6 @@
 ---
 id: "02-persist-stall-warning"
-title: "Persist an actionable stall warning"
+title: "Persist an actionable stall notice"
 status: pending
 wave: 2
 depends_on: ["01-detect-stalled-prompt"]
@@ -8,22 +8,23 @@ plan: "plan.md"
 spec: "../../specs/agent-stall-recovery/spec.md"
 ---
 
-# Task 02: Persist an actionable stall warning
+# Task 02: Persist an actionable stall notice
 
 ## Acceptance
 
-- The orchestrator consumes `agent.stalled` and creates one warning status
+- The orchestrator consumes `agent.stalled` and creates one neutral status
   message without changing task, session, or process state.
-- Copy uses only the tool display title/name, falling back to a generic warning.
+- Copy says Kandev is still waiting, uses only the tool display title/name, and
+  falls back to a generic notice without asserting failure.
 - Metadata exposes a running-only **Cancel turn** `agent.cancel` action with the
-  affected `session_id` and stable test ID.
+  affected `session_id`, neutral styling, and stable test ID.
 
 ## Verification
 
 - `cd apps/backend && go test -race -run 'TestHandleAgentStalled' ./internal/orchestrator`
 - `cd apps/backend && go test -race -run 'TestWatcher.*AgentStalled' ./internal/orchestrator/watcher`
 
-The handler test must first fail because no warning is persisted, then pass
+The handler test must first fail because no notice is persisted, then pass
 with exact metadata assertions and unchanged session state.
 
 ## Files likely touched
@@ -45,12 +46,12 @@ metadata contract.
 
 ## Inputs
 
-- Spec scenarios for tool-specific and generic warnings
-- Plan section `Persist the actionable warning`
+- Spec scenarios for tool-specific and generic notices
+- Plan section `Persist the actionable notice`
 - Existing transient-retry and recoverable-failure action-message builders
 
 ## Output contract
 
-Report the RED assertion, warning copy and metadata, proof that no state
+Report the RED assertion, notice copy and metadata, proof that no state
 transition occurred, exact test results, files changed, blockers, and risks.
 Mark this task `done` and update its plan checkbox in the same conversation.

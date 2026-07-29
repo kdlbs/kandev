@@ -10,8 +10,8 @@ status: draft
 ## Overview
 
 Turn the lifecycle watchdog's existing inactivity observation into one
-generation-scoped internal event, persist that event as an actionable warning,
-and make the warning visible while the session is still `RUNNING`. The existing
+generation-scoped internal event, persist that event as an actionable notice,
+and make the notice visible while the session is still `RUNNING`. The existing
 cancel-escalation path remains the sole recovery mechanism; no timeout changes
 session or process state automatically.
 
@@ -49,17 +49,18 @@ waits, force-releases a stuck prompt, and reconciles the session to
   `apps/backend/internal/agent/runtime/lifecycle/events.go`, and
   `apps/backend/internal/events/types.go`.
 
-### Persist the actionable warning
+### Persist the actionable notice
 
 - Extend `apps/backend/internal/orchestrator/watcher/watcher.go` with the typed
   `agent.stalled` subscription and wire it in
   `apps/backend/internal/orchestrator/service.go`.
 - Add `apps/backend/internal/orchestrator/event_handlers_stall.go` to create a
-  warning status message without changing task/session state.
+  neutral status message without changing task/session state.
 - Use only the tool display title or name in copy. Metadata carries
   `action_visibility: running` and one `ws_request` action for `agent.cancel`
-  with `session_id`, label **Cancel turn**, destructive styling, and stable
-  `stall-cancel-turn-button` test ID.
+  with `session_id`, label **Cancel turn**, neutral styling, and stable
+  `stall-cancel-turn-button` test ID. The copy says Kandev is still waiting; it
+  does not assert that the tool failed.
 - If message persistence fails, log the error and leave the running prompt
   untouched.
 
@@ -67,7 +68,7 @@ waits, force-releases a stuck prompt, and reconciles the session to
 
 ## Frontend
 
-### Running-session action warning
+### Compact running-session notice
 
 - Update
   `apps/web/components/task/chat/messages/action-message.tsx` so ordinary
@@ -75,25 +76,30 @@ waits, force-releases a stuck prompt, and reconciles the session to
   `action_visibility: running` messages render only during `RUNNING`.
 - Add the optional visibility metadata contract to
   `apps/web/components/task/chat/types.ts`.
-- Reuse the existing `ActionButtons` responsive presentation and add a
-  pause/cancel icon mapping if needed. The action remains compact on desktop
-  and full-width with a minimum 44px height on phones.
+- Render a running-only message as one inline row: muted `text-xs` copy, no
+  alert icon, no warning/error color, no tinted background or border, and one
+  neutral **Cancel turn** button at the end.
+- Extend the action-button presentation with a compact inline mode. The button
+  is content-width at every breakpoint, uses the existing small desktop
+  height, and retains a minimum 44px height on phones.
 
 ### Mobile design contract
 
-- **Desktop outcome:** an amber warning in the chat footer explains the stall
-  and exposes a compact **Cancel turn** button.
-- **Mobile entry point and outcome:** the same warning appears in the active
-  chat footer; **Cancel turn** is a visible full-width touch action and returns
-  the session to input-ready state.
-- **Nearest shipped exemplar:** `ActionMessage` supplies the responsive action
-  card and `mobile-pause-resume-recovery.spec.ts` supplies the touch cancellation
-  flow.
+- **Desktop outcome:** one low-emphasis inline status row in the chat footer
+  says Kandev is still waiting and exposes a neutral **Cancel turn** button.
+- **Mobile entry point and outcome:** the same compact row appears in the active
+  chat footer; **Cancel turn** remains inline and content-width, has a 44px
+  touch height, and returns the session to input-ready state.
+- **Nearest shipped exemplar:** `ActionMessage` supplies the message/action
+  behavior and `mobile-pause-resume-recovery.spec.ts` supplies the touch
+  cancellation flow. The existing stacked full-width mobile `ActionButtons`
+  geometry is intentionally not reused for this low-emphasis notice.
 - **Presentation:** inline in the existing chat footer; no drawer or new
   navigation layer is needed for a frequent, single-step recovery action.
-- **Hierarchy and geometry:** warning copy precedes the primary recovery action;
+- **Hierarchy and geometry:** notice copy truncates before the trailing action;
   chat remains the sole scroll owner, existing safe-area behavior is retained,
-  and the action uses the shared 44px mobile button treatment.
+  the row does not introduce a card or stacked action area, and the action uses
+  the shared 44px mobile touch height without expanding to full width.
 - **Shared logic:** message metadata, session-state visibility, and the
   `agent.cancel` handler are identical across viewports.
 
@@ -111,33 +117,35 @@ waits, force-releases a stuck prompt, and reconciles the session to
   on later checks.
   **File:** `apps/backend/internal/agent/runtime/lifecycle/session_test.go`.
   **How:** `testing/synctest` with the real ticker and event bus.
-- **What:** the orchestrator persists one warning with sanitized tool copy and
-  the exact `agent.cancel` action without transitioning session state.
+- **What:** the orchestrator persists one neutral notice with sanitized tool
+  copy and the exact `agent.cancel` action without transitioning session state.
   **File:**
   `apps/backend/internal/orchestrator/event_handlers_stall_test.go` and
   `apps/backend/internal/orchestrator/watcher/watcher_test.go`.
   **How:** direct handler test with the existing message-creator fake plus a
   memory-bus watcher dispatch test.
-- **What:** running-only action messages render during `RUNNING`, hide after
-  settlement, and do not change ordinary recovery-message visibility.
+- **What:** running-only action messages render as a compact neutral row during
+  `RUNNING`, hide after settlement, and do not change ordinary recovery-message
+  visibility.
   **File:**
   `apps/web/components/task/chat/messages/action-message.test.tsx`.
   **How:** rendered store-backed component tests.
 
 ## E2E Tests
 
-- **Scenario:** a running session with a persisted stall warning exposes
+- **Scenario:** a running session with a persisted stall notice exposes
   **Cancel turn**, and activating it makes the session input-ready without a
   backend restart.
   **File:**
   `apps/web/e2e/tests/session/pause-resume-recovery.spec.ts`.
-  **What to verify:** warning copy, action request, warning/status disappearance,
-  idle composer, and unchanged task URL.
+  **What to verify:** neutral compact copy, action request, notice
+  disappearance, idle composer, and unchanged task URL.
 - **Scenario:** the same recovery is reachable by touch on a phone viewport.
   **File:**
   `apps/web/e2e/tests/session/mobile-pause-resume-recovery.spec.ts`.
-  **What to verify:** full-width action is at least 44px high, `.tap()` settles
-  the session, and the document has no horizontal overflow.
+  **What to verify:** the content-width action is at least 44px high, the seeded
+  notice remains one compact row, `.tap()` settles the session, and the document
+  has no horizontal overflow.
 - Seed the `RUNNING` session and actionable status message through the existing
   E2E-only `seedTaskSession` and `seedSessionMessage` helpers. The cancel path's
   missing-live-execution reconciliation provides a deterministic end-to-end
@@ -156,11 +164,11 @@ Wave 1:
 
 Wave 2:
 
-- [ ] [Task 02: Persist an actionable stall warning](task-02-persist-stall-warning.md)
+- [ ] [Task 02: Persist an actionable stall notice](task-02-persist-stall-warning.md)
 
 Wave 3:
 
-- [ ] [Task 03: Render the warning during running sessions](task-03-render-running-warning.md)
+- [ ] [Task 03: Render the notice during running sessions](task-03-render-running-warning.md)
 
 Wave 4:
 
@@ -179,11 +187,11 @@ requires them; the task-level commands remain the TDD evidence for each change.
 
 ## Risks and non-goals
 
-- Event silence remains ambiguous, so the warning is advisory and cannot alter
+- Event silence remains ambiguous, so the notice is advisory and cannot alter
   lifecycle state by itself.
 - Tool titles are already user-visible display data; raw command arguments must
-  not be copied into the warning.
-- The warning is persisted once per prompt generation so reloads retain it. It
+  not be copied into the notice.
+- The notice is persisted once per prompt generation so reloads retain it. It
   remains historical/actionable while that generation is still `RUNNING` and
   disappears when the session settles.
 - No schema migration, public HTTP endpoint, configurable timeout, automatic

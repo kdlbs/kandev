@@ -13,8 +13,8 @@ Decision:
 
 An agent turn can remain `RUNNING` forever after its active tool stops emitting
 events. Users currently see only “Agent is running,” while Resume is correctly
-blocked by the active-session guard and the backend repeats a warning that the
-UI never receives.
+blocked by the active-session guard and the backend repeats a diagnostic that
+the UI never receives.
 
 ## Broken behavior
 
@@ -28,48 +28,53 @@ the turn.
 
 - Kandev checks running prompts for inactivity once per 60 seconds.
 - After five minutes without agent events, Kandev creates at most one
-  user-visible warning for that prompt generation.
-- The warning says the agent may be stuck and includes the active top-level
-  tool's display title or name when available. It does not include raw command
-  arguments.
-- The warning provides a prominent **Cancel turn** action on desktop and
-  mobile. Activating it uses the existing `agent.cancel` request.
-- The warning remains visible and actionable while the affected session is
+  user-visible notice for that prompt generation.
+- The notice says Kandev is still waiting and includes the active top-level
+  tool's display title or name when available. It does not assert that the tool
+  failed and does not include raw command arguments.
+- The notice is a single compact inline row with muted neutral copy and a
+  neutral **Cancel turn** action. It has no warning/error colors, alert icon,
+  tinted background, or alert-card treatment.
+- On phones, **Cancel turn** remains inline and content-width rather than
+  becoming a full-width row, while retaining a minimum 44px touch height.
+  Activating it uses the existing `agent.cancel` request.
+- The notice remains visible and actionable while the affected session is
   `RUNNING`, including after a page reload, and is hidden when the session
   leaves `RUNNING`.
 - Detection alone does not change task state, session state, prompt admission,
   or process liveness.
 - The backend logs the first stall detected for a prompt generation and does
-  not emit another warning or log entry on every watchdog check.
+  not emit another notice or log entry on every watchdog check.
 
 ## Failure modes
 
-- If active tool identity is unavailable, the generic warning and cancel action
+- If active tool identity is unavailable, the generic notice and cancel action
   still appear.
 - If the agent acknowledges cancellation, normal cancellation reconciliation
   makes the session input-ready.
 - If the agent does not acknowledge cancellation, the existing bounded
   cancel-escalation path releases the prompt and reconciles the session.
-- If warning-message persistence fails, the failure is logged without changing
+- If notice-message persistence fails, the failure is logged without changing
   or terminating the running session.
 
 ## Scenarios
 
 - **GIVEN** a running prompt whose top-level shell tool is `in_progress`,
-  **WHEN** no agent event arrives for five minutes, **THEN** one warning names
-  that tool and offers **Cancel turn** while the session remains `RUNNING`.
+  **WHEN** no agent event arrives for five minutes, **THEN** one compact neutral
+  notice names that tool and offers **Cancel turn** while the session remains
+  `RUNNING`.
 - **GIVEN** a running prompt with no known active tool, **WHEN** no agent event
-  arrives for five minutes, **THEN** one generic warning offers **Cancel turn**
+  arrives for five minutes, **THEN** one generic notice offers **Cancel turn**
   while the session remains `RUNNING`.
-- **GIVEN** a warning already exists for the active prompt generation,
+- **GIVEN** a notice already exists for the active prompt generation,
   **WHEN** subsequent watchdog checks observe the same stall, **THEN** Kandev
-  creates no duplicate warning and emits no repeated stall log.
-- **GIVEN** a stalled warning is visible, **WHEN** the user activates
+  creates no duplicate notice and emits no repeated stall log.
+- **GIVEN** a stall notice is visible, **WHEN** the user activates
   **Cancel turn**, **THEN** the existing cancellation path settles the turn and
   the session becomes available for new input without a backend restart.
-- **GIVEN** a stalled warning is visible on a phone viewport, **WHEN** the user
-  taps **Cancel turn**, **THEN** the same cancellation outcome is reachable
-  through a full-width touch target of at least 44px.
+- **GIVEN** a stall notice is visible on a phone viewport, **WHEN** the user taps
+  **Cancel turn**, **THEN** the same cancellation outcome is reachable through
+  an inline, content-width touch target of at least 44px.
 - **GIVEN** a quiet but legitimate long-running turn, **WHEN** the inactivity
   threshold passes and the user does not cancel, **THEN** Kandev leaves the
   turn and process running.
