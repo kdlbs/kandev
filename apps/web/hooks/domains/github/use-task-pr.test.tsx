@@ -120,6 +120,43 @@ describe("useTaskPR — reconnect resync", () => {
     expect(requestMock.mock.calls.length).toBeGreaterThan(callsAfterExhaustion);
   });
 
+  // Resetting the retry refs on reconnect is not enough on its own: once the
+  // retry budget is exhausted the 5s interval clears itself, and simply zeroing
+  // retryRef doesn't recreate it. If the single reconnect sync returns empty,
+  // the store stays empty and the tab never appears. The polling interval must
+  // restart on reconnect so a fresh 30s window of 5s retries runs.
+  it("restarts the 5s retry polling after reconnect when the resync returns empty", async () => {
+    requestMock.mockResolvedValue({ prs: [] });
+
+    const { result } = renderHook(() => useTaskPRWithStore("task-1"), { wrapper });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    // Advance past the clearing tick (7 * 5s = 35s): the 6 retries fire and the
+    // 7th tick hits the budget guard and clears the interval, so no interval is
+    // live when the socket reconnects.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000 * 7);
+    });
+    const callsAfterExhaustion = requestMock.mock.calls.length;
+
+    // Reconnect: the resync fires once immediately (still empty).
+    await act(async () => {
+      result.current.store.getState().setConnectionStatus("connected", null);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    const callsAfterReconnect = requestMock.mock.calls.length;
+    expect(callsAfterReconnect).toBeGreaterThan(callsAfterExhaustion);
+
+    // A fresh polling window must now run: advancing another 5s tick fires
+    // another retry. Without restarting the interval this stays flat.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(requestMock.mock.calls.length).toBeGreaterThan(callsAfterReconnect);
+  });
+
   // A no-op status write (already-connected re-render) must not refire, or
   // every unrelated store update would spam the backend sync.
   it("does not refire while the status stays connected", async () => {
