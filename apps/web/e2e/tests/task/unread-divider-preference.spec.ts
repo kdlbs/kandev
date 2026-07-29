@@ -11,6 +11,8 @@ test.describe("Unread divider preference", () => {
 
     await expect(toggle).toBeChecked();
 
+    await toggle.scrollIntoViewIfNeeded();
+
     await prCapture.screenshot(`unread-divider-preference-${testInfo.project.name}`, {
       caption: `Unread divider preference (${testInfo.project.name})`,
       fullPage: true,
