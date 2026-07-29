@@ -3,6 +3,7 @@ import {
   shouldAutoScrollOnMessagesChange,
   shouldAutoScrollOnWorkingStart,
   hasTranscriptProgressedPastView,
+  hasTranscriptAppendedSinceBaseline,
   shouldCatchUpOnAutoScrollEnable,
   resolveNativeInitialScrollTop,
   resolveFollowOutput,
@@ -99,31 +100,172 @@ describe("hasTranscriptProgressedPastView", () => {
   });
 });
 
-describe("shouldCatchUpOnAutoScrollEnable", () => {
-  it("catches up when flipping from disabled to enabled with content below view", () => {
+const BASELINE_UPDATED_AT = "2026-01-01T00:00:00Z";
+
+const baseline = {
+  baselineCount: 20,
+  baselineLastId: "msg-19",
+  baselineLastUpdatedAt: BASELINE_UPDATED_AT,
+};
+
+describe("hasTranscriptAppendedSinceBaseline", () => {
+  it("is true when a new row was appended (count grew and the last id changed)", () => {
     expect(
-      shouldCatchUpOnAutoScrollEnable({ wasEnabled: false, nowEnabled: true, isAtBottom: false }),
+      hasTranscriptAppendedSinceBaseline({
+        ...baseline,
+        currentCount: 21,
+        currentLastId: "msg-20",
+        currentLastUpdatedAt: "2026-01-01T00:00:05Z",
+      }),
     ).toBe(true);
   });
 
-  it("does not catch up when already at the bottom", () => {
+  it("is true when the same last row streamed new content (id unchanged, updated_at advanced)", () => {
     expect(
-      shouldCatchUpOnAutoScrollEnable({ wasEnabled: false, nowEnabled: true, isAtBottom: true }),
+      hasTranscriptAppendedSinceBaseline({
+        ...baseline,
+        currentCount: 20,
+        currentLastId: "msg-19",
+        currentLastUpdatedAt: "2026-01-01T00:00:05Z",
+      }),
+    ).toBe(true);
+  });
+
+  it("is false for a prepend-only load (count grew but the last id and its updated_at are unchanged)", () => {
+    expect(
+      hasTranscriptAppendedSinceBaseline({
+        ...baseline,
+        currentCount: 40,
+        currentLastId: "msg-19",
+        currentLastUpdatedAt: BASELINE_UPDATED_AT,
+      }),
+    ).toBe(false);
+  });
+
+  it("is false when nothing changed", () => {
+    expect(
+      hasTranscriptAppendedSinceBaseline({
+        ...baseline,
+        currentCount: 20,
+        currentLastId: "msg-19",
+        currentLastUpdatedAt: BASELINE_UPDATED_AT,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not treat a missing current updated_at as a change from a defined baseline", () => {
+    expect(
+      hasTranscriptAppendedSinceBaseline({
+        ...baseline,
+        currentCount: 20,
+        currentLastId: "msg-19",
+        currentLastUpdatedAt: undefined,
+      }),
+    ).toBe(false);
+  });
+
+  it("is false when there is no current last id yet", () => {
+    expect(
+      hasTranscriptAppendedSinceBaseline({
+        baselineCount: 0,
+        baselineLastId: null,
+        baselineLastUpdatedAt: undefined,
+        currentCount: 0,
+        currentLastId: null,
+        currentLastUpdatedAt: undefined,
+      }),
+    ).toBe(false);
+  });
+
+  it("is true for the very first message appearing", () => {
+    expect(
+      hasTranscriptAppendedSinceBaseline({
+        baselineCount: 0,
+        baselineLastId: null,
+        baselineLastUpdatedAt: undefined,
+        currentCount: 1,
+        currentLastId: "msg-0",
+        currentLastUpdatedAt: BASELINE_UPDATED_AT,
+      }),
+    ).toBe(true);
+  });
+});
+
+describe("shouldCatchUpOnAutoScrollEnable", () => {
+  it("catches up when content was appended while disabled and it is not yet in view", () => {
+    expect(
+      shouldCatchUpOnAutoScrollEnable({
+        wasEnabled: false,
+        nowEnabled: true,
+        appendedSinceDisable: true,
+        isAtBottom: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("does NOT catch up when the user was already scrolled away from the bottom before disabling and nothing new arrived (regression: disable while already scrolled up)", () => {
+    expect(
+      shouldCatchUpOnAutoScrollEnable({
+        wasEnabled: false,
+        nowEnabled: true,
+        appendedSinceDisable: false,
+        isAtBottom: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("does NOT catch up when the user scrolled further away themselves while disabled, with no new content (regression: manual scroll is not progression)", () => {
+    // appendedSinceDisable is derived purely from message identity/updated_at
+    // — a manual scroll can never flip it, unlike a scrollTop/height-based
+    // baseline would.
+    expect(
+      shouldCatchUpOnAutoScrollEnable({
+        wasEnabled: false,
+        nowEnabled: true,
+        appendedSinceDisable: false,
+        isAtBottom: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not catch up when content appended but the user already scrolled down to see it", () => {
+    expect(
+      shouldCatchUpOnAutoScrollEnable({
+        wasEnabled: false,
+        nowEnabled: true,
+        appendedSinceDisable: true,
+        isAtBottom: true,
+      }),
     ).toBe(false);
   });
 
   it("does nothing when flipping from enabled to disabled", () => {
     expect(
-      shouldCatchUpOnAutoScrollEnable({ wasEnabled: true, nowEnabled: false, isAtBottom: false }),
+      shouldCatchUpOnAutoScrollEnable({
+        wasEnabled: true,
+        nowEnabled: false,
+        appendedSinceDisable: true,
+        isAtBottom: false,
+      }),
     ).toBe(false);
   });
 
   it("does nothing when the enabled state is unchanged", () => {
     expect(
-      shouldCatchUpOnAutoScrollEnable({ wasEnabled: true, nowEnabled: true, isAtBottom: false }),
+      shouldCatchUpOnAutoScrollEnable({
+        wasEnabled: true,
+        nowEnabled: true,
+        appendedSinceDisable: true,
+        isAtBottom: false,
+      }),
     ).toBe(false);
     expect(
-      shouldCatchUpOnAutoScrollEnable({ wasEnabled: false, nowEnabled: false, isAtBottom: false }),
+      shouldCatchUpOnAutoScrollEnable({
+        wasEnabled: false,
+        nowEnabled: false,
+        appendedSinceDisable: true,
+        isAtBottom: false,
+      }),
     ).toBe(false);
   });
 });

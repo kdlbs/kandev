@@ -16,6 +16,7 @@ import {
   shouldAutoScrollOnWorkingStart,
   shouldCatchUpOnAutoScrollEnable,
   hasTranscriptProgressedPastView,
+  hasTranscriptAppendedSinceBaseline,
   resolveNativeInitialScrollTop,
   isPrependUpdate,
 } from "./transcript-auto-scroll";
@@ -163,7 +164,6 @@ function useAutoScroll(
   const storeApi = useAppStoreApi();
   const isNearBottomRef = useRef(true);
   const prevIsWorkingRef = useRef(isWorking);
-  const prevEnabledRef = useRef(enabled);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -208,26 +208,94 @@ function useAutoScroll(
     }
   }, [messages, scrollRef, enabled]);
 
-  // Catch up to the bottom when the user re-enables auto-scroll, but only if
-  // the transcript actually progressed past the current view while disabled.
+  useCatchUpOnReEnable(scrollRef, messages, enabled, isNearBottomRef);
+
+  return isNearBottomRef;
+}
+
+/**
+ * Catches the view up to the bottom when the user re-enables auto-scroll,
+ * but only if the transcript actually appended content while disabled —
+ * never on a manual scroll or a prepend, which don't change baselineRef's
+ * identity. A one-time mount-time init covers panels that remount already
+ * disabled (no live transition to capture a baseline from).
+ */
+function useCatchUpOnReEnable(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  messages: Message[],
+  enabled: boolean,
+  isNearBottomRef: React.RefObject<boolean>,
+) {
+  const prevEnabledRef = useRef(enabled);
+  const baselineRef = useRef<{
+    count: number;
+    lastId: string | null;
+    lastUpdatedAt: string | undefined;
+  } | null>(null);
+  const hasInitializedBaselineRef = useRef(false);
   useEffect(() => {
     const wasEnabled = prevEnabledRef.current;
     prevEnabledRef.current = enabled;
+    const captureBaseline = () => {
+      const last = messages[messages.length - 1];
+      baselineRef.current = {
+        count: messages.length,
+        lastId: last?.id ?? null,
+        lastUpdatedAt: last?.updated_at,
+      };
+    };
+
+    // First run: if the panel mounted already disabled (e.g. a session
+    // opened, or remounted via a dockview rebuild, with a persisted
+    // disabled preference), there was no in-process disable transition to
+    // capture a baseline from — establish one now from whatever the
+    // transcript looks like at mount, so a later re-enable can still detect
+    // genuine progression instead of never catching up.
+    if (!hasInitializedBaselineRef.current) {
+      hasInitializedBaselineRef.current = true;
+      if (!enabled) captureBaseline();
+      return;
+    }
+
     if (wasEnabled === enabled) return;
+    if (!enabled) {
+      // Transitioning to disabled: capture the baseline used to detect real
+      // progression (a new row, or the trailing row streaming more content)
+      // once re-enabled.
+      captureBaseline();
+      return;
+    }
+    // Transitioning to enabled.
     const el = scrollRef.current;
-    if (!el) return;
+    const baseline = baselineRef.current;
+    baselineRef.current = null;
+    if (!el || !baseline) return;
+    const lastNow = messages[messages.length - 1];
+    const appendedSinceDisable = hasTranscriptAppendedSinceBaseline({
+      baselineCount: baseline.count,
+      currentCount: messages.length,
+      baselineLastId: baseline.lastId,
+      currentLastId: lastNow?.id ?? null,
+      baselineLastUpdatedAt: baseline.lastUpdatedAt,
+      currentLastUpdatedAt: lastNow?.updated_at,
+    });
     const isAtBottom = !hasTranscriptProgressedPastView({
       scrollTop: el.scrollTop,
       scrollHeight: el.scrollHeight,
       clientHeight: el.clientHeight,
     });
-    if (shouldCatchUpOnAutoScrollEnable({ wasEnabled, nowEnabled: enabled, isAtBottom })) {
+    if (
+      shouldCatchUpOnAutoScrollEnable({
+        wasEnabled,
+        nowEnabled: enabled,
+        appendedSinceDisable,
+        isAtBottom,
+      })
+    ) {
       el.scrollTop = el.scrollHeight;
       isNearBottomRef.current = true;
     }
-  }, [enabled, scrollRef]);
-
-  return isNearBottomRef;
+  }, [enabled, scrollRef, messages]);
 }
 
 /**

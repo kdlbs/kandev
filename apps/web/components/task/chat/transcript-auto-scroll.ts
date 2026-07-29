@@ -63,20 +63,56 @@ export function hasTranscriptProgressedPastView(params: {
 }
 
 /**
+ * Whether the transcript actually appended new content since a baseline
+ * captured at disable time — i.e. a genuinely new message row, or the same
+ * trailing message streaming in more content. Derived purely from message
+ * identity and `updated_at` (never scrollTop/scrollHeight), so it can't be
+ * fooled by:
+ *  - the user scrolling further away themselves while disabled (no message
+ *    data changed, so this stays false), or
+ *  - a prepend (older messages loaded above): count grows but the LAST
+ *    message's id and `updated_at` are untouched, so this stays false.
+ *
+ * `updated_at` is the backend's documented "authoritative per-message change
+ * signal; advances on every content/metadata update" (see Message in
+ * lib/types/http.ts) — it catches in-place streaming growth of the last row
+ * even when no new row was appended.
+ */
+export function hasTranscriptAppendedSinceBaseline(params: {
+  baselineCount: number;
+  currentCount: number;
+  baselineLastId: string | null;
+  currentLastId: string | null;
+  baselineLastUpdatedAt: string | undefined;
+  currentLastUpdatedAt: string | undefined;
+}): boolean {
+  if (params.currentLastId === null) return false;
+  const newRowAppended =
+    params.currentCount > params.baselineCount && params.currentLastId !== params.baselineLastId;
+  const sameRowChanged =
+    params.currentLastId === params.baselineLastId &&
+    params.currentLastUpdatedAt !== undefined &&
+    params.currentLastUpdatedAt !== params.baselineLastUpdatedAt;
+  return newRowAppended || sameRowChanged;
+}
+
+/**
  * Whether re-enabling auto-scroll (the user flips the toggle back on) should
  * immediately catch the view up to the bottom. Only fires on the disabled ->
- * enabled transition, and only when the transcript has actually progressed
- * past the current view while it was disabled — resuming auto-follow with no
- * new content, or while the user is already at the bottom, never forces a
- * scroll here.
+ * enabled transition, and only when the transcript genuinely appended new
+ * content while disabled (see `hasTranscriptAppendedSinceBaseline`) AND that
+ * content isn't already in view. Resuming auto-follow with no new content —
+ * whether the user simply never scrolled back down, or scrolled further away
+ * themselves while disabled — never forces a scroll here.
  */
 export function shouldCatchUpOnAutoScrollEnable(params: {
   wasEnabled: boolean;
   nowEnabled: boolean;
+  appendedSinceDisable: boolean;
   isAtBottom: boolean;
 }): boolean {
   if (params.wasEnabled || !params.nowEnabled) return false;
-  return !params.isAtBottom;
+  return params.appendedSinceDisable && !params.isAtBottom;
 }
 
 /**
