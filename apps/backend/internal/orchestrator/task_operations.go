@@ -1991,11 +1991,21 @@ func (s *Service) GetTaskSessionStatus(ctx context.Context, taskID, sessionID st
 		// instead of falling into the terminal-session block below. See
 		// models.IsArchiveCancelReason.
 		if isArchiveCancelledSession(session) {
-			out := s.validateResumeEligibility(session, resp)
-			if out.NeedsResume {
-				out.ResumeReason = resumeReasonArchiveCancelledResumable
+			if running != nil && running.Resumable {
+				out := s.validateResumeEligibility(session, resp)
+				if out.NeedsResume {
+					out.ResumeReason = resumeReasonArchiveCancelledResumable
+				}
+				return out, nil
 			}
-			return out, nil
+			// The persisted token's runtime reports Resumable=false — it isn't
+			// safe to resume with. Route through the same fresh-start result
+			// used when there's no token/running row at all instead of
+			// validateResumeEligibility, which never sets IsResumable and
+			// would return NeedsResume=true with IsResumable=false, a
+			// combination the frontend's auto-resume gate
+			// (needs_resume && is_resumable) can never satisfy.
+			return evaluateFreshStartResume(session, running, runErr, resp), nil
 		}
 		// Don't auto-resume other terminal sessions (CANCELLED stays stopped, COMPLETED is done).
 		if !isActiveSessionState(session.State) {
