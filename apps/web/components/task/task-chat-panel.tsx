@@ -35,6 +35,16 @@ import { useAppStore } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 
+/**
+ * Cap on how many extra pages the last-prompt background lookup will fetch
+ * (see the `lastPromptLookupPagesRef` effect below) before giving up and
+ * falling back to the transcript's manual "Load older messages" pagination.
+ * 3 pages of 20 covers a long single agent turn without silently draining
+ * an entire long-lived conversation that happens to have no recent user
+ * message at all.
+ */
+const MAX_LAST_PROMPT_LOOKUP_PAGES = 3;
+
 function useClarificationKey(agentMessageCount: number) {
   const lastCountRef = useRef(agentMessageCount);
   const [clarificationKey, setClarificationKey] = useState(0);
@@ -254,11 +264,26 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
     }
   }, [hasMore, firstMessageId]);
+  // Bounded background lookup: the last prompt is usually within a page or
+  // two of a long single agent turn, but a session with no recent user
+  // message at all (e.g. hours of tool-only activity) would otherwise drain
+  // its *entire* history just to power this convenience affordance. Stop
+  // after a handful of pages and fall back to the manual "Load older
+  // messages" pagination the transcript already offers.
+  const lastPromptLookupPagesRef = useRef(0);
   useEffect(() => {
-    if (!isLoadingMore && shouldLoadMoreForTranscriptTarget("last_prompt", allMessages, hasMore)) {
-      void loadMore();
+    lastPromptLookupPagesRef.current = 0;
+  }, [resolvedSessionId]);
+  useEffect(() => {
+    if (lastPromptMessageId !== null) {
+      lastPromptLookupPagesRef.current = 0;
+      return;
     }
-  }, [allMessages, hasMore, isLoadingMore, loadMore]);
+    if (isLoadingMore || lastPromptLookupPagesRef.current >= MAX_LAST_PROMPT_LOOKUP_PAGES) return;
+    if (!shouldLoadMoreForTranscriptTarget("last_prompt", allMessages, hasMore)) return;
+    lastPromptLookupPagesRef.current += 1;
+    void loadMore();
+  }, [allMessages, hasMore, isLoadingMore, loadMore, lastPromptMessageId, resolvedSessionId]);
   const search = useSessionSearch(resolvedSessionId, loadMore);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({
