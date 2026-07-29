@@ -18,8 +18,34 @@ describe("upsertOpenFileTab", () => {
     expect(result).toEqual([{ ...file, markdownPreview: true }]);
   });
 
+  it("keeps same-path tabs from different repositories separate", () => {
+    const frontend = { ...file, repo: "frontend" };
+    const backend = { ...file, repo: "backend", markdownPreview: true };
+
+    expect(upsertOpenFileTab([frontend], backend)).toEqual([frontend, backend]);
+  });
+
   it("preserves an existing tab when no preview state is requested", () => {
-    expect(upsertOpenFileTab([file], file)).toBeInstanceOf(Array);
-    expect(upsertOpenFileTab([file], file)).toEqual([file]);
+    const tabs = [file];
+    expect(upsertOpenFileTab(tabs, file)).toBe(tabs);
+  });
+
+  it("adds a new tab", () => {
+    expect(upsertOpenFileTab([], file)).toEqual([file]);
+  });
+
+  it("evicts the oldest tab at capacity", () => {
+    const tabs = Array.from({ length: 4 }, (_, index) => ({
+      ...file,
+      path: `file${index}.md`,
+      name: `file${index}.md`,
+    }));
+    const newFile = { ...file, path: "new.md", name: "new.md" };
+
+    const result = upsertOpenFileTab(tabs, newFile);
+
+    expect(result).toHaveLength(4);
+    expect(result[0]?.path).toBe("file1.md");
+    expect(result[3]).toEqual(newFile);
   });
 });

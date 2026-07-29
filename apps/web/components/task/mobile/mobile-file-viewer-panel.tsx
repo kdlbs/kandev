@@ -93,13 +93,14 @@ export function MobileFileViewerPanel({
   const markdownFile = isMarkdownFile(file.path);
 
   const [markdownPreview, setMarkdownPreview] = useState(initialMarkdownPreview);
-  const [lastPath, setLastPath] = useState(file.path);
+  const fileIdentity = `${file.repo ?? ""}\u0000${file.path}`;
+  const [lastFileIdentity, setLastFileIdentity] = useState(fileIdentity);
 
   // Reset preview mode when the file changes so reopening a markdown file
   // always starts in editor view, not the previous preview state.
   // Adjust state during render per React docs recommendation.
-  if (lastPath !== file.path) {
-    setLastPath(file.path);
+  if (lastFileIdentity !== fileIdentity) {
+    setLastFileIdentity(fileIdentity);
     setMarkdownPreview(initialMarkdownPreview);
   }
 

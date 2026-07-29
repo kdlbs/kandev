@@ -22,12 +22,14 @@ spec: "../../specs/ui/review-markdown-preview.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run \
+cd apps && pnpm install --frozen-lockfile
+pnpm --filter @kandev/web test -- --run \
   components/review/review-diff-toolbar.test.tsx \
   components/task/mobile/session-mobile-layout.test.tsx \
   components/task/mobile/mobile-file-viewer-panel.test.tsx
-cd apps/web && pnpm e2e:run tests/review/review-markdown-preview.spec.ts
-cd apps/web && pnpm e2e:run tests/review/mobile-review-markdown-preview.spec.ts -- --project=mobile-chrome
+pnpm --dir web e2e:run tests/review/review-markdown-preview.spec.ts
+pnpm --dir web e2e:run tests/review/mobile-review-markdown-preview.spec.ts -- --project=mobile-chrome
+cd ..
 make fmt
 make typecheck test lint
 ```
@@ -73,6 +75,19 @@ Sequential. The responsive paths share callback types, Review wiring, and E2E se
 - Preserve repository scoping through every callback.
 - Keep preview intent coupled to the non-stale mobile file request.
 - Do not change Markdown rendering or raw-HTML safety behavior.
+
+## Completion evidence
+
+- Changed files: Review toolbar/dialog wiring, desktop and mobile file viewers, tablet preview
+  routing, unit coverage, desktop/mobile Playwright coverage, and this plan package.
+- RED: focused toolbar and mobile preview tests initially failed because preview requests did not
+  receive repository context and mobile/tablet preview state was not available.
+- GREEN: focused Vitest coverage passed after the implementation; desktop and mobile Playwright
+  review-preview scenarios passed.
+- Verification: `make fmt` and `make typecheck test lint` passed before the implementation commit;
+  subsequent PR fixes reran focused Vitest, TypeScript typecheck, and changed-file ESLint checks.
+- Residual risk: preview-environment deployment depends on external credentials; an earlier sprite
+  authentication failure was unrelated to the code and later CI runs were retried.
 
 ## Output contract
 

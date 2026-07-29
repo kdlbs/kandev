@@ -78,12 +78,14 @@ viewer with preview mode selected initially.
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run \
+cd apps && pnpm install --frozen-lockfile
+pnpm --filter @kandev/web test -- --run \
   components/review/review-diff-toolbar.test.tsx \
   components/task/mobile/session-mobile-layout.test.tsx \
   components/task/mobile/mobile-file-viewer-panel.test.tsx
-cd apps/web && pnpm e2e:run tests/review/review-markdown-preview.spec.ts
-cd apps/web && pnpm e2e:run tests/review/mobile-review-markdown-preview.spec.ts -- --project=mobile-chrome
+pnpm --dir web e2e:run tests/review/review-markdown-preview.spec.ts
+pnpm --dir web e2e:run tests/review/mobile-review-markdown-preview.spec.ts -- --project=mobile-chrome
+cd ..
 make fmt
 make typecheck test lint
 ```
