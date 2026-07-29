@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -1844,7 +1845,7 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 func (s *Service) waitForSessionReady(ctx context.Context, sessionID string) error {
 	const (
 		pollInterval = 500 * time.Millisecond
-		maxWait      = 90 * time.Second
+		maxWait      = constants.AgentLaunchTimeout
 	)
 	// Derive a bounded context so the overall wait AND each GetTaskSession query
 	// inside the loop honor maxWait. Callers pass context.WithoutCancel(ctx) so

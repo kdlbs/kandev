@@ -28,7 +28,7 @@ func (r *deadlineRecordingRepo) GetTaskSession(ctx context.Context, id string) (
 // for cubic's P2: resume/launch pass context.WithoutCancel(ctx) (no deadline) so
 // the wait survives the caller's request timeout, but the GetTaskSession queries
 // inside the poll loop must still be bounded by waitForSessionReady's own
-// deadline — otherwise a single blocking query could hang past the 90s budget,
+// deadline — otherwise a single blocking query could hang past that budget,
 // which is only checked between iterations.
 func TestWaitForSessionReady_BoundsQueriesWithNonCancellableContext(t *testing.T) {
 	repo := setupTestRepo(t)
