@@ -69,7 +69,7 @@ export function useSessionReadTracking(
   // anchor is captured within the same render pass isVisible turns true.
   const [visibleFor, setVisibleFor] = useState<string | null>(null);
 
-  if (isVisible && sessionId && sessionLoaded && visibleFor !== sessionId) {
+  if (unreadDividerEnabled && isVisible && sessionId && sessionLoaded && visibleFor !== sessionId) {
     const priorCursor =
       store.getState().taskSessions.items[sessionId]?.last_read_message_id ?? null;
     setVisibleFor(sessionId);
@@ -89,10 +89,21 @@ export function useSessionReadTracking(
   // committing; a genuine navigate-away plays out on a completely
   // different time scale and still resets normally.
   useEffect(() => {
-    if (isVisible || visibleFor === null) return;
-    const timer = setTimeout(() => setVisibleFor(null), 300);
+    if (visibleFor === null) return;
+    if (!unreadDividerEnabled) {
+      setVisibleFor(null);
+      setAnchor(null);
+      latestDispatchRef.current = null;
+      return;
+    }
+    if (isVisible) return;
+    const timer = setTimeout(() => {
+      setVisibleFor(null);
+      setAnchor(null);
+      latestDispatchRef.current = null;
+    }, 300);
     return () => clearTimeout(timer);
-  }, [isVisible, visibleFor]);
+  }, [isVisible, unreadDividerEnabled, visibleFor]);
 
   // Tracks the (sessionId, messageId) of the most recently *dispatched*
   // mark-read request. The backend's cursor write is atomically monotonic
@@ -115,7 +126,14 @@ export function useSessionReadTracking(
     // sessionLoaded was still false), and the capture would then read the
     // *already-advanced* cursor once it finally runs — silently swallowing
     // this visit's real divider boundary with no error, just no divider.
-    if (!sessionId || !isVisible || !latestMessageId || visibleFor !== sessionId) return;
+    if (
+      !unreadDividerEnabled ||
+      !sessionId ||
+      !isVisible ||
+      !latestMessageId ||
+      visibleFor !== sessionId
+    )
+      return;
     const currentCursor = store.getState().taskSessions.items[sessionId]?.last_read_message_id;
     if (currentCursor === latestMessageId) return;
     latestDispatchRef.current = { sessionId, messageId: latestMessageId };
@@ -130,7 +148,17 @@ export function useSessionReadTracking(
       .catch((err: unknown) => {
         console.error("Failed to mark session read", err);
       });
-  }, [sessionId, isVisible, visibleFor, latestMessageId, store, updateSessionReadCursor]);
+  }, [
+    sessionId,
+    isVisible,
+    visibleFor,
+    latestMessageId,
+    store,
+    unreadDividerEnabled,
+    updateSessionReadCursor,
+  ]);
 
-  return isVisible && anchor && anchor.sessionId === sessionId ? anchor.messageId : null;
+  return unreadDividerEnabled && isVisible && anchor && anchor.sessionId === sessionId
+    ? anchor.messageId
+    : null;
 }
