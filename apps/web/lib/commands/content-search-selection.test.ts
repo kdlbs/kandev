@@ -41,13 +41,9 @@ describe("openContentSearchResult", () => {
     openContentSearchResult(result, "/tasks/task-1");
 
     expect(mockSetPendingCursorPosition).toHaveBeenCalledWith(FILE_PATH, 42, 7, "frontend");
-    expect(mockScrollEditorIfMounted).toHaveBeenCalledWith(
-      FILE_PATH,
-      "/tasks/task-1",
-      42,
-      7,
-      "frontend",
-    );
+    expect(mockScrollEditorIfMounted).toHaveBeenCalledWith(FILE_PATH, "/tasks/task-1", 42, 7, {
+      repo: "frontend",
+    });
     expect(mockAddFileEditorPanel).toHaveBeenCalledWith(FILE_PATH, FILE_NAME, {
       repo: "frontend",
     });
@@ -57,6 +53,9 @@ describe("openContentSearchResult", () => {
     openContentSearchResult({ ...result, repository_name: "" }, null);
 
     expect(mockSetPendingCursorPosition).toHaveBeenCalledWith(FILE_PATH, 42, 7, undefined);
+    expect(mockScrollEditorIfMounted).toHaveBeenCalledWith(FILE_PATH, null, 42, 7, {
+      repo: undefined,
+    });
     expect(mockAddFileEditorPanel).toHaveBeenCalledWith(FILE_PATH, FILE_NAME, {
       repo: undefined,
     });
