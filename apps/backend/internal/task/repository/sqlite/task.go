@@ -11,9 +11,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/agentctl/tracing"
+	internaldb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -703,7 +706,12 @@ func (r *Repository) PromoteQueuedTaskIfWorkflowStepHasCapacity(
 
 // DeleteTask deletes a task by ID
 func (r *Repository) DeleteTask(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM tasks WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -712,6 +720,13 @@ func (r *Repository) DeleteTask(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
+	if err := r.purgeTaskQueueInTx(ctx, tx, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.notifyTaskQueuePurged(ctx, id)
 	return nil
 }
 
@@ -1369,7 +1384,12 @@ func (r *Repository) GetTasksByIDs(ctx context.Context, ids []string) ([]*models
 // ArchiveTask sets the archived_at timestamp on a task
 func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`), now, now, id)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE tasks SET archived_at = ?, updated_at = ? WHERE id = ?`), now, now, id)
 	if err != nil {
 		return err
 	}
@@ -1377,6 +1397,13 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrTaskNotFound, id)
 	}
+	if err := r.purgeTaskQueueInTx(ctx, tx, id); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	r.notifyTaskQueuePurged(ctx, id)
 	return nil
 }
 
@@ -1393,7 +1420,12 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 // manual archive); the column will simply not get set.
 func (r *Repository) ArchiveTaskIfActive(ctx context.Context, id, cascadeID string) (bool, error) {
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET archived_at = ?, archived_by_cascade_id = ?, updated_at = ?
 		WHERE id = ? AND archived_at IS NULL
 	`), now, cascadeID, now, id)
@@ -1401,7 +1433,25 @@ func (r *Repository) ArchiveTaskIfActive(ctx context.Context, id, cascadeID stri
 		return false, err
 	}
 	rows, _ := result.RowsAffected()
-	return rows > 0, nil
+	if rows == 0 {
+		return false, tx.Commit()
+	}
+	if err := r.purgeTaskQueueInTx(ctx, tx, id); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	r.notifyTaskQueuePurged(ctx, id)
+	return true, nil
+}
+
+func (r *Repository) purgeTaskQueueInTx(ctx context.Context, tx *sqlx.Tx, taskID string) error {
+	_, err := messagequeue.PurgeTaskInTransaction(ctx, tx, r.db, taskID)
+	if internaldb.IsMissingTableError(err) {
+		return nil
+	}
+	return err
 }
 
 // UnarchiveTaskByCascade clears archived_at + archived_by_cascade_id only

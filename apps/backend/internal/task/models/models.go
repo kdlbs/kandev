@@ -848,6 +848,23 @@ func (r ReviewStatus) String() string { return string(r) }
 // TaskSessionState represents the state of an agent session
 type TaskSessionState string
 
+// PromptableTaskSessionClaimStatus describes the outcome of atomically
+// reserving a session for a lifecycle prompt.
+type PromptableTaskSessionClaimStatus string
+
+const (
+	PromptableTaskSessionClaimed  PromptableTaskSessionClaimStatus = "claimed"
+	PromptableTaskSessionBusy     PromptableTaskSessionClaimStatus = "busy"
+	PromptableTaskSessionInactive PromptableTaskSessionClaimStatus = "inactive"
+)
+
+// PromptableTaskSessionClaim is the result of a lifecycle prompt reservation.
+// PreviousState is set only when Status is PromptableTaskSessionClaimed.
+type PromptableTaskSessionClaim struct {
+	Status        PromptableTaskSessionClaimStatus
+	PreviousState TaskSessionState
+}
+
 const (
 	// TaskSessionStateCreated - session created but agent not started
 	TaskSessionStateCreated TaskSessionState = "CREATED"

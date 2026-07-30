@@ -42,7 +42,7 @@ func (r *SpritesExecutor) uploadCredentials(
 
 	// Ignore the retired host-global gh token method in stale profiles. GitHub
 	// automation credentials are supplied by the workspace credential broker.
-	selectedMethodIDs = r.resolveGHToken(selectedMethodIDs, req)
+	selectedMethodIDs = r.resolveGHToken(selectedMethodIDs)
 
 	if len(selectedMethodIDs) == 0 {
 		return nil
@@ -122,8 +122,7 @@ func (r *SpritesExecutor) runAuthSetupScripts(
 
 // resolveGHToken filters the retired host-global gh token method from stale
 // profiles. Explicit secret-backed GITHUB_TOKEN values are resolved separately.
-func (r *SpritesExecutor) resolveGHToken(credentialIDs []string, req *ExecutorCreateRequest) []string {
-	_ = req
+func (r *SpritesExecutor) resolveGHToken(credentialIDs []string) []string {
 	return removeID(credentialIDs, "gh_cli_token")
 }
 

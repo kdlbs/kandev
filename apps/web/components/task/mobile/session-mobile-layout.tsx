@@ -8,7 +8,7 @@ import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
 import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
-import { TaskReviewDialogMount } from "../dockview-review-dialog";
+import { SessionMobileReviewDialog } from "./session-mobile-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
 import { PassthroughToolbar } from "../passthrough-toolbar";
 import { MobileTerminalKeybar, KEYBAR_HEIGHT_PX } from "./mobile-terminal-keybar";
@@ -19,22 +19,34 @@ import { useSessionLayoutState } from "@/hooks/use-session-layout-state";
 import { useVisualViewportOffset } from "@/hooks/use-visual-viewport-offset";
 import { useToast } from "@/components/toast-provider";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
-import { useAppStore } from "@/components/state-provider";
 import { fetchAndOpenFile } from "../file-browser-hooks";
+import { useMobileMRSelection } from "./use-mobile-mr-selection";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { OpenFileTab } from "@/lib/types/backend";
-import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
 import { useReviewPRSelection } from "@/hooks/domains/github/use-review-pr-selection";
 import { PRDetailPanelComponent } from "@/components/github/pr-detail-panel";
 import { prTaskKey } from "@/components/github/pr-utils";
 import { ReviewPRSelector } from "@/components/review/review-pr-selector";
-import {
-  MRDetailPanelComponent,
-  mrTaskKey,
-  selectExplicitPanelMR,
-} from "@/components/gitlab/mr-detail-panel";
+import { MRDetailPanelComponent, mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 
 export type MobileReviewSource = "github" | "gitlab" | null;
+
+function useMobilePanelChangeHandler(
+  reviewSource: MobileReviewSource,
+  handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void,
+  handleReviewPanelChange: (panel: MobileSessionPanel) => void,
+) {
+  return useCallback(
+    (panel: MobileSessionPanel) => {
+      if (panel === "review" && reviewSource === "github") {
+        handlePanelChangeAndClearSheet(panel);
+        return;
+      }
+      handleReviewPanelChange(panel);
+    },
+    [handlePanelChangeAndClearSheet, handleReviewPanelChange, reviewSource],
+  );
+}
 
 export function resolveMobileReviewSource(
   hasGitHubPR: boolean,
@@ -113,8 +125,9 @@ type MobilePanelAreaProps = {
   isPassthroughMode: boolean;
   effectiveSessionId: string | null;
   selectedFile: OpenFileTab | null;
+  selectedFilePreview: boolean;
   selectedDiff: { path: string; content?: string } | null;
-  handleOpenFileFromChat: (path: string) => void;
+  handleOpenFileFromChat: (path: string, repo?: string, preview?: boolean) => void;
   handleClearSelectedDiff: () => void;
   handleOpenFile: (file: OpenFileTab) => void;
   handlePanelChangeAndClearSheet: (panel: MobileSessionPanel) => void;
@@ -134,6 +147,7 @@ export function MobilePanelArea({
   isPassthroughMode,
   effectiveSessionId,
   selectedFile,
+  selectedFilePreview,
   selectedDiff,
   handleOpenFileFromChat,
   handleClearSelectedDiff,
@@ -193,9 +207,10 @@ export function MobilePanelArea({
         <div className="flex-1 min-h-0 flex flex-col">
           {selectedFile ? (
             <MobileFileViewerPanel
-              key={selectedFile.path}
+              key={`${selectedFile.repo ?? ""}\u0000${selectedFile.path}`}
               file={selectedFile}
               sessionId={effectiveSessionId}
+              initialMarkdownPreview={selectedFilePreview}
               onClose={() => handlePanelChangeAndClearSheet("files")}
             />
           ) : (
@@ -316,6 +331,7 @@ export function useMobilePanelHandlers({
 }) {
   const { toast } = useToast();
   const [selectedFile, setSelectedFile] = useState<OpenFileTab | null>(null);
+  const [selectedFilePreview, setSelectedFilePreview] = useState(false);
   const [trackedSessionId, setTrackedSessionId] = useState<string | null>(effectiveSessionId);
   const latestRequestIdRef = useRef(0);
   const openFileAbortRef = useRef<AbortController | null>(null);
@@ -325,6 +341,7 @@ export function useMobilePanelHandlers({
   if (trackedSessionId !== effectiveSessionId) {
     setTrackedSessionId(effectiveSessionId);
     setSelectedFile(null);
+    setSelectedFilePreview(false);
   }
 
   useLayoutEffect(() => {
@@ -342,7 +359,7 @@ export function useMobilePanelHandlers({
   );
 
   const handleOpenFileFromChat = useCallback(
-    (path: string, repo?: string) => {
+    (path: string, repo?: string, preview = false) => {
       if (!effectiveSessionId) return;
       const requestId = (latestRequestIdRef.current += 1);
       openFileAbortRef.current?.abort();
@@ -355,6 +372,7 @@ export function useMobilePanelHandlers({
           (file) => {
             if (requestId !== latestRequestIdRef.current || controller.signal.aborted) return;
             setSelectedFile(file);
+            setSelectedFilePreview(preview);
             handlePanelChange("files");
           },
           toast,
@@ -375,6 +393,7 @@ export function useMobilePanelHandlers({
       openFileAbortRef.current?.abort();
       openFileAbortRef.current = null;
       setSelectedFile(file);
+      setSelectedFilePreview(false);
       handlePanelChange("files");
     },
     [handlePanelChange],
@@ -386,6 +405,7 @@ export function useMobilePanelHandlers({
       openFileAbortRef.current?.abort();
       openFileAbortRef.current = null;
       setSelectedFile(null);
+      setSelectedFilePreview(false);
       handlePanelChange(panel);
     },
     [handlePanelChange],
@@ -393,61 +413,11 @@ export function useMobilePanelHandlers({
 
   return {
     selectedFile,
+    selectedFilePreview,
     handleOpenFileFromChat,
     handleOpenFile,
     handlePanelChangeAndClearSheet,
   };
-}
-
-function useMobileMRSelection(
-  activeTaskId: string | null,
-  effectiveSessionId: string | null,
-  requestedPanel: MobileSessionPanel,
-  changePanel: (panel: MobileSessionPanel) => void,
-  hasGitHubPR: boolean,
-) {
-  const mrs = useTaskMRs(activeTaskId);
-  const reviewSourcesResolved = useAppStore((state) => {
-    const workspaceId = state.workspaces.activeId;
-    return !!workspaceId && Object.hasOwn(state.taskMRs.byWorkspaceId, workspaceId);
-  });
-  const reviewMRKey = useAppStore((state) =>
-    effectiveSessionId
-      ? (state.mobileSession.reviewMRKeyBySessionId?.[effectiveSessionId] ?? null)
-      : null,
-  );
-  const setMobileSessionReview = useAppStore((state) => state.setMobileSessionReview);
-  const selectedMR = selectExplicitPanelMR(mrs, reviewMRKey);
-
-  useEffect(() => {
-    const hasInvalidReviewPreference =
-      !hasGitHubPR &&
-      requestedPanel === "review" &&
-      (!reviewMRKey || (reviewSourcesResolved && !selectedMR));
-    if (effectiveSessionId && hasInvalidReviewPreference) {
-      setMobileSessionReview(effectiveSessionId, null);
-    }
-  }, [
-    effectiveSessionId,
-    requestedPanel,
-    hasGitHubPR,
-    reviewMRKey,
-    reviewSourcesResolved,
-    selectedMR,
-    setMobileSessionReview,
-  ]);
-
-  const handlePanelChange = useCallback(
-    (panel: MobileSessionPanel) => {
-      if (panel === "review" && effectiveSessionId && !selectedMR) {
-        const primaryMR = mrs[0];
-        if (primaryMR) setMobileSessionReview(effectiveSessionId, mrTaskKey(primaryMR));
-      }
-      changePanel(panel);
-    },
-    [changePanel, effectiveSessionId, mrs, selectedMR, setMobileSessionReview],
-  );
-  return { mrs, selectedMR, handlePanelChange };
 }
 
 type SessionMobileFooterProps = {
@@ -511,8 +481,13 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     handleMenuClick,
     setMobileSessionTaskSwitcherOpen,
   } = useSessionLayoutState({ sessionId: props.sessionId });
-  const { selectedFile, handleOpenFileFromChat, handleOpenFile, handlePanelChangeAndClearSheet } =
-    useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
+  const {
+    selectedFile,
+    selectedFilePreview,
+    handleOpenFileFromChat,
+    handleOpenFile,
+    handlePanelChangeAndClearSheet,
+  } = useMobilePanelHandlers({ effectiveSessionId, handlePanelChange });
   const mobilePR = useReviewPRSelection(activeTaskId);
   const mobileMR = useMobileMRSelection(
     activeTaskId,
@@ -524,18 +499,11 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
   const reviewSource = resolveMobileReviewSource(mobilePR.prs.length > 0, mobileMR.mrs.length > 0);
   const effectiveMobilePanel =
     currentMobilePanel === "review" && !reviewSource ? "chat" : currentMobilePanel;
-
-  const handleMobilePanelChange = useCallback(
-    (panel: MobileSessionPanel) => {
-      if (panel === "review" && reviewSource === "github") {
-        handlePanelChangeAndClearSheet(panel);
-        return;
-      }
-      mobileMR.handlePanelChange(panel);
-    },
-    [handlePanelChangeAndClearSheet, mobileMR.handlePanelChange, reviewSource],
+  const handleMobilePanelChange = useMobilePanelChangeHandler(
+    reviewSource,
+    handlePanelChangeAndClearSheet,
+    mobileMR.handlePanelChange,
   );
-
   return (
     <div className="h-dvh relative bg-background">
       <MobileTopBarSticky
@@ -553,6 +521,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         isPassthroughMode={isPassthroughMode}
         effectiveSessionId={effectiveSessionId}
         selectedFile={selectedFile}
+        selectedFilePreview={selectedFilePreview}
         selectedDiff={selectedDiff}
         handleOpenFileFromChat={handleOpenFileFromChat}
         handleClearSelectedDiff={handleClearSelectedDiff}
@@ -588,10 +557,10 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         presentation="drawer"
       />
 
-      <TaskReviewDialogMount
+      <SessionMobileReviewDialog
         sessionId={effectiveSessionId}
         taskId={activeTaskId}
-        onSelectWalkthroughFile={handleOpenFileFromChat}
+        onOpenFile={handleOpenFileFromChat}
       />
     </div>
   );

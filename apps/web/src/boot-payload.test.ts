@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { loadBootPayload, readBootPayload } from "./boot-payload";
+import { loadBootPayload, readBackendHostOS, readBootPayload } from "./boot-payload";
 
 const JIRA_BUNDLE_URL = "/api/plugins/jira/bundle";
 
@@ -23,6 +23,7 @@ describe("readBootPayload", () => {
         runtime: {
           apiPrefix: "/api/v1",
           webSocketPath: "/ws",
+          hostOS: "linux",
         },
         initialState: {
           tasks: { activeTaskId: "task-1" },
@@ -42,6 +43,7 @@ describe("readBootPayload", () => {
       runtime: {
         apiPrefix: "/api/v1",
         webSocketPath: "/ws",
+        hostOS: "linux",
       },
       initialState: {
         tasks: { activeTaskId: "task-1" },
@@ -73,6 +75,24 @@ describe("readBootPayload", () => {
 
     expect(readBootPayload(win).runtime?.debug).toBe(true);
     expect(win.__KANDEV_DEBUG).toBe(true);
+  });
+
+  it("ignores an invalid runtime host OS value", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: {
+        runtime: { hostOS: 42 },
+      },
+    } as unknown as Window;
+
+    expect(readBootPayload(win).runtime?.hostOS).toBeUndefined();
+  });
+
+  it("reads the backend host OS from the injected runtime payload", () => {
+    const win = {
+      __KANDEV_BOOT_PAYLOAD__: { runtime: { hostOS: "windows" } },
+    } as unknown as Window;
+
+    expect(readBackendHostOS(win)).toBe("windows");
   });
 });
 

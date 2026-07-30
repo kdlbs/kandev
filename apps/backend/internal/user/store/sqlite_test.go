@@ -149,6 +149,74 @@ func TestScanUserSettingsMCPTaskAgentProfileDefault(t *testing.T) {
 	}
 }
 
+func TestScanUserSettingsShowAnchoredPromptBarDefault(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !settings.ShowAnchoredPromptBar {
+		t.Fatal("ShowAnchoredPromptBar = false, want true (default)")
+	}
+
+	settings, err = scanUserSettings(settingsScanner{raw: `{"show_anchored_prompt_bar":false}`}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if settings.ShowAnchoredPromptBar {
+		t.Fatal("ShowAnchoredPromptBar = true, want false (stored)")
+	}
+}
+
+func TestScanUserSettingsTranscriptNavigationDefaults(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan defaults: %v", err)
+	}
+	if !settings.ShowScrollToLastPrompt || !settings.ShowScrollToStart {
+		t.Fatalf(
+			"transcript controls = (%t, %t), want (true, true)",
+			settings.ShowScrollToLastPrompt,
+			settings.ShowScrollToStart,
+		)
+	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_scroll_to_last_prompt":false,"show_scroll_to_start":false}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan stored preferences: %v", err)
+	}
+	if settings.ShowScrollToLastPrompt || settings.ShowScrollToStart {
+		t.Fatalf(
+			"transcript controls = (%t, %t), want (false, false)",
+			settings.ShowScrollToLastPrompt,
+			settings.ShowScrollToStart,
+		)
+	}
+}
+
+func TestTranscriptNavigationSettingsRoundTripThroughMarshalAndScan(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{
+		ShowScrollToLastPrompt: false,
+		ShowScrollToStart:      false,
+	})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	settings, err := scanUserSettings(settingsScanner{raw: string(raw)}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan settings: %v", err)
+	}
+	if settings.ShowScrollToLastPrompt || settings.ShowScrollToStart {
+		t.Fatalf(
+			"transcript controls = (%t, %t), want (false, false)",
+			settings.ShowScrollToLastPrompt,
+			settings.ShowScrollToStart,
+		)
+	}
+}
+
 func TestMarshalUserSettingsPersistsDisabledArchiveConfirmation(t *testing.T) {
 	raw, err := marshalUserSettingsPayload(&models.UserSettings{ConfirmTaskArchive: false})
 	if err != nil {
@@ -161,6 +229,20 @@ func TestMarshalUserSettingsPersistsDisabledArchiveConfirmation(t *testing.T) {
 	}
 	if got, ok := payload["confirm_task_archive"].(bool); !ok || got {
 		t.Fatalf("confirm_task_archive = %#v, want false", payload["confirm_task_archive"])
+	}
+}
+
+func TestShowAnchoredPromptBarRoundTripsThroughMarshalAndScan(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{ShowAnchoredPromptBar: true})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	settings, err := scanUserSettings(settingsScanner{raw: string(raw)}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan settings: %v", err)
+	}
+	if !settings.ShowAnchoredPromptBar {
+		t.Fatal("ShowAnchoredPromptBar = false after round trip, want true")
 	}
 }
 

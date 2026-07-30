@@ -58,6 +58,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 0048 | [Plugins invoke a settings-selectable utility agent](0048-plugin-host-utility-agent-invoke.md)                                       | accepted   | backend, frontend, protocol | 2026-07-21 |
 | 0049 | [Fine-grained foreground-idle busy signal](0049-fine-grained-foreground-idle-busy-signal.md)                                      | superseded by 2026-07-28-coarse-running-busy-signal | backend, frontend, protocol | 2026-07-11 |
 | 0050 | [Plugins provide OIDC/SAML login via a capability-gated, host-minted session](0050-plugin-external-auth-capability.md)               | accepted   | backend, security, protocol | 2026-07-26 |
+| 0051 | [PR agent notifications extend task PR automation](0051-pr-agent-notifications-extend-task-pr-automation.md)                          | accepted   | backend, frontend, workflow, GitHub, MCP | 2026-07-23 |
 | 2026-07-23-opencode-review-evidence-trust | [Trusted OpenCode Review Evidence](2026-07-23-opencode-review-evidence-trust.md) | accepted | workflow, infra | 2026-07-23 |
 | 2026-07-23-planner-direct-small-work | [Planner Direct Small Work](2026-07-23-planner-direct-small-work.md) | superseded by 2026-07-26 | workflow | 2026-07-23 |
 | 2026-07-23-post-commit-hook-aware-verification | [Post-Commit Hook-Aware Verification](2026-07-23-post-commit-hook-aware-verification.md) | superseded by 2026-07-26 | workflow | 2026-07-23 |
@@ -81,7 +82,9 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-26-user-managed-agent-runtime-updates | [User-Managed Agent Runtime Updates](2026-07-26-user-managed-agent-runtime-updates.md) | accepted | backend, frontend, protocol | 2026-07-26 |
 | 2026-07-26-single-session-model-switching | [Single-Session Model Switching](2026-07-26-single-session-model-switching.md) | accepted (amended 2026-07-27) | workflow, infra | 2026-07-26 |
 | 2026-07-27-task-git-credential-policy | [Separate GitHub Automation From Task Git Credential Policy](2026-07-27-task-git-credential-policy.md) | accepted | backend, frontend, security | 2026-07-27 |
+| 2026-07-27-spa-failure-containment-and-deployment-recovery | [SPA Failure Containment and Deployment Recovery](2026-07-27-spa-failure-containment-and-deployment-recovery.md) | accepted | frontend | 2026-07-27 |
 | 2026-07-27-legacy-add-branch-live-rescan | [Preserve Live Rescan for Legacy Add Branch](2026-07-27-legacy-add-branch-live-rescan.md) | accepted | backend, protocol | 2026-07-27 |
 | 2026-07-28-visible-wip-overflow-queues | [Separate Visible Queueing From WIP Admission](2026-07-28-visible-wip-overflow-queues.md) | proposed | backend, frontend, protocol, workflow | 2026-07-28 |
 | 2026-07-28-coarse-running-busy-signal | [Restore Coarse Running Prompt Admission](2026-07-28-coarse-running-busy-signal.md) | accepted | backend, frontend, protocol | 2026-07-28 |
 | 2026-07-29-agent-stall-user-controlled-recovery | [Keep Agent Stall Recovery User Controlled](2026-07-29-agent-stall-user-controlled-recovery.md) | accepted | backend, frontend, protocol | 2026-07-29 |
+| 2026-07-29-quarantine-retention-override | [Make Quarantine Retention Overridable but Visible](2026-07-29-quarantine-retention-override.md) | accepted | backend, frontend | 2026-07-29 |

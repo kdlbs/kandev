@@ -595,3 +595,6 @@ export function useChatPanelState({
     todoItems,
   };
 }
+
+/** The value returned by {@link useChatPanelState}, threaded through the chat input area and its extracted hooks. */
+export type ChatPanelState = ReturnType<typeof useChatPanelState>;

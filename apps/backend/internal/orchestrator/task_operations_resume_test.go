@@ -273,6 +273,205 @@ func TestGetTaskSessionStatus_CancelledSessionStaysWorkspaceRestore(t *testing.T
 	}
 }
 
+// TestGetTaskSessionStatus_ArchiveCancelledSessionWithTokenAutoResumes covers
+// the "Can't resume this un-archived task" bug: a session cancelled by an
+// archive (not an explicit user stop) must report NeedsResume=true once its
+// ExecutorRunning row is still present and resumable, exactly like a FAILED
+// session — even though its TaskSession.State is CANCELLED.
+func TestGetTaskSessionStatus_ArchiveCancelledSessionWithTokenAutoResumes(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	session.ErrorMessage = models.SessionArchiveCancelReason
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:          "er1",
+		SessionID:   "session1",
+		TaskID:      "task1",
+		Status:      "ready",
+		Resumable:   true,
+		ResumeToken: "acp-session-123",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("failed to upsert executor running: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if !resp.NeedsResume {
+		t.Fatal("expected NeedsResume=true for archive-cancelled session with resumable runtime")
+	}
+	if !resp.IsResumable {
+		t.Fatal("expected IsResumable=true for archive-cancelled session with resumable runtime")
+	}
+	if resp.NeedsWorkspaceRestore {
+		t.Fatal("expected NeedsWorkspaceRestore=false when auto-resuming")
+	}
+	if resp.ResumeReason != resumeReasonArchiveCancelledResumable {
+		t.Fatalf("expected ResumeReason=%q, got %q", resumeReasonArchiveCancelledResumable, resp.ResumeReason)
+	}
+}
+
+// TestGetTaskSessionStatus_ArchiveCancelledSessionWithNonResumableTokenFreshStarts
+// covers the CodeRabbit-flagged gap: an archive-cancelled session can carry a
+// resume token whose ExecutorRunning row has Resumable=false (the runtime
+// doesn't support resuming that specific token). Routing this through
+// validateResumeEligibility — as the with-token branch used to do
+// unconditionally — never sets IsResumable, so the response would come back
+// NeedsResume=true / IsResumable=false: a combination the frontend's
+// auto-resume gate (needs_resume && is_resumable) can never satisfy, silently
+// stranding the session on read-only workspace restore. It must instead get
+// the same consistent fresh-start result (IsResumable=true) as the
+// no-running-row case.
+func TestGetTaskSessionStatus_ArchiveCancelledSessionWithNonResumableTokenFreshStarts(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	session.ErrorMessage = models.SessionArchiveCancelReason
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	now := time.Now().UTC()
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID:          "er1",
+		SessionID:   "session1",
+		TaskID:      "task1",
+		Status:      "ready",
+		Resumable:   false,
+		ResumeToken: "acp-session-123",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatalf("failed to upsert executor running: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if !resp.NeedsResume {
+		t.Fatal("expected NeedsResume=true for archive-cancelled session with a non-resumable token")
+	}
+	if !resp.IsResumable {
+		t.Fatal("expected IsResumable=true for archive-cancelled session with a non-resumable token " +
+			"(fresh-start path), not the inconsistent validateResumeEligibility result")
+	}
+	if resp.NeedsWorkspaceRestore {
+		t.Fatal("expected NeedsWorkspaceRestore=false when fresh-start resumable")
+	}
+	if resp.ResumeReason != resumeReasonArchiveCancelledResumable {
+		t.Fatalf("expected ResumeReason=%q, got %q", resumeReasonArchiveCancelledResumable, resp.ResumeReason)
+	}
+}
+
+// TestGetTaskSessionStatus_ArchiveCancelledSessionWithoutRunningRowResumes
+// covers the common real-world shape of the bug: the archive cleanup already
+// deleted the ExecutorRunning row (no resume token), which is exactly the
+// state an unarchive-then-open observes. The session must still come back as
+// fresh-start resumable instead of falling through to read-only workspace
+// restore.
+func TestGetTaskSessionStatus_ArchiveCancelledSessionWithoutRunningRowResumes(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
+
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("failed to load session: %v", err)
+	}
+	session.AgentProfileID = "profile1"
+	session.ErrorMessage = models.SessionArchiveTreeCancelReason
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("failed to update session: %v", err)
+	}
+
+	if _, err := repo.GetExecutorRunningBySessionID(ctx, "session1"); !errors.Is(err, models.ErrExecutorRunningNotFound) {
+		t.Fatalf("precondition: expected no executors_running row, got err=%v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if !resp.NeedsResume {
+		t.Fatal("expected NeedsResume=true for archive-cancelled session even without an ExecutorRunning row")
+	}
+	if !resp.IsResumable {
+		t.Fatal("expected IsResumable=true for archive-cancelled session even without an ExecutorRunning row")
+	}
+	if resp.NeedsWorkspaceRestore {
+		t.Fatal("expected NeedsWorkspaceRestore=false when fresh-start resumable")
+	}
+	if resp.ResumeReason != resumeReasonArchiveCancelledResumable {
+		t.Fatalf("expected ResumeReason=%q, got %q", resumeReasonArchiveCancelledResumable, resp.ResumeReason)
+	}
+}
+
+// TestGetTaskSessionStatus_PlainCancelledSessionWithoutRunningRowStaysStopped
+// is the negative-case guard: a session the user explicitly stopped (no
+// archive-cancel reason, no ExecutorRunning row) must NOT be treated as
+// resumable just because it's CANCELLED.
+func TestGetTaskSessionStatus_PlainCancelledSessionWithoutRunningRowStaysStopped(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCancelled)
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", State: v1.TaskStateReview}
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if resp.NeedsResume {
+		t.Fatal("expected NeedsResume=false for a user-cancelled session")
+	}
+	if resp.IsResumable {
+		t.Fatal("expected IsResumable=false for a user-cancelled session")
+	}
+}
+
 func TestGetTaskSessionStatus_NoAutoResumeWithResumeTokenOnError(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

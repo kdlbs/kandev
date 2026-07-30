@@ -19,6 +19,7 @@ import {
   fetchStorageOverview,
   fetchStorageQuarantine,
   fetchStorageRuns,
+  purgeStorageQuarantine,
   restoreStorageQuarantine,
   runStorageMaintenance,
   saveStorageSettings,
@@ -27,6 +28,7 @@ import type {
   StorageBusyResource,
   StorageBusyResponse,
   StorageMaintenanceSettings,
+  StorageQuarantinePurgeScope,
   SystemJob,
 } from "@/lib/types/system";
 import { useSystemJob } from "./use-system-jobs";
@@ -39,6 +41,7 @@ export type StoragePendingAction =
   | "adopt"
   | "restore"
   | "delete"
+  | "purge"
   | null;
 
 export interface StorageBusyState {
@@ -189,6 +192,31 @@ function useStorageDeleteAction(
   );
 }
 
+function useStorageBulkDeleteAction(
+  perform: ReturnType<typeof useStorageActionRunner>["perform"],
+  toast: ReturnType<typeof useToast>["toast"],
+  clearBusy: () => void,
+  setDeleteJobId: Dispatch<SetStateAction<string | null>>,
+) {
+  return useCallback(
+    async (scope: StorageQuarantinePurgeScope) => {
+      clearBusy();
+      return perform("purge", async () => {
+        const accepted = await purgeStorageQuarantine(scope);
+        setDeleteJobId(accepted.job_id);
+        toast({
+          title:
+            scope === "eligible"
+              ? "Eligible quarantine cleanup started"
+              : "Forced quarantine cleanup started",
+          variant: "success",
+        });
+      });
+    },
+    [clearBusy, perform, setDeleteJobId, toast],
+  );
+}
+
 function useStorageActions(reload: Reload) {
   const { toast } = useToast();
   const { pendingAction, error, setError, finishLoading, perform } = useStorageActionRunner();
@@ -265,6 +293,7 @@ function useStorageActions(reload: Reload) {
     [clearBusy, perform, reload, toast],
   );
   const permanentlyDelete = useStorageDeleteAction(perform, toast, clearBusy, setDeleteJobId);
+  const purge = useStorageBulkDeleteAction(perform, toast, clearBusy, setDeleteJobId);
 
   return {
     pendingAction,
@@ -279,6 +308,8 @@ function useStorageActions(reload: Reload) {
     adopt,
     restore,
     permanentlyDelete,
+    clearEligible: useCallback(() => purge("eligible"), [purge]),
+    forceClearAll: useCallback(() => purge("all"), [purge]),
     analysisJob,
     cleanupJob,
     deleteJob,

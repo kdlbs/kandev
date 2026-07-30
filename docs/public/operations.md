@@ -87,10 +87,23 @@ snapshot was last analyzed. Select **Analyze** to force a fresh scan; restarting
 clears the in-memory snapshot.
 
 Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
-period. Orphaned task workspaces move into Kandev's quarantine before permanent deletion; review
-the quarantine list to restore an entry or request deletion as a background job. Host-wide Docker
-build-cache and unused-image cleanup remain disabled until you confirm that Kandev owns a dedicated
-Docker daemon.
+period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
+permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
+**Clear eligible** cannot remove it before that time. The deadline is the earliest safe deletion
+time, not an exact promise—the first successful scheduled or full manual maintenance run after the
+deadline performs the purge, subject to the idle gate and any preemption.
+
+Use **Clear eligible** to remove only entries whose deadlines have passed. It reports protected
+entries that remain. **Force clear all** requires typing `DELETE ALL NOW` and attempts to permanently
+remove every active quarantine entry, discarding restore windows for entries that are successfully
+deleted. Safety-validation or deletion failures may leave entries visible and retryable. This
+override bypasses only the retention timestamp; path, ownership, state, and filesystem safety
+checks still apply.
+If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
+one of the quarantine actions when you want cleanup.
+
+Host-wide Docker build-cache and unused-image cleanup remain disabled until you confirm that Kandev
+owns a dedicated Docker daemon.
 Do not enable those rules on a daemon shared with unrelated workloads.
 
 Host-local agents inherit the Kandev service's `TMPDIR`, `TMP`, and `TEMP` values unchanged. If the

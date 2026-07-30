@@ -121,6 +121,18 @@ steps:
 
       End with a verdict: Ready to merge / Ready with suggestions / Blocked
 
+      AFTER SUBMITTING THE REVIEW:
+
+      Use update_task_pr_automation_kandev to enable all three task-bound
+      notifications:
+      - prompt_on_review_requested: true
+      - prompt_on_merged: true
+      - prompt_on_closed: true
+
+      These settings keep this review task subscribed to the related PR. Kandev
+      will prompt the task again if review is requested after feedback is
+      addressed, or when the PR is merged or closed.
+
       NOT A FINDING (skip these):
       - Issues on lines or files the PR didn't modify — even if they are real bugs
       - Pre-existing code patterns that this PR didn't introduce or change

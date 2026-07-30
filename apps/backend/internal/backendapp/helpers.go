@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -697,17 +698,25 @@ func newWebDevHandler(p routeParams) (*webapp.DevHandler, error) {
 
 func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 	return []webapp.HandlerOption{
-		webapp.WithRuntimeConfig(webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws"}),
 		webapp.WithPayloadBuilder(func(req *http.Request, route webapp.RouteClassification) webapp.BootPayload {
 			return bootPayload(req.Context(), req, p, route)
 		}),
 	}
 }
 
+func webRuntimeConfig(debug bool) webapp.RuntimeConfig {
+	return webapp.RuntimeConfig{
+		APIPrefix:     "/api/v1",
+		WebSocketPath: "/ws",
+		HostOS:        runtime.GOOS,
+		Debug:         debug,
+	}
+}
+
 func bootPayload(ctx context.Context, req *http.Request, p routeParams, route webapp.RouteClassification) webapp.BootPayload {
 	payload := webapp.NewBootPayload(
 		route,
-		webapp.RuntimeConfig{APIPrefix: "/api/v1", WebSocketPath: "/ws", Debug: p.devMode},
+		webRuntimeConfig(p.devMode),
 		bootInitialState(ctx, req, p, route),
 	)
 	payload.RouteData = bootRouteData(ctx, req, p, route)
@@ -1391,6 +1400,7 @@ func registerMCPAndDebugRoutes(
 	// number, state) when the github service is available.
 	if p.services.GitHub != nil {
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
+		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
 	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —

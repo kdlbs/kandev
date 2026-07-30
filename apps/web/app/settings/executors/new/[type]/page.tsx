@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Badge } from "@kandev/ui/badge";
@@ -57,19 +57,18 @@ function ExecutorTypeIcon({ type }: { type: string }) {
   return <Icon className="h-5 w-5 text-muted-foreground" />;
 }
 
-export default function CreateProfilePage({ params }: { params: Promise<{ type: string }> }) {
-  const { type } = use(params);
-  const typeInfo = EXECUTOR_TYPE_MAP[type];
+export default function CreateProfilePage({ executorType }: { executorType: string }) {
+  const typeInfo = EXECUTOR_TYPE_MAP[executorType];
 
   if (!typeInfo) {
     return <InvalidTypeFallback />;
   }
 
-  if (type === "ssh") {
+  if (executorType === "ssh") {
     return <SSHCreatePage />;
   }
 
-  return <CreateProfileForm executorType={type as ExecutorType} typeInfo={typeInfo} />;
+  return <CreateProfileForm executorType={executorType as ExecutorType} typeInfo={typeInfo} />;
 }
 
 function InvalidTypeFallback() {

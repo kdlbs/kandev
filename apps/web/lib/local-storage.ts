@@ -3,6 +3,8 @@ import { setWalkthroughLastSeen } from "@/lib/walkthrough-notification-storage";
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
 // Session Storage helpers (cleared when browser tab closes)
+/** Read and JSON-parse a `sessionStorage` value, returning `fallback` when
+ *  absent, unparseable, or storage is unavailable (SSR, blocked). */
 export function getSessionStorage<T extends JsonValue>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
@@ -14,6 +16,8 @@ export function getSessionStorage<T extends JsonValue>(key: string, fallback: T)
   }
 }
 
+/** JSON-serialize and write a value to `sessionStorage`, silently ignoring
+ *  write failures (storage full, blocked, SSR). */
 export function setSessionStorage<T extends JsonValue>(key: string, value: T): void {
   if (typeof window === "undefined") return;
   try {
@@ -24,6 +28,8 @@ export function setSessionStorage<T extends JsonValue>(key: string, value: T): v
 }
 
 // Local Storage helpers (persists across browser sessions)
+/** Read and JSON-parse a `localStorage` value, returning `fallback` when
+ *  absent, unparseable, or storage is unavailable (SSR, blocked). */
 export function getLocalStorage<T extends JsonValue>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   try {
@@ -35,6 +41,8 @@ export function getLocalStorage<T extends JsonValue>(key: string, fallback: T): 
   }
 }
 
+/** JSON-serialize and write a value to `localStorage`, silently ignoring
+ *  write failures (storage full, blocked, SSR). */
 export function setLocalStorage<T extends JsonValue>(key: string, value: T): void {
   if (typeof window === "undefined") return;
   try {
@@ -44,6 +52,7 @@ export function setLocalStorage<T extends JsonValue>(key: string, value: T): voi
   }
 }
 
+/** Remove a `sessionStorage` key, silently ignoring removal failures. */
 export function removeSessionStorage(key: string): void {
   if (typeof window === "undefined") return;
   try {
@@ -53,6 +62,7 @@ export function removeSessionStorage(key: string): void {
   }
 }
 
+/** Remove a `localStorage` key, silently ignoring removal failures. */
 export function removeLocalStorage(key: string): void {
   if (typeof window === "undefined") return;
   try {
@@ -113,10 +123,13 @@ const PLAN_NOTIFICATION_KEY = "kandev.plan.lastSeenByTask";
 
 export type PlanNotificationState = Record<string, string | null>;
 
+/** Read the map of task ID to last-seen plan-update timestamp (localStorage). */
 export function getPlanNotificationState(): PlanNotificationState {
   return getLocalStorage(PLAN_NOTIFICATION_KEY, {} as PlanNotificationState);
 }
 
+/** Record (or clear, when `timestamp` is `null`) the last-seen plan-update
+ *  timestamp for a task. */
 export function setPlanLastSeen(taskId: string, timestamp: string | null): void {
   const state = getPlanNotificationState();
   if (timestamp === null) {
@@ -127,6 +140,7 @@ export function setPlanLastSeen(taskId: string, timestamp: string | null): void 
   setLocalStorage(PLAN_NOTIFICATION_KEY, state);
 }
 
+/** Read the last-seen plan-update timestamp for a task, or `null` if never recorded. */
 export function getPlanLastSeen(taskId: string): string | null {
   const state = getPlanNotificationState();
   return state[taskId] ?? null;
@@ -277,6 +291,8 @@ export function setEnvLayout(envId: string, layout: object): void {
   }
 }
 
+/** Read the manually-dragged right-panel width for a task env, or `null` if
+ *  never set or invalid (sessionStorage). */
 export function getManualRightWidth(envId: string | null): number | null {
   if (!envId) return null;
   const value = getSessionStorage<number | null>(
@@ -288,11 +304,14 @@ export function getManualRightWidth(envId: string | null): number | null {
     : null;
 }
 
+/** Record a genuine sash-drag width for the right panel of a task env. */
 export function setManualRightWidth(envId: string | null, width: number): void {
   if (!envId || !Number.isFinite(width) || width <= 0) return;
   setSessionStorage(`${DOCKVIEW_MANUAL_RIGHT_WIDTH_PREFIX}${envId}`, Math.round(width));
 }
 
+/** Clear the manually-dragged right-panel width for a task env, reverting
+ *  to the responsive default. */
 export function clearManualRightWidth(envId: string | null): void {
   if (!envId) return;
   removeSessionStorage(`${DOCKVIEW_MANUAL_RIGHT_WIDTH_PREFIX}${envId}`);
@@ -306,16 +325,20 @@ export function clearManualRightWidth(envId: string | null): void {
 // layout build/restore/switch via getPinnedWidth.
 const DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY = "kandev.dockview.sidebar-width";
 
+/** Read the global left-sidebar width, or `null` if never set or invalid
+ *  (localStorage, shared across every task env). */
 export function getGlobalSidebarWidth(): number | null {
   const v = getLocalStorage<number | null>(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY, null);
   return typeof v === "number" && Number.isFinite(v) && v > 0 ? v : null;
 }
 
+/** Record a genuine sash-drag width for the global left sidebar. */
 export function setGlobalSidebarWidth(width: number): void {
   if (!Number.isFinite(width) || width <= 0) return;
   setLocalStorage(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY, Math.round(width));
 }
 
+/** Clear the global left-sidebar width, reverting to the responsive default. */
 export function clearGlobalSidebarWidth(): void {
   removeLocalStorage(DOCKVIEW_GLOBAL_SIDEBAR_WIDTH_KEY);
 }
@@ -333,6 +356,7 @@ export type EnvMaximizeState = {
   maximizedDockviewJson: object;
 };
 
+/** Type guard validating a parsed value has the shape of {@link EnvMaximizeState}. */
 function isEnvMaximizeState(value: unknown): value is EnvMaximizeState {
   if (!value || typeof value !== "object") return false;
   const v = value as Record<string, unknown>;
@@ -344,6 +368,8 @@ function isEnvMaximizeState(value: unknown): value is EnvMaximizeState {
   );
 }
 
+/** Read the saved pre-maximize layout + maximized dockview JSON for a task
+ *  env, or `null` if absent or malformed. */
 export function getEnvMaximizeState(envId: string): EnvMaximizeState | null {
   if (typeof window === "undefined") return null;
   try {
@@ -356,6 +382,8 @@ export function getEnvMaximizeState(envId: string): EnvMaximizeState | null {
   }
 }
 
+/** Save the pre-maximize layout + maximized dockview JSON for a task env,
+ *  so exit-maximize can restore it. */
 export function setEnvMaximizeState(envId: string, state: EnvMaximizeState): void {
   if (typeof window === "undefined") return;
   try {
@@ -365,6 +393,7 @@ export function setEnvMaximizeState(envId: string, state: EnvMaximizeState): voi
   }
 }
 
+/** Clear the saved maximize state for a task env (e.g. on layout reset). */
 export function removeEnvMaximizeState(envId: string): void {
   if (typeof window === "undefined") return;
   try {
@@ -378,6 +407,7 @@ export function removeEnvMaximizeState(envId: string): void {
 // for a session. If offered and then closed by the user, we respect the dismissal.
 const PR_PANEL_OFFERED_PREFIX = "kandev.pr-panel-offered.";
 
+/** Whether the auto-show PR panel was already offered for this session. */
 export function wasPRPanelOffered(sessionId: string): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -387,6 +417,7 @@ export function wasPRPanelOffered(sessionId: string): boolean {
   }
 }
 
+/** Record that the auto-show PR panel was offered for this session. */
 export function markPRPanelOffered(sessionId: string): void {
   if (typeof window === "undefined") return;
   try {
@@ -400,6 +431,7 @@ export function markPRPanelOffered(sessionId: string): void {
 // the tab session, resets on tab close.
 const PR_MERGED_BANNER_DISMISSED_PREFIX = "kandev.pr-merged-banner-dismissed.";
 
+/** Whether the user dismissed the PR-merged banner for this task. */
 export function wasPRMergedBannerDismissed(taskId: string): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -409,6 +441,7 @@ export function wasPRMergedBannerDismissed(taskId: string): boolean {
   }
 }
 
+/** Record that the user dismissed the PR-merged banner for this task. */
 export function markPRMergedBannerDismissed(taskId: string): void {
   if (typeof window === "undefined") return;
   try {
@@ -422,6 +455,7 @@ export function markPRMergedBannerDismissed(taskId: string): void {
 // survives reload + task switch within the tab session, resets on tab close.
 const PR_CLOSED_BANNER_DISMISSED_PREFIX = "kandev.pr-closed-banner-dismissed.";
 
+/** Whether the user dismissed the PR-closed banner for this task. */
 export function wasPRClosedBannerDismissed(taskId: string): boolean {
   if (typeof window === "undefined") return false;
   try {
@@ -431,6 +465,7 @@ export function wasPRClosedBannerDismissed(taskId: string): boolean {
   }
 }
 
+/** Record that the user dismissed the PR-closed banner for this task. */
 export function markPRClosedBannerDismissed(taskId: string): void {
   if (typeof window === "undefined") return;
   try {
@@ -496,6 +531,7 @@ export function getOpenFileTabs(sessionId: string): StoredFileTab[] {
   }
 }
 
+/** Save the open file tabs for a session. */
 export function setOpenFileTabs(sessionId: string, tabs: StoredFileTab[]): void {
   if (typeof window === "undefined") return;
   try {
@@ -557,10 +593,12 @@ type StoredFileAttachment = {
   deliveryMode?: "prompt" | "path";
 };
 
+/** Read the draft chat message text for a session, or `""` if none saved. */
 export function getChatDraftText(sessionId: string): string {
   return getSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`, "");
 }
 
+/** Save (or clear, when empty) the draft chat message text for a session. */
 export function setChatDraftText(sessionId: string, text: string): void {
   if (text === "") {
     removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
@@ -574,6 +612,7 @@ export function getChatDraftContent(sessionId: string): unknown {
   return getSessionStorage<JsonValue | null>(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`, null);
 }
 
+/** Save (or clear, when falsy) the draft TipTap editor JSON for a session. */
 export function setChatDraftContent(sessionId: string, content: unknown): void {
   if (!content) {
     removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
@@ -582,6 +621,8 @@ export function setChatDraftContent(sessionId: string, content: unknown): void {
   }
 }
 
+/** Read the draft chat attachments for a session (previews reconstructed by
+ *  the caller, not persisted). */
 export function getChatDraftAttachments(sessionId: string): StoredFileAttachment[] {
   return getSessionStorage<StoredFileAttachment[]>(
     `${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`,
@@ -589,6 +630,8 @@ export function getChatDraftAttachments(sessionId: string): StoredFileAttachment
   );
 }
 
+/** Coerce a stored attachment delivery-mode value, falling back for anything
+ *  other than `"prompt"` or `"path"`. */
 function normalizeAttachmentDeliveryMode(
   value: unknown,
   fallback: "prompt" | "path",
@@ -596,6 +639,8 @@ function normalizeAttachmentDeliveryMode(
   return value === "prompt" || value === "path" ? value : fallback;
 }
 
+/** Save (or clear, when empty) the draft chat attachments for a session,
+ *  stripping `preview` to halve storage cost. */
 export function setChatDraftAttachments(
   sessionId: string,
   attachments: Array<{
@@ -644,12 +689,45 @@ export function restoreAttachmentPreview(
   return { ...att, deliveryMode: normalizeAttachmentDeliveryMode(att.deliveryMode, "path") };
 }
 
+/** Read the saved chat composer height for a session, or `null` if never set. */
 export function getChatInputHeight(sessionId: string): number | null {
   return getSessionStorage<number | null>(`${CHAT_INPUT_HEIGHT_KEY}.${sessionId}`, null);
 }
 
+/** Save the chat composer height for a session. */
 export function setChatInputHeight(sessionId: string, height: number): void {
   setSessionStorage(`${CHAT_INPUT_HEIGHT_KEY}.${sessionId}`, height);
+}
+
+// --- Transcript auto-scroll toggle (sessionStorage, per session) ---
+// Survives reload + task switch within the tab session, resets on tab close.
+const AUTO_SCROLL_ENABLED_PREFIX = "kandev.transcript-auto-scroll-enabled.";
+
+/** Read the per-session auto-scroll preference persisted by
+ *  {@link setStoredAutoScrollEnabled}, or `null` if never recorded. */
+export function getStoredAutoScrollEnabled(sessionId: string): boolean | null {
+  return getSessionStorage<boolean | null>(`${AUTO_SCROLL_ENABLED_PREFIX}${sessionId}`, null);
+}
+
+/** Persist the per-session auto-scroll toggle preference so it survives a
+ *  reload or task switch within the tab session (sessionStorage). */
+export function setStoredAutoScrollEnabled(sessionId: string, enabled: boolean): void {
+  setSessionStorage(`${AUTO_SCROLL_ENABLED_PREFIX}${sessionId}`, enabled);
+}
+
+const AUTO_SCROLL_TOP_PREFIX = "kandev.transcript-auto-scroll-top.";
+
+/** Read the last scrollTop persisted by {@link setStoredAutoScrollTop} for
+ *  this session, or `null` if never recorded. */
+export function getStoredAutoScrollTop(sessionId: string): number | null {
+  return getSessionStorage<number | null>(`${AUTO_SCROLL_TOP_PREFIX}${sessionId}`, null);
+}
+
+/** Persist the transcript's last scrollTop for this session so a disabled
+ *  auto-scroll preference restores the same position after a reload or task
+ *  switch within the tab session (sessionStorage). */
+export function setStoredAutoScrollTop(sessionId: string, scrollTop: number): void {
+  setSessionStorage(`${AUTO_SCROLL_TOP_PREFIX}${sessionId}`, scrollTop);
 }
 
 // --- Task storage cleanup ---
@@ -699,6 +777,8 @@ export function cleanupTaskStorage(
     removeSessionStorage(`kandev.contextFiles.${sessionId}`);
     removeSessionStorage(`kandev.comments.${sessionId}`);
     removeSessionStorage(`kandev.messageFavorites.${sessionId}`);
+    removeSessionStorage(`${AUTO_SCROLL_ENABLED_PREFIX}${sessionId}`);
+    removeSessionStorage(`${AUTO_SCROLL_TOP_PREFIX}${sessionId}`);
   }
 }
 
@@ -710,12 +790,14 @@ export function cleanupTaskStorage(
 
 const QUICK_CHAT_NAMES_KEY = "kandev.quickChat.names";
 
+/** Read the map of session ID to user-renamed quick-chat name (localStorage). */
 export function getStoredQuickChatNames(): Record<string, string> {
   const raw = getLocalStorage<Record<string, string>>(QUICK_CHAT_NAMES_KEY, {});
   if (!raw || typeof raw !== "object") return {};
   return raw;
 }
 
+/** Set (or clear, when `name` is empty) the user-renamed quick-chat name for a session. */
 export function setStoredQuickChatName(sessionId: string, name: string): void {
   if (!sessionId) return;
   const all = getStoredQuickChatNames();
@@ -724,6 +806,7 @@ export function setStoredQuickChatName(sessionId: string, name: string): void {
   setLocalStorage(QUICK_CHAT_NAMES_KEY, all);
 }
 
+/** Remove the user-renamed quick-chat name for a session. */
 export function removeStoredQuickChatName(sessionId: string): void {
   if (!sessionId) return;
   const all = getStoredQuickChatNames();

@@ -10,6 +10,7 @@
 package sysprompt
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -45,6 +46,21 @@ func Wrap(content string) string {
 // HasSystemContent checks whether the text contains any <kandev-system> tags.
 func HasSystemContent(text string) bool {
 	return systemTagRegex.MatchString(text)
+}
+
+// StripTags removes closing system tags from a value that is about to be
+// embedded inside a <kandev-system> block. The strip regex is non-greedy, so an
+// embedded closing tag would end the block early and leak the rest of the
+// system content into the visible chat bubble.
+//
+// Replace until stable: a single pass can be evaded by nesting the tag inside
+// itself (e.g. "</kandev</kandev-system>-system>" collapses to a live closing
+// tag after one removal).
+func StripTags(value string) string {
+	for strings.Contains(value, TagEnd) {
+		value = strings.ReplaceAll(value, TagEnd, "")
+	}
+	return value
 }
 
 // These markers distinguish task and Office context from other system blocks.
@@ -282,6 +298,33 @@ func FormatSessionHandover(sessionCount int, planSection string) string {
 // InjectSessionHandover prepends session handover context to a prompt, wrapped in system tags.
 func InjectSessionHandover(sessionCount int, planSection, prompt string) string {
 	return Wrap(FormatSessionHandover(sessionCount, planSection)) + "\n\n" + prompt
+}
+
+// SpawnedSessionContext returns the system context for a session started by
+// another agent session via spawn_session_kandev: who the spawner is, that the
+// initial prompt is peer-agent input rather than a user instruction, and the
+// message_task_kandev arguments needed to reply.
+//
+// It is generated at the launch site from server-resolved identifiers (never
+// from caller-supplied text) so the first-turn canonicalizer can whitelist the
+// exact block instead of stripping it as untrusted — see
+// [InjectKandevContextWithOptions]. Returns "" when there is no spawner
+// session to attribute.
+func SpawnedSessionContext(spawnerTaskID, spawnerSessionID, spawnerSessionName string) string {
+	safeTaskID := StripTags(spawnerTaskID)
+	safeSessionID := StripTags(spawnerSessionID)
+	if safeTaskID == "" || safeSessionID == "" {
+		return ""
+	}
+	sessionRef := fmt.Sprintf("session %s", safeSessionID)
+	if safeName := StripTags(spawnerSessionName); safeName != "" {
+		sessionRef = fmt.Sprintf("session %q (%s)", safeName, safeSessionID)
+	}
+	return Resolve("spawned-session", map[string]string{
+		"spawner_session_ref": sessionRef,
+		"spawner_task_id":     safeTaskID,
+		"spawner_session_id":  safeSessionID,
+	})
 }
 
 // Resolve loads a prompt template by name and replaces all {key} placeholders

@@ -82,7 +82,7 @@ func (r *Repository) GetTaskEnvironment(ctx context.Context, id string) (*models
 		&env.CreatedAt, &env.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("task environment not found: %s", id)
+		return nil, fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, id)
 	}
 	if err != nil {
 		return nil, err
@@ -165,7 +165,7 @@ func (r *Repository) UpdateTaskEnvironment(ctx context.Context, env *models.Task
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task environment not found: %s", env.ID)
+		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, env.ID)
 	}
 	return nil
 }
@@ -182,7 +182,7 @@ func (r *Repository) TransferTaskEnvironmentToTask(ctx context.Context, envID, t
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task environment not found: %s", envID)
+		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, envID)
 	}
 	return nil
 }
@@ -198,7 +198,7 @@ func (r *Repository) DeleteTaskEnvironment(ctx context.Context, id string) error
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("task environment not found: %s", id)
+		return fmt.Errorf("%w: %s", ErrTaskEnvironmentNotFound, id)
 	}
 	return nil
 }

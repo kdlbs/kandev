@@ -83,6 +83,18 @@ func (r *taskEnvironmentFailureRepo) GetTaskEnvironmentByTaskID(_ context.Contex
 	return nil, r.err
 }
 
+func TestClaimLifecycleTaskStateTreatsMissingTaskAsInactive(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.repo = &getTaskResultRepo{repoStore: repo}
+
+	previous, claimed, err := svc.claimLifecycleTaskState(ctx, "missing-task", "missing-session")
+	require.NoError(t, err)
+	require.Empty(t, previous)
+	require.False(t, claimed)
+}
+
 func TestCreateStartSession_KanbanRunnerCreatesDistinctSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

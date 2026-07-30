@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   adopt: vi.fn(),
   analyze: vi.fn(),
   deleteEntry: vi.fn(),
+  purge: vi.fn(),
   fetchJob: vi.fn(),
   fetchOverview: vi.fn(),
   fetchQuarantine: vi.fn(),
@@ -27,6 +28,7 @@ vi.mock("@/lib/api/domains/system-api", () => ({
   adoptStorageGoCache: mocks.adopt,
   analyzeStorage: mocks.analyze,
   deleteStorageQuarantine: mocks.deleteEntry,
+  purgeStorageQuarantine: mocks.purge,
   fetchSystemJob: mocks.fetchJob,
   fetchStorageOverview: mocks.fetchOverview,
   fetchStorageQuarantine: mocks.fetchQuarantine,
@@ -116,6 +118,7 @@ beforeEach(() => {
   mocks.save.mockResolvedValue({ settings });
   // Keep cleanup jobs deterministic for controller action tests.
   mocks.run.mockResolvedValue({ job_id: cleanupJobId });
+  mocks.purge.mockResolvedValue({ job_id: "purge-job" });
 });
 
 describe("useStorageMaintenance", () => {
@@ -138,6 +141,19 @@ describe("useStorageMaintenance", () => {
       title: "Storage policy saved",
       variant: "success",
     });
+  });
+
+  it("starts eligible and forced quarantine bulk jobs", async () => {
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+
+    await act(async () => {
+      await result.current.clearEligible();
+      await result.current.forceClearAll();
+    });
+
+    expect(mocks.purge).toHaveBeenNthCalledWith(1, "eligible");
+    expect(mocks.purge).toHaveBeenNthCalledWith(2, "all");
   });
 
   it("rejects failed saves so the settings coordinator can keep the draft dirty", async () => {

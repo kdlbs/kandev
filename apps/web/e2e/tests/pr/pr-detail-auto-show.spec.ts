@@ -630,4 +630,229 @@ test.describe("PR detail panel", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
     await expect(session.prDetailTab()).toHaveText("PR #401", { timeout: 15_000 });
   });
+
+  /**
+   * Contract coverage for switching to a different task's PR while its
+   * feedback (reviews/comments/checks) is still in flight: the tab/header
+   * must reflect the new task's PR immediately, and once the held fetch
+   * resolves, its "Bot comments" disclosure must render collapsed (not
+   * inheriting whatever the previous PR's disclosure was left in).
+   *
+   * This harness gives each task its own isolated worktree/env, so the
+   * auto-shown "pr-detail" panel is freshly mounted per task here and this
+   * does not reproduce the exact same-React-instance staleness window
+   * reported in production (reused instance carrying over `usePRFeedback`
+   * state and `CommentsSection`'s bot-comments toggle across tasks sharing
+   * one env — same category of limitation already called out on the
+   * "switching between two PR-linked tasks" test above). That reused-instance
+   * regression is covered deterministically by
+   * `hooks/domains/github/use-pr-feedback.test.ts` (masks stale feedback by
+   * PR identity) and `components/github/pr-detail-panel.test.tsx` (proves the
+   * bot-comments toggle doesn't leak across a switch on one panel instance).
+   * This spec still guards the real browser flow end-to-end.
+   *
+   * Setup:
+   *   Inbox → Working (auto_start, on_turn_complete → Done) → Done
+   *   Task A (PR #601, one bot comment), Task B (PR #602, one bot comment,
+   *   feedback fetch held back until explicitly released)
+   */
+  test("shows the new task's PR immediately and renders its bot-comments disclosure collapsed while switching with feedback in flight", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "PR Leak Workflow");
+
+    const inboxStep = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+    const workingStep = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
+    const doneStep = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+
+    await apiClient.updateWorkflowStep(workingStep.id, {
+      prompt: 'e2e:message("done")\n{{task_prompt}}',
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+        on_turn_complete: [{ type: "move_to_step", config: { step_id: doneStep.id } }],
+      },
+    });
+
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+      enable_preview_on_click: false,
+    });
+
+    const OWNER = "testorg";
+    const REPO = "testrepo";
+    const PR_A = 601;
+    const PR_B = 602;
+
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: PR_A,
+        title: "Leak Task A PR",
+        state: "open",
+        head_branch: "feat/leak-a",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: OWNER,
+        repo_name: REPO,
+        additions: 3,
+        deletions: 1,
+      },
+      {
+        number: PR_B,
+        title: "Leak Task B PR",
+        state: "open",
+        head_branch: "feat/leak-b",
+        base_branch: "main",
+        author_login: "test-user",
+        repo_owner: OWNER,
+        repo_name: REPO,
+        additions: 4,
+        deletions: 2,
+      },
+    ]);
+
+    const taskA = await apiClient.createTask(seedData.workspaceId, "Leak Task A", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+    const taskB = await apiClient.createTask(seedData.workspaceId, "Leak Task B", {
+      workflow_id: workflow.id,
+      workflow_step_id: inboxStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await apiClient.moveTask(taskA.id, workflow.id, workingStep.id);
+    await apiClient.moveTask(taskB.id, workflow.id, workingStep.id);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskA.id,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_A,
+      pr_url: `https://github.com/${OWNER}/${REPO}/pull/${PR_A}`,
+      pr_title: "Leak Task A PR",
+      head_branch: "feat/leak-a",
+      base_branch: "main",
+      author_login: "test-user",
+      additions: 3,
+      deletions: 1,
+    });
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskB.id,
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_B,
+      pr_url: `https://github.com/${OWNER}/${REPO}/pull/${PR_B}`,
+      pr_title: "Leak Task B PR",
+      head_branch: "feat/leak-b",
+      base_branch: "main",
+      author_login: "test-user",
+      additions: 4,
+      deletions: 2,
+    });
+
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_A,
+      comments: [
+        {
+          id: 1,
+          author: "review-bot",
+          author_is_bot: true,
+          body: "PR A bot comment",
+        },
+      ],
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: OWNER,
+      repo: REPO,
+      pr_number: PR_B,
+      comments: [
+        {
+          id: 2,
+          author: "review-bot",
+          author_is_bot: true,
+          body: "PR B bot comment",
+        },
+      ],
+    });
+
+    await expect(kanban.taskCardInColumn("Leak Task A", doneStep.id)).toBeVisible({
+      timeout: 45_000,
+    });
+    await expect(kanban.taskCardInColumn("Leak Task B", doneStep.id)).toBeVisible({
+      timeout: 45_000,
+    });
+
+    // Hold PR B's feedback fetch until explicitly released, so the switch
+    // below lands while its comments are still loading.
+    let releasePRBFeedback!: () => void;
+    const prBFeedbackHeld = new Promise<void>((resolve) => {
+      releasePRBFeedback = resolve;
+    });
+    let observePRBFeedbackRequested!: () => void;
+    const prBFeedbackRequested = new Promise<void>((resolve) => {
+      observePRBFeedbackRequested = resolve;
+    });
+    await testPage.route(
+      (url) => url.pathname === `/api/v1/github/prs/${OWNER}/${REPO}/${PR_B}`,
+      async (route) => {
+        const response = await route.fetch();
+        observePRBFeedbackRequested();
+        await prBFeedbackHeld;
+        await route.fulfill({ response });
+      },
+    );
+
+    await kanban.taskCardInColumn("Leak Task A", doneStep.id).click();
+    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
+
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await expect(session.prDetailTab()).toHaveText(`PR #${PR_A}`, { timeout: 15_000 });
+    await session.prDetailTab().click();
+
+    const panel = session.prDetailPanel();
+    await expect(panel).toBeVisible({ timeout: 10_000 });
+    await expect(panel.getByText("Bot comments (1)")).toBeVisible({ timeout: 15_000 });
+    await panel.getByText("Bot comments (1)").click();
+    await expect(panel.getByText("PR A bot comment")).toBeVisible();
+
+    // Switch to Task B — its feedback request is held back by the route above.
+    await session.clickTaskInSidebar("Leak Task B");
+    await prBFeedbackRequested;
+
+    // The header/tab already reflects Task B's PR (comes from the task-PR
+    // association, not the held feedback fetch) …
+    await expect(session.prDetailTab()).toHaveText(`PR #${PR_B}`, { timeout: 15_000 });
+    await session.prDetailTab().click();
+    await expect(panel).toBeVisible({ timeout: 10_000 });
+    // … but PR A's comment, and its expanded bot-comments disclosure, must
+    // be gone immediately — not left on screen for the several seconds the
+    // feedback fetch is still in flight.
+    await expect(panel.getByText("PR A bot comment")).toHaveCount(0);
+
+    releasePRBFeedback();
+
+    // PR B's bot comment must stay collapsed by default — the disclosure
+    // must not inherit Task A's expanded state — and must never be PR A's.
+    await expect(panel.getByText("Bot comments (1)")).toBeVisible({ timeout: 15_000 });
+    await expect(panel.getByText("PR B bot comment")).toHaveCount(0);
+    await panel.getByText("Bot comments (1)").click();
+    await expect(panel.getByText("PR B bot comment")).toBeVisible();
+    await expect(panel.getByText("PR A bot comment")).toHaveCount(0);
+  });
 });

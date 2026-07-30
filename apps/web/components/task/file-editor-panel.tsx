@@ -9,7 +9,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { useSessionGitStatus } from "@/hooks/domains/session/use-session-git-status";
-import { getFileCategory } from "@/lib/utils/file-types";
+import { getFileCategory, isMarkdownFile } from "@/lib/utils/file-types";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { requestFileContent } from "@/lib/ws/workspace-files";
 import { calculateHash } from "@/lib/utils/file-diff";
@@ -19,11 +19,6 @@ import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
 import { FileViewerExternalLink } from "./file-viewer-header";
 
 type FileCategory = "image" | "binary" | "text";
-
-function isMarkdownFile(path: string): boolean {
-  const ext = path.split(".").pop()?.toLowerCase();
-  return ext === "md" || ext === "mdx";
-}
 
 function resolveFileCategory(isBinary: boolean, path: string): FileCategory {
   if (!isBinary) return "text";

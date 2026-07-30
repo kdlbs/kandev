@@ -1,12 +1,6 @@
 "use client";
 
-import Link from "@/components/routing/app-link";
-import {
-  IconGitPullRequest,
-  IconGitPullRequestClosed,
-  IconGitMerge,
-  IconExternalLink,
-} from "@tabler/icons-react";
+import { IconGitPullRequest, IconGitPullRequestClosed, IconGitMerge } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 import { Spinner } from "@kandev/ui/spinner";
 import { cn, formatRelativeTime } from "@/lib/utils";
@@ -15,6 +9,7 @@ import type { GitLabLaunchPayload, GitLabTaskPreset } from "./quick-task-launche
 import { gitLabMRKey } from "@/lib/gitlab-identity";
 import { MRRowTaskIndicator } from "./mr-row-task-indicator";
 import { StartTaskMenu } from "./start-task-menu";
+import { RowTitleLink } from "./row-title-link";
 
 type MRListProps = {
   items: MR[];
@@ -55,15 +50,7 @@ function MRRow({
     >
       <StateIcon className={cn("h-4 w-4 mt-1 shrink-0", stateIconClass)} />
       <div className="min-w-0 flex-1">
-        <Link
-          href={mr.web_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm font-semibold hover:underline inline-flex items-center gap-1.5 truncate cursor-pointer"
-        >
-          <span className="truncate">{mr.title}</span>
-          <IconExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-        </Link>
+        <RowTitleLink href={mr.web_url} title={mr.title} />
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5 text-xs text-muted-foreground">
           <span className="whitespace-nowrap">
             {mr.project_path}!{mr.iid}

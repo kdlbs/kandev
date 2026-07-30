@@ -208,6 +208,7 @@ func TestPromptTask_SupersededQueuedDispatchReleasesForegroundClaim(t *testing.T
 
 	_, err := svc.promptTask(
 		context.Background(), taskID, sessionID, "queued prompt", "", false, nil, false, "stale-entry",
+		false, nil,
 	)
 	if !errors.Is(err, ErrAgentPromptInProgress) {
 		t.Fatalf("a queued dispatch into a RUNNING session must be rejected, got: %v", err)

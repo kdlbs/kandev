@@ -182,6 +182,9 @@ export type UserSettingsState = {
   confirmTaskArchive: boolean;
   unreadDivider: boolean;
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
+  showAnchoredPromptBar: boolean;
+  showScrollToLastPrompt: boolean;
+  showScrollToStart: boolean;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];

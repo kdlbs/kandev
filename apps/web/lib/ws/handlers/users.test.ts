@@ -104,6 +104,30 @@ describe("user settings websocket handler", () => {
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(store.getState().userSettings.confirmTaskArchive).toBe(true);
   });
+
+  it("syncs transcript navigation preferences and defaults missing values to enabled", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        show_anchored_prompt_bar: false,
+        show_scroll_to_last_prompt: false,
+        show_scroll_to_start: false,
+      }),
+    );
+    expect(store.getState().userSettings).toMatchObject({
+      showAnchoredPromptBar: false,
+      showScrollToLastPrompt: false,
+      showScrollToStart: false,
+    });
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings).toMatchObject({
+      showAnchoredPromptBar: true,
+      showScrollToLastPrompt: true,
+      showScrollToStart: true,
+    });
+  });
 });
 
 describe("user settings websocket sidebar sync", () => {

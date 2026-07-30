@@ -18,7 +18,18 @@ import (
 const (
 	taskResourceCleanupRetryDelay       = time.Minute
 	preparedCleanupTransitionRetryDelay = 50 * time.Millisecond
+	taskResourceCleanupMaxAttempts      = 8
 )
+
+var taskResourceCleanupRetryDelays = []time.Duration{
+	time.Minute,
+	5 * time.Minute,
+	15 * time.Minute,
+	time.Hour,
+	3 * time.Hour,
+	6 * time.Hour,
+	12 * time.Hour,
+}
 
 type persistedTaskStopTarget struct {
 	SessionID   string `json:"session_id"`
@@ -466,16 +477,33 @@ func (s *Service) cancelTaskResourceCleanupJob(ctx context.Context, job *models.
 }
 
 func (s *Service) retryTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob, cleanupErr error) error {
-	nextAttempt := time.Now().UTC().Add(taskResourceCleanupRetryDelay)
+	state := models.TaskResourceCleanupStateRetryWait
+	var nextAttempt *time.Time
+	if job.Attempts >= taskResourceCleanupMaxAttempts {
+		state = models.TaskResourceCleanupStateFailed
+	} else {
+		next := time.Now().UTC().Add(taskResourceCleanupRetryDelayForAttempt(job.Attempts))
+		nextAttempt = &next
+	}
 	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
 	defer cancel()
 	_, err := s.resourceCleanups.CompleteClaimedTaskResourceCleanupJob(
-		transitionCtx, job.ID, job.Attempts, models.TaskResourceCleanupStateRetryWait, cleanupErr.Error(), &nextAttempt,
+		transitionCtx, job.ID, job.Attempts, state, cleanupErr.Error(), nextAttempt,
 	)
 	if err != nil {
 		return errors.Join(cleanupErr, err)
 	}
 	return cleanupErr
+}
+
+func taskResourceCleanupRetryDelayForAttempt(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	if attempt > len(taskResourceCleanupRetryDelays) {
+		attempt = len(taskResourceCleanupRetryDelays)
+	}
+	return taskResourceCleanupRetryDelays[attempt-1]
 }
 
 func detachedCleanupTransitionContext(ctx context.Context) (context.Context, context.CancelFunc) {

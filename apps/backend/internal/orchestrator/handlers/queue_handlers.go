@@ -116,8 +116,8 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "attachment delivery_mode must be prompt or path",
 			map[string]interface{}{"attachment_index": invalid})
 	}
-	if req.UserID == messagequeue.QueuedByAgent {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
+	if messagequeue.IsReservedQueuedBy(req.UserID) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, reservedIdentityError(req.UserID), nil)
 	}
 	references, err := h.validateSubmittedReferences(ctx, req.SessionID, req.TaskID, req.EntityReferences)
 	if err != nil {
@@ -266,8 +266,8 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	// satisfy the `WHERE queued_by = ?` filter on inter-task entries and
 	// overwrite their content. The reserved sentinel must be settable only
 	// from the inter-task dispatch path inside the backend.
-	if req.UserID == messagequeue.QueuedByAgent {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
+	if messagequeue.IsReservedQueuedBy(req.UserID) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, reservedIdentityError(req.UserID), nil)
 	}
 	referencesProvided := req.EntityReferences != nil
 	references, err := h.validateSubmittedReferences(ctx, req.SessionID, "", req.EntityReferences)
@@ -377,8 +377,8 @@ func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*
 	if req.Content == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
 	}
-	if req.UserID == messagequeue.QueuedByAgent {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "user_id may not impersonate the agent identity", nil)
+	if messagequeue.IsReservedQueuedBy(req.UserID) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, reservedIdentityError(req.UserID), nil)
 	}
 
 	queuedBy := req.UserID
@@ -404,6 +404,13 @@ func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*
 		fieldEntryID: queued.ID,
 		"was_append": appended,
 	})
+}
+
+func reservedIdentityError(queuedBy string) string {
+	if queuedBy == messagequeue.QueuedByAgent {
+		return "user_id may not impersonate the agent identity"
+	}
+	return "user_id may not impersonate a reserved identity"
 }
 
 // publishStatus emits the latest QueueStatus on the event bus so the frontend

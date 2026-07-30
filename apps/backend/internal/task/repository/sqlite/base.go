@@ -2,8 +2,10 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
+	"sync"
 
 	"github.com/jmoiron/sqlx"
 
@@ -13,11 +15,31 @@ import (
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db      *sqlx.DB // writer
-	ro      *sqlx.DB // reader (read-only pool)
-	ownsDB  bool
-	log     *logger.Logger
-	migrate *db.MigrateLogger
+	db           *sqlx.DB // writer
+	ro           *sqlx.DB // reader (read-only pool)
+	ownsDB       bool
+	log          *logger.Logger
+	migrate      *db.MigrateLogger
+	queuePurgeMu sync.RWMutex
+	queuePurger  func(context.Context, string)
+}
+
+// SetTaskQueuePurger registers the orchestrator-owned queue cleanup for
+// in-memory queues. SQLite queues are also purged in the task mutation
+// transaction; this callback keeps the explicitly ephemeral queue equivalent.
+func (r *Repository) SetTaskQueuePurger(purger func(context.Context, string)) {
+	r.queuePurgeMu.Lock()
+	defer r.queuePurgeMu.Unlock()
+	r.queuePurger = purger
+}
+
+func (r *Repository) notifyTaskQueuePurged(ctx context.Context, taskID string) {
+	r.queuePurgeMu.RLock()
+	purger := r.queuePurger
+	r.queuePurgeMu.RUnlock()
+	if purger != nil {
+		purger(ctx, taskID)
+	}
 }
 
 // NewWithDB creates a new SQLite repository with an existing database connection (shared ownership).

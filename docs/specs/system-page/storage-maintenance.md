@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-07-14
-updated: 2026-07-27
+updated: 2026-07-29
 owner: cfl
 ---
 
@@ -29,7 +29,8 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
   Go build cache, Docker cleanup, and quarantine safety. Every option includes focusable,
   pointer-accessible help that explains what it can change, when it runs, and which safety checks
   apply. Threshold and path fields are disabled while their parent cleanup option is disabled;
-  quarantine retention remains independently editable because it also governs existing entries.
+  quarantine retention remains independently editable because it governs entries created by future
+  cleanup even when the other resource rules are disabled.
 - Read-only analysis is available even when scheduled maintenance is disabled. It reports total
   task workspace bytes alongside active and orphan-candidate bytes, active quarantined count and
   bytes, the managed Go cache, the service user's default Go cache when it is a distinct path,
@@ -78,10 +79,26 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
   cleanup immediately.
 - Kandev invokes typed, built-in maintenance providers. Users cannot configure arbitrary shell
   commands to run as the Kandev service account.
+- The Quarantine section shows each entry's exact deletion-eligibility timestamp and whether it is
+  protected or eligible now. It explains that the timestamp is the earliest deletion time, while
+  the actual automatic deletion occurs on the first successful scheduled maintenance run after
+  that time. When scheduling is disabled, it says that automatic deletion is off and names full
+  manual **Run now** or an explicit quarantine action as the available cleanup paths.
+- Scheduled and full manual maintenance runs permanently delete eligible quarantine entries.
+  Resource-specific manual runs do not delete unrelated quarantine entries.
+- **Clear eligible** permanently deletes every active quarantine entry whose retention deadline has
+  elapsed and leaves protected entries intact. Its result reports deleted, protected, and failed
+  entry counts and bytes.
+- A separate **Force clear all** action may delete protected and eligible entries together after the
+  user types `DELETE ALL NOW`. The force action bypasses only retention; it never bypasses resource
+  ownership, path containment, symlink, state-transition, or Git worktree-pruning validation.
 
 ### Task cleanup and orphan workspaces
 
 Decision: [ADR-2026-07-19-workspace-symlink-entries](../../decisions/2026-07-19-workspace-symlink-entries.md)
+
+Retention override:
+[ADR-2026-07-29-quarantine-retention-override](../../decisions/2026-07-29-quarantine-retention-override.md)
 
 - Archive, delete, cascade, workspace-delete, and quick-chat expiration persist a task resource
   cleanup intent before mutating or removing the task row. Cleanup inventory needed after a
@@ -109,11 +126,14 @@ Decision: [ADR-2026-07-19-workspace-symlink-entries](../../decisions/2026-07-19-
   `~/.kandev/trash/tasks/`; they are not immediately deleted. Quarantine entries record their
   original path, size, task/workspace identity when known, and permanent-deletion deadline.
 - The Storage page describes quarantine as a recoverable holding area, explains when Kandev uses
-  it, and distinguishes restore from immediate permanent deletion.
+  it, and distinguishes retention-protected deletion from the explicitly forced bulk override.
 - The default orphan grace period is seven days and the default quarantine retention is seven
   additional days. Both are configurable in whole hours and apply to scheduled and manual runs.
 - Quarantine never deletes a Git branch. Permanent deletion removes the quarantined files and
   prunes stale Git worktree registration only after the retention deadline.
+- Scheduled and full manual maintenance include a quarantine provider that permanently deletes
+  entries whose deadlines have elapsed. A resource-specific manual run, such as **Clean Go cache**,
+  does not purge unrelated quarantine entries.
 - Users can restore a quarantined task workspace to its original path while that path is free.
   A path conflict fails closed and leaves the quarantine entry intact.
 
@@ -242,7 +262,7 @@ operation_id      string     unique idempotency key for one lifecycle mutation
 task_id           string     indexed, no foreign key
 trigger           enum       archive | delete | cascade_archive | cascade_delete |
                              workspace_delete | quick_chat_expire | reconcile
-state             enum       pending | running | retry_wait | succeeded | cancelled
+state             enum       pending | running | retry_wait | succeeded | failed | cancelled
 resource_snapshot json       captured runtime/environment/worktree/path handles
 attempts          int        non-negative
 next_attempt_at   timestamp  nullable
@@ -332,6 +352,14 @@ POST   /api/v1/system/storage/quarantine/:id/restore
 DELETE /api/v1/system/storage/quarantine/:id
        body: { confirm: "DELETE" }
        -> 202 { job_id }
+       -> 409 before the entry's delete_after timestamp
+
+DELETE /api/v1/system/storage/quarantine
+       body: {
+         scope: "eligible" | "all",
+         confirm: "DELETE ELIGIBLE" | "DELETE ALL NOW"
+       }
+       -> 202 { job_id }
 ```
 
 `capabilities` reports the managed Go path, whether Go-cache adoption is available, Docker
@@ -344,6 +372,25 @@ window and replaces the cached snapshot only when the forced analysis succeeds.
 
 Storage operations use the existing `system.job.update` WebSocket event and polling fallback.
 Job kinds are `storage-analysis`, `storage-cleanup`, and `storage-quarantine-delete`.
+
+Bulk quarantine jobs expose this result shape:
+
+```json
+{
+  "scope": "eligible|all",
+  "considered": 4,
+  "deleted": 2,
+  "deleted_bytes": 2048,
+  "protected": 1,
+  "protected_bytes": 1024,
+  "failed": 1,
+  "failures": [{ "id": "...", "error": "..." }]
+}
+```
+
+`scope: "eligible"` requires `DELETE ELIGIBLE` and skips entries whose `delete_after` timestamp is
+still in the future. `scope: "all"` requires `DELETE ALL NOW` and may bypass that timestamp. The
+server rejects mismatched scope/confirmation pairs with `400`.
 
 `busy_resources` uses stable machine-readable `kind` values and plain-language `label` values.
 The response exposes activity categories, not task names, prompts, paths, or other session content.
@@ -387,12 +434,19 @@ at the next interval. Provider failure is isolated: a Docker failure does not ro
 quarantine or prevent a later Go-cache provider from running, but the overall run is `failed` and
 records each provider result.
 
+The quarantine provider runs during scheduled and full manual maintenance. It evaluates the
+persisted `delete_after` value at run time and attempts permanent deletion only for eligible
+entries. If any entry deletion fails, successful deletions remain committed, the failed entry
+remains visible and retryable, and the maintenance run records the quarantine provider failure.
+
 ### Task cleanup intent
 
 ```text
 pending -> running -> succeeded
                    -> cancelled       archived task became active again
-                   -> retry_wait      bounded attempt failed
+                   -> retry_wait      attempts 1-7 failed; retry uses the
+                                      1m, 5m, 15m, 1h, 3h, 6h, 12h schedule
+                   -> failed          attempt 8 failed; terminal diagnostic
 retry_wait -> running                 next attempt or manual maintenance run
 ```
 
@@ -407,8 +461,10 @@ quarantined -> restored
 ## Permissions
 
 Storage routes use the same install-user authorization as other System pages. Adopting an external
-Go cache, acknowledging a dedicated Docker daemon, permanently deleting a quarantine entry, and
-enabling host-global Docker cleanup require explicit UI confirmation and server-side validation.
+Go cache, acknowledging a dedicated Docker daemon, permanently deleting one or more quarantine
+entries, and enabling host-global Docker cleanup require explicit UI confirmation and server-side
+validation. **Force clear all** uses the distinct `DELETE ALL NOW` confirmation because it removes
+the configured restore window.
 
 ## Failure modes
 
@@ -429,6 +485,11 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
   warning, and does not run destructive maintenance.
 - A managed Go-cache cleanup failure leaves either the original cache or its quarantined rename
   intact; it never recursively deletes outside the configured owned path.
+- Bulk quarantine deletion continues after one entry fails. Successful entries remain deleted,
+  protected entries remain unchanged for eligible-only cleanup, failed entries remain visible with
+  their last error, and the job finishes as failed with per-entry failure details.
+- A force-clear request bypasses only the retention timestamp. Any ownership, containment, symlink,
+  ambiguous-state, or Git worktree-pruning failure keeps the affected entry and reports the error.
 - Docker list/usage failure marks Docker analysis unavailable. Docker prune failure records the
   daemon error and does not affect other providers.
 - Loss of the dedicated-daemon acknowledgment between analysis and cleanup cancels host-global
@@ -449,6 +510,9 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
   cleanup and permanent quarantine deletion do not cascade-delete that history.
 - Quarantined data remains restorable until permanent deletion succeeds. A failed permanent delete
   remains visible and retryable.
+- Expired entries are automatically considered only by scheduled or full manual maintenance.
+  Disabling scheduling prevents unattended quarantine deletion; it does not start an independent
+  sweeper or remove existing entries.
 - Run history retains the newest 20 completed entries plus all non-terminal entries.
 
 ## Scenarios
@@ -495,6 +559,24 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
   siblings in the same workspace directory.
 - **GIVEN** a quarantined task workspace has not reached its deletion deadline, **WHEN** the user
   selects **Restore**, **THEN** it returns to its original path and remains available to the task.
+- **GIVEN** protected and eligible quarantine entries, **WHEN** the Storage page renders, **THEN**
+  each row shows its exact `delete_after` timestamp and protected-or-eligible status, and the page
+  states whether automatic scheduled cleanup is enabled.
+- **GIVEN** protected and eligible quarantine entries, **WHEN** the user confirms **Clear eligible**
+  with `DELETE ELIGIBLE`, **THEN** every eligible entry is permanently deleted, protected entries
+  remain, and the completed job reports both groups.
+- **GIVEN** protected and eligible quarantine entries, **WHEN** the user confirms **Force clear
+  all** with `DELETE ALL NOW`, **THEN** Kandev attempts to permanently delete both groups while
+  retaining every ownership and path-safety check.
+- **GIVEN** an eligible quarantine entry and enabled scheduling, **WHEN** the next scheduled
+  maintenance run acquires the idle gate, **THEN** its quarantine provider permanently deletes the
+  entry and reports the reclaimed bytes.
+- **GIVEN** an eligible quarantine entry and disabled scheduling, **WHEN** no manual maintenance or
+  quarantine action occurs, **THEN** the entry remains restorable and the page states that
+  automatic cleanup is off.
+- **GIVEN** one invalid quarantine payload among otherwise deletable entries, **WHEN** bulk deletion
+  runs, **THEN** valid entries are deleted, the invalid entry remains visible, and the job reports
+  the partial failure.
 - **GIVEN** an archived task has a quarantined workspace, **WHEN** the user unarchives it, **THEN**
   Kandev restores the quarantined directory before reporting branch recovery.
 - **GIVEN** an archive cleanup job is waiting to retry, **WHEN** the task is unarchived, **THEN** the
@@ -532,6 +614,10 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 - **GIVEN** the Storage page is opened on a mobile viewport, **WHEN** the user navigates through the
   settings sheet, analyzes storage, and expands a resource result, **THEN** every value and action is
   available without horizontal page scrolling or hover-only controls.
+- **GIVEN** multiple protected and eligible quarantine entries on a mobile viewport, **WHEN** the
+  user reviews deadlines and completes either bulk action, **THEN** the same counts, confirmation,
+  result feedback, and safety behavior are available through at least 44-pixel touch targets
+  without horizontal page scrolling.
 - **GIVEN** settings were saved, **WHEN** the backend restarts, **THEN** the Storage page shows the
   persisted policy and the next run uses it.
 
@@ -544,6 +630,11 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 - Cleaning remote SSH executor filesystems; remote maintenance requires a separate explicit design.
 - Restoring uncommitted files after their quarantine retention has expired.
 - Automatically cleaning a pre-existing user Go cache without explicit path adoption.
+- An independent quarantine sweeper that runs while scheduled maintenance is disabled.
+- Promising an exact permanent-deletion instant when the maintenance idle gate may delay or preempt
+  a scheduled run.
+- Letting the force-clear retention override bypass ownership, containment, symlink, state, or Git
+  worktree-pruning safety checks.
 - Age-based or name-based deletion of unmarked `/tmp/kandev-agent/*` directories.
 - A Kandev-owned general-purpose sweeper for the operating system's shared temporary directory.
 - Guaranteed compatibility with tools that require a fixed, globally unique name in shared temp;
@@ -553,3 +644,4 @@ enabling host-global Docker cleanup require explicit UI confirmation and server-
 
 - [Original Storage maintenance implementation](../../plans/storage-maintenance/plan.md)
 - [Storage overview cache and settings follow-up](../../plans/storage-overview-cache/plan.md)
+- [Quarantine lifecycle follow-up](../../plans/quarantine-lifecycle/plan.md)

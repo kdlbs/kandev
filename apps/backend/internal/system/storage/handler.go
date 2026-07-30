@@ -28,6 +28,7 @@ type Mutations interface {
 	RunNow(context.Context, []string, bool) (string, error)
 	RestoreQuarantine(context.Context, string) (QuarantineEntry, error)
 	DeleteQuarantine(context.Context, string, string) (string, error)
+	PurgeQuarantine(context.Context, QuarantinePurgeScope, string) (string, error)
 }
 
 type Capabilities struct {
@@ -86,6 +87,7 @@ func RegisterRoutes(group *gin.RouterGroup, handler *Handler) {
 	group.GET("/storage/runs", handler.listRuns)
 	group.GET("/storage/quarantine", handler.listQuarantine)
 	group.POST("/storage/quarantine/:id/restore", handler.restoreQuarantine)
+	group.DELETE("/storage/quarantine", handler.deleteQuarantineBulk)
 	group.DELETE("/storage/quarantine/:id", handler.deleteQuarantine)
 }
 
@@ -172,11 +174,32 @@ type confirmationRequest struct {
 
 func (h *Handler) deleteQuarantine(c *gin.Context) {
 	var request confirmationRequest
-	if err := c.ShouldBindJSON(&request); err != nil || request.Confirm != "DELETE" {
+	if err := c.ShouldBindJSON(&request); err != nil || request.Confirm != QuarantineConfirmationDelete {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "quarantine deletion requires DELETE confirmation"})
 		return
 	}
 	id, err := h.config.Mutations.DeleteQuarantine(c.Request.Context(), c.Param("id"), request.Confirm)
+	writeAcceptedJob(c, id, err)
+}
+
+type bulkQuarantineRequest struct {
+	Scope   QuarantinePurgeScope `json:"scope" binding:"required"`
+	Confirm string               `json:"confirm" binding:"required"`
+}
+
+func (h *Handler) deleteQuarantineBulk(c *gin.Context) {
+	var request bulkQuarantineRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if (request.Scope == QuarantinePurgeScopeEligible && request.Confirm != QuarantineConfirmationEligible) ||
+		(request.Scope == QuarantinePurgeScopeAll && request.Confirm != QuarantineConfirmationForce) ||
+		(request.Scope != QuarantinePurgeScopeEligible && request.Scope != QuarantinePurgeScopeAll) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid quarantine purge scope or confirmation"})
+		return
+	}
+	id, err := h.config.Mutations.PurgeQuarantine(c.Request.Context(), request.Scope, request.Confirm)
 	writeAcceptedJob(c, id, err)
 }
 

@@ -12,14 +12,14 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { Input } from "@kandev/ui/input";
-import type { StorageQuarantineEntry } from "@/lib/types/system";
+import type { StorageQuarantineEntry, StorageQuarantinePurgeScope } from "@/lib/types/system";
 
 type ConfirmationDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   description: string;
-  phrase: "DEDICATED" | "ADOPT" | "DELETE";
+  phrase: "DEDICATED" | "ADOPT" | "DELETE" | "DELETE ELIGIBLE" | "DELETE ALL NOW";
   actionLabel: string;
   actionTestId: string;
   destructive?: boolean;
@@ -109,6 +109,38 @@ export function PermanentDeleteDialog({
       phrase="DELETE"
       actionLabel="Delete permanently"
       actionTestId="storage-quarantine-delete-confirm"
+      destructive
+    />
+  );
+}
+
+export function QuarantinePurgeDialog({
+  scope,
+  eligibleCount,
+  protectedCount,
+  ...props
+}: Pick<ConfirmationDialogProps, "open" | "onOpenChange" | "onConfirm"> & {
+  scope: StorageQuarantinePurgeScope;
+  eligibleCount: number;
+  protectedCount: number;
+}) {
+  const eligible = scope === "eligible";
+  return (
+    <ConfirmationDialog
+      {...props}
+      title={eligible ? "Clear eligible quarantine" : "Force clear all quarantine"}
+      description={
+        eligible
+          ? `This will permanently remove ${eligibleCount} eligible item${eligibleCount === 1 ? "" : "s"}. ${protectedCount} protected item${protectedCount === 1 ? " remains" : "s remain"} until ${protectedCount === 1 ? "its" : "their"} retention deadline${protectedCount === 1 ? "" : "s"}.`
+          : "This attempts to permanently remove every quarantined item immediately and cannot be undone for entries that succeed. Failed entries may remain visible and retryable."
+      }
+      phrase={eligible ? "DELETE ELIGIBLE" : "DELETE ALL NOW"}
+      actionLabel={eligible ? "Clear eligible" : "Force clear all"}
+      actionTestId={
+        eligible
+          ? "storage-quarantine-clear-eligible-confirm"
+          : "storage-quarantine-force-clear-confirm"
+      }
       destructive
     />
   );

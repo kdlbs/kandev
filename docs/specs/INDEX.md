@@ -117,14 +117,16 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 
 | Spec | Status |
 |---|---|
-| [ci-pr-automation](ui/ci-pr-automation.md) | draft |
+| [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
 | [acp-shell-command-output](ui/acp-shell-command-output.md) | shipped |
 | [acp-model-configuration-summary](ui/acp-model-configuration-summary.md) | shipped |
 | [review-file-status](ui/review-file-status.md) | building |
+| [review-markdown-preview](ui/review-markdown-preview.md) | draft |
 | [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
+| [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
@@ -138,6 +140,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
 | [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
+| [embedded-vscode-windows-availability](ui/embedded-vscode-windows-availability.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

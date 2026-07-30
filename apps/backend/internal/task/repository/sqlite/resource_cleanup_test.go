@@ -137,3 +137,68 @@ func TestTaskResourceCleanupJobStaleClaimCannotOverwriteCancellation(t *testing.
 		t.Fatalf("cancelled job lost historical metadata: %#v", got)
 	}
 }
+
+func TestTaskResourceCleanupFailedJobIsTerminalAndNotDue(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-failed", OperationID: "delete:failed", TaskID: "task-failed",
+		Trigger: models.TaskResourceCleanupTriggerDelete,
+		State:   models.TaskResourceCleanupStatePending, ResourceSnapshot: `{}`,
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	claimed, err := repo.MarkTaskResourceCleanupJobRunning(ctx, job.ID)
+	if err != nil || !claimed {
+		t.Fatalf("claim = %v, %v; want true", claimed, err)
+	}
+	claimedJob, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob: %v", err)
+	}
+	if _, err := repo.CompleteClaimedTaskResourceCleanupJob(
+		ctx, job.ID, claimedJob.Attempts, models.TaskResourceCleanupState("failed"), "permanent failure", nil,
+	); err != nil {
+		t.Fatalf("complete failed cleanup: %v", err)
+	}
+	got, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("reload failed cleanup: %v", err)
+	}
+	if got.CompletedAt == nil {
+		t.Fatal("failed cleanup has no completion timestamp")
+	}
+	due, err := repo.ListDueTaskResourceCleanupJobs(ctx, time.Now().UTC(), 10)
+	if err != nil {
+		t.Fatalf("ListDueTaskResourceCleanupJobs: %v", err)
+	}
+	if len(due) != 0 {
+		t.Fatalf("failed cleanup is due: %#v", due)
+	}
+}
+
+func TestTaskResourceCleanupFailedUnclaimedCompletionHasTimestamp(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-failed-unclaimed", OperationID: "delete:failed-unclaimed", TaskID: "task-failed-unclaimed",
+		Trigger: models.TaskResourceCleanupTriggerDelete,
+		State:   models.TaskResourceCleanupStatePending, ResourceSnapshot: `{}`,
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	if err := repo.CompleteTaskResourceCleanupJob(
+		ctx, job.ID, models.TaskResourceCleanupStateFailed, "permanent failure", nil,
+	); err != nil {
+		t.Fatalf("complete unclaimed failed cleanup: %v", err)
+	}
+	got, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("reload failed cleanup: %v", err)
+	}
+	if got.CompletedAt == nil {
+		t.Fatal("unclaimed failed cleanup has no completion timestamp")
+	}
+}

@@ -843,6 +843,9 @@ export class ApiClient {
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
+    show_anchored_prompt_bar?: boolean;
+    show_scroll_to_last_prompt?: boolean;
+    show_scroll_to_start?: boolean;
     workspace_id?: string;
     workflow_filter_id?: string;
     repository_ids?: string[];
@@ -1342,6 +1345,7 @@ export class ApiClient {
 
   async mockGitHubAssociateTaskPR(data: {
     task_id: string;
+    workspace_id?: string;
     owner: string;
     repo: string;
     pr_number: number;
@@ -1435,6 +1439,7 @@ export class ApiClient {
       id: number;
       author: string;
       author_avatar?: string;
+      author_is_bot?: boolean;
       body: string;
       path?: string;
       line?: number;

@@ -12,6 +12,7 @@ import {
 import { calculateHash, generateUnifiedDiff } from "@/lib/utils/file-diff";
 import { requestFileContent, updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
 import { useToast } from "@/components/toast-provider";
+import { getFileTabKey } from "./task-center-panel-file-tabs";
 
 export type FileTabRestorationOptions = {
   activeSessionId: string | null;
@@ -25,7 +26,7 @@ export type FileSaveDeleteOptions = {
   openFileTabs: OpenFileTab[];
   setOpenFileTabs: React.Dispatch<React.SetStateAction<OpenFileTab[]>>;
   setSavingFiles: React.Dispatch<React.SetStateAction<Set<string>>>;
-  handleCloseFileTab: (path: string) => void;
+  handleCloseFileTab: (fileKey: string) => void;
 };
 
 export function toPrimaryTab(savedTab: string) {
@@ -38,7 +39,7 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
   const loadedTabs: OpenFileTab[] = [];
   for (const savedTab of savedTabs) {
     try {
-      const response = await requestFileContent(client, sessionId, savedTab.path);
+      const response = await requestFileContent(client, sessionId, savedTab.path, savedTab.repo);
       const hash = await calculateHash(response.content);
       loadedTabs.push({
         path: savedTab.path,
@@ -48,6 +49,8 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
         originalHash: hash,
         isDirty: false,
         isBinary: response.is_binary,
+        repo: savedTab.repo,
+        markdownPreview: savedTab.markdownPreview,
       });
     } catch {
       /* skip failed tabs */
@@ -75,10 +78,15 @@ function restoreLoadedTabs({
   if (loadedTabs.length > 0) {
     setOpenFileTabs(loadedTabs);
     if (savedActiveTab.startsWith("file:")) {
-      const filePath = savedActiveTab.replace("file:", "");
-      if (loadedTabs.some((t) => t.path === filePath)) {
+      const savedFileKey = savedActiveTab.slice("file:".length);
+      // Existing sessions may have stored the old path-only tab value. Prefer
+      // the repo-aware key, while keeping that persisted state restorable.
+      const activeTab = loadedTabs.find(
+        (tab) => getFileTabKey(tab) === savedFileKey || tab.path === savedFileKey,
+      );
+      if (activeTab) {
         setTimeout(() => {
-          setLeftTab(savedActiveTab);
+          setLeftTab(`file:${getFileTabKey(activeTab)}`);
           restorationInProgressRef.current = false;
         }, 0);
       } else {
@@ -176,12 +184,13 @@ export function useFileSaveDelete({
   const { toast } = useToast();
 
   const handleFileSave = useCallback(
-    async (path: string) => {
-      const tab = openFileTabs.find((t) => t.path === path);
+    async (path: string, repo?: string) => {
+      const fileKey = getFileTabKey({ path, repo });
+      const tab = openFileTabs.find((item) => getFileTabKey(item) === fileKey);
       if (!tab || !tab.isDirty) return;
       const client = getWebSocketClient();
       if (!client || !activeSessionId) return;
-      setSavingFiles((prev) => new Set(prev).add(path));
+      setSavingFiles((prev) => new Set(prev).add(fileKey));
       try {
         const diff = generateUnifiedDiff(tab.originalContent, tab.content, tab.path);
         const response = await updateFileContent(client, activeSessionId, {
@@ -189,11 +198,12 @@ export function useFileSaveDelete({
           diff,
           originalHash: tab.originalHash,
           desiredContent: tab.content,
+          repo: tab.repo,
         });
         if (response.success && response.new_hash) {
           setOpenFileTabs((prev) =>
             prev.map((t) =>
-              t.path === path
+              getFileTabKey(t) === fileKey
                 ? {
                     ...t,
                     originalContent: t.content,
@@ -220,7 +230,7 @@ export function useFileSaveDelete({
       } finally {
         setSavingFiles((prev) => {
           const next = new Set(prev);
-          next.delete(path);
+          next.delete(fileKey);
           return next;
         });
       }
@@ -229,13 +239,13 @@ export function useFileSaveDelete({
   );
 
   const handleFileDelete = useCallback(
-    async (path: string) => {
+    async (path: string, repo?: string) => {
       const client = getWebSocketClient();
       if (!client || !activeSessionId) return;
       try {
-        const response = await deleteFile(client, activeSessionId, path);
+        const response = await deleteFile(client, activeSessionId, path, repo);
         if (response.success) {
-          handleCloseFileTab(path);
+          handleCloseFileTab(getFileTabKey({ path, repo }));
         } else {
           toast({
             title: "Delete failed",

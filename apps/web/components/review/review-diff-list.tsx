@@ -20,6 +20,8 @@ import {
 import type { ReviewFile } from "./types";
 import { RepoGroupHeader } from "./review-diff-list-groups";
 import { ReviewDiffHeader, type ReviewExternalLinkContext } from "./review-diff-header";
+import { extractReviewMarkdownPreview } from "./review-markdown-diff-preview";
+import { ReviewMarkdownDiffPreviewContent } from "./review-markdown-diff-preview-content";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 
@@ -34,7 +36,7 @@ type ReviewDiffListProps = {
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
-  onPreviewMarkdown?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 };
 
@@ -143,7 +145,7 @@ type FileDiffSectionProps = {
   onToggleReviewed: (key: string, reviewed: boolean) => void;
   onDiscard: (key: string) => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
-  onPreviewMarkdown?: (filePath: string) => void;
+  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
   /** Per-repo base branches + single-repo fallback, resolved once by the list
@@ -410,6 +412,54 @@ function renderDiffContent(opts: {
   );
 }
 
+function useMarkdownPreview(file: ReviewFile) {
+  const [markdownPreview, setMarkdownPreview] = useState(false);
+  const markdownPreviewContent = useMemo(() => extractReviewMarkdownPreview(file), [file]);
+  const handleToggleMarkdownPreview = useCallback(() => setMarkdownPreview((v) => !v), []);
+  useEffect(() => {
+    if (markdownPreviewContent.fragments.length === 0) setMarkdownPreview(false);
+  }, [markdownPreviewContent.fragments.length]);
+  return { markdownPreview, markdownPreviewContent, handleToggleMarkdownPreview };
+}
+
+function useFileDiffDisplayControls(wordWrap: boolean) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [expandUnchanged, setExpandUnchanged] = useState(false);
+  const [localWordWrap, setLocalWordWrap] = useState<boolean | undefined>(undefined);
+  const effectiveWordWrap = localWordWrap ?? wordWrap;
+  const handleToggleCollapse = useCallback(() => setCollapsed((v) => !v), []);
+  const handleToggleExpandUnchanged = useCallback(() => setExpandUnchanged((v) => !v), []);
+  const handleToggleWordWrap = useCallback(
+    () => setLocalWordWrap((v) => !(v ?? wordWrap)),
+    [wordWrap],
+  );
+  return {
+    collapsed,
+    setCollapsed,
+    expandUnchanged,
+    effectiveWordWrap,
+    handleToggleCollapse,
+    handleToggleExpandUnchanged,
+    handleToggleWordWrap,
+  };
+}
+
+function getMarkdownPreviewToggle({
+  file,
+  fragments,
+  onPreviewMarkdown,
+  onTogglePreview,
+}: {
+  file: ReviewFile;
+  fragments: string[];
+  onPreviewMarkdown?: (filePath: string, repo?: string) => void;
+  onTogglePreview: () => void;
+}) {
+  if (fragments.length === 0) return undefined;
+  if (!onPreviewMarkdown) return onTogglePreview;
+  return () => onPreviewMarkdown(file.path, file.repository_name);
+}
+
 function FileDiffSection({
   file,
   fileKey,
@@ -428,20 +478,13 @@ function FileDiffSection({
   scrollContainer,
   externalLinkContext,
 }: FileDiffSectionProps) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [expandUnchanged, setExpandUnchanged] = useState(false);
-  const [localWordWrap, setLocalWordWrap] = useState<boolean | undefined>(undefined);
-  const effectiveWordWrap = localWordWrap ?? wordWrap;
-  const handleToggleCollapse = useCallback(() => setCollapsed((v) => !v), []);
-  const handleToggleExpandUnchanged = useCallback(() => setExpandUnchanged((v) => !v), []);
-  const handleToggleWordWrap = useCallback(
-    () => setLocalWordWrap((v) => !(v ?? wordWrap)),
-    [wordWrap],
-  );
+  const controls = useFileDiffDisplayControls(wordWrap);
+  const { markdownPreview, markdownPreviewContent, handleToggleMarkdownPreview } =
+    useMarkdownPreview(file);
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
   // Force load when visible via intersection observer, or forceLoad is true
   const shouldRenderContent = isVisible || !!forceLoad;
-  useScrollIntoViewOnSelect(isSelected, sectionRef, setCollapsed);
+  useScrollIntoViewOnSelect(isSelected, sectionRef, controls.setCollapsed);
   // Auto-mark sends the composite key (matches the dialog's reviewed-set
   // shape) so cross-repo same-named files don't all get marked when one
   // scrolls past.
@@ -476,6 +519,12 @@ function FileDiffSection({
     externalLinkContext.baseBranchByRepo,
     externalLinkContext.fallbackBaseBranch,
   );
+  const onToggleMarkdownPreview = getMarkdownPreviewToggle({
+    file,
+    fragments: markdownPreviewContent.fragments,
+    onPreviewMarkdown,
+    onTogglePreview: handleToggleMarkdownPreview,
+  });
 
   return (
     <div ref={sectionRef} className="border-b border-border">
@@ -485,32 +534,37 @@ function FileDiffSection({
         isReviewed={isReviewed}
         isStale={isStale}
         sessionId={sessionId}
-        collapsed={collapsed}
-        wordWrap={effectiveWordWrap}
-        expandUnchanged={expandUnchanged}
+        collapsed={controls.collapsed}
+        wordWrap={controls.effectiveWordWrap}
+        expandUnchanged={controls.expandUnchanged}
         onCheckboxChange={handleCheckboxChange}
         onDiscard={handleDiscard}
         onOpenFile={onOpenFile}
-        onPreviewMarkdown={onPreviewMarkdown}
-        onToggleCollapse={handleToggleCollapse}
-        onToggleExpandUnchanged={handleToggleExpandUnchanged}
-        onToggleWordWrap={handleToggleWordWrap}
+        markdownPreview={!onPreviewMarkdown && markdownPreview}
+        onToggleMarkdownPreview={onToggleMarkdownPreview}
+        onToggleCollapse={controls.handleToggleCollapse}
+        onToggleExpandUnchanged={controls.handleToggleExpandUnchanged}
+        onToggleWordWrap={controls.handleToggleWordWrap}
         {...externalLinkContext}
       />
       <div ref={sentinelRef} />
-      {!collapsed &&
-        renderDiffContent({
-          shouldRender: shouldRenderContent,
-          file,
-          sessionId,
-          wordWrap: effectiveWordWrap,
-          expandUnchanged,
-          enableExpansion,
-          baseRef,
-          onRevertBlock: handleRevertBlock,
-          onCommentRun: handleCommentRun,
-          onToggleExpandUnchanged: handleToggleExpandUnchanged,
-        })}
+      {!controls.collapsed &&
+        (markdownPreview ? (
+          <ReviewMarkdownDiffPreviewContent preview={markdownPreviewContent} />
+        ) : (
+          renderDiffContent({
+            shouldRender: shouldRenderContent,
+            file,
+            sessionId,
+            wordWrap: controls.effectiveWordWrap,
+            expandUnchanged: controls.expandUnchanged,
+            enableExpansion,
+            baseRef,
+            onRevertBlock: handleRevertBlock,
+            onCommentRun: handleCommentRun,
+            onToggleExpandUnchanged: controls.handleToggleExpandUnchanged,
+          })
+        ))}
     </div>
   );
 }

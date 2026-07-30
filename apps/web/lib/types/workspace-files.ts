@@ -82,6 +82,7 @@ export type OpenFileTab = {
   originalHash: string;
   isDirty: boolean;
   isBinary?: boolean;
+  markdownPreview?: boolean;
 };
 
 export const FILE_EXTENSION_COLORS: Record<string, string> = {

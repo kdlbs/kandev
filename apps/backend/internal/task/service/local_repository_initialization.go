@@ -9,12 +9,11 @@ import (
 	"io"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 
+	"github.com/kandev/kandev/internal/task/gitinit"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
@@ -201,14 +200,10 @@ func (s *Service) closeLocalRepositoryStaging(staging *localRepositoryStaging) {
 }
 
 func initializeGitRepository(ctx context.Context, targetPath string, targetDirectory *os.File) error {
-	gitTarget := targetPath
-	var extraFiles []*os.File
-	if inheritedPath := inheritedDirectoryPath(3); inheritedPath != "" {
-		gitTarget = inheritedPath
-		extraFiles = []*os.File{targetDirectory}
+	command, err := gitinit.CommandContext(ctx, targetPath, targetDirectory)
+	if err != nil {
+		return err
 	}
-	command := exec.CommandContext(ctx, "git", "init", "--initial-branch=main", gitTarget)
-	command.ExtraFiles = extraFiles
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
@@ -288,17 +283,6 @@ func removeLocalRepositoryRootTree(root *os.Root, name string) error {
 		}
 	}
 	return root.Remove(name)
-}
-
-func inheritedDirectoryPath(fd int) string {
-	switch runtime.GOOS {
-	case "linux":
-		return "/proc/self/fd/" + strconv.Itoa(fd)
-	case "darwin", "freebsd", "openbsd", "netbsd":
-		return "/dev/fd/" + strconv.Itoa(fd)
-	default:
-		return ""
-	}
 }
 
 func localRepositoryTargetMatches(targetPath string, createdTarget fs.FileInfo) bool {

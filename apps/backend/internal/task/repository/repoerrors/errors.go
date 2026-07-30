@@ -17,3 +17,6 @@ var ErrTaskPlanNotFound = errors.New("task plan not found")
 
 // ErrRepositoryNotFound reports that no live repository row matched the supplied id.
 var ErrRepositoryNotFound = errors.New("repository not found")
+
+// ErrTaskEnvironmentNotFound reports that no task environment row matched the supplied id.
+var ErrTaskEnvironmentNotFound = errors.New("task environment not found")

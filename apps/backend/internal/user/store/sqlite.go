@@ -458,6 +458,9 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"confirm_task_archive":            settings.ConfirmTaskArchive,
 		"unread_divider":                  settings.UnreadDivider,
 		"mcp_task_agent_profile_default":  models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
+		"show_anchored_prompt_bar":        settings.ShowAnchoredPromptBar,
+		"show_scroll_to_last_prompt":      settings.ShowScrollToLastPrompt,
+		"show_scroll_to_start":            settings.ShowScrollToStart,
 		"show_release_notification":       settings.ShowReleaseNotification,
 		"release_notes_last_seen_version": settings.ReleaseNotesLastSeenVersion,
 		"lsp_auto_start_languages":        lspAutoStart,
@@ -578,6 +581,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ConfirmTaskArchive = true
 		settings.UnreadDivider = true
 		settings.MCPTaskAgentProfileDefault = models.MCPTaskAgentProfileDefaultCurrentTask
+		settings.ShowAnchoredPromptBar = true
+		settings.ShowScrollToLastPrompt = true
+		settings.ShowScrollToStart = true
 		settings.ChatSubmitKey = "cmd_enter"
 		settings.KeyboardShortcuts = map[string]interface{}{}
 		settings.TerminalLinkBehavior = "new_tab"
@@ -605,6 +611,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ConfirmTaskArchive          *bool                               `json:"confirm_task_archive"`
 		UnreadDivider               *bool                               `json:"unread_divider"`
 		MCPTaskAgentProfileDefault  string                              `json:"mcp_task_agent_profile_default"`
+		ShowAnchoredPromptBar       *bool                               `json:"show_anchored_prompt_bar"`
+		ShowScrollToLastPrompt      *bool                               `json:"show_scroll_to_last_prompt"`
+		ShowScrollToStart           *bool                               `json:"show_scroll_to_start"`
 		ShowReleaseNotification     *bool                               `json:"show_release_notification"`
 		ReleaseNotesLastSeenVersion string                              `json:"release_notes_last_seen_version"`
 		LspAutoStartLanguages       []string                            `json:"lsp_auto_start_languages"`
@@ -668,6 +677,21 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.UnreadDivider = true
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
+	if payload.ShowAnchoredPromptBar != nil {
+		settings.ShowAnchoredPromptBar = *payload.ShowAnchoredPromptBar
+	} else {
+		settings.ShowAnchoredPromptBar = true
+	}
+	if payload.ShowScrollToLastPrompt != nil {
+		settings.ShowScrollToLastPrompt = *payload.ShowScrollToLastPrompt
+	} else {
+		settings.ShowScrollToLastPrompt = true
+	}
+	if payload.ShowScrollToStart != nil {
+		settings.ShowScrollToStart = *payload.ShowScrollToStart
+	} else {
+		settings.ShowScrollToStart = true
+	}
 	if payload.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *payload.ShowReleaseNotification
 	} else {

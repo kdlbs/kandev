@@ -195,6 +195,10 @@ export const test = backendFixture.extend<
       // test renders cards with data-testid="pipeline-task-<id>" instead of
       // "task-card-<id>", breaking taskCardByTitle locators.
       kanban_view_mode: "",
+      // Reset to the default (off). Anchored-bar tests flip this via
+      // saveUserSettings; without this reset it would leak into unrelated
+      // tests running later in the same worker.
+      show_anchored_prompt_bar: false,
     });
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,
@@ -283,6 +287,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     sidebar_views: [],
     saved_layouts: [],
     kanban_view_mode: "",
+    show_anchored_prompt_bar: false,
     task_create_last_used: {
       repository_id: seedData.repositoryId,
       branch: "main",

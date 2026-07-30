@@ -85,6 +85,46 @@ func TestShouldDeleteReviewTask_AutoPolicy_UserMessage_Preserves(t *testing.T) {
 	}
 }
 
+func TestShouldDeleteReviewTask_AutoPolicy_LifecyclePromptPreserves(t *testing.T) {
+	_, svc, client, store := setupPollerTest(t)
+	ctx := context.Background()
+	client.AddPR(&PR{
+		Number: 99, State: prStateMerged, RepoOwner: "acme", RepoName: "widget",
+	})
+	enabled := true
+	if _, err := store.UpdateTaskCIOptions(ctx, "task-99", TaskCIOptionsPatch{
+		PromptOnMerged: &enabled,
+	}); err != nil {
+		t.Fatalf("enable merged prompt: %v", err)
+	}
+	svc.taskSessionChecker = &recordingSessionChecker{}
+
+	del, _ := svc.shouldDeleteReviewTask(ctx, reviewTaskFixture(), CleanupPolicyAuto)
+	if del {
+		t.Fatal("auto cleanup deleted a task with lifecycle prompts enabled")
+	}
+}
+
+func TestShouldDeleteReviewTask_AutoPolicy_LifecyclePromptPreservesWithoutSessionChecker(t *testing.T) {
+	_, svc, client, store := setupPollerTest(t)
+	ctx := context.Background()
+	client.AddPR(&PR{
+		Number: 99, State: prStateMerged, RepoOwner: "acme", RepoName: "widget",
+	})
+	enabled := true
+	if _, err := store.UpdateTaskCIOptions(ctx, "task-99", TaskCIOptionsPatch{
+		PromptOnMerged: &enabled,
+	}); err != nil {
+		t.Fatalf("enable merged prompt: %v", err)
+	}
+	svc.taskSessionChecker = nil
+
+	del, _ := svc.shouldDeleteReviewTask(ctx, reviewTaskFixture(), CleanupPolicyAuto)
+	if del {
+		t.Fatal("auto cleanup deleted a task with lifecycle prompts enabled and no session checker")
+	}
+}
+
 func TestShouldDeleteReviewTask_AlwaysPolicy_IgnoresUserMessages(t *testing.T) {
 	log := testLogger(t)
 	checker := &recordingSessionChecker{hasUserMsg: true}

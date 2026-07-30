@@ -59,6 +59,9 @@ export type UserSettings = {
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
   chat_submit_key?: "enter" | "cmd_enter";
+  show_anchored_prompt_bar?: boolean;
+  show_scroll_to_last_prompt?: boolean;
+  show_scroll_to_start?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   unread_divider?: boolean;
@@ -109,6 +112,9 @@ export type UserSettingsUpdatePayload = {
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
   chat_submit_key?: "enter" | "cmd_enter";
+  show_anchored_prompt_bar?: boolean;
+  show_scroll_to_last_prompt?: boolean;
+  show_scroll_to_start?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   unread_divider?: boolean;

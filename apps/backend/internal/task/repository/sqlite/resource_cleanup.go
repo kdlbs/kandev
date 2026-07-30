@@ -141,7 +141,9 @@ func (r *Repository) StartPreparedTaskResourceCleanupJob(ctx context.Context, id
 func (r *Repository) CompleteTaskResourceCleanupJob(ctx context.Context, id string, state models.TaskResourceCleanupState, lastError string, nextAttemptAt *time.Time) error {
 	now := time.Now().UTC()
 	var completedAt *time.Time
-	if state == models.TaskResourceCleanupStateSucceeded || state == models.TaskResourceCleanupStateCancelled {
+	if state == models.TaskResourceCleanupStateSucceeded ||
+		state == models.TaskResourceCleanupStateFailed ||
+		state == models.TaskResourceCleanupStateCancelled {
 		completedAt = &now
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
@@ -165,7 +167,9 @@ func (r *Repository) CompleteClaimedTaskResourceCleanupJob(
 ) (bool, error) {
 	now := time.Now().UTC()
 	var completedAt *time.Time
-	if state == models.TaskResourceCleanupStateSucceeded || state == models.TaskResourceCleanupStateCancelled {
+	if state == models.TaskResourceCleanupStateSucceeded ||
+		state == models.TaskResourceCleanupStateFailed ||
+		state == models.TaskResourceCleanupStateCancelled {
 		completedAt = &now
 	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`

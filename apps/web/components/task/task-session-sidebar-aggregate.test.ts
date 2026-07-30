@@ -109,7 +109,7 @@ describe("aggregateSidebarTasks", () => {
     expect(result.allTasks.find((t) => t.id === "t2")).toBeDefined();
   });
 
-  it("does not overwrite snapshot steps when the workflow already has a snapshot", () => {
+  it("prefers live active steps when the workflow snapshot is stale", () => {
     const snapshots: WorkflowSnapshotMap = {
       "wf-1": makeSnapshot([makeStep("s1", 0, { title: "Snapshot Step" })], []),
     };
@@ -117,9 +117,13 @@ describe("aggregateSidebarTasks", () => {
       snapshots,
       "wf-1",
       [],
-      [makeStep("s1", 0, { title: "Active Step" })],
+      [makeStep("s1", 2, { title: "Active Step" })],
     );
-    expect(result.stepsByWorkflowId["wf-1"][0].title).toBe("Snapshot Step");
+    expect(result.stepsByWorkflowId["wf-1"][0].title).toBe("Active Step");
+    expect(result.allSteps.find((step) => step.id === "s1")).toMatchObject({
+      title: "Active Step",
+      position: 2,
+    });
   });
 
   it("deduplicates steps across workflows by id", () => {

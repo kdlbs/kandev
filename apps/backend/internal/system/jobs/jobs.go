@@ -29,10 +29,13 @@ const (
 
 // Job is a tracked unit of long-running work.
 type Job struct {
-	ID        string                 `json:"id"`
-	Kind      string                 `json:"kind"`
-	State     State                  `json:"state"`
-	Message   string                 `json:"message,omitempty"`
+	ID      string `json:"id"`
+	Kind    string `json:"kind"`
+	State   State  `json:"state"`
+	Message string `json:"message,omitempty"`
+	// Result may contain partial progress even when State is failed. A job
+	// closure can return both a result and an error so best-effort operations
+	// can report committed work alongside the failure.
 	Result    map[string]interface{} `json:"result,omitempty"`
 	StartedAt time.Time              `json:"started_at"`
 	EndedAt   time.Time              `json:"ended_at,omitempty"`
@@ -93,13 +96,13 @@ func (t *Tracker) run(ctx context.Context, job *Job, fn func(ctx context.Context
 
 	t.transition(ctx, job.ID, func(j *Job) {
 		j.EndedAt = time.Now().UTC()
+		j.Result = result
 		if err != nil {
 			j.State = StateFailed
 			j.Message = err.Error()
 			return
 		}
 		j.State = StateSucceeded
-		j.Result = result
 	})
 }
 

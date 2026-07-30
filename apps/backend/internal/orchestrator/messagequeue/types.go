@@ -11,22 +11,51 @@ const DefaultMaxPerSession = 10
 
 // Sender identities written to QueuedMessage.QueuedBy. The handlers default
 // any empty user-supplied identity to QueuedByUser so the UpdateMessage
-// ownership guard always runs against a non-empty value, and inter-task
-// dispatch hardcodes QueuedByAgent so user clients can never overwrite an
-// agent-authored entry.
+// ownership guard always runs against a non-empty value. Agent, workflow, and
+// server identities are reserved for backend dispatch paths.
 const (
 	QueuedByUser     = "user"
 	QueuedByAgent    = "agent"
 	QueuedByWorkflow = "workflow"
+	QueuedByServer   = "server"
 )
 
-const (
-	// MetadataCoalesceKey identifies queued entries that should be replaced
-	// rather than appended when newer pending content supersedes older content.
-	MetadataCoalesceKey = "coalesce_key"
-	// MetadataEntityReferences stores normalized composer references.
-	MetadataEntityReferences = "entity_references"
-)
+// IsReservedQueuedBy reports identities owned by backend dispatch paths.
+// WebSocket/MCP clients may create and mutate only user-owned entries.
+func IsReservedQueuedBy(queuedBy string) bool {
+	switch queuedBy {
+	case QueuedByAgent, QueuedByWorkflow, QueuedByServer:
+		return true
+	default:
+		return false
+	}
+}
+
+// MetadataCoalesceKey identifies queued entries that should be replaced rather
+// than appended when a newer pending message supersedes an older one.
+const MetadataCoalesceKey = "coalesce_key"
+
+// MetadataEntityReferences carries persisted entity-reference context for a
+// queued message.
+const MetadataEntityReferences = "entity_references"
+
+// MetadataLifecycleDurable marks lifecycle entries that remain in persistent
+// queue storage until the executor accepts their prompt.
+const MetadataLifecycleDurable = "lifecycle_durable_until_accepted"
+
+// MetadataLifecycleGeneration ties a durable lifecycle entry to the task
+// archive generation that accepted it. A task purge advances the generation,
+// so stale retries cannot revive work after an archive then unarchive.
+const MetadataLifecycleGeneration = "lifecycle_queue_generation"
+
+// MetadataLifecycleReserved marks a durable lifecycle entry that ReserveHead
+// already handed to a dispatch attempt. The row stays in storage for crash
+// recovery, but it is no longer a pending message, so queue status hides it —
+// otherwise the delivered prompt and its own reservation row are both visible
+// and the reservation looks like a stuck duplicate. Cleared implicitly: a
+// requeue rewrites the row's metadata from the in-memory copy, which never
+// carries the flag.
+const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
 
 // QueueFullErrorCode is the well-known WS / MCP error code surfaced when an
 // insert would exceed the per-session cap. Shared between the user-side WS
@@ -40,6 +69,12 @@ var (
 	// ErrEntryNotFound is returned when an operation targets an entry that no
 	// longer exists (e.g. it was drained between fetch and update).
 	ErrEntryNotFound = errors.New("queue entry not found")
+	// ErrTaskInactive means a lifecycle prompt could not be accepted because
+	// its task was deleted or archived before the queue transaction claimed it.
+	ErrTaskInactive = errors.New("queue task is inactive")
+	// ErrLifecycleCancelled means an archive/delete purge invalidated a
+	// previously accepted lifecycle entry before it could be retried.
+	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
 )
 
 // QueuedMessage represents a single FIFO entry queued for a session.
@@ -55,6 +90,64 @@ type QueuedMessage struct {
 	Metadata    map[string]interface{} `json:"metadata,omitempty"`
 	QueuedAt    time.Time              `json:"queued_at"`
 	QueuedBy    string                 `json:"queued_by"`
+
+	// reservedLifecycleDelivery is process-local evidence that ReserveHead
+	// retained this durable row for acknowledgement. It deliberately is not
+	// persisted in metadata, where a restart could leak it into a retry.
+	reservedLifecycleDelivery bool
+}
+
+// IsDurableLifecycle reports whether this entry uses reserve/ack delivery.
+// The origin fallback keeps lifecycle rows queued by older builds safe across
+// a rolling restart before the explicit marker was introduced.
+func (m *QueuedMessage) IsDurableLifecycle() bool {
+	if m == nil {
+		return false
+	}
+	if durable, _ := m.Metadata[MetadataLifecycleDurable].(bool); durable {
+		return true
+	}
+	origin, _ := m.Metadata["origin"].(string)
+	return origin == "github_pr_automation"
+}
+
+// IsReservedInFlight reports whether this durable row was already reserved for
+// a dispatch attempt and should not be shown as a pending queue entry.
+func (m *QueuedMessage) IsReservedInFlight() bool {
+	if m == nil || !m.IsDurableLifecycle() {
+		return false
+	}
+	reserved, _ := m.Metadata[MetadataLifecycleReserved].(bool)
+	return reserved
+}
+
+// IsReservedLifecycleDelivery reports whether this copy came from the
+// reserve/ack path rather than a destructive legacy TakeHead call.
+func (m *QueuedMessage) IsReservedLifecycleDelivery() bool {
+	return m != nil && m.reservedLifecycleDelivery
+}
+
+// markReservedMetadata returns a copy of metadata carrying the in-flight
+// reservation marker.
+func markReservedMetadata(metadata map[string]interface{}) map[string]interface{} {
+	marked := make(map[string]interface{}, len(metadata)+1)
+	for k, v := range metadata {
+		marked[k] = v
+	}
+	marked[MetadataLifecycleReserved] = true
+	return marked
+}
+
+// clearReservedMetadata removes the transient in-process delivery marker from
+// copies returned to dispatch or written back for retry.
+func clearReservedMetadata(metadata map[string]interface{}) map[string]interface{} {
+	cleared := make(map[string]interface{}, len(metadata))
+	for k, v := range metadata {
+		if k != MetadataLifecycleReserved {
+			cleared[k] = v
+		}
+	}
+	return cleared
 }
 
 // MessageAttachment represents an attachment (image) in a queued message.

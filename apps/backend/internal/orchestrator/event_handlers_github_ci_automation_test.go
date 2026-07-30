@@ -5,10 +5,14 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -17,6 +21,105 @@ import (
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+type archiveBeforeLifecycleQueueRepo struct {
+	repoStore
+	archive func(context.Context) error
+	gets    int
+}
+
+type getTaskResultRepo struct {
+	repoStore
+	task *models.Task
+	err  error
+}
+
+func (r *getTaskResultRepo) GetTask(context.Context, string) (*models.Task, error) {
+	return r.task, r.err
+}
+
+// storeBackedLifecycleGitHubService keeps the handler's external GitHub
+// controls deterministic while sending lifecycle checkpoints and CI errors to
+// the real SQLite store. That makes precedence assertions observe the same
+// shared last_error row used in production.
+type storeBackedLifecycleGitHubService struct {
+	*mockGitHubService
+	store *github.Store
+}
+
+// autoFixStateFailureThenStoreService fails only the first state lookup, which
+// is the auto-fix lookup. Lifecycle evaluation then uses the real store so the
+// test exercises the same shared last_error row as production.
+type autoFixStateFailureThenStoreService struct {
+	*storeBackedLifecycleGitHubService
+	stateLookups int
+}
+
+// autoMergeFailureThenReviewRequestService models a fresh review request
+// arriving after the merge readiness snapshot has been checked but before the
+// lifecycle phase consumes that same PR object.
+type autoMergeFailureThenReviewRequestService struct {
+	*storeBackedLifecycleGitHubService
+	pr *github.TaskPR
+}
+
+func (s *autoFixStateFailureThenStoreService) GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error) {
+	s.stateLookups++
+	if s.stateLookups == 1 {
+		return nil, errors.New("state store unavailable")
+	}
+	return s.store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
+}
+
+func (s *autoMergeFailureThenReviewRequestService) MergePR(context.Context, string, string, int, string) error {
+	s.mergeCalls++
+	s.pr.PendingReviewCount = 1
+	return errors.New("GitHub unavailable")
+}
+
+func (s *autoMergeFailureThenReviewRequestService) MergePRForAutomation(
+	ctx context.Context,
+	_ string,
+	owner, repo string,
+	number int,
+	method string,
+) error {
+	return s.MergePR(ctx, owner, repo, number, method)
+}
+
+func (s *storeBackedLifecycleGitHubService) GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error) {
+	return s.store.GetTaskCIPRState(ctx, taskID, repositoryID, prNumber)
+}
+
+func (s *storeBackedLifecycleGitHubService) RecordTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int, message string) error {
+	return s.store.RecordTaskCIError(ctx, taskID, repositoryID, prNumber, message)
+}
+
+func (s *storeBackedLifecycleGitHubService) ClearTaskCIError(ctx context.Context, taskID, repositoryID string, prNumber int) error {
+	return s.store.ClearTaskCIError(ctx, taskID, repositoryID, prNumber)
+}
+
+func (s *storeBackedLifecycleGitHubService) SetTaskPRReviewRequestState(ctx context.Context, taskID, repositoryID string, prNumber int, requested bool) error {
+	return s.store.SetTaskPRReviewRequestState(ctx, taskID, repositoryID, prNumber, requested)
+}
+
+func (s *storeBackedLifecycleGitHubService) SetTaskPRObservedState(ctx context.Context, taskID, repositoryID string, prNumber int, state string) error {
+	return s.store.SetTaskPRObservedState(ctx, taskID, repositoryID, prNumber, state)
+}
+
+func (s *storeBackedLifecycleGitHubService) RecordTaskPRLifecyclePrompt(ctx context.Context, prompt github.TaskPRLifecyclePrompt) error {
+	return s.store.RecordTaskPRLifecyclePrompt(ctx, prompt)
+}
+
+func (r *archiveBeforeLifecycleQueueRepo) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
+	r.gets++
+	if r.gets == 2 {
+		if err := r.archive(ctx); err != nil {
+			return nil, err
+		}
+	}
+	return r.repoStore.GetTask(ctx, taskID)
+}
 
 func TestCIAutomationReadyToMerge(t *testing.T) {
 	required := 1
@@ -326,165 +429,562 @@ func TestHandleTaskPRCIAutomationQueuesFixDedupesAndMerges(t *testing.T) {
 	}
 }
 
-// TestHandleTaskPRCIAutomationAutoFixExpandsPromptReferences verifies that a
-// "@name" saved-prompt reference embedded in the (potentially per-task
-// override) ci-auto-fix prompt template gets expanded via the configured
-// PromptReferenceExpander before being queued for the agent, mirroring the
-// expansion contract already covered for workflow-step prompts.
-func TestHandleTaskPRCIAutomationAutoFixExpandsPromptReferences(t *testing.T) {
+func TestHandleTaskPRLifecycleDeliveryFailureRecordsAndPublishesError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateFailed)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{ciOptionsResp: &github.TaskCIOptionsResponse{
+		TaskID: "task-1", PromptOnMerged: true, EffectiveMergedPrompt: "The linked pull request {{pr.url}} was merged.",
+	}}
+	svc.SetGitHubService(ghSvc)
+	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+	var stateUpdates int
+	if _, err := svc.eventBus.Subscribe(events.GitHubTaskCIOptionsUpdated, func(context.Context, *bus.Event) error {
+		stateUpdates++
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe state updates: %v", err)
+	}
+
+	err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "merged",
+	}, false)
+	if err != nil {
+		t.Fatalf("handle lifecycle: %v", err)
+	}
+	if len(ghSvc.ciErrors) != 1 || ghSvc.ciErrors[0].LastError == nil {
+		t.Fatalf("lifecycle delivery failure was not recorded: %+v", ghSvc.ciErrors)
+	}
+	if stateUpdates != 1 {
+		t.Fatalf("state updates = %d, want 1 after recorded lifecycle error", stateUpdates)
+	}
+}
+
+func TestHandleTaskPRCIAutomationPropagatesTaskLookupError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	lookupErr := errors.New("task database unavailable")
+	svc.repo = &getTaskResultRepo{repoStore: repo, err: lookupErr}
+	svc.SetGitHubService(&mockGitHubService{})
+
+	err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{TaskID: "task-1"}, false)
+	if !errors.Is(err, lookupErr) {
+		t.Fatalf("handle lifecycle error = %v, want %v", err, lookupErr)
+	}
+}
+
+func TestHandleTaskPRLifecycleSuccessPublishesClearedErrorState(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	expander := &fakePromptReferenceExpander{}
-	svc.promptExpander = expander
-	pr := &github.TaskPR{
-		TaskID:       "task-1",
-		RepositoryID: "repo-1",
-		Owner:        "acme",
-		Repo:         "widget",
-		PRNumber:     42,
-		State:        "open",
-		ChecksState:  "failure",
-	}
-	ghSvc := &mockGitHubService{
-		ciOptionsResp: &github.TaskCIOptionsResponse{
-			TaskID:                 "task-1",
-			AutoFixEnabled:         true,
-			EffectiveAutoFixPrompt: "Fix the PR using @my-prompt\n\n{{pr.feedback}}",
-		},
-		prFeedback: &github.PRFeedback{
-			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
-		},
-	}
+	ghSvc := &mockGitHubService{ciOptionsResp: &github.TaskCIOptionsResponse{
+		TaskID: "task-1", PromptOnMerged: true, EffectiveMergedPrompt: "The linked pull request {{pr.url}} was merged.",
+	}}
 	svc.SetGitHubService(ghSvc)
 	svc.eventBus = bus.NewMemoryEventBus(testLogger())
-
-	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
-		t.Fatalf("handle auto-fix: %v", err)
+	var stateUpdates int
+	if _, err := svc.eventBus.Subscribe(events.GitHubTaskCIOptionsUpdated, func(context.Context, *bus.Event) error {
+		stateUpdates++
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe state updates: %v", err)
 	}
 
-	status := svc.messageQueue.GetStatus(ctx, "session-1")
-	if status.Count != 1 {
-		t.Fatalf("expected one queued CI fix prompt, got %+v", status)
+	err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "merged",
+	}, false)
+	if err != nil {
+		t.Fatalf("handle lifecycle: %v", err)
 	}
-	queued := status.Entries[0].Content
-	if !strings.Contains(queued, "Fix the PR using @my-prompt") {
-		t.Fatalf("expected original prompt text preserved, got %q", queued)
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 1 {
+		t.Fatalf("lifecycle prompts = %+v, want one accepted prompt", prompts)
 	}
-	if !strings.Contains(queued, sysprompt.Wrap(fakeResolvedPromptReferenceContext)) {
-		t.Fatalf("expected canonical saved-prompt expansion with resolved content, got %q", queued)
+	if stateUpdates != 1 {
+		t.Fatalf("state updates = %d, want 1 after lifecycle delivery clears error", stateUpdates)
 	}
 }
 
-// TestHandleTaskPRCIAutomationAutoFixNoExpanderLeavesReferenceUnexpanded is
-// the regression-safety counterpart: with no PromptReferenceExpander set
-// (the default fixture used by other tests in this file), a "@name" token in
-// the ci-auto-fix prompt is queued verbatim.
-func TestHandleTaskPRCIAutomationAutoFixNoExpanderLeavesReferenceUnexpanded(t *testing.T) {
+func TestHandleTaskPRLifecycleSkipsArchivedTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	if err := repo.ArchiveTask(ctx, "task-1"); err != nil {
+		t.Fatalf("archive task: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{ciOptionsResp: &github.TaskCIOptionsResponse{
+		TaskID: "task-1", PromptOnMerged: true, EffectiveMergedPrompt: "The linked pull request {{pr.url}} was merged.",
+	}}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "merged",
+	}, false)
+	if err != nil {
+		t.Fatalf("handle lifecycle: %v", err)
+	}
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 0 {
+		t.Fatalf("archived task received lifecycle prompts: %+v", prompts)
+	}
+}
+
+func TestHandleTaskPRLifecycleTerminalPromptIgnoresReviewerResolutionFailure(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	pr := &github.TaskPR{
-		TaskID:       "task-1",
-		RepositoryID: "repo-1",
-		Owner:        "acme",
-		Repo:         "widget",
-		PRNumber:     42,
-		State:        "open",
-		ChecksState:  "failure",
-	}
 	ghSvc := &mockGitHubService{
 		ciOptionsResp: &github.TaskCIOptionsResponse{
-			TaskID:                 "task-1",
-			AutoFixEnabled:         true,
-			EffectiveAutoFixPrompt: "Fix the PR using @my-prompt\n\n{{pr.feedback}}",
+			TaskID: "task-1", PromptOnReviewRequested: true, PromptOnMerged: true,
+			EffectiveMergedPrompt: "The linked pull request {{pr.url}} was merged.",
 		},
-		prFeedback: &github.PRFeedback{
-			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
-		},
+		lifecycleReviewErr: errors.New("GitHub authentication is temporarily unavailable"),
 	}
 	svc.SetGitHubService(ghSvc)
-	svc.eventBus = bus.NewMemoryEventBus(testLogger())
 
-	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
-		t.Fatalf("handle auto-fix: %v", err)
+	err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "merged",
+	}, false)
+	if err != nil {
+		t.Fatalf("handle lifecycle: %v", err)
 	}
-
-	status := svc.messageQueue.GetStatus(ctx, "session-1")
-	if status.Count != 1 {
-		t.Fatalf("expected one queued CI fix prompt, got %+v", status)
-	}
-	queued := status.Entries[0].Content
-	if !strings.Contains(queued, "Fix the PR using @my-prompt") {
-		t.Fatalf("expected original prompt text preserved, got %q", queued)
-	}
-	if strings.Contains(queued, "<kandev-system>EXPANDED:") {
-		t.Fatalf("expected no expansion when no expander is set, got %q", queued)
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 1 || prompts[0].Event != taskPRAgentEventMerged {
+		t.Fatalf("terminal lifecycle prompt = %+v, want merged prompt", prompts)
 	}
 }
 
-// TestHandleTaskPRCIAutomationAutoFixPassthroughSkipsReferenceExpansion
-// verifies that a passthrough CI-fix session (prompt written raw to a PTY,
-// with no <kandev-system> stripping step) skips "@name" expansion entirely,
-// mirroring the guard already covered for workflow-step prompts. The queued
-// prompt must contain the literal "@my-prompt" text with no appended hidden
-// expansion block.
-func TestHandleTaskPRCIAutomationAutoFixPassthroughSkipsReferenceExpansion(t *testing.T) {
+func TestHandleTaskPRLifecycleReboundRequestedReviewEstablishesQuietBaseline(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID: "task-1", PromptOnReviewRequested: true, ReviewReviewerLogin: "reviewer-a",
+			EffectiveReviewPrompt: "Your review was requested on {{pr.url}}.",
+		},
+		ciPRState:          &github.TaskCIPRAutomationState{},
+		lifecycleReviewer:  "reviewer-b",
+		lifecycleRebound:   true,
+		lifecycleRequested: true,
+	}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "open", PendingReviewCount: 1,
+	}, false)
+	if err != nil {
+		t.Fatalf("handle lifecycle: %v", err)
+	}
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 0 {
+		t.Fatalf("rebound requested review prompted instead of baselining: %+v", prompts)
+	}
+	if calls := ghSvc.lifecycleRebindCallCount(); calls != 1 {
+		t.Fatalf("reviewer rebind calls = %d, want 1", calls)
+	}
+}
+
+func TestHandleTaskPRCIAutomationEvaluatesLifecycleWhenAutoFixBlocksMerge(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	checkpointJSON, signature := encodeCIAutomationCheckpoint(ciAutomationCheckpoint{})
+	now := time.Now().UTC()
+	ghSvc := &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID: "task-1", AutoFixEnabled: true, PromptOnReviewRequested: true,
+			ReviewReviewerLogin: "reviewer", EffectiveReviewPrompt: "Your review was requested on {{pr.url}}.",
+		},
+		ciPRState: &github.TaskCIPRAutomationState{
+			LastFixSignature: signature, LastFixCheckpointJSON: checkpointJSON, LastFixEnqueuedAt: &now,
+			ReviewRequestInitialized: true, LastReviewRequested: false,
+		},
+		lifecycleReviewer: "reviewer", lifecycleRequested: true,
+	}
+	svc.SetGitHubService(ghSvc)
+
+	err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "open", ChecksState: "failure", PendingReviewCount: 1,
+	}, false)
+	if err != nil {
+		t.Fatalf("handle automation: %v", err)
+	}
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 1 || prompts[0].Event != taskPRAgentEventReviewRequested {
+		t.Fatalf("lifecycle prompts = %+v, want review-requested prompt despite auto-fix block", prompts)
+	}
+}
+
+func TestResolveTaskPRAgentSessionPrefersPrimaryIdleSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "running-session", models.TaskSessionStateRunning)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "primary-idle", TaskID: "task-1", IsPrimary: true,
+		State: models.TaskSessionStateIdle, StartedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create primary idle session: %v", err)
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	session, err := svc.resolveTaskPRAgentSession(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("resolve lifecycle session: %v", err)
+	}
+	if session.ID != "primary-idle" {
+		t.Fatalf("session = %q, want primary IDLE session", session.ID)
+	}
+}
+
+func TestHandleTaskPRLifecycleSkipsQueueWhenTaskArchivesBeforeDispatch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.repo = &archiveBeforeLifecycleQueueRepo{
+		repoStore: repo,
+		archive: func(ctx context.Context) error {
+			return repo.ArchiveTask(ctx, "task-1")
+		},
+	}
+	ghSvc := &mockGitHubService{ciOptionsResp: &github.TaskCIOptionsResponse{
+		TaskID: "task-1", PromptOnMerged: true, EffectiveMergedPrompt: "The linked pull request {{pr.url}} was merged.",
+	}}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "merged",
+	}, false); err != nil {
+		t.Fatalf("handle lifecycle: %v", err)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "session-1").Count; got != 0 {
+		t.Fatalf("queued lifecycle messages = %d, want 0 after archive race", got)
+	}
+}
+
+func TestHandleTaskPRLifecycleSkipsQueueWhenTaskDeletesBeforeDispatch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	store := newOrchestratorGitHubStore(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.repo = &archiveBeforeLifecycleQueueRepo{
+		repoStore: repo,
+		archive: func(ctx context.Context) error {
+			return repo.DeleteTask(ctx, "task-1")
+		},
+	}
+	ghSvc := &storeBackedLifecycleGitHubService{
+		mockGitHubService: &mockGitHubService{ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID: "task-1", PromptOnMerged: true, EffectiveMergedPrompt: "merged {{pr.url}}",
+		}},
+		store: store,
+	}
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "merged",
+	}, false); err != nil {
+		t.Fatalf("handle lifecycle: %v", err)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "session-1").Count; got != 0 {
+		t.Fatalf("queued lifecycle messages = %d, want 0 after delete race", got)
+	}
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get lifecycle state: %v", err)
+	}
+	if state != nil && state.LastLifecycleEvent != "" {
+		t.Fatalf("lifecycle checkpoint after task deletion = %+v, want none", state)
+	}
+}
+
+func TestHandleTaskPRLifecycleRetriesNoPromptableSessionAfterSessionBecomesRunning(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateFailed)
+	store := newOrchestratorGitHubStore(t)
+	ghSvc := &storeBackedLifecycleGitHubService{
+		mockGitHubService: &mockGitHubService{ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID: "task-1", PromptOnMerged: true, EffectiveMergedPrompt: "merged {{pr.url}}",
+		}},
+		store: store,
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+	stateErrors := captureLifecycleStateEventErrors(t, svc, store, "task-1", "repo-1", 42)
+	pr := &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "merged",
+	}
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("evaluate with failed session: %v", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get failed delivery state: %v", err)
+	}
+	if state == nil || state.LastError == nil || state.LastLifecycleEvent != "" {
+		t.Fatalf("failed delivery state = %+v, want error without checkpoint", state)
+	}
+	if len(*stateErrors) != 1 || !strings.Contains((*stateErrors)[0], "no promptable agent session") {
+		t.Fatalf("failure state updates = %+v, want persisted delivery error", *stateErrors)
+	}
+
 	session, err := repo.GetTaskSession(ctx, "session-1")
 	if err != nil {
-		t.Fatalf("failed to load seeded session: %v", err)
+		t.Fatalf("get existing session: %v", err)
 	}
-	session.IsPassthrough = true
+	session.State = models.TaskSessionStateRunning
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("failed to mark session passthrough: %v", err)
+		t.Fatalf("make existing session promptable: %v", err)
 	}
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("retry after session transition: %v", err)
+	}
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("repeat accepted lifecycle observation: %v", err)
+	}
+
+	if got := svc.messageQueue.GetStatus(ctx, "session-1").Count; got != 1 {
+		t.Fatalf("accepted lifecycle queue entries = %d, want one coalesced event", got)
+	}
+	state, err = store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get accepted delivery state: %v", err)
+	}
+	if state == nil || state.LastLifecycleEvent != taskPRAgentEventMerged || state.LastError != nil {
+		t.Fatalf("accepted delivery state = %+v, want merged checkpoint with cleared error", state)
+	}
+	if len(*stateErrors) != 2 || (*stateErrors)[1] != "" {
+		t.Fatalf("final state updates = %+v, want error-clear broadcast after accepted delivery", *stateErrors)
+	}
+}
+
+func TestHandleTaskPRCIAutomationRefreshFailureStillEvaluatesLifecycle(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	expander := &fakePromptReferenceExpander{}
-	svc.promptExpander = expander
-	pr := &github.TaskPR{
-		TaskID:       "task-1",
-		RepositoryID: "repo-1",
-		Owner:        "acme",
-		Repo:         "widget",
-		PRNumber:     42,
-		State:        "open",
-		ChecksState:  "failure",
-	}
 	ghSvc := &mockGitHubService{
-		ciOptionsResp: &github.TaskCIOptionsResponse{
-			TaskID:                 "task-1",
-			AutoFixEnabled:         true,
-			EffectiveAutoFixPrompt: "Fix the PR using @my-prompt\n\n{{pr.feedback}}",
-		},
-		prFeedback: &github.PRFeedback{
-			Checks: []github.CheckRun{{Name: "unit", Status: "completed", Conclusion: "failure", HTMLURL: "https://ci/unit"}},
-		},
+		ciOptionsResp:       &github.TaskCIOptionsResponse{TaskID: "task-1", AutoFixEnabled: true, PromptOnMerged: true, EffectiveMergedPrompt: "merged {{pr.url}}"},
+		triggerPRSyncAllErr: errors.New("GitHub unavailable"),
 	}
 	svc.SetGitHubService(ghSvc)
+	if err := svc.handleTaskPRCIAutomation(ctx, &github.TaskPR{TaskID: "task-1", RepositoryID: "repo", Owner: "a", Repo: "b", PRNumber: 1, PRURL: "url", State: "merged"}); err != nil {
+		t.Fatalf("handle automation: %v", err)
+	}
+	if prompts := ghSvc.lifecyclePromptSnapshot(); len(prompts) != 1 {
+		t.Fatalf("lifecycle prompts = %+v, want merged prompt after refresh failure", prompts)
+	}
+}
+
+func TestHandleTaskPRCIAutomationRefreshFailurePreservesCIErrorAfterLifecycleCheckpoint(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	store := newOrchestratorGitHubStore(t)
+	ghSvc := &storeBackedLifecycleGitHubService{
+		mockGitHubService: &mockGitHubService{
+			ciOptionsResp: &github.TaskCIOptionsResponse{
+				TaskID: "task-1", AutoFixEnabled: true, PromptOnMerged: true, EffectiveMergedPrompt: "merged {{pr.url}}",
+			},
+			triggerPRSyncAllErr: errors.New("GitHub unavailable"),
+		},
+		store: store,
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+	stateErrors := captureLifecycleStateEventErrors(t, svc, store, "task-1", "repo-1", 42)
+
+	if err := svc.handleTaskPRCIAutomation(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "merged",
+	}); err != nil {
+		t.Fatalf("handle automation: %v", err)
+	}
+	assertStoredCIErrorAfterLifecycle(t, store, "task-1", "repo-1", 42, "sync PR status: GitHub unavailable", *stateErrors)
+}
+
+func TestHandleTaskPRCIAutomationAutoFixStateFailurePreservesErrorAfterLifecycleDelivery(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	store := newOrchestratorGitHubStore(t)
+	if err := store.SetTaskPRReviewRequestState(ctx, "task-1", "repo-1", 42, false); err != nil {
+		t.Fatalf("seed review baseline: %v", err)
+	}
+	ghSvc := &autoFixStateFailureThenStoreService{
+		storeBackedLifecycleGitHubService: &storeBackedLifecycleGitHubService{
+			mockGitHubService: &mockGitHubService{
+				ciOptionsResp: &github.TaskCIOptionsResponse{
+					TaskID: "task-1", AutoFixEnabled: true, PromptOnReviewRequested: true,
+					ReviewReviewerLogin: "reviewer", EffectiveReviewPrompt: "review {{pr.url}}",
+				},
+				lifecycleReviewer: "reviewer", lifecycleRequested: true,
+			},
+			store: store,
+		},
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "open", PendingReviewCount: 1,
+	}, false); err != nil {
+		t.Fatalf("handle automation: %v", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get stored CI state: %v", err)
+	}
+	if state == nil || state.LastError == nil || !strings.Contains(*state.LastError, "load CI automation state: state store unavailable") {
+		t.Fatalf("final stored last_error = %+v, want auto-fix state lookup error", state)
+	}
+}
+
+func TestHandleTaskPRCIAutomationAutoMergeFailurePreservesErrorAfterLifecycleDelivery(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	store := newOrchestratorGitHubStore(t)
+	if err := store.SetTaskPRReviewRequestState(ctx, "task-1", "repo-1", 42, false); err != nil {
+		t.Fatalf("seed review baseline: %v", err)
+	}
+	pr := &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "open", ChecksState: "success",
+		ReviewState: "approved", MergeableState: "clean", ReviewCount: 1,
+	}
+	ghSvc := &autoMergeFailureThenReviewRequestService{
+		storeBackedLifecycleGitHubService: &storeBackedLifecycleGitHubService{
+			mockGitHubService: &mockGitHubService{
+				ciOptionsResp: &github.TaskCIOptionsResponse{
+					TaskID: "task-1", AutoMergeEnabled: true, PromptOnReviewRequested: true,
+					ReviewReviewerLogin: "reviewer", EffectiveReviewPrompt: "review {{pr.url}}",
+				},
+				lifecycleReviewer:  "reviewer",
+				lifecycleRequested: true,
+			},
+			store: store,
+		},
+		pr: pr,
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+	stateErrors := captureLifecycleStateEventErrors(t, svc, store, "task-1", "repo-1", 42)
+	now := time.Now().UTC()
+	pr.LastSyncedAt = &now
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false); err != nil {
+		t.Fatalf("handle automation: %v", err)
+	}
+	if ghSvc.mergeCalls != 1 {
+		t.Fatalf("merge calls = %d, want one failed merge attempt", ghSvc.mergeCalls)
+	}
+	assertStoredCIErrorAfterLifecycle(t, store, "task-1", "repo-1", 42, "merge PR: GitHub unavailable", *stateErrors)
+}
+
+func TestHandleTaskPRCIAutomationStaleMergePreservesCIErrorAfterLifecycleEvaluation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	store := newOrchestratorGitHubStore(t)
+	if err := store.SetTaskPRReviewRequestState(ctx, "task-1", "repo-1", 42, false); err != nil {
+		t.Fatalf("seed review baseline: %v", err)
+	}
+	ghSvc := &storeBackedLifecycleGitHubService{
+		mockGitHubService: &mockGitHubService{
+			ciOptionsResp: &github.TaskCIOptionsResponse{
+				TaskID: "task-1", AutoMergeEnabled: true, PromptOnReviewRequested: true,
+				ReviewReviewerLogin: "reviewer", EffectiveReviewPrompt: "review {{pr.url}}",
+			},
+			lifecycleReviewer: "reviewer", lifecycleRequested: true,
+		},
+		store: store,
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetGitHubService(ghSvc)
+	stateErrors := captureLifecycleStateEventErrors(t, svc, store, "task-1", "repo-1", 42)
+
+	if err := svc.handleTaskPRCIAutomationWithRefresh(ctx, &github.TaskPR{
+		TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "widget", PRNumber: 42,
+		PRURL: "https://github.com/acme/widget/pull/42", State: "open", ChecksState: "success",
+		ReviewState: "approved", MergeableState: "clean", ReviewCount: 1,
+	}, false); err != nil {
+		t.Fatalf("handle automation: %v", err)
+	}
+	state, err := store.GetTaskCIPRState(ctx, "task-1", "repo-1", 42)
+	if err != nil {
+		t.Fatalf("get lifecycle evaluation state: %v", err)
+	}
+	if state == nil || state.LastObservedPRState != "open" || state.LastLifecycleEvent != "" {
+		t.Fatalf("quiet lifecycle evaluation state = %+v, want observed open without delivery", state)
+	}
+	assertStoredCIErrorAfterLifecycle(t, store, "task-1", "repo-1", 42, "PR status is not freshly synced for auto-merge", *stateErrors)
+}
+
+func newOrchestratorGitHubStore(t *testing.T) *github.Store {
+	t.Helper()
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "github.db"))
+	if err != nil {
+		t.Fatalf("open GitHub store database: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = sqlxDB.Close() })
+	store, err := github.NewStore(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("create GitHub store: %v", err)
+	}
+	return store
+}
+
+func captureLifecycleStateEventErrors(t *testing.T, svc *Service, store *github.Store, taskID, repositoryID string, prNumber int) *[]string {
+	t.Helper()
 	svc.eventBus = bus.NewMemoryEventBus(testLogger())
+	errorsAtPublish := []string{}
+	if _, err := svc.eventBus.Subscribe(events.GitHubTaskCIOptionsUpdated, func(context.Context, *bus.Event) error {
+		state, err := store.GetTaskCIPRState(context.Background(), taskID, repositoryID, prNumber)
+		if err != nil {
+			return err
+		}
+		if state != nil && state.LastError != nil {
+			errorsAtPublish = append(errorsAtPublish, *state.LastError)
+			return nil
+		}
+		errorsAtPublish = append(errorsAtPublish, "")
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe CI state updates: %v", err)
+	}
+	return &errorsAtPublish
+}
 
-	if err := svc.handleTaskPRCIAutomation(ctx, pr); err != nil {
-		t.Fatalf("handle auto-fix: %v", err)
+func assertStoredCIErrorAfterLifecycle(t *testing.T, store *github.Store, taskID, repositoryID string, prNumber int, wantError string, errorsAtPublish []string) {
+	t.Helper()
+	state, err := store.GetTaskCIPRState(context.Background(), taskID, repositoryID, prNumber)
+	if err != nil {
+		t.Fatalf("get persisted CI state: %v", err)
 	}
-
-	status := svc.messageQueue.GetStatus(ctx, "session-1")
-	if status.Count != 1 {
-		t.Fatalf("expected one queued CI fix prompt, got %+v", status)
+	if state == nil || state.LastError == nil || !strings.Contains(*state.LastError, wantError) {
+		t.Fatalf("final stored last_error = %+v, want %q", state, wantError)
 	}
-	queued := status.Entries[0].Content
-	if !strings.Contains(queued, "Fix the PR using @my-prompt") {
-		t.Fatalf("expected original prompt text preserved verbatim, got %q", queued)
-	}
-	if strings.Contains(queued, "<kandev-system>EXPANDED:") {
-		t.Fatalf("expected no expansion for a passthrough session, got %q", queued)
-	}
-	if len(expander.calls) != 0 {
-		t.Fatalf("expected expander not to be invoked for a passthrough session, got %d calls", len(expander.calls))
+	if len(errorsAtPublish) == 0 || !strings.Contains(errorsAtPublish[len(errorsAtPublish)-1], wantError) {
+		t.Fatalf("post-persistence state updates = %+v, want final update with %q", errorsAtPublish, wantError)
 	}
 }
 
@@ -2096,7 +2596,9 @@ func TestHandleTaskPRCIAutomationRetriesMergeAfterTransientFailure(t *testing.T)
 
 func TestHandlePRFeedbackStartsAutomationForMatchingPR(t *testing.T) {
 	ctx := context.Background()
-	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	started := make(chan struct{})
 	block := make(chan struct{})
 	ghSvc := &mockGitHubService{
@@ -2138,7 +2640,9 @@ func TestHandlePRFeedbackStartsAutomationForMatchingPR(t *testing.T) {
 
 func TestHandleTaskCIOptionsUpdatedStartsAutomationForTaskPRs(t *testing.T) {
 	ctx := context.Background()
-	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	started := make(chan struct{})
 	block := make(chan struct{})
 	ghSvc := &mockGitHubService{
@@ -2226,7 +2730,9 @@ func TestHandleTaskCIOptionsUpdatedRecordsSyncFailureForLinkedPRs(t *testing.T) 
 
 func TestHandleTaskCIOptionsUpdatedStartsAutomationForPartialSyncResults(t *testing.T) {
 	ctx := context.Background()
-	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	started := make(chan struct{})
 	block := make(chan struct{})
 	ghSvc := &mockGitHubService{
@@ -2320,7 +2826,9 @@ func TestHandleTaskCIOptionsUpdatedRecordsPartialSyncFailureOnlyForUnsyncedPRs(t
 
 func TestStartTaskPRCIAutomationSkipsDuplicateInFlightPR(t *testing.T) {
 	ctx := context.Background()
-	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	started := make(chan struct{})
 	block := make(chan struct{})
 	ghSvc := &mockGitHubService{

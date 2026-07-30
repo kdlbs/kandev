@@ -1139,6 +1139,27 @@ func TestHttpTaskCIOptions_DefaultAndPatch(t *testing.T) {
 	}
 }
 
+func TestHttpTaskCIOptions_RejectsLifecyclePromptOverrides(t *testing.T) {
+	for _, field := range []string{
+		"review_prompt_override",
+		"merged_prompt_override",
+		"closed_prompt_override",
+	} {
+		t.Run(field, func(t *testing.T) {
+			router, _ := setupControllerStoreTest(t)
+			body := bytes.NewBufferString(`{"` + field + `":"untrusted prompt"}`)
+			req := httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", body)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			assertJSONError(t, w.Body.Bytes(), "lifecycle prompt overrides are not supported")
+		})
+	}
+}
+
 func TestHttpPatchTaskCIOptions_EmptyPatchDoesNotUpdateRow(t *testing.T) {
 	router, _ := setupControllerStoreTest(t)
 	body := bytes.NewBufferString(`{"auto_fix_enabled":true}`)

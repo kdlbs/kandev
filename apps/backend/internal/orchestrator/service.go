@@ -192,6 +192,7 @@ type sessionExecutorStore interface {
 	UpdateTaskSession(ctx context.Context, session *models.TaskSession) error
 	UpdateTaskSessionIfCurrentState(ctx context.Context, session *models.TaskSession, expected models.TaskSessionState) (bool, error)
 	UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error
+	ClaimPromptableTaskSessionIfActive(ctx context.Context, id string) (models.PromptableTaskSessionClaim, error)
 	UpdateTaskSessionBaseCommit(ctx context.Context, id string, baseCommitSHA string) error
 	GetTaskSessionByTaskAndAgent(ctx context.Context, taskID, agentInstanceID string) (*models.TaskSession, error)
 	UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error
@@ -457,6 +458,11 @@ type Service struct {
 	// in-flight dispatch at all is reason enough to defer.
 	dispatchingQueued sync.Map
 
+	// afterReadyLifecycleReservation is a deterministic test seam for the
+	// narrow interval after handleAgentReady releases its per-session guard
+	// and before it starts a deferred durable-lifecycle dispatch.
+	afterReadyLifecycleReservation func()
+
 	// foregroundActivity tracks, per session, whether the open turn is actively
 	// generating in the foreground or only waiting on a spawned background task
 	// (subagent / run-in-background shell). Keyed sessionID -> *turnActivity;
@@ -594,8 +600,26 @@ func NewService(
 	// Create the scheduler with queue, executor, and task repository
 	sched := scheduler.NewScheduler(taskQueue, exec, taskRepo, log, cfg.Scheduler)
 
-	if msgQueue == nil {
+	usesDefaultEphemeralQueue := msgQueue == nil
+	if usesDefaultEphemeralQueue {
 		msgQueue = messagequeue.NewServiceMemory(log)
+	}
+	// Task-repository mutations purge the shared SQLite lifecycle queue in the
+	// same transaction. Only the fallback in-memory queue needs the post-commit
+	// callback; registering a supplied production queue here would purge the
+	// next generation accepted after an archive/unarchive race.
+	if usesDefaultEphemeralQueue {
+		registrar, ok := repo.(interface {
+			SetTaskQueuePurger(func(context.Context, string))
+		})
+		if ok {
+			registrar.SetTaskQueuePurger(func(ctx context.Context, taskID string) {
+				if _, err := msgQueue.PurgeTask(ctx, taskID); err != nil {
+					svcLogger.Warn("failed to purge ephemeral task queue after task lifecycle mutation",
+						zap.String("task_id", taskID), zap.Error(err))
+				}
+			})
+		}
 	}
 
 	// Create the service (watcher will be created after we have handlers)
@@ -1085,19 +1109,27 @@ func (s *Service) WorkflowEngine() *engine.Engine {
 // starts turn X (DB only) → PromptTask → startTurnForSession → would create turn Y
 // (DB + activeTurns), leaving X open forever because nothing tracks it.
 func (s *Service) startTurnForSession(ctx context.Context, sessionID string) string {
+	turnID, _ := s.startTurnForSessionWithOwnership(ctx, sessionID)
+	return turnID
+}
+
+// startTurnForSessionWithOwnership returns whether this dispatch created the
+// active turn. Callers that must compensate a failed dispatch may only close a
+// turn they created; an adopted turn belongs to an earlier dispatch.
+func (s *Service) startTurnForSessionWithOwnership(ctx context.Context, sessionID string) (string, bool) {
 	if s.turnService == nil {
-		return ""
+		return "", false
 	}
 
 	if turnIDVal, ok := s.activeTurns.Load(sessionID); ok {
 		if turnID, ok := turnIDVal.(string); ok && turnID != "" {
-			return turnID
+			return turnID, false
 		}
 	}
 
 	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); turn != nil {
 		s.activeTurns.Store(sessionID, turn.ID)
-		return turn.ID
+		return turn.ID, false
 	} else if err != nil {
 		// A real DB read failure here would otherwise be silently dropped, and
 		// we'd fall through to StartTurn — potentially writing a duplicate next
@@ -1113,11 +1145,11 @@ func (s *Service) startTurnForSession(ctx context.Context, sessionID string) str
 		s.logger.Warn("failed to start turn",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return ""
+		return "", false
 	}
 
 	s.activeTurns.Store(sessionID, turn.ID)
-	return turn.ID
+	return turn.ID, true
 }
 
 // completeTurnForSession closes any open turn for the session.
@@ -1175,6 +1207,31 @@ func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessio
 			zap.String("session_id", sessionID),
 			zap.Int("max_iterations", maxIterations))
 	}
+}
+
+// completeTurnIfCurrent closes turnID only when it is still sessionID's active
+// turn. Lifecycle delivery uses this after a visible-message persistence
+// failure so it cannot complete a turn that existed before this dispatch or a
+// successor created concurrently.
+func (s *Service) completeTurnIfCurrent(ctx context.Context, sessionID, turnID string) {
+	if s.turnService == nil || turnID == "" {
+		return
+	}
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to look up active turn after lifecycle message persistence failure",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if turn == nil || turn.ID != turnID {
+		return
+	}
+	if err := s.turnService.CompleteTurn(ctx, turnID); err != nil {
+		s.logger.Warn("failed to complete lifecycle turn after message persistence failure",
+			zap.String("session_id", sessionID), zap.String("turn_id", turnID), zap.Error(err))
+		return
+	}
+	s.activeTurns.CompareAndDelete(sessionID, turnID)
 }
 
 // getActiveTurnID returns the active turn ID for a session.

@@ -79,6 +79,7 @@ test.describe("Mobile chat model selector", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }, testInfo) => {
     const { task } = await seedAndOpenTask(testPage, apiClient, seedData);
     expect(task.session_id).toBeTruthy();
@@ -163,6 +164,9 @@ test.describe("Mobile chat model selector", () => {
     await testInfo.attach("task-model-selector-mobile", {
       body: await testPage.screenshot(),
       contentType: "image/png",
+    });
+    await prCapture.screenshot("mobile-model-selector", {
+      caption: "Mobile model selector remains reachable by touch",
     });
 
     const viewport = testPage.viewportSize();

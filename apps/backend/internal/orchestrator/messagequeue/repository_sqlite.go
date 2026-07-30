@@ -45,6 +45,11 @@ func (r *sqliteRepository) initSchema() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_queued_messages_session_position ON queued_messages(session_id, position);
 
+	CREATE TABLE IF NOT EXISTS lifecycle_queue_generations (
+		task_id    TEXT PRIMARY KEY,
+		generation INTEGER NOT NULL DEFAULT 0
+	);
+
 	CREATE TABLE IF NOT EXISTS pending_moves (
 		id               TEXT PRIMARY KEY,
 		session_id       TEXT NOT NULL UNIQUE,
@@ -143,8 +148,7 @@ func (r *sqliteRepository) Restore(ctx context.Context, msg *QueuedMessage, maxP
 		INSERT INTO queued_messages
 			(id, session_id, task_id, position, content, model, plan_mode, attachments_json, metadata_json, queued_at, queued_by)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`),
-		msg.ID, msg.SessionID, msg.TaskID, msg.Position, msg.Content, msg.Model,
+	`), msg.ID, msg.SessionID, msg.TaskID, msg.Position, msg.Content, msg.Model,
 		boolToInt(msg.PlanMode), attachmentsJSON, metadataJSON, msg.QueuedAt, msg.QueuedBy,
 	); err != nil {
 		return fmt.Errorf("restore queued_messages: %w", err)
@@ -258,6 +262,135 @@ func (r *sqliteRepository) InsertOrReplaceByCoalesceKey(ctx context.Context, msg
 		return nil, false, err
 	}
 	return msg, false, nil
+}
+
+// InsertOrReplaceLifecycleByCoalesceKey serializes lifecycle acceptance with
+// task archival. The no-op UPDATE takes SQLite's writer lock only when the
+// referenced task is still active; archive either commits first (this returns
+// ErrTaskInactive) or queues first (the archive then follows normal
+// cancellation semantics).
+func (r *sqliteRepository) InsertOrReplaceLifecycleByCoalesceKey(ctx context.Context, msg *QueuedMessage, coalesceKey string, maxPerSession int, allowInsert bool) (*QueuedMessage, bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, false, fmt.Errorf("begin lifecycle coalesce tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	guard, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET updated_at = updated_at
+		WHERE id = ? AND archived_at IS NULL
+	`), msg.TaskID)
+	if err != nil {
+		return nil, false, fmt.Errorf("guard active lifecycle task: %w", err)
+	}
+	rows, err := guard.RowsAffected()
+	if err != nil {
+		return nil, false, fmt.Errorf("active lifecycle task rows affected: %w", err)
+	}
+	if rows == 0 {
+		return nil, false, ErrTaskInactive
+	}
+	expectedGeneration, ok := lifecycleGenerationFromMetadata(msg.Metadata)
+	if !ok {
+		return nil, false, ErrLifecycleCancelled
+	}
+	generation, err := lifecycleGenerationInTx(ctx, tx, r.db, msg.TaskID)
+	if err != nil {
+		return nil, false, err
+	}
+	if expectedGeneration != generation {
+		return nil, false, ErrLifecycleCancelled
+	}
+
+	existing, err := r.findCoalesced(ctx, tx, msg.SessionID, msg.QueuedBy, coalesceKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing != nil {
+		updated, err := r.replaceCoalesced(ctx, tx, existing, msg)
+		if err != nil {
+			return nil, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, false, err
+		}
+		return updated, true, nil
+	}
+	if !allowInsert {
+		return nil, false, ErrEntryNotFound
+	}
+	if err := r.insertCoalesced(ctx, tx, msg, maxPerSession); err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return msg, false, nil
+}
+
+func (r *sqliteRepository) LifecycleGeneration(ctx context.Context, taskID string) (int64, error) {
+	var generation int64
+	err := r.ro.GetContext(ctx, &generation, r.ro.Rebind(`
+		SELECT generation FROM lifecycle_queue_generations WHERE task_id = ?
+	`), taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("get lifecycle queue generation: %w", err)
+	}
+	return generation, nil
+}
+
+func (r *sqliteRepository) PurgeTask(ctx context.Context, taskID string) (int, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin lifecycle queue purge: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	removed, err := PurgeTaskInTransaction(ctx, tx, r.db, taskID)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
+func lifecycleGenerationInTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID string) (int64, error) {
+	var generation int64
+	err := tx.GetContext(ctx, &generation, db.Rebind(`
+		SELECT generation FROM lifecycle_queue_generations WHERE task_id = ?
+	`), taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("get lifecycle queue generation: %w", err)
+	}
+	return generation, nil
+}
+
+// PurgeTaskInTransaction lets the task repository make archive/delete and
+// durable queue invalidation one SQLite transaction. It is backend-internal:
+// user queue handlers must keep using ownership-checked deletion methods.
+func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID string) (int, error) {
+	result, err := tx.ExecContext(ctx, db.Rebind(`DELETE FROM queued_messages WHERE task_id = ?`), taskID)
+	if err != nil {
+		return 0, fmt.Errorf("purge queued task entries: %w", err)
+	}
+	removed, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("purge queued task entries rows affected: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		INSERT INTO lifecycle_queue_generations (task_id, generation) VALUES (?, 1)
+		ON CONFLICT(task_id) DO UPDATE SET generation = lifecycle_queue_generations.generation + 1
+	`), taskID); err != nil {
+		return 0, fmt.Errorf("advance lifecycle queue generation: %w", err)
+	}
+	return int(removed), nil
 }
 
 func (r *sqliteRepository) replaceCoalesced(ctx context.Context, tx *sqlx.Tx, existing, msg *QueuedMessage) (*QueuedMessage, error) {
@@ -427,6 +560,84 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 	return msg, nil
 }
 
+func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin reserve tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE session_id = ?
+		ORDER BY position ASC
+		LIMIT 1
+	`), sessionID)
+	msg, err := scanQueuedRow(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reserve head: %w", err)
+	}
+	if msg.IsDurableLifecycle() {
+		// Keep the row for crash recovery but stop reporting it as pending.
+		// Strip a marker persisted by an interrupted prior process from the
+		// returned copy so a failed retry becomes visible again.
+		msg.Metadata = clearReservedMetadata(msg.Metadata)
+		reservedJSON, err := marshalMetadata(markReservedMetadata(msg.Metadata))
+		if err != nil {
+			return nil, err
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE queued_messages SET metadata_json = ? WHERE id = ? AND session_id = ?
+		`), reservedJSON, msg.ID, sessionID); err != nil {
+			return nil, fmt.Errorf("mark lifecycle reservation in flight: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, err
+		}
+		msg.reservedLifecycleDelivery = true
+		return msg, nil
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages WHERE id = ? AND session_id = ?
+	`), msg.ID, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("delete reserved ordinary head: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("delete reserved ordinary head rows affected: %w", err)
+	}
+	if affected == 0 {
+		return nil, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
+func (r *sqliteRepository) AcknowledgeByID(ctx context.Context, sessionID, entryID string) error {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages WHERE id = ? AND session_id = ?
+	`), entryID, sessionID)
+	if err != nil {
+		return fmt.Errorf("acknowledge queued: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrEntryNotFound
+	}
+	return nil
+}
+
 // TakeByID atomically returns and deletes the entry identified by entryID,
 // regardless of its FIFO position. Mirrors TakeHead's race handling: if a
 // concurrent take already removed the row between the SELECT and DELETE,
@@ -478,6 +689,9 @@ func (r *sqliteRepository) UpdateContent(ctx context.Context, sessionID, entryID
 }
 
 func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {
+	if queuedBy == "" || IsReservedQueuedBy(queuedBy) {
+		return ErrEntryNotFound
+	}
 	attachmentsJSON, err := marshalAttachments(attachments)
 	if err != nil {
 		return err
@@ -488,16 +702,9 @@ func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, session
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var selectQuery string
-	selectArgs := []interface{}{entryID, sessionID}
-	if queuedBy != "" {
-		selectQuery = `SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ? AND queued_by = ?`
-		selectArgs = append(selectArgs, queuedBy)
-	} else {
-		selectQuery = `SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?`
-	}
 	var metadataJSON string
-	if err := tx.GetContext(ctx, &metadataJSON, r.db.Rebind(selectQuery), selectArgs...); err != nil {
+	query := `SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ? AND queued_by = ? AND queued_by NOT IN (?, ?, ?)`
+	if err := tx.GetContext(ctx, &metadataJSON, r.db.Rebind(query), entryID, sessionID, queuedBy, QueuedByAgent, QueuedByWorkflow, QueuedByServer); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrEntryNotFound
 		}
@@ -513,16 +720,9 @@ func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, session
 	if err != nil {
 		return err
 	}
-
-	var updateQuery string
-	args := []interface{}{content, attachmentsJSON, metadataJSON, entryID, sessionID}
-	if queuedBy != "" {
-		updateQuery = `UPDATE queued_messages SET content = ?, attachments_json = ?, metadata_json = ? WHERE id = ? AND session_id = ? AND queued_by = ?`
-		args = append(args, queuedBy)
-	} else {
-		updateQuery = `UPDATE queued_messages SET content = ?, attachments_json = ?, metadata_json = ? WHERE id = ? AND session_id = ?`
-	}
-	res, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), args...)
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`UPDATE queued_messages SET content = ?, attachments_json = ?, metadata_json = ?
+		WHERE id = ? AND session_id = ? AND queued_by = ? AND queued_by NOT IN (?, ?, ?)`),
+		content, attachmentsJSON, metadataJSON, entryID, sessionID, queuedBy, QueuedByAgent, QueuedByWorkflow, QueuedByServer)
 	if err != nil {
 		return fmt.Errorf("update queued: %w", err)
 	}
@@ -541,8 +741,8 @@ func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID st
 		DELETE FROM queued_messages
 		WHERE id = ?
 		  AND session_id = ?
-		  AND queued_by != ?
-	`), entryID, sessionID, QueuedByAgent)
+		  AND queued_by NOT IN (?, ?, ?)
+	`), entryID, sessionID, QueuedByAgent, QueuedByWorkflow, QueuedByServer)
 	if err != nil {
 		return fmt.Errorf("delete queued: %w", err)
 	}
@@ -557,7 +757,10 @@ func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID st
 }
 
 func (r *sqliteRepository) DeleteAllBySession(ctx context.Context, sessionID string) (int, error) {
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM queued_messages WHERE session_id = ?`), sessionID)
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages
+		WHERE session_id = ? AND queued_by NOT IN (?, ?, ?)
+	`), sessionID, QueuedByAgent, QueuedByWorkflow, QueuedByServer)
 	if err != nil {
 		return 0, fmt.Errorf("delete all queued: %w", err)
 	}

@@ -50,6 +50,22 @@ type LaunchSessionRequest struct {
 	// suppress the upgrade and strand a passthrough session without a PTY.
 	DeferredStart bool                   `json:"-"`
 	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
+	// SpawnOrigin identifies the agent session that requested this launch via
+	// spawn_session_kandev, so the new session's first turn can carry spawner
+	// attribution and reply instructions. Like DeferredStart it is kept off the
+	// wire protocol (`json:"-"`): the launch site turns it into a *trusted*
+	// <kandev-system> block that survives first-turn canonicalization, so a WS
+	// client must not be able to forge one and fabricate server authority.
+	SpawnOrigin *SpawnOrigin `json:"-"`
+}
+
+// SpawnOrigin describes the agent session that spawned a new sibling session.
+// The identifiers are resolved server-side by the MCP layer from the calling
+// agent's own session, never read from the tool arguments.
+type SpawnOrigin struct {
+	TaskID      string
+	SessionID   string
+	SessionName string
 }
 
 // LaunchSessionResponse is the unified response for session.launch.
@@ -178,10 +194,11 @@ func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*
 		return s.launchPrepare(ctx, req)
 	}
 
-	execution, err := s.StartTask(
+	execution, err := s.startTask(
 		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.Priority, req.Prompt,
 		req.WorkflowStepID, req.PlanMode, req.AutoStart, req.Attachments,
+		startTaskOptions{SpawnOrigin: req.SpawnOrigin},
 	)
 	if err != nil {
 		return nil, err

@@ -286,7 +286,6 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 			zap.String("task_id", watch.TaskID), zap.Error(syncErr))
 		return // Keep watch so the next cycle can retry
 	}
-
 	// When the tracked PR is merged or closed, reset the watch back to the
 	// "searching" state (pr_number=0) rather than deleting it. This lets the
 	// poller discover a follow-up PR opened on the same branch (e.g. the user
@@ -294,6 +293,17 @@ func (p *Poller) checkSinglePRWatch(ctx context.Context, watch *PRWatch) {
 	// intervention. The watch is only deleted when its owning session is gone.
 	if status.PR != nil && (status.PR.State == prStateMerged || status.PR.State == prStateClosed) {
 		p.publishPRStatusEvent(ctx, watch, status)
+		hold, holdErr := p.service.ShouldHoldTerminalPRWatch(
+			ctx, watch.TaskID, watch.RepositoryID, watch.PRNumber, status.PR.State,
+		)
+		if holdErr != nil {
+			p.logger.Warn("failed to check terminal PR automation",
+				zap.String("task_id", watch.TaskID), zap.Error(holdErr))
+			return
+		}
+		if hold {
+			return
+		}
 		if resetErr := p.service.store.UpdatePRWatchPRNumber(ctx, watch.ID, 0); resetErr != nil {
 			p.logger.Error("failed to reset completed PR watch",
 				zap.String("id", watch.ID), zap.Error(resetErr))
