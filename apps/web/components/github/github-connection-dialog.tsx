@@ -42,25 +42,38 @@ function ConnectionBody({
   workspaceId,
   open,
   onMethodChange,
-  onSaved,
+  onConnectionSaved,
+  onTaskAccessSaved,
+  onTaskAccessDirtyChange,
   taskAccess,
 }: {
   method: GitHubAutomationMethod;
   workspaceId: string;
   open: boolean;
   onMethodChange: (method: GitHubAutomationMethod) => void;
-  onSaved: () => void;
+  onConnectionSaved: () => void;
+  onTaskAccessSaved: () => void;
+  onTaskAccessDirtyChange: (dirty: boolean) => void;
   taskAccess: TaskGitCredentialsState;
 }) {
   return (
     <div className="space-y-5">
       <GitHubAuthMethodList value={method} onChange={onMethodChange} />
       <div className="border-t pt-5">
-        {method === "pat" && <GitHubPATForm workspaceId={workspaceId} onSaved={onSaved} />}
-        {method === "cli" && <GitHubCLIForm workspaceId={workspaceId} onSaved={onSaved} />}
+        {method === "pat" && (
+          <GitHubPATForm workspaceId={workspaceId} onSaved={onConnectionSaved} />
+        )}
+        {method === "cli" && (
+          <GitHubCLIForm workspaceId={workspaceId} onSaved={onConnectionSaved} />
+        )}
         {method === "app" && <GitHubAppConnectionPanel workspaceId={workspaceId} />}
       </div>
-      <GitHubTaskAccessForm open={open} taskAccess={taskAccess} onSaved={onSaved} />
+      <GitHubTaskAccessForm
+        open={open}
+        taskAccess={taskAccess}
+        onSaved={onTaskAccessSaved}
+        onDraftChange={onTaskAccessDirtyChange}
+      />
     </div>
   );
 }
@@ -78,21 +91,32 @@ export function GitHubConnectionDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<GitHubAutomationMethod>(() => methodForStatus(status));
+  const [taskAccessDirty, setTaskAccessDirty] = useState(false);
   const { isMobile } = useResponsiveBreakpoint();
   const connected = Boolean(status.automation);
 
   useEffect(() => {
-    setOpen(false);
     setMethod(methodForStatus(status));
-  }, [status, workspaceId]);
+  }, [status]);
 
-  const saved = useCallback(() => {
+  useEffect(() => {
+    setOpen(false);
+    setTaskAccessDirty(false);
+  }, [workspaceId]);
+
+  const connectionSaved = useCallback(() => {
     onSaved();
+    if (!taskAccessDirty) setOpen(false);
+  }, [onSaved, taskAccessDirty]);
+  const taskAccessSaved = useCallback(() => {
+    onSaved();
+    setTaskAccessDirty(false);
     setOpen(false);
   }, [onSaved]);
   const openChange = useCallback(
     (next: boolean) => {
       if (next) setMethod(methodForStatus(status));
+      if (!next) setTaskAccessDirty(false);
       setOpen(next);
     },
     [status],
@@ -109,7 +133,9 @@ export function GitHubConnectionDialog({
       workspaceId={workspaceId}
       open={open}
       onMethodChange={setMethod}
-      onSaved={saved}
+      onConnectionSaved={connectionSaved}
+      onTaskAccessSaved={taskAccessSaved}
+      onTaskAccessDirtyChange={setTaskAccessDirty}
       taskAccess={taskAccess}
     />
   );

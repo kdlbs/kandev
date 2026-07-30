@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchGitHubWorkspaceSettings,
   updateGitHubWorkspaceSettings,
@@ -18,6 +18,8 @@ export function useTaskGitCredentials(workspaceId: string): TaskGitCredentialsSt
   const [mode, setMode] = useState<TaskGitCredentialsMode>("managed");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const activeWorkspaceId = useRef(workspaceId);
+  activeWorkspaceId.current = workspaceId;
 
   useEffect(() => {
     let cancelled = false;
@@ -44,6 +46,7 @@ export function useTaskGitCredentials(workspaceId: string): TaskGitCredentialsSt
         workspace_id: workspaceId,
         task_git_credentials_mode: nextMode,
       });
+      if (activeWorkspaceId.current !== workspaceId) return;
       setMode(updated.task_git_credentials_mode ?? "managed");
       setError(false);
     },

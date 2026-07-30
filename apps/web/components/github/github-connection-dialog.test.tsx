@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
 const changeConnectionLabel = "Change connection";
 const registrationDisplayName = "Work automation";
 const githubAppLabel = "GitHub App";
+const WORKSPACE_ID = "workspace-1";
+const DESKTOP_CONNECTION_TEST_ID = "github-connection-desktop";
 const taskAccess: TaskGitCredentialsState = {
   mode: "managed",
   loading: false,
@@ -51,10 +53,16 @@ vi.mock("./github-app-import-form", () => ({
   ),
 }));
 
+vi.mock("./github-pat-form", () => ({
+  GitHubPATForm: ({ onSaved }: { onSaved: () => void }) => (
+    <button onClick={onSaved}>Save connection</button>
+  ),
+}));
+
 const status: GitHubStatus = {
-  workspace_id: "workspace-1",
+  workspace_id: WORKSPACE_ID,
   automation: {
-    workspace_id: "workspace-1",
+    workspace_id: WORKSPACE_ID,
     source: "pat",
     github_host: "github.com",
     login: "octocat",
@@ -96,14 +104,14 @@ const registration: GitHubAppRegistrationCatalogItem = {
   webhook_url: "https://kandev.example/webhook",
 };
 
-function view(workspaceId = "workspace-1") {
+function view(workspaceId = WORKSPACE_ID, currentTaskAccess = taskAccess) {
   return render(
     <ToastProvider>
       <GitHubConnectionDialog
         status={{ ...status, workspace_id: workspaceId }}
         workspaceId={workspaceId}
         onSaved={vi.fn()}
-        taskAccess={taskAccess}
+        taskAccess={currentTaskAccess}
       />
     </ToastProvider>,
   );
@@ -113,13 +121,30 @@ beforeEach(() => {
   mocks.mobile = false;
   mocks.registrations = [registration];
 });
+
+describe("GitHubConnectionDialog task access", () => {
+  it("keeps an unsaved task access choice open when saving the connection", async () => {
+    view(WORKSPACE_ID, { ...taskAccess, save: vi.fn() });
+    fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
+    const dialog = await screen.findByTestId(DESKTOP_CONNECTION_TEST_ID);
+    const executor = screen
+      .getByTestId("github-task-access-option-executor")
+      .querySelector('[role="radio"]')!;
+    fireEvent.click(executor);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save connection" }));
+
+    expect(dialog.getAttribute("data-state")).toBe("open");
+    expect(executor.getAttribute("aria-checked")).toBe("true");
+  });
+});
 afterEach(() => cleanup());
 
 describe("GitHubConnectionDialog", () => {
   it("uses a method list and shows workspace App choices and sharing impact", async () => {
     view();
     fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
-    expect(await screen.findByTestId("github-connection-desktop")).toBeTruthy();
+    expect(await screen.findByTestId(DESKTOP_CONNECTION_TEST_ID)).toBeTruthy();
     expect(screen.getByLabelText("Connection method")).toBeTruthy();
     expect(screen.getAllByText("Personal access token")).not.toHaveLength(0);
     expect(screen.getByText("GitHub CLI account")).toBeTruthy();
@@ -140,7 +165,7 @@ describe("GitHubConnectionDialog", () => {
     const drawer = await screen.findByTestId("github-connection-mobile");
     expect(drawer.className).toContain("100dvh");
     expect(drawer.querySelectorAll(".overflow-y-auto")).toHaveLength(1);
-    expect(screen.queryByTestId("github-connection-desktop")).toBeNull();
+    expect(screen.queryByTestId(DESKTOP_CONNECTION_TEST_ID)).toBeNull();
   });
 
   it("returns to the registration catalog after importing an App", async () => {
@@ -214,6 +239,6 @@ describe("GitHubConnectionDialog", () => {
         />
       </ToastProvider>,
     );
-    await waitFor(() => expect(screen.queryByTestId("github-connection-desktop")).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId(DESKTOP_CONNECTION_TEST_ID)).toBeNull());
   });
 });

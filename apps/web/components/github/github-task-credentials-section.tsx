@@ -32,10 +32,12 @@ export function GitHubTaskAccessForm({
   open,
   taskAccess,
   onSaved,
+  onDraftChange,
 }: {
   open: boolean;
   taskAccess: TaskGitCredentialsState;
   onSaved: () => void;
+  onDraftChange: (dirty: boolean) => void;
 }) {
   const { toast } = useToast();
   const [draft, setDraft] = useState(taskAccess.mode);
@@ -44,6 +46,10 @@ export function GitHubTaskAccessForm({
   useEffect(() => {
     if (open) setDraft(taskAccess.mode);
   }, [open, taskAccess.mode]);
+
+  useEffect(() => {
+    onDraftChange(draft !== taskAccess.mode);
+  }, [draft, onDraftChange, taskAccess.mode]);
 
   const save = async () => {
     setSaving(true);
