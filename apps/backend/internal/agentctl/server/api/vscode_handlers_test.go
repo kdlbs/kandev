@@ -206,7 +206,7 @@ func TestHandleVscodeStatus_AfterStart(t *testing.T) {
 func TestVscodeOpenFile_WaitsForRunning_E2E(t *testing.T) {
 	s := prepareVscodeTestServer(t)
 	ts := httptest.NewServer(s.router)
-	defer ts.Close()
+	t.Cleanup(ts.Close)
 
 	body, _ := json.Marshal(types.VscodeOpenFileRequest{Path: "main.go", Line: 1})
 

@@ -78,15 +78,27 @@ func TestMapUserSettingsStateIncludesAppStatusBarOrder(t *testing.T) {
 	}
 }
 
-func TestMapUserSettingsStateIncludesLspStatusLocation(t *testing.T) {
-	state := mapUserSettingsState(userdto.UserSettingsResponse{
-		Settings: userdto.UserSettingsDTO{
-			LspStatusLocation: usermodels.LspStatusLocationStatusBar,
-		},
-	}, "workspace-1")
+func TestMapUserSettingsStateNormalizesLspStatusLocation(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "status bar is preserved", value: usermodels.LspStatusLocationStatusBar, want: usermodels.LspStatusLocationStatusBar},
+		{name: "empty uses toolbar", value: "", want: usermodels.LspStatusLocationToolbar},
+		{name: "unknown uses toolbar", value: "future_location", want: usermodels.LspStatusLocationToolbar},
+	}
 
-	if got := state["lspStatusLocation"]; got != usermodels.LspStatusLocationStatusBar {
-		t.Fatalf("lspStatusLocation = %#v, want status_bar", got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			state := mapUserSettingsState(userdto.UserSettingsResponse{
+				Settings: userdto.UserSettingsDTO{LspStatusLocation: tt.value},
+			}, "workspace-1")
+
+			if got := state["lspStatusLocation"]; got != tt.want {
+				t.Fatalf("lspStatusLocation = %#v, want %q", got, tt.want)
+			}
+		})
 	}
 }
 
