@@ -24,6 +24,25 @@ function addSimplePanel(api: DockviewApi, groupId: string, opts: SimplePanelOpts
   focusOrAddPanel(api, { ...opts, position: { referenceGroup: groupId } });
 }
 
+type SidePanelOpts = { groupId?: string; quiet?: boolean; inCenter?: boolean };
+
+// Shared opener for the Plan/Notes side panels: both default to a tab next to
+// "chat" unless a target group is given, and both support the same quiet /
+// inCenter overrides used by the kanban shortcuts and dockview add-panel menu.
+function addSidePanel(
+  get: StoreGet,
+  opts: SidePanelOpts | undefined,
+  panel: { id: string; component: string; title: string; tabComponent: string },
+): void {
+  const { api, centerGroupId } = get();
+  if (!api) return;
+  const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
+  const position = groupId
+    ? { referenceGroup: groupId }
+    : { referencePanel: "chat" as const, direction: "right" as const };
+  focusOrAddPanel(api, { ...panel, position }, opts?.quiet ?? false);
+}
+
 function focusMatchingLegacyPanel(
   api: DockviewApi,
   keyedPanelId: string,
@@ -455,7 +474,6 @@ export function removeSessionPanel(api: DockviewApi, sessionId: string): void {
   if (panel) api.removePanel(panel);
 }
 
-// eslint-disable-next-line max-lines-per-function -- panel openers stay together as one dockview action bundle.
 export function buildExtraPanelActions(get: StoreGet) {
   return {
     addVscodePanel: () => {
@@ -483,32 +501,20 @@ export function buildExtraPanelActions(get: StoreGet) {
         position: { referenceGroup: centerGroupId },
       });
     },
-    addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
-      const position = groupId
-        ? { referenceGroup: groupId }
-        : { referencePanel: "chat" as const, direction: "right" as const };
-      focusOrAddPanel(
-        api,
-        { id: "plan", component: "plan", title: "Plan", tabComponent: "planTab", position },
-        opts?.quiet ?? false,
-      );
-    },
-    addNotesPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
-      const position = groupId
-        ? { referenceGroup: groupId }
-        : { referencePanel: "chat" as const, direction: "right" as const };
-      focusOrAddPanel(
-        api,
-        { id: "notes", component: "notes", title: "Notes", tabComponent: "notesTab", position },
-        opts?.quiet ?? false,
-      );
-    },
+    addPlanPanel: (opts?: SidePanelOpts) =>
+      addSidePanel(get, opts, {
+        id: "plan",
+        component: "plan",
+        title: "Plan",
+        tabComponent: "planTab",
+      }),
+    addNotesPanel: (opts?: SidePanelOpts) =>
+      addSidePanel(get, opts, {
+        id: "notes",
+        component: "notes",
+        title: "Notes",
+        tabComponent: "notesTab",
+      }),
     /**
      * Opens the PR detail panel for a given key, or focuses the tab already
      * showing that exact PR.
