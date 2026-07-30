@@ -109,10 +109,12 @@ export function useVirtuosoAutoScrollLifecycle(params: {
     }
   }, [enabled, captureSnapshot, firstItemIndex, itemCount, virtuosoRef, messages]);
 
-  // Restore the saved position on first mount when disabled. Lazy-initialized
-  // so it's read once at mount time, not on every render.
+  // Restore the saved position on first mount, regardless of whether
+  // auto-scroll is currently enabled or disabled, so navigating away and
+  // back never silently discards a manually-scrolled read position.
+  // Lazy-initialized so it's read once at mount time, not on every render.
   const [restoreStateFrom] = useState<StateSnapshot | undefined>(() => {
-    if (enabled || !sessionId) return undefined;
+    if (!sessionId) return undefined;
     return storeApi.getState().transcriptAutoScroll.virtuosoStateBySessionId[sessionId];
   });
 

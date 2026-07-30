@@ -123,23 +123,25 @@ export function shouldCatchUpOnAutoScrollEnable(params: {
  * - A pending dockview layout-rebuild restore always wins; that separate
  *   mechanism owns the position for maximize/un-maximize and runs
  *   independently of this feature.
- * - When auto-scroll is disabled, restore whatever offset was captured the
- *   last time this session's transcript was visible — falling back to the
- *   bottom only if nothing was ever captured (first-time disable, or a
+ * - Otherwise, restore whatever offset was captured the last time this
+ *   session's transcript was visible — regardless of whether auto-scroll
+ *   is currently enabled or disabled, so navigating away and back never
+ *   silently discards a manually-scrolled read position. Falls back to
+ *   the bottom only if nothing was ever captured (first-time open, or a
  *   session that has never been scrolled).
- * - When enabled, the pre-existing behavior (scroll to bottom) applies.
+ * - Live in-session auto-follow while enabled is unaffected: that's
+ *   driven by `useAutoScroll`'s scroll-event handling, not this
+ *   mount-time resolver.
  *
  * Returns `null` when the caller should skip applying any scrollTop.
  */
 export function resolveNativeInitialScrollTop(params: {
-  enabled: boolean;
   hasPendingLayoutRestore: boolean;
   savedScrollTop: number | undefined;
   scrollHeight: number;
 }): number | null {
   if (params.hasPendingLayoutRestore) return null;
-  if (!params.enabled) return params.savedScrollTop ?? params.scrollHeight;
-  return params.scrollHeight;
+  return params.savedScrollTop ?? params.scrollHeight;
 }
 
 /**

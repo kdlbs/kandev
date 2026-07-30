@@ -389,16 +389,18 @@ function useScrollToMessage(runGuardedScroll: (performScroll: () => void) => voi
 }
 
 /**
- * Applies the initial scrollTop once items are available: bottom when
- * enabled, or the last captured offset for this session when disabled (see
- * `resolveNativeInitialScrollTop`). Skips while a dockview layout-rebuild
- * restore is pending — that separate mechanism owns the position instead.
+ * Applies the initial scrollTop once items are available: the last
+ * captured offset for this session, regardless of whether auto-scroll is
+ * currently enabled or disabled (see `resolveNativeInitialScrollTop`), so
+ * navigating away and back never silently discards a manually-scrolled
+ * read position. Falls back to the bottom when nothing was ever captured.
+ * Skips while a dockview layout-rebuild restore is pending — that
+ * separate mechanism owns the position instead.
  */
 function useInitialScrollPosition(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   itemCount: number,
   sessionId: string | null,
-  enabled: boolean,
   isNearBottomRef: React.RefObject<boolean>,
 ) {
   const storeApi = useAppStoreApi();
@@ -414,7 +416,6 @@ function useInitialScrollPosition(
         undefined)
       : undefined;
     const scrollTop = resolveNativeInitialScrollTop({
-      enabled,
       hasPendingLayoutRestore,
       savedScrollTop,
       scrollHeight: el.scrollHeight,
@@ -428,7 +429,7 @@ function useInitialScrollPosition(
       });
     }
     didInitialScroll.current = true;
-  }, [itemCount, sessionId, enabled, isNearBottomRef, storeApi]);
+  }, [itemCount, sessionId, isNearBottomRef, storeApi]);
 }
 
 /**
@@ -480,7 +481,7 @@ export function useNativeScrollManagement(params: {
   const handleScrollToMessage = useScrollToMessage(runGuardedScroll);
   useScrollPositionOnPrepend(scrollRef, items, isProgrammaticScrollLocked);
   const sentinelRef = useLazyLoadSentinel(scrollRef, hasMore, isLoadingMore, loadMore);
-  useInitialScrollPosition(scrollRef, items.length, sessionId, enabled, isNearBottomRef);
+  useInitialScrollPosition(scrollRef, items.length, sessionId, isNearBottomRef);
 
   return { handleScrollToMessage, sentinelRef };
 }

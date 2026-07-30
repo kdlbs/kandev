@@ -140,6 +140,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
 | [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
 | [embedded-vscode-windows-availability](ui/embedded-vscode-windows-availability.md) | shipped |
+| [keep-transcript-position](keep-transcript-position/spec.md) | building |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

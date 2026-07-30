@@ -18,11 +18,12 @@ type Props = {
 
 /**
  * Toggles whether the transcript auto-scrolls to the bottom as new messages
- * arrive. Enabled by default. Disabling freezes the current scroll position
- * (preserved across navigating away and back); re-enabling resumes
- * auto-scroll and catches the view up if the transcript progressed while
- * disabled. See message-list-native.tsx / message-list-virtuoso.tsx for the
- * renderer-side behavior driven by this preference.
+ * arrive live. Enabled by default. Disabling freezes the current position
+ * and suppresses live auto-follow; re-enabling resumes it and catches the
+ * view up if the transcript progressed while disabled. The scroll position
+ * itself is preserved across navigating away and back regardless of this
+ * toggle's state. See message-list-native.tsx / message-list-virtuoso.tsx
+ * for the renderer-side behavior driven by this preference.
  */
 export function AutoScrollToggleButton({ sessionId }: Props) {
   const enabled = useTranscriptAutoScrollEnabled(sessionId);
