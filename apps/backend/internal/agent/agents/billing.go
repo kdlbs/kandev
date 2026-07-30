@@ -22,7 +22,10 @@ func claudeBillingType() usage.BillingType {
 	if err != nil {
 		return usage.BillingTypeAPIKey
 	}
-	client := usage.NewClaudeUsageClientWithPath(filepath.Join(home, ".claude", ".credentials.json"))
+	client := usage.NewClaudeUsageClientForProfile(
+		filepath.Join(home, ".claude", ".credentials.json"),
+		usage.ClaudeDefaultKeychainService,
+	)
 	if client.HasSubscriptionCredentials() {
 		return usage.BillingTypeSubscription
 	}

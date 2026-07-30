@@ -23,15 +23,33 @@ const (
 // ClaudeUsageClient fetches utilization from the Anthropic OAuth usage API.
 type ClaudeUsageClient struct {
 	credentialsPath string
+	keychainService string
 	usageURL        string
 	refreshURL      string
 	httpClient      *http.Client
 }
 
-// NewClaudeUsageClientWithPath creates a client with an explicit credentials path (for tests).
+// NewClaudeUsageClientWithPath creates a file-only client with an explicit
+// credentials path (for tests). It deliberately does NOT consult the keychain,
+// so a test pointed at a temp file cannot silently read the developer's real
+// credential instead. Production callers want NewClaudeUsageClientForProfile.
 func NewClaudeUsageClientWithPath(credentialsPath string) *ClaudeUsageClient {
+	return NewClaudeUsageClientForProfile(credentialsPath, "")
+}
+
+// NewClaudeUsageClientForProfile creates a client for one Claude login.
+//
+// A second account is a second CLAUDE_CONFIG_DIR: `claude auth login` under a
+// custom config dir stores its token in a hash-suffixed keychain item
+// ("Claude Code-credentials-<8 hex>") so it never collides with the default
+// profile's. Pass that service name to poll the non-default account.
+//
+// keychainService may be empty to force the file path (used by tests, and the
+// only sane behaviour on non-darwin hosts).
+func NewClaudeUsageClientForProfile(credentialsPath, keychainService string) *ClaudeUsageClient {
 	return &ClaudeUsageClient{
 		credentialsPath: credentialsPath,
+		keychainService: keychainService,
 		usageURL:        claudeUsageURL,
 		refreshURL:      claudeRefreshURL,
 		httpClient:      &http.Client{Timeout: 10 * time.Second},
@@ -87,14 +105,14 @@ type claudeUsageResponse struct {
 
 // FetchUsage implements ProviderUsageClient.
 func (c *ClaudeUsageClient) FetchUsage(ctx context.Context) (*ProviderUsage, error) {
-	creds, err := c.readCredentials()
+	creds, fromKeychain, err := c.readCredentialsWithSource()
 	if err != nil {
 		return nil, fmt.Errorf("claude usage: read credentials: %w", err)
 	}
 	if creds.ClaudeAiOauth == nil {
 		return nil, fmt.Errorf("claude usage: no claudeAiOauth entry in %s", c.credentialsPath)
 	}
-	token, err := c.freshAccessToken(ctx, creds.ClaudeAiOauth)
+	token, err := c.freshAccessToken(ctx, creds.ClaudeAiOauth, fromKeychain)
 	if err != nil {
 		return nil, fmt.Errorf("claude usage: %w", err)
 	}
@@ -205,7 +223,15 @@ func claudeLimitLabel(l claudeLimit) string {
 }
 
 // freshAccessToken returns a valid access token, refreshing if expired.
-func (c *ClaudeUsageClient) freshAccessToken(ctx context.Context, tok *claudeOAuthToken) (string, error) {
+//
+// fromKeychain reports whether the credential came from the keychain, which the
+// Claude CLI owns and keeps refreshed. In that case we never write a refreshed
+// token back to ~/.claude/.credentials.json: that file is already stale by
+// design, and overwriting it would fabricate a second, competing source of
+// truth for a token we do not own.
+func (c *ClaudeUsageClient) freshAccessToken(
+	ctx context.Context, tok *claudeOAuthToken, fromKeychain bool,
+) (string, error) {
 	// ExpiresAt is in milliseconds; treat as expired if within 60 s of now.
 	expiresAt := time.UnixMilli(tok.ExpiresAt)
 	if time.Until(expiresAt) > 60*time.Second {
@@ -216,26 +242,52 @@ func (c *ClaudeUsageClient) freshAccessToken(ctx context.Context, tok *claudeOAu
 	}
 	newTok, err := c.refreshToken(ctx, tok.RefreshToken)
 	if err != nil {
+		if fromKeychain {
+			// The CLI is the only writer of this credential. A failure here
+			// means it has not run recently enough, not that we should retry
+			// harder — say so instead of surfacing a bare OAuth error.
+			return "", fmt.Errorf("refresh token: %w (run `claude auth status` to refresh)", err)
+		}
 		return "", fmt.Errorf("refresh token: %w", err)
 	}
-	// Write new token back. Non-fatal — we have the new token in memory even if
-	// persistence fails, but log the error so it doesn't go unnoticed.
-	if writeErr := c.persistRefreshedToken(newTok); writeErr != nil {
-		fmt.Fprintf(os.Stderr, "claude usage: persist refreshed token: %v\n", writeErr)
+	if !fromKeychain {
+		// Write new token back. Non-fatal — we have the new token in memory even if
+		// persistence fails, but log the error so it doesn't go unnoticed.
+		if writeErr := c.persistRefreshedToken(newTok); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "claude usage: persist refreshed token: %v\n", writeErr)
+		}
 	}
 	return newTok.AccessToken, nil
 }
 
+// readCredentials returns the live credential and whether it came from the
+// keychain. The keychain is authoritative on macOS: Claude Code refreshes the
+// token there and leaves the file frozen at first-login state, so preferring
+// the file yields a token that expired days or weeks ago.
 func (c *ClaudeUsageClient) readCredentials() (*claudeCredentials, error) {
+	creds, _, err := c.readCredentialsWithSource()
+	return creds, err
+}
+
+func (c *ClaudeUsageClient) readCredentialsWithSource() (*claudeCredentials, bool, error) {
+	if blob := readKeychainCredentials(c.keychainService); blob != nil {
+		var creds claudeCredentials
+		// A malformed keychain item is not fatal — fall through to the file
+		// rather than blinding the panel on a shape change we did not expect.
+		if err := json.Unmarshal(blob, &creds); err == nil && creds.ClaudeAiOauth != nil {
+			return &creds, true, nil
+		}
+	}
+
 	data, err := os.ReadFile(c.credentialsPath)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", c.credentialsPath, err)
+		return nil, false, fmt.Errorf("read %s: %w", c.credentialsPath, err)
 	}
 	var creds claudeCredentials
 	if err := json.Unmarshal(data, &creds); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", c.credentialsPath, err)
+		return nil, false, fmt.Errorf("parse %s: %w", c.credentialsPath, err)
 	}
-	return &creds, nil
+	return &creds, false, nil
 }
 
 // persistRefreshedToken updates only the token fields inside claudeAiOauth,
