@@ -66,6 +66,13 @@ function carryForwardTranscriptNavigationSettings(current: DisplaySettings) {
   };
 }
 
+function carryForwardAppearanceSettings(current: DisplaySettings) {
+  return {
+    changesPanelLayout: current.changesPanelLayout ?? "tree",
+    prPanelPlacement: current.prPanelPlacement ?? "agent",
+  };
+}
+
 function carryForwardCoreSettings(current: DisplaySettings) {
   return {
     shellOptions: current.shellOptions ?? [],
@@ -79,8 +86,7 @@ function carryForwardCoreSettings(current: DisplaySettings) {
     ...carryForwardUtilitySettings(current),
     tasksListSort: current.tasksListSort ?? DEFAULT_TASKS_LIST_SORT,
     tasksListGroup: current.tasksListGroup ?? DEFAULT_TASKS_LIST_GROUP,
-    changesPanelLayout: current.changesPanelLayout ?? "tree",
-    prPanelPlacement: current.prPanelPlacement ?? "agent",
+    ...carryForwardAppearanceSettings(current),
     ...carryForwardAppStatusSettings(current),
     voiceMode: current.voiceMode ?? { ...DEFAULT_VOICE_MODE_STATE },
   };
