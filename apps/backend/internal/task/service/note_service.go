@@ -17,6 +17,7 @@ var ErrTaskNoteNotFound = errors.New("task note not found")
 
 type noteRepo interface {
 	repository.NoteRepository
+	GetTask(ctx context.Context, id string) (*models.Task, error)
 }
 
 // NoteService provides task note business logic.
@@ -116,17 +117,36 @@ func (s *NoteService) DeleteNote(ctx context.Context, taskID string) error {
 	return nil
 }
 
+// resolveWorkspaceID looks up the owning workspace for a task-note event.
+// Note events carry workspace_id so TaskEventBroadcaster can route them via
+// BroadcastToWorkspace; without it, an empty scope falls back to a global
+// broadcast and leaks note content across workspaces. Callers must skip
+// publishing (fail closed) when this returns ok=false.
+func (s *NoteService) resolveWorkspaceID(ctx context.Context, taskID string) (string, bool) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil || task == nil || task.WorkspaceID == "" {
+		s.logger.Error("resolve task workspace for note event", zap.String("task_id", taskID), zap.Error(err))
+		return "", false
+	}
+	return task.WorkspaceID, true
+}
+
 func (s *NoteService) publishEvent(ctx context.Context, eventType string, note *models.TaskNote) {
 	if s.eventBus == nil || note == nil {
 		return
 	}
+	workspaceID, ok := s.resolveWorkspaceID(ctx, note.TaskID)
+	if !ok {
+		return
+	}
 	payload := map[string]interface{}{
-		"id":         note.ID,
-		"task_id":    note.TaskID,
-		"content":    note.Content,
-		"updated_by": note.UpdatedBy,
-		"created_at": note.CreatedAt,
-		"updated_at": note.UpdatedAt,
+		"id":           note.ID,
+		"task_id":      note.TaskID,
+		"workspace_id": workspaceID,
+		"content":      note.Content,
+		"updated_by":   note.UpdatedBy,
+		"created_at":   note.CreatedAt,
+		"updated_at":   note.UpdatedAt,
 	}
 	if err := s.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "note-service", payload)); err != nil {
 		s.logger.Error("publish task note event", zap.String("event_type", eventType), zap.Error(err))
@@ -134,7 +154,11 @@ func (s *NoteService) publishEvent(ctx context.Context, eventType string, note *
 }
 
 func (s *NoteService) publishDeletedEvent(ctx context.Context, taskID string) {
-	payload := map[string]interface{}{"task_id": taskID}
+	workspaceID, ok := s.resolveWorkspaceID(ctx, taskID)
+	if !ok {
+		return
+	}
+	payload := map[string]interface{}{"task_id": taskID, "workspace_id": workspaceID}
 	if err := s.eventBus.Publish(ctx, events.TaskNoteDeleted, bus.NewEvent(events.TaskNoteDeleted, "note-service", payload)); err != nil {
 		s.logger.Error("publish task note delete event", zap.String("task_id", taskID), zap.Error(err))
 	}

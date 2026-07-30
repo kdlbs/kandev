@@ -7,6 +7,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
@@ -61,6 +62,39 @@ func TestNoteService_UpsertNotePublishesUpdate(t *testing.T) {
 	}
 	if got := payload["updated_by"]; got != "user" {
 		t.Fatalf("expected updated_by user, got %v", got)
+	}
+	if got := payload["workspace_id"]; got != "ws-plan" {
+		t.Fatalf("expected workspace_id ws-plan, got %v", got)
+	}
+}
+
+func TestNoteService_ResolveWorkspaceIDFailsClosedForUnknownTask(t *testing.T) {
+	svc, _, _ := createTestNoteService(t)
+	ctx := context.Background()
+
+	workspaceID, ok := svc.resolveWorkspaceID(ctx, "missing-task")
+	if ok {
+		t.Fatalf("expected ok=false for unknown task, got workspace_id=%q", workspaceID)
+	}
+	if workspaceID != "" {
+		t.Fatalf("expected empty workspace_id, got %q", workspaceID)
+	}
+}
+
+func TestNoteService_PublishEventSkippedWhenWorkspaceUnresolved(t *testing.T) {
+	svc, eventBus, _ := createTestNoteService(t)
+	ctx := context.Background()
+
+	// note.TaskID references no seeded task, so the workspace can't be
+	// resolved and the event must not be published unscoped.
+	svc.publishEvent(ctx, events.TaskNoteUpdated, &models.TaskNote{TaskID: "missing-task", Content: "note"})
+	if len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatalf("expected no events published when workspace can't be resolved, got %d", len(eventBus.GetPublishedEvents()))
+	}
+
+	svc.publishDeletedEvent(ctx, "missing-task")
+	if len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatalf("expected no delete event published when workspace can't be resolved, got %d", len(eventBus.GetPublishedEvents()))
 	}
 }
 
