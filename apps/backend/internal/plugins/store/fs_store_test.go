@@ -87,8 +87,6 @@ func TestFSStore_Save_RoundTripsLastErrorFields(t *testing.T) {
 	}
 }
 
-
-
 func TestFSStore_Get_UnknownIDReturnsErrNotFound(t *testing.T) {
 	dir := t.TempDir()
 	s := NewFSStore(dir)

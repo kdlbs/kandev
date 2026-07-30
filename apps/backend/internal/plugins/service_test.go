@@ -313,6 +313,22 @@ func installTestPlugin(t *testing.T, svc *Service, id string) *store.Record {
 	return rec
 }
 
+// reloadServiceFromDisk builds a fresh Service backed by the same on-disk store,
+// simulating a backend restart. It returns the rebuilt service and its fresh
+// fake runtime so callers can drive boot-recovery scenarios.
+func reloadServiceFromDisk(t *testing.T, dir string, fsStore *store.FSStore) (*Service, *fakeRuntime) {
+	t.Helper()
+	reg := NewRegistry()
+	if err := reg.Load(fsStore); err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	svc := NewService(fsStore, reg, nil, testLogger(t))
+	svc.SetPluginsDir(dir)
+	rt := newFakeRuntime()
+	svc.SetRuntime(rt)
+	return svc, rt
+}
+
 func TestServiceListReturnsInstalledPlugins(t *testing.T) {
 	svc, _, _ := newTestService(t)
 	installTestPlugin(t, svc, "kandev-plugin-slack")

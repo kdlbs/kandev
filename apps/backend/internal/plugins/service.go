@@ -971,6 +971,10 @@ func (s *Service) Enable(id string) error {
 		return nil
 	}
 	if err := s.activate(rec); err != nil {
+		// activate already recorded StatusError + last_error; refresh so the
+		// deliverer tracks the new error row (disabled→error is a newly legal
+		// hop and must not leave workers on the prior disabled view).
+		s.notifyDeliverer()
 		return err
 	}
 	s.notifyDeliverer()
@@ -1146,24 +1150,43 @@ func (s *Service) recordRestartCount(id string) {
 // (including sideloads) is never auto-spawned. One attempt per plugin per
 // boot — no host-level tight loop. Success → active + clear last_error;
 // failure → error + refreshed last_error. Called once at boot.
+//
+// After spawns, Refresh the deliverer so workers pick up post-boot status
+// changes. backendapp Refresh()es before this method runs; without a
+// second Refresh, error→active recovery leaves the worker caching
+// StatusError and buffering live events. Flush any recovered ids so
+// anything buffered between the first Refresh and recovery is delivered
+// (usually empty at cold boot; matches handleStatusChange recovery).
 func (s *Service) StartActivePlugins(ctx context.Context) {
 	s.logBootScanResult(s.bootScan(ctx))
 
 	if s.runtime == nil {
 		return
 	}
+	var recovered []string
 	for _, rec := range s.List() {
 		if !s.shouldSpawnAtBoot(rec) {
 			continue
 		}
+		wasError := rec.Status == StatusError
 		if err := s.activate(rec); err != nil {
 			s.log.Warn("plugins: failed to spawn plugin at boot",
 				zap.String("plugin_id", rec.ID), zap.String("status", rec.Status), zap.Error(err))
-			// activate already recorded StatusError + last_error. The deliverer
-			// was refreshed before boot activation began, so reconcile it after
-			// a plugin fails to spawn — otherwise its worker would keep treating
-			// the plugin as active.
-			s.notifyDeliverer()
+			// activate already recorded StatusError + last_error.
+			continue
+		}
+		if wasError {
+			recovered = append(recovered, rec.ID)
+		}
+	}
+	// The deliverer was refreshed before boot activation began; reconcile it
+	// once after the spawn pass so workers pick up any error→active recovery
+	// (otherwise a recovered worker keeps caching StatusError and buffering
+	// live events), then flush anything buffered for the recovered ids.
+	s.notifyDeliverer()
+	if d := s.Deliverer(); d != nil {
+		for _, id := range recovered {
+			d.Flush(id)
 		}
 	}
 }

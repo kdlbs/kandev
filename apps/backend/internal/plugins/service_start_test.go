@@ -3,6 +3,7 @@ package plugins
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -317,5 +318,98 @@ func TestServiceHandleStatusChangePersistsRestartCountBestEffort(t *testing.T) {
 	}
 	if onDisk.RestartCount != 3 {
 		t.Fatalf("store.Get().RestartCount = %d, want 3", onDisk.RestartCount)
+	}
+}
+
+// TestServiceStartActivePluginsMissingInstallUpdatesLastErrorAndDoesNotRecover
+// pins boot order: a managed plugin whose install tree is gone must be marked
+// error with a refreshed last_error (never left as the pre-boot sticky reason)
+// and must not end up running.
+func TestServiceStartActivePluginsMissingInstallUpdatesLastErrorAndDoesNotRecover(t *testing.T) {
+	svc, dir, fsStore, _ := newTestServiceWithDir(t)
+	rec := installTestPlugin(t, svc, "kandev-provider-usage")
+	// Wipe the install tree while leaving the YAML record.
+	if err := os.RemoveAll(rec.InstallPath); err != nil {
+		t.Fatalf("RemoveAll install path: %v", err)
+	}
+	// Persist sticky error as a prior boot would have after a crash.
+	at := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	rec.Status = StatusError
+	rec.LastError = "old sticky"
+	rec.LastErrorAt = &at
+	if err := fsStore.Save(rec); err != nil {
+		t.Fatalf("Save(): %v", err)
+	}
+
+	reg2 := NewRegistry()
+	if err := reg2.Load(fsStore); err != nil {
+		t.Fatalf("Load(): %v", err)
+	}
+	svc2 := NewService(fsStore, reg2, nil, testLogger(t))
+	svc2.SetPluginsDir(dir)
+	// The install path is gone, so a recovery Start must fail even if the fake
+	// runtime would otherwise succeed.
+	rt2 := newFakeRuntime()
+	rt2.setStartErr("kandev-provider-usage", errors.New("no such file or directory"))
+	svc2.SetRuntime(rt2)
+
+	svc2.StartActivePlugins(context.Background())
+
+	got, err := svc2.Get("kandev-provider-usage")
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	if got.Status != StatusError {
+		t.Fatalf("Status = %q, want %q", got.Status, StatusError)
+	}
+	if got.LastError == "" {
+		t.Fatal("LastError empty after missing-install boot path")
+	}
+	// Either markMissing's reason or the spawn failure should be visible — not
+	// the pre-boot sticky string.
+	if got.LastError == "old sticky" {
+		t.Fatal("LastError left as pre-boot sticky string; boot did not refresh failure reason")
+	}
+	if rt2.Running("kandev-provider-usage") {
+		t.Fatal("plugin should not be running when install path is missing")
+	}
+}
+
+// TestServiceEnableFromErrorWhenRuntimeAlreadyRunningClearsLastError pins that
+// Enable on an error plugin whose runtime process is still tracked as running
+// (Start is skipped) still clears last_error via the activate path.
+func TestServiceEnableFromErrorWhenRuntimeAlreadyRunningClearsLastError(t *testing.T) {
+	svc, fsStore, rt := newTestService(t)
+	installTestPlugin(t, svc, "kandev-plugin-slack")
+	// Force error + stale last_error on the record while the process stays up.
+	if err := svc.SetStatus("kandev-plugin-slack", StatusError); err != nil {
+		t.Fatalf("SetStatus(error): %v", err)
+	}
+	at := time.Now().UTC()
+	rec, _ := fsStore.Get("kandev-plugin-slack")
+	rec.LastError = "stale while still tracked running"
+	rec.LastErrorAt = &at
+	if err := fsStore.Save(rec); err != nil {
+		t.Fatalf("Save(): %v", err)
+	}
+	svc.Registry().Add(rec)
+	if !rt.Running("kandev-plugin-slack") {
+		t.Fatal("precondition: runtime should still report running")
+	}
+
+	if err := svc.Enable("kandev-plugin-slack"); err != nil {
+		t.Fatalf("Enable(): %v", err)
+	}
+	got, _ := svc.Get("kandev-plugin-slack")
+	if got.Status != StatusActive {
+		t.Fatalf("Status = %q, want %q", got.Status, StatusActive)
+	}
+	if got.LastError != "" || got.LastErrorAt != nil {
+		t.Fatalf("last_error not cleared when Start skipped because already running: %q %v",
+			got.LastError, got.LastErrorAt)
+	}
+	// installTestPlugin starts once; Enable must not Start again while Running.
+	if starts := rt.startCallCount("kandev-plugin-slack"); starts != 1 {
+		t.Fatalf("Start call count = %d, want 1 (install only; Enable must skip Start when running)", starts)
 	}
 }
