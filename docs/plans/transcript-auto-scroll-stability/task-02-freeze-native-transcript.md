@@ -20,8 +20,11 @@ spec: "../../specs/ui/transcript-auto-scroll.md"
 ## Verification
 
 ```bash
-cd apps/web && pnpm e2e:run tests/chat/auto-scroll-toggle.spec.ts -- --grep 'disabling while genuinely at the bottom'
-cd apps/web && pnpm e2e:run tests/chat/mobile-auto-scroll-toggle.spec.ts
+cd apps
+pnpm install --frozen-lockfile
+cd web
+pnpm e2e:run tests/chat/auto-scroll-toggle.spec.ts -- --grep 'disabling while genuinely at the bottom'
+pnpm e2e:run tests/chat/mobile-auto-scroll-toggle.spec.ts
 ```
 
 ## Files likely touched

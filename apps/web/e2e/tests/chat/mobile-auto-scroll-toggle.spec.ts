@@ -140,20 +140,31 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
         },
       )
       .toBeLessThan(5);
-    const bottomScrollTop = await list.evaluate((el) => el.scrollTop);
 
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.tap();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
 
     const marker = "New content while disabled at bottom on mobile";
-    await session.sendMessageViaButton(`e2e:message("${marker}")`);
+    await session.sendMessageViaButton(`e2e:delay(500)\ne2e:message("${marker}")`);
+    // Mobile submission clears the composer and appends the user's prompt,
+    // which can resize the transcript before the delayed agent reply. Capture
+    // the frozen position after that submit layout settles so this assertion
+    // isolates movement caused by the incoming content.
+    const frozenScrollTop = await list.evaluate((el) => el.scrollTop);
     await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
       timeout: 15_000,
     });
 
     await expect
-      .poll(async () => list.evaluate((el) => el.scrollTop), { timeout: 2_000 })
-      .toBeLessThanOrEqual(bottomScrollTop + 2);
+      .poll(
+        async () =>
+          list.evaluate(
+            (el, expectedScrollTop) => Math.abs(el.scrollTop - expectedScrollTop),
+            frozenScrollTop,
+          ),
+        { timeout: 2_000 },
+      )
+      .toBeLessThanOrEqual(2);
   });
 });

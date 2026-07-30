@@ -167,6 +167,7 @@ test.describe("Transcript auto-scroll toggle", () => {
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(list).toHaveCSS("overflow-anchor", "none");
 
     // A new message arrives while disabled from the true bottom. The
     // browser's native bottom overflow-anchor must not override the
@@ -178,8 +179,15 @@ test.describe("Transcript auto-scroll toggle", () => {
     );
 
     await expect
-      .poll(async () => list.evaluate((el) => el.scrollTop), { timeout: 2_000 })
-      .toBeLessThanOrEqual(bottomScrollTop + 2);
+      .poll(
+        async () =>
+          list.evaluate(
+            (el, expectedScrollTop) => Math.abs(el.scrollTop - expectedScrollTop),
+            bottomScrollTop,
+          ),
+        { timeout: 2_000 },
+      )
+      .toBeLessThanOrEqual(2);
   });
 
   test("preserves the frozen scroll position across navigating away and back", async ({

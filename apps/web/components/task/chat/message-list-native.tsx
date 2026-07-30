@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, memo, forwardRef, useImperativeHandle } from "react";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
-import { cn } from "@kandev/ui/lib/utils";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { RenderItem } from "@/hooks/use-processed-messages";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
@@ -141,6 +140,7 @@ type NativeMessageListBodyProps = {
   activeTurnId: string | null;
   streamingMessageId: string | null;
   onScrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
+  autoScrollEnabled: boolean;
 };
 
 /** Sentinel, status/footer, and transcript rows — everything below the
@@ -168,6 +168,7 @@ function NativeMessageListBody({
   activeTurnId,
   streamingMessageId,
   onScrollToMessage,
+  autoScrollEnabled,
 }: NativeMessageListBodyProps) {
   return (
     <div className="p-4">
@@ -209,10 +210,11 @@ function NativeMessageListBody({
         footerActionMessages={footerActionMessages}
       />
 
-      {/* The scroll owner disables anchoring while paused, so the browser
-          cannot choose another transcript element as its anchor. This bottom
-          marker keeps enabled auto-scroll pinned to the newest content. */}
-      <div style={{ overflowAnchor: "auto", height: 1 }} />
+      {/* Bottom anchor keeps the view pinned while auto-scroll is enabled.
+          The scroll container disables anchoring entirely while it is off,
+          so status/footer updates cannot choose a different anchor and move
+          the frozen transcript. */}
+      <div style={{ overflowAnchor: autoScrollEnabled ? "auto" : "none", height: 1 }} />
     </div>
   );
 }
@@ -286,10 +288,9 @@ export const NativeMessageList = memo(
     return (
       <SessionPanelContent
         ref={scrollRef}
-        className={cn(
-          "relative chat-message-list p-0",
-          autoScrollEnabled ? "[overflow-anchor:auto]" : "[overflow-anchor:none]",
-        )}
+        className={`relative chat-message-list p-0 ${
+          autoScrollEnabled ? "[overflow-anchor:auto]" : "[overflow-anchor:none]"
+        }`}
       >
         {stickyPromptBar}
         <NativeMessageListBody
@@ -315,6 +316,7 @@ export const NativeMessageList = memo(
           activeTurnId={effectiveActiveTurnId}
           streamingMessageId={streamingMessageId}
           onScrollToMessage={handleScrollToMessage}
+          autoScrollEnabled={autoScrollEnabled}
         />
       </SessionPanelContent>
     );

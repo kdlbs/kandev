@@ -1,7 +1,6 @@
 "use client";
 
-import Link from "@/components/routing/app-link";
-import { IconCircle, IconCircleCheck, IconExternalLink } from "@tabler/icons-react";
+import { IconCircle, IconCircleCheck } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Spinner } from "@kandev/ui/spinner";
 import { cn, formatRelativeTime } from "@/lib/utils";
@@ -9,6 +8,7 @@ import type { Issue } from "@/lib/types/gitlab";
 import type { GitLabLaunchPayload, GitLabTaskPreset } from "./quick-task-launcher";
 import { StartTaskMenu } from "./start-task-menu";
 import { SubscriptionToggle } from "../subscription-toggle";
+import { RowTitleLink } from "./row-title-link";
 
 type IssueListProps = {
   items: Issue[];
@@ -62,15 +62,7 @@ function IssueRow({
     >
       <StateIcon className={cn("h-4 w-4 mt-1 shrink-0", stateClass)} />
       <div className="min-w-0 flex-1">
-        <Link
-          href={issue.web_url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm font-semibold hover:underline inline-flex items-center gap-1.5 truncate cursor-pointer"
-        >
-          <span className="truncate">{issue.title}</span>
-          <IconExternalLink className="h-3 w-3 shrink-0 text-muted-foreground" />
-        </Link>
+        <RowTitleLink href={issue.web_url} title={issue.title} />
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5 text-xs text-muted-foreground">
           <span className="whitespace-nowrap">
             {issue.project_path}#{issue.iid}

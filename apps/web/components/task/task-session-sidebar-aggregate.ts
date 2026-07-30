@@ -99,8 +99,11 @@ function applyActiveKanbanFallback(
   activeSteps: KanbanState["steps"],
   acc: Acc,
 ): void {
-  if (!acc.wfSteps[activeWorkflowId] && activeSteps.length > 0) {
-    for (const step of activeSteps) if (!acc.stepMap.has(step.id)) acc.stepMap.set(step.id, step);
+  // The active kanban slice receives live workflow-step WS updates. Prefer it
+  // over an existing snapshot so completion icons reflect creates, deletes,
+  // and reorders without waiting for the next full snapshot refresh.
+  if (activeSteps.length > 0) {
+    for (const step of activeSteps) acc.stepMap.set(step.id, step);
     acc.wfSteps[activeWorkflowId] = [...activeSteps].sort((a, b) => a.position - b.position);
   }
   // Hydrator's mergeKanbanTasks accumulates tasks across workflow switches, so
