@@ -5,6 +5,7 @@ import (
 
 	"github.com/kandev/kandev/internal/backendapp"
 	"github.com/kandev/kandev/internal/launcher"
+	"github.com/kandev/kandev/internal/task/gitinit"
 )
 
 // Build-time variables injected via -ldflags "-X main.Version=... -X main.Commit=... -X main.BuildTime=..."
@@ -21,6 +22,7 @@ type buildInfo struct {
 	BuildTime string
 }
 
+type helperRunner func(args []string) (int, bool)
 type backendRunner func(args []string, build backendapp.BuildInfo) int
 type launcherRunner func(args []string, build launcher.BuildInfo) int
 
@@ -30,10 +32,19 @@ func main() {
 
 func run(args []string) int {
 	build := buildInfo{Version: Version, Commit: Commit, BuildTime: BuildTime}
-	return dispatch(args, build, backendapp.Run, launcher.Run)
+	return dispatch(args, build, gitinit.RunHelper, backendapp.Run, launcher.Run)
 }
 
-func dispatch(args []string, build buildInfo, backend backendRunner, launch launcherRunner) int {
+func dispatch(
+	args []string,
+	build buildInfo,
+	runHelper helperRunner,
+	backend backendRunner,
+	launch launcherRunner,
+) int {
+	if code, handled := runHelper(args); handled {
+		return code
+	}
 	if len(args) > 0 && args[0] == "__backend" {
 		return backend(args[1:], backendapp.BuildInfo{
 			Version:   build.Version,
