@@ -122,7 +122,7 @@ test.describe("shell command output echo stripping", () => {
     testPage,
     apiClient,
     seedData,
-  }) => {
+  }, testInfo) => {
     // Regression for a report that the workDir-resolved-path fix above
     // still leaked the echo: a command that itself carries an embedded
     // newline (a multi-line script or commit message passed as a single
@@ -177,7 +177,7 @@ test.describe("shell command output echo stripping", () => {
     // Visual evidence: the Output disclosure shows only "start\nhello",
     // never the "$ echo start" / "cat /workspace/..." echo lines.
     await testPage.screenshot({
-      path: "test-results/screenshots/shell-output-multiline-workdir-echo-fixed.png",
+      path: testInfo.outputPath("shell-output-multiline-workdir-echo-fixed.png"),
       fullPage: true,
     });
   });
