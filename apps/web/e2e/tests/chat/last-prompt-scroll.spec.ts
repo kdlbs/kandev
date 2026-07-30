@@ -13,13 +13,6 @@ import {
 } from "./last-prompt-scroll-helpers";
 
 test.describe("@chat last prompt scroll affordance", () => {
-  test.beforeEach(async ({ apiClient }) => {
-    await apiClient.saveUserSettings({
-      show_scroll_to_last_prompt: true,
-      show_scroll_to_start: true,
-    });
-  });
-
   test.afterEach(async ({ apiClient }) => {
     // The anchored-bar test flips this setting; restore the default so later
     // tests in this worker see it again.
@@ -75,6 +68,7 @@ test.describe("@chat last prompt scroll affordance", () => {
       apiClient,
       seedData,
       "disabled-transcript-navigation",
+      { showScrollControls: false },
     );
     const chat = session.activeChat();
 

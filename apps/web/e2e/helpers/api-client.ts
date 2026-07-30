@@ -833,6 +833,7 @@ export class ApiClient {
       terminal_font_size?: number;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
+      show_transcript_auto_scroll_control?: boolean;
       [key: string]: unknown;
     };
   }> {

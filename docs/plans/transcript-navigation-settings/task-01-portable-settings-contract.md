@@ -22,7 +22,7 @@ spec: "../../specs/ui/transcript-navigation-settings.md"
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/user/... ./internal/backendapp/...
+make -C apps/backend test
 cd apps && pnpm --filter @kandev/web test -- --run lib/ssr/user-settings.test.ts lib/ws/handlers/users.test.ts hooks/use-ensure-user-settings.test.ts
 ```
 

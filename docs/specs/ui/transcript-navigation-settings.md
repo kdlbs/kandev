@@ -14,7 +14,7 @@ action is visible.
 
 ## What
 
-- A user can independently show or hide the desktop anchored prompt bar, the scroll-to-last-prompt
+- A user can independently show or hide the desktop-only anchored prompt bar, the scroll-to-last-prompt
   control, the scroll-to-start control, and the per-session transcript auto-scroll control.
 - Users with no saved value start with:
   - **Show anchored prompt bar** off.
