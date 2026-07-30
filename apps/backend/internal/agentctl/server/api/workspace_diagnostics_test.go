@@ -48,3 +48,35 @@ func TestWorkspaceDiagnosticsRejectsInvalidBundleID(t *testing.T) {
 		t.Fatalf("status = %d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestEnsureDiagnosticsIgnoredResolvesLinkedWorktreeGitDir(t *testing.T) {
+	workDir := t.TempDir()
+	commonDir := filepath.Join(workDir, "common.git")
+	gitDir := filepath.Join(commonDir, "worktrees", "linked")
+	if err := os.MkdirAll(filepath.Join(commonDir, "info"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(gitDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(gitDir, "commondir"), []byte("../..\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(
+		filepath.Join(workDir, ".git"),
+		[]byte("gitdir: common.git/worktrees/linked\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	ensureDiagnosticsIgnored(workDir)
+
+	exclude, err := os.ReadFile(filepath.Join(commonDir, "info", "exclude"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(exclude, []byte("/.kandev/")) {
+		t.Fatalf("exclude = %q, want diagnostics pattern", exclude)
+	}
+}

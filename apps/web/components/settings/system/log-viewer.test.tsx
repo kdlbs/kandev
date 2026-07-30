@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LogViewer } from "./log-viewer";
@@ -36,7 +37,11 @@ describe("LogViewer", () => {
       status: "partial",
       warnings: ["One browser did not respond."],
     });
-    render(<LogViewer />);
+    render(
+      <StrictMode>
+        <LogViewer />
+      </StrictMode>,
+    );
 
     expect(screen.getByText("Review before sharing")).toBeTruthy();
     expect(screen.queryByText("Recent log output")).toBeNull();

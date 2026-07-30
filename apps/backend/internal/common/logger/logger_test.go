@@ -18,6 +18,27 @@ type lockedBuffer struct {
 	bytes.Buffer
 }
 
+type blockingWriteCloser struct {
+	mu      sync.Mutex
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+}
+
+func (w *blockingWriteCloser) Write(data []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.once.Do(func() { close(w.started) })
+	<-w.release
+	return len(data), nil
+}
+
+func (w *blockingWriteCloser) Close() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return nil
+}
+
 func (b *lockedBuffer) Write(data []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -160,6 +181,37 @@ func TestNewBackendLoggerRetriesFileActivation(t *testing.T) {
 	if got := readLogFile(t, filepath.Join(logPath, activeBackendLogName)); !strings.Contains(got, "after recovery") {
 		t.Fatalf("recovered file log = %s", got)
 	}
+}
+
+func TestBackendLoggerCloseDoesNotWaitOnBlockedFileWriter(t *testing.T) {
+	writer := &blockingWriteCloser{started: make(chan struct{}), release: make(chan struct{})}
+	fileSink := newAsyncSink(writer, asyncSinkConfig{
+		Name: "file", MaxEntries: 3, MaxBytes: 30, MaxEntryBytes: 20,
+	})
+	stdoutSink := newAsyncSink(discardWriter{}, asyncSinkConfig{
+		Name: "stdout", MaxEntries: 3, MaxBytes: 30, MaxEntryBytes: 20,
+	})
+	runtime := &backendLoggerRuntime{
+		fileSink: fileSink, stdoutSink: stdoutSink, fileWriter: writer,
+		stderr: &lockedBuffer{}, closeTimeout: 20 * time.Millisecond,
+	}
+	if !fileSink.Enqueue(zap.WarnLevel, []byte("warning")) {
+		t.Fatal("warning was rejected")
+	}
+	<-writer.started
+
+	done := make(chan error, 1)
+	go func() { done <- runtime.Close() }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Close succeeded despite blocked file writer")
+		}
+	case <-time.After(100 * time.Millisecond):
+		close(writer.release)
+		t.Fatal("Close exceeded bounded deadline")
+	}
+	close(writer.release)
 }
 
 func TestNewLogger_StdoutHasNoRotator(t *testing.T) {

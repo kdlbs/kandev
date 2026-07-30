@@ -15,12 +15,13 @@ import (
 )
 
 const (
-	textLogFormat      = "text"
-	maxEncodedLogEntry = 256 * 1024
-	fileQueueEntries   = 8192
-	fileQueueBytes     = 8 * 1024 * 1024
-	stdoutQueueEntries = 2048
-	stdoutQueueBytes   = 2 * 1024 * 1024
+	textLogFormat       = "text"
+	maxEncodedLogEntry  = 256 * 1024
+	fileQueueEntries    = 8192
+	fileQueueBytes      = 8 * 1024 * 1024
+	stdoutQueueEntries  = 2048
+	stdoutQueueBytes    = 2 * 1024 * 1024
+	backendCloseTimeout = 2 * time.Second
 )
 
 type BackendLoggingConfig struct {
@@ -34,12 +35,13 @@ type BackendLoggingConfig struct {
 }
 
 type backendLoggerRuntime struct {
-	fileSink   *asyncSink
-	stdoutSink *asyncSink
-	fileWriter *retryDailyWriter
-	stderr     io.Writer
-	closeOnce  sync.Once
-	closeErr   error
+	fileSink     *asyncSink
+	stdoutSink   *asyncSink
+	fileWriter   io.Closer
+	stderr       io.Writer
+	closeTimeout time.Duration
+	closeOnce    sync.Once
+	closeErr     error
 }
 
 func NewBackendLogger(cfg BackendLoggingConfig) (*Logger, error) {
@@ -65,6 +67,7 @@ func NewBackendLogger(cfg BackendLoggingConfig) (*Logger, error) {
 	})
 	runtime := &backendLoggerRuntime{
 		fileSink: fileSink, stdoutSink: stdoutSink, fileWriter: fileWriter, stderr: cfg.Stderr,
+		closeTimeout: backendCloseTimeout,
 	}
 	encoderConfig := backendEncoderConfig()
 	fileCore := newAsyncCore(newLogEncoder(cfg.Format, encoderConfig), fileSink, fileLevel)
@@ -114,21 +117,32 @@ func newLogEncoder(format string, cfg zapcore.EncoderConfig) zapcore.Encoder {
 
 func (r *backendLoggerRuntime) Close() error {
 	r.closeOnce.Do(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		timeout := r.closeTimeout
+		if timeout <= 0 {
+			timeout = backendCloseTimeout
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), timeout)
 		defer cancel()
 		results := make(chan error, 2)
 		go func() { results <- r.fileSink.Close(ctx) }()
 		go func() { results <- r.stdoutSink.Close(ctx) }()
-		for range 2 {
+		for pending := 2; pending > 0; pending-- {
 			select {
 			case err := <-results:
 				r.closeErr = errors.Join(r.closeErr, err)
 			case <-ctx.Done():
 				r.closeErr = errors.Join(r.closeErr, ctx.Err())
-				return
+				pending = 1
 			}
 		}
-		r.closeErr = errors.Join(r.closeErr, r.fileWriter.Close())
+		writerResult := make(chan error, 1)
+		go func() { writerResult <- r.fileWriter.Close() }()
+		select {
+		case err := <-writerResult:
+			r.closeErr = errors.Join(r.closeErr, err)
+		case <-ctx.Done():
+			r.closeErr = errors.Join(r.closeErr, ctx.Err())
+		}
 	})
 	return r.closeErr
 }

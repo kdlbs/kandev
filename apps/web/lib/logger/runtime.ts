@@ -23,7 +23,7 @@ export function setLogIdentity(scope: string | null): void {
 
 export function stageLogEntry(entry: Omit<LogEntry, "identity_scope">): void {
   const scoped = { ...entry, identity_scope: identityScope ?? undefined };
-  getLogBuffer().push(scoped);
+  if (!getLogBuffer().push(scoped)) return;
   if (!identityScope || storageMode === "memory") return;
   const bytes = encodedBytes(scoped);
   if (!makeStagingRoom(entry.level, bytes)) {

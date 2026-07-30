@@ -87,7 +87,13 @@ func cleanupExpiredDiagnostics(root string, cutoff time.Time) {
 }
 
 func ensureDiagnosticsIgnored(workDir string) {
-	excludePath := filepath.Join(workDir, ".git", "info", "exclude")
+	excludePath, err := diagnosticsExcludePath(workDir)
+	if err != nil || excludePath == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(excludePath), 0o700); err != nil {
+		return
+	}
 	content, err := os.ReadFile(excludePath)
 	if err != nil && !os.IsNotExist(err) {
 		return
@@ -101,4 +107,48 @@ func ensureDiagnosticsIgnored(workDir string) {
 	}
 	defer func() { _ = file.Close() }()
 	_, _ = file.WriteString("\n/.kandev/\n")
+}
+
+func diagnosticsExcludePath(workDir string) (string, error) {
+	gitPath := filepath.Join(workDir, ".git")
+	info, err := os.Stat(gitPath)
+	if err == nil && info.IsDir() {
+		return filepath.Join(gitPath, "info", "exclude"), nil
+	}
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	data, err := os.ReadFile(gitPath)
+	if err != nil {
+		return "", err
+	}
+	const prefix = "gitdir:"
+	line := strings.TrimSpace(string(data))
+	if !strings.HasPrefix(line, prefix) {
+		return "", nil
+	}
+	gitDir := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+	if gitDir == "" {
+		return "", nil
+	}
+	if !filepath.IsAbs(gitDir) {
+		gitDir = filepath.Join(workDir, gitDir)
+	}
+	gitDir = filepath.Clean(gitDir)
+	commonData, commonErr := os.ReadFile(filepath.Join(gitDir, "commondir"))
+	if commonErr == nil {
+		commonDir := strings.TrimSpace(string(commonData))
+		if commonDir != "" {
+			if !filepath.IsAbs(commonDir) {
+				commonDir = filepath.Join(gitDir, commonDir)
+			}
+			gitDir = filepath.Clean(commonDir)
+		}
+	} else if !os.IsNotExist(commonErr) {
+		return "", commonErr
+	}
+	return filepath.Join(gitDir, "info", "exclude"), nil
 }

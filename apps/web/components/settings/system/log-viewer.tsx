@@ -20,12 +20,12 @@ export function LogViewer() {
   const [state, setState] = useState<ViewState>("idle");
   const [message, setMessage] = useState("");
   const mounted = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
       mounted.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
 
   const download = async () => {
     setMessage("");
