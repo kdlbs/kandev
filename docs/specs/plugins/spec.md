@@ -136,8 +136,8 @@ install_path: "~/.kandev/plugins/kandev-plugin-slack/1.0.0"
 signed: false
 installed_at: "2026-04-26T10:00:00Z"
 restart_count: 0
-last_error: null
-last_error_at: null
+last_error: ""                 # omitted/empty when healthy; set on transition to error
+last_error_at: null            # RFC3339 timestamp of last_error; cleared with last_error
 ```
 
 `last_error` and `last_error_at` are host-managed runtime diagnostics. When a
@@ -254,8 +254,10 @@ no reverse proxy and no upstream plugin process involved in serving frontend ass
 since the files are already on local disk after install.
 
 Enable/disable/uninstall act on the supervised subprocess: disable stops it (state and
-config preserved); enable respawns it; uninstall stops it and deletes its package,
-record, and state.
+config preserved); enable respawns it from `disabled`, `registered`, or `error` (clearing
+`last_error` / `last_error_at` on success); uninstall stops it and deletes its package,
+record, and state. List/get responses include the full installation record fields,
+including `last_error` and `last_error_at` when status is `error`.
 
 ### Event delivery (kandev -> plugin, gRPC `DeliverEvent`)
 
@@ -579,22 +581,38 @@ error --Disable--> disabled
 | State | Meaning |
 |---|---|
 | `registered` | Package extracted and record written; go-plugin spawn/handshake pending or in flight |
-| `active` | Handshake succeeded and health (`Ping`) passes; events delivered, webhooks proxied |
-| `error` | 3 consecutive `Ping` failures (30s interval, injectable), or the subprocess crashed and restart attempts (backoff, max 5) are exhausted. Events buffered (ring buffer, 100 events, 5-minute TTL). Webhooks return 503 |
-| `disabled` | Operator explicitly disabled. Subprocess stopped. No events, no webhooks. State and config preserved |
+| `active` | Handshake succeeded and health (`Ping`) passes; events delivered, webhooks proxied. `last_error` / `last_error_at` are empty |
+| `error` | 3 consecutive `Ping` failures (30s interval, injectable), the subprocess crashed and restart attempts (backoff, max 5) are exhausted, or a spawn/handshake failed. Events buffered (ring buffer, 100 events, 5-minute TTL). Webhooks return 503. `last_error` holds the operator-facing failure reason and `last_error_at` its timestamp |
+| `disabled` | Operator explicitly disabled. Subprocess stopped. No events, no webhooks. State and config preserved. Sideloads registered by Sync always start here and are never auto-spawned |
 | `uninstalled` | Subprocess stopped, package/record/state deleted (no grace period in v1) |
 
 Health monitoring: kandev's go-plugin client calls `Ping()` on the plugin every 30
 seconds (injectable). 3 consecutive failures -> `error` + inbox item + restart attempt
 with backoff. A subprocess crash (unexpected process exit) triggers an immediate
 restart with backoff (max 5 attempts, then `error`). Next successful handshake/`Ping`
--> `active`, queued events delivered in order, and the persisted failure diagnostic
-is cleared. An operator can manually enable a plugin in `error` to retry its spawn
-and handshake; boot does not automatically retry a persisted `error` state. A
-manual Enable racing the final restart-exhaustion callback must complete without
-deadlock: the manager never waits for a stopping process while holding its
-process registry lock, so the final callback and replacement start can both
-complete.
+-> `active`, `last_error` / `last_error_at` cleared, queued events delivered in
+order. An operator can also manually enable a plugin in `error` to retry its
+spawn and handshake. A manual Enable racing the final restart-exhaustion
+callback must complete without deadlock: the manager never waits for a stopping
+process while holding its process registry lock, so the final callback and
+replacement start can both complete.
+
+### Boot recovery
+
+On backend start, after the filesystem scan (sideloads → `disabled`, missing installs → `error`), kandev attempts one spawn for every managed plugin whose status is `active` **or** `error` and that is not already running:
+
+- Spawn succeeds → status `active`, `last_error` / `last_error_at` cleared.
+- Spawn fails → status remains / becomes `error`, `last_error` / `last_error_at` updated with the failure reason. Boot does **not** tight-loop or schedule further host-level retries for that plugin; the operator uses Enable (or a later backend restart) for another attempt. Runtime supervision still owns crash/health restarts only while a process is live.
+- Status `disabled` (including sideloads) is never auto-spawned.
+
+### Last failure reason
+
+Whenever kandev transitions a managed plugin to `error` (spawn/handshake failure, health degrade after restart exhaustion, missing install path), it MUST persist:
+
+- `last_error` — short operator-facing string (spawn/handshake/runtime error text, truncated if necessary)
+- `last_error_at` — UTC timestamp of that write
+
+Both fields are cleared on any successful transition to `active` (boot recovery, Enable, or healthy status change). They are part of the installation record returned by `GET /api/plugins` and `GET /api/plugins/:id`, written into the on-disk plugin YAML, and shown in Settings → Plugins when status is `error`. Enable MUST be available for `error` plugins (same activate path as disabled/registered) so the operator can retry without calling the API by hand.
 
 ## Permissions
 
@@ -631,6 +649,9 @@ complete.
 - **Failed spawn/handshake, missing install path, or failed restart**: status ->
   `error` with the bounded diagnostic persisted; the Plugins UI exposes **Enable**
   as the manual retry action.
+- **Backend restart while a managed plugin is left in `error`**: kandev attempts
+  exactly one recovery spawn (see "Boot recovery"). Success clears the error fields;
+  failure refreshes them. No host-level tight retry loop at boot.
 - **Diagnostic safety**: persisted failure text is normalized, credential/path
   redacted, and bounded before it is returned by plugin list/detail APIs. Plugin
   stdout is not a durable diagnostic channel.
@@ -639,7 +660,7 @@ complete.
   dropped events since the previous warning.
 - **Plugin returns a gRPC error (or times out) on `DeliverEvent`**: retry up to 3 times
   with exponential backoff (5s, 15s, 45s). After exhaustion, event is logged as failed
-  and dropped.
+  and dropped. This is not a host-level plugin `error` status.
 - **External webhook hits a disabled/error plugin**: kandev returns 503.
 - **Undeclared capability access attempt on a Host RPC**: gRPC `PermissionDenied` with
   a message naming the missing capability.
@@ -649,7 +670,7 @@ complete.
 ## Persistence guarantees
 
 - Plugin installation records (`id`, `version`, `install_path`, capabilities, status,
-  `signed`, `last_error`, `last_error_at`) persist to disk as
+  `signed`, `restart_count`, `last_error`, `last_error_at`) persist to disk as
   `~/.kandev/plugins/<id>.yml` and survive backend restarts.
 - Extracted plugin packages persist at `~/.kandev/plugins/<id>/<version>/` until
   uninstall.
@@ -658,6 +679,8 @@ complete.
   restart.
 - There are no plugin credentials to persist or lose — auth is re-derived from the
   spawn relationship on every process launch.
+- After a backend restart, managed plugins that were `active` or `error` receive one
+  spawn attempt; `disabled` plugins (including sideloads) do not.
 
 ## Scenarios
 
@@ -695,11 +718,11 @@ complete.
 
 - **GIVEN** an active plugin subprocess that crashes, **WHEN** kandev detects the
   process exit, **THEN** kandev immediately attempts a restart with backoff, marks the
-  plugin `error` while buffering events (up to 100 or 5 minutes), and creates an inbox
-  item "Plugin kandev-plugin-slack is unreachable". **WHEN** a subsequent restart
-  attempt succeeds and the handshake completes, **THEN** status returns to `active`
-  and buffered events are delivered in order, with the persisted failure diagnostic
-  cleared.
+  plugin `error` while buffering events (up to 100 or 5 minutes), sets `last_error` /
+  `last_error_at`, and creates an inbox item "Plugin kandev-plugin-slack is
+  unreachable". **WHEN** a subsequent restart attempt succeeds and the handshake
+  completes, **THEN** status returns to `active`, `last_error` / `last_error_at` are
+  cleared, and buffered events are delivered in order.
 
 - **GIVEN** a plugin in `error` with a persisted `last_error`, **WHEN** the operator
   opens Settings > Plugins, **THEN** the row shows the diagnostic and an **Enable**
@@ -724,6 +747,18 @@ complete.
   warnings for that plugin for one minute while counting them. **WHEN** the next
   warning is emitted, **THEN** it includes the aggregate number of drops since the
   previous warning.
+
+- **GIVEN** a managed plugin whose last run left status `error` with no live process,
+  **WHEN** the kandev backend restarts, **THEN** boot attempts exactly one spawn for
+  that plugin alongside any `active` managed plugins. **WHEN** the spawn and handshake
+  succeed, **THEN** status is `active`, `last_error` / `last_error_at` are empty, and
+  the plugin appears healthy in `GET /api/plugins` and Settings → Plugins. **WHEN**
+  the spawn fails, **THEN** status remains `error`, `last_error` / `last_error_at` are
+  refreshed, and boot does not schedule further host-level retries for that plugin.
+
+- **GIVEN** a sideload registered by Sync with status `disabled`, **WHEN** the backend
+  restarts, **THEN** kandev does not auto-spawn it. Boot recovery applies only to
+  managed plugins in `active` or `error`.
 
 - **GIVEN** a plugin whose manifest declares `secrets: false`, **WHEN** the plugin
   calls `Host.RevealSecret`, **THEN** kandev's server interceptor returns gRPC status

@@ -161,3 +161,34 @@ describe("PluginRow auto-update toggle", () => {
     expect(onSetAutoUpdate).toHaveBeenCalledWith(p, null);
   });
 });
+
+describe("PluginRow error status", () => {
+  it("shows Enable and last_error when status is error", () => {
+    const onEnable = vi.fn();
+    render(
+      <PluginRow
+        {...baseProps}
+        onEnable={onEnable}
+        plugin={plugin({
+          status: "error",
+          last_error: "spawn failed: handshake timeout",
+          last_error_at: "2026-07-30T12:00:00Z",
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("plugin-last-error-acme").textContent).toContain(
+      "spawn failed: handshake timeout",
+    );
+    const enable = screen.getByRole("button", { name: "Enable" });
+    fireEvent.click(enable);
+    expect(onEnable).toHaveBeenCalledTimes(1);
+    // Disable remains available so the operator can stop wanting it running.
+    expect(screen.getByRole("button", { name: "Disable" })).toBeTruthy();
+  });
+
+  it("does not render last_error when status is active", () => {
+    render(<PluginRow {...baseProps} plugin={plugin({ status: "active" })} />);
+    expect(screen.queryByTestId("plugin-last-error-acme")).toBeNull();
+  });
+});

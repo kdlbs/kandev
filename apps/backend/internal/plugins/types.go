@@ -60,7 +60,11 @@ var allowedTransitions = map[Status][]Status{
 	StatusRegistered: {StatusActive, StatusError},
 	StatusActive:     {StatusDisabled, StatusError},
 	StatusError:      {StatusActive, StatusDisabled},
-	StatusDisabled:   {StatusActive, StatusError},
+	// disabled → error covers Enable/activate spawn failure from a
+	// deliberately-off plugin (operator retries Enable and the binary fails
+	// handshake). Without this edge SetStatus(Error) no-ops and the row stays
+	// disabled with no last_error.
+	StatusDisabled: {StatusActive, StatusError},
 }
 
 // canTransition reports whether to is a legal single-hop transition from

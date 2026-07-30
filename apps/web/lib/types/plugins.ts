@@ -85,9 +85,14 @@ export interface PluginRecord {
   installed_at: string;
   /** Crash-restart attempts since install (health-check backoff counter). */
   restart_count: number;
-  /** Host-managed, bounded single-line diagnostic for the last failure. */
+  /**
+   * Most recent operator-facing failure reason when status is `error`
+   * (spawn/handshake failure, health degrade after restart exhaustion,
+   * missing install). Empty/absent when healthy. Cleared on successful
+   * transition to active.
+   */
   last_error?: string | null;
-  /** UTC timestamp of the last host-managed failure diagnostic. */
+  /** RFC3339 timestamp of last_error; absent/null when last_error is empty. */
   last_error_at?: string | null;
   last_health_check?: string | null;
   /**

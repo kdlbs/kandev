@@ -893,8 +893,9 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		// error and notify observers so it isn't reported as running while no
 		// process is, before returning the retryable failure.
 		if wasRunning {
-			if setErr := s.SetStatus(id, StatusError); setErr != nil {
-				s.log.Warn("plugins: could not mark plugin errored after an aborted uninstall",
+			if setErr := s.setStatusAndDiagnostic(id, StatusError,
+				errors.New("uninstall aborted while purging plugin secrets"), true); setErr != nil {
+				s.log.Warn("plugins: could not reconcile status after aborted uninstall",
 					zap.String("plugin_id", id), zap.Error(setErr))
 			}
 			s.notifyDeliverer()
@@ -1010,8 +1011,12 @@ func (s *Service) Disable(id string) error {
 const activateStartTimeout = 30 * time.Second
 
 // activate spawns rec's process (if not already running) and transitions it
-// to StatusActive. If the spawn fails, it records the failure and transitions
-// the record to StatusError before returning the spawn error.
+// to StatusActive (clearing last_error via setStatusAndDiagnostic). If the
+// spawn fails, it records StatusError + last_error and returns the spawn
+// error. Idempotent when already StatusActive (the boot-resume/recovery path
+// for plugins that were active before restart): a same-status transition is
+// not an error, it just clears any stale last_error from a prior partial
+// write.
 func (s *Service) activate(rec *store.Record) error {
 	if s.runtime != nil && !s.runtime.Running(rec.ID) {
 		ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
@@ -1024,7 +1029,9 @@ func (s *Service) activate(rec *store.Record) error {
 			return fmt.Errorf("plugins: start %q: %w", rec.ID, err)
 		}
 	}
-	return s.SetStatus(rec.ID, StatusActive)
+	// allowSame=true so an already-active boot resume clears last_error without
+	// tripping the same-status guard; an error/registered record hops to active.
+	return s.setStatusAndDiagnostic(rec.ID, StatusActive, nil, true)
 }
 
 // SetStatus applies a single-hop status transition for id, enforcing the
@@ -1087,8 +1094,9 @@ func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error
 // handleStatusChange is the runtime.Manager OnStatusChange callback (see
 // Provide, where it is bound as a Manager constructor argument): invoked
 // from the supervision loop's own goroutine whenever a running plugin's
-// health transitions. healthy=false drives active -> error; healthy=true
-// drives error -> active plus a Deliverer.Flush (the buffered-event
+// health transitions. healthy=false drives active -> error carrying the
+// runtime's reason as last_error; healthy=true drives error -> active,
+// clears last_error, and Flushes buffered events (the buffered-event
 // recovery replay). Restart count is persisted best-effort afterward.
 func (s *Service) handleStatusChange(id string, healthy bool, reason error) {
 	newStatus := StatusError
@@ -1131,11 +1139,13 @@ func (s *Service) recordRestartCount(id string) {
 
 // StartActivePlugins runs the conservative boot filesystem scan (dir
 // sideloads registered disabled, missing-install detection — see
-// service_sync.go's bootScan) and then spawns every currently-StatusActive,
-// runtime-managed plugin's process. Called once at boot (backendapp's
-// startPluginsSubsystems) so plugins that were active before a restart
-// resume running. A spawn failure is logged and the plugin transitions to
-// StatusError rather than aborting the rest of the boot sequence.
+// service_sync.go's bootScan) and then spawns every managed plugin whose
+// status is StatusActive or StatusError and that is not already running.
+// StatusError is included so a sticky error (e.g. prior spawn/handshake
+// failure) gets one recovery attempt on backend restart; StatusDisabled
+// (including sideloads) is never auto-spawned. One attempt per plugin per
+// boot — no host-level tight loop. Success → active + clear last_error;
+// failure → error + refreshed last_error. Called once at boot.
 func (s *Service) StartActivePlugins(ctx context.Context) {
 	s.logBootScanResult(s.bootScan(ctx))
 
@@ -1143,23 +1153,28 @@ func (s *Service) StartActivePlugins(ctx context.Context) {
 		return
 	}
 	for _, rec := range s.List() {
-		if rec.Status != StatusActive || !rec.IsManaged() || s.runtime.Running(rec.ID) {
+		if !s.shouldSpawnAtBoot(rec) {
 			continue
 		}
-		if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-			s.log.Warn("plugins: failed to spawn active plugin at boot",
-				zap.String("plugin_id", rec.ID), zap.Error(err))
-			if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
-				s.log.Warn("plugins: could not persist boot activation failure",
-					zap.String("plugin_id", rec.ID), zap.Error(setErr))
-			} else {
-				// The deliverer was refreshed before boot activation began, so
-				// reconcile it after an active plugin fails to spawn. Otherwise
-				// its worker would continue treating the plugin as active.
-				s.notifyDeliverer()
-			}
+		if err := s.activate(rec); err != nil {
+			s.log.Warn("plugins: failed to spawn plugin at boot",
+				zap.String("plugin_id", rec.ID), zap.String("status", rec.Status), zap.Error(err))
+			// activate already recorded StatusError + last_error. The deliverer
+			// was refreshed before boot activation began, so reconcile it after
+			// a plugin fails to spawn — otherwise its worker would keep treating
+			// the plugin as active.
+			s.notifyDeliverer()
 		}
 	}
+}
+
+// shouldSpawnAtBoot reports whether StartActivePlugins should attempt one
+// spawn for rec: managed, not already running, and status active or error.
+func (s *Service) shouldSpawnAtBoot(rec *store.Record) bool {
+	if rec == nil || !rec.IsManaged() || s.runtime.Running(rec.ID) {
+		return false
+	}
+	return rec.Status == StatusActive || rec.Status == StatusError
 }
 
 // logBootScanResult logs what the boot filesystem scan found, if anything —

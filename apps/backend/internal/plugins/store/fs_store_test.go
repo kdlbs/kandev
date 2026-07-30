@@ -58,6 +58,37 @@ func TestFSStore_Save_WritesRecordFile(t *testing.T) {
 	}
 }
 
+func TestFSStore_Save_RoundTripsLastErrorFields(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	at := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	rec := testRecord("kandev-plugin-slack")
+	rec.Status = StatusError
+	rec.LastError = "spawn failed: handshake timeout"
+	rec.LastErrorAt = &at
+
+	if err := s.Save(rec); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+
+	got, err := s.Get("kandev-plugin-slack")
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if got.LastError != "spawn failed: handshake timeout" {
+		t.Fatalf("Get().LastError = %q, want %q", got.LastError, "spawn failed: handshake timeout")
+	}
+	if got.LastErrorAt == nil {
+		t.Fatal("Get().LastErrorAt = nil, want non-nil timestamp")
+	}
+	if !got.LastErrorAt.UTC().Equal(at) {
+		t.Fatalf("Get().LastErrorAt = %v, want %v", got.LastErrorAt.UTC(), at)
+	}
+}
+
+
+
 func TestFSStore_Get_UnknownIDReturnsErrNotFound(t *testing.T) {
 	dir := t.TempDir()
 	s := NewFSStore(dir)

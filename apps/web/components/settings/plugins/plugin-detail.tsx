@@ -112,6 +112,14 @@ function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
             </span>
             <PluginRepoLink url={plugin.repo_url} />
           </div>
+          {plugin.status === "error" && plugin.last_error ? (
+            <p
+              data-testid={`plugin-last-error-${plugin.id}`}
+              className="text-xs text-destructive break-words"
+            >
+              {plugin.last_error}
+            </p>
+          ) : null}
           {plugin.description && (
             <p className="text-sm text-muted-foreground">{plugin.description}</p>
           )}
