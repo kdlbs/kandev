@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/keep-transcript-position/spec.md
 created: 2026-07-30
-status: implemented
+status: in-review
 ---
 
 # Implementation Plan: Keep Transcript Scroll Position On Navigation
