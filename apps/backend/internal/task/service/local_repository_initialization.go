@@ -201,14 +201,27 @@ func (s *Service) closeLocalRepositoryStaging(staging *localRepositoryStaging) {
 }
 
 func initializeGitRepository(ctx context.Context, targetPath string, targetDirectory *os.File) error {
-	gitTarget := targetPath
-	var extraFiles []*os.File
+	command := exec.CommandContext(ctx, "git", "init", "--initial-branch=main")
 	if inheritedPath := inheritedDirectoryPath(3); inheritedPath != "" {
-		gitTarget = inheritedPath
-		extraFiles = []*os.File{targetDirectory}
+		// Hand git the descriptor we already verified, so it re-opens the same
+		// inode rather than resolving a name that could have been swapped.
+		command.Args = append(command.Args, inheritedPath)
+		command.ExtraFiles = []*os.File{targetDirectory}
+	} else {
+		// No usable descriptor path: run git *inside* the staging directory with
+		// no path argument. The child resolves the name exactly once, in its own
+		// chdir, and git then initialises the working directory without calling
+		// mkdir at all. Passing the path as an argument would work too, but makes
+		// git resolve it again for every operation.
+		//
+		// The staging directory this runs against is randomly named, mode 0700,
+		// and verified to be a non-symlink directory we own and that is empty
+		// (createLocalRepositoryStaging). A swap during the run is still caught:
+		// the caller re-checks os.SameFile before publishing, publication is an
+		// exclusive rename, and cleanupInitializedLocalRepository refuses to
+		// delete a directory whose identity changed.
+		command.Dir = targetPath
 	}
-	command := exec.CommandContext(ctx, "git", "init", "--initial-branch=main", gitTarget)
-	command.ExtraFiles = extraFiles
 	output, err := command.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
@@ -290,15 +303,24 @@ func removeLocalRepositoryRootTree(root *os.Root, name string) error {
 	return root.Remove(name)
 }
 
+// inheritedDirectoryPath returns a path that re-opens an inherited descriptor,
+// or "" when the platform has none that `git init` will accept.
+//
+// Linux's /proc/self/fd/N is a magic symlink: git resolves it to the directory
+// we already hold open, so the path it operates on cannot be swapped between our
+// checks and its own open.
+//
+// The BSD /dev/fd/N form looks equivalent and is not. On darwin, fdescfs
+// synthesises the entry as a read-only directory (`dr--------`), and
+// `git init /dev/fd/3` dies with `cannot mkdir /dev/fd/3: File exists` — the
+// mkdir returns EEXIST and git's follow-up check on that synthetic entry does
+// not pass. Three of this package's own tests fail on macOS because of it.
+// initializeGitRepository takes the chdir route there instead.
 func inheritedDirectoryPath(fd int) string {
-	switch runtime.GOOS {
-	case "linux":
+	if runtime.GOOS == "linux" {
 		return "/proc/self/fd/" + strconv.Itoa(fd)
-	case "darwin", "freebsd", "openbsd", "netbsd":
-		return "/dev/fd/" + strconv.Itoa(fd)
-	default:
-		return ""
 	}
+	return ""
 }
 
 func localRepositoryTargetMatches(targetPath string, createdTarget fs.FileInfo) bool {
