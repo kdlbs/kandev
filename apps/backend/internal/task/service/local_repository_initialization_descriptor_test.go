@@ -7,16 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-
-	"github.com/kandev/kandev/internal/task/gitinit"
 )
-
-func TestMain(m *testing.M) {
-	if code, handled := gitinit.RunHelper(os.Args[1:]); handled {
-		os.Exit(code)
-	}
-	os.Exit(m.Run())
-}
 
 func TestInitializeGitRepositoryDoesNotFollowReplacedDirectoryPath(t *testing.T) {
 	parent := t.TempDir()
@@ -28,7 +19,7 @@ func TestInitializeGitRepositoryDoesNotFollowReplacedDirectoryPath(t *testing.T)
 	if err != nil {
 		t.Fatalf("openLocalRepositoryDirectory: %v", err)
 	}
-	defer func() { _ = directory.Close() }()
+	t.Cleanup(func() { _ = directory.Close() })
 
 	openedDirectory := filepath.Join(parent, "opened-directory")
 	if err := os.Rename(staging, openedDirectory); err != nil {

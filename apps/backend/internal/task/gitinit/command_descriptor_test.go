@@ -11,13 +11,6 @@ import (
 	"testing"
 )
 
-func TestMain(m *testing.M) {
-	if code, handled := RunHelper(os.Args[1:]); handled {
-		os.Exit(code)
-	}
-	os.Exit(m.Run())
-}
-
 func TestCommandContextInitializesInheritedDirectory(t *testing.T) {
 	parent := t.TempDir()
 	path := filepath.Join(parent, "staging")
@@ -28,7 +21,7 @@ func TestCommandContextInitializesInheritedDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open staging: %v", err)
 	}
-	defer func() { _ = directory.Close() }()
+	t.Cleanup(func() { _ = directory.Close() })
 
 	openedPath := filepath.Join(parent, "opened")
 	if err := os.Rename(path, openedPath); err != nil {
@@ -64,7 +57,7 @@ func TestCommandContextRejectsMissingGit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open directory: %v", err)
 	}
-	defer func() { _ = directory.Close() }()
+	t.Cleanup(func() { _ = directory.Close() })
 
 	command, err := CommandContext(context.Background(), directory.Name(), directory)
 	if err == nil {
@@ -77,11 +70,12 @@ func TestRunHelperRejectsNonDirectoryDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Pipe: %v", err)
 	}
-	defer func() { _ = readPipe.Close() }()
-	defer func() { _ = writePipe.Close() }()
+	t.Cleanup(func() { _ = readPipe.Close() })
+	t.Cleanup(func() { _ = writePipe.Close() })
 
 	command := exec.Command(os.Args[0], helperArgument, os.Args[0])
 	command.ExtraFiles = []*os.File{readPipe}
+	command.Env = withHelperEnvironment(os.Environ())
 	output, err := command.CombinedOutput()
 	if err == nil {
 		t.Fatal("helper succeeded with a pipe as fd 3")

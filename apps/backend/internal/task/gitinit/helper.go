@@ -4,12 +4,15 @@ package gitinit
 import (
 	"fmt"
 	"os"
+	"strings"
 )
 
-const helperArgument = "__git-init-open-directory"
+const (
+	helperArgument            = "__git-init-open-directory"
+	helperEnvironmentVariable = "KANDEV_INTERNAL_GIT_INIT_HELPER"
+)
 
-// RunHelper handles the internal inherited-directory command when requested.
-func RunHelper(args []string) (int, bool) {
+func runHelper(args []string) (int, bool) {
 	if len(args) == 0 || args[0] != helperArgument {
 		return 0, false
 	}
@@ -18,4 +21,20 @@ func RunHelper(args []string) (int, bool) {
 		return 2, true
 	}
 	return runInheritedDirectory(args[1]), true
+}
+
+func withHelperEnvironment(environment []string) []string {
+	filtered := withoutHelperEnvironment(environment)
+	return append(filtered, helperEnvironmentVariable+"=1")
+}
+
+func withoutHelperEnvironment(environment []string) []string {
+	prefix := helperEnvironmentVariable + "="
+	filtered := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		if !strings.HasPrefix(entry, prefix) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }

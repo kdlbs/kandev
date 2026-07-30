@@ -14,6 +14,17 @@ import (
 
 const inheritedDirectoryFD = 3
 
+// init handles the explicitly marked helper subprocess before a test binary or
+// another Kandev entry point can interpret the private helper argument.
+func init() {
+	if os.Getenv(helperEnvironmentVariable) != "1" {
+		return
+	}
+	if code, handled := runHelper(os.Args[1:]); handled {
+		os.Exit(code)
+	}
+}
+
 // CommandContext creates a Git initialization command bound to targetDirectory.
 func CommandContext(ctx context.Context, _ string, targetDirectory *os.File) (*exec.Cmd, error) {
 	gitPath, err := exec.LookPath("git")
@@ -32,6 +43,7 @@ func CommandContext(ctx context.Context, _ string, targetDirectory *os.File) (*e
 	}
 	command := exec.CommandContext(ctx, executable, helperArgument, gitPath)
 	command.ExtraFiles = []*os.File{targetDirectory}
+	command.Env = withHelperEnvironment(os.Environ())
 	return command, nil
 }
 
@@ -40,7 +52,11 @@ func runInheritedDirectory(gitPath string) int {
 		fmt.Fprintf(os.Stderr, "git init helper: enter inherited directory: %v\n", err)
 		return 1
 	}
-	if err := unix.Exec(gitPath, []string{"git", "init", "--initial-branch=main"}, os.Environ()); err != nil {
+	if err := unix.Exec(
+		gitPath,
+		[]string{"git", "init", "--initial-branch=main"},
+		withoutHelperEnvironment(os.Environ()),
+	); err != nil {
 		fmt.Fprintf(os.Stderr, "git init helper: execute git: %v\n", err)
 		return 1
 	}
