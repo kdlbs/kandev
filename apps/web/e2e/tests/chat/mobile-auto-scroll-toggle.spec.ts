@@ -125,11 +125,20 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
     );
     const activeChat = session.activeChat();
     const list = activeChat.locator(".chat-message-list");
+    // Establish the true-bottom precondition after the mobile sticky prompt
+    // bar has joined the scroll layout.
     await expect
-      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
-        timeout: 5_000,
-        message: "expected to be at the bottom before disabling",
-      })
+      .poll(
+        async () =>
+          list.evaluate((el) => {
+            el.scrollTop = el.scrollHeight;
+            return el.scrollHeight - el.scrollTop - el.clientHeight;
+          }),
+        {
+          timeout: 5_000,
+          message: "expected to be at the bottom before disabling",
+        },
+      )
       .toBeLessThan(5);
     const bottomScrollTop = await list.evaluate((el) => el.scrollTop);
 

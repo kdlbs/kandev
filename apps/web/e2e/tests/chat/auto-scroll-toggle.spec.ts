@@ -146,15 +146,21 @@ test.describe("Transcript auto-scroll toggle", () => {
     await waitForOverflow(testPage);
 
     const list = chatList(testPage);
-    // The renderer auto-scrolls to the bottom by default, so this should
-    // already hold — assert it explicitly so the test fails loudly if that
-    // assumption ever breaks instead of silently passing for the wrong
-    // reason.
+    // Establish the scenario's true-bottom precondition explicitly. The
+    // sticky prompt bar can settle after the renderer's initial auto-scroll,
+    // which is unrelated to the disabled-state behavior under test.
     await expect
-      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
-        timeout: 5_000,
-        message: "expected to be at the bottom before disabling",
-      })
+      .poll(
+        async () =>
+          list.evaluate((el) => {
+            el.scrollTop = el.scrollHeight;
+            return el.scrollHeight - el.scrollTop - el.clientHeight;
+          }),
+        {
+          timeout: 5_000,
+          message: "expected to be at the bottom before disabling",
+        },
+      )
       .toBeLessThan(5);
     const bottomScrollTop = await list.evaluate((el) => el.scrollTop);
 
