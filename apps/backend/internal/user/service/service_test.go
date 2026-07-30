@@ -285,18 +285,26 @@ func TestApplyBasicSettingsShowAnchoredPromptBar(t *testing.T) {
 }
 
 func TestApplyBasicSettingsTranscriptNavigation(t *testing.T) {
-	settings := &models.UserSettings{ShowScrollToLastPrompt: true, ShowScrollToStart: true}
+	settings := &models.UserSettings{
+		ShowScrollToLastPrompt:          true,
+		ShowScrollToStart:               true,
+		ShowTranscriptAutoScrollControl: true,
+	}
 	if err := applyBasicSettings(
 		settings,
-		&UpdateUserSettingsRequest{ShowScrollToLastPrompt: ptr(false)},
+		&UpdateUserSettingsRequest{
+			ShowScrollToLastPrompt:          ptr(false),
+			ShowTranscriptAutoScrollControl: ptr(false),
+		},
 	); err != nil {
 		t.Fatalf("apply settings: %v", err)
 	}
-	if settings.ShowScrollToLastPrompt || !settings.ShowScrollToStart {
+	if settings.ShowScrollToLastPrompt || !settings.ShowScrollToStart || settings.ShowTranscriptAutoScrollControl {
 		t.Fatalf(
-			"transcript controls = (%t, %t), want (false, true)",
+			"transcript controls = (%t, %t, %t), want (false, true, false)",
 			settings.ShowScrollToLastPrompt,
 			settings.ShowScrollToStart,
+			settings.ShowTranscriptAutoScrollControl,
 		)
 	}
 }

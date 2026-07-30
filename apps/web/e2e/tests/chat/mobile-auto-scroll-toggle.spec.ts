@@ -45,6 +45,32 @@ async function seedOverflowingTask(
 }
 
 test.describe("Mobile transcript auto-scroll toggle", () => {
+  test("can be hidden without changing the mobile transcript auto-scroll default", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({ show_transcript_auto_scroll_control: false });
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Auto-scroll Toggle Hidden",
+    );
+    const list = session.activeChat().locator(".chat-message-list");
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.clientHeight), {
+        timeout: 15_000,
+        message: "Waiting for chat to overflow",
+      })
+      .toBeGreaterThan(200);
+
+    await expect(session.chatStatusBar().getByTestId("auto-scroll-toggle-button")).toHaveCount(0);
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+      .toBeLessThan(25);
+  });
+
   test("is reachable and toggles by touch", async ({ testPage, apiClient, seedData }) => {
     const session = await seedOverflowingTask(
       testPage,

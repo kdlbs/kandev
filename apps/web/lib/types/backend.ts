@@ -406,6 +406,7 @@ export type UserSettingsUpdatedPayload = {
   show_anchored_prompt_bar?: boolean;
   show_scroll_to_last_prompt?: boolean;
   show_scroll_to_start?: boolean;
+  show_transcript_auto_scroll_control?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
