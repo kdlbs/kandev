@@ -117,9 +117,13 @@ describe("aggregateSidebarTasks", () => {
       snapshots,
       "wf-1",
       [],
-      [makeStep("s1", 0, { title: "Active Step" })],
+      [makeStep("s1", 2, { title: "Active Step" })],
     );
     expect(result.stepsByWorkflowId["wf-1"][0].title).toBe("Active Step");
+    expect(result.allSteps.find((step) => step.id === "s1")).toMatchObject({
+      title: "Active Step",
+      position: 2,
+    });
   });
 
   it("deduplicates steps across workflows by id", () => {
