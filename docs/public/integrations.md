@@ -94,8 +94,10 @@ must be scoped and rotated independently.
 
 ### Choose task Git credentials
 
-The **Task Git credentials** setting is separate from the workspace automation connection. It
-controls how GitHub HTTPS and `gh` authenticate *inside newly launched task processes*:
+Within **Workspace GitHub access**, select **Connect GitHub** or **Change connection** to manage
+both the workspace automation connection and **Task Git access**. The page keeps a compact summary
+of the saved task access mode. Task Git access controls how GitHub HTTPS and `gh` authenticate
+*inside newly launched task processes*:
 
 - **Managed workspace credentials** (the default) uses the selected workspace PAT, named GitHub
   CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. The task

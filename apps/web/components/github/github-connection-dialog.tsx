@@ -20,11 +20,13 @@ import {
   DrawerTrigger,
 } from "@kandev/ui/drawer";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type { TaskGitCredentialsState } from "@/hooks/domains/github/use-task-git-credentials";
 import type { GitHubStatus } from "@/lib/types/github";
 import { GitHubAuthMethodList, type GitHubAutomationMethod } from "./github-auth-method-list";
 import { GitHubAppConnectionPanel } from "./github-app-connection-panel";
 import { GitHubCLIForm } from "./github-cli-form";
 import { GitHubPATForm } from "./github-pat-form";
+import { GitHubTaskAccessForm } from "./github-task-credentials-section";
 
 function methodForStatus(status: GitHubStatus): GitHubAutomationMethod {
   if (status.automation?.source === "github_app_installation") return "app";
@@ -38,13 +40,17 @@ const description =
 function ConnectionBody({
   method,
   workspaceId,
+  open,
   onMethodChange,
   onSaved,
+  taskAccess,
 }: {
   method: GitHubAutomationMethod;
   workspaceId: string;
+  open: boolean;
   onMethodChange: (method: GitHubAutomationMethod) => void;
   onSaved: () => void;
+  taskAccess: TaskGitCredentialsState;
 }) {
   return (
     <div className="space-y-5">
@@ -54,6 +60,7 @@ function ConnectionBody({
         {method === "cli" && <GitHubCLIForm workspaceId={workspaceId} onSaved={onSaved} />}
         {method === "app" && <GitHubAppConnectionPanel workspaceId={workspaceId} />}
       </div>
+      <GitHubTaskAccessForm open={open} taskAccess={taskAccess} onSaved={onSaved} />
     </div>
   );
 }
@@ -62,10 +69,12 @@ export function GitHubConnectionDialog({
   status,
   workspaceId,
   onSaved,
+  taskAccess,
 }: {
   status: GitHubStatus;
   workspaceId: string;
   onSaved: () => void;
+  taskAccess: TaskGitCredentialsState;
 }) {
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<GitHubAutomationMethod>(() => methodForStatus(status));
@@ -98,8 +107,10 @@ export function GitHubConnectionDialog({
     <ConnectionBody
       method={method}
       workspaceId={workspaceId}
+      open={open}
       onMethodChange={setMethod}
       onSaved={saved}
+      taskAccess={taskAccess}
     />
   );
 

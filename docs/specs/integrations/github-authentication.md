@@ -1,7 +1,7 @@
 ---
 status: draft
 created: 2026-07-19
-amended: 2026-07-28
+amended: 2026-07-30
 owner: Kandev
 ---
 
@@ -50,6 +50,11 @@ automation under different GitHub Apps without operating separate Kandev deploym
   workspace automation connection. **Inherit executor Git credentials** injects no GitHub broker
   helper or `gh` shim: Local and Worktree tasks use host-visible Git/SSH credentials, while remote
   tasks use credentials configured in that executor.
+- Workspace settings present the automation identity and task Git credential routing as one
+  **Workspace GitHub access** group. The page shows a compact read-only summary of both effective
+  choices; the existing **Change GitHub connection** dialog contains the full controls for the
+  automation method and task routing policy. The task policy remains independent in behavior and
+  persistence even though the related choices share one configuration surface.
 - For Kandev-managed GitHub checkouts used by Local and Worktree tasks, the selected task policy
   also controls the persisted `origin` transport. Managed routing uses canonical GitHub HTTPS.
   Executor inheritance uses the host's detected `gh` clone protocol, including SSH, and reconciles
@@ -418,10 +423,14 @@ registration and never creates a global default.
   command. The method chooser uses a menu/list with PAT, GitHub CLI, and GitHub App descriptions,
   not a segmented tab control.
 - Method descriptions state where the credential is stored/resolved and how managed tasks receive
-  it. A separate **Task Git credentials** setting visibly explains **Managed workspace
-  credentials** and **Inherit executor Git credentials**, including local/Worktree versus remote
-  behavior and explicit profile-token precedence. An information icon provides the complete
-  per-method delivery explanation as supplementary help.
+  it. The same access group shows a compact **Task access** summary and the **Change GitHub
+  connection** dialog visibly explains and edits **Managed workspace credentials** and **Inherit
+  executor Git credentials**, including local/Worktree versus remote behavior and explicit
+  profile-token precedence. The page does not repeat those controls in a standalone settings
+  section.
+- Changing task access is an explicit dialog submission with its own success/error feedback. It
+  does not implicitly replace the workspace automation connection, and changing the automation
+  method does not silently change the task policy.
 - GitHub App selection first explains when to use it and the sharing/isolation trade-off, then lists
   known registrations and actions to **Add existing App** or **Create new App**.
 - The import guide provides copyable callback, setup, and webhook URLs; required permissions/events;
@@ -477,6 +486,12 @@ registration and never creates a global default.
 - **GIVEN** a workspace selects executor inheritance, **WHEN** a Local/Worktree or remote task
   launches, **THEN** Kandev injects no broker helper/shim and the task uses host-visible or
   executor-configured credentials respectively.
+- **GIVEN** a configured workspace, **WHEN** the user views Workspace GitHub access, **THEN** one
+  compact summary identifies both the workspace automation identity and the effective task access
+  mode without rendering a separate Task Git credentials settings section.
+- **GIVEN** either task access mode, **WHEN** the user opens Change GitHub connection and submits
+  the other mode, **THEN** the dialog persists that policy, reports the result, and the page summary
+  reflects the saved mode without changing the selected automation identity.
 - **GIVEN** the host `gh` clone protocol is SSH and a Kandev-managed GitHub checkout currently has
   an HTTPS `origin`, **WHEN** the workspace selects executor inheritance and launches a Local or
   Worktree task, **THEN** Kandev changes that managed checkout's `origin` to the canonical SSH URL
@@ -509,6 +524,9 @@ registration and never creates a global default.
   exposing the token.
 - **GIVEN** desktop and mobile viewports, **WHEN** users complete every App flow, **THEN** actions and
   disclosures remain usable without clipping, overlap, or desktop-only capability.
+- **GIVEN** a mobile coarse-pointer viewport, **WHEN** the user opens Change GitHub connection,
+  **THEN** the task access controls share the existing full-height drawer's single scroll owner,
+  remain touch reachable, clear the safe area, and introduce no horizontal overflow.
 - **GIVEN** desktop fine-pointer and mobile coarse-pointer task views, **WHEN** the branch
   disclosure is opened, **THEN** both show the same credential policy, method, actor truth, and
   transport without horizontal overflow.

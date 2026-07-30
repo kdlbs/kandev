@@ -68,23 +68,39 @@ test.describe("GitHub workspace settings", () => {
     }
   });
 
-  test("saves the explicit task Git credential policy", async ({
+  test("configures task Git access from the workspace connection dialog", async ({
     testPage,
     apiClient,
     seedData,
     prCapture,
   }) => {
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
-    await expect(testPage.getByRole("heading", { name: "Task Git credentials" })).toBeVisible();
-
-    await testPage.getByRole("radio", { name: "Inherit executor Git credentials" }).click();
-    await prCapture.screenshot("desktop-task-git-credentials", {
-      caption: "Workspace task Git credential policy",
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
     });
-    await testPage.getByTestId("settings-floating-save").getByRole("button").click();
-    await expect(testPage.getByText("Task Git credential settings saved")).toBeVisible({
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    const automation = testPage.getByTestId("github-workspace-automation");
+    await expect(automation.getByTestId("github-task-access-summary")).toContainText(
+      "Managed workspace credentials",
+    );
+    await expect(testPage.getByRole("heading", { name: "Task Git credentials" })).toHaveCount(0);
+
+    await automation.getByRole("button", { name: "Change connection" }).click();
+    const dialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });
+    await expect(dialog.getByRole("heading", { name: "Task Git access" })).toBeVisible();
+    await dialog.getByRole("radio", { name: "Inherit executor Git credentials" }).click();
+    await testPage.waitForTimeout(300);
+    await prCapture.screenshot("desktop-task-git-access-dialog", {
+      caption: "Task Git access is configured alongside the workspace connection",
+    });
+    await dialog.getByRole("button", { name: "Save task access" }).click();
+    await expect(testPage.getByText("Task Git access saved")).toBeVisible({
       timeout: 10_000,
     });
+    await expect(dialog).not.toBeVisible();
+    await expect(automation.getByTestId("github-task-access-summary")).toContainText(
+      "Inherit executor Git credentials",
+    );
 
     const response = await apiClient.rawRequest(
       "GET",
@@ -92,6 +108,13 @@ test.describe("GitHub workspace settings", () => {
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ task_git_credentials_mode: "executor" });
+
+    await automation.getByRole("button", { name: "Change connection" }).click();
+    await expect(
+      testPage
+        .getByRole("dialog", { name: "Change GitHub connection" })
+        .getByRole("radio", { name: "Inherit executor Git credentials" }),
+    ).toBeChecked();
   });
 
   test("repository scope is saved per workspace and filters the GitHub PR list", async ({

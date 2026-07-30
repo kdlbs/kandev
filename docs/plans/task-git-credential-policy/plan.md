@@ -111,19 +111,24 @@ Confirmed root causes:
 
 ## Frontend
 
-### Task Git credentials settings
+### Unified GitHub access configuration
 
 - Extend `GitHubWorkspaceSettings` and `UpdateGitHubWorkspaceSettingsRequest` in
   `apps/web/lib/types/github.ts`.
-- Add `apps/web/components/github/github-task-credentials-section.tsx`, registered with
-  `useSettingsSaveContributor`, with two explicit choices:
-  **Managed workspace credentials** and **Inherit executor Git credentials**.
+- Refactor `apps/web/components/github/github-task-credentials-section.tsx` from a standalone
+  settings section into reusable task-access summary and dialog controls with two explicit choices:
+  **Managed workspace credentials** and **Inherit executor Git credentials**. The dialog submission
+  owns its draft, explicit save, failure feedback, and saved baseline.
 - Visible copy must explain local/Worktree host behavior, remote executor behavior, profile-token
-  precedence, and when each choice applies. Reuse the repository-scope responsive help pattern:
-  tooltip/focus on a fine pointer and a 44px information-button Drawer on a coarse pointer.
+  precedence, and when each choice applies.
 - Update `github-auth-method-list.tsx`, `github-connection-dialog.tsx`, and `github-settings.tsx`
   so PAT, named CLI, and App cards state where their credential is stored/resolved and how managed
-  tasks receive it. The information disclosure supplements rather than replaces this text.
+  tasks receive it; the task policy controls live below the method controls in the same bounded
+  dialog/drawer. Remove the standalone Task Git credentials section from the settings page.
+- Update `github-status.tsx` so the Workspace GitHub access summary shows the current task access
+  mode beside the automation identity and refreshes after a successful dialog submission.
+- Desktop retains the bounded dialog. Mobile retains the existing full-height Drawer, one internal
+  scroll owner, safe-area padding, 44px controls, and no horizontal overflow.
 
 ### Changes branch credential disclosure
 
@@ -180,10 +185,11 @@ Confirmed root causes:
   **File:** `apps/backend/internal/github/auth_resolver_test.go`.  
   **How:** deterministic fake clock and call counter.
 - **What:** settings drafts load, save, discard, and explain both policies and every automation
-  method.  
-  **File:** new component/model tests beside
-  `apps/web/components/github/github-task-credentials-section.tsx`.  
-  **How:** mocked API promises and settings-save provider; keyboard-focus help assertion.
+  method.
+  **File:** `apps/web/components/github/github-connection-dialog.test.tsx` and focused tests beside
+  `apps/web/components/github/github-task-credentials-section.tsx` if state is extracted.
+  **How:** mocked workspace-settings API promises; verify compact summary, explicit dialog save,
+  close/discard behavior, refresh, and failure retention.
 - **What:** valid/malformed/missing session snapshots produce truthful disclosure labels, never an
   inferred actor.  
   **File:** new Changes credential view-model test and focused header component test.  
@@ -195,16 +201,18 @@ Targeted pre-PR commands are recorded in the task files.
 
 ## E2E Tests
 
-- **Scenario:** GIVEN workspace settings, WHEN the user switches to executor inheritance and saves,
-  THEN the API persists `executor`; discard/reload and switching back to managed remain coherent,
-  and the desktop help names PAT/CLI/App delivery and profile-token precedence.  
+- **Scenario:** GIVEN workspace settings, WHEN the user sees the compact Task access summary, opens
+  Change GitHub connection, switches to executor inheritance, and explicitly saves, THEN the API
+  persists `executor`, the summary updates, reopening retains the saved mode, and the automation
+  identity remains unchanged.
   **File:** extend
   `apps/web/e2e/tests/integrations/github-workspace-settings.spec.ts`.
-- **Scenario:** GIVEN a coarse-pointer settings viewport, WHEN the task-credential information icon
-  is tapped, THEN a Drawer contains the same delivery explanation, controls meet 44px targets, and
-  the page has no horizontal overflow.  
+- **Scenario:** GIVEN a coarse-pointer settings viewport, WHEN Change GitHub connection opens, THEN
+  its full-height Drawer contains the task access controls in the same single scroll body, the
+  controls meet 44px targets, saving updates the page summary, and neither surface has horizontal
+  overflow.
   **File:** extend
-  `apps/web/e2e/tests/integrations/mobile-github-auth-settings.spec.ts`.
+  `apps/web/e2e/tests/integrations/mobile-github-workspace-settings.spec.ts`.
 - **Scenario:** GIVEN a session seeded with a managed CLI or App snapshot, WHEN a desktop user
   hovers/focuses the Changes branch trigger, THEN branch/base information and launch-time actor,
   method, and managed transport are visible.  
@@ -223,6 +231,9 @@ Production E2E runs only after rebuilding backend and Vite artifacts.
 - Update `docs/public/integrations.md`, `docs/public/executors.md`, and
   `docs/public/use-kandev.md` to separate workspace automation method from task credential policy,
   describe named CLI brokerage, explain executor inheritance, and document the Changes snapshot.
+- Update `docs/public/integrations.md` so users find task access inside **Change GitHub connection**
+  and understand the compact Workspace GitHub access summary; do not describe a standalone Task Git
+  credentials section.
 - Update troubleshooting so `agentctl: command not found` is a managed-runtime defect rather than a
   prompt to fall back to personal SSH, and distinguish managed-helper failure from missing executor
   credentials.
@@ -250,6 +261,10 @@ Wave 4:
 
 - [x] [task-06-e2e-and-documentation](task-06-e2e-and-documentation.md)
 
+Wave 5:
+
+- [x] [task-07-unified-github-access-settings](task-07-unified-github-access-settings.md)
+
 The default execution is sequential in this primary conversation. Waves identify dependency-safe
 opportunities only and do not authorize subagents.
 
@@ -270,3 +285,6 @@ opportunities only and do not authorize subagents.
   reintroduce misleading identity.
 - Agentctl tool-directory activation must be per instance so executor inheritance and explicit
   profile-token overrides do not accidentally invoke the broker shim.
+- Workspace connection and task policy remain separate persistence operations inside one dialog.
+  The UI must label each submission clearly, must not imply atomicity, and must not discard a
+  failed or unsaved task-policy draft when unrelated connection controls rerender.

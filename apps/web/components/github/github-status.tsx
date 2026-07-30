@@ -17,6 +17,10 @@ import { useToast } from "@/components/toast-provider";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitHubAppRegistrations } from "@/hooks/domains/github/use-github-app-registrations";
 import {
+  useTaskGitCredentials,
+  type TaskGitCredentialsState,
+} from "@/hooks/domains/github/use-task-git-credentials";
+import {
   disconnectGitHubPersonal,
   disconnectGitHubWorkspace,
   startGitHubPersonalConnect,
@@ -30,6 +34,7 @@ import type {
 } from "@/lib/types/github";
 import { GitHubConnectionDialog } from "./github-connection-dialog";
 import { GitHubPermissionsDialog } from "./github-permissions-dialog";
+import { GitHubTaskAccessSummary } from "./github-task-credentials-section";
 
 const sourceLabels: Record<GitHubConnectionSource, string> = {
   pat: "Personal access token",
@@ -99,9 +104,11 @@ function errorMessage(error: unknown, fallback: string) {
 function AutomationStatusSummary({
   status,
   app,
+  taskAccess,
 }: {
   status: GitHubStatus;
   app?: GitHubAppRegistrationCatalogItem;
+  taskAccess: Omit<TaskGitCredentialsState, "save">;
 }) {
   const appAutomation = status.automation?.source === "github_app_installation";
   return (
@@ -111,6 +118,7 @@ function AutomationStatusSummary({
       {appAutomation && <AppRegistrationDetails app={app} />}
       {!appAutomation && <HumanIdentityExplanation status={status} />}
       <AutomationError status={status} />
+      <GitHubTaskAccessSummary {...taskAccess} />
     </div>
   );
 }
@@ -177,17 +185,24 @@ function AutomationActions({
   busy,
   onDisconnect,
   onRefresh,
+  taskAccess,
 }: {
   status: GitHubStatus;
   workspaceId: string;
   busy: boolean;
   onDisconnect: () => void;
   onRefresh: () => void;
+  taskAccess: TaskGitCredentialsState;
 }) {
   return (
     <div className="flex flex-wrap gap-2">
       <GitHubPermissionsDialog status={status} />
-      <GitHubConnectionDialog status={status} workspaceId={workspaceId} onSaved={onRefresh} />
+      <GitHubConnectionDialog
+        status={status}
+        workspaceId={workspaceId}
+        onSaved={onRefresh}
+        taskAccess={taskAccess}
+      />
       <Button
         variant="outline"
         size="icon"
@@ -215,6 +230,7 @@ function AutomationActions({
 export function GitHubAutomationSettings({ workspaceId }: { workspaceId: string }) {
   const { status, loaded, loading, refresh } = useGitHubStatus(workspaceId);
   const appRegistrations = useGitHubAppRegistrations(workspaceId);
+  const taskAccess = useTaskGitCredentials(workspaceId);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
   const disconnect = useCallback(async () => {
@@ -241,13 +257,14 @@ export function GitHubAutomationSettings({ workspaceId }: { workspaceId: string 
       className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
       data-testid="github-workspace-automation"
     >
-      <AutomationStatusSummary status={status} app={activeApp} />
+      <AutomationStatusSummary status={status} app={activeApp} taskAccess={taskAccess} />
       <AutomationActions
         status={status}
         workspaceId={workspaceId}
         busy={busy}
         onDisconnect={disconnect}
         onRefresh={refresh}
+        taskAccess={taskAccess}
       />
     </div>
   );

@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/toast-provider";
+import type { TaskGitCredentialsState } from "@/hooks/domains/github/use-task-git-credentials";
 import type { GitHubAppRegistrationCatalogItem, GitHubStatus } from "@/lib/types/github";
 import { GitHubAppConnectionPanel } from "./github-app-connection-panel";
 import { GitHubConnectionDialog } from "./github-connection-dialog";
@@ -13,6 +14,12 @@ const mocks = vi.hoisted(() => ({
 const changeConnectionLabel = "Change connection";
 const registrationDisplayName = "Work automation";
 const githubAppLabel = "GitHub App";
+const taskAccess: TaskGitCredentialsState = {
+  mode: "managed",
+  loading: false,
+  error: false,
+  save: vi.fn(),
+};
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: mocks.mobile }),
@@ -96,6 +103,7 @@ function view(workspaceId = "workspace-1") {
         status={{ ...status, workspace_id: workspaceId }}
         workspaceId={workspaceId}
         onSaved={vi.fn()}
+        taskAccess={taskAccess}
       />
     </ToastProvider>,
   );
@@ -202,6 +210,7 @@ describe("GitHubConnectionDialog", () => {
           status={{ ...status, workspace_id: "workspace-2" }}
           workspaceId="workspace-2"
           onSaved={vi.fn()}
+          taskAccess={taskAccess}
         />
       </ToastProvider>,
     );

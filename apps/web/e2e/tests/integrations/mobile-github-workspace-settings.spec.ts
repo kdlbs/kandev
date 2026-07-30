@@ -1,28 +1,49 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("GitHub workspace settings on mobile", () => {
-  test("explains and saves task Git credential inheritance", async ({
+  test("configures task Git access in the connection drawer", async ({
     testPage,
     apiClient,
     seedData,
     prCapture,
   }) => {
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
-
-    await testPage.getByRole("button", { name: "Explain task Git credentials" }).click();
-    await expect(
-      testPage.getByRole("dialog", { name: "How task Git credentials work" }),
-    ).toContainText("GH_TOKEN or GITHUB_TOKEN");
-    await prCapture.screenshot("mobile-task-git-credentials-help", {
-      caption: "Mobile task Git credential explanation",
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
     });
-    await testPage.keyboard.press("Escape");
+    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    const automation = testPage.getByTestId("github-workspace-automation");
+    await expect(automation.getByTestId("github-task-access-summary")).toContainText(
+      "Managed workspace credentials",
+    );
+    await expect(testPage.getByRole("heading", { name: "Task Git credentials" })).toHaveCount(0);
 
-    await testPage.getByRole("radio", { name: "Inherit executor Git credentials" }).click();
-    await testPage.getByTestId("settings-floating-save").getByRole("button").click();
-    await expect(testPage.getByText("Task Git credential settings saved")).toBeVisible({
+    await automation.getByRole("button", { name: "Change connection" }).tap();
+    const drawer = testPage.getByTestId("github-connection-mobile");
+    await expect(drawer.getByRole("heading", { name: "Task Git access" })).toBeVisible();
+    await expect(drawer.locator(".overflow-y-auto")).toHaveCount(1);
+    const executorOption = drawer.getByTestId("github-task-access-option-executor");
+    const saveButton = drawer.getByRole("button", { name: "Save task access" });
+    const [optionBox, saveButtonBox] = await Promise.all([
+      executorOption.boundingBox(),
+      saveButton.boundingBox(),
+    ]);
+    expect(optionBox).not.toBeNull();
+    expect(saveButtonBox).not.toBeNull();
+    expect(optionBox!.height).toBeGreaterThanOrEqual(44);
+    expect(saveButtonBox!.height).toBeGreaterThanOrEqual(44);
+
+    await executorOption.tap();
+    await prCapture.screenshot("mobile-task-git-access-drawer", {
+      caption: "Task Git access is configured in the mobile connection drawer",
+    });
+    await saveButton.tap();
+    await expect(testPage.getByText("Task Git access saved")).toBeVisible({
       timeout: 10_000,
     });
+    await expect(automation.getByTestId("github-task-access-summary")).toContainText(
+      "Inherit executor Git credentials",
+    );
 
     const response = await apiClient.rawRequest(
       "GET",
