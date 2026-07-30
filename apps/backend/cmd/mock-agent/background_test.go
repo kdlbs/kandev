@@ -103,3 +103,25 @@ func TestAsyncSubagentForegroundFramesMatchClaudeOrdering(t *testing.T) {
 		t.Fatalf("fifth update must be final same-prompt assistant output, got %#v", got[4])
 	}
 }
+
+func TestBackgroundWorkEmitsForegroundIdleBoundary(t *testing.T) {
+	e, updates := newTestEmitter()
+	emitBackgroundWork(e, "/background 1ms")
+
+	got := updates.getUpdates()
+	idleIndex := -1
+	for i, update := range got {
+		usage := update.notification.Update.UsageUpdate
+		if usage == nil {
+			continue
+		}
+		origin := usage.Meta[claudeOriginMetaKey].(map[string]any)
+		if origin["kind"] == claudeOriginHuman {
+			idleIndex = i
+			break
+		}
+	}
+	if idleIndex < 0 {
+		t.Fatal("/background must emit a human-origin foreground-idle boundary")
+	}
+}

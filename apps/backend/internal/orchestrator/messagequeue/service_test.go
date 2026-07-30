@@ -515,6 +515,57 @@ func TestGetStatus(t *testing.T) {
 		assert.Equal(t, "a", status.Entries[0].Content)
 		assert.Equal(t, "c", status.Entries[2].Content)
 	})
+
+	t.Run("hides a lifecycle row already reserved for delivery", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, _, accepted, err := svc.QueueLifecycleMessageWithCoalesceKey(
+			ctx, "s", "t", "pr merged", "", QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"},
+			"github-pr:repo:1:merged", true,
+		)
+		require.NoError(t, err)
+		require.True(t, accepted)
+		require.Equal(t, 1, svc.GetStatus(ctx, "s").Count)
+
+		reserved, ok := svc.ReserveQueued(ctx, "s")
+		require.True(t, ok)
+		// The reservation stays in storage for crash recovery, but it is no
+		// longer pending: listing it duplicates the prompt being delivered.
+		assert.False(t, reserved.IsReservedInFlight())
+		assert.True(t, reserved.IsReservedLifecycleDelivery())
+		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
+
+		// A failed delivery requeues the same entry and it becomes visible again.
+		_, _, accepted, err = svc.RequeueLifecycleMessageWithCoalesceKey(
+			ctx, "s", "t", reserved.Content, "", QueuedByWorkflow, false, nil,
+			reserved.Metadata, "github-pr:repo:1:merged", true,
+		)
+		require.NoError(t, err)
+		require.True(t, accepted)
+		assert.Equal(t, 1, svc.GetStatus(ctx, "s").Count)
+
+		require.NoError(t, svc.AcknowledgeQueued(ctx, "s", reserved.ID))
+		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
+	})
+
+	t.Run("does not label a destructive lifecycle take as a reservation", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+
+		_, _, accepted, err := svc.QueueLifecycleMessageWithCoalesceKey(
+			ctx, "s", "t", "pr merged", "", QueuedByWorkflow, false, nil,
+			map[string]interface{}{"origin": "github_pr_automation"},
+			"github-pr:repo:1:merged", true,
+		)
+		require.NoError(t, err)
+		require.True(t, accepted)
+
+		taken, ok := svc.TakeQueued(ctx, "s")
+		require.True(t, ok)
+		assert.False(t, taken.IsReservedLifecycleDelivery())
+	})
 }
 
 func TestTransferSession(t *testing.T) {

@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
@@ -71,18 +72,18 @@ func TestForegroundActivitySignal_FollowUpPromptKeepsIndependentCompletionIdenti
 	svc.completeTurnForTaskSession(t.Context(), taskID, sessionID)
 	svc.completeTurnForTaskSession(t.Context(), taskID, sessionID)
 
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("follow-up completion was mistaken for its predecessor: activity = %q", got)
 	}
-	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
-		t.Fatalf("follow-up left background-only session unpromptable: %v", err)
+	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("follow-up RUNNING session must remain unpromptable: %v", err)
 	}
 	got := activityValues(eb)
 	want := []string{
 		string(v1.ForegroundActivityGenerating),
-		string(v1.ForegroundActivityBackground),
 		string(v1.ForegroundActivityGenerating),
-		string(v1.ForegroundActivityBackground),
+		string(v1.ForegroundActivityGenerating),
+		string(v1.ForegroundActivityGenerating),
 	}
 	if len(got) != len(want) {
 		t.Fatalf("activity publications = %v, want exactly %v", got, want)
@@ -145,18 +146,18 @@ func TestForegroundActivitySignal_PreDispatchEventsUseCurrentPromptCycle(t *test
 	); err != nil {
 		t.Fatalf("dispatch follow-up prompt: %v", err)
 	}
-	if got := svc.ForegroundActivity(sessionID); got != v1.ForegroundActivityBackground {
+	if got := svc.foregroundActivityValue(sessionID); got != v1.ForegroundActivityBackground {
 		t.Fatalf("pre-callback completion did not own the new prompt cycle: activity = %q", got)
 	}
-	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
-		t.Fatalf("detached work after pre-callback completion must be promptable: %v", err)
+	if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); !errors.Is(err, ErrAgentPromptInProgress) {
+		t.Fatalf("detached work must not make a RUNNING session promptable: %v", err)
 	}
 	got := activityValues(eb)
 	want := []string{
 		string(v1.ForegroundActivityGenerating),
-		string(v1.ForegroundActivityBackground),
 		string(v1.ForegroundActivityGenerating),
-		string(v1.ForegroundActivityBackground),
+		string(v1.ForegroundActivityGenerating),
+		string(v1.ForegroundActivityGenerating),
 	}
 	if len(got) != len(want) {
 		t.Fatalf("activity publications = %v, want exactly %v", got, want)
@@ -212,25 +213,13 @@ func TestForegroundActivitySignal_ClaimedPreDispatchCompletionReconcilesOnAccept
 				}
 			}
 
-			if _, err := svc.PromptTask(t.Context(), taskID, sessionID, "follow up", "", false, nil, false); err != nil {
-				t.Fatalf("dispatch claimed follow-up: %v", err)
+			if _, err := svc.PromptTask(
+				t.Context(), taskID, sessionID, "follow up", "", false, nil, false,
+			); !errors.Is(err, ErrAgentPromptInProgress) {
+				t.Fatalf("RUNNING session must reject claimed follow-up: %v", err)
 			}
-			got := activityValues(eb)
-			if tt.keepWork {
-				want := []string{string(v1.ForegroundActivityGenerating), string(v1.ForegroundActivityBackground)}
-				if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-					t.Fatalf("claimed pre-callback publications = %v, want %v", got, want)
-				}
-				if err := svc.checkSessionPromptable(taskID, sessionID, models.TaskSessionStateRunning); err != nil {
-					t.Fatalf("accepted completed foreground with detached work must be promptable: %v", err)
-				}
-				return
-			}
-			if len(got) != 1 || got[0] != string(v1.ForegroundActivityGenerating) {
-				t.Fatalf("no-work completion publications = %v, want generating claim only", got)
-			}
-			if gotActivity := svc.ForegroundActivity(sessionID); gotActivity != v1.ForegroundActivityGenerating {
-				t.Fatalf("no-work completion must settle without background hold, got %q", gotActivity)
+			if len(activityValues(eb)) != 0 {
+				t.Fatalf("rejected follow-up must not publish an activity change: %v", activityValues(eb))
 			}
 		})
 	}

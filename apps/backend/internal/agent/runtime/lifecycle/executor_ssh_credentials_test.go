@@ -2,8 +2,6 @@ package lifecycle
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -11,29 +9,24 @@ import (
 )
 
 func TestRemoteExecutorsIgnoreLegacyHostGHTokenSelection(t *testing.T) {
-	binDir := t.TempDir()
-	ghPath := filepath.Join(binDir, "gh")
-	if err := os.WriteFile(ghPath, []byte("#!/bin/sh\nprintf host-global-token\n"), 0o755); err != nil {
-		t.Fatalf("write fake gh: %v", err)
-	}
-	t.Setenv("PATH", binDir)
-
+	// resolveGHToken is a pure filter: it can no longer reach the request, so
+	// a stale gh_cli_token selection is dropped rather than turned into a
+	// host-global GITHUB_TOKEN injection.
 	tests := []struct {
 		name    string
-		resolve func([]string, *ExecutorCreateRequest) []string
+		resolve func([]string) []string
 	}{
 		{name: "ssh", resolve: (&SSHExecutor{logger: newTestLogger()}).resolveGHToken},
 		{name: "sprites", resolve: (&SpritesExecutor{logger: newTestLogger()}).resolveGHToken},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := &ExecutorCreateRequest{Env: map[string]string{}}
-			remaining := tt.resolve([]string{"gh_cli_token", "agent:codex:files:0"}, req)
-			if got := req.Env["GITHUB_TOKEN"]; got != "" {
-				t.Fatalf("GITHUB_TOKEN = %q, want no host-global token injection", got)
-			}
+			remaining := tt.resolve([]string{"gh_cli_token", "agent:codex:files:0"})
 			if len(remaining) != 1 || remaining[0] != "agent:codex:files:0" {
 				t.Fatalf("remaining methods = %v, want stale gh_cli_token filtered", remaining)
+			}
+			if got := tt.resolve([]string{"agent:codex:files:0"}); len(got) != 1 || got[0] != "agent:codex:files:0" {
+				t.Fatalf("resolve without gh_cli_token = %v, want untouched selection", got)
 			}
 		})
 	}

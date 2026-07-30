@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -16,6 +18,12 @@ import (
 type WorkspaceFileHandlers struct {
 	lifecycle *lifecycle.Manager
 	logger    *logger.Logger
+}
+
+type workspaceContentSearchRequest struct {
+	SessionID    string `json:"session_id"`
+	Query        string `json:"query"`
+	LimitPerRepo int    `json:"limit_per_repo"`
 }
 
 // NewWorkspaceFileHandlers creates new workspace file handlers
@@ -36,6 +44,7 @@ func (h *WorkspaceFileHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionWorkspaceFileDelete, h.wsDeleteFile)
 	d.RegisterFunc(ws.ActionWorkspaceFileRename, h.wsRenameFile)
 	d.RegisterFunc(ws.ActionWorkspaceFilesSearch, h.wsSearchFiles)
+	d.RegisterFunc(ws.ActionWorkspaceContentSearch, h.wsSearchContent)
 }
 
 // wsGetFileTree handles workspace.tree.get action
@@ -325,6 +334,68 @@ func (h *WorkspaceFileHandlers) wsSearchFiles(ctx context.Context, msg *ws.Messa
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// wsSearchContent handles workspace.content.search.
+func (h *WorkspaceFileHandlers) wsSearchContent(
+	ctx context.Context,
+	msg *ws.Message,
+) (*ws.Message, error) {
+	req, err := decodeWorkspaceContentSearchRequest(msg)
+	if err != nil {
+		return ws.NewError(
+			msg.ID, msg.Action, ws.ErrorCodeBadRequest,
+			"Invalid payload: "+err.Error(), nil,
+		)
+	}
+	if req.SessionID == "" {
+		return ws.NewError(
+			msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"session_id is required", nil,
+		)
+	}
+	if utf8.RuneCountInString(req.Query) > streams.WorkspaceContentSearchMaxQueryRunes {
+		return ws.NewError(
+			msg.ID, msg.Action, ws.ErrorCodeValidation,
+			"query exceeds 200 characters", nil,
+		)
+	}
+
+	execution, err := h.lifecycle.GetOrEnsureExecution(ctx, req.SessionID)
+	if err != nil {
+		return ws.NewError(
+			msg.ID, msg.Action, ws.ErrorCodeNotFound,
+			"No agent found for session: "+err.Error(), nil,
+		)
+	}
+	client := execution.GetAgentCtlClient()
+	if client == nil {
+		return ws.NewError(
+			msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			"Agent client not available", nil,
+		)
+	}
+	response, err := client.SearchWorkspaceContent(ctx, req.Query, req.LimitPerRepo)
+	if err != nil {
+		h.logger.Error(
+			"failed to search workspace content",
+			zap.Error(err),
+			zap.String("session_id", req.SessionID),
+		)
+		return ws.NewError(
+			msg.ID, msg.Action, ws.ErrorCodeInternalError,
+			fmt.Sprintf("Failed to search workspace content: %v", err), nil,
+		)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+func decodeWorkspaceContentSearchRequest(
+	msg *ws.Message,
+) (workspaceContentSearchRequest, error) {
+	var request workspaceContentSearchRequest
+	err := msg.ParsePayload(&request)
+	return request, err
 }
 
 // wsRenameFile handles workspace.file.rename action

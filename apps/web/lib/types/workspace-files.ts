@@ -23,8 +23,37 @@ export type FileContentResponse = {
   error?: string;
 };
 
+export type FileSearchResult = {
+  repository_name?: string;
+  /** Task-root-relative path accepted by the workspace file APIs. */
+  path: string;
+};
+
 export type FileSearchResponse = {
   files: string[];
+  /** Structured results for repository-aware consumers. */
+  results?: FileSearchResult[];
+  error?: string;
+};
+
+export type ContentSearchMatchRange = {
+  /** Inclusive UTF-16 offset into `preview`. */
+  start: number;
+  /** Exclusive UTF-16 offset into `preview`. */
+  end: number;
+};
+
+export type WorkspaceContentSearchResult = {
+  repository_name: string;
+  path: string;
+  line: number;
+  column: number;
+  preview: string;
+  match_ranges: ContentSearchMatchRange[];
+};
+
+export type WorkspaceContentSearchResponse = {
+  results: WorkspaceContentSearchResult[];
   error?: string;
 };
 

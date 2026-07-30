@@ -4,6 +4,8 @@ import {
   setLocalStorage,
   setStoredCollapsedSubtaskParents,
   setStoredQuickChatName,
+  setStoredAutoScrollEnabled,
+  setStoredAutoScrollTop,
 } from "@/lib/local-storage";
 import { buildDismissedAgentErrors } from "./dismissed-agent-errors-actions";
 import {
@@ -20,6 +22,7 @@ import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, UISlice, UISliceState } from "./types";
 import { getQuickChatSetupSessionId } from "./quick-chat-session";
 
+/** Default sidebar view state: the single built-in "All tasks" view, active, no draft. */
 function createDefaultSidebarState(): UISliceState["sidebarViews"] {
   return { views: [DEFAULT_VIEW], activeViewId: DEFAULT_VIEW.id, draft: null, syncError: null };
 }
@@ -46,8 +49,11 @@ export const KNOWN_SORT_KEYS = new Set<string>([
   "custom",
 ]);
 
-// Drops clauses whose dimension is no longer known (e.g. renamed or removed in an upgrade),
-// and resets stale sort keys, so the popover does not crash when rendering stored views.
+/**
+ * Drops clauses whose dimension is no longer known (e.g. renamed or removed
+ * in an upgrade), and resets stale sort keys, so the popover does not crash
+ * when rendering stored views.
+ */
 export function migrateView(view: SidebarView): SidebarView {
   const sort: SortSpec = KNOWN_SORT_KEYS.has(view.sort.key)
     ? view.sort
@@ -78,6 +84,11 @@ export const defaultUIState: UISliceState = {
     isTaskSwitcherOpen: false,
   },
   chatInput: { planModeBySessionId: {} },
+  transcriptAutoScroll: {
+    enabledBySessionId: {},
+    scrollTopBySessionId: {},
+    virtuosoStateBySessionId: {},
+  },
   reviewPRSelection: { selectedKeyByTaskId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], checks: [], healthy: true, loaded: false, loading: false },
@@ -102,6 +113,7 @@ export const defaultUIState: UISliceState = {
 
 type ImmerSet = Parameters<typeof createUISlice>[0];
 
+/** Builds the preview-panel actions (open/toggle/view/device/stage/url), each persisting to localStorage where noted. */
 function buildPreviewActions(set: ImmerSet) {
   return {
     setPreviewOpen: (sessionId: string, open: boolean) =>
@@ -149,6 +161,7 @@ function buildPreviewActions(set: ImmerSet) {
   };
 }
 
+/** Builds the mobile Kanban view's column-index, menu, and search-open actions. */
 function buildMobileActions(set: ImmerSet) {
   return {
     setMobileKanbanColumnIndex: (index: number) =>
@@ -189,6 +202,7 @@ function buildMobileActions(set: ImmerSet) {
   };
 }
 
+/** Builds the bottom terminal's open/toggle and pending-command actions, persisting open state to localStorage. */
 function buildBottomTerminalActions(set: ImmerSet) {
   return {
     toggleBottomTerminal: () =>
@@ -210,6 +224,7 @@ function buildBottomTerminalActions(set: ImmerSet) {
   };
 }
 
+/** Builds the system-health cache's set/loading/invalidate actions. */
 function buildSystemHealthActions(set: ImmerSet) {
   return {
     setSystemHealth: (response: SystemHealthResponse) =>
@@ -230,6 +245,12 @@ function buildSystemHealthActions(set: ImmerSet) {
   };
 }
 
+/**
+ * Builds the collapsed-subtask-parents toggle action. Tab-scoped collapse of
+ * a parent task's subtasks, persisted via sessionStorage (survives reload /
+ * task switch within the tab, resets on tab close). Not per-view and not
+ * synced to the backend — purely visual.
+ */
 function buildCollapsedSubtaskActions(set: ImmerSet, get: () => UISlice) {
   return {
     // Tab-scoped collapse of a parent task's subtasks. Persisted via
@@ -247,6 +268,7 @@ function buildCollapsedSubtaskActions(set: ImmerSet, get: () => UISlice) {
   };
 }
 
+/** Builds the setters for session-failure, task-deleted, and update-available notifications. */
 function buildNotificationActions(set: ImmerSet) {
   return {
     setSessionFailureNotification: (n: UISlice["sessionFailureNotification"]) =>
@@ -264,6 +286,7 @@ function buildNotificationActions(set: ImmerSet) {
   };
 }
 
+/** Finds this workspace's quick-chat "config" session, if one is already open. */
 function findWorkspaceConfigSession(
   sessions: UISliceState["quickChat"]["sessions"],
   workspaceId: string,
@@ -273,6 +296,11 @@ function findWorkspaceConfigSession(
   );
 }
 
+/**
+ * Builds the `openQuickChat` action: opens (creating if needed) a quick-chat
+ * session, reusing an existing workspace config session for `kind: "config"`
+ * rather than creating a duplicate.
+ */
 function buildOpenQuickChatAction(set: ImmerSet) {
   return (
     sessionId: string,
@@ -311,6 +339,7 @@ function buildOpenQuickChatAction(set: ImmerSet) {
     });
 }
 
+/** Builds the remaining quick-chat session CRUD actions (add/remove/rename/close). */
 function buildQuickChatActions(set: ImmerSet) {
   return {
     addQuickChatSession: (
@@ -414,6 +443,20 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   setPlanMode: (sessionId, enabled) =>
     set((draft) => {
       draft.chatInput.planModeBySessionId[sessionId] = enabled;
+    }),
+  setTranscriptAutoScrollEnabled: (sessionId, enabled) =>
+    set((draft) => {
+      draft.transcriptAutoScroll.enabledBySessionId[sessionId] = enabled;
+      setStoredAutoScrollEnabled(sessionId, enabled);
+    }),
+  setTranscriptScrollTop: (sessionId, scrollTop) =>
+    set((draft) => {
+      draft.transcriptAutoScroll.scrollTopBySessionId[sessionId] = scrollTop;
+      setStoredAutoScrollTop(sessionId, scrollTop);
+    }),
+  setTranscriptVirtuosoState: (sessionId, state) =>
+    set((draft) => {
+      draft.transcriptAutoScroll.virtuosoStateBySessionId[sessionId] = state;
     }),
   setReviewPRSelection: (taskId, selectedKey) =>
     set((draft) => {

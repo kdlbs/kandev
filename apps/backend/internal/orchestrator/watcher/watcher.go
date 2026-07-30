@@ -99,6 +99,7 @@ type EventHandlers struct {
 	OnAgentReady        func(ctx context.Context, data AgentEventData) // Turn ended; agent idle waiting for follow-up
 	OnAgentCompleted    func(ctx context.Context, data AgentEventData)
 	OnAgentFailed       func(ctx context.Context, data AgentEventData)
+	OnAgentStalled      func(ctx context.Context, payload lifecycle.AgentStalledPayload)
 	OnAgentStopped      func(ctx context.Context, data AgentEventData)
 	OnACPSessionCreated func(ctx context.Context, data ACPSessionEventData)
 
@@ -159,6 +160,10 @@ func (w *Watcher) Start(ctx context.Context) error {
 
 	// Subscribe to agent events
 	if err := w.subscribeToAgentEvents(); err != nil {
+		w.unsubscribeAll()
+		return err
+	}
+	if err := w.subscribeToAgentStallEvents(); err != nil {
 		w.unsubscribeAll()
 		return err
 	}
@@ -320,6 +325,23 @@ func (w *Watcher) subscribeToAgentEvents() error {
 	return nil
 }
 
+func (w *Watcher) subscribeToAgentStallEvents() error {
+	if w.handlers.OnAgentStalled == nil {
+		return nil
+	}
+	sub, err := w.eventBus.QueueSubscribe(
+		events.AgentStalled,
+		w.queue,
+		w.createAgentStalledEventHandler(w.handlers.OnAgentStalled),
+	)
+	if err != nil {
+		w.logger.Error("failed to subscribe to agent stalled event", zap.Error(err))
+		return err
+	}
+	w.subscriptions = append(w.subscriptions, sub)
+	return nil
+}
+
 // subscribeToACPSessionEvents subscribes to ACP session lifecycle events
 func (w *Watcher) subscribeToACPSessionEvents() error {
 	if w.handlers.OnACPSessionCreated == nil {
@@ -421,6 +443,20 @@ func (w *Watcher) createAgentEventHandler(handler func(ctx context.Context, data
 			zap.String("agent_execution_id", data.AgentExecutionID))
 
 		handler(ctx, data)
+		return nil
+	}
+}
+
+func (w *Watcher) createAgentStalledEventHandler(
+	handler func(ctx context.Context, payload lifecycle.AgentStalledPayload),
+) bus.EventHandler {
+	return func(ctx context.Context, event *bus.Event) error {
+		var payload lifecycle.AgentStalledPayload
+		if err := w.parseEventData(event.Data, &payload); err != nil {
+			w.logger.Error("failed to parse agent stalled event", zap.Error(err))
+			return nil
+		}
+		handler(ctx, payload)
 		return nil
 	}
 }

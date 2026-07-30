@@ -13,6 +13,8 @@ Manage and run tasks in parallel. Orchestrate agents. Review changes. Ship value
 ## What
 
 
+Kandev is a powerful tool for power users who want deeper control over how AI agents work: customize workflows, agent profiles, runtimes, prompts, and review gates to match your process.
+
 Organize work across kanban and pipeline views with opinionated workflows and execute multiple tasks in parallel. Assign agents from any provider, and review their output in an integrated workspace - file editor, file tree, terminal, browser preview, and git changes in one place. Terminal agent TUIs are great for running agents, but reviewing and iterating on changes there doesn't scale.
 
 Run it locally or self-host it on your own infrastructure and access it from anywhere via [Tailscale](https://tailscale.com/) or any VPN.

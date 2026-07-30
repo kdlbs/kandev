@@ -1,5 +1,7 @@
 package sqlite
 
+//revive:disable:file-length-limit // SQLite session regression coverage is intentionally scenario-heavy.
+
 import (
 	"context"
 	"database/sql"
@@ -17,9 +19,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newRepoForSessionTests creates a fresh SQLite-backed Repository in a
-// temporary directory for use by session tests, closing the connection via
-// t.Cleanup.
 func newRepoForSessionTests(t *testing.T) *Repository {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "session-test.db")
@@ -80,10 +79,6 @@ func insertAgentMsg(t *testing.T, repo *Repository, id, sessionID, turnID, autho
 	}
 }
 
-// TestRenameTaskSession verifies RenameTaskSession rejects a missing
-// session, updates and clears the session name (with ToAPI omitting an
-// empty name), and that a name set via CreateTaskSession round-trips
-// through ListTaskSessions.
 func TestRenameTaskSession(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -146,12 +141,6 @@ func TestRenameTaskSession(t *testing.T) {
 	}
 }
 
-// TestTaskSessionNotFoundErrorsAreTyped verifies that GetTaskSession,
-// UpdateTaskSession, UpdateTaskSessionState, and UpdateTaskSessionBaseCommit
-// all return ErrTaskSessionNotFound for a missing session, that
-// GetTaskSessionByTaskAndAgent translates not-found to (nil, nil), and that
-// GetPrimarySessionByTaskID returns ErrNoPrimarySession, while operations on
-// an existing session succeed.
 func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -189,10 +178,136 @@ func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
 	}
 }
 
-// TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce verifies that on SQLite
-// SetSessionMetadataKeyIfAbsent stores the value on first call and reports
-// no write (leaving the original value in place) on a subsequent call with
-// the same key.
+func TestClaimPromptableTaskSessionIfActive(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("claims an active promptable session and persists running", func(t *testing.T) {
+		repo := newRepoForSessionTests(t)
+		seedForMsgTest(t, repo, "task-active", "session-active", "turn-active")
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-active", models.TaskSessionStateWaitingForInput, ""))
+
+		claim, err := repo.ClaimPromptableTaskSessionIfActive(ctx, "session-active")
+		require.NoError(t, err)
+		require.Equal(t, models.PromptableTaskSessionClaimed, claim.Status)
+		require.Equal(t, models.TaskSessionStateWaitingForInput, claim.PreviousState)
+
+		persisted, err := repo.GetTaskSession(ctx, "session-active")
+		require.NoError(t, err)
+		require.Equal(t, models.TaskSessionStateRunning, persisted.State)
+	})
+
+	t.Run("clears completion timestamp when reclaiming a completed session", func(t *testing.T) {
+		repo := newRepoForSessionTests(t)
+		seedForMsgTest(t, repo, "task-completed", "session-completed", "turn-completed")
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-completed", models.TaskSessionStateCompleted, ""))
+
+		before, err := repo.GetTaskSession(ctx, "session-completed")
+		require.NoError(t, err)
+		require.NotNil(t, before.CompletedAt)
+
+		claim, err := repo.ClaimPromptableTaskSessionIfActive(ctx, "session-completed")
+		require.NoError(t, err)
+		require.Equal(t, models.PromptableTaskSessionClaimed, claim.Status)
+
+		persisted, err := repo.GetTaskSession(ctx, "session-completed")
+		require.NoError(t, err)
+		require.Equal(t, models.TaskSessionStateRunning, persisted.State)
+		require.Nil(t, persisted.CompletedAt)
+	})
+
+	t.Run("does not claim an archived task session", func(t *testing.T) {
+		repo := newRepoForSessionTests(t)
+		seedForMsgTest(t, repo, "task-archived", "session-archived", "turn-archived")
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-archived", models.TaskSessionStateIdle, ""))
+		require.NoError(t, repo.ArchiveTask(ctx, "task-archived"))
+
+		claim, err := repo.ClaimPromptableTaskSessionIfActive(ctx, "session-archived")
+		require.NoError(t, err)
+		require.Equal(t, models.PromptableTaskSessionInactive, claim.Status)
+
+		persisted, err := repo.GetTaskSession(ctx, "session-archived")
+		require.NoError(t, err)
+		require.Equal(t, models.TaskSessionStateIdle, persisted.State)
+	})
+
+	t.Run("does not claim a deleted or missing task session", func(t *testing.T) {
+		repo := newRepoForSessionTests(t)
+
+		claim, err := repo.ClaimPromptableTaskSessionIfActive(ctx, "missing-session")
+		require.NoError(t, err)
+		require.Equal(t, models.PromptableTaskSessionInactive, claim.Status)
+
+		seedForMsgTest(t, repo, "task-deleted", "session-deleted", "turn-deleted")
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-deleted", models.TaskSessionStateCompleted, ""))
+		require.NoError(t, repo.DeleteTask(ctx, "task-deleted"))
+
+		claim, err = repo.ClaimPromptableTaskSessionIfActive(ctx, "session-deleted")
+		require.NoError(t, err)
+		require.Equal(t, models.PromptableTaskSessionInactive, claim.Status)
+	})
+
+	t.Run("does not claim a non-promptable session", func(t *testing.T) {
+		repo := newRepoForSessionTests(t)
+		seedForMsgTest(t, repo, "task-running", "session-running", "turn-running")
+		require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-running", models.TaskSessionStateRunning, ""))
+
+		claim, err := repo.ClaimPromptableTaskSessionIfActive(ctx, "session-running")
+		require.NoError(t, err)
+		require.Equal(t, models.PromptableTaskSessionBusy, claim.Status)
+
+		persisted, err := repo.GetTaskSession(ctx, "session-running")
+		require.NoError(t, err)
+		require.Equal(t, models.TaskSessionStateRunning, persisted.State)
+	})
+}
+
+func TestClaimPromptableTaskSessionIfActive_ZeroRowAfterConcurrentBusyTransition(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-race", "session-race", "turn-race")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, "session-race", models.TaskSessionStateWaitingForInput, ""))
+
+	// Simulate the competing writer winning after ClaimPromptableTaskSessionIfActive
+	// has read WAITING_FOR_INPUT but before its guarded UPDATE can take ownership.
+	// RAISE(IGNORE) makes the outer UPDATE report zero rows deterministically.
+	_, err := repo.db.Exec(`
+		CREATE TRIGGER claim_race_before_running
+		BEFORE UPDATE OF state ON task_sessions
+		WHEN OLD.id = 'session-race'
+		  AND OLD.state = 'WAITING_FOR_INPUT'
+		  AND NEW.state = 'RUNNING'
+		BEGIN
+			UPDATE task_sessions SET state = 'RUNNING' WHERE id = OLD.id;
+			SELECT RAISE(IGNORE);
+		END
+	`)
+	require.NoError(t, err)
+
+	claim, err := repo.ClaimPromptableTaskSessionIfActive(ctx, "session-race")
+	require.NoError(t, err)
+	require.Equal(t, models.PromptableTaskSessionBusy, claim.Status,
+		"a zero-row guarded update must distinguish a concurrent active session from an inactive task")
+
+	persisted, err := repo.GetTaskSession(ctx, "session-race")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, persisted.State)
+}
+
+func TestClassifyPromptableTaskSessionClaimPropagatesScanError(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-scan-error", "session-scan-error", "turn-scan-error")
+
+	tx, err := repo.db.BeginTxx(ctx, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = tx.Rollback() })
+	_, err = tx.ExecContext(ctx, `ALTER TABLE tasks RENAME TO tasks_unavailable`)
+	require.NoError(t, err)
+
+	_, err = repo.classifyPromptableTaskSessionClaim(ctx, tx, "session-scan-error")
+	require.Error(t, err)
+}
+
 func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	seedForMsgTest(t, repo, "task-baseline", "session-baseline", "turn-baseline")
@@ -223,81 +338,6 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	}
 }
 
-func TestSetSessionMetadataKeyIfAbsentIfStateSQLiteRequiresFailedSession(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	seedForMsgTest(t, repo, "task-recovery", "session-recovery", "turn-recovery")
-	ctx := context.Background()
-
-	stored, err := repo.SetSessionMetadataKeyIfAbsentIfState(
-		ctx, "session-recovery", "missing_pr_branch_recovery_claimed", true, models.TaskSessionStateFailed,
-	)
-	if err != nil {
-		t.Fatalf("claim before failed state: %v", err)
-	}
-	if stored {
-		t.Fatal("claim should reject a session that is not FAILED")
-	}
-	if err := repo.UpdateTaskSessionState(ctx, "session-recovery", models.TaskSessionStateFailed, "missing branch"); err != nil {
-		t.Fatalf("mark failed: %v", err)
-	}
-	stored, err = repo.SetSessionMetadataKeyIfAbsentIfState(
-		ctx, "session-recovery", "missing_pr_branch_recovery_claimed", true, models.TaskSessionStateFailed,
-	)
-	if err != nil {
-		t.Fatalf("claim after failed state: %v", err)
-	}
-	if !stored {
-		t.Fatal("claim should store after FAILED state")
-	}
-	stored, err = repo.SetSessionMetadataKeyIfAbsentIfState(
-		ctx, "session-recovery", "missing_pr_branch_recovery_claimed", true, models.TaskSessionStateFailed,
-	)
-	if err != nil {
-		t.Fatalf("repeat claim: %v", err)
-	}
-	if stored {
-		t.Fatal("repeat claim should not overwrite")
-	}
-}
-
-func TestRemoveSessionMetadataKeyIfStateSQLiteRequiresFailedSession(t *testing.T) {
-	repo := newRepoForSessionTests(t)
-	seedForMsgTest(t, repo, "task-recovery", "session-recovery", "turn-recovery")
-	ctx := context.Background()
-	const key = "missing_pr_branch_recovery_claimed"
-
-	if err := repo.SetSessionMetadataKey(ctx, "session-recovery", key, true); err != nil {
-		t.Fatalf("seed claim: %v", err)
-	}
-	removed, err := repo.RemoveSessionMetadataKeyIfState(ctx, "session-recovery", key, models.TaskSessionStateFailed)
-	if err != nil {
-		t.Fatalf("remove before failed state: %v", err)
-	}
-	if removed {
-		t.Fatal("remove should reject a session that is not FAILED")
-	}
-	if err := repo.UpdateTaskSessionState(ctx, "session-recovery", models.TaskSessionStateFailed, "missing branch"); err != nil {
-		t.Fatalf("mark failed: %v", err)
-	}
-	removed, err = repo.RemoveSessionMetadataKeyIfState(ctx, "session-recovery", key, models.TaskSessionStateFailed)
-	if err != nil {
-		t.Fatalf("remove after failed state: %v", err)
-	}
-	if !removed {
-		t.Fatal("remove should delete the failed-session claim")
-	}
-	session, err := repo.GetTaskSession(ctx, "session-recovery")
-	if err != nil {
-		t.Fatalf("get session after remove: %v", err)
-	}
-	if _, exists := session.Metadata[key]; exists {
-		t.Fatal("removed claim remains in session metadata")
-	}
-}
-
-// TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB verifies the
-// Postgres dialect's write-once query uses jsonb_set/jsonb_extract_path
-// rather than SQLite's json_set/json_type/json functions.
 func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
 	query := setSessionMetadataKeyIfAbsentQuery(dialect.PGX)
 	if strings.Contains(query, "json_set") || strings.Contains(query, "json_type") || strings.Contains(query, "json(?)") {
@@ -308,10 +348,6 @@ func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
 	}
 }
 
-// TestListTaskSessionWorktreesFiltersInactiveRows verifies that
-// ListTaskSessionWorktrees and ListWorktreesBySessionIDs exclude worktree
-// rows marked deleted via either the status column or a set deleted_at
-// timestamp, returning only the still-active worktree.
 func TestListTaskSessionWorktreesFiltersInactiveRows(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -377,10 +413,6 @@ func TestListTaskSessionWorktreesFiltersInactiveRows(t *testing.T) {
 	}
 }
 
-// TestUpdateTaskSessionWorktreeBranchByRepositoryScopesUpdate verifies
-// UpdateTaskSessionWorktreeBranchByRepository updates the branch only for
-// the worktree matching the given repository, leaving other repositories'
-// worktrees on the same session unchanged.
 func TestUpdateTaskSessionWorktreeBranchByRepositoryScopesUpdate(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -827,8 +859,6 @@ func insertSession(t *testing.T, repo *Repository, sessionID, taskID, state stri
 	}
 }
 
-// sessionState reads and returns the state column of the task_sessions row
-// for the given session ID, failing the test if the row cannot be read.
 func sessionState(t *testing.T, repo *Repository, sessionID string) string {
 	t.Helper()
 	var state string
@@ -839,11 +869,6 @@ func sessionState(t *testing.T, repo *Repository, sessionID string) string {
 	return state
 }
 
-// TestCancelActiveTaskSessionIsTerminalSafe verifies CancelActiveTaskSession
-// transitions a RUNNING session to CANCELLED and returns the stored
-// updated_at as the cancellation timestamp, while a session already in a
-// terminal state (COMPLETED) is left unchanged and reported as not
-// cancelled.
 func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -883,10 +908,6 @@ func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 	}
 }
 
-// TestUpdateTaskSessionStateIfCurrentRejectsStaleActiveWriter verifies that
-// after a session is cancelled, a conditional UpdateTaskSessionStateIfCurrent
-// call from a writer still expecting the prior RUNNING state is rejected and
-// the session remains CANCELLED.
 func TestUpdateTaskSessionStateIfCurrentRejectsStaleActiveWriter(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -916,11 +937,6 @@ func TestUpdateTaskSessionStateIfCurrentRejectsStaleActiveWriter(t *testing.T) {
 	}
 }
 
-// TestUpdateTaskSessionIfCurrentStateRejectsStaleFullRowWriter verifies that
-// after a session is cancelled out from under a full-row writer, a
-// subsequent UpdateTaskSessionIfCurrentState call using the writer's stale
-// in-memory state is rejected, leaving the session CANCELLED with its
-// executor ID unset.
 func TestUpdateTaskSessionIfCurrentStateRejectsStaleFullRowWriter(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -948,10 +964,6 @@ func TestUpdateTaskSessionIfCurrentStateRejectsStaleFullRowWriter(t *testing.T) 
 	require.Empty(t, stored.ExecutorID)
 }
 
-// TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite
-// verifies that UpdateTaskSessionWithMetadata returns an error and leaves
-// both the session state and existing metadata untouched when the supplied
-// metadata cannot be marshalled.
 func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -982,10 +994,6 @@ func TestUpdateTaskSessionWithMetadataRejectsInvalidMetadataBeforeStateWrite(t *
 	}
 }
 
-// TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeys verifies that
-// UpdateTaskSessionIfCurrentStateRemovingMetadataKeys removes the requested
-// metadata key while preserving other keys when the session's current state
-// matches the expected state.
 func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeys(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -1010,10 +1018,6 @@ func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeys(t *testing.T) {
 	require.Equal(t, "newer", stored.Metadata["keep"])
 }
 
-// TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeysStateMismatch
-// verifies that UpdateTaskSessionIfCurrentStateRemovingMetadataKeys is a
-// no-op, leaving all metadata untouched, when the expected state does not
-// match the session's current state.
 func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeysStateMismatch(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -1038,9 +1042,6 @@ func TestUpdateTaskSessionIfCurrentStateRemovingMetadataKeysStateMismatch(t *tes
 	require.Equal(t, "untouched", stored.Metadata["keep"])
 }
 
-// TestDismissLastAgentErrorDoesNotOverwriteNewerError verifies that
-// DismissLastAgentError ignores a dismiss request for a stale error once a
-// newer error has been recorded, leaving the newer error undismissed.
 func TestDismissLastAgentErrorDoesNotOverwriteNewerError(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -1081,10 +1082,6 @@ func TestDismissLastAgentErrorDoesNotOverwriteNewerError(t *testing.T) {
 	}
 }
 
-// TestDismissLastAgentErrorMatchesEquivalentTimestampText verifies that
-// DismissLastAgentError matches the stored error even when its occurred_at
-// timestamp was persisted as RFC3339Nano text rather than the parsed
-// time.Time value, and marks it dismissed.
 func TestDismissLastAgentErrorMatchesEquivalentTimestampText(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -1125,9 +1122,6 @@ func TestDismissLastAgentErrorMatchesEquivalentTimestampText(t *testing.T) {
 	}
 }
 
-// sessionCancellationMetadata reads and returns the error_message,
-// completed_at, and updated_at columns of the task_sessions row for the
-// given session ID.
 func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID string) (string, sql.NullTime, time.Time) {
 	t.Helper()
 	var errorMessage string
@@ -1142,10 +1136,6 @@ func sessionCancellationMetadata(t *testing.T, repo *Repository, sessionID strin
 	return errorMessage, completedAt, updatedAt
 }
 
-// assertReapedSession asserts that the session was transitioned to
-// CANCELLED with error_message "task archived", a completed_at timestamp
-// set, and updated_at at or after reapedAfter, recording any mismatch as a
-// test failure.
 func assertReapedSession(t *testing.T, repo *Repository, sessionID string, reapedAfter time.Time) {
 	t.Helper()
 	if got := sessionState(t, repo, sessionID); got != "CANCELLED" {

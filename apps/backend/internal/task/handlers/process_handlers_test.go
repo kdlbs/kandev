@@ -288,6 +288,28 @@ func (m *mockRepository) UpdateTaskSession(ctx context.Context, session *models.
 func (m *mockRepository) UpdateTaskSessionState(ctx context.Context, id string, state models.TaskSessionState, errorMessage string) error {
 	return nil
 }
+func (m *mockRepository) ClaimPromptableTaskSessionIfActive(_ context.Context, id string) (models.PromptableTaskSessionClaim, error) {
+	return claimPromptableTaskSession(m.sessions, id)
+}
+
+func claimPromptableTaskSession(sessions map[string]*models.TaskSession, id string) (models.PromptableTaskSessionClaim, error) {
+	session, ok := sessions[id]
+	if !ok {
+		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionInactive}, nil
+	}
+	if !isPromptableTaskSessionState(session.State) {
+		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionBusy}, nil
+	}
+	previousState := session.State
+	session.State = models.TaskSessionStateRunning
+	return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionClaimed, PreviousState: previousState}, nil
+}
+
+func isPromptableTaskSessionState(state models.TaskSessionState) bool {
+	return state == models.TaskSessionStateWaitingForInput ||
+		state == models.TaskSessionStateIdle ||
+		state == models.TaskSessionStateCompleted
+}
 func (m *mockRepository) ResetTaskSessionBasesForRepository(ctx context.Context, taskID, repositoryID, baseBranch string) (int64, error) {
 	return 0, nil
 }

@@ -201,6 +201,20 @@ func TestTeardownEnvironmentResources_CancellationStopsBeforeNextResource(t *tes
 	}
 }
 
+func TestTeardownEnvironmentResources_GenericWorktreeFailureRemainsError(t *testing.T) {
+	worktreeErr := errors.New("worktree backend unavailable")
+	svc := newResetTestService(t, &stubEnvRepo{})
+	svc.SetEnvironmentDestroyer(&stubDestroyer{worktreeErr: worktreeErr})
+
+	err := svc.teardownEnvironmentResources(context.Background(), &models.TaskEnvironment{
+		WorktreeID: "worktree-1",
+	})
+
+	if !errors.Is(err, worktreeErr) {
+		t.Fatalf("teardown error = %v, want %v", err, worktreeErr)
+	}
+}
+
 func TestCleanupTaskEnvironment_CancellationPreservesEnvironmentRow(t *testing.T) {
 	repo := &stubEnvRepo{}
 	svc := newResetTestService(t, repo)

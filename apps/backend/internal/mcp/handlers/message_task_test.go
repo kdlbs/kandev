@@ -56,6 +56,21 @@ type fakeOrchestrator struct {
 	interruptSkippedNoError bool
 }
 
+type failingQueueSnapshotRepository struct {
+	messagequeue.Repository
+	failSessionID string
+}
+
+func (r *failingQueueSnapshotRepository) ListBySession(
+	ctx context.Context,
+	sessionID string,
+) ([]messagequeue.QueuedMessage, error) {
+	if sessionID == r.failSessionID {
+		return nil, errors.New("snapshot failed")
+	}
+	return r.Repository.ListBySession(ctx, sessionID)
+}
+
 // interruptCall records one InterruptForPeerMessage invocation.
 type interruptCall struct {
 	taskID, sessionID, entryID string
@@ -1322,6 +1337,71 @@ func TestHandleMessageTask_DispatchErrorRestoresReview(t *testing.T) {
 	assert.Empty(t, messages)
 }
 
+func TestTaskMessageReviewRollbackPreservesReservedLifecycleQueueEntry(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateWaitingForInput)
+
+	h, orch := newMessageTaskHandler(t, svc, repo)
+	_, _, accepted, err := orch.queue.QueueLifecycleMessageWithCoalesceKey(
+		ctx,
+		sess.ID,
+		target.ID,
+		"reserved lifecycle prompt",
+		"",
+		messagequeue.QueuedByWorkflow,
+		false,
+		nil,
+		nil,
+		"github-pr:repo:1:merged",
+		true,
+	)
+	require.NoError(t, err)
+	require.True(t, accepted)
+	reserved, ok := orch.queue.ReserveQueued(ctx, sess.ID)
+	require.True(t, ok)
+
+	rollback := taskMessageReviewRollback{
+		changed: true,
+		sessions: []taskMessageSessionRollback{{
+			sessionID: sess.ID,
+		}},
+	}
+	require.NoError(t, rollback.captureQueues(ctx, orch.queue))
+	require.NoError(t, h.restoreTaskMessageQueues(ctx, rollback))
+
+	restored, ok, err := orch.queue.TakeQueuedEntry(ctx, sess.ID, reserved.ID)
+	require.NoError(t, err)
+	require.True(t, ok, "rollback must preserve lifecycle rows reserved by an in-flight delivery")
+	require.Equal(t, reserved.ID, restored.ID)
+}
+
+func TestTaskMessageReviewRollbackCaptureQueuesIsAtomic(t *testing.T) {
+	ctx := context.Background()
+	repo := &failingQueueSnapshotRepository{
+		Repository:    messagequeue.NewMemoryRepository(),
+		failSessionID: "session-2",
+	}
+	queue := messagequeue.NewService(
+		repo, messagequeue.DefaultMaxPerSession, testLogger(t),
+	)
+	original := map[string]taskMessageQueueRollback{
+		"existing": {entries: []messagequeue.QueuedMessage{{ID: "keep-me"}}},
+	}
+	rollback := taskMessageReviewRollback{
+		changed: true,
+		sessions: []taskMessageSessionRollback{
+			{sessionID: "session-1"},
+			{sessionID: "session-2"},
+		},
+		queues: original,
+	}
+
+	err := rollback.captureQueues(ctx, queue)
+	require.ErrorContains(t, err, "snapshot failed")
+	assert.Equal(t, original, rollback.queues, "failed capture must not publish a partial snapshot")
+}
+
 func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(t *testing.T) {
 	ctx := context.Background()
 	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
@@ -1355,6 +1435,21 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	h, orch := newMessageTaskHandler(t, svc, repo)
 	queuedBeforeSwitch, err := orch.queue.QueueMessageWithMetadata(ctx, sess.ID, target.ID, "queued before switch", "", "agent", false, nil, nil)
 	require.NoError(t, err)
+	durableBeforeSwitch, _, accepted, err := orch.queue.QueueLifecycleMessageWithCoalesceKey(
+		ctx,
+		sess.ID,
+		target.ID,
+		"durable lifecycle before switch",
+		"",
+		messagequeue.QueuedByWorkflow,
+		false,
+		nil,
+		nil,
+		"github-pr:repo:1:merged",
+		true,
+	)
+	require.NoError(t, err)
+	require.True(t, accepted)
 	orch.queue.SetPendingMove(ctx, sess.ID, &messagequeue.PendingMove{
 		TaskID:         target.ID,
 		WorkflowID:     "workflow-1",
@@ -1425,11 +1520,13 @@ func TestHandleMessageTask_DispatchErrorAfterSessionSwitchRestoresReviewSession(
 	require.NoError(t, err)
 	assert.Empty(t, messages)
 	status := orch.queue.GetStatus(ctx, sess.ID)
-	require.Equal(t, 1, status.Count)
+	require.Equal(t, 2, status.Count)
 	assert.Equal(t, "queued before switch", status.Entries[0].Content)
 	assert.Equal(t, queuedBeforeSwitch.ID, status.Entries[0].ID)
 	assert.Equal(t, queuedBeforeSwitch.Position, status.Entries[0].Position)
 	assert.Equal(t, queuedBeforeSwitch.QueuedAt, status.Entries[0].QueuedAt)
+	assert.Equal(t, durableBeforeSwitch.ID, status.Entries[1].ID)
+	assert.True(t, status.Entries[1].IsDurableLifecycle())
 	move, ok := orch.queue.TakePendingMove(ctx, sess.ID)
 	require.True(t, ok)
 	assert.Equal(t, "step-review", move.WorkflowStepID)

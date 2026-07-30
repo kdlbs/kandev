@@ -118,6 +118,7 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 | `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
 | `features.plugins` | `KANDEV_FEATURES_PLUGINS` | `false` in production | Extensible plugin system: install/manage plugins, spawn plugin backends, and load native UI bundles. Loaded plugin code runs with backend privileges. |
 | `features.app_status_bar` | `KANDEV_FEATURES_APP_STATUS_BAR` | `false` in production | Opt-in global connection/host-metrics/plugin surface: bottom bar on tablet/desktop and Status drawer on phones. |
+| `features.claude_background_prompt_handoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | `false` | High-risk experiment that lets Claude Code accept a new prompt after its foreground yields while adapter-attested background work remains active. Other providers keep the coarse busy gate. |
 
 Do not infer security from `auth.jwtSecret`: setting it currently does not turn the local server into an authenticated public service. Office's JWT key has a narrower, active purpose. Store both active secrets and third-party API keys in your deployment secret manager; never commit them in `config.yaml`.
 
@@ -294,11 +295,12 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | `features.office` | `KANDEV_FEATURES_OFFICE` | off | Experimental autonomous-agent Office surfaces and automation. |
 | `features.plugins` | `KANDEV_FEATURES_PLUGINS` | off | Extensible plugin system: install/manage plugins and load their backends and native UI bundles. |
 | `features.appStatusBar` | `KANDEV_FEATURES_APP_STATUS_BAR` | off | Global status bar on tablet/desktop and Status drawer entry on phones. Enabling changes visibility only. |
+| `features.claudeBackgroundPromptHandoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | off | High-risk Claude Code experiment that exposes recognized background-only activity and admits a successor prompt. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` (also locked by explicit legacy/debug-message vars) | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
 
-The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; the App status bar remains opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
+The source checkout's `make dev` activates the embedded development profile, which enables Office, debug surfaces, ACP logging, and a mock agent; the App status bar and Claude background prompt handoff remain opt-in. Installed `run`/desktop builds select the safe production profile unless the environment explicitly opts in. E2E mock variables and routes are test-only and must never be enabled on a public deployment.
 
 ## Credentials and product settings
 

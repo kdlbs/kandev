@@ -47,8 +47,8 @@ func TestHandleSpawnSession_TaskNotFound(t *testing.T) {
 }
 
 // Spawning on the caller's own task inherits the caller session's agent
-// profile when none is given, launches via IntentStart, wraps the prompt with
-// spawner attribution, and applies the optional session name.
+// profile when none is given, launches via IntentStart, carries the spawner
+// origin, and applies the optional session name.
 func TestHandleSpawnSession_SameTask_DefaultsToSenderProfile(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	_, target, sess := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
@@ -74,10 +74,13 @@ func TestHandleSpawnSession_SameTask_DefaultsToSenderProfile(t *testing.T) {
 	assert.Equal(t, target.ID, launched.TaskID)
 	assert.Equal(t, orchestrator.IntentStart, launched.Intent)
 	assert.Equal(t, "agent-profile-1", launched.AgentProfileID)
-	// Prompt carries the spawner attribution block plus the original body.
-	assert.Contains(t, launched.Prompt, "review the diff please")
-	assert.Contains(t, launched.Prompt, "<kandev-system>")
-	assert.Contains(t, launched.Prompt, sess.ID)
+	// The prompt travels unwrapped; spawner attribution rides along as
+	// structured origin so the launch site can build a trusted system block
+	// that survives first-turn canonicalization.
+	assert.Equal(t, "review the diff please", launched.Prompt)
+	require.NotNil(t, launched.SpawnOrigin)
+	assert.Equal(t, target.ID, launched.SpawnOrigin.TaskID)
+	assert.Equal(t, sess.ID, launched.SpawnOrigin.SessionID)
 
 	require.Len(t, orch.renameCalls, 1)
 	assert.Equal(t, renameCall{sessionID: "spawned-sess-1", name: "reviewer"}, orch.renameCalls[0])
@@ -183,13 +186,86 @@ func TestHandleSpawnSession_CrossWorkspace_Forbidden(t *testing.T) {
 	assert.Empty(t, orch.launchCalls, "cross-workspace spawn must not launch")
 }
 
-func TestWrapSpawnedSessionPrompt(t *testing.T) {
-	wrapped := wrapSpawnedSessionPrompt("do the thing", "task-1", "sess-1")
-	assert.Contains(t, wrapped, "do the thing")
-	assert.Contains(t, wrapped, "<kandev-system>")
-	assert.Contains(t, wrapped, `task_id="task-1"`)
-	assert.Contains(t, wrapped, `session_id="sess-1"`)
+// The spawner's session name (tab label) rides along so the new agent can refer
+// to its spawner by name rather than by bare UUID.
+func TestHandleSpawnSession_OriginCarriesSpawnerSessionName(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	_, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+	spawner := &models.TaskSession{
+		ID:             "sess-planner",
+		TaskID:         target.ID,
+		AgentProfileID: "agent-profile-1",
+		Name:           "planner",
+		State:          models.TaskSessionStateRunning,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, spawner))
 
-	// No sender session (e.g. external mode) → prompt passes through unwrapped.
-	assert.Equal(t, "plain", wrapSpawnedSessionPrompt("plain", "task-1", ""))
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "do the thing", target.ID, spawner.ID))
+	resp, err := h.handleSpawnSession(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	require.Len(t, orch.launchCalls, 1)
+	require.NotNil(t, orch.launchCalls[0].SpawnOrigin)
+	assert.Equal(t, "planner", orch.launchCalls[0].SpawnOrigin.SessionName)
+}
+
+// Without a sender session (external MCP callers) there is nothing to attribute,
+// so the launch carries no origin and the prompt is untouched.
+func TestHandleSpawnSession_NoSenderSession_NoOrigin(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "plain", target.ID, ""))
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	require.Len(t, orch.launchCalls, 1)
+	assert.Nil(t, orch.launchCalls[0].SpawnOrigin)
+	assert.Equal(t, "plain", orch.launchCalls[0].Prompt)
+}
+
+// A caller-supplied sender_session_id that does not belong to the claimed sender
+// task must not become launch attribution: the spawned agent would be told to
+// report to a session that never asked for it. Falling back to the target's
+// primary profile keeps the spawn working without the forged origin.
+func TestHandleSpawnSession_ForgedSenderSession_YieldsNoOrigin(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	sender, target, victim := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	// victim belongs to the target task, but the caller claims it is a session of
+	// the sender task.
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "do things", sender.ID, victim.ID))
+	resp, err := h.handleSpawnSession(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	require.Len(t, orch.launchCalls, 1)
+	assert.Nil(t, orch.launchCalls[0].SpawnOrigin)
+	assert.Equal(t, "agent-profile-1", orch.launchCalls[0].AgentProfileID)
+}
+
+// An unknown sender_session_id is likewise not attributable.
+func TestHandleSpawnSession_UnknownSenderSession_YieldsNoOrigin(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	_, target, _ := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
+
+	h, orch := newMessageTaskHandler(t, svc)
+
+	msg := makeWSMessage(t, ws.ActionMCPSpawnSession, spawnPayload(target.ID, "do things", target.ID, "sess-ghost"))
+	resp, err := h.handleSpawnSession(context.Background(), msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	require.Len(t, orch.launchCalls, 1)
+	assert.Nil(t, orch.launchCalls[0].SpawnOrigin)
 }

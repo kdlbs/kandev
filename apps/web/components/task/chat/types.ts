@@ -163,6 +163,9 @@ export type StatusMetadata = {
   attempt?: number;
   max_attempts?: number;
   retry_in_seconds?: number;
+  // Running-only action notices are hidden once the session settles. They use
+  // compact neutral presentation instead of the normal recovery/error card.
+  action_visibility?: "running";
 };
 
 export type RecoveryAuthMethod = {

@@ -346,6 +346,12 @@ func (m *Manager) handleCompleteEvent(execution *AgentExecution, event *agentctl
 // separate DB rows mid-sentence, breaking markdown that spans the boundary.
 func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.AgentEvent) agentctl.AgentEvent {
 	if event.ParentToolCallID == "" {
+		execution.setActiveTool(activeTopLevelTool{
+			ToolCallID: event.ToolCallID,
+			Name:       event.ToolName,
+			Title:      event.ToolTitle,
+			Status:     event.ToolStatus,
+		})
 		// flushMessageBuffer publishes any remaining buffered content through
 		// the streaming path itself and always returns "".
 		m.flushMessageBuffer(execution)
@@ -365,6 +371,9 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 
 // handleToolUpdateEvent stores completed tool results in session history.
 func (m *Manager) handleToolUpdateEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	if event.ParentToolCallID == "" && isTerminalToolUpdate(event) {
+		execution.clearActiveTool(event.ToolCallID)
+	}
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" && event.ToolStatus == toolStatusComplete {
 		m.flushAssistantHistory(execution)
 		if err := m.historyManager.AppendToolResult(execution.SessionID, event); err != nil {

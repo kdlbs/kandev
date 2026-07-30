@@ -12,6 +12,7 @@ package messagequeue
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -54,7 +55,7 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 // is propagated to the resulting Message row when the queued message is
 // drained (e.g. sender_task_id for messages sent via message_task_kandev).
 func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
-	metadataCopy := copyMessageMetadata(metadata, false)
+	metadataCopy := copyMessageMetadata(metadata, 0)
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
 		TaskID:      taskID,
@@ -83,14 +84,14 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 }
 
 // RestoreMessage restores a dequeued message at its original FIFO position
-// after a delivery failure. Unlike QueueMessageWithMetadata, it preserves the
-// entry's identity, position, queued_at time, and queued_by ownership.
+// after a delivery failure. It preserves the entry's identity, position,
+// queued_at time, and queued_by ownership.
 func (s *Service) RestoreMessage(ctx context.Context, msg *QueuedMessage) (*QueuedMessage, error) {
 	if msg == nil {
 		return nil, errors.New("queued message is nil")
 	}
 	restored := *msg
-	restored.Metadata = copyMessageMetadata(msg.Metadata, false)
+	restored.Metadata = copyMessageMetadata(msg.Metadata, 0)
 	if err := s.repo.Restore(ctx, &restored, s.maxPerSession); err != nil {
 		return nil, err
 	}
@@ -107,7 +108,7 @@ func (s *Service) RestoreMessage(ctx context.Context, msg *QueuedMessage) (*Queu
 // inserts a new tail entry if allowInsert is true; otherwise ErrEntryNotFound is
 // returned. The returned bool is true when an existing entry was replaced.
 func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, error) {
-	metadataCopy := copyMessageMetadata(metadata, true)
+	metadataCopy := copyMessageMetadata(metadata, 1)
 	metadataCopy[MetadataCoalesceKey] = coalesceKey
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
@@ -139,11 +140,129 @@ func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, ta
 	return queued, replaced, nil
 }
 
-func copyMessageMetadata(metadata map[string]interface{}, ensureWritable bool) map[string]interface{} {
-	if len(metadata) == 0 && !ensureWritable {
+// QueueLifecycleMessageWithCoalesceKey accepts a lifecycle entry only while
+// its task remains active. accepted is false for a normal archive/delete win.
+func (s *Service) QueueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, false)
+}
+
+// RequeueLifecycleMessageWithCoalesceKey preserves the generation captured by
+// an existing durable row. This prevents a stale retry from becoming a new
+// prompt after the task was archived and then unarchived.
+func (s *Service) RequeueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, bool, error) {
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, true)
+}
+
+func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert, isRetry bool) (*QueuedMessage, bool, bool, error) {
+	metadataCopy := clearReservedMetadata(metadata)
+	generation, err := s.repo.LifecycleGeneration(ctx, taskID)
+	if err != nil {
+		return nil, false, false, err
+	}
+	if isRetry {
+		// Rows written before generation metadata existed belong to generation
+		// zero. They may retry while no purge occurred, but a later archive
+		// advances generation and rejects them just like newer rows.
+		expected, ok := lifecycleGenerationFromMetadata(metadataCopy)
+		if !ok {
+			expected = 0
+		}
+		if expected != generation {
+			return nil, false, false, nil
+		}
+	}
+	metadataCopy[MetadataCoalesceKey] = coalesceKey
+	metadataCopy[MetadataLifecycleDurable] = true
+	metadataCopy[MetadataLifecycleGeneration] = generation
+	msg := &QueuedMessage{SessionID: sessionID, TaskID: taskID, Content: content, Model: model, PlanMode: planMode, Attachments: attachments, Metadata: metadataCopy, QueuedBy: userID}
+	queued, replaced, err := s.repo.InsertOrReplaceLifecycleByCoalesceKey(ctx, msg, coalesceKey, s.maxPerSession, allowInsert)
+	if errors.Is(err, ErrTaskInactive) || errors.Is(err, ErrLifecycleCancelled) {
+		return nil, false, false, nil
+	}
+	if err != nil {
+		return nil, false, false, err
+	}
+	return queued, replaced, true, nil
+}
+
+// PurgeTask is a backend-only task lifecycle operation. Client deletion APIs
+// retain their reserved-entry protections.
+func (s *Service) PurgeTask(ctx context.Context, taskID string) (int, error) {
+	return s.repo.PurgeTask(ctx, taskID)
+}
+
+func lifecycleGenerationFromMetadata(metadata map[string]interface{}) (int64, bool) {
+	if metadata == nil {
+		return 0, false
+	}
+	switch value := metadata[MetadataLifecycleGeneration].(type) {
+	case int64:
+		return value, true
+	case int:
+		return int64(value), true
+	case float64:
+		return int64(value), true
+	default:
+		return 0, false
+	}
+}
+
+// ReserveQueued atomically takes an ordinary head entry or reserves a durable
+// lifecycle head entry. A reserved lifecycle row survives until acknowledged.
+func (s *Service) ReserveQueued(ctx context.Context, sessionID string) (*QueuedMessage, bool) {
+	msg, err := s.repo.ReserveHead(ctx, sessionID)
+	if err != nil {
+		s.logger.Error("reserve head failed",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return nil, false
+	}
+	return msg, msg != nil
+}
+
+// AcknowledgeQueued removes a server-reserved entry after prompt acceptance.
+func (s *Service) AcknowledgeQueued(ctx context.Context, sessionID, entryID string) error {
+	err := s.repo.AcknowledgeByID(ctx, sessionID, entryID)
+	if errors.Is(err, ErrEntryNotFound) {
 		return nil
 	}
-	out := make(map[string]interface{}, len(metadata))
+	return err
+}
+
+// IsCurrentLifecycleReservation verifies that msg is still the durable row
+// accepted for the task's current lifecycle generation. A task archive/delete
+// removes that row and advances the generation, so callers can discard a
+// deferred reservation before it performs any prompt side effects.
+func (s *Service) IsCurrentLifecycleReservation(ctx context.Context, msg *QueuedMessage) bool {
+	if msg == nil || !msg.IsDurableLifecycle() {
+		return false
+	}
+	expectedGeneration, ok := lifecycleGenerationFromMetadata(msg.Metadata)
+	if !ok {
+		expectedGeneration = 0
+	}
+	generation, err := s.repo.LifecycleGeneration(ctx, msg.TaskID)
+	if err != nil || generation != expectedGeneration {
+		return false
+	}
+	entries, err := s.repo.ListBySession(ctx, msg.SessionID)
+	if err != nil {
+		return false
+	}
+	for i := range entries {
+		entry := &entries[i]
+		if entry.ID == msg.ID && entry.TaskID == msg.TaskID && entry.IsDurableLifecycle() {
+			return true
+		}
+	}
+	return false
+}
+
+func copyMessageMetadata(metadata map[string]interface{}, extraCapacity int) map[string]interface{} {
+	if len(metadata) == 0 && extraCapacity == 0 {
+		return nil
+	}
+	out := make(map[string]interface{}, len(metadata)+extraCapacity)
 	for key, value := range metadata {
 		out[key] = value
 	}
@@ -270,14 +389,35 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 			zap.Error(err))
 		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: s.maxPerSession}
 	}
-	if entries == nil {
-		entries = []QueuedMessage{}
+	pending := make([]QueuedMessage, 0, len(entries))
+	for _, entry := range entries {
+		// A reserved lifecycle row is already being delivered; listing it next
+		// to the message it produced reads as a stuck duplicate.
+		if entry.IsReservedInFlight() {
+			continue
+		}
+		pending = append(pending, entry)
 	}
 	return &QueueStatus{
-		Entries: entries,
-		Count:   len(entries),
+		Entries: pending,
+		Count:   len(pending),
 		Max:     s.maxPerSession,
 	}
+}
+
+// SnapshotSession returns the complete persisted queue state for rollback.
+// Unlike GetStatus, it includes durable lifecycle rows reserved by an in-flight
+// delivery so a later restore cannot erase them before acknowledgement.
+func (s *Service) SnapshotSession(ctx context.Context, sessionID string) ([]QueuedMessage, *PendingMove, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("snapshot queued messages: %w", err)
+	}
+	move, err := s.repo.GetPendingMove(ctx, sessionID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("snapshot pending move: %w", err)
+	}
+	return entries, move, nil
 }
 
 // TransferSession moves any queued messages and pending move from one session

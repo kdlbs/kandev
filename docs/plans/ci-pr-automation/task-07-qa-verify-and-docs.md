@@ -1,9 +1,10 @@
 ---
 id: "07-qa-verify-and-docs"
 title: "QA verify and docs"
-status: pending
-wave: 4
-depends_on: ["06-e2e-ci-automation"]
+status: done
+wave: 9
+depends_on:
+  - "17-final-lifecycle-transition-coverage"
 plan: "plan.md"
 spec: "../../specs/ui/ci-pr-automation.md"
 ---
@@ -19,21 +20,19 @@ spec: "../../specs/ui/ci-pr-automation.md"
 ## Verification
 
 ```bash
-rtk make fmt
-rtk make typecheck test lint
+make fmt
+make typecheck test lint
 ```
 
 ## Files Likely Touched
 
-- `docs/specs/ui/ci-pr-automation.md`
-- `docs/plans/ci-pr-automation/plan.md`
-- `docs/plans/ci-pr-automation/task-*.md`
+- `docs/plans/ci-pr-automation/task-07-qa-verify-and-docs.md`
 - Relevant `AGENTS.md` files only if implementation changes documented conventions
 - `docs/decisions/*.md` only if a durable architecture decision emerges during implementation
 
 ## Dependencies
 
-- `06-e2e-ci-automation`
+- Task 17.
 
 ## Inputs
 
@@ -44,4 +43,5 @@ rtk make typecheck test lint
 
 ## Output Contract
 
-When complete, update this file's `status` to `done`, update the Wave 4 checkbox in `plan.md`, and report changed files, tests run, blockers, and residual risks.
+When complete, update this file's `status` to `done` and report changed files,
+tests run, blockers, and residual risks. Do not edit `plan.md`.

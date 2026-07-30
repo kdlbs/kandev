@@ -119,3 +119,19 @@ func TestExecutionStore_BeginPromptAlwaysAdvancesGeneration(t *testing.T) {
 		t.Fatal("replacement prompt must create generation 2 while already running")
 	}
 }
+
+func TestExecutionStore_BeginPromptClearsActiveTopLevelTool(t *testing.T) {
+	store := NewExecutionStore()
+	exec := &AgentExecution{ID: "exec-1", SessionID: "session-1"}
+	if err := store.Add(exec); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	exec.setActiveTool(activeTopLevelTool{ToolCallID: "tool-1", Name: "shell"})
+
+	if _, err := store.BeginPrompt(exec.ID); err != nil {
+		t.Fatalf("BeginPrompt: %v", err)
+	}
+	if got := exec.activeToolSnapshot(); got != nil {
+		t.Fatalf("active tool after BeginPrompt = %#v, want nil", got)
+	}
+}

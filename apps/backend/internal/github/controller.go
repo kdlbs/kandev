@@ -348,7 +348,7 @@ func (c *Controller) httpGetTaskCIOptions(ctx *gin.Context) {
 func (c *Controller) httpPatchTaskCIOptions(ctx *gin.Context) {
 	patch, err := parseTaskCIOptionsPatch(ctx)
 	if err != nil {
-		ctx.JSON(http.StatusBadRequest, gin.H{"error": "invalid payload"})
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	if !patch.HasAny() {
@@ -408,10 +408,30 @@ func parseTaskCIOptionsPatch(ctx *gin.Context) (TaskCIOptionsPatch, error) {
 				return TaskCIOptionsPatch{}, err
 			}
 			patch.AutoFixPromptOverride = &prompt
+		case "prompt_on_review_requested":
+			if err := json.Unmarshal(value, &patch.PromptOnReviewRequested); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+		case "prompt_on_merged":
+			if err := json.Unmarshal(value, &patch.PromptOnMerged); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+		case "prompt_on_closed":
+			if err := json.Unmarshal(value, &patch.PromptOnClosed); err != nil {
+				return TaskCIOptionsPatch{}, err
+			}
+		case "review_prompt_override":
+			return TaskCIOptionsPatch{}, errLifecyclePromptOverridesUnsupported
+		case "merged_prompt_override":
+			return TaskCIOptionsPatch{}, errLifecyclePromptOverridesUnsupported
+		case "closed_prompt_override":
+			return TaskCIOptionsPatch{}, errLifecyclePromptOverridesUnsupported
 		}
 	}
 	return patch, nil
 }
+
+var errLifecyclePromptOverridesUnsupported = errors.New("lifecycle prompt overrides are not supported")
 
 func (c *Controller) publishTaskCIOptionsUpdated(ctx context.Context, resp *TaskCIOptionsResponse) {
 	if c.service == nil || c.service.eventBus == nil || resp == nil {
@@ -787,7 +807,12 @@ func (c *Controller) httpUpdateReviewWatch(ctx *gin.Context) {
 		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	ctx.JSON(http.StatusOK, gin.H{"updated": true})
+	updated, err := c.service.GetReviewWatch(ctx.Request.Context(), id)
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, updated)
 }
 
 func (c *Controller) httpDeleteReviewWatch(ctx *gin.Context) {

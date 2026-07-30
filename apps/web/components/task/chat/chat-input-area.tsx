@@ -5,6 +5,7 @@ import { IconArrowRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { TodoIndicator } from "./todo-indicator";
+import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
@@ -40,6 +41,10 @@ import { resolveComposerWorkspaceId } from "./composer-workspace";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
+/**
+ * Prepends any pending review/walkthrough/PR-feedback/plan/message comments
+ * to the composer text as Markdown, in a fixed stacking order, before send.
+ */
 export function buildSubmitMessage({
   message,
   reviewComments,
@@ -78,6 +83,7 @@ export function buildSubmitMessage({
   return finalMessage;
 }
 
+/** Resolves the composer placeholder text for the current agent/document/plan state. */
 export function resolveInputPlaceholder(
   isAgentBusy: boolean,
   activeDocumentType: string | undefined,
@@ -103,6 +109,8 @@ type PlaceholderArgs = {
   needsRecovery: boolean;
 };
 
+/** Picks the composer placeholder: an explicit override wins, then the
+ *  "switching agent" state, then {@link resolveInputPlaceholder}. */
 function pickInputPlaceholder(a: PlaceholderArgs): string {
   if (a.isMoving) return "Switching agent...";
   // Preserve the prior `??` semantics: an explicit "" override (caller wants
@@ -117,6 +125,8 @@ function pickInputPlaceholder(a: PlaceholderArgs): string {
   );
 }
 
+/** Shows an error toast for a failed message send, distinguishing a known
+ *  send error from an ambiguous connection drop/timeout. */
 function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>["toast"]) {
   console.error("Failed to send message:", error);
   if (isMessageSendError(error)) {
@@ -135,6 +145,7 @@ function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>
   });
 }
 
+/** Adapts {@link useChatPanelState}'s fields into {@link useMessageHandler}'s params. */
 function usePanelMessageHandler(panelState: ReturnType<typeof useChatPanelState>) {
   const {
     resolvedSessionId,
@@ -160,6 +171,8 @@ function usePanelMessageHandler(panelState: ReturnType<typeof useChatPanelState>
   });
 }
 
+/** Builds the composer's submit handler, tracking in-flight sends and
+ *  routing errors to a toast. */
 export function useSubmitHandler(
   panelState: ReturnType<typeof useChatPanelState>,
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult,
@@ -252,6 +265,7 @@ export function useSubmitHandler(
   return { isSending, handleSubmit };
 }
 
+/** Builds the cancel-turn handler and registers the global focus-input keyboard shortcut. */
 export function useChatPanelHandlers(
   resolvedSessionId: string | null,
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
@@ -298,6 +312,11 @@ type TodoDisplayItem = {
   status?: "pending" | "in_progress" | "completed" | "failed";
 };
 
+/**
+ * Row above the composer showing todo progress, PR/CI status chips,
+ * merged/closed PR banners, the auto-scroll toggle + Share (right-aligned),
+ * and a "move to next step" action when the workflow allows it.
+ */
 function ChatStatusBar({
   todoItems,
   taskId,
@@ -322,6 +341,9 @@ function ChatStatusBar({
   const showTodos = todoItems.length > 0;
   const showProceed = !!nextStepName && !isAgentBusy;
   const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
+  // Auto-scroll toggle only needs a session (quick-chat/ephemeral sessions
+  // have a transcript with no taskId); Share additionally needs a taskId.
+  const showRightControls = !!sessionId;
   // PRMergedBanner returns null internally when not applicable
   return (
     <div
@@ -337,9 +359,12 @@ function ChatStatusBar({
           different avoids a duplicate-sibling-key collision. */}
       {taskId && <PRMergedBanner key={`${taskId}-merged`} taskId={taskId} />}
       {taskId && <PRClosedBanner key={`${taskId}-closed`} taskId={taskId} />}
-      {canShare && taskId && sessionId && (
-        <div className="ml-auto shrink-0">
-          <ShareButton taskId={taskId} sessionId={sessionId} iconOnly />
+      {showRightControls && (
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
+          {canShare && taskId && sessionId && (
+            <ShareButton taskId={taskId} sessionId={sessionId} iconOnly />
+          )}
         </div>
       )}
       {showProceed && (
@@ -349,7 +374,7 @@ function ChatStatusBar({
               type="button"
               variant="outline"
               size="sm"
-              className={`${canShare ? "" : "ml-auto "}h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary`}
+              className={`${showRightControls ? "" : "ml-auto "}h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary`}
               onClick={onProceed}
               disabled={isMoving}
               data-testid="proceed-next-step"
@@ -383,6 +408,7 @@ type ChatInputAreaProps = {
   surfaceClassName?: string;
 };
 
+/** Resolves whether this session's executor environment is unavailable, and why. */
 function useExecutorUnavailable(taskId: string | null, sessionId: string | null) {
   const availability = useExecutorEnvironmentAvailability(taskId, Boolean(sessionId && taskId));
   return {
@@ -391,6 +417,7 @@ function useExecutorUnavailable(taskId: string | null, sessionId: string | null)
   };
 }
 
+/** Resolves the workspace ID the composer should attribute a new message to. */
 function useComposerWorkspaceId(sessionId: string | null, taskId: string | null) {
   return useAppStore((state) =>
     resolveComposerWorkspaceId({
@@ -405,6 +432,7 @@ function useComposerWorkspaceId(sessionId: string | null, taskId: string | null)
   );
 }
 
+/** Derives the composer's plan actions, executor-availability state, and placeholder text. */
 function useChatInputDerived(
   panelState: ReturnType<typeof useChatPanelState>,
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
@@ -433,10 +461,16 @@ function useChatInputDerived(
   return { planActions, executor, placeholder };
 }
 
+/** Whether the user can manually drain the queued-message backlog right now
+ *  (no pending clarification, and the session is idle/waiting for input). */
 function canManuallyDrainQueue(pendingClarification: unknown, sessionState: string | null) {
   return !pendingClarification && (sessionState === "WAITING_FOR_INPUT" || sessionState === "IDLE");
 }
 
+/**
+ * The chat composer: input box, submit/cancel handling, plan-mode toggle,
+ * clarification banner, and the {@link ChatStatusBar} above it.
+ */
 export function ChatInputArea({
   chatInputRef,
   clarificationKey,

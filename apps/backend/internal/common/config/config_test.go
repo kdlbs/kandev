@@ -228,6 +228,18 @@ func TestFeatures_PluginsEnabledByEnv(t *testing.T) {
 	}
 }
 
+func TestFeatures_ClaudeBackgroundPromptHandoffEnabledByEnv(t *testing.T) {
+	t.Setenv("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF", "true")
+
+	cfg, err := LoadWithPath(t.TempDir())
+	if err != nil {
+		t.Fatalf("LoadWithPath: %v", err)
+	}
+	if !cfg.Features.ClaudeBackgroundPromptHandoff {
+		t.Error("Features.ClaudeBackgroundPromptHandoff = false, want true")
+	}
+}
+
 func TestFeatures_AppStatusBarDisabledByEnv(t *testing.T) {
 	t.Setenv("KANDEV_FEATURES_APP_STATUS_BAR", "false")
 
@@ -422,13 +434,18 @@ func TestServerHostsFromConfigWhenHostUnset(t *testing.T) {
 // without a tag) would surface as a capitalized JSON key and break the
 // frontend's case-sensitive read in apps/web/app/actions/features.ts.
 func TestFeaturesConfig_JSONShape(t *testing.T) {
-	cfg := FeaturesConfig{Office: true, Plugins: true, AppStatusBar: true, Auth: true}
+	cfg := FeaturesConfig{
+		Office:       true,
+		Plugins:      true,
+		AppStatusBar: true,
+		Auth:         true,
+	}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
 	got := string(raw)
-	want := `{"office":true,"plugins":true,"appStatusBar":true,"auth":true}`
+	want := `{"office":true,"plugins":true,"appStatusBar":true,"auth":true,"claudeBackgroundPromptHandoff":false}`
 	if got != want {
 		t.Errorf("FeaturesConfig JSON = %s; want %s — missing or wrong `json:` struct tag", got, want)
 	}

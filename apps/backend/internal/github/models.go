@@ -437,55 +437,83 @@ type TaskPR struct {
 
 // TaskCIOptions stores task-level PR automation preferences.
 type TaskCIOptions struct {
-	TaskID                string    `json:"task_id" db:"task_id"`
-	AutoFixEnabled        bool      `json:"auto_fix_enabled" db:"auto_fix_enabled"`
-	AutoMergeEnabled      bool      `json:"auto_merge_enabled" db:"auto_merge_enabled"`
-	AutoFixPromptOverride *string   `json:"auto_fix_prompt_override,omitempty" db:"auto_fix_prompt_override"`
-	CreatedAt             time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at" db:"updated_at"`
+	TaskID                  string  `json:"task_id" db:"task_id"`
+	AutoFixEnabled          bool    `json:"auto_fix_enabled" db:"auto_fix_enabled"`
+	AutoMergeEnabled        bool    `json:"auto_merge_enabled" db:"auto_merge_enabled"`
+	AutoFixPromptOverride   *string `json:"auto_fix_prompt_override,omitempty" db:"auto_fix_prompt_override"`
+	PromptOnReviewRequested bool    `json:"prompt_on_review_requested" db:"prompt_on_review_requested"`
+	PromptOnMerged          bool    `json:"prompt_on_merged" db:"prompt_on_merged"`
+	PromptOnClosed          bool    `json:"prompt_on_closed" db:"prompt_on_closed"`
+	ReviewReviewerLogin     string  `json:"review_reviewer_login" db:"review_reviewer_login"`
+	// Lifecycle override columns remain only to read and clear legacy rows during
+	// the additive schema migration. They are not part of the update or API model.
+	ReviewPromptOverride *string   `json:"-" db:"review_prompt_override"`
+	MergedPromptOverride *string   `json:"-" db:"merged_prompt_override"`
+	ClosedPromptOverride *string   `json:"-" db:"closed_prompt_override"`
+	CreatedAt            time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // TaskCIOptionsPatch is a partial update for task CI automation options.
 type TaskCIOptionsPatch struct {
-	AutoFixEnabled        *bool
-	AutoMergeEnabled      *bool
-	AutoFixPromptOverride *string
+	AutoFixEnabled          *bool
+	AutoMergeEnabled        *bool
+	AutoFixPromptOverride   *string
+	PromptOnReviewRequested *bool
+	PromptOnMerged          *bool
+	PromptOnClosed          *bool
+	ReviewReviewerLogin     *string
 }
 
 // HasAny reports whether the patch contains at least one requested field change.
 func (p TaskCIOptionsPatch) HasAny() bool {
-	return p.AutoFixEnabled != nil || p.AutoMergeEnabled != nil || p.AutoFixPromptOverride != nil
+	return p.AutoFixEnabled != nil || p.AutoMergeEnabled != nil || p.AutoFixPromptOverride != nil ||
+		p.PromptOnReviewRequested != nil || p.PromptOnMerged != nil || p.PromptOnClosed != nil ||
+		p.ReviewReviewerLogin != nil
 }
 
 // TaskCIOptionsResponse is the HTTP shape for task CI automation options.
 type TaskCIOptionsResponse struct {
-	TaskID                 string                     `json:"task_id"`
-	AutoFixEnabled         bool                       `json:"auto_fix_enabled"`
-	AutoMergeEnabled       bool                       `json:"auto_merge_enabled"`
-	AutoFixPromptOverride  *string                    `json:"auto_fix_prompt_override"`
-	AutoFixMaxRounds       int                        `json:"auto_fix_max_rounds"`
-	EffectiveAutoFixPrompt string                     `json:"effective_auto_fix_prompt"`
-	UsingDefaultPrompt     bool                       `json:"using_default_prompt"`
-	UpdatedAt              time.Time                  `json:"updated_at"`
-	PRStates               []*TaskCIPRAutomationState `json:"pr_states"`
+	TaskID                  string                     `json:"task_id"`
+	AutoFixEnabled          bool                       `json:"auto_fix_enabled"`
+	AutoMergeEnabled        bool                       `json:"auto_merge_enabled"`
+	AutoFixPromptOverride   *string                    `json:"auto_fix_prompt_override"`
+	AutoFixMaxRounds        int                        `json:"auto_fix_max_rounds"`
+	EffectiveAutoFixPrompt  string                     `json:"effective_auto_fix_prompt"`
+	UsingDefaultPrompt      bool                       `json:"using_default_prompt"`
+	PromptOnReviewRequested bool                       `json:"prompt_on_review_requested"`
+	PromptOnMerged          bool                       `json:"prompt_on_merged"`
+	PromptOnClosed          bool                       `json:"prompt_on_closed"`
+	ReviewReviewerLogin     string                     `json:"review_reviewer_login"`
+	EffectiveReviewPrompt   string                     `json:"-"`
+	EffectiveMergedPrompt   string                     `json:"-"`
+	EffectiveClosedPrompt   string                     `json:"-"`
+	UpdatedAt               time.Time                  `json:"updated_at"`
+	PRStates                []*TaskCIPRAutomationState `json:"pr_states"`
 }
 
 // TaskCIPRAutomationState stores per-PR dedupe and error state for CI automation.
 type TaskCIPRAutomationState struct {
-	TaskID                string     `json:"task_id" db:"task_id"`
-	RepositoryID          string     `json:"repository_id" db:"repository_id"`
-	PRNumber              int        `json:"pr_number" db:"pr_number"`
-	LastFixSignature      string     `json:"last_fix_signature" db:"last_fix_signature"`
-	LastFixCheckpointJSON string     `json:"last_fix_checkpoint_json" db:"last_fix_checkpoint_json"`
-	LastFixEnqueuedAt     *time.Time `json:"last_fix_enqueued_at,omitempty" db:"last_fix_enqueued_at"`
-	LastFixSessionID      *string    `json:"last_fix_session_id,omitempty" db:"last_fix_session_id"`
-	AutoFixRoundCount     int        `json:"auto_fix_round_count" db:"auto_fix_round_count"`
-	AutoFixExhaustedAt    *time.Time `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
-	LastMergeSignature    string     `json:"last_merge_signature" db:"last_merge_signature"`
-	LastMergeAttemptAt    *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
-	LastError             *string    `json:"last_error,omitempty" db:"last_error"`
-	CreatedAt             time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at" db:"updated_at"`
+	TaskID                   string     `json:"task_id" db:"task_id"`
+	RepositoryID             string     `json:"repository_id" db:"repository_id"`
+	PRNumber                 int        `json:"pr_number" db:"pr_number"`
+	LastFixSignature         string     `json:"last_fix_signature" db:"last_fix_signature"`
+	LastFixCheckpointJSON    string     `json:"last_fix_checkpoint_json" db:"last_fix_checkpoint_json"`
+	LastFixEnqueuedAt        *time.Time `json:"last_fix_enqueued_at,omitempty" db:"last_fix_enqueued_at"`
+	LastFixSessionID         *string    `json:"last_fix_session_id,omitempty" db:"last_fix_session_id"`
+	AutoFixRoundCount        int        `json:"auto_fix_round_count" db:"auto_fix_round_count"`
+	AutoFixExhaustedAt       *time.Time `json:"auto_fix_exhausted_at" db:"auto_fix_exhausted_at"`
+	LastMergeSignature       string     `json:"last_merge_signature" db:"last_merge_signature"`
+	LastMergeAttemptAt       *time.Time `json:"last_merge_attempt_at,omitempty" db:"last_merge_attempt_at"`
+	ReviewRequestInitialized bool       `json:"review_request_initialized" db:"review_request_initialized"`
+	LastReviewRequested      bool       `json:"last_review_requested" db:"last_review_requested"`
+	LastObservedPRState      string     `json:"last_observed_pr_state" db:"last_observed_pr_state"`
+	LastLifecycleEvent       string     `json:"last_lifecycle_event" db:"last_lifecycle_event"`
+	LastLifecyclePromptAt    *time.Time `json:"last_lifecycle_prompt_at,omitempty" db:"last_lifecycle_prompt_at"`
+	LastLifecycleSessionID   *string    `json:"last_lifecycle_session_id,omitempty" db:"last_lifecycle_session_id"`
+	LastError                *string    `json:"last_error,omitempty" db:"last_error"`
+	CreatedAt                time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 // TaskCIFixAttempt records an auto-fix prompt attempt for a task PR.
@@ -507,6 +535,18 @@ type TaskCIMergeAttempt struct {
 	PRNumber     int
 	Signature    string
 	AttemptedAt  time.Time
+}
+
+// TaskPRLifecyclePrompt records an accepted lifecycle prompt checkpoint.
+type TaskPRLifecyclePrompt struct {
+	TaskID          string
+	RepositoryID    string
+	PRNumber        int
+	Event           string
+	SessionID       string
+	PromptedAt      time.Time
+	ReviewRequested bool
+	ObservedState   string
 }
 
 // RepoFilter identifies a GitHub repository for review watch filtering.

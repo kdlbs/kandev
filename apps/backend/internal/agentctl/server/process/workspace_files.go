@@ -862,10 +862,18 @@ func calculateSHA256(content string) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// scoredMatch holds a file path and its match score for sorting
+// scoredMatch holds a file path, repository identity, and match score for sorting.
 type scoredMatch struct {
-	path  string
-	score int
+	path           string
+	matchPath      string
+	repositoryName string
+	score          int
+}
+
+type fileSearchCandidate struct {
+	path           string
+	matchPath      string
+	repositoryName string
 }
 
 // GetFileContentAtRef returns the content of a file at a specific git ref (branch, commit, HEAD, etc).
@@ -928,8 +936,75 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 // SearchFiles searches for files matching the query string.
 // It uses fuzzy matching with scoring based on how well the query matches.
 func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
+	wt.mu.RLock()
+	candidates := make([]fileSearchCandidate, 0, len(wt.currentFiles.Files))
+	for _, file := range wt.currentFiles.Files {
+		candidates = append(candidates, fileSearchCandidate{
+			path:      file.Path,
+			matchPath: file.Path,
+		})
+	}
+	wt.mu.RUnlock()
+
+	results := searchFileCandidates(candidates, query, limit)
+	paths := make([]string, 0, len(results))
+	for _, result := range results {
+		paths = append(paths, result.Path)
+	}
+	return paths
+}
+
+// SearchWorkspaceFileResults searches every repository represented by the manager.
+// Multi-repo results retain their task-root-relative repository prefix so
+// existing file consumers can open the returned path without extra metadata.
+func (m *Manager) SearchWorkspaceFileResults(query string, limit int) []types.FileSearchResult {
+	root, repositories := m.snapshotTrackers()
+	if len(repositories) == 0 {
+		if root == nil {
+			return []types.FileSearchResult{}
+		}
+		candidates := appendTrackerFileSearchCandidates(nil, root)
+		return searchFileCandidates(candidates, query, limit)
+	}
+
+	candidates := make([]fileSearchCandidate, 0)
+	if root != nil && root.RepositoryName() != "" {
+		candidates = appendTrackerFileSearchCandidates(candidates, root)
+	}
+	for _, tracker := range repositories {
+		candidates = appendTrackerFileSearchCandidates(candidates, tracker)
+	}
+	return searchFileCandidates(candidates, query, limit)
+}
+
+func appendTrackerFileSearchCandidates(
+	candidates []fileSearchCandidate,
+	tracker *WorkspaceTracker,
+) []fileSearchCandidate {
+	tracker.mu.RLock()
+	defer tracker.mu.RUnlock()
+	repository := tracker.RepositoryName()
+	for _, file := range tracker.currentFiles.Files {
+		path := file.Path
+		if repository != "" {
+			path = filepath.ToSlash(filepath.Join(repository, path))
+		}
+		candidates = append(candidates, fileSearchCandidate{
+			path:           path,
+			matchPath:      file.Path,
+			repositoryName: repository,
+		})
+	}
+	return candidates
+}
+
+func searchFileCandidates(
+	candidates []fileSearchCandidate,
+	query string,
+	limit int,
+) []types.FileSearchResult {
 	if query == "" {
-		return []string{}
+		return []types.FileSearchResult{}
 	}
 	if limit <= 0 {
 		limit = 20
@@ -938,16 +1013,15 @@ func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
 	query = strings.ToLower(query)
 	var matches []scoredMatch
 
-	wt.mu.RLock()
-	files := wt.currentFiles.Files
-	wt.mu.RUnlock()
-
-	for _, file := range files {
-		path := file.Path
-		if isRootOwnershipMarkerPath(path) {
+	for _, candidate := range candidates {
+		if isRootOwnershipMarkerPath(candidate.path) {
 			continue
 		}
-		lowerPath := strings.ToLower(path)
+		matchPath := candidate.matchPath
+		if matchPath == "" {
+			matchPath = candidate.path
+		}
+		lowerPath := strings.ToLower(matchPath)
 		name := filepath.Base(lowerPath)
 
 		score := 0
@@ -963,7 +1037,12 @@ func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
 		}
 
 		if score > 0 {
-			matches = append(matches, scoredMatch{path: path, score: score})
+			matches = append(matches, scoredMatch{
+				path:           candidate.path,
+				matchPath:      matchPath,
+				repositoryName: candidate.repositoryName,
+				score:          score,
+			})
 		}
 	}
 
@@ -973,13 +1052,16 @@ func (wt *WorkspaceTracker) SearchFiles(query string, limit int) []string {
 			return matches[i].score > matches[j].score
 		}
 		// Secondary sort by path length (shorter paths first)
-		return len(matches[i].path) < len(matches[j].path)
+		return len(matches[i].matchPath) < len(matches[j].matchPath)
 	})
 
 	// Return top limit results
-	result := make([]string, 0, limit)
+	result := make([]types.FileSearchResult, 0, limit)
 	for i := 0; i < len(matches) && i < limit; i++ {
-		result = append(result, matches[i].path)
+		result = append(result, types.FileSearchResult{
+			RepositoryName: matches[i].repositoryName,
+			Path:           matches[i].path,
+		})
 	}
 
 	return result

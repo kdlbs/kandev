@@ -10,6 +10,7 @@ export const defaultFeaturesState: FeaturesSliceState = {
     plugins: false,
     appStatusBar: false,
     auth: false,
+    claudeBackgroundPromptHandoff: false,
   },
 };
 

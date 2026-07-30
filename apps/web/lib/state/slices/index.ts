@@ -178,6 +178,7 @@ export type {
   ActiveDocument,
   DocumentPanelState,
   SystemHealthState,
+  TranscriptAutoScrollState,
 } from "./ui/types";
 export type {
   GitHubStatusState,

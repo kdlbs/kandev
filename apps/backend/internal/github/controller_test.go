@@ -481,6 +481,41 @@ func TestHttpTriggerReviewWatchPublishesNewPREvents(t *testing.T) {
 	}
 }
 
+func TestHttpUpdateReviewWatchReturnsUpdatedWatch(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	watch := &ReviewWatch{
+		WorkspaceID:         "ws-1",
+		WorkflowID:          "wf-1",
+		WorkflowStepID:      "step-1",
+		Enabled:             true,
+		PollIntervalSeconds: defaultWatchPollIntervalSec,
+		CleanupPolicy:       CleanupPolicyNever,
+	}
+	if err := store.CreateReviewWatch(context.Background(), watch); err != nil {
+		t.Fatalf("create review watch: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/api/v1/github/watches/review/"+watch.ID+"?workspace_id=ws-1",
+		strings.NewReader(`{"enabled":false}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var updated ReviewWatch
+	if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode update response: %v", err)
+	}
+	if updated.ID != watch.ID || updated.Enabled {
+		t.Fatalf("updated watch = %+v, want id %q and enabled=false", updated, watch.ID)
+	}
+}
+
 func TestHttpListReviewWatchesRequiresWorkspaceForRequests(t *testing.T) {
 	store := newTestStore(t)
 	watch := &ReviewWatch{WorkspaceID: "victim-workspace", Prompt: "secret review prompt"}
@@ -1101,6 +1136,27 @@ func TestHttpTaskCIOptions_DefaultAndPatch(t *testing.T) {
 	}
 	if got.AutoFixPromptOverride != nil || !got.UsingDefaultPrompt {
 		t.Fatalf("expected reset to default prompt, got %+v", got)
+	}
+}
+
+func TestHttpTaskCIOptions_RejectsLifecyclePromptOverrides(t *testing.T) {
+	for _, field := range []string{
+		"review_prompt_override",
+		"merged_prompt_override",
+		"closed_prompt_override",
+	} {
+		t.Run(field, func(t *testing.T) {
+			router, _ := setupControllerStoreTest(t)
+			body := bytes.NewBufferString(`{"` + field + `":"untrusted prompt"}`)
+			req := httptest.NewRequest(http.MethodPatch, "/api/v1/github/tasks/task-1/ci-options", body)
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+			assertJSONError(t, w.Body.Bytes(), "lifecycle prompt overrides are not supported")
+		})
 	}
 }
 

@@ -304,8 +304,19 @@ func (s *Service) applyBatchedNumberedWatch(
 	// Reset to "searching" when the PR is merged/closed so a follow-up PR on the
 	// same branch can be detected without manual intervention.
 	if status.PR != nil && (status.PR.State == prStateMerged || status.PR.State == prStateClosed) {
-		if resetErr := s.store.UpdatePRWatchPRNumber(ctx, w.ID, 0); resetErr != nil {
-			s.logger.Error("failed to reset completed PR watch", zap.String("id", w.ID), zap.Error(resetErr))
+		hold, holdErr := s.ShouldHoldTerminalPRWatch(
+			ctx, w.TaskID, w.RepositoryID, w.PRNumber, status.PR.State,
+		)
+		if holdErr != nil {
+			s.logger.Error("failed to check terminal PR automation", zap.String("id", w.ID), zap.Error(holdErr))
+			// Fail conservatively like stale task-PR state: suppress feedback
+			// until terminal lifecycle retention can be determined safely.
+			return PRWatchSyncResult{Watch: w, Status: status, Found: true, Changed: changed, SyncFailed: true}
+		}
+		if !hold {
+			if resetErr := s.store.UpdatePRWatchPRNumber(ctx, w.ID, 0); resetErr != nil {
+				s.logger.Error("failed to reset completed PR watch", zap.String("id", w.ID), zap.Error(resetErr))
+			}
 		}
 	}
 	return PRWatchSyncResult{Watch: w, Status: status, Found: true, Changed: changed}

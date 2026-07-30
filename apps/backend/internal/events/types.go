@@ -170,6 +170,7 @@ const (
 	AgentReady             = "agent.ready"      // Agent finished a prompt turn, ready for follow-up
 	AgentCompleted         = "agent.completed"
 	AgentFailed            = "agent.failed"
+	AgentStalled           = "agent.stalled"
 	AgentStopped           = "agent.stopped"
 	AgentContextReset      = "agent.context_reset" // Agent subprocess restarted with fresh ACP session
 	AgentACPSessionCreated = "agent.acp_session_created"

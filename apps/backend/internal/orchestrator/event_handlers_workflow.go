@@ -453,6 +453,20 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 	// Async: event bus delivers synchronously; blocking here → HTTP timeout (see handleTaskMovedWithSession doc).
 	go func() {
 		asyncCtx := context.WithoutCancel(ctx)
+
+		// When the task has the permanent auto-start guard marker, it means
+		// both this promotion path and the watcher's synchronous path (autoStartReviewTask)
+		// can fire. Only the first atomic claim of MetaKeyAutoStartClaimed wins;
+		// the loser skips launch because the winner will handle it.
+		// Absent guard = ordinary (non-watcher) auto-start; proceed as before.
+		if _, hasGuard := task.Metadata[models.MetaKeyAutoStartGuard]; hasGuard {
+			if !s.claimAutoStart(asyncCtx, task.ID, eventName) {
+				s.logger.Debug(eventName+": auto-start claim lost; watcher path will launch",
+					zap.String("task_id", taskID))
+				return
+			}
+		}
+
 		startAgentProfileID := agentProfileID
 		if workflowAgentProfileID != "" {
 			startAgentProfileID = ""
@@ -462,6 +476,7 @@ func (s *Service) autoStartTaskForStep(ctx context.Context, taskID, stepID, even
 			s.logger.Error(eventName+": failed to auto-start task",
 				zap.String("task_id", taskID),
 				zap.Error(err))
+			s.restoreAutoStartClaim(asyncCtx, task.ID, eventName)
 		}
 	}()
 }
@@ -555,6 +570,43 @@ func (s *Service) restoreDeferredLaunch(ctx context.Context, taskID string, raw 
 	}
 	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch, raw); err != nil {
 		s.logger.Warn(eventName+": failed to restore deferred launch intent", zap.String("task_id", taskID), zap.Error(err))
+	}
+}
+
+// claimAutoStart atomically removes the MetaKeyAutoStartClaimed token from a
+// task. It returns true only for the first caller that removes the key.
+// Both Path A (event-driven autoStartTaskForStep) and Path B (watcher's
+// synchronous autoStartReviewTask) must call this when the token is present;
+// only the winner proceeds to StartTask. When the token is absent (ordinary
+// non-watcher auto-start), the caller skips the claim and launches as before.
+func (s *Service) claimAutoStart(ctx context.Context, taskID, eventName string) bool {
+	remover, ok := s.repo.(interface {
+		RemoveTaskMetadataKey(context.Context, string, string) (bool, error)
+	})
+	if !ok {
+		return true // repo doesn't support atomic removal; allow launch
+	}
+	claimed, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyAutoStartClaimed)
+	if err != nil {
+		s.logger.Warn(eventName+": failed to claim auto-start token",
+			zap.String("task_id", taskID), zap.Error(err))
+		return false
+	}
+	return claimed
+}
+
+// restoreAutoStartClaim puts the MetaKeyAutoStartClaimed token back when a
+// launch fails so a later event trigger can retry. Mirrors restoreDeferredLaunch.
+func (s *Service) restoreAutoStartClaim(ctx context.Context, taskID, eventName string) {
+	setter, ok := s.repo.(interface {
+		SetTaskMetadataKey(context.Context, string, string, interface{}) error
+	})
+	if !ok {
+		return
+	}
+	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyAutoStartClaimed, true); err != nil {
+		s.logger.Warn(eventName+": failed to restore auto-start claim",
+			zap.String("task_id", taskID), zap.Error(err))
 	}
 }
 
@@ -1342,7 +1394,7 @@ func (s *Service) drainQueuedMessageForPromptableSessionLocked(ctx context.Conte
 	if s.messageQueue == nil || s.isQueuedDispatchInFlight(sessionID) {
 		return false
 	}
-	queuedMsg, ok := s.messageQueue.TakeQueued(ctx, sessionID)
+	queuedMsg, ok := s.messageQueue.ReserveQueued(ctx, sessionID)
 	return s.dispatchTakenQueuedMessage(ctx, sessionID, queuedMsg, ok)
 }
 

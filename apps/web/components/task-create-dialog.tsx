@@ -48,6 +48,7 @@ import { useAppStore } from "@/components/state-provider";
 import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
+import { useResolvedTaskCreateWorkflowContext } from "@/components/task-create-dialog-workflow-context";
 
 const PROMPT_INSERTED_MESSAGE = "Enhanced prompt inserted.";
 
@@ -430,11 +431,11 @@ export function useTaskCreateDialogSetup(
   props: TaskCreateDialogProps,
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
 ) {
-  const { open, mode = "create", workspaceId, workflowId, defaultStepId } = props;
-  const { editingTask, initialValues } = props;
+  const resolvedProps = useResolvedTaskCreateWorkflowContext(props);
+  const { open, mode = "create", workspaceId, workflowId, defaultStepId } = resolvedProps;
+  const { editingTask, initialValues } = resolvedProps;
   const isSessionMode = mode === "session";
   const isEditMode = mode === "edit";
-  const isCreateMode = mode === "create";
   const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
   const fs = useDialogFormState(open, workspaceId, workflowId, initialValues);
   const upsertWorkspaceRepository = useAppStore((state) => state.upsertRepository);
@@ -457,6 +458,7 @@ export function useTaskCreateDialogSetup(
     open,
     workspaceId,
     workflowId,
+    effectiveWorkflowId: computed.effectiveWorkflowId,
     repositories,
     repositoriesLoading,
     agentProfiles,
@@ -481,7 +483,7 @@ export function useTaskCreateDialogSetup(
     upsertWorkspaceRepository,
   });
   const submitHandlers = useSubmitHandlersWiring({
-    props,
+    props: resolvedProps,
     fs,
     computed,
     workspaceRepositories: repositories,
@@ -492,21 +494,18 @@ export function useTaskCreateDialogSetup(
   });
   const guardedHandleSubmit = useGuardedSubmit(
     submitHandlers.handleSubmit,
-    props.submitBlockedReason,
+    resolvedProps.submitBlockedReason,
   );
   const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
     guardedHandleSubmit(event as unknown as FormEvent);
   });
-  // Fresh-branch is single-row + local executor + not URL mode. The chip row
-  // can hold any number of repos; we hide the toggle whenever the question
-  // ("which repo do we discard local changes in?") becomes ambiguous.
   const freshBranchAvailable =
     !fs.useRemote && computed.isLocalExecutor && fs.repositories.length === 1;
   return {
     fs,
     isSessionMode,
     isEditMode,
-    isCreateMode,
+    isCreateMode: mode === "create",
     isTaskStarted,
     sessionRepoName,
     workflows,
@@ -523,7 +522,7 @@ export function useTaskCreateDialogSetup(
     taskCreateLastUsed,
     userSettingsLoaded,
     guardedHandleSubmit,
-    enhance: useEnhanceForDialog(fs, props.taskId, props.open),
+    enhance: useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open),
     handleJiraImport: useJiraImportHandler(fs),
     handleLinearImport: useLinearImportHandler(fs),
   };

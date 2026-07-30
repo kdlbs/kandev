@@ -99,6 +99,10 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 	if queuedMsg.QueuedBy != "" && coalesceKey != "" {
 		queuedBy = queuedMsg.QueuedBy
 	}
+	if queuedMsg.Metadata["origin"] == githubPRAutomationOrigin {
+		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
+		return
+	}
 	var (
 		requeuedMsg *messagequeue.QueuedMessage
 		replaced    bool
@@ -149,6 +153,40 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		zap.String("coalesce_key", coalesceKey),
 		zap.Bool("replaced", replaced))
 	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
+}
+
+func (s *Service) requeueLifecycleMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, queuedBy, coalesceKey string) bool {
+	requeuedMsg, replaced, accepted, err := s.messageQueue.RequeueLifecycleMessageWithCoalesceKey(
+		ctx, queuedMsg.SessionID, queuedMsg.TaskID, queuedMsg.Content, queuedMsg.Model,
+		queuedBy, queuedMsg.PlanMode, queuedMsg.Attachments, queuedMsg.Metadata, coalesceKey, true,
+	)
+	if err != nil {
+		s.logger.Error("failed to requeue lifecycle message",
+			zap.String("session_id", queuedMsg.SessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.String("queued_by", queuedBy),
+			zap.Error(err))
+		return false
+	}
+	if !accepted {
+		s.acknowledgeLifecycleQueueEntry(ctx, queuedMsg.SessionID, queuedMsg)
+		s.logger.Info("discarding lifecycle retry for inactive task",
+			zap.String("session_id", queuedMsg.SessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID))
+		return false
+	}
+	s.logger.Info("lifecycle message requeued",
+		zap.String("session_id", queuedMsg.SessionID),
+		zap.String("task_id", queuedMsg.TaskID),
+		zap.String("old_queue_id", queuedMsg.ID),
+		zap.String("new_queue_id", requeuedMsg.ID),
+		zap.String("queued_by", queuedBy),
+		zap.String("coalesce_key", coalesceKey),
+		zap.Bool("replaced", replaced))
+	s.publishQueueStatusEvent(ctx, queuedMsg.SessionID)
+	return true
 }
 
 func messageCoalesceKey(queuedMsg *messagequeue.QueuedMessage) string {
@@ -299,6 +337,22 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			zap.String("task_id", data.TaskID))
 		return
 	}
+	// A passthrough lifecycle reservation cannot be executed while this ready
+	// handler holds the per-session guard: executeQueuedMessage performs its
+	// own final claim through that guard. Register the deferred dispatch before
+	// acquiring it, so LIFO defer ordering releases the guard first. Keeping
+	// execution in this handler preserves the legacy ready-event completion
+	// boundary while still using the normal lifecycle delivery pipeline.
+	var deferredLifecycleDispatch *messagequeue.QueuedMessage
+	defer func() {
+		if deferredLifecycleDispatch == nil {
+			return
+		}
+		if hook := s.afterReadyLifecycleReservation; hook != nil {
+			hook()
+		}
+		s.executeQueuedMessage(data.SessionID, deferredLifecycleDispatch)
+	}()
 
 	if s.isSessionResetInProgress(data.SessionID) {
 		s.logger.Debug("ignoring agent.ready while session reset is in progress",
@@ -446,8 +500,23 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 
 	// Passthrough sessions: deliver queued messages via PTY stdin instead of ACP.
 	if s.agentManager.IsPassthroughSession(ctx, data.SessionID) {
-		queuedMsg, exists := s.messageQueue.TakeQueued(ctx, data.SessionID)
+		queuedMsg, exists := s.messageQueue.ReserveQueued(ctx, data.SessionID)
 		if !exists {
+			return
+		}
+		// A durable lifecycle reservation must take the same guarded delivery
+		// path as an ACP session. In particular, executeQueuedMessage performs
+		// the final active-task/session claim, records the visible message, and
+		// only acknowledges the reservation after Executor.Prompt accepts it.
+		// Executor.Prompt itself is passthrough-aware and writes to PTY stdin.
+		// Ordinary entries retain the historical direct PTY behavior below.
+		if queuedMsg.IsDurableLifecycle() {
+			// Reserve the durable row's dispatch token while this ready handler
+			// still owns the same guard used by all drains. Deferring this mark
+			// until after guard release lets a competing manual drain reserve the
+			// same durable row and begin a duplicate delivery attempt.
+			s.markQueuedDispatchInFlight(data.SessionID, queuedMsg.ID)
+			deferredLifecycleDispatch = queuedMsg
 			return
 		}
 		if queuedMsg.Content != "" {
@@ -455,6 +524,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 				s.logger.Warn("failed to deliver queued message to passthrough",
 					zap.String("session_id", data.SessionID),
 					zap.Error(err))
+				return
 			}
 		}
 		return
@@ -466,8 +536,41 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	s.drainQueuedMessageForPromptableSessionLocked(ctx, data.SessionID)
 }
 
+const githubPRAutomationOrigin = "github_pr_automation"
+
+func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage, attachments []v1.MessageAttachment) error {
+	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
+	if s.messageCreator == nil || alreadyRecorded {
+		return nil
+	}
+	turnID := s.getActiveTurnID(queuedMsg.SessionID)
+	if turnID == "" {
+		s.startTurnForSession(ctx, queuedMsg.SessionID)
+		turnID = s.getActiveTurnID(queuedMsg.SessionID)
+	}
+	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
+	promptContent := AppendEntityReferenceContext(queuedMsg.Content, references)
+	meta := NewUserMessageMeta().
+		WithPlanMode(queuedMsg.PlanMode).
+		WithAttachments(attachments).
+		WithEntityReferences(references)
+	metaMap := mergeMetadata(meta.ToMap(), metadataWithoutEntityReferences(queuedMsg.Metadata))
+	if err := s.messageCreator.CreateUserMessage(ctx, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap); err != nil {
+		s.logger.Error("failed to create user message for queued message", zap.String("session_id", queuedMsg.SessionID), zap.Error(err))
+		return err
+	}
+	if queuedMsg.Metadata == nil {
+		queuedMsg.Metadata = map[string]interface{}{}
+	}
+	queuedMsg.Metadata[metaKeyUserMessageRecorded] = true
+	return nil
+}
+
 func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messagequeue.QueuedMessage) {
 	promptCtx := context.Background() // Use a fresh context for async execution
+	reservedSessionID := queuedMsg.SessionID
+	defer s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, queuedMsg.ID)
+	lifecyclePrompt := queuedMsg.Metadata["origin"] == githubPRAutomationOrigin
 
 	// Safety net: guarantee the in-flight marker (set by
 	// dispatchTakenQueuedMessage before spawning this goroutine — see the
@@ -479,14 +582,19 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	// further down; this defer only catches paths that return before
 	// reaching it, or a losing claim that must not touch a newer dispatch's
 	// marker.
-	defer s.clearQueuedDispatchInFlightIfCurrent(queuedMsg.SessionID, queuedMsg.ID)
-
 	if s.isSessionResetInProgress(queuedMsg.SessionID) {
 		s.logger.Warn("queued message execution deferred due to context reset in progress",
 			zap.String("session_id", callerSessionID),
 			zap.String("task_id", queuedMsg.TaskID),
 			zap.String("queue_id", queuedMsg.ID))
 		s.requeueMessage(promptCtx, queuedMsg, "workflow-auto-start-reset-retry")
+		return
+	}
+	if lifecyclePrompt && !s.lifecycleQueuedDispatchIsCurrent(promptCtx, queuedMsg) {
+		s.logger.Info("discarding stale lifecycle dispatch before workflow side effects",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID))
 		return
 	}
 
@@ -503,7 +611,8 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	references := entityrefs.NormalizePersisted(queuedMsg.Metadata[messagequeue.MetadataEntityReferences])
 	promptContent := AppendEntityReferenceContext(queuedMsg.Content, references)
 
-	// Create user message for the queued message (so it appears in chat history).
+	// Create user messages for ordinary queue entries now. Lifecycle entries
+	// persist their visible message only after the final active-task claim.
 	// Skip when the queued metadata is tagged user_message_recorded — that means
 	// autoStartStepPrompt already inserted the chat row via recordAutoStartMessage
 	// before queueing (the post-recordAutoStartMessage retry branches). Recording
@@ -511,41 +620,23 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	// auto-start failed transiently and the queue drained on boot_ready.
 	alreadyRecorded, _ := queuedMsg.Metadata[metaKeyUserMessageRecorded].(bool)
 	userMessageRecorded := alreadyRecorded
-	if s.messageCreator != nil && !alreadyRecorded {
-		turnID := s.getActiveTurnID(queuedMsg.SessionID)
-		if turnID == "" {
-			// Start a new turn if needed
-			s.startTurnForSession(promptCtx, queuedMsg.SessionID)
-			turnID = s.getActiveTurnID(queuedMsg.SessionID)
-		}
-
-		meta := NewUserMessageMeta().
-			WithPlanMode(queuedMsg.PlanMode).
-			WithAttachments(attachments).
-			WithEntityReferences(references)
-		// Merge any extra metadata captured at queue time (e.g. sender_task_id
-		// from message_task_kandev) so the resulting Message row carries the
-		// full context.
-		metaMap := mergeMetadata(meta.ToMap(), metadataWithoutEntityReferences(queuedMsg.Metadata))
-		err := s.messageCreator.CreateUserMessage(promptCtx, queuedMsg.TaskID, promptContent, queuedMsg.SessionID, turnID, metaMap)
-		if err != nil {
-			s.logger.Error("failed to create user message for queued message",
-				zap.String("session_id", queuedMsg.SessionID),
-				zap.Error(err))
-			// Continue anyway - the prompt should still be sent
-		} else {
+	if !lifecyclePrompt {
+		if err := s.recordQueuedUserMessage(promptCtx, queuedMsg, attachments); err == nil && s.messageCreator != nil {
 			userMessageRecorded = true
 		}
-	} else if s.messageCreator != nil && alreadyRecorded {
-		s.logger.Debug("skipping CreateUserMessage for queued workflow auto-start; already recorded before queueing",
-			zap.String("session_id", queuedMsg.SessionID),
-			zap.String("queue_id", queuedMsg.ID))
 	}
 
 	// Process on_turn_start before sending the queued prompt, just like
 	// dispatchPromptAsync does for user-initiated messages. This allows
 	// workflow transitions (e.g. move_to_next) to fire on auto-started prompts.
 	if session, sErr := s.repo.GetTaskSession(promptCtx, queuedMsg.SessionID); sErr == nil {
+		if lifecyclePrompt && !s.lifecycleQueuedDispatchIsCurrent(promptCtx, queuedMsg) {
+			s.logger.Info("discarding stale lifecycle dispatch before workflow side effects",
+				zap.String("session_id", callerSessionID),
+				zap.String("task_id", queuedMsg.TaskID),
+				zap.String("queue_id", queuedMsg.ID))
+			return
+		}
 		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
 	}
 
@@ -554,9 +645,43 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 	// promptTask's doc comment and the Service.dispatchingQueued field doc
 	// comment for the guarded claim-then-mark-RUNNING step this enables,
 	// and for why a bare, unguarded check-then-clear would not be enough.
+	var afterClaim func() error
+	if lifecyclePrompt {
+		afterClaim = func() error {
+			if !s.lifecycleQueuedDispatchIsCurrent(promptCtx, queuedMsg) {
+				return errLifecyclePromptReservationSuperseded
+			}
+			return s.recordQueuedUserMessage(promptCtx, queuedMsg, attachments)
+		}
+	}
+	claimEntryID := ""
+	if s.isQueuedDispatchInFlight(queuedMsg.SessionID) {
+		claimEntryID = queuedMsg.ID
+	}
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
-		queuedMsg.ID)
+		claimEntryID, lifecyclePrompt, afterClaim)
+	if errors.Is(err, errLifecyclePromptReservationSuperseded) {
+		s.logger.Info("discarding stale lifecycle dispatch after final claim",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID))
+		return
+	}
+	if errors.Is(err, errLifecyclePromptInactive) {
+		s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
+		return
+	}
+	var reselected *lifecyclePromptReselectedError
+	if errors.As(err, &reselected) {
+		queuedMsg.SessionID = reselected.sessionID
+		if s.requeueLifecycleMessage(
+			promptCtx, queuedMsg, queuedMsg.QueuedBy, messageCoalesceKey(queuedMsg),
+		) {
+			s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
+		}
+		return
+	}
 	if errors.Is(err, errQueuedDispatchSuperseded) {
 		// A newer dispatch for this same session (e.g. a second parent
 		// interrupt cancelling and re-taking while this one was still
@@ -579,7 +704,9 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			zap.Error(err))
 
 		manualRecovery := isManualRecoveryPromptError(err)
-		if isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
+		if lifecyclePrompt || errors.Is(err, errLifecyclePromptClaim) ||
+			errors.Is(err, errLifecyclePromptMessagePersistence) ||
+			isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
 			errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) {
 			if userMessageRecorded {
 				markQueuedUserMessageRecorded(queuedMsg)
@@ -606,7 +733,50 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			zap.String("session_id", callerSessionID),
 			zap.String("queue_id", queuedMsg.ID),
 			zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
+		return
 	}
+	if lifecyclePrompt {
+		s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
+	}
+}
+
+func (s *Service) lifecycleQueuedDispatchIsCurrent(
+	ctx context.Context,
+	queuedMsg *messagequeue.QueuedMessage,
+) bool {
+	task, err := s.repo.GetTask(ctx, queuedMsg.TaskID)
+	if err != nil || task == nil || task.ArchivedAt != nil {
+		return false
+	}
+	dispatchTracked := s.isQueuedDispatchInFlight(queuedMsg.SessionID)
+	if dispatchTracked && !s.isCurrentQueuedDispatch(queuedMsg.SessionID, queuedMsg.ID) {
+		return false
+	}
+	// Legacy/direct TakeQueued callers remove the row before execution, so
+	// there is no durable reservation left to validate. ReserveQueued marks
+	// its returned copy independently of persisted metadata so the check still
+	// applies after the final claim clears the dispatch token.
+	return !queuedMsg.IsReservedLifecycleDelivery() ||
+		(s.messageQueue != nil && s.messageQueue.IsCurrentLifecycleReservation(ctx, queuedMsg))
+}
+
+func (s *Service) acknowledgeLifecycleQueueEntry(
+	ctx context.Context,
+	sessionID string,
+	queuedMsg *messagequeue.QueuedMessage,
+) {
+	if s.messageQueue == nil || queuedMsg == nil || !queuedMsg.IsDurableLifecycle() {
+		return
+	}
+	if err := s.messageQueue.AcknowledgeQueued(ctx, sessionID, queuedMsg.ID); err != nil {
+		s.logger.Error("failed to acknowledge accepted lifecycle message",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(err))
+		return
+	}
+	s.publishQueueStatusEvent(ctx, sessionID)
 }
 
 func (s *Service) restoreQueuedMessage(ctx context.Context, queuedMsg *messagequeue.QueuedMessage) {

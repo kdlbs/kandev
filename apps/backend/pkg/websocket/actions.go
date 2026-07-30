@@ -264,6 +264,7 @@ const (
 	ActionWorkspaceFileDelete        = "workspace.file.delete"
 	ActionWorkspaceFileRename        = "workspace.file.rename"
 	ActionWorkspaceFilesSearch       = "workspace.files.search"
+	ActionWorkspaceContentSearch     = "workspace.content.search"
 	ActionWorkspaceFileChanges       = "session.workspace.file.changes" // Notification
 
 	// Shell actions
@@ -359,6 +360,8 @@ const (
 	ActionMCPListTasks                  = "mcp.list_tasks"
 	ActionMCPCreateTask                 = "mcp.create_task"
 	ActionMCPUpdateTask                 = "mcp.update_task"
+	ActionMCPGetTaskPRAutomation        = "mcp.get_task_pr_automation"
+	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"
 	ActionMCPAddBranchToTask            = "mcp.add_branch_to_task"
 	ActionMCPAddWorkspaceSources        = "mcp.add_workspace_sources"
 	ActionMCPUpdateRepositoryBaseBranch = "mcp.update_repository_base_branch"

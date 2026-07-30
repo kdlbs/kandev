@@ -267,6 +267,7 @@ These metrics are lightweight UI observability. Set alerts, retention, CPU/memor
 
 - **Office mode** — experimental, medium risk, and off in the production profile by default.
 - **App status bar** — stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins.
+- **Claude background prompt handoff** — experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
 - **Debug mode** — high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
 
 Each requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.

@@ -178,6 +178,8 @@ type AgentExecution struct {
 	// Last time an agent event was received (for stall detection)
 	lastActivityAt   time.Time
 	lastActivityAtMu sync.Mutex
+	activeTool       *activeTopLevelTool
+	activeToolMu     sync.RWMutex
 
 	// Fires once on the first agent event to publish AgentRunning.
 	firstActivityOnce sync.Once
@@ -185,6 +187,43 @@ type AgentExecution struct {
 	// Session-level trace span for grouping all operations under one trace
 	sessionSpan   trace.Span
 	sessionSpanMu sync.RWMutex
+}
+
+type activeTopLevelTool struct {
+	ToolCallID string
+	Name       string
+	Title      string
+	Status     string
+}
+
+func (e *AgentExecution) setActiveTool(tool activeTopLevelTool) {
+	e.activeToolMu.Lock()
+	e.activeTool = &tool
+	e.activeToolMu.Unlock()
+}
+
+func (e *AgentExecution) clearActiveTool(toolCallID string) {
+	e.activeToolMu.Lock()
+	if e.activeTool != nil && e.activeTool.ToolCallID == toolCallID {
+		e.activeTool = nil
+	}
+	e.activeToolMu.Unlock()
+}
+
+func (e *AgentExecution) resetActiveTool() {
+	e.activeToolMu.Lock()
+	e.activeTool = nil
+	e.activeToolMu.Unlock()
+}
+
+func (e *AgentExecution) activeToolSnapshot() *activeTopLevelTool {
+	e.activeToolMu.RLock()
+	defer e.activeToolMu.RUnlock()
+	if e.activeTool == nil {
+		return nil
+	}
+	tool := *e.activeTool
+	return &tool
 }
 
 // setRuntimeEnvironment stores a defensive copy of the effective task runtime

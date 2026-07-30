@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
@@ -886,6 +887,129 @@ func TestRetryTaskResourceCleanupJobPersistsAfterRunContextCancellation(t *testi
 	}
 	if got.State != models.TaskResourceCleanupStateRetryWait {
 		t.Fatalf("cleanup state = %q, want retry_wait", got.State)
+	}
+}
+
+func TestRetryTaskResourceCleanupJobUsesBoundedBackoffAndTerminalState(t *testing.T) {
+	tests := []struct {
+		name      string
+		attempts  int
+		wantState models.TaskResourceCleanupState
+		wantDelay time.Duration
+	}{
+		{name: "first failure", attempts: 1, wantState: models.TaskResourceCleanupStateRetryWait, wantDelay: time.Minute},
+		{name: "seventh failure", attempts: 7, wantState: models.TaskResourceCleanupStateRetryWait, wantDelay: 12 * time.Hour},
+		{name: "eighth failure", attempts: 8, wantState: models.TaskResourceCleanupState("failed")},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			taskSvc, repo := setupOfficeTest(t)
+			job := &models.TaskResourceCleanupJob{
+				ID: "retry-bound-" + test.name, OperationID: "delete:retry-bound:" + test.name,
+				TaskID: "task-retry-bound", Trigger: models.TaskResourceCleanupTriggerDelete,
+				State: models.TaskResourceCleanupStatePending, Attempts: test.attempts - 1,
+				ResourceSnapshot: `{}`,
+			}
+			if err := repo.CreateTaskResourceCleanupJob(context.Background(), job); err != nil {
+				t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+			}
+			claimed, err := repo.MarkTaskResourceCleanupJobRunning(context.Background(), job.ID)
+			if err != nil || !claimed {
+				t.Fatalf("MarkTaskResourceCleanupJobRunning = %v, %v", claimed, err)
+			}
+			job, err = repo.GetTaskResourceCleanupJob(context.Background(), job.ID)
+			if err != nil {
+				t.Fatalf("GetTaskResourceCleanupJob: %v", err)
+			}
+
+			before := time.Now().UTC()
+			cleanupErr := errors.New("persistent cleanup failure")
+			if err := taskSvc.retryTaskResourceCleanupJob(context.Background(), job, cleanupErr); !errors.Is(err, cleanupErr) {
+				t.Fatalf("retryTaskResourceCleanupJob error = %v, want cleanup error", err)
+			}
+			got, err := repo.GetTaskResourceCleanupJob(context.Background(), job.ID)
+			if err != nil {
+				t.Fatalf("reload cleanup job: %v", err)
+			}
+			if got.State != test.wantState {
+				t.Fatalf("cleanup state = %q, want %q", got.State, test.wantState)
+			}
+			if got.LastError != cleanupErr.Error() {
+				t.Fatalf("last error = %q, want %q", got.LastError, cleanupErr.Error())
+			}
+			if test.wantState == models.TaskResourceCleanupState("failed") {
+				if got.NextAttemptAt != nil || got.CompletedAt == nil {
+					t.Fatalf("terminal cleanup metadata = next=%v completed=%v, want nil/non-nil", got.NextAttemptAt, got.CompletedAt)
+				}
+				return
+			}
+			if got.NextAttemptAt == nil {
+				t.Fatal("retry cleanup has no next attempt")
+			}
+			delta := got.NextAttemptAt.Sub(before)
+			if delta < test.wantDelay-time.Second || delta > test.wantDelay+time.Second {
+				t.Fatalf("retry delay = %v, want about %v", delta, test.wantDelay)
+			}
+		})
+	}
+}
+
+func TestTaskResourceCleanupMissingResourcesSucceed(t *testing.T) {
+	tests := []struct {
+		name        string
+		environment *models.TaskEnvironment
+		destroyer   *stubDestroyer
+	}{
+		{
+			name:        "worktree",
+			environment: &models.TaskEnvironment{ID: "env-gone-worktree", WorktreeID: "worktree-gone"},
+			destroyer:   &stubDestroyer{worktreeErr: fmt.Errorf("worktree cleanup: %w", worktree.ErrWorktreeNotFound)},
+		},
+		{
+			name:        "task environment row",
+			environment: &models.TaskEnvironment{ID: "env-gone-row"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			taskSvc, repo := setupOfficeTest(t)
+			taskSvc.StopTaskResourceCleanupWorker()
+			if test.destroyer != nil {
+				taskSvc.SetEnvironmentDestroyer(test.destroyer)
+			}
+
+			snapshot, err := json.Marshal(taskResourceCleanupSnapshot{
+				TaskEnvironment:      test.environment,
+				DeleteEnvironmentRow: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			job := &models.TaskResourceCleanupJob{
+				ID:               "issue-2027-" + test.name,
+				OperationID:      "cascade_delete:issue-2027:" + test.name,
+				TaskID:           "deleted-task",
+				Trigger:          models.TaskResourceCleanupTriggerCascadeDelete,
+				State:            models.TaskResourceCleanupStatePending,
+				ResourceSnapshot: string(snapshot),
+			}
+			if err := repo.CreateTaskResourceCleanupJob(context.Background(), job); err != nil {
+				t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+			}
+
+			if err := taskSvc.processTaskResourceCleanupJob(context.Background(), job.ID); err != nil {
+				t.Fatalf("cleanup of already-absent resource: %v", err)
+			}
+			got, err := repo.GetTaskResourceCleanupJob(context.Background(), job.ID)
+			if err != nil {
+				t.Fatalf("GetTaskResourceCleanupJob: %v", err)
+			}
+			if got.State != models.TaskResourceCleanupStateSucceeded {
+				t.Fatalf("cleanup state = %q, want succeeded", got.State)
+			}
+		})
 	}
 }
 

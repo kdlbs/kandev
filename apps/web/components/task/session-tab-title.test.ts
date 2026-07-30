@@ -96,13 +96,23 @@ describe("resolveSessionTabTitle", () => {
 });
 
 describe("resolveSessionTabTitle fallbacks", () => {
-  it("includes non-model config selections in the title", () => {
+  it("excludes non-model config selections from the title", () => {
     expect(
       resolveSessionTabTitle({
         ...baseArgs,
         agentLabel: null,
         activeModelId: SPARK_MODEL_ID,
         configOptions: [
+          {
+            type: "select",
+            id: "mode",
+            name: "Mode",
+            currentValue: "default",
+            options: [
+              { value: "default", name: "Default" },
+              { value: "plan", name: "Plan" },
+            ],
+          },
           {
             type: "select",
             id: "model",
@@ -125,7 +135,7 @@ describe("resolveSessionTabTitle fallbacks", () => {
           },
         ],
       }),
-    ).toBe(`${SPARK_MODEL_NAME} / High`);
+    ).toBe(SPARK_MODEL_NAME);
   });
 
   it("falls back to the agent label when live model state is unavailable", () => {

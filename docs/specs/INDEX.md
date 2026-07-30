@@ -116,7 +116,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 
 | Spec | Status |
 |---|---|
-| [ci-pr-automation](ui/ci-pr-automation.md) | draft |
+| [ci-pr-automation](ui/ci-pr-automation.md) | building |
 | [github-pr-review-actions](ui/github-pr-review-actions.md) | shipped |
 | [comment-markdown](ui/comment-markdown.md) | shipped |
 | [empty-turn-notice](ui/empty-turn-notice.md) | shipped |
@@ -136,6 +136,8 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
+| [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
+| [embedded-vscode-windows-availability](ui/embedded-vscode-windows-availability.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -154,6 +156,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | Spec | Status |
 |---|---|
 | [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |
+| [agent-stall-recovery](agent-stall-recovery/spec.md) | draft |
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |
 | [workflow-cycle-guardrails](workflow-cycle-guardrails/spec.md) | building |

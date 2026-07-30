@@ -200,7 +200,10 @@ func (s *Service) handleTaskPRUpdated(ctx context.Context, event *bus.Event) err
 
 func (s *Service) handleTaskCIOptionsUpdated(ctx context.Context, event *bus.Event) error {
 	options, ok := event.Data.(*github.TaskCIOptionsResponse)
-	if !ok || options == nil || event.Source == ciAutomationStateEventSource || (!options.AutoFixEnabled && !options.AutoMergeEnabled) || s.githubService == nil {
+	if !ok || options == nil || event.Source == ciAutomationStateEventSource ||
+		(!options.AutoFixEnabled && !options.AutoMergeEnabled &&
+			!options.PromptOnReviewRequested && !options.PromptOnMerged && !options.PromptOnClosed) ||
+		s.githubService == nil {
 		return nil
 	}
 	detachedCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
@@ -457,6 +460,16 @@ func buildReviewTaskRequest(evt *github.NewReviewPREvent, repositories []ReviewT
 			"pr_branch":           pr.HeadBranch,
 			"agent_profile_id":    evt.AgentProfileID,
 			"executor_profile_id": evt.ExecutorProfileID,
+			// Permanent guard: signals that the auto-start idempotency protocol
+			// is active for this task. Both Path A (promotion, async) and Path B
+			// (watcher, sync) check this marker and then compete for the one-shot
+			// MetaKeyAutoStartClaimed token before calling StartTask.
+			models.MetaKeyAutoStartGuard: true,
+			// One-shot token: both paths atomically remove this key; only the
+			// first removal wins and proceeds to StartTask. Prevents the
+			// duplicate-agent bug when CreateTask synchronously promotes the task
+			// from its feeder into an auto-start destination.
+			models.MetaKeyAutoStartClaimed: true,
 		},
 	}
 }
@@ -479,6 +492,17 @@ func (s *Service) shouldAutoStartStep(ctx context.Context, stepID string) bool {
 func (s *Service) autoStartReviewTask(
 	ctx context.Context, evt *github.NewReviewPREvent, task *models.Task,
 ) {
+	// Compete for the one-shot auto-start token set at task creation.
+	// The promotion that ran inside CreateTask may have already triggered
+	// autoStartTaskForStep (Path A) asynchronously; only the first claimer
+	// launches so exactly one session is created for the task.
+	if !s.claimAutoStart(ctx, task.ID, "review.auto_start") {
+		s.logger.Debug("review auto-start claim lost; promotion path will launch",
+			zap.String("task_id", task.ID),
+			zap.Int("pr_number", evt.PR.Number))
+		return
+	}
+
 	_, err := s.StartTask(
 		ctx,
 		task.ID,
@@ -496,6 +520,7 @@ func (s *Service) autoStartReviewTask(
 		s.logger.Error("failed to auto-start review task",
 			zap.String("task_id", task.ID),
 			zap.Error(err))
+		s.restoreAutoStartClaim(ctx, task.ID, "review.auto_start")
 		return
 	}
 	s.logger.Info("auto-started review task",

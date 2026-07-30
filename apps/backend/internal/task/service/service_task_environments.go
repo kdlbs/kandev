@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 // EnvironmentDestroyer tears down the runtime resources recorded on a TaskEnvironment.
@@ -329,7 +330,8 @@ func (s *Service) ResetTaskEnvironment(ctx context.Context, taskID string, opts 
 // recorded on a TaskEnvironment. Best-effort per resource: every resource is
 // attempted even when an earlier one fails, and all failures are joined into a
 // single error so a stuck container can't permanently orphan the worktree.
-// On any error, the caller should preserve the row so the user can retry.
+// On any non-idempotent error, the caller should preserve the row so the user
+// can retry.
 func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.TaskEnvironment) error {
 	if cause := context.Cause(ctx); cause != nil {
 		return cause
@@ -369,7 +371,9 @@ func (s *Service) teardownEnvironmentResources(ctx context.Context, env *models.
 			return err
 		}
 		if err := s.envDestroyer.DestroyWorktree(ctx, env.WorktreeID); err != nil {
-			errs = append(errs, fmt.Errorf("destroy worktree %s: %w", env.WorktreeID, err))
+			if !errors.Is(err, worktree.ErrWorktreeNotFound) {
+				errs = append(errs, fmt.Errorf("destroy worktree %s: %w", env.WorktreeID, err))
+			}
 		}
 	}
 	if err := contextError(); err != nil {

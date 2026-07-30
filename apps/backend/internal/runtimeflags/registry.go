@@ -57,6 +57,20 @@ var definitions = []RuntimeFlagDefinition{
 		Mutable:         true,
 	},
 	{
+		Key:         featureClaudeBackgroundPromptHandoffKey,
+		EnvVar:      envFeaturesClaudeBackgroundPromptHandoff,
+		Kind:        KindFeature,
+		Label:       "Claude background prompt handoff",
+		Description: "Allows Claude Code to accept a new prompt after its foreground yields while recognized background work remains active.",
+		Stability:   StabilityExperimental,
+		RiskLevel:   RiskHigh,
+		RiskDescription: "Claude ACP background lifecycle signals can be missing, delayed, duplicated, or ambiguous. " +
+			"Enabling this experiment can misclassify session activity or dispatch overlapping prompts. " +
+			"Use it only for controlled testing and disable it if a session behaves unexpectedly.",
+		RestartRequired: true,
+		Mutable:         true,
+	},
+	{
 		Key:         debugDevModeKey,
 		EnvVar:      envDebugDevMode,
 		Kind:        KindDebug,

@@ -134,13 +134,14 @@ A task created with **Create without starting agent** opens in a prepared workbe
 
 If the selected profile is unhealthy or incompatible with the executor, fix that configuration before launch. Starting an agent is separate from moving the task through its workflow; entry actions and turn-complete transitions can move or restart work afterward.
 
-When a session shows **Working in background**, its foreground turn has ended
-but recognized child work is still live. You can send a follow-up without
-waiting for that work to finish. Providers with an attested handoff, including
-Claude ACP, receive the follow-up immediately while the child may continue
-streaming. While the session still shows **Generating**, the provider retains
-foreground ownership and Kandev keeps another message queued until that
-ownership is released.
+By default, a running session keeps the coarse **Generating** state and queues
+another message even if Kandev detects background work. Operators can opt into
+the high-risk **Claude background prompt handoff** feature toggle for controlled
+testing. With that experiment enabled, a Claude Code session shows **Working in
+background** after its foreground yields while a recognized async subagent,
+`run_in_background` shell, or Monitor remains active. A follow-up is then sent
+immediately and the child may continue streaming. Other providers and
+foreground-generating Claude turns retain the coarse queueing behavior.
 
 ## Find and organize tasks
 
@@ -308,7 +309,11 @@ To restore a task, open **List**, enable **Show archived**, and choose unarchive
 
 Delete is permanent. If **Also delete _N_ subtasks** is left unchecked, direct children become root tasks. If selected, descendants are deleted. The operation cannot be undone, and executor cleanup follows the same asynchronous, best-effort rules as archive.
 
-When a task still has an agent generating or background work outstanding, the confirmation dialog adds a still-working warning: proceeding discards work that is in progress. Delete always shows this warning; archive shows it only when the archive confirmation is enabled.
+When a task still has a `RUNNING` agent, the confirmation dialog adds a
+still-working warning: proceeding discards work that is in progress. Delete
+always shows this warning; archive shows it only when the archive confirmation
+is enabled. Best-effort detached-work accounting does not independently keep a
+settled task in the still-working state.
 
 ## Troubleshooting
 

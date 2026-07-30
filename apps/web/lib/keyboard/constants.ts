@@ -137,6 +137,10 @@ export const SHORTCUTS = {
     key: KEYS.K,
     modifiers: { ctrlOrCmd: true, shift: true },
   },
+  CONTENT_SEARCH: {
+    key: KEYS.F,
+    modifiers: { ctrlOrCmd: true, shift: true },
+  },
   TOGGLE_PLAN_MODE: {
     key: KEYS.TAB,
     modifiers: { shift: true },

@@ -565,8 +565,9 @@ func (sm *SessionManager) waitForPromptDone(
 	execution *AgentExecution,
 	promptGeneration uint64,
 ) (*PromptResult, error) {
-	stallTicker := time.NewTicker(30 * time.Second)
+	stallTicker := time.NewTicker(time.Minute)
 	defer stallTicker.Stop()
+	stallReported := false
 
 	for {
 		select {
@@ -618,11 +619,21 @@ func (sm *SessionManager) waitForPromptDone(
 			lastActivity := execution.lastActivityAt
 			execution.lastActivityAtMu.Unlock()
 
-			if elapsed > 5*time.Minute {
+			if elapsed >= 5*time.Minute && !stallReported {
 				sm.logger.Warn("agent stall detected: no events received",
 					zap.String("execution_id", execution.ID),
 					zap.Duration("elapsed_since_last_event", elapsed),
 					zap.Time("last_activity", lastActivity))
+				if sm.eventPublisher != nil {
+					sm.eventPublisher.PublishAgentStalled(
+						ctx,
+						execution,
+						promptGeneration,
+						lastActivity,
+						elapsed,
+					)
+				}
+				stallReported = true
 			}
 		}
 	}

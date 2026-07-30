@@ -52,9 +52,16 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 - Cleanup is idempotent: repeating archive/delete cleanup, startup reconciliation,
   or explicit session stop does not fail because the process, task, session, or
   worktree was already removed.
+- A cleanup operation treats a classifiable missing owned resource as already
+  complete. This includes a missing worktree and a missing `TaskEnvironment`
+  row captured by the durable cleanup snapshot.
 - Archive, delete, cascade, workspace-delete, and quick-chat expiration persist a
   cleanup intent and resource snapshot before mutating or deleting task state.
   Cleanup is performed by a durable worker rather than a detached goroutine.
+- A durable cleanup job makes at most eight attempts. Failed attempts back off
+  for 1 minute, 5 minutes, 15 minutes, 1 hour, 3 hours, 6 hours, and 12 hours
+  before the next claim. An eighth failed attempt becomes terminal `failed`
+  instead of scheduling another retry.
 - Archive cleanup revalidates that the task remains archived before every
   destructive step. Unarchiving a task cancels its pending archive cleanup so a
   delayed retry cannot remove the newly active task's resources.
@@ -97,7 +104,9 @@ no foreign key to `tasks`, so delete cleanup survives deletion of the owning row
 It stores the trigger, state, retry timing, last error, and a JSON snapshot of the
 runtime, environment, worktree, and path handles captured before task mutation.
 Only one non-terminal row exists for an operation ID; repeated event delivery
-reuses the same cleanup job.
+reuses the same cleanup job. `attempts` counts successful worker claims. A
+terminal `failed` row retains its final error and completion timestamp for
+diagnosis but is not selected by the automatic worker.
 
 ## API Surface
 
@@ -147,7 +156,8 @@ The durable cleanup job wraps that resource lifecycle:
 - `pending` -> `running` when the cleanup worker claims the job.
 - `running` -> `succeeded` when runtime and owned resource cleanup finish.
 - `running` -> `retry_wait` when bounded cleanup fails and the resource snapshot
-  must be retried.
+  must be retried and fewer than eight claims have run.
+- `running` -> `failed` when the eighth claimed attempt fails.
 - `retry_wait` -> `running` on the next scheduled retry or manual storage run.
 - `pending|running|retry_wait` -> `cancelled` when an archive-triggered cleanup
   observes that its task has been unarchived.
@@ -168,6 +178,12 @@ The durable cleanup job wraps that resource lifecycle:
   confirmed, the runtime tracking row can still be removed because it no longer
   identifies a live process. The resource cleanup error is logged and handled by
   the resource-specific retry path.
+- If a worktree or captured task-environment row is already absent, cleanup
+  treats that deletion step as successful and continues. Other teardown errors
+  remain retryable and are not hidden by an accompanying not-found result.
+- If cleanup still fails on its eighth worker claim, the job becomes terminal
+  `failed`, preserves `last_error`, clears `next_attempt_at`, stamps
+  `completed_at`, and is excluded from automatic due-job selection.
 - If cleanup cannot prove that a session worktree belongs to the task being
   cleaned, destructive worktree deletion fails closed and skips that worktree.
 - If an agentctl process exits unexpectedly, its owned agent subprocess group is
@@ -198,6 +214,8 @@ The durable cleanup job wraps that resource lifecycle:
   reattempting cleanup for stale runtime rows.
 - Pending and retryable task cleanup jobs survive restart and resume independently
   of whether optional scheduled storage maintenance is enabled.
+- Terminal failed task cleanup jobs survive restart for diagnosis but do not
+  resume automatically.
 - Cleanup snapshots needed after task deletion survive without foreign-keyed task,
   session, environment, or worktree rows.
 - Historical worktree rows for archived tasks remain available to unarchive branch
@@ -250,6 +268,18 @@ The durable cleanup job wraps that resource lifecycle:
 - **GIVEN** the backend exits after a task is deleted but before its worktree is
   removed, **WHEN** the backend restarts, **THEN** the durable cleanup job retries
   using its captured resource snapshot.
+- **GIVEN** a delete cleanup snapshot references a worktree that is already
+  absent, **WHEN** the cleanup worker runs, **THEN** the worktree step is treated
+  as complete and the job does not retry because of that absence.
+- **GIVEN** a delete cleanup snapshot requests deletion of a task-environment row
+  that is already absent, **WHEN** the cleanup worker runs, **THEN** the row step
+  is treated as complete and the job does not retry because of that absence.
+- **GIVEN** a cleanup job fails for a genuinely retryable reason, **WHEN** fewer
+  than eight attempts have run, **THEN** it enters `retry_wait` using the
+  documented backoff schedule.
+- **GIVEN** a cleanup job fails on its eighth attempt, **WHEN** the worker records
+  the result, **THEN** it enters terminal `failed` with the final diagnostic and
+  is not automatically claimed again.
 - **GIVEN** an archive cleanup job is pending, **WHEN** the task is unarchived,
   **THEN** the job is cancelled and cannot delete resources created after
   unarchive.
@@ -262,6 +292,7 @@ The durable cleanup job wraps that resource lifecycle:
 - A general-purpose OS process sweeper that kills every process named
   `codex-acp`, `claude-acp`, or `opencode`.
 - UI changes for showing runtime cleanup failures.
+- A user-facing action to replay a terminal failed cleanup job.
 - New user-facing archive/delete controls.
 - Changing the task/session state model beyond the cleanup guarantees described
   here.

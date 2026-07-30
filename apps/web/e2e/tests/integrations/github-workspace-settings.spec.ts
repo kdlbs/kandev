@@ -1,6 +1,73 @@
 import { test, expect } from "../../fixtures/test-base";
 
+type ReviewWatchesResponse = {
+  watches: Array<{ id: string; enabled: boolean }>;
+};
+
 test.describe("GitHub workspace settings", () => {
+  test("keeps review watch pause and resume visible after save", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    const watch = await apiClient.createReviewWatch(
+      seedData.workspaceId,
+      seedData.workflowId,
+      seedData.startStepId,
+      seedData.agentProfileId,
+    );
+
+    try {
+      await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+      const row = testPage.getByRole("row").filter({ hasText: "All repositories" });
+      await expect(row).toBeVisible();
+
+      const toggle = row.getByRole("button").nth(0);
+      await toggle.click();
+      await testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: "Save changes" })
+        .click();
+
+      await expect(row).toContainText("Paused");
+      await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
+      await prCapture.screenshot("desktop-review-watch-paused", {
+        caption: "Review watch remains paused after saving",
+      });
+
+      const pausedResponse = await apiClient.rawRequest(
+        "GET",
+        `/api/v1/github/watches/review?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+      );
+      const pausedBody = (await pausedResponse.json()) as ReviewWatchesResponse;
+      expect(pausedBody.watches.find((item) => item.id === watch.id)?.enabled).toBe(false);
+
+      await toggle.click();
+      await testPage
+        .getByTestId("settings-floating-save")
+        .getByRole("button", { name: "Save changes" })
+        .click();
+
+      await expect(row).toContainText("Active");
+      await expect(testPage.getByTestId("settings-floating-save")).not.toBeVisible();
+
+      const activeResponse = await apiClient.rawRequest(
+        "GET",
+        `/api/v1/github/watches/review?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+      );
+      const activeBody = (await activeResponse.json()) as ReviewWatchesResponse;
+      expect(activeBody.watches.find((item) => item.id === watch.id)?.enabled).toBe(true);
+    } finally {
+      await apiClient.deleteReviewWatch(watch.id, seedData.workspaceId);
+    }
+  });
+
   test("saves the explicit task Git credential policy", async ({
     testPage,
     apiClient,

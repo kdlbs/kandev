@@ -2,10 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
+	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"go.uber.org/zap"
@@ -232,9 +235,35 @@ func (s *Server) handleFileSearch(c *gin.Context) {
 		}
 	}
 
-	files := s.procMgr.GetWorkspaceTracker().SearchFiles(query, limit)
+	results := s.procMgr.SearchWorkspaceFileResults(query, limit)
+	files := make([]string, 0, len(results))
+	for _, result := range results {
+		files = append(files, result.Path)
+	}
 
-	c.JSON(200, types.FileSearchResponse{Files: files})
+	c.JSON(200, types.FileSearchResponse{Files: files, Results: results})
+}
+
+// handleWorkspaceContentSearch searches matching lines across every task repository.
+func (s *Server) handleWorkspaceContentSearch(c *gin.Context) {
+	query := c.Query("q")
+	limit := 20
+	if rawLimit := c.Query("limit_per_repo"); rawLimit != "" {
+		if parsed := mustParseInt(rawLimit); parsed > 0 {
+			limit = parsed
+		}
+	}
+
+	response, err := s.procMgr.SearchWorkspaceContent(c.Request.Context(), query, limit)
+	if err == nil {
+		c.JSON(http.StatusOK, response)
+		return
+	}
+	if errors.Is(err, process.ErrContentSearchQueryTooLong) {
+		c.JSON(http.StatusBadRequest, types.WorkspaceContentSearchResponse{Error: err.Error()})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, types.WorkspaceContentSearchResponse{Error: err.Error()})
 }
 
 // handleFileCreate handles file create requests via HTTP POST.

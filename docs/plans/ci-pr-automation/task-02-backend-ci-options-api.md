@@ -13,7 +13,9 @@ spec: "../../specs/ui/ci-pr-automation.md"
 ## Acceptance
 
 - `GET /api/v1/github/tasks/:taskId/ci-options` returns persisted/default options, effective prompt, default/override flag, and linked PR automation states.
-- `PATCH /api/v1/github/tasks/:taskId/ci-options` supports partial boolean updates and prompt override save/reset.
+- `PATCH /api/v1/github/tasks/:taskId/ci-options` supports partial boolean
+  updates and auto-fix prompt override save/reset. Lifecycle override fields
+  are no longer supported.
 - API tests cover default response, partial update, override reset, and invalid payload behavior.
 
 ## Verification

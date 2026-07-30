@@ -34,6 +34,39 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayload(execution))
 }
 
+// PublishAgentStalled publishes one advisory inactivity signal for a prompt.
+func (p *EventPublisher) PublishAgentStalled(
+	ctx context.Context,
+	execution *AgentExecution,
+	promptGeneration uint64,
+	lastActivityAt time.Time,
+	stalledFor time.Duration,
+) {
+	if p.eventBus == nil {
+		return
+	}
+	payload := AgentStalledPayload{
+		AgentExecutionID: execution.ID,
+		TaskID:           execution.TaskID,
+		SessionID:        execution.SessionID,
+		PromptGeneration: promptGeneration,
+		LastActivityAt:   lastActivityAt,
+		StalledFor:       stalledFor,
+	}
+	if tool := execution.activeToolSnapshot(); tool != nil {
+		payload.ToolCallID = tool.ToolCallID
+		payload.ToolName = tool.Name
+		payload.ToolTitle = tool.Title
+		payload.ToolStatus = tool.Status
+	}
+	event := bus.NewEvent(events.AgentStalled, "agent-manager", payload)
+	if err := p.eventBus.Publish(ctx, events.AgentStalled, event); err != nil {
+		p.logger.Error("failed to publish stalled agent event",
+			zap.String("execution_id", execution.ID),
+			zap.Error(err))
+	}
+}
+
 // publishAgentEventPayload publishes an immutable agent lifecycle snapshot.
 func (p *EventPublisher) publishAgentEventPayload(ctx context.Context, eventType string, payload AgentEventPayload) {
 	if p.eventBus == nil {

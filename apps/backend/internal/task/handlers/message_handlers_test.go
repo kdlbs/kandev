@@ -154,6 +154,21 @@ func (s *sessionStateSequencer) GetTaskSession(ctx context.Context, id string) (
 	}, nil
 }
 
+func (s *sessionStateSequencer) ClaimPromptableTaskSessionIfActive(_ context.Context, id string) (models.PromptableTaskSessionClaim, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	idx := s.call
+	if idx >= len(s.states) {
+		idx = len(s.states) - 1
+	}
+	if idx < 0 || !isPromptableTaskSessionState(s.states[idx]) {
+		return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionBusy}, nil
+	}
+	previousState := s.states[idx]
+	s.states[idx] = models.TaskSessionStateRunning
+	return models.PromptableTaskSessionClaim{Status: models.PromptableTaskSessionClaimed, PreviousState: previousState}, nil
+}
+
 func newTestMessageHandlers(t *testing.T, repo *sessionStateSequencer) *MessageHandlers {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{

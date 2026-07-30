@@ -381,6 +381,7 @@ func emitBackgroundWork(e *emitter, cmd string) {
 		"Background exploration",
 		"Explore the codebase while the foreground stays idle",
 		"general-purpose")
+	e.foregroundIdle()
 
 	// Hold the turn open with NO foreground output so the session stays in the
 	// background-idle substate for the whole window.

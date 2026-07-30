@@ -4,6 +4,9 @@ import { useEffect } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
 import { isEditableKeydownTarget, matchesShortcut } from "@/lib/keyboard/utils";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
+import { useCommandPanelOpen } from "@/lib/commands/command-registry";
+import { isTaskWorkspaceSearchAvailable } from "@/lib/commands/task-workspace-search";
+import { usePathname } from "@/lib/routing/client-router";
 
 /**
  * App-root keyboard shortcuts that must fire on every route — not just inside
@@ -33,13 +36,23 @@ import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
  */
 export function useAppShortcuts() {
   const appStore = useAppStoreApi();
+  const { openMode } = useCommandPanelOpen();
+  const pathname = usePathname();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
-      if (isEditableKeydownTarget(e)) return;
 
       const overrides = appStore.getState().userSettings.keyboardShortcuts;
+      if (matchesShortcut(e, getShortcut("CONTENT_SEARCH", overrides))) {
+        if (!isTaskWorkspaceSearchAvailable(appStore.getState(), pathname)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        openMode("search-content");
+        return;
+      }
+      if (isEditableKeydownTarget(e)) return;
+
       if (matchesShortcut(e, getShortcut("TOGGLE_SIDEBAR", overrides))) {
         e.preventDefault();
         e.stopPropagation();
@@ -51,5 +64,5 @@ export function useAppShortcuts() {
     // xterm.js) can swallow it — mirrors useEditorKeybinds.
     window.addEventListener("keydown", handler, true);
     return () => window.removeEventListener("keydown", handler, true);
-  }, [appStore]);
+  }, [appStore, openMode, pathname]);
 }
