@@ -1,7 +1,7 @@
 import { createRepositoryAction } from "@/app/actions/workspaces";
 import type { ExecutionMode, TriggerType } from "@/lib/types/automation";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
-import type { RepositorySelection } from "./config-section";
+import type { RepositorySelection } from "./automation-repository-selection";
 
 // Shared form state + pending trigger types used by the editor and its
 // save handler. Lifted out of automation-editor.tsx so the editor stays
@@ -14,10 +14,10 @@ export type FormState = {
   workflowStepId: string;
   agentProfileId: string;
   executorProfileId: string;
-  // repositorySelection captures either a registered workspace repo (id),
-  // a discovered local repo (path — registered at save time to obtain an
-  // id), or "none" for repo-less automations.
-  repositorySelection: RepositorySelection;
+  // repositorySelections captures an ordered list of registered workspace
+  // repos (id), discovered local repos (path — registered at save time to
+  // obtain an id), or an empty list for repo-less automations.
+  repositorySelections: RepositorySelection[];
   prompt: string;
   taskTitleTemplate: string;
   executionMode: ExecutionMode;
@@ -32,12 +32,39 @@ export type PendingTrigger = {
   enabled: boolean;
 };
 
-// resolveRepositoryId turns a RepositorySelection into a concrete
-// repository_id, registering a discovered local repo with the workspace
-// first when needed. Empty string for "none" — the orchestrator runs the
-// task without a repository, which is the right choice for notification-
-// style or side-effect-only automations.
-export async function resolveRepositoryId(
+// ResolvedRepositories bundles the save-time output of resolving an ordered
+// RepositorySelection[]: `ids` is the compact repository_ids payload (in
+// order, "none"/empty entries dropped), `selections` is the 1:1-with-input
+// list promoted from "discovered" to "registered" wherever a repository was
+// newly created — the form re-adopts this so a second save doesn't
+// re-register the same local path.
+export type ResolvedRepositories = {
+  ids: string[];
+  selections: RepositorySelection[];
+};
+
+// resolveRepositoryIds turns each RepositorySelection into a concrete
+// repository_id, in order, registering any discovered local repo with the
+// workspace first when needed. The positional zip against `selections`
+// happens BEFORE filtering out empty ("none") entries, so promotion always
+// lines up with the original array — only the returned `ids` list is
+// compacted for the wire payload.
+export async function resolveRepositoryIds(
+  workspaceId: string,
+  selections: RepositorySelection[],
+): Promise<ResolvedRepositories> {
+  const resolvedIds = await Promise.all(
+    selections.map((selection) => resolveOneRepositoryId(workspaceId, selection)),
+  );
+  const promoted = selections.map((selection, i) =>
+    selection.kind === "discovered" && resolvedIds[i]
+      ? ({ kind: "registered", id: resolvedIds[i] } as const)
+      : selection,
+  );
+  return { ids: resolvedIds.filter((id) => id !== ""), selections: promoted };
+}
+
+async function resolveOneRepositoryId(
   workspaceId: string,
   selection: RepositorySelection,
 ): Promise<string> {
@@ -67,7 +94,7 @@ export async function resolveRepositoryId(
 export function buildCreatePayload(
   workspaceId: string,
   form: FormState,
-  repositoryId: string,
+  repositoryIds: string[],
   pending: PendingTrigger[],
 ) {
   return {
@@ -78,7 +105,7 @@ export function buildCreatePayload(
     workflow_step_id: form.workflowStepId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
-    repository_id: repositoryId,
+    repository_ids: repositoryIds,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     execution_mode: form.executionMode,
@@ -87,7 +114,7 @@ export function buildCreatePayload(
   };
 }
 
-export function buildUpdatePayload(form: FormState, repositoryId: string) {
+export function buildUpdatePayload(form: FormState, repositoryIds: string[]) {
   return {
     name: form.name,
     description: form.description,
@@ -95,7 +122,7 @@ export function buildUpdatePayload(form: FormState, repositoryId: string) {
     workflow_step_id: form.workflowStepId,
     agent_profile_id: form.agentProfileId,
     executor_profile_id: form.executorProfileId,
-    repository_id: repositoryId,
+    repository_ids: repositoryIds,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
     execution_mode: form.executionMode,

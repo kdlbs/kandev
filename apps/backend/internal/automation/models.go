@@ -4,6 +4,7 @@
 package automation
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -84,19 +85,14 @@ func (m ExecutionMode) Valid() bool {
 
 // Automation is a named rule with triggers, a prompt template, and agent/executor config.
 type Automation struct {
-	ID                string `json:"id" db:"id"`
-	WorkspaceID       string `json:"workspace_id" db:"workspace_id"`
-	Name              string `json:"name" db:"name"`
-	Description       string `json:"description" db:"description"`
-	WorkflowID        string `json:"workflow_id" db:"workflow_id"`
-	WorkflowStepID    string `json:"workflow_step_id" db:"workflow_step_id"`
-	AgentProfileID    string `json:"agent_profile_id" db:"agent_profile_id"`
-	ExecutorProfileID string `json:"executor_profile_id" db:"executor_profile_id"`
-	// RepositoryID is the explicit repository to use for trigger firings.
-	// Empty falls back to the workspace's first repository (for scheduled /
-	// webhook triggers) or the PR's repository (for github_pr triggers, which
-	// always override this field — see resolveAutomationRepository).
-	RepositoryID      string        `json:"repository_id" db:"repository_id"`
+	ID                string        `json:"id" db:"id"`
+	WorkspaceID       string        `json:"workspace_id" db:"workspace_id"`
+	Name              string        `json:"name" db:"name"`
+	Description       string        `json:"description" db:"description"`
+	WorkflowID        string        `json:"workflow_id" db:"workflow_id"`
+	WorkflowStepID    string        `json:"workflow_step_id" db:"workflow_step_id"`
+	AgentProfileID    string        `json:"agent_profile_id" db:"agent_profile_id"`
+	ExecutorProfileID string        `json:"executor_profile_id" db:"executor_profile_id"`
 	Prompt            string        `json:"prompt" db:"prompt"`
 	TaskTitleTemplate string        `json:"task_title_template" db:"task_title_template"`
 	ExecutionMode     ExecutionMode `json:"execution_mode" db:"execution_mode"`
@@ -107,8 +103,14 @@ type Automation struct {
 	CreatedAt         time.Time     `json:"created_at" db:"created_at"`
 	UpdatedAt         time.Time     `json:"updated_at" db:"updated_at"`
 
-	// Hydrated separately, not stored in the automations table.
+	// Hydrated separately, not stored as columns on this table.
 	Triggers []AutomationTrigger `json:"triggers" db:"-"`
+	// RepositoryIDs is the ordered list of repositories to use for trigger
+	// firings, backed by the automation_repositories join table. Empty
+	// falls back to the workspace's first repository (for scheduled /
+	// webhook triggers) or the PR's repository (for github_pr triggers,
+	// which always override this field — see resolveAutomationRepository).
+	RepositoryIDs []string `json:"repository_ids" db:"-"`
 }
 
 // AutomationTrigger is a single trigger attached to an automation.
@@ -187,7 +189,7 @@ type CreateAutomationRequest struct {
 	WorkflowStepID    string              `json:"workflow_step_id"`
 	AgentProfileID    string              `json:"agent_profile_id"`
 	ExecutorProfileID string              `json:"executor_profile_id"`
-	RepositoryID      string              `json:"repository_id"`
+	RepositoryIDs     []string            `json:"repository_ids"`
 	Prompt            string              `json:"prompt"`
 	TaskTitleTemplate string              `json:"task_title_template"`
 	ExecutionMode     ExecutionMode       `json:"execution_mode"`
@@ -204,13 +206,15 @@ type CreateTriggerSpec struct {
 
 // UpdateAutomationRequest is the payload for updating an automation.
 type UpdateAutomationRequest struct {
-	Name              *string        `json:"name,omitempty"`
-	Description       *string        `json:"description,omitempty"`
-	WorkflowID        *string        `json:"workflow_id,omitempty"`
-	WorkflowStepID    *string        `json:"workflow_step_id,omitempty"`
-	AgentProfileID    *string        `json:"agent_profile_id,omitempty"`
-	ExecutorProfileID *string        `json:"executor_profile_id,omitempty"`
-	RepositoryID      *string        `json:"repository_id,omitempty"`
+	Name              *string `json:"name,omitempty"`
+	Description       *string `json:"description,omitempty"`
+	WorkflowID        *string `json:"workflow_id,omitempty"`
+	WorkflowStepID    *string `json:"workflow_step_id,omitempty"`
+	AgentProfileID    *string `json:"agent_profile_id,omitempty"`
+	ExecutorProfileID *string `json:"executor_profile_id,omitempty"`
+	// RepositoryIDs replaces the automation's repository list when non-nil.
+	// nil means "leave unchanged"; an explicit empty slice clears it.
+	RepositoryIDs     []string       `json:"repository_ids,omitempty"`
 	Prompt            *string        `json:"prompt,omitempty"`
 	TaskTitleTemplate *string        `json:"task_title_template,omitempty"`
 	ExecutionMode     *ExecutionMode `json:"execution_mode,omitempty"`
@@ -254,4 +258,12 @@ type AutomationTriggeredEvent struct {
 	TriggerType  TriggerType     `json:"trigger_type"`
 	TriggerData  json.RawMessage `json:"trigger_data"`
 	DedupKey     string          `json:"dedup_key"`
+}
+
+// RepositoryLookup resolves a repository's workspace ownership for
+// validating an automation's repository_ids. Structurally identical to the
+// jira/linear/gitlab RepositoryLookup interfaces — the same
+// repositoryLookupAdapter over the task service satisfies all of them.
+type RepositoryLookup interface {
+	GetRepository(ctx context.Context, id string) (workspaceID, defaultBranch string, ok bool)
 }

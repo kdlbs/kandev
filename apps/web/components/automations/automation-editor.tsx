@@ -21,7 +21,7 @@ import {
   buildCreatePayload,
   buildUpdatePayload,
   buildWebhookUrl,
-  resolveRepositoryId,
+  resolveRepositoryIds,
 } from "./automation-payload";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
@@ -49,7 +49,7 @@ const defaultForm: FormState = {
   workflowStepId: "",
   agentProfileId: "",
   executorProfileId: "",
-  repositorySelection: { kind: "none" },
+  repositorySelections: [],
   prompt: DEFAULT_PROMPT,
   taskTitleTemplate: "",
   executionMode: "task",
@@ -65,9 +65,7 @@ function formFromAutomation(a: Automation): FormState {
     workflowStepId: a.workflow_step_id,
     agentProfileId: a.agent_profile_id,
     executorProfileId: a.executor_profile_id,
-    repositorySelection: a.repository_id
-      ? { kind: "registered", id: a.repository_id }
-      : { kind: "none" },
+    repositorySelections: a.repository_ids.map((id) => ({ kind: "registered" as const, id })),
     prompt: a.prompt || DEFAULT_PROMPT,
     taskTitleTemplate: a.task_title_template ?? "",
     executionMode: a.execution_mode ?? "task",
@@ -129,36 +127,28 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
   return async () => {
     setSaving(true);
     try {
-      const repositoryId = await resolveRepositoryId(workspaceId, form.repositorySelection);
-      const promoteSelection = () => {
-        if (form.repositorySelection.kind === "discovered" && repositoryId) {
-          setForm((prev) => ({
-            ...prev,
-            repositorySelection: { kind: "registered", id: repositoryId },
-          }));
-        }
+      const { ids: repositoryIds, selections: promotedSelections } = await resolveRepositoryIds(
+        workspaceId,
+        form.repositorySelections,
+      );
+      const promoteSelections = () => {
+        setForm((prev) => ({ ...prev, repositorySelections: promotedSelections }));
       };
+      const formWithPromotedSelections = { ...form, repositorySelections: promotedSelections };
       if (isNew) {
         const a = await create(
-          buildCreatePayload(workspaceId, form, repositoryId, triggerActions.pending),
+          buildCreatePayload(workspaceId, form, repositoryIds, triggerActions.pending),
         );
-        promoteSelection();
+        promoteSelections();
         // Webhook automations need their URL + secret communicated to the
         // user; show the dialog and let its close handler do the redirect.
         // Everything else goes straight to the listings page with a toast.
         const hasWebhookTrigger = (a.triggers ?? []).some((t) => t.type === "webhook");
         if (hasWebhookTrigger && a.webhook_secret) {
-          const savedForm =
-            form.repositorySelection.kind === "discovered" && repositoryId
-              ? {
-                  ...form,
-                  repositorySelection: { kind: "registered" as const, id: repositoryId },
-                }
-              : form;
           const savedTriggers = a.triggers ?? [];
           triggerActions.loadTriggers(savedTriggers);
           triggerActions.clearPending();
-          onSaved(savedForm, savedTriggers);
+          onSaved(formWithPromotedSelections, savedTriggers);
           setCurrentId(a.id);
           setCreatedWebhook({ url: buildWebhookUrl(a.id), secret: a.webhook_secret });
         } else {
@@ -168,14 +158,10 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           );
         }
       } else if (currentId) {
-        await update(currentId, buildUpdatePayload(form, repositoryId));
+        await update(currentId, buildUpdatePayload(form, repositoryIds));
         const persistedTriggers = await triggerActions.persistDrafts();
-        promoteSelection();
-        const savedForm =
-          form.repositorySelection.kind === "discovered" && repositoryId
-            ? { ...form, repositorySelection: { kind: "registered" as const, id: repositoryId } }
-            : form;
-        onSaved(savedForm, persistedTriggers);
+        promoteSelections();
+        onSaved(formWithPromotedSelections, persistedTriggers);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

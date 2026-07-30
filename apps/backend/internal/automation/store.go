@@ -82,17 +82,44 @@ const createTablesSQL = `
 
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_automation ON automation_runs(automation_id);
 	CREATE INDEX IF NOT EXISTS idx_automation_runs_dedup ON automation_runs(automation_id, dedup_key);
+
+	CREATE TABLE IF NOT EXISTS automation_repositories (
+		id TEXT PRIMARY KEY,
+		automation_id TEXT NOT NULL REFERENCES automations(id) ON DELETE CASCADE,
+		repository_id TEXT NOT NULL,
+		position INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL,
+		UNIQUE(automation_id, repository_id)
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_automation_repositories_automation ON automation_repositories(automation_id);
 `
 
 // In-branch column additions. The canonical CREATE TABLE covers fresh
 // installs; these ALTERs cover DBs already initialised from an earlier
 // commit on this branch (the original PR #406 schema). SQLite returns a
 // duplicate-column error when the column already exists, which we swallow.
+//
+// automations.repository_id is retained as a legacy, write-once column: it
+// is never read or written by current code (repository selection now lives
+// in automation_repositories), but dropping a column referenced by two
+// FK-child tables (automation_triggers, automation_runs) under
+// foreign_keys=on would require table-recreate migration infrastructure
+// this package doesn't have yet. Every query that scans a full Automation
+// row uses the explicit automationColumns list, which omits it, so its
+// continued presence in the table is inert.
 const (
 	migrateTaskTitleSQL     = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
 	migrateExecutionModeSQL = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
 	migrateRepositoryIDSQL  = `ALTER TABLE automations ADD COLUMN repository_id TEXT NOT NULL DEFAULT ''`
 )
+
+// automationColumns is the explicit column list for every query that scans
+// a full Automation row. Excludes the legacy repository_id column — see
+// the comment above migrateRepositoryIDSQL.
+const automationColumns = `id, workspace_id, name, description, workflow_id, workflow_step_id,
+	agent_profile_id, executor_profile_id, prompt, task_title_template, execution_mode,
+	enabled, max_concurrent_runs, webhook_secret, last_triggered_at, created_at, updated_at`
 
 func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
@@ -101,12 +128,58 @@ func (s *Store) initSchema() error {
 	s.db.Exec(migrateTaskTitleSQL)     //nolint:errcheck // duplicate-column on existing DBs
 	s.db.Exec(migrateExecutionModeSQL) //nolint:errcheck // duplicate-column on existing DBs
 	s.db.Exec(migrateRepositoryIDSQL)  //nolint:errcheck // duplicate-column on existing DBs
-	return nil
+	return s.backfillLegacyRepositoryIDs()
+}
+
+// backfillLegacyRepositoryIDs copies every non-empty legacy
+// automations.repository_id value into automation_repositories (position 0)
+// the first time a DB upgrades to this schema. Idempotent: the
+// UNIQUE(automation_id, repository_id) constraint plus INSERT OR IGNORE
+// means re-running this on an already-migrated DB inserts nothing new.
+func (s *Store) backfillLegacyRepositoryIDs() error {
+	type legacyRow struct {
+		ID           string    `db:"id"`
+		RepositoryID string    `db:"repository_id"`
+		CreatedAt    time.Time `db:"created_at"`
+	}
+	var rows []legacyRow
+	err := s.db.Select(&rows,
+		`SELECT id, repository_id, created_at FROM automations WHERE repository_id != ''`)
+	if err != nil {
+		return fmt.Errorf("select legacy repository_id rows: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return fmt.Errorf("begin legacy repository_id backfill: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	for _, row := range rows {
+		_, err := tx.Exec(
+			`INSERT OR IGNORE INTO automation_repositories (id, automation_id, repository_id, position, created_at)
+			VALUES (?, ?, ?, 0, ?)`,
+			uuid.New().String(), row.ID, row.RepositoryID, row.CreatedAt)
+		if err != nil {
+			return fmt.Errorf("backfill automation_repositories for %s: %w", row.ID, err)
+		}
+		// Clear the legacy column in the same transaction as the insert.
+		// Without this, a later UpdateAutomation that removes this exact
+		// repository from automation_repositories would resurrect it on
+		// the next boot's backfill pass (INSERT OR IGNORE only blocks
+		// exact re-insertion, not re-addition after deletion).
+		if _, err := tx.Exec(`UPDATE automations SET repository_id = '' WHERE id = ?`, row.ID); err != nil {
+			return fmt.Errorf("clear legacy repository_id for %s: %w", row.ID, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // --- Automation CRUD ---
 
-// CreateAutomation persists a new automation.
+// CreateAutomation persists a new automation and its repository_ids.
 func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	if a.ID == "" {
 		a.ID = uuid.New().String()
@@ -120,25 +193,55 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	if a.ExecutionMode == "" {
 		a.ExecutionMode = ExecutionModeTask
 	}
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
 		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
-			agent_profile_id, executor_profile_id, repository_id,
+			agent_profile_id, executor_profile_id,
 			prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs,
 			webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
-		a.AgentProfileID, a.ExecutorProfileID, a.RepositoryID,
+		a.AgentProfileID, a.ExecutorProfileID,
 		a.Prompt, a.TaskTitleTemplate, string(a.ExecutionMode),
 		a.Enabled, a.MaxConcurrentRuns,
 		a.WebhookSecret, a.LastTriggeredAt, a.CreatedAt, a.UpdatedAt)
-	return err
+	if err != nil {
+		return err
+	}
+	if err := insertAutomationRepositories(ctx, tx, a.ID, a.RepositoryIDs); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
-// GetAutomation returns an automation by ID with its triggers hydrated.
+// insertAutomationRepositories inserts one automation_repositories row per
+// ID, preserving slice order via the position column. No-op for an empty
+// slice. Shared by CreateAutomation and UpdateAutomation's replace path.
+func insertAutomationRepositories(ctx context.Context, tx *sqlx.Tx, automationID string, repositoryIDs []string) error {
+	now := time.Now().UTC()
+	for i, repositoryID := range repositoryIDs {
+		_, err := tx.ExecContext(ctx, `
+			INSERT INTO automation_repositories (id, automation_id, repository_id, position, created_at)
+			VALUES (?, ?, ?, ?, ?)`,
+			uuid.New().String(), automationID, repositoryID, i, now)
+		if err != nil {
+			return fmt.Errorf("insert automation_repositories: %w", err)
+		}
+	}
+	return nil
+}
+
+// GetAutomation returns an automation by ID with its triggers and
+// repository_ids hydrated.
 func (s *Store) GetAutomation(ctx context.Context, id string) (*Automation, error) {
 	var a Automation
-	err := s.ro.GetContext(ctx, &a, `SELECT * FROM automations WHERE id = ?`, id)
+	err := s.ro.GetContext(ctx, &a, `SELECT `+automationColumns+` FROM automations WHERE id = ?`, id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -150,45 +253,70 @@ func (s *Store) GetAutomation(ctx context.Context, id string) (*Automation, erro
 		return nil, fmt.Errorf("hydrate triggers: %w", err)
 	}
 	a.Triggers = triggers
+	repoIDs, err := s.listRepositoryIDsForAutomations(ctx, []string{id})
+	if err != nil {
+		return nil, fmt.Errorf("hydrate repository_ids: %w", err)
+	}
+	a.RepositoryIDs = repoIDs[id]
 	return &a, nil
 }
 
-// ListAutomations returns all automations for a workspace with triggers hydrated.
-func (s *Store) ListAutomations(ctx context.Context, workspaceID string) ([]*Automation, error) {
-	var automations []*Automation
-	err := s.ro.SelectContext(ctx, &automations,
-		`SELECT * FROM automations WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
+// listRepositoryIDsForAutomations batch-loads ordered repository_ids for
+// several automations at once, mirroring listTriggersForAutomations.
+func (s *Store) listRepositoryIDsForAutomations(ctx context.Context, automationIDs []string) (map[string][]string, error) {
+	if len(automationIDs) == 0 {
+		return make(map[string][]string), nil
+	}
+	query, args, err := sqlx.In(
+		`SELECT automation_id, repository_id FROM automation_repositories
+		WHERE automation_id IN (?) ORDER BY automation_id, position`, automationIDs)
 	if err != nil {
 		return nil, err
 	}
-	if len(automations) == 0 {
-		return automations, nil
+	query = s.ro.Rebind(query)
+	type row struct {
+		AutomationID string `db:"automation_id"`
+		RepositoryID string `db:"repository_id"`
 	}
-	// Batch-load triggers for all automations.
-	ids := make([]string, len(automations))
-	for i, a := range automations {
-		ids[i] = a.ID
+	var rows []row
+	if err := s.ro.SelectContext(ctx, &rows, query, args...); err != nil {
+		return nil, err
 	}
-	triggersByAutomation, err := s.listTriggersForAutomations(ctx, ids)
+	result := make(map[string][]string, len(automationIDs))
+	for _, r := range rows {
+		result[r.AutomationID] = append(result[r.AutomationID], r.RepositoryID)
+	}
+	return result, nil
+}
+
+// ListAutomations returns all automations for a workspace with triggers and
+// repository_ids hydrated.
+func (s *Store) ListAutomations(ctx context.Context, workspaceID string) ([]*Automation, error) {
+	var automations []*Automation
+	err := s.ro.SelectContext(ctx, &automations,
+		`SELECT `+automationColumns+` FROM automations WHERE workspace_id = ? ORDER BY created_at DESC`, workspaceID)
 	if err != nil {
-		return nil, fmt.Errorf("hydrate triggers: %w", err)
+		return nil, err
 	}
-	for _, a := range automations {
-		a.Triggers = triggersByAutomation[a.ID]
-	}
-	return automations, nil
+	return automations, s.hydrateAutomations(ctx, automations)
 }
 
 // ListAllEnabled returns all enabled automations (across workspaces).
 func (s *Store) ListAllEnabled(ctx context.Context) ([]*Automation, error) {
 	var automations []*Automation
 	err := s.ro.SelectContext(ctx, &automations,
-		`SELECT * FROM automations WHERE enabled = 1 ORDER BY created_at`)
+		`SELECT `+automationColumns+` FROM automations WHERE enabled = 1 ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
+	return automations, s.hydrateAutomations(ctx, automations)
+}
+
+// hydrateAutomations batch-loads triggers and repository_ids onto an
+// already-fetched automations slice. Shared by ListAutomations/ListAllEnabled.
+func (s *Store) hydrateAutomations(ctx context.Context, automations []*Automation) error {
 	if len(automations) == 0 {
-		return automations, nil
+		return nil
 	}
 	ids := make([]string, len(automations))
 	for i, a := range automations {
@@ -196,15 +324,23 @@ func (s *Store) ListAllEnabled(ctx context.Context) ([]*Automation, error) {
 	}
 	triggersByAutomation, err := s.listTriggersForAutomations(ctx, ids)
 	if err != nil {
-		return nil, fmt.Errorf("hydrate triggers: %w", err)
+		return fmt.Errorf("hydrate triggers: %w", err)
+	}
+	repoIDsByAutomation, err := s.listRepositoryIDsForAutomations(ctx, ids)
+	if err != nil {
+		return fmt.Errorf("hydrate repository_ids: %w", err)
 	}
 	for _, a := range automations {
 		a.Triggers = triggersByAutomation[a.ID]
+		a.RepositoryIDs = repoIDsByAutomation[a.ID]
 	}
-	return automations, nil
+	return nil
 }
 
-// UpdateAutomation applies partial updates to an automation.
+// UpdateAutomation applies partial updates to an automation. When
+// req.RepositoryIDs is non-nil, it atomically replaces the automation's
+// automation_repositories rows (nil means "leave unchanged"; an explicit
+// empty slice clears the list).
 func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAutomationRequest) error {
 	a, err := s.GetAutomation(ctx, id)
 	if err != nil {
@@ -215,17 +351,35 @@ func (s *Store) UpdateAutomation(ctx context.Context, id string, req *UpdateAuto
 	}
 	applyAutomationUpdate(a, req)
 	a.UpdatedAt = time.Now().UTC()
-	_, err = s.db.ExecContext(ctx, `
+
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	_, err = tx.ExecContext(ctx, `
 		UPDATE automations SET name = ?, description = ?, workflow_id = ?, workflow_step_id = ?,
-			agent_profile_id = ?, executor_profile_id = ?, repository_id = ?,
+			agent_profile_id = ?, executor_profile_id = ?,
 			prompt = ?, task_title_template = ?,
 			execution_mode = ?, enabled = ?, max_concurrent_runs = ?, updated_at = ?
 		WHERE id = ?`,
 		a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
-		a.AgentProfileID, a.ExecutorProfileID, a.RepositoryID,
+		a.AgentProfileID, a.ExecutorProfileID,
 		a.Prompt, a.TaskTitleTemplate,
 		string(a.ExecutionMode), a.Enabled, a.MaxConcurrentRuns, a.UpdatedAt, id)
-	return err
+	if err != nil {
+		return err
+	}
+	if req.RepositoryIDs != nil {
+		if _, err := tx.ExecContext(ctx, `DELETE FROM automation_repositories WHERE automation_id = ?`, id); err != nil {
+			return fmt.Errorf("clear automation_repositories: %w", err)
+		}
+		if err := insertAutomationRepositories(ctx, tx, id, req.RepositoryIDs); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
@@ -246,9 +400,6 @@ func applyAutomationUpdate(a *Automation, req *UpdateAutomationRequest) {
 	}
 	if req.ExecutorProfileID != nil {
 		a.ExecutorProfileID = *req.ExecutorProfileID
-	}
-	if req.RepositoryID != nil {
-		a.RepositoryID = *req.RepositoryID
 	}
 	if req.Prompt != nil {
 		a.Prompt = *req.Prompt

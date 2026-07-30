@@ -65,6 +65,221 @@ func TestCreateAndGetAutomation(t *testing.T) {
 	}
 }
 
+func TestCreateAutomation_PersistsRepositoryIDsInOrder(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	a := &Automation{
+		WorkspaceID:       "ws-1",
+		Name:              "Multi-repo automation",
+		WorkflowID:        "wf-1",
+		WorkflowStepID:    "step-1",
+		Enabled:           true,
+		MaxConcurrentRuns: 1,
+		RepositoryIDs:     []string{"repo-b", "repo-a"},
+	}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.GetAutomation(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil {
+		t.Fatal("expected automation, got nil")
+	}
+	if len(got.RepositoryIDs) != 2 || got.RepositoryIDs[0] != "repo-b" || got.RepositoryIDs[1] != "repo-a" {
+		t.Fatalf("expected repository_ids [repo-b repo-a] in order, got %v", got.RepositoryIDs)
+	}
+}
+
+func TestCreateAutomation_EmptyRepositoryIDs(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "No repo", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetAutomation(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.RepositoryIDs) != 0 {
+		t.Fatalf("expected no repository_ids, got %v", got.RepositoryIDs)
+	}
+}
+
+func TestUpdateAutomation_ReplacesRepositoryIDs(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	a := &Automation{
+		WorkspaceID: "ws-1", Name: "Original", WorkflowID: "wf-1", WorkflowStepID: "s-1",
+		Enabled: true, RepositoryIDs: []string{"repo-a"},
+	}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	newRepos := []string{"repo-x", "repo-y", "repo-z"}
+	if err := store.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{RepositoryIDs: newRepos}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetAutomation(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.RepositoryIDs) != 3 || got.RepositoryIDs[0] != "repo-x" || got.RepositoryIDs[2] != "repo-z" {
+		t.Fatalf("expected repository_ids [repo-x repo-y repo-z], got %v", got.RepositoryIDs)
+	}
+
+	// Explicit empty slice clears the list.
+	if err := store.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{RepositoryIDs: []string{}}); err != nil {
+		t.Fatal(err)
+	}
+	got, err = store.GetAutomation(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.RepositoryIDs) != 0 {
+		t.Fatalf("expected repository_ids cleared, got %v", got.RepositoryIDs)
+	}
+}
+
+func TestUpdateAutomation_NilRepositoryIDsLeavesUnchanged(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	a := &Automation{
+		WorkspaceID: "ws-1", Name: "Original", WorkflowID: "wf-1", WorkflowStepID: "s-1",
+		Enabled: true, RepositoryIDs: []string{"repo-a"},
+	}
+	if err := store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	newName := "Renamed"
+	if err := store.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{Name: &newName}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.GetAutomation(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.RepositoryIDs) != 1 || got.RepositoryIDs[0] != "repo-a" {
+		t.Fatalf("expected repository_ids unchanged [repo-a], got %v", got.RepositoryIDs)
+	}
+}
+
+func TestListAutomations_BatchHydratesRepositoryIDs(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+
+	a1 := &Automation{WorkspaceID: "ws-1", Name: "A1", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true, RepositoryIDs: []string{"repo-1", "repo-2"}}
+	a2 := &Automation{WorkspaceID: "ws-1", Name: "A2", WorkflowID: "wf-1", WorkflowStepID: "s-1", Enabled: true}
+	if err := store.CreateAutomation(ctx, a1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateAutomation(ctx, a2); err != nil {
+		t.Fatal(err)
+	}
+
+	items, err := store.ListAutomations(ctx, "ws-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[string]*Automation{}
+	for _, item := range items {
+		byID[item.ID] = item
+	}
+	if got := byID[a1.ID].RepositoryIDs; len(got) != 2 || got[0] != "repo-1" || got[1] != "repo-2" {
+		t.Fatalf("expected a1 repository_ids [repo-1 repo-2], got %v", got)
+	}
+	if got := byID[a2.ID].RepositoryIDs; len(got) != 0 {
+		t.Fatalf("expected a2 repository_ids empty, got %v", got)
+	}
+}
+
+// TestInitSchema_BackfillsLegacyRepositoryID seeds a DB shaped like a
+// pre-automation_repositories install (automations.repository_id populated,
+// no automation_repositories table) and asserts NewStore backfills exactly
+// one automation_repositories row per non-empty legacy value, and that
+// running it again is a no-op (no duplicate rows).
+func TestInitSchema_BackfillsLegacyRepositoryID(t *testing.T) {
+	db, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	// Pre-automation_repositories schema: automations already has
+	// repository_id (as ALTER'd by an earlier version) but no join table.
+	preSchema := `
+		CREATE TABLE automations (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, name TEXT NOT NULL,
+			description TEXT DEFAULT '', workflow_id TEXT NOT NULL, workflow_step_id TEXT NOT NULL,
+			agent_profile_id TEXT NOT NULL, executor_profile_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '', prompt TEXT DEFAULT '',
+			task_title_template TEXT DEFAULT '', execution_mode TEXT NOT NULL DEFAULT 'task',
+			enabled BOOLEAN DEFAULT 1, max_concurrent_runs INTEGER DEFAULT 1,
+			webhook_secret TEXT DEFAULT '', last_triggered_at DATETIME,
+			created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL
+		);
+		CREATE TABLE automation_triggers (
+			id TEXT PRIMARY KEY, automation_id TEXT NOT NULL, type TEXT NOT NULL,
+			config TEXT NOT NULL DEFAULT '{}', enabled BOOLEAN DEFAULT 1,
+			last_evaluated_at DATETIME, created_at DATETIME NOT NULL, updated_at DATETIME NOT NULL
+		);
+		CREATE TABLE automation_runs (
+			id TEXT PRIMARY KEY, automation_id TEXT NOT NULL, trigger_id TEXT NOT NULL,
+			trigger_type TEXT NOT NULL, task_id TEXT DEFAULT '', status TEXT NOT NULL,
+			dedup_key TEXT DEFAULT '', trigger_data TEXT NOT NULL DEFAULT '{}',
+			error_message TEXT DEFAULT '', created_at DATETIME NOT NULL
+		);
+	`
+	if _, err := db.Exec(preSchema); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	_, err = db.Exec(
+		`INSERT INTO automations (id, workspace_id, name, workflow_id, workflow_step_id,
+			agent_profile_id, executor_profile_id, repository_id, created_at, updated_at)
+		VALUES ('a1', 'ws-1', 'Legacy', 'wf-1', 's-1', '', '', 'repo-legacy', ?, ?)`,
+		now, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := NewStore(db, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.GetAutomation(context.Background(), "a1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.RepositoryIDs) != 1 || got.RepositoryIDs[0] != "repo-legacy" {
+		t.Fatalf("expected backfilled repository_ids [repo-legacy], got %v", got.RepositoryIDs)
+	}
+
+	// Re-running initSchema (as NewStore does on every boot) must not
+	// duplicate the backfilled row.
+	if _, err := NewStore(db, db); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.Get(&count, `SELECT COUNT(*) FROM automation_repositories WHERE automation_id = 'a1'`); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("expected exactly 1 backfilled row after repeated init, got %d", count)
+	}
+}
+
 func TestCreateAndListTriggers(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()
