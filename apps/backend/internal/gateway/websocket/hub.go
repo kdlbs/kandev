@@ -459,6 +459,32 @@ func (h *Hub) BroadcastToUser(userID string, msg *ws.Message) bool {
 	return h.sendToClients(data, clients, msg.Action) > 0
 }
 
+// SendToIdentity sends a notification to every connected client belonging to
+// the authenticated identity, without requiring a topic subscription.
+func (h *Hub) SendToIdentity(userID string, msg *ws.Message) int {
+	if userID == "" {
+		return 0
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal identity message", zap.Error(err))
+		return 0
+	}
+	h.mu.RLock()
+	clients := make([]*Client, 0)
+	for client := range h.clients {
+		if client.identity.UserID == userID {
+			clients = append(clients, client)
+		}
+	}
+	h.mu.RUnlock()
+	h.logger.Debug("SendToIdentity",
+		zap.String("user_id", userID),
+		zap.String("action", msg.Action),
+		zap.Int("recipient_count", len(clients)))
+	return h.sendToClients(data, clients, msg.Action)
+}
+
 // SubscribeToTask subscribes a client to task notifications
 func (h *Hub) SubscribeToTask(client *Client, taskID string) {
 	h.mu.Lock()

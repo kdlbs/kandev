@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { cacheAzureDevOpsTaskPullRequest } from "@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests";

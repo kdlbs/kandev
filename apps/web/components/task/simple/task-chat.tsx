@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { IconCode, IconChevronDown, IconSend, IconPaperclip, IconUser } from "@tabler/icons-react";
 import { AgentAvatar } from "@/app/office/components/agent-avatar";
 import { Button } from "@kandev/ui/button";

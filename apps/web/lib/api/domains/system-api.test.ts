@@ -18,9 +18,10 @@ import {
   restoreBackup,
   deleteBackup,
   buildBackupDownloadUrl,
-  fetchLogFiles,
-  fetchLogTail,
-  buildLogDownloadUrl,
+  buildDiagnosticBundleDownloadUrl,
+  createDiagnosticBundle,
+  fetchDiagnosticBundle,
+  uploadFrontendBundleChunk,
   fetchUpdates,
   checkUpdates,
   applyUpdate,
@@ -198,31 +199,33 @@ describe("fetchBackups / createBackup / restoreBackup / deleteBackup", () => {
 });
 
 describe("logs", () => {
-  it("fetchLogFiles GETs /logs", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse([]));
-    await fetchLogFiles();
-    expect(lastCall().url).toBe(`${BASE}/logs`);
-    expect(method()).toBe("GET");
-  });
-
-  it("fetchLogTail GETs /logs/tail with default n=1000 and no-store cache", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ lines: ["a", "b"] }));
-    const res = await fetchLogTail();
-    const { url, init } = lastCall();
-    expect(url).toBe(`${BASE}/logs/tail?n=1000`);
-    expect((init?.method ?? "GET").toUpperCase()).toBe("GET");
-    expect(init?.cache).toBe("no-store");
-    expect(res.lines).toEqual(["a", "b"]);
-  });
-
-  it("fetchLogTail uses the explicit n parameter when provided", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ lines: [] }));
-    await fetchLogTail(250);
-    expect(lastCall().url).toBe(`${BASE}/logs/tail?n=250`);
-  });
-
-  it("buildLogDownloadUrl returns the absolute download URL", () => {
-    expect(buildLogDownloadUrl("kandev.log.1")).toBe(`${BASE}/logs/kandev.log.1/download`);
+  it("creates, inspects, uploads, and builds URLs for diagnostic bundles", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(jsonResponse({ id: "bundle-1", status: "collecting" }))
+      .mockResolvedValueOnce(jsonResponse({ id: "bundle-1", status: "ready" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await createDiagnosticBundle(["backend", "frontend"]);
+    expect(lastCall().url).toBe(`${BASE}/logs/bundles`);
+    expect(method()).toBe("POST");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      sources: ["backend", "frontend"],
+    });
+    await fetchDiagnosticBundle("bundle-1");
+    expect(lastCall().url).toBe(`${BASE}/logs/bundles/bundle-1`);
+    expect(lastCall().init?.cache).toBe("no-store");
+    await uploadFrontendBundleChunk("bundle-1", {
+      browser_id: "browser",
+      capture_stream_id: "stream",
+      chunk_index: 0,
+      done: true,
+      storage_mode: "memory",
+      capture_metadata: null,
+      entries: [],
+    });
+    expect(lastCall().url).toBe(`${BASE}/logs/bundles/bundle-1/frontend`);
+    expect(buildDiagnosticBundleDownloadUrl("bundle 1")).toBe(
+      `${BASE}/logs/bundles/bundle%201/download`,
+    );
   });
 });
 

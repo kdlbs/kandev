@@ -1,7 +1,7 @@
 ---
 name: debug
 description: Diagnose Kandev bugs, running-instance issues, UI/browser failures, and runtime behavior. Use when the user reports unexpected behavior, asks to investigate, asks to add logs/instrumentation, or when a fix needs root-cause evidence before implementing. Triage first, gather evidence safely, then hand off to /fix for code changes.
-allowed-tools: Bash(curl:*) Bash(jq:*) Bash(npx:*) Bash(scripts/kandev-instances:*) Bash(scripts/kandev-logs:*) Bash(scripts/dev-isolated:*) Bash(scripts/kandev-kill:*) Bash(go:*) Bash(rg:*) Bash(grep:*)
+allowed-tools: Bash(curl:*) Bash(jq:*) Bash(mktemp:*) Bash(unzip:*) Bash(npx:*) Bash(scripts/kandev-instances:*) Bash(scripts/kandev-logs:*) Bash(scripts/dev-isolated:*) Bash(scripts/kandev-kill:*) Bash(go:*) Bash(rg:*) Bash(grep:*)
 ---
 
 # Debug
@@ -19,7 +19,7 @@ through `/fix` when code changes are needed.
 Create a visible task list:
 
 1. **Triage** - classify the bug and choose the cheapest faithful path
-2. **Gather evidence** - targeted test, debug export/logs, browser state, or instrumentation
+2. **Gather evidence** - targeted test, source-selectable diagnostic bundle, browser state, or instrumentation
 3. **Diagnose** - trace the failure to root cause
 4. **Report** - summarize evidence and choose `/fix` when code changes are needed
 5. **Clean up** - remove temporary logs, throwaway repro tests, isolated instances, and browser sessions
@@ -38,7 +38,7 @@ Pick one path before launching anything:
 Rules:
 - Triage before launching anything.
 - Use logs and targeted tests before browser automation.
-- Never mutate the user's live instance. Read-only debug export/logs are allowed; browser interaction must use your isolated instance.
+- Never mutate the user's live instance. Creating or downloading an owned diagnostic bundle is read-only; browser interaction must use your isolated instance.
 - Tear down only what you started. Never `pkill kandev`.
 
 ## Evidence Strategy
@@ -46,9 +46,10 @@ Rules:
 Start with the cheapest faithful reproduction:
 
 1. Backend logic: write a throwaway focused Go repro test against the real service path. If it reproduces, convert it via `/fix`.
-2. Live instance: use `scripts/kandev-logs <port> --export` or `--level error`; do not relaunch.
-3. UI/browser: launch `scripts/dev-isolated --web`, drive `npx playwright-cli`, and correlate console/network state with backend logs.
-4. Unknown: trace from the symptom backward through code and add temporary instrumentation only where it will split the search space.
+2. Live instance in a task session: call `get_diagnostic_bundle_kandev` with `backend`, `frontend`, or `all`; inspect `manifest.json` before assuming a source is complete.
+3. Host-side instance: use `scripts/kandev-logs <port> --source backend|frontend|all`; do not relaunch. Set `KANDEV_API_TOKEN` only when authentication is enabled.
+4. UI/browser: launch `scripts/dev-isolated --web`, drive `npx playwright-cli`, and correlate console/network state with a fresh all-source bundle.
+5. Unknown: trace from the symptom backward through code and add temporary instrumentation only where it will split the search space.
 
 ## Reference Files
 

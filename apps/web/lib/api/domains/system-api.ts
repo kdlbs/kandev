@@ -5,8 +5,8 @@ import type {
   DiskUsageResponse,
   DatabaseStats,
   SnapshotInfo,
-  LogFileInfo,
-  LogTailResponse,
+  DiagnosticBundleJob,
+  FrontendLogUploadChunk,
   UpdatesResponse,
   JobAcceptResponse,
   RestartCapability,
@@ -125,21 +125,44 @@ export function buildBackupDownloadUrl(name: string, baseUrl?: string): string {
 
 // --- Logs ---------------------------------------------------------------
 
-export async function fetchLogFiles(options?: ApiRequestOptions): Promise<LogFileInfo[]> {
-  const res = await fetchJson<{ files: LogFileInfo[] }>(`${SYSTEM_BASE}/logs`, options);
-  return res.files ?? [];
-}
-
-export function fetchLogTail(n = 1000, options?: ApiRequestOptions): Promise<LogTailResponse> {
-  return fetchJson<LogTailResponse>(`${SYSTEM_BASE}/logs/tail?n=${encodeURIComponent(String(n))}`, {
-    cache: "no-store",
+export function createDiagnosticBundle(
+  sources: Array<"backend" | "frontend"> = ["backend", "frontend"],
+  options?: ApiRequestOptions,
+): Promise<DiagnosticBundleJob> {
+  return fetchJson<DiagnosticBundleJob>(`${SYSTEM_BASE}/logs/bundles`, {
     ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify({ sources }),
+    },
   });
 }
 
-export function buildLogDownloadUrl(name: string, baseUrl?: string): string {
+export function fetchDiagnosticBundle(
+  id: string,
+  options?: ApiRequestOptions,
+): Promise<DiagnosticBundleJob> {
+  return fetchJson<DiagnosticBundleJob>(`${SYSTEM_BASE}/logs/bundles/${encodeURIComponent(id)}`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function uploadFrontendBundleChunk(
+  id: string,
+  chunk: FrontendLogUploadChunk,
+  options?: ApiRequestOptions,
+): Promise<void> {
+  return fetchJson<void>(`${SYSTEM_BASE}/logs/bundles/${encodeURIComponent(id)}/frontend`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify(chunk) },
+  });
+}
+
+export function buildDiagnosticBundleDownloadUrl(id: string, baseUrl?: string): string {
   const root = baseUrl ?? getBackendConfig().apiBaseUrl;
-  return `${root}${SYSTEM_BASE}/logs/${encodeURIComponent(name)}/download`;
+  return `${root}${SYSTEM_BASE}/logs/bundles/${encodeURIComponent(id)}/download`;
 }
 
 // --- Jobs ---------------------------------------------------------------

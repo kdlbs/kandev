@@ -22,7 +22,7 @@ import { listPorts, listTunnels, type ListeningPort } from "@/lib/api/domains/po
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { useTunnelActions } from "./use-tunnel-actions";
 import { getBackendConfig } from "@/lib/config";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 
 function buildPortProxyUrl(sessionId: string, port: number): string {
   const backendUrl = getBackendConfig().apiBaseUrl;

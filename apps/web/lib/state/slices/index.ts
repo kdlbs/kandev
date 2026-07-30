@@ -83,7 +83,6 @@ export type {
   SystemSliceState,
   SystemSliceActions,
   SystemBackupsState,
-  SystemLogsState,
   SystemJobsMap,
 } from "./system/types";
 export type {

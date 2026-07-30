@@ -101,4 +101,23 @@ describe("console interceptor", () => {
       true,
     );
   });
+
+  it("keeps reference-free bounded previews without traversing caller objects", () => {
+    installConsoleInterceptor();
+    const hostile = new Proxy(
+      {},
+      {
+        get() {
+          throw new Error("must not read properties");
+        },
+        getPrototypeOf() {
+          throw new Error("must not inspect prototypes");
+        },
+      },
+    );
+    console.info("preview", hostile, ..."x".repeat(30).split(""));
+    const entry = snapshotLogs().at(-1)!;
+    expect(entry.args?.[0]).toEqual({ type: "object" });
+    expect(entry.args).toHaveLength(19);
+  });
 });

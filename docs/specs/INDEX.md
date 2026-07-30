@@ -44,6 +44,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
+| [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 
 ## tasks/ — task & workflow model
 

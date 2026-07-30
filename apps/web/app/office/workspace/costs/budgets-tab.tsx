@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { IconPlus } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { listBudgets, deleteBudget } from "@/lib/api/domains/office-api";
 import type { BudgetPolicy } from "@/lib/state/slices/office/types";
 import { BudgetPolicyCard } from "./budget-policy-card";

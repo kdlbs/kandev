@@ -7,7 +7,6 @@ export const defaultSystemState: SystemSliceState = {
     diskUsage: null,
     database: null,
     backups: { items: [], loaded: false },
-    logs: { files: [], tail: [], tailLoaded: false },
     updates: null,
     jobs: {},
     metrics: null,
@@ -41,15 +40,6 @@ export const createSystemSlice: StateCreator<
   setSystemBackups: (items) =>
     set((draft) => {
       draft.system.backups = { items, loaded: true };
-    }),
-  setSystemLogs: (files) =>
-    set((draft) => {
-      draft.system.logs.files = files;
-    }),
-  setSystemLogTail: (lines) =>
-    set((draft) => {
-      draft.system.logs.tail = lines;
-      draft.system.logs.tailLoaded = true;
     }),
   setSystemUpdates: (updates) =>
     set((draft) => {

@@ -71,10 +71,14 @@ describe("supervisor launch manifest", () => {
     expect(
       allowedEnv({
         KANDEV_HOME_DIR: "/tmp/kandev",
+        KANDEV_CONSOLE_LOG_LEVEL: "warn",
         AWS_SECRET_ACCESS_KEY: "secret",
         GITHUB_TOKEN: "secret",
       }),
-    ).toEqual({ KANDEV_HOME_DIR: "/tmp/kandev" });
+    ).toEqual({
+      KANDEV_HOME_DIR: "/tmp/kandev",
+      KANDEV_CONSOLE_LOG_LEVEL: "warn",
+    });
   });
 });
 

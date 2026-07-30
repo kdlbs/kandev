@@ -335,6 +335,6 @@ echo "  backend log : $BACKEND_LOG"
 [[ "$WANT_WEB" -eq 1 ]] && echo "  web log     : $WEB_LOG"
 echo "  pidfile     : $PIDFILE"
 echo
-echo "  Logs        : scripts/kandev-logs $BACKEND_PORT --export"
+echo "  Logs        : scripts/kandev-logs $BACKEND_PORT --source backend"
 echo "  Teardown    : scripts/kandev-kill --pidfile $PIDFILE --yes"
 echo "==========================================================="

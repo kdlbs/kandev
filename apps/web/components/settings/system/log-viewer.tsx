@@ -1,269 +1,145 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { useEffect, useRef, useState } from "react";
+import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
-import { Badge } from "@kandev/ui/badge";
-import { IconCopy, IconDownload, IconFileText, IconRefresh } from "@tabler/icons-react";
-import { useLogFiles } from "@/hooks/domains/system/use-log-files";
-import { useLogTail } from "@/hooks/domains/system/use-log-tail";
-import { buildLogDownloadUrl } from "@/lib/api/domains/system-api";
-import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
-import { formatBytes } from "@/lib/utils/format-bytes";
-import { useActionFeedback, type ActionFeedbackState } from "@/hooks/use-action-feedback";
-import { ActionButtonContent } from "./action-button-content";
+import { IconAlertTriangle, IconDownload, IconFileZip } from "@tabler/icons-react";
+import { ApiError } from "@/lib/api/client";
+import {
+  buildDiagnosticBundleDownloadUrl,
+  createDiagnosticBundle,
+  fetchDiagnosticBundle,
+} from "@/lib/api/domains/system-api";
+import type { DiagnosticBundleJob } from "@/lib/types/system";
 
-function formatTimestamp(iso: string): string {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
-}
-
-function TailContent({
-  tail,
-  loading,
-  inMemoryOnly,
-}: {
-  tail: string[];
-  loading: boolean;
-  inMemoryOnly: boolean;
-}) {
-  if (loading && tail.length === 0) {
-    return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner className="size-4" /> Loading log...
-      </div>
-    );
-  }
-  if (tail.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground" data-testid="system-log-tail-empty">
-        No recent log activity captured yet. Logs will appear as Kandev does work.
-      </p>
-    );
-  }
-  return (
-    <div className="space-y-2">
-      {inMemoryOnly && (
-        <p className="text-xs text-muted-foreground" data-testid="system-log-tail-source">
-          Showing the in-memory log buffer (last ~2000 entries). Kandev is currently logging to the
-          terminal, not to a file - file rotation is disabled. Set <code>logging.outputPath</code>{" "}
-          in <code>config.yaml</code> to a file path to enable downloadable log files.
-        </p>
-      )}
-      <pre
-        className="max-h-[28rem] overflow-auto rounded-md border bg-muted/30 p-3 text-[11px] leading-relaxed font-mono whitespace-pre"
-        data-testid="system-log-tail-content"
-      >
-        {tail.join("\n")}
-      </pre>
-    </div>
-  );
-}
-
-function buildTailFilename(): string {
-  // YYYY-MM-DDTHH-MM-SS to mirror lumberjack's rotation naming, minus the
-  // colons (which are invalid on Windows). The user can rename freely.
-  const stamp = new Date().toISOString().replace(/:/g, "-").replace(/\..+$/, "");
-  return `kandev-tail-${stamp}.log`;
-}
-
-function downloadTailAsFile(tail: string[]) {
-  if (typeof window === "undefined" || tail.length === 0) return;
-  const blob = new Blob([tail.join("\n") + "\n"], { type: "text/plain" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = buildTailFilename();
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-}
-
-function TailHeader({
-  tail,
-  current,
-  refreshState,
-  copyState,
-  onRefresh,
-  onCopy,
-}: {
-  tail: string[];
-  current: ReturnType<typeof useLogFiles>["files"][number] | undefined;
-  refreshState: ActionFeedbackState;
-  copyState: ActionFeedbackState;
-  onRefresh: () => void;
-  onCopy: () => void;
-}) {
-  const hasTail = tail.length > 0;
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={!hasTail || copyState === "pending"}
-        onClick={onCopy}
-        className="cursor-pointer min-w-[5.5rem] justify-center"
-        data-testid="system-log-tail-copy"
-        data-state={copyState}
-      >
-        <ActionButtonContent
-          state={copyState}
-          idleIcon={<IconCopy className="h-3.5 w-3.5 mr-1" />}
-          idleLabel="Copy"
-          pendingLabel="Copying..."
-          successLabel="Copied"
-        />
-      </Button>
-      {current ? (
-        <Button
-          asChild
-          variant="outline"
-          size="sm"
-          className="cursor-pointer"
-          data-testid="system-log-current-download"
-        >
-          <a href={buildLogDownloadUrl(current.name)} download>
-            <IconDownload className="h-3.5 w-3.5 mr-1" />
-            Download file
-          </a>
-        </Button>
-      ) : (
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!hasTail}
-          onClick={() => downloadTailAsFile(tail)}
-          className="cursor-pointer"
-          data-testid="system-log-tail-download"
-        >
-          <IconDownload className="h-3.5 w-3.5 mr-1" />
-          Download tail
-        </Button>
-      )}
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={refreshState === "pending"}
-        onClick={onRefresh}
-        className="cursor-pointer min-w-[6.5rem] justify-center"
-        data-testid="system-log-tail-refresh"
-        data-state={refreshState}
-      >
-        <ActionButtonContent
-          state={refreshState}
-          idleIcon={<IconRefresh className="h-3.5 w-3.5 mr-1" />}
-          idleLabel="Refresh"
-          pendingLabel="Refreshing..."
-          successLabel="Refreshed"
-        />
-      </Button>
-    </div>
-  );
-}
+type ViewState = "idle" | "collecting" | "preparing" | "partial" | "busy" | "error";
 
 export function LogViewer() {
-  const { files, isLoading: filesLoading } = useLogFiles();
-  const { tail, isLoading: tailLoading, reload: reloadTail } = useLogTail(1000);
-  const refreshFeedback = useActionFeedback();
-  const copyFeedback = useActionFeedback();
+  const [state, setState] = useState<ViewState>("idle");
+  const [message, setMessage] = useState("");
+  const mounted = useRef(true);
+  useEffect(
+    () => () => {
+      mounted.current = false;
+    },
+    [],
+  );
 
-  const onRefresh = () =>
-    void refreshFeedback.run(async () => {
-      await reloadTail();
-    });
-
-  const onCopy = () =>
-    void copyFeedback.run(async () => {
-      if (!(await copyToClipboard(tail.join("\n") + "\n"))) {
-        throw new Error("Clipboard copy failed");
+  const download = async () => {
+    setMessage("");
+    setState("collecting");
+    try {
+      const job = await prepareDiagnosticBundle((next) => mounted.current && setState(next));
+      if (!mounted.current) return;
+      if (job.status !== "ready" && job.status !== "partial") {
+        throw new Error(job.warnings?.[0] ?? "The diagnostic bundle could not be prepared.");
       }
-    });
+      setState(job.status === "partial" ? "partial" : "idle");
+      setMessage(bundleMessage(job));
+      triggerDownload(buildDiagnosticBundleDownloadUrl(job.id));
+    } catch (error) {
+      if (!mounted.current) return;
+      if (error instanceof ApiError && (error.status === 429 || error.status === 503)) {
+        const retry = error.retryAfterSeconds ?? 5;
+        setState("busy");
+        setMessage(`Diagnostics are busy. Try again in ${retry} seconds.`);
+        window.setTimeout(() => mounted.current && setState("idle"), retry * 1_000);
+        return;
+      }
+      setState("error");
+      setMessage(error instanceof Error ? error.message : "The diagnostic bundle failed.");
+    }
+  };
 
-  const current = files.find((f) => f.current);
-  const inMemoryOnly = !filesLoading && files.length === 0;
-
+  const pending = state === "collecting" || state === "preparing";
   return (
-    <div className="space-y-6">
-      <Card data-testid="system-log-tail-card">
-        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0">
-          <CardTitle className="text-base flex items-center gap-2">
-            <IconFileText className="h-4 w-4" /> Recent log output
-          </CardTitle>
-          <TailHeader
-            tail={tail}
-            current={current}
-            refreshState={refreshFeedback.state}
-            copyState={copyFeedback.state}
-            onRefresh={onRefresh}
-            onCopy={onCopy}
-          />
-        </CardHeader>
-        <CardContent>
-          <TailContent tail={tail} loading={tailLoading} inMemoryOnly={inMemoryOnly} />
-        </CardContent>
-      </Card>
+    <div className="min-w-0 space-y-4">
+      <Alert>
+        <IconAlertTriangle className="size-4" />
+        <AlertTitle>Review before sharing</AlertTitle>
+        <AlertDescription>
+          This ZIP combines up to three days of backend logs with locally retained frontend console
+          events from connected browsers. It may contain URLs, console arguments, stacks, paths,
+          runtime metadata, and user-visible errors.
+        </AlertDescription>
+      </Alert>
 
-      <Card data-testid="system-log-files-card">
+      <Card data-testid="system-diagnostic-bundle-card">
         <CardHeader>
-          <CardTitle className="text-base">Log files</CardTitle>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <IconFileZip className="size-4" />
+            Frontend + backend diagnostic logs
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          {!files.length && filesLoading && (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner className="size-4" /> Loading files...
-            </div>
-          )}
-          {files.length > 0 && (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Kind</TableHead>
-                  <TableHead className="text-right">Size</TableHead>
-                  <TableHead>Modified</TableHead>
-                  <TableHead className="text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {files.map((f) => (
-                  <TableRow key={f.name} data-testid="system-log-file-row" data-name={f.name}>
-                    <TableCell className="font-mono text-xs break-all">{f.name}</TableCell>
-                    <TableCell>
-                      <Badge variant={f.current ? "default" : "secondary"} className="text-[10px]">
-                        {f.current ? "current" : "rotated"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-xs text-right">{formatBytes(f.size)}</TableCell>
-                    <TableCell className="text-xs">{formatTimestamp(f.mtime)}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        asChild
-                        size="sm"
-                        variant="ghost"
-                        className="cursor-pointer"
-                        data-testid="system-log-download"
-                      >
-                        <a href={buildLogDownloadUrl(f.name)} download>
-                          <IconDownload className="h-3.5 w-3.5" />
-                        </a>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          )}
-          {!filesLoading && files.length === 0 && (
-            <p className="text-sm text-muted-foreground" data-testid="system-log-files-empty">
-              No log files found. Kandev may be logging to stdout (no file rotation configured).
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Kandev asks your connected browser tabs for their bounded three-day console history,
+            combines it with retained backend log files, and downloads one ZIP.
+          </p>
+          <Button
+            className="min-h-11 w-full cursor-pointer sm:w-auto"
+            disabled={pending}
+            onClick={() => void download()}
+            data-testid="download-diagnostic-bundle"
+          >
+            {pending ? (
+              <Spinner className="mr-2 size-4" />
+            ) : (
+              <IconDownload className="mr-2 size-4" />
+            )}
+            {buttonLabel(state)}
+          </Button>
+          {message && (
+            <p
+              className={
+                state === "error" ? "text-sm text-destructive" : "text-sm text-muted-foreground"
+              }
+              role={state === "error" ? "alert" : "status"}
+              data-testid="diagnostic-bundle-status"
+            >
+              {message}
             </p>
           )}
         </CardContent>
       </Card>
     </div>
   );
+}
+
+async function prepareDiagnosticBundle(onStatus: (state: ViewState) => void) {
+  let job = await createDiagnosticBundle(["backend", "frontend"]);
+  while (job.status === "collecting" || job.status === "building") {
+    onStatus(job.status === "collecting" ? "collecting" : "preparing");
+    await delay(500);
+    job = await fetchDiagnosticBundle(job.id);
+  }
+  return job;
+}
+
+function buttonLabel(state: ViewState): string {
+  if (state === "collecting") return "Collecting frontend logs…";
+  if (state === "preparing") return "Preparing ZIP…";
+  return "Download diagnostic bundle";
+}
+
+function bundleMessage(job: DiagnosticBundleJob): string {
+  if (job.status !== "partial") return "Your diagnostic ZIP is downloading.";
+  return job.warnings?.length
+    ? `A partial ZIP is downloading: ${job.warnings.join(" ")}`
+    : "A partial diagnostic ZIP is downloading; some frontend logs were unavailable.";
+}
+
+function triggerDownload(url: string): void {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "kandev-diagnostic-logs.zip";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }

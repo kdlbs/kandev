@@ -54,16 +54,37 @@ export interface SnapshotInfo {
   kind: SnapshotKind;
 }
 
-export interface LogFileInfo {
-  name: string;
-  size: number;
-  /** ISO timestamp. */
-  mtime: string;
-  current: boolean;
+export type DiagnosticBundleStatus =
+  | "collecting"
+  | "building"
+  | "ready"
+  | "partial"
+  | "failed"
+  | "expired";
+
+export interface DiagnosticBundleJob {
+  id: string;
+  status: DiagnosticBundleStatus;
+  sources: Array<"backend" | "frontend">;
+  reused?: boolean;
+  build_deadline: string;
+  capture_deadline?: string;
+  expires_at: string | null;
+  browser_profiles: number;
+  frontend_entry_count: number;
+  frontend_bytes: number;
+  warnings: string[];
+  download_url?: string;
 }
 
-export interface LogTailResponse {
-  lines: string[];
+export interface FrontendLogUploadChunk {
+  browser_id: string;
+  capture_stream_id: string;
+  chunk_index: number;
+  done: boolean;
+  storage_mode: "indexeddb" | "memory";
+  capture_metadata: Record<string, unknown> | null;
+  entries: unknown[];
 }
 
 export interface UpdatesResponse {

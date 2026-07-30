@@ -14,8 +14,8 @@ Options:
   service          Manage kandev as an OS service.
   --version, -V    Print CLI version and exit.
   --port           Port for the Go backend. Alias for --backend-port.
-  --verbose, -v    Show info logs from backend.
-  --debug          Show debug logs + agent message dumps.
+  --verbose, -v    Show info logs on stdout (also retained in the backend file).
+  --debug          Retain debug logs in the backend file + agent message dumps.
   --headless       Skip opening the browser. Used by service units.
   --help, -h       Show help.
 

@@ -206,14 +206,11 @@ func Run(args []string, build BuildInfo) int {
 	}
 
 	// 2. Initialize logger
-	log, err := logger.NewLogger(logger.LoggingConfig{
-		Level:      cfg.Logging.Level,
-		Format:     cfg.Logging.Format,
-		OutputPath: cfg.Logging.OutputPath,
-		MaxSizeMB:  cfg.Logging.MaxSizeMB,
-		MaxBackups: cfg.Logging.MaxBackups,
-		MaxAgeDays: cfg.Logging.MaxAgeDays,
-		Compress:   cfg.Logging.Compress,
+	log, err := logger.NewBackendLogger(logger.BackendLoggingConfig{
+		HomeDir:      cfg.ResolvedHomeDir(),
+		Level:        cfg.Logging.Level,
+		Format:       cfg.Logging.Format,
+		ConsoleLevel: os.Getenv("KANDEV_CONSOLE_LOG_LEVEL"),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
@@ -838,6 +835,9 @@ func startGatewayAndServe(
 	}
 	systemSvc.Storage = storageComposition.handler
 	systemSvc.StorageRuntime = storageComposition.runtime
+	if systemSvc.LogBundles != nil {
+		systemSvc.LogBundles.SetNotifier(gateway.Hub)
+	}
 	if systemSvc.Metrics != nil {
 		systemSvc.Metrics.SetBroadcaster(gateway.Hub.BroadcastToSystemMetrics)
 		gateway.Hub.SetSystemMetricsInterestTracker(systemSvc.Metrics)

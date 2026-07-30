@@ -22,7 +22,7 @@ import {
   IconArrowMerge,
 } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui";
 import { Textarea } from "@kandev/ui/textarea";

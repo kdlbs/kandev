@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { listTasks, type ListTasksParams } from "@/lib/api/domains/office-extended-api";
 import type { TaskFilterState, TaskSortDir, TaskSortField } from "@/lib/state/slices/office/types";

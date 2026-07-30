@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { IconTrash } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,

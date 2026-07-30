@@ -32,15 +32,20 @@ npx playwright-cli snapshot --depth=4
 npx playwright-cli console
 npx playwright-cli console error
 npx playwright-cli network
-npx playwright-cli eval "JSON.stringify(window.__kandevLogBuffer?.snapshot?.() ?? [])"
 npx playwright-cli goto http://localhost:<your_web_port>/some/path
 ```
 
-Correlate browser console, frontend log buffer, network activity, and backend logs from:
+Correlate browser console and network activity with a fresh all-source bundle:
 
 ```bash
-scripts/kandev-logs <your_backend_port> --export --level error
+scripts/kandev-logs <your_backend_port> --source all
 ```
+
+Kandev retains a bounded three-day console history in that browser. It uploads
+the history only after an explicit bundle request; it does not stream console
+calls continuously. Inspect the bundle manifest for missing browsers,
+truncation, persistence fallback, or dropped entries before treating absence
+as evidence.
 
 Close the browser when done unless the user asks to keep it open:
 
