@@ -155,7 +155,9 @@ describe("user settings websocket handler", () => {
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(store.getState().userSettings.agentGeneratedTaskTitles).toBe(true);
   });
+});
 
+describe("user settings websocket transcript navigation", () => {
   it("syncs transcript navigation preferences and uses the documented defaults", () => {
     const store = makeStore();
 
