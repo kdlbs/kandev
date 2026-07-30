@@ -100,9 +100,9 @@ updates, and any remaining Dockview focus ambiguity.
   activation sequence recorded Plan.
 - RED E2E: the production-build screenshot showed Plan selected, Agent
   inactive, Files unfocused, and the unseen Plan indicator consumed.
-- GREEN implementation: the session is inserted at index 0, inherits Chat's
-  group-local selection before Chat removal, and then yields global focus back
-  to the captured live panel.
+- GREEN implementation: the session replaces Chat in Chat's live group (at
+  index 0 when Chat was selected), inherits its group-local selection before
+  removal, and then yields global focus back to the captured live panel.
 - Unit: 44 tests passed across `dockview-session-tabs.test.ts` and
   `dockview-session-tab-activation.test.ts`.
 - Typecheck: `pnpm run typecheck` passed.
@@ -111,3 +111,9 @@ updates, and any remaining Dockview focus ambiguity.
   session panel.
 - Mobile/tablet: no rendered or responsive path changed; these viewports do not
   mount `DockviewDesktopLayout` or execute the repaired reconciliation hook.
+- CI remediation: sessions anchored before reconciliation no longer re-activate
+  over a saved preview/file selection, while custom layouts always replace Chat
+  in Chat's actual group rather than creating a default center split.
+- Regression checks: targeted unit suite (37 tests), typecheck, and focused
+  Chromium scenarios for task-switch preview focus, refresh preview focus,
+  returning-Agent focus, and the Plan/Files indicator all passed.

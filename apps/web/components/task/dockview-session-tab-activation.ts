@@ -24,9 +24,9 @@ export function isChatPlaceholderSelected(api: DockviewApi): boolean {
 export function activateChatReplacement(
   api: DockviewApi,
   effectiveSessionId: string,
-  chatWasSelected: boolean,
+  shouldActivateReplacement: boolean,
 ): void {
-  if (!chatWasSelected) return;
+  if (!shouldActivateReplacement) return;
   api.getPanel(`session:${effectiveSessionId}`)?.api.setActive();
 }
 

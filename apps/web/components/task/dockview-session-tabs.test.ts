@@ -331,6 +331,15 @@ describe("findSessionAnchorGroupId", () => {
 });
 
 describe("resolveInitialPosition", () => {
+  it("replaces Chat inside its live custom-layout group", () => {
+    const api = makePositionApi({
+      groups: [RIGHT_TOP_GROUP],
+      panels: [{ id: "chat", groupId: RIGHT_TOP_GROUP }],
+    });
+
+    expect(resolveInitialPosition(api)).toEqual({ referenceGroup: RIGHT_TOP_GROUP });
+  });
+
   it("creates a center column left of the right sidebar when only the right group remains", () => {
     useDockviewStore.setState({ centerGroupId: RIGHT_TOP_GROUP });
     const api = makePositionApi({ groups: [RIGHT_TOP_GROUP] });
