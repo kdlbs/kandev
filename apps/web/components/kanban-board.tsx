@@ -288,6 +288,18 @@ function useEffectiveWorkflowContext({
   };
 }
 
+function useEditNotesTask(onBeforeEdit: KanbanBoardProps["onBeforeEdit"]) {
+  const [editingNotesTask, setEditingNotesTask] = useState<Task | null>(null);
+  const handleEditNotes = useCallback(
+    (task: Task) => {
+      onBeforeEdit?.();
+      setEditingNotesTask(task);
+    },
+    [onBeforeEdit],
+  );
+  return { editingNotesTask, setEditingNotesTask, handleEditNotes };
+}
+
 function useKanbanBoardSetup(
   onPreviewTask: KanbanBoardProps["onPreviewTask"],
   onOpenTask: KanbanBoardProps["onOpenTask"],
@@ -311,7 +323,7 @@ function useKanbanBoardSetup(
   useWorkspaceMRs(workspaceState.activeId);
 
   const hooks = useKanbanBoardHooks(searchQuery, workspaceState, workflowsState);
-  const [editingNotesTask, setEditingNotesTask] = useState<Task | null>(null);
+  const { editingNotesTask, setEditingNotesTask, handleEditNotes } = useEditNotesTask(onBeforeEdit);
   const { handleOpenTask, handleCardClick } = useKanbanNavigation({
     enablePreviewOnClick: hooks.enablePreviewOnClick,
     isMobile,
@@ -352,14 +364,6 @@ function useKanbanBoardSetup(
       handleCardClick(task);
     },
     [isMultiSelectMode, toggleSelect, handleCardClick],
-  );
-
-  const handleEditNotes = useCallback(
-    (task: Task) => {
-      onBeforeEdit?.();
-      setEditingNotesTask(task);
-    },
-    [onBeforeEdit],
   );
 
   const automation = useMoveErrorState(router);

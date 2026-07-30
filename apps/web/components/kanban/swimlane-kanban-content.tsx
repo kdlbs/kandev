@@ -257,7 +257,7 @@ function MobileKanbanLayout({
   onPreviewTask,
   onOpenTask,
   onEditTask,
-  onEditNotesTask: _onEditNotesTask,
+  onEditNotesTask,
   onDeleteTask,
   onArchiveTask,
   moveTaskToStep,
