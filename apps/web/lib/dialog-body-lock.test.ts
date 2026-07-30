@@ -26,7 +26,7 @@ function isLocked() {
 }
 
 function animation() {
-  return { cancel: vi.fn() } as unknown as Animation;
+  return { finish: vi.fn() } as unknown as Animation;
 }
 
 /** Mirrors modal/content primitives so selectors see realistic markup. */
@@ -51,22 +51,22 @@ beforeEach(() => {
 });
 
 describe("finishClosingDialogAnimations", () => {
-  it("cancels a closing dialog animation without mutating its owner's body lock", () => {
+  it("finishes a closing dialog animation without mutating its owner's body lock", () => {
     const exit = animation();
     mountContent("closed", DIALOG_CONTENT, [exit]);
     lockBody();
 
     expect(finishClosingDialogAnimations(document)).toBe(true);
-    expect(exit.cancel).toHaveBeenCalledOnce();
+    expect(exit.finish).toHaveBeenCalledOnce();
     expect(isLocked()).toBe(true);
   });
 
-  it("cancels a closing overlay so an invisible portal cannot intercept clicks", () => {
+  it("finishes a closing overlay so an invisible portal cannot intercept clicks", () => {
     const exit = animation();
     mountContent("closed", "dialog-overlay", [exit]);
 
     expect(finishClosingDialogAnimations(document)).toBe(true);
-    expect(exit.cancel).toHaveBeenCalledOnce();
+    expect(exit.finish).toHaveBeenCalledOnce();
   });
 
   it("ignores open dialog animations", () => {
@@ -75,11 +75,11 @@ describe("finishClosingDialogAnimations", () => {
     lockBody();
 
     expect(finishClosingDialogAnimations(document)).toBe(false);
-    expect(open.cancel).not.toHaveBeenCalled();
+    expect(open.finish).not.toHaveBeenCalled();
     expect(isLocked()).toBe(true);
   });
 
-  it("cancels the closing owner while preserving a second open modal's lock", () => {
+  it("finishes the closing owner while preserving a second open modal's lock", () => {
     const closing = animation();
     const open = animation();
     mountContent("closed", DIALOG_CONTENT, [closing]);
@@ -87,8 +87,8 @@ describe("finishClosingDialogAnimations", () => {
     lockBody();
 
     expect(finishClosingDialogAnimations(document)).toBe(true);
-    expect(closing.cancel).toHaveBeenCalledOnce();
-    expect(open.cancel).not.toHaveBeenCalled();
+    expect(closing.finish).toHaveBeenCalledOnce();
+    expect(open.finish).not.toHaveBeenCalled();
     expect(isLocked()).toBe(true);
   });
 
@@ -100,7 +100,7 @@ describe("finishClosingDialogAnimations", () => {
     lockBody();
 
     expect(finishClosingDialogAnimations(document)).toBe(true);
-    expect(closing.cancel).toHaveBeenCalledOnce();
+    expect(closing.finish).toHaveBeenCalledOnce();
     expect(isLocked()).toBe(true);
   });
 

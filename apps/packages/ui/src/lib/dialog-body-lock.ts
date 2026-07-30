@@ -13,9 +13,9 @@
  *     CSS animation timelines. `document.timeline.currentTime` stays at 0 and a
  *     100ms exit animation reports playState "running" indefinitely.
  *
- * Recovery cancels only closing dialog animations. Radix Presence handles the
- * resulting `animationcancel` event as a normal terminal event, unmounts the
- * closing owner, and releases its own pointer and scroll-lock bookkeeping.
+ * Recovery finishes only closing dialog animations. The resulting
+ * `animationend` event lets Radix Presence unmount the closing owner and release
+ * its own pointer and scroll-lock bookkeeping.
  */
 
 /** Grace period after a close before sweeping. Must exceed the exit duration. */
@@ -34,19 +34,18 @@ type VisibilitySubscription = {
 const visibilitySubscriptions = new WeakMap<Document, VisibilitySubscription>();
 
 /**
- * Ask Radix Presence to finish closing dialog owners through its supported
- * animation-cancellation path. Returns true when at least one animation was
- * cancelled.
+ * Ask Radix Presence to finish closing dialog owners through its normal
+ * `animationend` path. Returns true when at least one animation was finished.
  */
 export function finishClosingDialogAnimations(doc: Document): boolean {
-  let cancelled = false;
+  let finished = false;
   for (const element of doc.querySelectorAll<HTMLElement>(CLOSING_DIALOG_PARTS)) {
     for (const animation of element.getAnimations()) {
-      animation.cancel();
-      cancelled = true;
+      animation.finish();
+      finished = true;
     }
   }
-  return cancelled;
+  return finished;
 }
 
 /** Share one document-level foreground recovery listener across dialog roots. */
