@@ -439,8 +439,11 @@ registration and never creates a global default.
   distinguishes installability from Marketplace publication and repository access.
 - Permission details use a button and dialog. Current actor, installation account, App label, source,
   visibility, webhook health, and sharing warning are scannable without exposing secrets.
-- `My GitHub identity` appears as a connectable section only for App automation. For PAT/CLI it shows
-  that personal actions use the same verified human identity and offers no fake selector.
+- `My GitHub identity` appears as a connectable section only for App automation. For PAT/CLI,
+  Workspace GitHub access states that My GitHub and user-triggered actions use the same verified
+  human identity; the page does not render a redundant identity section or a fake selector.
+- The workspace identity and task-access summary lines expose concise help through a tooltip on
+  hover or keyboard focus and the same explanation in a 44px-target drawer on touch devices.
 - Desktop and mobile support the same create/import/select/install/switch/disconnect flows. Mobile
   uses a single-column sheet/page, one scroll owner, safe-area padding, 44px targets, no fixed footer,
   and no horizontal overflow. External GitHub navigation is deliberate and returns to the same
@@ -489,6 +492,10 @@ registration and never creates a global default.
 - **GIVEN** a configured workspace, **WHEN** the user views Workspace GitHub access, **THEN** one
   compact summary identifies both the workspace automation identity and the effective task access
   mode without rendering a separate Task Git credentials settings section.
+- **GIVEN** a PAT or named CLI workspace, **WHEN** the user views Workspace GitHub access, **THEN**
+  the page states that the same account powers My GitHub and user-triggered actions without
+  rendering a separate My GitHub identity section, and accessible help explains both the workspace
+  identity and task-access summary.
 - **GIVEN** either task access mode, **WHEN** the user opens Change GitHub connection and submits
   the other mode, **THEN** the dialog persists that policy, reports the result, and the page summary
   reflects the saved mode without changing the selected automation identity.

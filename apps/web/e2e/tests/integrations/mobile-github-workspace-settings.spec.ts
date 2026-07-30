@@ -16,7 +16,28 @@ test.describe("GitHub workspace settings on mobile", () => {
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
       "Managed workspace credentials",
     );
+    await expect(testPage.getByRole("heading", { name: "My GitHub identity" })).toHaveCount(0);
     await expect(testPage.getByRole("heading", { name: "Task Git credentials" })).toHaveCount(0);
+    const identityHelp = automation.getByRole("button", {
+      name: "Explain workspace GitHub identity",
+    });
+    const taskAccessHelp = automation.getByRole("button", { name: "Explain task Git access" });
+    const [identityHelpBox, taskAccessHelpBox] = await Promise.all([
+      identityHelp.boundingBox(),
+      taskAccessHelp.boundingBox(),
+    ]);
+    expect(identityHelpBox?.height).toBeGreaterThanOrEqual(44);
+    expect(taskAccessHelpBox?.height).toBeGreaterThanOrEqual(44);
+    await identityHelp.tap();
+    await expect(testPage.getByRole("dialog", { name: "Workspace GitHub identity" })).toContainText(
+      "repository sync, watches, background jobs, and managed agent GitHub commands",
+    );
+    await testPage.keyboard.press("Escape");
+    await taskAccessHelp.tap();
+    await expect(testPage.getByRole("dialog", { name: "Task Git access" })).toContainText(
+      "newly launched tasks authenticate to GitHub",
+    );
+    await testPage.keyboard.press("Escape");
 
     await automation.getByRole("button", { name: "Change connection" }).tap();
     const drawer = testPage.getByTestId("github-connection-mobile");

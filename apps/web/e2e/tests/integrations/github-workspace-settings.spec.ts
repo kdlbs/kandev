@@ -83,7 +83,24 @@ test.describe("GitHub workspace settings", () => {
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
       "Managed workspace credentials",
     );
+    await expect(testPage.getByRole("heading", { name: "My GitHub identity" })).toHaveCount(0);
     await expect(testPage.getByRole("heading", { name: "Task Git credentials" })).toHaveCount(0);
+    const identityHelp = automation.getByRole("button", {
+      name: "Explain workspace GitHub identity",
+    });
+    await identityHelp.hover();
+    await expect(
+      testPage.getByRole("tooltip", {
+        name: /repository sync, watches, background jobs, and managed agent GitHub commands/,
+      }),
+    ).toBeVisible();
+    const taskAccessHelp = automation.getByRole("button", { name: "Explain task Git access" });
+    await taskAccessHelp.hover();
+    await expect(
+      testPage.getByRole("tooltip", {
+        name: /newly launched tasks authenticate to GitHub/,
+      }),
+    ).toBeVisible();
 
     await automation.getByRole("button", { name: "Change connection" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });

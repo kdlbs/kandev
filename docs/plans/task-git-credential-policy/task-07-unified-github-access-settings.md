@@ -14,6 +14,11 @@ spec: "../../specs/integrations/github-authentication.md"
 
 - Workspace GitHub access shows one compact read-only summary containing the active automation
   identity and effective task access mode, with no standalone Task Git credentials section.
+- PAT/CLI connections describe their shared human identity inside that summary and do not render a
+  separate My GitHub identity section. App automation keeps the separate, connectable personal
+  identity section.
+- The workspace identity and task-access summary lines provide accessible help: a tooltip on
+  hover/keyboard focus and an equivalent 44px-target Drawer interaction on touch devices.
 - Change GitHub connection contains the managed/executor task-access controls and an explicit
   dialog submission; success refreshes the summary, failure preserves the draft, closing without
   saving restores the persisted mode, and neither task-policy changes nor connection changes
@@ -71,14 +76,17 @@ flow and should land together.
 - **Outcome and entry point:** the Workspace GitHub access summary exposes the saved task mode;
   the same Change connection button opens configuration on desktop and mobile.
 - **Exemplar:** reuse `GitHubConnectionDialog` itself for the shipped full-height mobile Drawer,
-  including its fixed header, single `min-h-0` scroll body, and safe-area bottom padding.
+  including its fixed header, single `min-h-0` scroll body, and safe-area bottom padding. Reuse the
+  responsive help-control pattern from `RepositoryScopeHelp` for fine-pointer tooltips and
+  coarse-pointer Drawers.
 - **Hierarchy and action:** workspace automation method first, task access second; the task section
   has a clearly labeled explicit submission and does not compete with connection-method actions.
 - **Surface rationale:** both choices are infrequent workspace-level GitHub configuration, so one
   bounded dialog/full-height phone Drawer is more appropriate than a second page section or stacked
   overlay.
 - **Shared versus responsive behavior:** share task-mode state, validation, persistence, and labels;
-  only the existing Dialog/Drawer shell differs by viewport.
+  only the existing Dialog/Drawer shell differs by viewport. Summary help has the same title and
+  description on every viewport, with 44px touch targets on mobile.
 - **Proof:** desktop and `mobile-chrome` E2E save executor mode through the dialog, observe the
   compact summary, reopen to prove persistence, and assert the mobile single-scroll/no-overflow
   geometry.
@@ -99,13 +107,16 @@ component and E2E results, docs validation, files changed, risks, and task/plan 
 
 ## Verification results
 
+- `pnpm --filter @kandev/web test -- --run components/github/github-status.test.tsx` — passed
+  (3 tests) after a deliberate RED failure proved PAT/CLI still rendered the redundant personal
+  identity section.
 - `pnpm --filter @kandev/web test -- --run components/github/github-connection-dialog.test.tsx` —
   passed (6 tests).
-- `pnpm run typecheck` — passed.
+- `pnpm --filter @kandev/web lint` and `pnpm run typecheck` — passed.
 - Chromium E2E for `configures task Git access from the workspace connection dialog` — passed after
-  a deliberate RED failure for the missing summary.
+  a deliberate RED failure for the missing summary and now covers both summary help tooltips.
 - `mobile-chrome` E2E for `configures task Git access in the connection drawer` — passed, including
-  single-scroll, 44px-control, and no-overflow assertions.
+  single-scroll, 44px-control, no-overflow, and both summary help Drawer assertions.
 - `node --test scripts/validate-public-docs.test.mjs` and
   `node scripts/validate-public-docs.mjs` — passed (58 tests; 41 published docs pages).
 - `git diff --check` — passed.

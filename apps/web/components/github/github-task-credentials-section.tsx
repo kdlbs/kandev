@@ -6,6 +6,7 @@ import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { useToast } from "@/components/toast-provider";
 import type { TaskGitCredentialsState } from "@/hooks/domains/github/use-task-git-credentials";
 import type { TaskGitCredentialsMode } from "@/lib/types/github";
+import { GitHubAccessHelp } from "./github-access-help";
 
 const taskAccessLabels: Record<TaskGitCredentialsMode, string> = {
   managed: "Managed workspace credentials",
@@ -21,9 +22,19 @@ export function GitHubTaskAccessSummary({
   if (loading) value = "Loading task access…";
   if (error) value = "Task access unavailable";
   return (
-    <div className="pt-1 text-xs text-muted-foreground" data-testid="github-task-access-summary">
-      <span className="font-medium text-foreground">Task access: </span>
-      {value}
+    <div
+      className="flex items-center gap-1 text-xs text-muted-foreground"
+      data-testid="github-task-access-summary"
+    >
+      <GitHubAccessHelp
+        label="Explain task Git access"
+        title="Task Git access"
+        description="Controls how newly launched tasks authenticate to GitHub for Git HTTPS and gh commands. Managed workspace credentials use Kandev's workspace connection; executor credentials use the selected executor's Git or SSH setup."
+      />
+      <span>
+        <span className="font-medium text-foreground">Task access: </span>
+        {value}
+      </span>
     </div>
   );
 }

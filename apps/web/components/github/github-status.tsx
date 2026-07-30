@@ -33,6 +33,7 @@ import type {
   GitHubAppRegistrationCatalogItem,
 } from "@/lib/types/github";
 import { GitHubConnectionDialog } from "./github-connection-dialog";
+import { GitHubAccessHelp } from "./github-access-help";
 import { GitHubPermissionsDialog } from "./github-permissions-dialog";
 import { GitHubTaskAccessSummary } from "./github-task-credentials-section";
 
@@ -116,7 +117,6 @@ function AutomationStatusSummary({
       <StatusLine status={status} />
       <AutomationActorExplanation status={status} appAutomation={appAutomation} />
       {appAutomation && <AppRegistrationDetails app={app} />}
-      {!appAutomation && <HumanIdentityExplanation status={status} />}
       <AutomationError status={status} />
       <GitHubTaskAccessSummary {...taskAccess} />
     </div>
@@ -132,12 +132,25 @@ function AutomationActorExplanation({
 }) {
   const actor = status.automation?.actor?.login;
   if (!status.authenticated || !actor) return null;
+  const humanIdentity = status.effective_personal_actor?.kind === "human";
   return (
-    <p className="text-xs text-muted-foreground">
-      {appAutomation
-        ? `Kandev-managed operations use the GitHub App installed for ${actor}.`
-        : `Kandev-managed operations act as ${actor}.`}
-    </p>
+    <div className="flex items-start gap-1 text-xs text-muted-foreground">
+      <GitHubAccessHelp
+        label="Explain workspace GitHub identity"
+        title="Workspace GitHub identity"
+        description="Kandev uses this workspace connection for repository sync, watches, background jobs, and managed agent GitHub commands. With a PAT or GitHub CLI account, My GitHub and actions you trigger use the same human identity."
+      />
+      <div className="min-w-0 space-y-1 pt-3 sm:pt-1">
+        <p>
+          {appAutomation
+            ? `Kandev-managed operations use the GitHub App installed for ${actor}.`
+            : `Kandev-managed operations act as ${actor}.`}
+        </p>
+        {!appAutomation && humanIdentity && (
+          <p>This account also powers My GitHub and user-triggered actions.</p>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -162,15 +175,6 @@ function AppRegistrationDetails({ app }: { app?: GitHubAppRegistrationCatalogIte
         </p>
       )}
     </>
-  );
-}
-
-function HumanIdentityExplanation({ status }: { status: GitHubStatus }) {
-  if (status.effective_personal_actor?.kind !== "human") return null;
-  return (
-    <p className="text-xs text-muted-foreground">
-      This account also powers My GitHub and user-triggered actions.
-    </p>
   );
 }
 
@@ -343,34 +347,11 @@ export function GitHubPersonalSettings({ workspaceId }: { workspaceId: string })
   const { status, loaded, loading, refresh } = useGitHubStatus(workspaceId);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
-  if (!loaded || loading || !status) {
-    return (
-      <SettingsSection
-        title="My GitHub identity"
-        description="Connect your GitHub user for My GitHub and human-attributed actions. Without it, automation continues as the App."
-      >
-        <LoadingStatus />
-      </SettingsSection>
-    );
-  }
+  if (!loaded || loading || !status) return null;
   const view = personalIdentityView(status);
   const appAutomation = status.automation?.source === "github_app_installation";
   if (!status.automation) return null;
-  if (!appAutomation) {
-    return (
-      <SettingsSection
-        title="My GitHub identity"
-        description="My GitHub and human-attributed actions use the same human account selected for workspace access. Choose a different PAT or GitHub CLI account by changing the workspace connection."
-      >
-        <div className="space-y-2" data-testid="github-personal-identity">
-          <PersonalIdentityStatus view={view} />
-          <p className="text-xs text-muted-foreground">
-            A separate personal identity is only needed when workspace automation uses a GitHub App.
-          </p>
-        </div>
-      </SettingsSection>
-    );
-  }
+  if (!appAutomation) return null;
   const disconnect = async () => {
     setBusy(true);
     try {

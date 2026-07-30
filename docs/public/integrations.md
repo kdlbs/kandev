@@ -71,9 +71,9 @@ The status panel identifies the selected source, verified actor, connection stat
 
 ### Automation and personal identity
 
-PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions.
+PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions. Settings show this shared identity inside **Workspace GitHub access** instead of repeating it as a separate **My GitHub identity** section.
 
-A GitHub App installation is an automation identity, not a person. App-backed repository discovery, watches, task Git operations, pull-request creation, reviews, and merges are attributed to the App when the App is the effective actor. To see pull requests or issues assigned to the current user, connect **My GitHub identity** in that workspace. This is a GitHub App user authorization, stored per Kandev user and workspace.
+A GitHub App installation is an automation identity, not a person. App-backed repository discovery, watches, task Git operations, pull-request creation, reviews, and merges are attributed to the App when the App is the effective actor. App-backed workspaces therefore show a separate **My GitHub identity** section where you can connect the human account used to see pull requests or issues assigned to the current user. This is a GitHub App user authorization, stored per Kandev user and workspace.
 
 Kandev routes credentials as follows:
 
