@@ -21,6 +21,7 @@ import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { formatShortcut } from "@/lib/keyboard/utils";
 import { cn } from "@/lib/utils";
+import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 
 type SubmitButtonProps = {
   isAgentBusy: boolean;
@@ -216,14 +217,11 @@ const mcpStatusColor: Record<string, string> = {
 
 export function McpIndicator({
   mcpServers,
-  sessionId,
+  attachmentHistory,
 }: {
   mcpServers: string[];
-  sessionId?: string | null;
+  attachmentHistory?: MCPAttachmentHistory;
 }) {
-  const attachmentHistory = useAppStore((state) =>
-    sessionId ? state.sessionMcpStatus.bySessionId[sessionId] : undefined,
-  );
   const usesTouchDrawer = useTouchDrawer();
   const hasMcp = mcpServers.length > 0;
   const Icon = hasMcp ? IconPlugConnected : IconPlugConnectedX;

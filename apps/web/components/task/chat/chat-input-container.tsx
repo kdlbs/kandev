@@ -10,6 +10,7 @@ import type { ContextFile } from "@/lib/state/context-files-store";
 import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
+import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useChatInputContainer } from "./use-chat-input-container";
@@ -68,6 +69,7 @@ type ChatInputContainerProps = {
   planModeEnabled: boolean;
   planModeAvailable?: boolean;
   mcpServers?: string[];
+  mcpAttachmentHistory?: MCPAttachmentHistory;
   onPlanModeChange: (enabled: boolean) => void;
   isAgentBusy: boolean;
   isStarting: boolean;
@@ -295,6 +297,7 @@ function buildEditorAreaProps(
     planModeEnabled: p.planModeEnabled,
     planModeAvailable: p.planModeAvailable ?? true,
     mcpServers: p.mcpServers ?? [],
+    mcpAttachmentHistory: p.mcpAttachmentHistory,
     submitKey: p.submitKey,
     setIsInputFocused: s.setIsInputFocused,
     sessionId: p.sessionId,

@@ -16,6 +16,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const kandevMCPServerName = "kandev"
+
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	a.mu.Lock()
@@ -278,7 +280,7 @@ func (a *Adapter) emitMCPAttachmentEvidence(
 		target = streams.SanitizeMCPNetworkTarget(server.URL)
 	}
 	source := streams.MCPServerSourceProfile
-	if server.Name == "kandev" {
+	if server.Name == kandevMCPServerName {
 		source = streams.MCPServerSourceKandev
 	}
 	a.sendUpdate(AgentEvent{
