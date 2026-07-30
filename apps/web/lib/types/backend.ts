@@ -6,6 +6,8 @@ export type { BackendMessage } from "./backend-message";
 import type { BackendMessage } from "./backend-message";
 import type { OfficeBackendMessageMap } from "./office-events";
 export type { OfficeEventType, OfficeEventPayload } from "./office-events";
+import type { RunEventAppendedPayload } from "./run-events";
+export type { RunEventAppendedPayload } from "./run-events";
 
 import type {
   AvailableAgent,
@@ -661,18 +663,6 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     >;
     "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
   };
-
-// The WS gateway forwards run events verbatim: id at top level, row under `event`.
-export type RunEventAppendedPayload = {
-  run_id: string;
-  event: {
-    seq: number;
-    event_type: string;
-    level: string;
-    payload: string;
-    created_at: string;
-  };
-};
 
 // Workspace file types (extracted to reduce file size)
 export * from "./workspace-files";

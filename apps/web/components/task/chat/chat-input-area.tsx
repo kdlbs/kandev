@@ -498,15 +498,6 @@ function canManuallyDrainQueue(pendingClarification: unknown, sessionState: stri
   return !pendingClarification && (sessionState === "WAITING_FOR_INPUT" || sessionState === "IDLE");
 }
 
-function hasContextComments(panelState: ChatInputAreaProps["panelState"]) {
-  return (
-    panelState.planComments.length > 0 ||
-    panelState.pendingPRFeedback.length > 0 ||
-    panelState.walkthroughComments.length > 0 ||
-    panelState.messageComments.length > 0
-  );
-}
-
 /**
  * The chat composer: input box, submit/cancel handling, plan-mode toggle,
  * clarification banner, and the {@link ChatStatusBar} above it.
