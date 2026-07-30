@@ -4,11 +4,14 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
 	"testing"
+	"time"
 
+	gorillaws "github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/lsp/protocol"
@@ -17,6 +20,25 @@ import (
 
 type staticLSPUserService struct {
 	settings *models.UserSettings
+}
+
+type recordingLSPMessageWriter struct {
+	deadline        time.Time
+	deadlineOnWrite time.Time
+	messageType     int
+	payload         []byte
+}
+
+func (w *recordingLSPMessageWriter) SetWriteDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return nil
+}
+
+func (w *recordingLSPMessageWriter) WriteMessage(messageType int, payload []byte) error {
+	w.deadlineOnWrite = w.deadline
+	w.messageType = messageType
+	w.payload = payload
+	return nil
 }
 
 func (s staticLSPUserService) GetUserSettings(context.Context) (*models.UserSettings, error) {
@@ -175,6 +197,7 @@ func TestCloseCodeConstants(t *testing.T) {
 		{"lspCloseInstallFailed", lspCloseInstallFailed},
 		{"lspCloseUnsupportedExecutor", lspCloseUnsupportedExecutor},
 		{"lspCloseCapacityExceeded", lspCloseCapacityExceeded},
+		{"lspCloseStreamError", lspCloseStreamError},
 	}
 	for _, tc := range codes {
 		if tc.code < 4000 || tc.code > 4999 {
@@ -188,6 +211,39 @@ func TestCloseCodeConstants(t *testing.T) {
 			t.Errorf("%s and %s have the same code %d", prev, tc.name, tc.code)
 		}
 		seen[tc.code] = tc.name
+	}
+}
+
+func TestWriteLSPProxyMessageSetsDeadlineBeforeWriting(t *testing.T) {
+	writer := &recordingLSPMessageWriter{}
+	startedAt := time.Now()
+
+	if err := writeLSPProxyMessage(writer, gorillaws.TextMessage, []byte("payload")); err != nil {
+		t.Fatalf("writeLSPProxyMessage() error = %v", err)
+	}
+	if writer.deadlineOnWrite.IsZero() {
+		t.Fatal("WriteMessage() called without a write deadline")
+	}
+	if writer.deadlineOnWrite.Before(startedAt.Add(lspProxyWriteTimeout)) {
+		t.Fatalf("write deadline = %v, want at least %v", writer.deadlineOnWrite, startedAt.Add(lspProxyWriteTimeout))
+	}
+}
+
+func TestForwardLSPCloseUsesGenericStreamErrorCode(t *testing.T) {
+	writer := &recordingLSPMessageWriter{}
+	handler := &LSPHandler{}
+
+	handler.forwardLSPClose(writer, errors.New("transport failed"))
+
+	if writer.messageType != gorillaws.CloseMessage {
+		t.Fatalf("message type = %d, want close message", writer.messageType)
+	}
+	closeCode := int(writer.payload[0])<<8 | int(writer.payload[1])
+	if closeCode != lspCloseStreamError {
+		t.Fatalf("close code = %d, want %d", closeCode, lspCloseStreamError)
+	}
+	if writer.deadlineOnWrite.IsZero() {
+		t.Fatal("close frame written without a write deadline")
 	}
 }
 

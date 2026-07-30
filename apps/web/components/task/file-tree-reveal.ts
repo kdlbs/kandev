@@ -119,6 +119,11 @@ export function useFileTreeReveal(params: FileTreeRevealParams) {
           run.retryTimer = null;
           setRevision((value) => value + 1);
         }, delay);
+      })
+      .catch((error: unknown) => {
+        if (runRef.current !== run) return;
+        run.inFlightPath = null;
+        console.error("Failed to reveal file tree path", error);
       });
   }, [activeFilePath, revealKey, revision, tree]);
 

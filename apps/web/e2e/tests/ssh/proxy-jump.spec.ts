@@ -13,6 +13,8 @@ import path from "node:path";
  * because it's heavier than the default fixture's single-sshd model.
  */
 test.describe("ssh executor — ProxyJump", () => {
+  test.describe.configure({ timeout: 900_000 });
+
   test.beforeAll(() => {
     buildE2ESSHImage();
   });

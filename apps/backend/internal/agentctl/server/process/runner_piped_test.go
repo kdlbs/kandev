@@ -69,6 +69,16 @@ func TestProcessRunnerStartPipedRoundTripAndStop(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartPiped() error = %v", err)
 	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = runner.Stop(ctx, StopProcessRequest{ProcessID: proc.ID})
+		_ = proc.Stdin.Close()
+		_ = proc.Stdout.Close()
+		if proc.Stderr != nil {
+			_ = proc.Stderr.Close()
+		}
+	})
 
 	if _, err := proc.Stdin.Write([]byte("hello\n")); err != nil {
 		t.Fatalf("write stdin: %v", err)

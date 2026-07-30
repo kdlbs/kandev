@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
@@ -25,8 +26,15 @@ const (
 	lspCloseInstallFailed        = 4003
 	lspCloseUnsupportedExecutor  = 4004
 	lspCloseCapacityExceeded     = 4005
+	lspCloseStreamError          = 4006
 	lspCloseUnsupportedCloseText = "LSP is only supported for local_pc and local_docker tasks in this release"
+	lspProxyWriteTimeout         = 10 * time.Second
 )
+
+type lspMessageWriter interface {
+	SetWriteDeadline(time.Time) error
+	WriteMessage(int, []byte) error
+}
 
 // LSPUserService provides user settings for the LSP handler.
 type LSPUserService interface {
@@ -203,7 +211,12 @@ func (h *LSPHandler) proxyLSPConnections(browserConn, upstreamConn *gorillaws.Co
 		zap.String("language", language))
 }
 
-func (h *LSPHandler) copyLSPMessages(direction string, src, dst *gorillaws.Conn, sessionID, language string) {
+func (h *LSPHandler) copyLSPMessages(
+	direction string,
+	src *gorillaws.Conn,
+	dst lspMessageWriter,
+	sessionID, language string,
+) {
 	for {
 		messageType, msg, err := src.ReadMessage()
 		if err != nil {
@@ -217,7 +230,7 @@ func (h *LSPHandler) copyLSPMessages(direction string, src, dst *gorillaws.Conn,
 			}
 			return
 		}
-		if err := dst.WriteMessage(messageType, msg); err != nil {
+		if err := writeLSPProxyMessage(dst, messageType, msg); err != nil {
 			h.logger.Debug("LSP proxy write error",
 				zap.String("direction", direction),
 				zap.String("session_id", sessionID),
@@ -228,15 +241,30 @@ func (h *LSPHandler) copyLSPMessages(direction string, src, dst *gorillaws.Conn,
 	}
 }
 
-func (h *LSPHandler) forwardLSPClose(dst *gorillaws.Conn, err error) {
+func (h *LSPHandler) forwardLSPClose(dst lspMessageWriter, err error) {
 	if closeErr, ok := err.(*gorillaws.CloseError); ok {
-		_ = dst.WriteMessage(gorillaws.CloseMessage, gorillaws.FormatCloseMessage(closeErr.Code, closeErr.Text))
+		_ = writeLSPProxyMessage(
+			dst,
+			gorillaws.CloseMessage,
+			gorillaws.FormatCloseMessage(closeErr.Code, closeErr.Text),
+		)
 		return
 	}
-	_ = dst.WriteMessage(gorillaws.CloseMessage, gorillaws.FormatCloseMessage(lspCloseSessionNotFound, "LSP stream closed"))
+	_ = writeLSPProxyMessage(
+		dst,
+		gorillaws.CloseMessage,
+		gorillaws.FormatCloseMessage(lspCloseStreamError, "LSP stream closed"),
+	)
+}
+
+func writeLSPProxyMessage(dst lspMessageWriter, messageType int, payload []byte) error {
+	if err := dst.SetWriteDeadline(time.Now().Add(lspProxyWriteTimeout)); err != nil {
+		return err
+	}
+	return dst.WriteMessage(messageType, payload)
 }
 
 func closeLSPConnWithCode(conn *gorillaws.Conn, code int, text string) {
-	_ = conn.WriteMessage(gorillaws.CloseMessage, gorillaws.FormatCloseMessage(code, text))
+	_ = writeLSPProxyMessage(conn, gorillaws.CloseMessage, gorillaws.FormatCloseMessage(code, text))
 	_ = conn.Close()
 }

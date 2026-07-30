@@ -145,6 +145,7 @@ func TestHandleLSPStreamBridgesFramesAndStopsOwnedProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial lsp stream: %v", err)
 	}
+	t.Cleanup(func() { _ = conn.Close() })
 
 	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
 	_, ready, err := conn.ReadMessage()

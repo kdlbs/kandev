@@ -140,6 +140,35 @@ it("waits before retrying a transient load failure", async () => {
   expect(loadChildren).toHaveBeenCalledTimes(2);
 });
 
+it("reports an unexpected loader rejection without scheduling a retry", async () => {
+  vi.useFakeTimers();
+  const failure = new Error("unexpected loader failure");
+  const loadChildren = vi.fn<(node: FileTreeNode) => Promise<boolean>>().mockRejectedValue(failure);
+  const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+  const { setExpandedPaths } = expansionState();
+
+  renderHook(() =>
+    useFileTreeReveal({
+      activeFilePath: TARGET_PATH,
+      sessionId: "session-1",
+      tree: srcOnlyTree(),
+      setExpandedPaths,
+      isLoading: () => false,
+      loadChildren,
+      retryDelaysMs: [100, 500],
+    }),
+  );
+  await act(async () => Promise.resolve());
+
+  expect(consoleError).toHaveBeenCalledWith("Failed to reveal file tree path", failure);
+  await act(async () => {
+    vi.advanceTimersByTime(1_000);
+    await Promise.resolve();
+  });
+  expect(loadChildren).toHaveBeenCalledTimes(1);
+  consoleError.mockRestore();
+});
+
 it("starts a fresh reveal generation after the tree resets", async () => {
   const loadChildren = vi.fn<(node: FileTreeNode) => Promise<boolean>>().mockResolvedValue(false);
   const { setExpandedPaths } = expansionState();

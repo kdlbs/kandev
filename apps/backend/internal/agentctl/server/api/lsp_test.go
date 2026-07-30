@@ -485,6 +485,11 @@ func TestLSPAutoInstallIsCanceledAndDrainedByInstanceTeardown(t *testing.T) {
 	log := newTestLogger()
 	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-1"}
 	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
 	strategy := &blockingLSPInstallStrategy{
 		started:  make(chan struct{}),
 		canceled: make(chan struct{}),
@@ -500,7 +505,7 @@ func TestLSPAutoInstallIsCanceledAndDrainedByInstanceTeardown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial lsp stream: %v", err)
 	}
-	defer func() { _ = conn.Close() }()
+	t.Cleanup(func() { _ = conn.Close() })
 	<-strategy.started
 	if _, status, err := conn.ReadMessage(); err != nil || !strings.Contains(string(status), lspStatusInstalling) {
 		t.Fatalf("installing status = %q, error = %v", status, err)

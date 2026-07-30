@@ -2,13 +2,7 @@ import type { editor as monacoEditor, IDisposable } from "monaco-editor";
 import { getMonacoInstance, waitForMonacoInstance } from "@/components/editors/monaco/monaco-init";
 import { setBuiltinTsSuppressed } from "@/components/editors/monaco/builtin-providers";
 import { registerLspProviders } from "./lsp-providers";
-import {
-  canonicalFileUri,
-  documentUriForModel,
-  fileUrisEqual,
-  modelUriForDocument,
-  resolveFileUriInWorkspace,
-} from "./file-uri";
+import { canonicalFileUri } from "./file-uri";
 import {
   JsonRpcConnection,
   getWsBaseUrl,
@@ -23,12 +17,8 @@ import {
   type OpenDocumentParams,
   type PublishDiagnosticsParams,
 } from "./lsp-client-types";
-import {
-  connectionDocumentUri,
-  connectionModelMatchesUri,
-  connectionModelUri,
-  diagnosticMarkers,
-} from "./lsp-editor-models";
+import { connectionDocumentUri, connectionModelUri } from "./lsp-editor-models";
+import { LspClientEditorState } from "./lsp-client-editor-state";
 import {
   configureLspWorkspace,
   lspWorkspaceFolders,
@@ -66,8 +56,9 @@ class LSPClientManager {
   private workspaceMetadata = new Map<string, WorkspaceMetadata>();
   private listeners = new Set<ChangeListener>();
   private fileOpener: ((uri: string, line?: number, column?: number) => void) | null = null;
-  /** Tracks which connections own placeholder Monaco models created for references/definitions. */
-  private placeholderModelOwners = new Map<string, Set<string>>();
+  private editorState = new LspClientEditorState((connection) =>
+    this.isCurrentConnection(connection),
+  );
   /** Tracks ready TypeScript connections that require Monaco's built-in providers to stay off. */
   private typescriptConnections = new Set<string>();
 
@@ -306,7 +297,7 @@ class LSPClientManager {
       // Register diagnostics handler
       rpc.onNotification("textDocument/publishDiagnostics", (params) => {
         if (!this.isCurrentConnection(conn)) return;
-        this.handleDiagnostics(conn, params as PublishDiagnosticsParams);
+        this.editorState.handleDiagnostics(conn, params as PublishDiagnosticsParams);
       });
 
       // Suppress Monaco's built-in TS/JS providers BEFORE registering our LSP providers.
@@ -331,10 +322,14 @@ class LSPClientManager {
 
       conn.providerDisposables.push(
         monaco.editor.onDidCreateModel((model: monacoEditor.ITextModel) => {
-          if (this.isCurrentConnection(conn)) this.applyCachedDiagnostics(conn, model);
+          if (this.isCurrentConnection(conn)) {
+            this.editorState.applyCachedDiagnostics(conn, model);
+          }
         }),
       );
-      for (const model of monaco.editor.getModels()) this.applyCachedDiagnostics(conn, model);
+      for (const model of monaco.editor.getModels()) {
+        this.editorState.applyCachedDiagnostics(conn, model);
+      }
 
       // Register Monaco providers for this language
       conn.providerDisposables.push(
@@ -375,95 +370,13 @@ class LSPClientManager {
       getDocumentUri: (model) => connectionDocumentUri(model, conn),
       getModelUri: (uri) =>
         connectionModelUri(uri, conn, getMonacoInstance()?.editor.getModels() ?? []),
-      ensureModelsExist: (uris) => this.ensureModelsExist(uris, conn),
+      ensureModelsExist: (uris) => this.editorState.ensureModelsExist(uris, conn),
     });
-  }
-
-  // ------- Placeholder models for Go-to-Definition / References -------
-
-  private ensureModelsExist(uris: string[], conn: ManagedLspConnection): void {
-    if (!this.isCurrentConnection(conn)) return;
-    const monaco = getMonacoInstance();
-    if (!monaco) return;
-
-    for (const fileUri of uris) {
-      const canonicalUri = canonicalFileUri(fileUri);
-      if (!canonicalUri) continue;
-      if (
-        !conn.workspaceUri ||
-        !resolveFileUriInWorkspace(canonicalUri, conn.workspaceUri, conn.repositorySubpaths)
-      ) {
-        continue;
-      }
-      const modelUri = modelUriForDocument(canonicalUri, conn.sessionId);
-      const parsed = monaco.Uri.parse(modelUri);
-      const existingModel = monaco.editor
-        .getModels()
-        .find((model: monacoEditor.ITextModel) =>
-          connectionModelMatchesUri(model, canonicalUri, conn),
-        );
-
-      if (existingModel) {
-        const owners = this.placeholderModelOwners.get(modelUri);
-        if (!owners || owners.has(conn.ownerId)) continue;
-        owners.add(conn.ownerId);
-        this.loadPlaceholderContent(canonicalUri, modelUri, existingModel, conn);
-        continue;
-      }
-
-      const placeholderModel = monaco.editor.createModel("", undefined, parsed);
-      this.placeholderModelOwners.set(modelUri, new Set([conn.ownerId]));
-      this.loadPlaceholderContent(canonicalUri, modelUri, placeholderModel, conn);
-    }
-  }
-
-  private loadPlaceholderContent(
-    documentUri: string,
-    modelUri: string,
-    placeholderModel: monacoEditor.ITextModel,
-    conn: ManagedLspConnection,
-  ): void {
-    if (!conn.workspaceUri) return;
-    const location = resolveFileUriInWorkspace(
-      documentUri,
-      conn.workspaceUri,
-      conn.repositorySubpaths,
-    );
-    if (!location) return;
-
-    // Dynamic import to avoid circular dependency
-    Promise.all([import("@/lib/ws/connection"), import("@/lib/ws/workspace-files")])
-      .then(([{ getWebSocketClient }, { requestFileContent }]) => {
-        if (!this.isPlaceholderOwner(modelUri, conn)) return;
-        const client = getWebSocketClient();
-        if (!client) return;
-        return requestFileContent(client, conn.sessionId, location.path, location.repo);
-      })
-      .then((response) => {
-        if (!response || !this.isPlaceholderOwner(modelUri, conn)) return;
-        const monaco = getMonacoInstance();
-        const currentModel = monaco?.editor.getModel(placeholderModel.uri);
-        if (currentModel === placeholderModel) placeholderModel.setValue(response.content);
-      })
-      .catch(() => {
-        // Best effort — placeholder stays empty
-      });
-  }
-
-  private isPlaceholderOwner(modelUri: string, conn: ManagedLspConnection): boolean {
-    return (
-      this.isCurrentConnection(conn) &&
-      this.placeholderModelOwners.get(modelUri)?.has(conn.ownerId) === true
-    );
   }
 
   /** Dispose a placeholder model (e.g. when the file is opened in a real tab). */
   disposePlaceholderModel(modelUri: string): void {
-    if (!this.placeholderModelOwners.delete(modelUri)) return;
-    const monaco = getMonacoInstance();
-    if (!monaco) return;
-    const model = monaco.editor.getModel(monaco.Uri.parse(modelUri));
-    if (model) model.dispose();
+    this.editorState.disposePlaceholderModel(modelUri);
   }
 
   // ------- Document synchronization -------
@@ -501,22 +414,7 @@ class LSPClientManager {
 
   /** Transfer a placeholder model to a real file editor, regardless of LSP language/status. */
   promoteDocumentModel(sessionId: string, documentUri: string, text: string): void {
-    const canonicalUri = canonicalFileUri(documentUri);
-    if (!canonicalUri) return;
-    const monaco = getMonacoInstance();
-    const realModelUri = modelUriForDocument(canonicalUri, sessionId);
-    let promoted = false;
-    for (const placeholderUri of this.placeholderModelOwners.keys()) {
-      const placeholderDocumentUri = documentUriForModel(placeholderUri, sessionId);
-      if (!placeholderDocumentUri || !fileUrisEqual(placeholderDocumentUri, canonicalUri)) continue;
-      this.placeholderModelOwners.delete(placeholderUri);
-      promoted = true;
-      if (monaco && placeholderUri !== realModelUri) {
-        monaco.editor.getModel(monaco.Uri.parse(placeholderUri))?.dispose();
-      }
-    }
-    if (!promoted || !monaco) return;
-    monaco.editor.getModel(monaco.Uri.parse(realModelUri))?.setValue(text);
+    this.editorState.promoteDocumentModel(sessionId, documentUri, text);
   }
 
   changeDocument(sessionId: string, lspLanguage: string, documentUri: string, text: string): void {
@@ -552,48 +450,6 @@ class LSPClientManager {
     conn.rpc.sendNotification("textDocument/didClose", {
       textDocument: { uri: canonicalUri },
     });
-  }
-
-  // ------- Helpers -------
-
-  private handleDiagnostics(conn: ManagedLspConnection, params: PublishDiagnosticsParams) {
-    const uri = canonicalFileUri(params.uri);
-    if (!uri) return;
-    const canonicalParams = { ...params, uri };
-    conn.diagnosticsByUri.set(uri, canonicalParams);
-    const monaco = getMonacoInstance();
-    if (!monaco) return;
-
-    const models = monaco.editor.getModels();
-    const targetModel = models.find((model: monacoEditor.ITextModel) =>
-      connectionModelMatchesUri(model, uri, conn),
-    );
-    if (!targetModel) return;
-
-    this.applyDiagnostics(conn.ownerId, targetModel, canonicalParams);
-  }
-
-  private applyCachedDiagnostics(conn: ManagedLspConnection, model: monacoEditor.ITextModel): void {
-    for (const params of conn.diagnosticsByUri.values()) {
-      if (connectionModelMatchesUri(model, params.uri, conn)) {
-        this.applyDiagnostics(conn.ownerId, model, params);
-      }
-    }
-  }
-
-  private applyDiagnostics(
-    ownerId: string,
-    targetModel: monacoEditor.ITextModel,
-    params: PublishDiagnosticsParams,
-  ): void {
-    const monaco = getMonacoInstance();
-    if (!monaco) return;
-
-    monaco.editor.setModelMarkers(
-      targetModel,
-      this.markerOwner(ownerId),
-      diagnosticMarkers(params),
-    );
   }
 
   // ------- Stop / cleanup -------
@@ -676,7 +532,7 @@ class LSPClientManager {
     }
     if (this.isCurrentConnection(conn)) this.connections.delete(conn.key);
     this.removeTypeScriptConnection(conn.ownerId);
-    this.disposeConnectionEditorState(conn.ownerId);
+    this.editorState.disposeConnection(conn.ownerId);
   }
 
   private addTypeScriptConnection(ownerId: string): void {
@@ -688,32 +544,6 @@ class LSPClientManager {
   private removeTypeScriptConnection(ownerId: string): void {
     if (!this.typescriptConnections.delete(ownerId)) return;
     if (this.typescriptConnections.size === 0) setBuiltinTsSuppressed(false);
-  }
-
-  private markerOwner(ownerId: string): string {
-    return `lsp:${ownerId}`;
-  }
-
-  private disposeConnectionEditorState(ownerId: string): void {
-    const monaco = getMonacoInstance();
-    for (const [uri, owners] of this.placeholderModelOwners) {
-      owners.delete(ownerId);
-      if (owners.size === 0) {
-        if (monaco) {
-          const parsed = monaco.Uri.parse(uri);
-          const model = monaco.editor.getModel(parsed);
-          if (model) model.dispose();
-        }
-        this.placeholderModelOwners.delete(uri);
-      }
-    }
-
-    if (monaco) {
-      const markerOwner = this.markerOwner(ownerId);
-      for (const model of monaco.editor.getModels()) {
-        monaco.editor.setModelMarkers(model, markerOwner, []);
-      }
-    }
   }
 }
 

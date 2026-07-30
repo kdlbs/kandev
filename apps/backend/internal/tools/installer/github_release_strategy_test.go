@@ -19,9 +19,9 @@ func (r *cancelingAssetReader) Read(data []byte) (int, error) {
 		return 0, io.EOF
 	}
 	r.sent = true
-	copy(data, "partial-binary")
+	n := copy(data, "partial-binary")
 	r.cancel()
-	return len("partial-binary"), nil
+	return n, nil
 }
 
 func TestWriteReleaseAssetDoesNotPublishCanceledDownload(t *testing.T) {
