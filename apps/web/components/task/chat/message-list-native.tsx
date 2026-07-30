@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, memo } from "react";
 import { SessionPanelContent } from "@kandev/ui/pannel-session";
+import { cn } from "@kandev/ui/lib/utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStoreApi } from "@/components/state-provider";
 import { getStoredAutoScrollTop } from "@/lib/local-storage";
@@ -406,7 +407,13 @@ export const NativeMessageList = memo(function NativeMessageList({
   useInitialScrollPosition(scrollRef, items.length, sessionId, autoScrollEnabled, isNearBottomRef);
 
   return (
-    <SessionPanelContent ref={scrollRef} className="relative p-4 chat-message-list">
+    <SessionPanelContent
+      ref={scrollRef}
+      className={cn(
+        "relative p-4 chat-message-list",
+        autoScrollEnabled ? "[overflow-anchor:auto]" : "[overflow-anchor:none]",
+      )}
+    >
       {/* Sentinel for lazy loading older messages */}
       {hasMore && <div ref={sentinelRef} className="h-px" />}
 
@@ -449,12 +456,10 @@ export const NativeMessageList = memo(function NativeMessageList({
         footerActionMessages={footerActionMessages}
       />
 
-      {/* Bottom anchor — browser keeps scroll pinned here when new content
-          appends, but only while auto-scroll is enabled: without disabling
-          the anchor too, the browser's native scroll-anchoring keeps
-          tracking the bottom on its own and defeats the toggle for a user
-          who disables from the current bottom. */}
-      <div style={{ overflowAnchor: autoScrollEnabled ? "auto" : "none", height: 1 }} />
+      {/* The scroll owner disables anchoring while paused, so the browser
+          cannot choose another transcript element as its anchor. This bottom
+          marker keeps enabled auto-scroll pinned to the newest content. */}
+      <div style={{ overflowAnchor: "auto", height: 1 }} />
     </SessionPanelContent>
   );
 });

@@ -111,4 +111,40 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       .toBeLessThan(targetScrollTop + 10);
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 10);
   });
+
+  test("disabling from the bottom freezes the view when new content arrives", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Auto-scroll Toggle Bottom Anchor",
+    );
+    const activeChat = session.activeChat();
+    const list = activeChat.locator(".chat-message-list");
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
+        timeout: 5_000,
+        message: "expected to be at the bottom before disabling",
+      })
+      .toBeLessThan(5);
+    const bottomScrollTop = await list.evaluate((el) => el.scrollTop);
+
+    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+    await toggle.tap();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    const marker = "New content while disabled at bottom on mobile";
+    await session.sendMessageViaButton(`e2e:message("${marker}")`);
+    await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollTop), { timeout: 2_000 })
+      .toBeLessThanOrEqual(bottomScrollTop + 2);
+  });
 });
