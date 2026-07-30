@@ -302,6 +302,15 @@ export type TaskPlanResponse = {
   plan: TaskPlan | null;
 };
 
+export type TaskNote = {
+  id: string;
+  task_id: string;
+  content: string;
+  updated_by: "agent" | "user";
+  created_at: string;
+  updated_at: string;
+};
+
 /** A single anchored stop in a code walkthrough. */
 export type WalkthroughStep = {
   title?: string;

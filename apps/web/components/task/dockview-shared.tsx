@@ -20,12 +20,14 @@ import { TaskChangesPanel } from "./task-changes-panel";
 import { ChangesPanel } from "./changes-panel";
 import { FilesPanel } from "./files-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
+import { TaskNotePanel } from "./task-note-panel";
 import { FileEditorPanel } from "./file-editor-panel";
 import { PassthroughToolbar } from "./passthrough-toolbar";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { ContextMenuTab } from "./tab-context-menu";
 import { ChangesTab } from "./changes-tab";
 import { PlanTab } from "./plan-tab";
+import { NoteTab } from "./note-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
 import { TerminalTab } from "./terminal-tab";
@@ -113,6 +115,7 @@ export const dockviewComponents: Record<string, React.FunctionComponent<IDockvie
   browser: PortalSlot,
   vscode: PortalSlot,
   plan: PortalSlot,
+  notes: PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   // Backwards compat aliases for saved layouts
@@ -132,6 +135,7 @@ export const dockviewTabComponents: Record<
   permanentTab: PermanentTab,
   changesTab: ChangesTab,
   planTab: PlanTab,
+  notesTab: NoteTab,
   sessionTab: SessionTab,
   terminalTab: TerminalTab,
   previewFileTab: PreviewFileTab,
@@ -354,6 +358,11 @@ function PlanContent() {
   return <TaskPlanPanel taskId={taskId} visible />;
 }
 
+function NotesContent() {
+  const taskId = useAppStore((state) => state.tasks.activeTaskId);
+  return <TaskNotePanel taskId={taskId} visible />;
+}
+
 // ---------------------------------------------------------------------------
 // renderPanel — maps component names to their portal content
 // ---------------------------------------------------------------------------
@@ -368,6 +377,7 @@ function resolveComponent(component: string): string {
   return COMPONENT_ALIASES[component] ?? component;
 }
 
+// eslint-disable-next-line complexity -- dockview keeps panel dispatch explicit for readability.
 export function renderPanel(
   panelId: string,
   component: string,
@@ -398,6 +408,8 @@ export function renderPanel(
       return <VscodePanel panelId={panelId} />;
     case "plan":
       return <PlanContent />;
+    case "notes":
+      return <NotesContent />;
     case "pr-detail":
       return <ReviewDetailPanelComponent panelId={panelId} params={params} />;
     case "mr-detail":

@@ -1,5 +1,6 @@
 "use client";
 
+/* eslint-disable max-lines -- menu entry renderer intentionally stays co-located. */
 import { useMemo, type ReactNode } from "react";
 import {
   IconArchive,
@@ -85,6 +86,7 @@ type BuildKanbanCardMenuEntriesArgs = {
   isDetaching?: boolean;
   parentTaskId?: string | null;
   onEdit?: () => void;
+  onEditNotes?: () => void;
   onArchive?: () => void;
   onDelete?: () => void;
   onDetach?: () => void;
@@ -345,6 +347,7 @@ function buildLinkSubmenu({
   };
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- task-card menu assembly is an explicit static structure.
 export function buildKanbanCardMenuEntries({
   currentWorkflowId,
   currentStepId,
@@ -356,6 +359,7 @@ export function buildKanbanCardMenuEntries({
   isDetaching,
   parentTaskId,
   onEdit,
+  onEditNotes,
   onArchive,
   onDelete,
   onDetach,
@@ -373,12 +377,30 @@ export function buildKanbanCardMenuEntries({
   const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
   const entries: KanbanCardMenuEntry[] = [
     {
-      kind: "item",
+      kind: "submenu",
       key: "edit",
       icon: <IconPencil className="mr-2 h-4 w-4" />,
       label: "Edit",
-      disabled: isProcessing || !onEdit,
-      onSelect: onEdit,
+      disabled: isProcessing || (!onEdit && !onEditNotes),
+      className: "w-48",
+      children: [
+        {
+          kind: "item",
+          key: "edit-task",
+          testId: "task-context-edit-task",
+          label: "Edit task",
+          disabled: isProcessing || !onEdit,
+          onSelect: onEdit,
+        },
+        {
+          kind: "item",
+          key: "edit-notes",
+          testId: "task-context-edit-notes",
+          label: "Edit notes",
+          disabled: isProcessing || !onEditNotes,
+          onSelect: onEditNotes,
+        },
+      ],
     },
   ];
 

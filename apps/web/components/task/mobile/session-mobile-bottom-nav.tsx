@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import {
   IconMessage,
   IconListCheck,
+  IconFileText,
   IconGitBranch,
   IconFolder,
   IconTerminal2,
@@ -30,6 +31,7 @@ type NavItem = {
   badge?: React.ReactNode;
 } & ({ panel: MobileSessionPanel; onClick?: never } | { panel?: never; onClick: () => void });
 
+// eslint-disable-next-line max-lines-per-function -- bottom-nav item assembly stays inline with the component.
 export function SessionMobileBottomNav({
   activePanel,
   onPanelChange,
@@ -53,6 +55,11 @@ export function SessionMobileBottomNav({
         badge: planBadge ? (
           <span className="absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full bg-amber-500" />
         ) : undefined,
+      },
+      {
+        panel: "notes",
+        label: "Notes",
+        icon: <IconFileText className="h-5 w-5" />,
       },
       {
         panel: "changes",

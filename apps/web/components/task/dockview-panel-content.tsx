@@ -21,6 +21,7 @@ import { PassthroughToolbar } from "./passthrough-toolbar";
 import { TaskChangesPanel } from "./task-changes-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskPlanPanel } from "./task-plan-panel";
+import { TaskNotePanel } from "./task-note-panel";
 import { TerminalPanel } from "./terminal-panel";
 import { VscodePanel } from "./vscode-panel";
 
@@ -182,6 +183,11 @@ function PlanContent() {
   return <TaskPlanPanel taskId={taskId} visible />;
 }
 
+function NotesContent() {
+  const taskId = useAppStore((state) => state.tasks.activeTaskId);
+  return <TaskNotePanel taskId={taskId} visible />;
+}
+
 const COMPONENT_ALIASES: Record<string, string> = {
   "diff-files": "changes",
   "all-files": "files",
@@ -191,6 +197,7 @@ function resolveComponent(component: string): string {
   return COMPONENT_ALIASES[component] ?? component;
 }
 
+// eslint-disable-next-line complexity -- dockview keeps panel dispatch explicit for readability.
 export function renderPanel(
   panelId: string,
   component: string,
@@ -221,6 +228,8 @@ export function renderPanel(
       return <VscodePanel panelId={panelId} />;
     case "plan":
       return <PlanContent />;
+    case "notes":
+      return <NotesContent />;
     case "pr-detail":
       return <ReviewDetailPanelComponent panelId={panelId} params={params} />;
     case "mr-detail":

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps 
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { Task } from "./kanban-card";
 import { TaskCreateDialog } from "./task-create-dialog";
+import { TaskNoteEditDialog } from "./task/task-note-edit-dialog";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { Task as BackendTask } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
@@ -310,6 +311,7 @@ function useKanbanBoardSetup(
   useWorkspaceMRs(workspaceState.activeId);
 
   const hooks = useKanbanBoardHooks(searchQuery, workspaceState, workflowsState);
+  const [editingNotesTask, setEditingNotesTask] = useState<Task | null>(null);
   const { handleOpenTask, handleCardClick } = useKanbanNavigation({
     enablePreviewOnClick: hooks.enablePreviewOnClick,
     isMobile,
@@ -352,6 +354,14 @@ function useKanbanBoardSetup(
     [isMultiSelectMode, toggleSelect, handleCardClick],
   );
 
+  const handleEditNotes = useCallback(
+    (task: Task) => {
+      onBeforeEdit?.();
+      setEditingNotesTask(task);
+    },
+    [onBeforeEdit],
+  );
+
   const automation = useMoveErrorState(router);
 
   useWorkflowSelection({
@@ -374,6 +384,9 @@ function useKanbanBoardSetup(
     setSearchQuery,
     ...hooks,
     handleEdit: handleEditWithCleanup,
+    editingNotesTask,
+    setEditingNotesTask,
+    handleEditNotes,
     ...automation,
     handleOpenTask,
     handleCardClick: handleCardClickOrSelect,
@@ -432,6 +445,8 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         defaultStepId={s.effectiveSteps[0]?.id ?? null}
         stepOptions={stepOptions}
         editingTask={s.editingTask}
+        editingNotesTask={s.editingNotesTask}
+        setEditingNotesTask={s.setEditingNotesTask}
         handleDialogSuccess={s.handleDialogSuccess}
         moveError={s.moveError}
         setMoveError={s.setMoveError}
@@ -443,6 +458,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         onPreviewTask={s.handleCardClick}
         onOpenTask={s.handleOpenTask}
         onEditTask={s.handleEdit}
+        onEditNotesTask={s.handleEditNotes}
         onDeleteTask={s.handleDelete}
         onArchiveTask={s.handleArchive}
         onMoveError={s.handleMoveError}
@@ -501,6 +517,8 @@ type KanbanBoardDialogsProps = {
     };
   }>;
   editingTask: Task | null;
+  editingNotesTask: Task | null;
+  setEditingNotesTask: (task: Task | null) => void;
   handleDialogSuccess: (task: BackendTask, mode: "create" | "edit") => void;
   moveError: MoveTaskError | null;
   setMoveError: (error: MoveTaskError | null) => void;
@@ -515,6 +533,8 @@ function KanbanBoardDialogs({
   defaultStepId,
   stepOptions,
   editingTask,
+  editingNotesTask,
+  setEditingNotesTask,
   handleDialogSuccess,
   moveError,
   setMoveError,
@@ -554,6 +574,16 @@ function KanbanBoardDialogs({
         }
         mode={editingTask ? "edit" : "create"}
       />
+      {editingNotesTask && (
+        <TaskNoteEditDialog
+          open={true}
+          onOpenChange={(open) => {
+            if (!open) setEditingNotesTask(null);
+          }}
+          taskId={editingNotesTask.id}
+          taskTitle={editingNotesTask.title}
+        />
+      )}
       <ApprovalWarningDialog
         moveError={moveError}
         setMoveError={setMoveError}

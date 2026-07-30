@@ -41,7 +41,14 @@ export type MobileKanbanState = {
   isSearchOpen: boolean;
 };
 
-export type MobileSessionPanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
+export type MobileSessionPanel =
+  | "chat"
+  | "plan"
+  | "notes"
+  | "changes"
+  | "files"
+  | "terminal"
+  | "review";
 
 export type MobileSessionState = {
   activePanelBySessionId: Record<string, MobileSessionPanel>;

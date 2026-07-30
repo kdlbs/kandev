@@ -13,6 +13,7 @@ export type ViewContentProps = {
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
+  onEditNotesTask?: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   onArchiveTask?: (task: Task) => void;
   onMoveError?: (error: MoveTaskError) => void;

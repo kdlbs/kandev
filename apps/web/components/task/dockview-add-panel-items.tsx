@@ -52,6 +52,7 @@ export function AddPanelMenuItems({
   const addBrowserPanel = useDockviewStore((s) => s.addBrowserPanel);
   const addVscodePanel = useDockviewStore((s) => s.addVscodePanel);
   const addPlanPanel = useDockviewStore((s) => s.addPlanPanel);
+  const addNotesPanel = useDockviewStore((s) => s.addNotesPanel);
   const addFilesPanel = useDockviewStore((s) => s.addFilesPanel);
   const addChangesPanel = useDockviewStore((s) => s.addChangesPanel);
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
@@ -80,10 +81,16 @@ export function AddPanelMenuItems({
         VS Code
       </DropdownMenuItem>
       {!state.isPassthrough && (
-        <DropdownMenuItem onClick={() => addPlanPanel({ groupId })} className={MENU_ITEM_CLASS}>
-          <IconFileText className={MENU_ICON_CLASS} />
-          Plan
-        </DropdownMenuItem>
+        <>
+          <DropdownMenuItem onClick={() => addPlanPanel({ groupId })} className={MENU_ITEM_CLASS}>
+            <IconFileText className={MENU_ICON_CLASS} />
+            Plan
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => addNotesPanel({ groupId })} className={MENU_ITEM_CLASS}>
+            <IconFileText className={MENU_ICON_CLASS} />
+            Notes
+          </DropdownMenuItem>
+        </>
       )}
       {!state.hasChanges && (
         <DropdownMenuItem onClick={() => addChangesPanel(groupId)} className={MENU_ITEM_CLASS}>

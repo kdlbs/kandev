@@ -162,3 +162,36 @@ describe("buildKanbanCardMenuEntries — detach", () => {
     expect(entries.some((entry) => entry.key === "detach")).toBe(false);
   });
 });
+
+describe("buildKanbanCardMenuEntries — edit submenu", () => {
+  it("builds edit-task and edit-notes submenu entries", () => {
+    const onEdit = vi.fn();
+    const onEditNotes = vi.fn();
+    const entries = buildKanbanCardMenuEntries({
+      workflows: [],
+      stepsByWorkflowId: {},
+      onEdit,
+      onEditNotes,
+    });
+
+    const edit = entries.find((entry) => entry.kind === "submenu" && entry.key === "edit");
+    expect(edit?.kind).toBe("submenu");
+    if (edit?.kind !== "submenu") return;
+
+    expect(
+      edit.children.filter((child) => child.kind === "item").map((child) => child.label),
+    ).toEqual(["Edit task", "Edit notes"]);
+
+    const editTask = edit.children.find(
+      (child) => child.kind === "item" && child.key === "edit-task",
+    );
+    const editNotes = edit.children.find(
+      (child) => child.kind === "item" && child.key === "edit-notes",
+    );
+    if (editTask?.kind === "item") editTask.onSelect?.();
+    if (editNotes?.kind === "item") editNotes.onSelect?.();
+
+    expect(onEdit).toHaveBeenCalledOnce();
+    expect(onEditNotes).toHaveBeenCalledOnce();
+  });
+});

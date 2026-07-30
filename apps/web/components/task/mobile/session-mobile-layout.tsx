@@ -7,6 +7,7 @@ import { SessionTaskSwitcherSheet } from "./session-task-switcher-sheet";
 import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
 import { TaskChatPanel } from "../task-chat-panel";
 import { TaskPlanPanel } from "../task-plan-panel";
+import { TaskNotePanel } from "../task-note-panel";
 import { MobileChangesPanel } from "./mobile-changes-panel";
 import { TaskReviewDialogMount } from "../dockview-review-dialog";
 import { TaskFilesPanel } from "../task-files-panel";
@@ -128,7 +129,8 @@ type MobilePanelAreaProps = {
   onSelectReviewPR: ReturnType<typeof useReviewPRSelection>["selectPR"];
 };
 
-export function MobilePanelArea({
+export // eslint-disable-next-line max-lines-per-function -- mobile panel composition remains explicit per surface.
+function MobilePanelArea({
   currentMobilePanel,
   activeTaskId,
   isPassthroughMode,
@@ -178,6 +180,11 @@ export function MobilePanelArea({
       {currentMobilePanel === "plan" && (
         <div className="flex-1 min-h-0 flex flex-col p-2">
           <TaskPlanPanel taskId={activeTaskId} visible={true} />
+        </div>
+      )}
+      {currentMobilePanel === "notes" && (
+        <div className="flex-1 min-h-0 flex flex-col p-2">
+          <TaskNotePanel taskId={activeTaskId} visible={true} />
         </div>
       )}
       {currentMobilePanel === "changes" && (

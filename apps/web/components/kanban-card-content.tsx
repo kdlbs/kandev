@@ -138,12 +138,20 @@ export function KanbanCardBody({
         <div className="min-w-0 flex-1">
           <RepoChipRow chips={repositoryChips} />
           <div className="flex items-center gap-1 min-w-0">
-            <p
-              data-testid="task-card-title"
-              className="text-sm font-medium leading-tight line-clamp-1 min-w-0"
-            >
-              {task.title}
-            </p>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <p
+                  data-testid="task-card-title"
+                  tabIndex={0}
+                  className="text-sm font-medium leading-tight line-clamp-1 min-w-0"
+                >
+                  {task.title}
+                </p>
+              </TooltipTrigger>
+              <TooltipContent side="top" align="start">
+                <span className="max-w-[22rem] break-words text-xs">{task.title}</span>
+              </TooltipContent>
+            </Tooltip>
             <PRTaskIcon taskId={task.id} />
           </div>
         </div>

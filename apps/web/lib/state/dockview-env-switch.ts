@@ -224,7 +224,7 @@ export function replaceStaleSessionPanels(
   addCurrentSessionSiblings(api, keepSessionId, currentSessionIds);
 }
 
-const RESTORED_SESSION_ANCHOR_IDS = ["plan", "pr-detail", "mr-detail"];
+const RESTORED_SESSION_ANCHOR_IDS = ["plan", "notes", "pr-detail", "mr-detail"];
 
 function findRestoredSessionGroup(api: DockviewApi): DockviewApi["groups"][number] | undefined {
   const canonicalCenter = api.groups.find((group) => group.id === CENTER_GROUP);

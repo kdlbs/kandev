@@ -18,6 +18,7 @@ const PRESET_ONLY_PANELS = new Set(["sidebar"]);
  *  is `file:<path>` with component `file-editor`. */
 const CENTER_EXTRA_COMPONENTS = new Set([
   "plan",
+  "notes",
   "browser",
   "vscode",
   "pr-detail",

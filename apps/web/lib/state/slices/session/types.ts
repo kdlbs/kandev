@@ -4,6 +4,7 @@ import type {
   Turn,
   TaskPlan,
   TaskPlanRevision,
+  TaskNote,
   TaskWalkthrough,
 } from "@/lib/types/http";
 import type { EntityReference } from "@/lib/types/entity-reference";
@@ -73,6 +74,12 @@ export type ActiveModelState = {
 /** Ordered slot pair for the compare-revisions feature. Either slot may be
  * null. Reducers enforce a 2-slot cap and reject duplicates. */
 export type ComparePair = [string | null, string | null];
+
+export type TaskNotesState = {
+  byTaskId: Record<string, TaskNote | null>;
+  loadingByTaskId: Record<string, boolean>;
+  savingByTaskId: Record<string, boolean>;
+};
 
 export type TaskPlansState = {
   byTaskId: Record<string, TaskPlan | null>;
@@ -163,6 +170,7 @@ export type SessionSliceState = {
   sessionWorktreesBySessionId: SessionWorktreesState;
   pendingModel: PendingModelState;
   activeModel: ActiveModelState;
+  taskNotes: TaskNotesState;
   taskPlans: TaskPlansState;
   walkthroughs: WalkthroughsState;
   queue: QueueState;
@@ -219,6 +227,11 @@ export type SessionSliceActions = {
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
+  // Task note actions
+  setTaskNote: (taskId: string, note: TaskNote | null) => void;
+  setTaskNoteLoading: (taskId: string, loading: boolean) => void;
+  setTaskNoteSaving: (taskId: string, saving: boolean) => void;
+  clearTaskNote: (taskId: string) => void;
   // Task plan actions
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;

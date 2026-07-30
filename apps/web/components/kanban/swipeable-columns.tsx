@@ -18,6 +18,7 @@ type SwipeableColumnsProps = {
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
+  onEditNotesTask?: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   onArchiveTask?: (task: Task) => void;
   onMoveTask?: (task: Task, targetStepId: string) => void;
@@ -76,6 +77,7 @@ export function SwipeableColumns({
   onPreviewTask,
   onOpenTask,
   onEditTask,
+  onEditNotesTask,
   onDeleteTask,
   onArchiveTask,
   onMoveTask,
@@ -127,6 +129,7 @@ export function SwipeableColumns({
               onPreviewTask={onPreviewTask}
               onOpenTask={onOpenTask}
               onEditTask={onEditTask}
+              onEditNotesTask={onEditNotesTask}
               onDeleteTask={onDeleteTask}
               onArchiveTask={onArchiveTask}
               onMoveTask={onMoveTask}

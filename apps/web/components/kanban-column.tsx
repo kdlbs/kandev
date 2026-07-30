@@ -28,6 +28,7 @@ interface KanbanColumnProps {
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
+  onEditNotesTask?: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   onArchiveTask?: (task: Task) => void;
   onMoveTask?: (task: Task, targetStepId: string) => void;
@@ -50,6 +51,7 @@ export function KanbanColumn({
   onPreviewTask,
   onOpenTask,
   onEditTask,
+  onEditNotesTask,
   onDeleteTask,
   onArchiveTask,
   onMoveTask,
@@ -127,6 +129,7 @@ export function KanbanColumn({
             onClick={onPreviewTask}
             onOpenFullPage={onOpenTask}
             onEdit={onEditTask}
+            onEditNotes={onEditNotesTask}
             onDelete={onDeleteTask}
             onArchive={onArchiveTask}
             onMove={onMoveTask}

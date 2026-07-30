@@ -31,6 +31,7 @@ import { ContextMenuTab } from "./tab-context-menu";
 import { ChangesTab } from "./changes-tab";
 import { useChangesPanelAutoFocus } from "./changes-panel-focus";
 import { PlanTab } from "./plan-tab";
+import { NoteTab } from "./note-tab";
 import { PreviewFileTab, PreviewDiffTab, PreviewCommitTab, PinnedDefaultTab } from "./preview-tab";
 import { SessionTab } from "./session-tab";
 import { TerminalTab } from "./terminal-tab";
@@ -132,6 +133,7 @@ const components: Record<string, React.FunctionComponent<IDockviewPanelProps>> =
   browser: PortalSlot,
   vscode: PortalSlot,
   plan: PortalSlot,
+  notes: PortalSlot,
   "pr-detail": PortalSlot,
   "mr-detail": PortalSlot,
   // Backwards compat aliases for saved layouts
@@ -170,6 +172,7 @@ const tabComponents: Record<string, React.FunctionComponent<IDockviewPanelHeader
   permanentTab: PermanentTab,
   changesTab: ChangesTab,
   planTab: PlanTab,
+  notesTab: NoteTab,
   sessionTab: SessionTab,
   terminalTab: TerminalTab,
   previewFileTab: PreviewFileTab,

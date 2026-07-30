@@ -61,6 +61,7 @@ export type SwimlaneKanbanContentProps = {
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
+  onEditNotesTask?: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   onArchiveTask?: (task: Task) => void;
   onMoveError?: (error: MoveTaskError) => void;
@@ -256,6 +257,7 @@ function MobileKanbanLayout({
   onPreviewTask,
   onOpenTask,
   onEditTask,
+  onEditNotesTask: _onEditNotesTask,
   onDeleteTask,
   onArchiveTask,
   moveTaskToStep,
@@ -316,6 +318,7 @@ function MobileKanbanLayout({
           onPreviewTask={onPreviewTask}
           onOpenTask={onOpenTask}
           onEditTask={onEditTask}
+          onEditNotesTask={onEditNotesTask}
           onDeleteTask={onDeleteTask}
           onArchiveTask={onArchiveTask}
           onMoveTask={moveTaskToStep}
@@ -348,6 +351,7 @@ type SharedKanbanLayoutProps = {
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
+  onEditNotesTask?: (task: Task) => void;
   onDeleteTask: (task: Task) => void;
   onArchiveTask?: (task: Task) => void;
   moveTaskToStep: (task: Task, targetStepId: string) => Promise<void>;
@@ -368,6 +372,7 @@ function TabletKanbanLayout({
   onPreviewTask,
   onOpenTask,
   onEditTask,
+  onEditNotesTask,
   onDeleteTask,
   onArchiveTask,
   moveTaskToStep,
@@ -395,6 +400,7 @@ function TabletKanbanLayout({
             onPreviewTask={onPreviewTask}
             onOpenTask={onOpenTask}
             onEditTask={onEditTask}
+            onEditNotesTask={onEditNotesTask}
             onDeleteTask={onDeleteTask}
             onArchiveTask={onArchiveTask}
             onMoveTask={moveTaskToStep}
@@ -421,6 +427,7 @@ function DesktopKanbanLayout({
   onPreviewTask,
   onOpenTask,
   onEditTask,
+  onEditNotesTask,
   onDeleteTask,
   onArchiveTask,
   moveTaskToStep,
@@ -445,6 +452,7 @@ function DesktopKanbanLayout({
           onPreviewTask={onPreviewTask}
           onOpenTask={onOpenTask}
           onEditTask={onEditTask}
+          onEditNotesTask={onEditNotesTask}
           onDeleteTask={onDeleteTask}
           onArchiveTask={onArchiveTask}
           onMoveTask={moveTaskToStep}
@@ -508,6 +516,7 @@ export function SwimlaneKanbanContent({
   onPreviewTask,
   onOpenTask,
   onEditTask,
+  onEditNotesTask,
   onDeleteTask,
   onArchiveTask,
   onMoveError,
@@ -547,6 +556,7 @@ export function SwimlaneKanbanContent({
       onPreviewTask,
       onOpenTask,
       onEditTask,
+      onEditNotesTask,
       onDeleteTask,
       onArchiveTask,
       moveTaskToStep,
@@ -566,6 +576,7 @@ export function SwimlaneKanbanContent({
       onPreviewTask,
       onOpenTask,
       onEditTask,
+      onEditNotesTask,
       onDeleteTask,
       onArchiveTask,
       moveTaskToStep,

@@ -53,6 +53,7 @@ const placeholderTabs = {
   permanentTab: EditorTab,
   changesTab: EditorTab,
   planTab: EditorTab,
+  notesTab: EditorTab,
   terminalTab: EditorTab,
 };
 

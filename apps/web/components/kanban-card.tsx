@@ -103,6 +103,7 @@ interface KanbanCardProps {
   repositoryChips?: RepositoryChip[];
   onClick?: (task: Task) => void;
   onEdit?: (task: Task) => void;
+  onEditNotes?: (task: Task) => void;
   onDelete?: (task: Task, opts?: { cascade?: boolean }) => void;
   onArchive?: (task: Task, opts?: { cascade?: boolean }) => void;
   onOpenFullPage?: (task: Task) => void;
@@ -187,6 +188,7 @@ function externalLinkHandlers(
   };
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity -- menu/dialog state is coordinated in one hook for a single card surface.
 function useKanbanCardMenus({
   task,
   steps,
@@ -197,6 +199,7 @@ function useKanbanCardMenus({
   onEdit,
   onDelete,
   onArchive,
+  onEditNotes,
   onMove,
   externalLinkAvailability,
 }: Pick<
@@ -211,6 +214,7 @@ function useKanbanCardMenus({
   | "onEdit"
   | "onDelete"
   | "onArchive"
+  | "onEditNotes"
   | "onMove"
 >) {
   const moveMenu = useKanbanCardMoveMenuActions({ task, steps, isSelected, selectedIds, onMove });
@@ -249,6 +253,7 @@ function useKanbanCardMenus({
     parentTaskId: task.parentTaskId,
     onEdit: onEdit ? () => onEdit(task) : undefined,
     onArchive: onArchive ? () => setShowArchiveConfirm(true) : undefined,
+    onEditNotes: onEditNotes ? () => onEditNotes(task) : undefined,
     onDelete: onDelete ? () => setShowDeleteConfirm(true) : undefined,
     onDetach:
       task.parentTaskId && !actingOnMultiSelection ? () => setShowDetachConfirm(true) : undefined,
@@ -488,6 +493,7 @@ export function KanbanCard({
   onEdit,
   onDelete,
   onArchive,
+  onEditNotes,
   onOpenFullPage,
   onMove,
   steps,
@@ -517,6 +523,7 @@ export function KanbanCard({
     onEdit,
     onDelete,
     onArchive,
+    onEditNotes,
     onMove,
   });
 

@@ -455,6 +455,7 @@ export function removeSessionPanel(api: DockviewApi, sessionId: string): void {
   if (panel) api.removePanel(panel);
 }
 
+// eslint-disable-next-line max-lines-per-function -- panel openers stay together as one dockview action bundle.
 export function buildExtraPanelActions(get: StoreGet) {
   return {
     addVscodePanel: () => {
@@ -492,6 +493,19 @@ export function buildExtraPanelActions(get: StoreGet) {
       focusOrAddPanel(
         api,
         { id: "plan", component: "plan", title: "Plan", tabComponent: "planTab", position },
+        opts?.quiet ?? false,
+      );
+    },
+    addNotesPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      const groupId = opts?.groupId ?? (opts?.inCenter ? centerGroupId : undefined);
+      const position = groupId
+        ? { referenceGroup: groupId }
+        : { referencePanel: "chat" as const, direction: "right" as const };
+      focusOrAddPanel(
+        api,
+        { id: "notes", component: "notes", title: "Notes", tabComponent: "notesTab", position },
         opts?.quiet ?? false,
       );
     },

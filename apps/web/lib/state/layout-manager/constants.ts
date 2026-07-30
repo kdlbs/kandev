@@ -25,6 +25,7 @@ export const REUSABLE_PANEL_IDS = [
   "changes",
   TERMINAL_DEFAULT_ID,
   "plan",
+  "notes",
   "browser",
   "vscode",
 ] as const;
@@ -34,6 +35,7 @@ export type ReusablePanelId = (typeof REUSABLE_PANEL_IDS)[number];
 export const KNOWN_PANEL_IDS = new Set([
   "chat",
   "plan",
+  "notes",
   TERMINAL_DEFAULT_ID,
   "browser",
   "vscode",
@@ -48,6 +50,7 @@ export const KNOWN_PANEL_IDS = new Set([
 export const STRUCTURAL_COMPONENTS = new Set([
   "chat",
   "plan",
+  "notes",
   "changes",
   "files",
   "terminal",
@@ -61,6 +64,7 @@ export const STRUCTURAL_COMPONENTS = new Set([
 export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
   chat: { component: "chat", title: "Agent", tabComponent: "permanentTab" },
   plan: { component: "plan", title: "Plan", tabComponent: "planTab" },
+  notes: { component: "notes", title: "Notes", tabComponent: "notesTab" },
   changes: { component: "changes", title: "Changes", tabComponent: "changesTab" },
   files: { component: "files", title: "Files" },
   browser: { component: "browser", title: "Browser", params: { url: "" } },

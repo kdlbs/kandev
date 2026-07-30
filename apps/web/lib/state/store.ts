@@ -8,6 +8,8 @@ import type {
   Message,
   Turn,
   TaskSession,
+  TaskPlan,
+  TaskNote,
   TaskWalkthrough,
 } from "@/lib/types/http";
 import type { SystemHealthResponse } from "@/lib/types/health";
@@ -137,6 +139,7 @@ export type AppState = KanbanSlice & {
   sessionWorktreesBySessionId: (typeof defaultSessionState)["sessionWorktreesBySessionId"];
   pendingModel: (typeof defaultSessionState)["pendingModel"];
   activeModel: (typeof defaultSessionState)["activeModel"];
+  taskNotes: (typeof defaultSessionState)["taskNotes"];
   taskPlans: (typeof defaultSessionState)["taskPlans"];
   walkthroughs: (typeof defaultSessionState)["walkthroughs"];
   queue: (typeof defaultSessionState)["queue"];
@@ -398,8 +401,13 @@ export type AppState = KanbanSlice & {
   setPendingModel: (sessionId: string, modelId: string) => void;
   clearPendingModel: (sessionId: string) => void;
   setActiveModel: (sessionId: string, modelId: string) => void;
+  // Task note actions
+  setTaskNote: (taskId: string, note: TaskNote | null) => void;
+  setTaskNoteLoading: (taskId: string, loading: boolean) => void;
+  setTaskNoteSaving: (taskId: string, saving: boolean) => void;
+  clearTaskNote: (taskId: string) => void;
   // Task plan actions
-  setTaskPlan: (taskId: string, plan: import("@/lib/types/http").TaskPlan | null) => void;
+  setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
   clearTaskPlan: (taskId: string) => void;

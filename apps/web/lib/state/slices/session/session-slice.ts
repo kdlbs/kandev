@@ -166,6 +166,11 @@ export const defaultSessionState: SessionSliceState = {
   sessionWorktreesBySessionId: { itemsBySessionId: {} },
   pendingModel: { bySessionId: {} },
   activeModel: { bySessionId: {} },
+  taskNotes: {
+    byTaskId: {},
+    loadingByTaskId: {},
+    savingByTaskId: {},
+  },
   taskPlans: {
     byTaskId: {},
     loadingByTaskId: {},
@@ -288,6 +293,30 @@ function buildMessageActions(set: ImmerSet) {
     setMessagesLoading: (sessionId: string, loading: boolean) =>
       set((draft) => {
         applyMessageMeta(draft.messages.metaBySession, sessionId, { isLoading: loading });
+      }),
+  };
+}
+
+function buildTaskNoteActions(set: ImmerSet) {
+  return {
+    setTaskNote: (taskId: string, note: Parameters<SessionSlice["setTaskNote"]>[1]) =>
+      set((draft) => {
+        draft.taskNotes.byTaskId[taskId] = note;
+        draft.taskNotes.loadingByTaskId[taskId] = false;
+      }),
+    setTaskNoteLoading: (taskId: string, loading: boolean) =>
+      set((draft) => {
+        draft.taskNotes.loadingByTaskId[taskId] = loading;
+      }),
+    setTaskNoteSaving: (taskId: string, saving: boolean) =>
+      set((draft) => {
+        draft.taskNotes.savingByTaskId[taskId] = saving;
+      }),
+    clearTaskNote: (taskId: string) =>
+      set((draft) => {
+        delete draft.taskNotes.byTaskId[taskId];
+        delete draft.taskNotes.loadingByTaskId[taskId];
+        delete draft.taskNotes.savingByTaskId[taskId];
       }),
   };
 }
@@ -580,6 +609,7 @@ export const createSessionSlice: StateCreator<
     set((draft) => {
       draft.activeModel.bySessionId[sessionId] = modelId;
     }),
+  ...buildTaskNoteActions(set),
   ...buildTaskPlanActions(set, get),
   ...buildWalkthroughActions(set, get),
   setQueueEntries: (sessionId, entries, meta) =>
