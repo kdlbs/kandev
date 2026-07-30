@@ -112,6 +112,51 @@ describe("useTaskNote", () => {
     expect(mockUpdateTaskNote).toHaveBeenCalledWith(TASK_ID, "Updated note", undefined);
   });
 
+  it("keeps a newer draft when a stale in-flight save echoes back", async () => {
+    seedState(makeNote({ content: "Seed note" }));
+    let resolveSave: (note: TaskNote) => void = () => {};
+    mockUpdateTaskNote.mockImplementationOnce(
+      () =>
+        new Promise<TaskNote>((resolve) => {
+          resolveSave = resolve;
+        }),
+    );
+
+    const { result, rerender } = renderHook(() => useTaskNote(TASK_ID));
+
+    await act(async () => {
+      result.current.setDraftContent("v1");
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(mockUpdateTaskNote).toHaveBeenCalledWith(TASK_ID, "v1", undefined);
+
+    // User keeps typing while the "v1" save is still in flight.
+    await act(async () => {
+      result.current.setDraftContent("v2");
+    });
+
+    // The stale save resolves and lands in the store, echoing back "v1".
+    await act(async () => {
+      resolveSave(makeNote({ content: "v1" }));
+      await Promise.resolve();
+    });
+    seedState(makeNote({ content: "v1" }));
+    await act(async () => {
+      rerender();
+    });
+
+    expect(result.current.draftContent).toBe("v2");
+
+    // The newer draft still autosaves on its own cycle.
+    mockUpdateTaskNote.mockResolvedValueOnce(makeNote({ content: "v2" }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1500);
+    });
+    expect(mockUpdateTaskNote).toHaveBeenLastCalledWith(TASK_ID, "v2", undefined);
+  });
+
   it("deletes an existing note when the draft is cleared", async () => {
     seedState(makeNote({ content: "Seed note" }));
     const { result } = renderHook(() => useTaskNote(TASK_ID));

@@ -29,6 +29,10 @@ export function useTaskNote(taskId: string | null, options?: { visible?: boolean
   const lastNoteContentRef = useRef<string | undefined>(undefined);
   const isExternalUpdateRef = useRef(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Content the most recent in-flight save started with. Lets the sync effect
+  // below tell "this store update is just our own save landing" apart from a
+  // genuine external edit, so a stale echo doesn't clobber a newer draft.
+  const pendingSaveContentRef = useRef<string | null>(null);
 
   useEffect(() => {
     draftContentRef.current = draftContent;
@@ -66,13 +70,23 @@ export function useTaskNote(taskId: string | null, options?: { visible?: boolean
     const prevContent = lastNoteContentRef.current;
     const newContent = note?.content;
     lastNoteContentRef.current = newContent;
-    if (newContent !== prevContent) {
-      const resolved = newContent ?? "";
-      if (resolved === draftContentRef.current) return;
-      isExternalUpdateRef.current = true;
-      setDraftContent(resolved);
-      setEditorKey((key) => key + 1);
+    if (newContent === prevContent) return;
+
+    const resolved = newContent ?? "";
+    const pendingSaveContent = pendingSaveContentRef.current;
+    pendingSaveContentRef.current = null;
+    const isOwnStaleSaveEcho = pendingSaveContent !== null && resolved === pendingSaveContent;
+    if (isOwnStaleSaveEcho && draftContentRef.current !== resolved) {
+      // Our own save just landed, but the user kept typing while it was in
+      // flight. The store now reflects the older content we asked to save,
+      // not the newer draft — leave the draft alone so the pending-changes
+      // effect below schedules another save for it.
+      return;
     }
+    if (resolved === draftContentRef.current) return;
+    isExternalUpdateRef.current = true;
+    setDraftContent(resolved);
+    setEditorKey((key) => key + 1);
   }, [note?.content]);
 
   const saveNote = useCallback(
@@ -83,6 +97,7 @@ export function useTaskNote(taskId: string | null, options?: { visible?: boolean
       setError(null);
       try {
         if (trimmed === "") {
+          pendingSaveContentRef.current = "";
           if (note) {
             await deleteTaskNote(taskId);
             setTaskNote(taskId, null);
@@ -92,6 +107,7 @@ export function useTaskNote(taskId: string | null, options?: { visible?: boolean
           return null;
         }
 
+        pendingSaveContentRef.current = content;
         const savedNote = await updateTaskNote(taskId, content, updatedBy);
         setTaskNote(taskId, savedNote);
         return savedNote;
