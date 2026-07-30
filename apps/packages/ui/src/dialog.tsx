@@ -7,22 +7,42 @@ import { cn } from "./lib/utils";
 import { Button } from "./button";
 import { IconX } from "@tabler/icons-react";
 import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
+import { DIALOG_BODY_LOCK_SWEEP_MS, releaseStuckDialogBodyLock } from "./lib/dialog-body-lock";
 
-function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
+function Dialog({ onOpenChange, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
+  const sweep = React.useCallback(() => releaseStuckDialogBodyLock(document), []);
+
+  // Unmount is one way to strand the lock — Radix's animation-based cleanup
+  // never runs when the dialog disappears mid-close.
+  React.useEffect(
+    () => () => {
+      sweep();
+    },
+    [sweep],
+  );
+
+  // Becoming visible again is the other. A hidden document freezes CSS animation
+  // timelines, so the exit animation that Radix waits on never ends; by the time
+  // the user is looking at the page again the lock has outlived its dialog.
   React.useEffect(() => {
-    return () => {
-      // Safety cleanup: Radix Dialog sets pointer-events: none on body when
-      // modal. If the dialog unmounts mid-close (e.g. onOpenChange(false)
-      // followed immediately by router.push), Radix never finishes its
-      // animation-based cleanup. Check the actual body state rather than
-      // tracking the open prop, which may already be false by unmount time.
-      if (document.body.style.pointerEvents === "none") {
-        document.body.style.removeProperty("pointer-events");
-      }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") sweep();
     };
-  }, []);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [sweep]);
 
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />;
+  // And the general case: once a close has been requested, the page must be
+  // usable shortly afterwards whether or not animationend ever arrives.
+  const handleOpenChange = React.useCallback(
+    (open: boolean) => {
+      onOpenChange?.(open);
+      if (!open) window.setTimeout(sweep, DIALOG_BODY_LOCK_SWEEP_MS);
+    },
+    [onOpenChange, sweep],
+  );
+
+  return <DialogPrimitive.Root data-slot="dialog" onOpenChange={handleOpenChange} {...props} />;
 }
 
 function DialogTrigger({ ...props }: React.ComponentProps<typeof DialogPrimitive.Trigger>) {
