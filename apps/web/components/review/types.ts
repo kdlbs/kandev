@@ -256,8 +256,30 @@ function prefixPaths(node: FileTreeNode, prefix: string): FileTreeNode {
   };
 }
 
+function getOrAppendDirectorySegment(
+  parent: FileTreeNode,
+  name: string,
+  logicalPath: string,
+  segmentCounts: Map<string, number>,
+): FileTreeNode {
+  const previousChild = parent.children!.at(-1);
+  if (previousChild?.isDir && previousChild.name === name) return previousChild;
+
+  const segment = segmentCounts.get(logicalPath) ?? 0;
+  segmentCounts.set(logicalPath, segment + 1);
+  const child: FileTreeNode = {
+    name,
+    path: segment === 0 ? logicalPath : `${logicalPath}${FILE_KEY_SEP}segment:${segment}`,
+    isDir: true,
+    children: [],
+  };
+  parent.children!.push(child);
+  return child;
+}
+
 function buildFlatTree(files: ReviewFile[]): FileTreeNode[] {
   const root: FileTreeNode = { name: "", path: "", isDir: true, children: [] };
+  const directorySegmentCounts = new Map<string, number>();
 
   for (const file of files) {
     const parts = file.path.split("/");
@@ -276,12 +298,7 @@ function buildFlatTree(files: ReviewFile[]): FileTreeNode[] {
           file,
         });
       } else {
-        let child = current.children!.find((c) => c.isDir && c.name === part);
-        if (!child) {
-          child = { name: part, path: partPath, isDir: true, children: [] };
-          current.children!.push(child);
-        }
-        current = child;
+        current = getOrAppendDirectorySegment(current, part, partPath, directorySegmentCounts);
       }
     }
   }
@@ -312,8 +329,8 @@ function buildFlatTree(files: ReviewFile[]): FileTreeNode[] {
 
   const collapsed = collapse(root);
 
-  // Preserve the caller's canonical file order. Re-sorting tree nodes (for
-  // example, directories before files) makes the sidebar traversal disagree
-  // with the linear review list even when both receive the same files.
+  // Directory nodes represent contiguous input segments. If a directory
+  // reappears after another root entry, its unique segment node lets preorder
+  // traversal preserve the caller's exact file order.
   return collapsed.children ?? [];
 }

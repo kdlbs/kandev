@@ -113,10 +113,16 @@ function firePassedTop(record: ObserverRecord, target: Element) {
   });
 }
 
+let scrollIntoViewDescriptor: PropertyDescriptor | undefined;
+
 beforeEach(() => {
   observerRecords.length = 0;
   diffViewerProps.length = 0;
   installIntersectionObserver();
+  scrollIntoViewDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "scrollIntoView",
+  );
   vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
     callback(0);
     return 1;
@@ -130,7 +136,11 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
-  Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  if (scrollIntoViewDescriptor) {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", scrollIntoViewDescriptor);
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView");
+  }
 });
 
 describe("ReviewDiffList auto-mark", () => {
