@@ -430,6 +430,19 @@ func (m *Manager) reapplySessionModelAfterReset(
 		zap.String("model", modelID))
 }
 
+func (m *Manager) effectiveSessionModelForReset(ctx context.Context, execution *AgentExecution) string {
+	modelFallback := ""
+	if previous := execution.GetModelState(); previous != nil {
+		modelFallback = previous.CurrentModelID
+	}
+	if modelFallback == "" {
+		profileModel, _, _ := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
+		modelFallback = profileModel
+	}
+	model, _, _ := m.effectiveSessionRuntimeConfig(ctx, execution, modelFallback, "", nil)
+	return model
+}
+
 // ResetAgentContext resets the agent's conversation context. For ACP agents that support
 // session reset, this creates a new session on the existing connection (fast, no process restart).
 // For all other agents, this falls back to RestartAgentProcess (full subprocess restart).
@@ -452,22 +465,7 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	// at provider defaults, so asynchronous model/mode events from it must not
 	// replace the task's effective pre-reset configuration.
 	prevMode := execution.GetModeState()
-	prevModel := execution.GetModelState()
-	modelFallback := ""
-	if prevModel != nil {
-		modelFallback = prevModel.CurrentModelID
-	}
-	if modelFallback == "" {
-		profileModel, _, _ := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
-		modelFallback = profileModel
-	}
-	effectiveModel, _, _ := m.effectiveSessionRuntimeConfig(
-		ctx,
-		execution,
-		modelFallback,
-		"",
-		nil,
-	)
+	effectiveModel := m.effectiveSessionModelForReset(ctx, execution)
 
 	// Resolve agent config and MCP servers for session reset
 	agentConfig, err := m.getAgentConfigForExecution(execution)

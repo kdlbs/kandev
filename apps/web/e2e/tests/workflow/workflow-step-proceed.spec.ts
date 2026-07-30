@@ -117,7 +117,10 @@ test.describe("Manual proceed to next workflow step", () => {
     seedData,
   }) => {
     const { agents } = await apiClient.listAgents();
-    const agent = agents.find((item) => item.name === "mock-agent") ?? agents[0];
+    const agent = agents.find((item) => item.name === "mock-agent");
+    if (!agent) {
+      throw new Error("E2E mock agent is required for model-reset coverage");
+    }
     const smartProfile = await apiClient.createAgentProfile(agent.id, "Reset Model Profile", {
       model: "mock-smart",
     });
