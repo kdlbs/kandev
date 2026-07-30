@@ -372,12 +372,13 @@ Wave 7:
 After every task's targeted RED/GREEN evidence is recorded:
 
 1. `make -C apps/backend test`
-2. `cd apps && pnpm --filter @kandev/web typecheck`
-3. `cd apps && pnpm --filter @kandev/web lint`
-4. `cd apps/web && pnpm e2e:run tests/chat/mcp-status.spec.ts -- --project=chromium`
-5. `cd apps/web && pnpm e2e:run tests/chat/mobile-mcp-status.spec.ts -- --project=mobile-chrome`
-6. `node --test scripts/validate-public-docs.test.mjs`
-7. `node scripts/validate-public-docs.mjs`
+2. `cd apps && pnpm install --frozen-lockfile`
+3. `cd apps/web && pnpm run typecheck`
+4. `cd apps && pnpm --filter @kandev/web lint`
+5. `cd apps && pnpm --filter @kandev/web e2e:run tests/chat/mcp-status.spec.ts -- --project=chromium`
+6. `cd apps && pnpm --filter @kandev/web e2e:run tests/chat/mobile-mcp-status.spec.ts -- --project=mobile-chrome`
+7. `node --test scripts/validate-public-docs.test.mjs`
+8. `node scripts/validate-public-docs.mjs`
 
 ## Risks and non-goals
 
