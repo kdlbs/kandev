@@ -14,9 +14,8 @@ async function seedOverflowingTask(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-  opts: { messageCount?: number; rendererOverride?: "native" | "virtuoso" } = {},
+  messageCount = 30,
 ): Promise<SessionPage> {
-  const messageCount = opts.messageCount ?? 30;
   const script = Array.from(
     { length: messageCount },
     (_, i) =>
@@ -36,8 +35,7 @@ async function seedOverflowingTask(
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-  const query = opts.rendererOverride ? `?renderer=${opts.rendererOverride}` : "";
-  await testPage.goto(`/t/${task.id}${query}`);
+  await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
@@ -68,7 +66,7 @@ test.describe("Transcript auto-scroll toggle", () => {
       apiClient,
       seedData,
       "Auto-scroll Toggle Basic",
-      { messageCount: 2 },
+      2,
     );
 
     const statusBar = session.chatStatusBar();
@@ -238,115 +236,6 @@ test.describe("Transcript auto-scroll toggle", () => {
     await expect(toggleAfter).toHaveAttribute("aria-pressed", "true");
     await testPage.waitForTimeout(300);
     expect(await listAfter.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 20);
-  });
-
-  test("preserves the scroll position across navigating away and back while auto-scroll stays enabled", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedOverflowingTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Auto-scroll Enabled Nav",
-    );
-    await waitForOverflow(testPage);
-
-    const list = chatList(testPage);
-    const targetScrollTop = await list.evaluate((el) => {
-      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      return el.scrollTop;
-    });
-    expect(targetScrollTop).toBeGreaterThan(100);
-
-    // Auto-scroll stays enabled (default) — the user just reads earlier
-    // history without touching the toggle.
-    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
-
-    // Navigate away to the kanban board, then back into the same task —
-    // this remounts the chat panel via dockview's layout rebuild.
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card = kanban.taskCardByTitle("Auto-scroll Enabled Nav");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
-    const sessionAfter = new SessionPage(testPage);
-    await sessionAfter.waitForLoad();
-    const listAfter = chatList(testPage);
-    await listAfter.waitFor({ state: "visible", timeout: 10_000 });
-
-    // Position is restored, not reset to the bottom, even though
-    // auto-scroll was never disabled.
-    await expect
-      .poll(async () => listAfter.evaluate((el) => el.scrollTop), {
-        timeout: 5_000,
-        message: "scroll position should be restored after navigating back while enabled",
-      })
-      .toBeGreaterThan(targetScrollTop - 20);
-    const toggleAfter = sessionAfter.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await expect(toggleAfter).toHaveAttribute("aria-pressed", "true");
-  });
-
-  test("preserves the scroll position across navigation on the virtuoso renderer while enabled", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    const session = await seedOverflowingTask(
-      testPage,
-      apiClient,
-      seedData,
-      "Auto-scroll Virtuoso Nav",
-      { messageCount: 60, rendererOverride: "virtuoso" },
-    );
-    await expect(testPage.getByTestId("virtuoso-item-list")).toBeVisible({ timeout: 10_000 });
-    const scroller = chatList(testPage);
-    await expect
-      .poll(async () => scroller.evaluate((el) => el.scrollHeight - el.clientHeight), {
-        timeout: 15_000,
-        message: "Waiting for virtuoso chat to overflow",
-      })
-      .toBeGreaterThan(200);
-
-    const targetScrollTop = await scroller.evaluate((el) => {
-      el.scrollTop = Math.floor((el.scrollHeight - el.clientHeight) / 2);
-      return el.scrollTop;
-    });
-    expect(targetScrollTop).toBeGreaterThan(100);
-
-    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
-    await expect(toggle).toHaveAttribute("aria-pressed", "true");
-
-    // The `?renderer=virtuoso` override is a per-navigation query param, not
-    // a persisted preference (see message-list.tsx's resolveStrategy) — the
-    // kanban board itself doesn't carry it, so capture the exact task URL
-    // (including the override) before leaving and reuse it to come back,
-    // rather than relying on a plain task-card click to preserve it.
-    const taskUrl = testPage.url();
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-    const card = kanban.taskCardByTitle("Auto-scroll Virtuoso Nav");
-    await expect(card).toBeVisible({ timeout: 15_000 });
-
-    await testPage.goto(taskUrl);
-    const sessionAfter = new SessionPage(testPage);
-    await sessionAfter.waitForLoad();
-    // Confirm the virtuoso branch rendered again after remount (not a
-    // silent fallback to native) before asserting on the restored offset.
-    await expect(testPage.getByTestId("virtuoso-item-list")).toBeVisible({ timeout: 10_000 });
-    const scrollerAfter = chatList(testPage);
-    await scrollerAfter.waitFor({ state: "visible", timeout: 10_000 });
-
-    await expect
-      .poll(async () => scrollerAfter.evaluate((el) => el.scrollTop), {
-        timeout: 5_000,
-        message: "virtuoso scroll position should be restored after navigating back while enabled",
-      })
-      .toBeGreaterThan(targetScrollTop - 20);
   });
 
   test("re-enabling does not jump to the bottom when nothing progressed while disabled", async ({

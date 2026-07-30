@@ -269,9 +269,10 @@ describe("shouldCatchUpOnAutoScrollEnable", () => {
 });
 
 describe("resolveNativeInitialScrollTop", () => {
-  it("defers to a pending dockview layout restore regardless of any saved offset", () => {
+  it("defers to a pending dockview layout restore regardless of the toggle", () => {
     expect(
       resolveNativeInitialScrollTop({
+        enabled: false,
         hasPendingLayoutRestore: true,
         savedScrollTop: 42,
         scrollHeight: 900,
@@ -279,9 +280,10 @@ describe("resolveNativeInitialScrollTop", () => {
     ).toBeNull();
   });
 
-  it("restores the saved offset when one was captured, regardless of the auto-scroll toggle", () => {
+  it("restores the saved offset when disabled", () => {
     expect(
       resolveNativeInitialScrollTop({
+        enabled: false,
         hasPendingLayoutRestore: false,
         savedScrollTop: 250,
         scrollHeight: 900,
@@ -289,11 +291,23 @@ describe("resolveNativeInitialScrollTop", () => {
     ).toBe(250);
   });
 
-  it("falls back to the bottom when nothing was ever captured", () => {
+  it("falls back to the bottom when disabled but nothing was ever captured", () => {
     expect(
       resolveNativeInitialScrollTop({
+        enabled: false,
         hasPendingLayoutRestore: false,
         savedScrollTop: undefined,
+        scrollHeight: 900,
+      }),
+    ).toBe(900);
+  });
+
+  it("scrolls to the bottom when enabled, ignoring any saved offset", () => {
+    expect(
+      resolveNativeInitialScrollTop({
+        enabled: true,
+        hasPendingLayoutRestore: false,
+        savedScrollTop: 250,
         scrollHeight: 900,
       }),
     ).toBe(900);
