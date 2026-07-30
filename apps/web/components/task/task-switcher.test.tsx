@@ -160,6 +160,10 @@ describe("TaskSwitcher — workflow completion icons", () => {
         workflowId: "workflow-1",
         workflowStepId: finalStepId,
       }),
+      item("Missing workflow metadata", undefined, {
+        state: "REVIEW",
+        sessionState: "COMPLETED",
+      }),
     ];
 
     render(
@@ -189,11 +193,16 @@ describe("TaskSwitcher — workflow completion icons", () => {
     const workflowCompleteRow = screen
       .getByText("Workflow complete")
       .closest<HTMLElement>("[data-testid='sidebar-task-item']");
+    const missingMetadataRow = screen
+      .getByText("Missing workflow metadata")
+      .closest<HTMLElement>("[data-testid='sidebar-task-item']");
 
     expect(within(turnFinishedRow!).getByTestId("task-state-turn-finished")).toBeTruthy();
     expect(within(turnFinishedRow!).queryByTestId("task-state-workflow-complete")).toBeNull();
     expect(within(workflowCompleteRow!).getByTestId("task-state-workflow-complete")).toBeTruthy();
     expect(within(workflowCompleteRow!).queryByTestId("task-state-turn-finished")).toBeNull();
+    expect(within(missingMetadataRow!).getByTestId("task-state-turn-finished")).toBeTruthy();
+    expect(within(missingMetadataRow!).queryByTestId("task-state-workflow-complete")).toBeNull();
   });
 });
 

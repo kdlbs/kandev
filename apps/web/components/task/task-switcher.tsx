@@ -224,6 +224,7 @@ function TaskRow({
 }: TaskRowProps) {
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
   const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
+  const stepId = task.workflowStepId;
   return (
     <TaskItemWithContextMenu
       task={task}
@@ -278,7 +279,7 @@ function TaskRow({
         issueInfo={task.issueInfo}
         agentErrorMessage={task.agentErrorMessage}
         isSubTask={isSubTask}
-        isOnLastWorkflowStep={taskSteps?.at(-1)?.id === task.workflowStepId}
+        isOnLastWorkflowStep={!!stepId && taskSteps?.at(-1)?.id === stepId}
         depth={depth}
         subtaskCount={subtaskToggle?.subtaskCount}
         subtasksCollapsed={subtaskToggle?.subtasksCollapsed}
