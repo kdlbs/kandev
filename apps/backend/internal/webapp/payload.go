@@ -36,7 +36,6 @@ type ActivePluginPayload struct {
 type RuntimeConfig struct {
 	APIPrefix     string `json:"apiPrefix"`
 	WebSocketPath string `json:"webSocketPath"`
-	HostOS        string `json:"hostOS"`
 	Debug         bool   `json:"debug,omitempty"`
 }
 

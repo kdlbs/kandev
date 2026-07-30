@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -1150,27 +1149,6 @@ func TestBootPayloadIncludesDebugRuntimeWhenDevMode(t *testing.T) {
 	}
 	if !decoded.Runtime.Debug {
 		t.Fatal("runtime.debug = false, want true when backend devMode is enabled")
-	}
-}
-
-func TestBootPayloadIncludesBackendHostOS(t *testing.T) {
-	t.Parallel()
-
-	payload := bootPayload(context.Background(), nil, routeParams{}, webapp.ClassifyRoute("/"))
-	raw, err := json.Marshal(payload)
-	if err != nil {
-		t.Fatalf("Marshal payload: %v", err)
-	}
-	var decoded struct {
-		Runtime struct {
-			HostOS string `json:"hostOS"`
-		} `json:"runtime"`
-	}
-	if err := json.Unmarshal(raw, &decoded); err != nil {
-		t.Fatalf("Unmarshal payload: %v", err)
-	}
-	if decoded.Runtime.HostOS != runtime.GOOS {
-		t.Fatalf("runtime.hostOS = %q, want %q", decoded.Runtime.HostOS, runtime.GOOS)
 	}
 }
 

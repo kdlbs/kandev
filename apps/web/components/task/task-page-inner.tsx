@@ -14,6 +14,7 @@ import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
 import { SessionCommands } from "@/components/session-commands";
 import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
+import { getEmbeddedVscodeSupported } from "@/components/task/task-page-editor-capability";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import {
   buildDebugEntries,
@@ -62,6 +63,9 @@ type RemoteExecutorStatus = {
   remote_created_at?: string | null;
   remote_checked_at?: string | null;
   remote_status_error?: string | null;
+  capabilities?: {
+    embedded_vscode?: boolean;
+  };
 };
 
 function toNullable(value: string | null | undefined): string | null {
@@ -100,6 +104,7 @@ function buildTaskTopBarProps(params: {
   remote: ReturnType<typeof resolveRemoteExecutor>;
   sessionWorkflowStepId: string | null;
   agentctlReady: boolean;
+  embeddedVscodeSupported: boolean;
   officeTaskHref?: string | null;
   onTaskUnarchived: (taskId: string) => void;
 }) {
@@ -124,6 +129,7 @@ function buildTaskTopBarProps(params: {
     isArchived: taskProps.isArchived,
     isRemoteExecutor: params.remote.isRemoteExecutor,
     isAgentctlReady: params.agentctlReady,
+    embeddedVscodeSupported: params.embeddedVscodeSupported,
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
     onTaskUnarchived: params.onTaskUnarchived,
@@ -220,6 +226,7 @@ export function TaskPageInner({
 }: TaskPageInnerProps) {
   const taskProps = resolveTaskProps(task, repository);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
+  const embeddedVscodeSupported = getEmbeddedVscodeSupported(resumption.sessionStatus);
   const activeSessionMetadata = useAppStore((state) =>
     effectiveSessionId ? (state.taskSessions.items[effectiveSessionId]?.metadata ?? null) : null,
   );
@@ -245,6 +252,7 @@ export function TaskPageInner({
     remote,
     sessionWorkflowStepId: sessionPanel.sessionWorkflowStepId,
     agentctlReady: agentctlStatus.isReady,
+    embeddedVscodeSupported,
     officeTaskHref,
     onTaskUnarchived,
   });

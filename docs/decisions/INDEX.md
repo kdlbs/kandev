@@ -88,3 +88,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-28-coarse-running-busy-signal | [Restore Coarse Running Prompt Admission](2026-07-28-coarse-running-busy-signal.md) | accepted | backend, frontend, protocol | 2026-07-28 |
 | 2026-07-29-agent-stall-user-controlled-recovery | [Keep Agent Stall Recovery User Controlled](2026-07-29-agent-stall-user-controlled-recovery.md) | accepted | backend, frontend, protocol | 2026-07-29 |
 | 2026-07-29-quarantine-retention-override | [Make Quarantine Retention Overridable but Visible](2026-07-29-quarantine-retention-override.md) | accepted | backend, frontend | 2026-07-29 |
+| 2026-07-30-embedded-editor-executor-capabilities | [Derive Embedded Editor Availability from the Active Executor](2026-07-30-embedded-editor-executor-capabilities.md) | accepted | backend, frontend, protocol | 2026-07-30 |

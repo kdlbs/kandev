@@ -38,6 +38,9 @@ export type SessionStatus = {
   remote_created_at?: string;
   remote_checked_at?: string;
   remote_status_error?: string;
+  capabilities?: {
+    embedded_vscode: boolean;
+  };
   error?: string;
 };
 

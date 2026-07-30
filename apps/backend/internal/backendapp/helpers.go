@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -708,7 +707,6 @@ func webRuntimeConfig(debug bool) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:     "/api/v1",
 		WebSocketPath: "/ws",
-		HostOS:        runtime.GOOS,
 		Debug:         debug,
 	}
 }

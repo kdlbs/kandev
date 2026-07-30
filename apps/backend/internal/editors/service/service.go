@@ -15,6 +15,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/editors/capabilities"
 	"github.com/kandev/kandev/internal/editors/models"
 	"github.com/kandev/kandev/internal/editors/store"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -25,6 +26,7 @@ import (
 type taskSessionReader interface {
 	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
 	GetRepository(ctx context.Context, id string) (*taskmodels.Repository, error)
+	GetExecutor(ctx context.Context, id string) (*taskmodels.Executor, error)
 }
 
 var (
@@ -99,6 +101,9 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 	if err != nil {
 		return "", err
 	}
+	if editor.Kind == editorKindInternalVscode && !s.supportsEmbeddedVscode(ctx, session) {
+		return "", ErrEditorUnavailable
+	}
 	// Opening the embedded editor at folder level only needs a valid session.
 	// Repository-less sessions still have an executor workspace where code-server
 	// can run, but they intentionally have no task worktree to resolve here.
@@ -117,6 +122,17 @@ func (s *Service) OpenEditor(ctx context.Context, input OpenEditorInput) (string
 	}
 
 	return s.dispatchEditorKind(editor, worktreePath, absPath, input.Line, input.Column)
+}
+
+func (s *Service) supportsEmbeddedVscode(ctx context.Context, session *taskmodels.TaskSession) bool {
+	if session == nil || session.ExecutorID == "" {
+		return false
+	}
+	executor, err := s.taskRepo.GetExecutor(ctx, session.ExecutorID)
+	if err != nil || executor == nil {
+		return false
+	}
+	return capabilities.SupportsEmbeddedVscode(executor.Type, runtime.GOOS)
 }
 
 func (s *Service) dispatchEditorKind(editor *models.Editor, worktreePath, absPath string, line, column int) (string, error) {
