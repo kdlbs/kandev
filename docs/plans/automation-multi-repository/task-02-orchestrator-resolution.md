@@ -77,7 +77,7 @@ spec: "../../specs/office/automations-settings.md"
 ## Verification
 
 ```
-cd apps/backend && go test ./internal/orchestrator/... -run 'TestResolveAutomationRepository|TestCreateAutomationTask|TestHandleAutomationTriggered' -v
+make -C apps/backend test
 ```
 
 ## Files likely touched

@@ -64,14 +64,19 @@ spec: "../../specs/office/automations-settings.md"
      getMultiRepoExecutorDisabledReason(p.executor_type) !== null` and
      `disabledReason: getMultiRepoExecutorDisabledReason(p.executor_type) ??
      undefined`.
-   - Repository picker: branch on `multiRepoDisabledReason === null`:
+   - Repository picker: branch on `multiRepoDisabledReason === null &&
+     conditionType !== "github_pr"`:
      - compatible → render new `AutomationRepositoryRows` (new file, see
        below).
-     - incompatible → keep today's single `SelectField`, bound to
-       `repositorySelections[0]`, with a `"__none__"` sentinel mapping to an
-       empty array (reuse existing `REPO_NONE_OPTION_ID`/
-       `selectionToOptionId`/`pickSelectionFromOptionId`, adjusted to return
-       `null` instead of `{kind:"none"}`).
+     - incompatible (single-repo executor, or a `github_pr` trigger) → keep
+       today's single `SelectField`, bound to `repositorySelections[0]`,
+       with a `"__none__"` sentinel mapping to an empty array (reuse
+       existing `REPO_NONE_OPTION_ID`/`selectionToOptionId`/
+       `pickSelectionFromOptionId`, adjusted to return `null` instead of
+       `{kind:"none"}`). For `github_pr` specifically, additionally disable
+       the dropdown and show helper text ("PR triggers always use the PR's
+       own repository.") — the PR's own repository always wins regardless
+       of what's selected, so the picker is informational only.
 3. **New file** `apps/web/components/automations/automation-repository-rows.tsx`:
    - Props: `repositorySelections: RepositorySelection[]`, `repositories:
      Repository[]`, `discoveredRepos: LocalRepository[]`, `onChange:
@@ -82,10 +87,16 @@ spec: "../../specs/office/automations-settings.md"
      semantics as the task-creation dialog's marker, simplified to a
      disabled option here since this is a plain native select, not a chip
      picker).
-   - "Add repository" button appends an empty/placeholder row; disabled once
-     every known repository (registered + discovered) is already selected.
+   - "Add repository" button appends a new row and immediately fills it with
+     the next available (not-yet-selected) repository — there is no
+     unfilled/placeholder row state to represent, since `RepositorySelection`
+     only has `{kind:"registered", id}` / `{kind:"discovered", path}`
+     variants and every row must resolve to one of them. The button disables
+     once every known repository (registered + discovered) is already used,
+     since there's nothing left to fill a new row with.
    - Per-row remove control; removing the last row is allowed (results in an
-     empty array).
+     empty array, handled by the workspace-fallback behavior documented in
+     `config-section.tsx`'s helper text below the picker).
 4. **`automation-payload.ts`**:
    - `FormState.repositorySelection` → `repositorySelections:
      RepositorySelection[]`.
@@ -106,7 +117,7 @@ spec: "../../specs/office/automations-settings.md"
 6. **`automation-editor-sections.tsx`**: rename the
    `repositorySelection`/`onRepositoryChange`/dirty-field wiring to the
    plural forms throughout.
-7. After the rename, `grep -rn repositorySelection apps/web/components/automations`
+7. After the rename, `grep -rnP '\brepositorySelection\b' apps/web/components/automations`
    must return no matches (confirms no missed call site).
 
 ## Acceptance
@@ -124,6 +135,9 @@ spec: "../../specs/office/automations-settings.md"
   `repository_ids` payload → `formFromAutomation` on reload).
 - Saving with a mix of registered and newly-discovered repository rows
   registers only the discovered ones and promotes just those rows.
+- With a `github_pr` condition selected, the repository picker renders as the
+  single dropdown (regardless of executor profile), is disabled, and shows
+  "PR triggers always use the PR's own repository."
 
 ## Verification
 
@@ -155,6 +169,6 @@ finished contract.
 
 ## Output contract
 
-Summary of changes, confirmation the `grep repositorySelection` completeness
+Summary of changes, confirmation the `grep -rnP '\brepositorySelection\b'`
 check returned no matches, exact test/typecheck command output, and a note
 updating `plan.md`'s Wave 2 checkbox and this file's `status` to `done`.

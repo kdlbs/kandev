@@ -112,7 +112,7 @@ spec: "../../specs/office/automations-settings.md"
 ## Verification
 
 ```
-cd apps/backend && go test ./internal/automation/... -run 'TestCreateAutomation|TestUpdateAutomation|TestGetAutomation|TestListAutomations|TestListAllEnabled|TestInitSchema' -v
+make -C apps/backend test
 ```
 
 ## Files likely touched

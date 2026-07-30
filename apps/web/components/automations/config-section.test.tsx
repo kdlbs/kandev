@@ -140,6 +140,9 @@ describe("ConfigSection", () => {
     expect(screen.queryByTestId(REPOSITORY_SELECTOR_TEST_ID)).toBeNull();
     const rows = screen.getByTestId(REPOSITORY_ROWS_TEST_ID);
     within(rows).getByRole("button", { name: "Add repository" });
+    screen.getByText(
+      "With no repositories selected, this automation runs against the workspace's first repository.",
+    );
   });
 
   it("renders a single dropdown when the executor profile does not support multi-repo", () => {

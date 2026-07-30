@@ -85,6 +85,10 @@ export function AutomationRepositoryRows({
           Add repository
         </Button>
       </div>
+      <p className="text-[10px] text-muted-foreground">
+        With no repositories selected, this automation runs against the workspace&apos;s first
+        repository.
+      </p>
     </div>
   );
 }

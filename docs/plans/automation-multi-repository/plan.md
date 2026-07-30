@@ -161,19 +161,30 @@ files, both consume the same contract), then E2E last.
   title={item.disabledReason}>`). Build executor items with `disabled:
   repositorySelections.length > 1 &&
   getMultiRepoExecutorDisabledReason(p.executor_type) !== null`.
-- Repository picker: branch on `multiRepoDisabledReason === null`:
-  - `null` (compatible executor): render a new `AutomationRepositoryRows`
-    component (new file `apps/web/components/automations/automation-repository-rows.tsx`)
-    that renders one `SelectField` per entry in `repositorySelections` (options
-    built via `buildRepositoryItems`, marking repos already chosen in another
-    row analogous to the task-creation dialog's "Already added" marker) plus a
-    trailing "Add repository" button (disabled once every known repo is
-    selected). Removing the last remaining row is allowed (falls back to
-    empty list == no repository).
-  - non-null (incompatible executor): render the existing single `SelectField`
-    bound to `repositorySelections[0] ?? {kind:"none"}` (using a `{kind:"none"}`
-    UI-only sentinel local to this branch, not part of the exported type),
-    `onChange` replaces the whole array with `[]` or `[selection]`.
+- Repository picker: branch on `multiRepoDisabledReason === null &&
+  conditionType !== "github_pr"`:
+  - compatible (`null` reason, non-PR trigger): render a new
+    `AutomationRepositoryRows` component (new file
+    `apps/web/components/automations/automation-repository-rows.tsx`) that
+    renders one `SelectField` per entry in `repositorySelections` (options
+    built via `buildRepositoryItems`, marking repos already chosen in
+    another row analogous to the task-creation dialog's "Already added"
+    marker) plus a trailing "Add repository" button. Each click appends a
+    row pre-filled with the next not-yet-selected repository — there is no
+    unfilled/placeholder row state, since `RepositorySelection` only has
+    `{kind:"registered", id}` / `{kind:"discovered", path}` variants, so the
+    button disables once every known repo is already selected. Removing the
+    last remaining row is allowed (falls back to an empty list, which the
+    orchestrator resolves to the workspace's first repository — stated in
+    helper text beside the control).
+  - incompatible (single-repo executor, or a `github_pr` trigger): render
+    the existing single `SelectField` bound to `repositorySelections[0] ??
+    {kind:"none"}` (using a `{kind:"none"}` UI-only sentinel local to this
+    branch, not part of the exported type), `onChange` replaces the whole
+    array with `[]` or `[selection]`. For `github_pr` specifically,
+    additionally disable the dropdown and show "PR triggers always use the
+    PR's own repository." — the PR's own repo always wins regardless of
+    what's selected.
 - `pickSelectionFromOptionId`/`buildRepositoryItems`/`selectionToOptionId`:
   keep signatures, just drop the `{kind:"none"}` branch from
   `pickSelectionFromOptionId`'s return type (return `null` instead) and adjust
@@ -213,8 +224,9 @@ files, both consume the same contract), then E2E last.
 - `apps/web/components/automations/automation-trigger-drafts.test.ts` /
   other automation tests referencing `repositorySelection`: grep after the
   rename lands to confirm none were missed (`lsp references` on the removed
-  export is not applicable across TS/Go, so use `grep repositorySelection` in
-  `apps/web/components/automations` as the completeness check).
+  export is not applicable across TS/Go, so use
+  `grep -rnP '\brepositorySelection\b' apps/web/components/automations` as
+  the completeness check).
 
 ---
 
