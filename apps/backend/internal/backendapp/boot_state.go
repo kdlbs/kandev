@@ -1034,6 +1034,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	worktrees := make(map[string]any)
 	worktreesBySession := make(map[string]any)
 	sessionModelsByID := make(map[string]any)
+	sessionMCPStatusByID := make(map[string]any)
 	for _, session := range sessions {
 		if session == nil {
 			continue
@@ -1068,6 +1069,11 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 				snapshot, sessionACPConfigBaseline(session),
 			)
 		}
+		if history, ok := lifecycle.LoadMCPAttachmentHistory(
+			session.Metadata[taskmodels.SessionMetaKeyMCPAttachmentState],
+		); ok {
+			sessionMCPStatusByID[session.ID] = history
+		}
 	}
 	state["taskSessions"] = map[string]any{"items": sessionItems}
 	state["taskSessionsByTask"] = map[string]any{
@@ -1081,6 +1087,9 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	state["sessionWorktreesBySessionId"] = map[string]any{"itemsBySessionId": worktreesBySession}
 	if len(sessionModelsByID) > 0 {
 		state["sessionModels"] = map[string]any{"bySessionId": sessionModelsByID}
+	}
+	if len(sessionMCPStatusByID) > 0 {
+		state["sessionMcpStatus"] = map[string]any{"bySessionId": sessionMCPStatusByID}
 	}
 }
 

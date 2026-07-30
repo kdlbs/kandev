@@ -833,6 +833,7 @@ export class ApiClient {
       terminal_font_size?: number;
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
+      show_transcript_auto_scroll_control?: boolean;
       [key: string]: unknown;
     };
   }> {
@@ -843,6 +844,10 @@ export class ApiClient {
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
+    show_anchored_prompt_bar?: boolean;
+    show_scroll_to_last_prompt?: boolean;
+    show_scroll_to_start?: boolean;
+    show_transcript_auto_scroll_control?: boolean;
     workspace_id?: string;
     workflow_filter_id?: string;
     repository_ids?: string[];

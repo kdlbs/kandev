@@ -91,6 +91,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "session_models":
 		s.handleSessionModelsEvent(ctx, payload)
 
+	case streams.EventTypeMCPAttachment:
+		s.handleSessionMCPAttachmentEvent(ctx, payload)
+
 	case streams.EventTypeSessionInfo:
 		s.handleSessionInfoEvent(ctx, payload)
 
@@ -2386,6 +2389,62 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	)
 	subject := events.BuildSessionModelsSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
+}
+
+// handleSessionMCPAttachmentEvent reduces safe attachment observations into
+// bounded session metadata and broadcasts the resulting report. A failed
+// diagnostic write is intentionally isolated from task and agent state.
+func (s *Service) handleSessionMCPAttachmentEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload == nil || payload.Data == nil || payload.SessionID == "" || s.repo == nil {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil || session == nil {
+		if err != nil {
+			s.logger.Warn("failed to load session for MCP attachment evidence", zap.String("session_id", payload.SessionID), zap.Error(err))
+		}
+		return
+	}
+	if staleMCPAttachmentAttempt(payload) {
+		s.logger.Warn("dropping stale MCP attachment attempt in orchestrator",
+			zap.String("attempt_execution_id", payload.Data.MCPAttachmentAttempt.ExecutionID),
+			zap.String("event_execution_id", payload.ExecutionID))
+		return
+	}
+	history, _ := lifecycle.LoadMCPAttachmentHistory(session.Metadata[models.SessionMetaKeyMCPAttachmentState])
+	changed := reduceMCPAttachmentHistory(&history, payload.Data)
+	if !changed || !history.Valid() {
+		return
+	}
+	writeCtx := context.WithoutCancel(ctx)
+	if err := s.repo.SetSessionMetadataKey(writeCtx, payload.SessionID, models.SessionMetaKeyMCPAttachmentState, history); err != nil {
+		s.logger.Warn("failed to persist MCP attachment status", zap.String("session_id", payload.SessionID), zap.Error(err))
+		return
+	}
+	eventPayload := lifecycle.SessionMCPStatusEventPayload{
+		TaskID: payload.TaskID, SessionID: payload.SessionID, History: history,
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if s.eventBus != nil {
+		_ = s.eventBus.Publish(writeCtx, events.BuildSessionMCPStatusSubject(payload.SessionID), bus.NewEvent(events.SessionMCPStatusUpdated, "orchestrator", eventPayload))
+	}
+}
+
+func staleMCPAttachmentAttempt(payload *lifecycle.AgentStreamEventPayload) bool {
+	attempt := payload.Data.MCPAttachmentAttempt
+	return attempt != nil && attempt.ExecutionID != "" && attempt.ExecutionID != payload.ExecutionID
+}
+
+func reduceMCPAttachmentHistory(history *streams.MCPAttachmentHistory, data *lifecycle.AgentStreamEventData) bool {
+	changed := false
+	if attempt := data.MCPAttachmentAttempt; attempt != nil {
+		history.StartAttempt(*attempt)
+		changed = true
+	}
+	if evidence := data.MCPAttachment; evidence != nil {
+		changed = history.Apply(*evidence) || changed
+	}
+	return changed
 }
 
 func (s *Service) sessionACPConfigBaselineForEvent(

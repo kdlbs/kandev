@@ -26,6 +26,9 @@ repository on the machine running Kandev, select it, and continue composing the 
   the user create and enter one new child folder in the currently displayed directory.
 - Confirmation creates `<parent>/<name>` only when that target does not already exist, initializes a
   local Git repository with unborn default branch `main`, and does not create files or commits.
+- Git initialization remains bound to the exact request-owned directory identity that the backend
+  opened and verified. Replacing its pathname before or during initialization must not cause Git to
+  modify the replacement path.
 - A successfully initialized repository is persisted as a local repository in the active workspace,
   added to the in-memory workspace repository list, selected in the originating row, and displays
   `main` as that row's branch. Other task fields and repository rows are unchanged.
@@ -121,6 +124,7 @@ to the created canonical target path and the active workspace.
 | Name is empty, `.`/`..`, or contains a host path separator | Confirmation is disabled client-side and the backend rejects a forged request. |
 | The nearest existing parent ancestor cannot be trusted, read, or written | The form stays open, shows an error, and no repository is selected or persisted. |
 | Target already exists, including an empty directory | The request returns conflict and does not modify the target. |
+| The request-owned staging pathname is replaced during Git initialization | The operation fails without modifying the replacement path. Cleanup remains limited to a request-owned directory whose identity can still be verified. |
 | `git` is unavailable or initialization fails | The request fails, no repository row is persisted, and Kandev removes only the target directory created by this request when cleanup is safe. A cleanup failure is logged and the error remains visible. |
 | Repository persistence fails after Git initialization | The request fails and performs the same best-effort cleanup of the request-owned target; no repository row is returned. |
 | Frontend state refresh fails after a successful response | The returned repository is still selected directly and merged into the active workspace cache without waiting for a second list request. |
@@ -168,6 +172,10 @@ deleting the task does not delete the repository or its workspace registration.
 - **GIVEN** `/work/projects/alpha` already exists, **WHEN** the user tries to create `alpha` under
   `/work/projects`, **THEN** the UI reports the conflict and Kandev does not modify or register the
   existing path.
+- **GIVEN** the backend has opened its request-owned staging directory, **WHEN** that directory is
+  renamed and another directory is installed at the staging pathname before Git starts, **THEN**
+  Git operates only on the originally opened directory, the replacement remains unchanged, and the
+  request fails because the original identity is no longer publishable at that pathname.
 - **GIVEN** `/work` exists but `/work/team/projects` does not, **WHEN** the user enters
   `/work/team/projects` as the parent and creates `alpha`, **THEN** Kandev creates both missing
   parent directories and initializes `/work/team/projects/alpha`.
@@ -198,7 +206,12 @@ deleting the task does not delete the repository or its workspace registration.
   tools in this iteration.
 - Automatically deleting a successfully created repository when its originating task is canceled or
   deleted.
+- Adding local-repository initialization support to BSD platforms that do not currently implement
+  trusted directory ownership checks and exclusive publication.
 
 ## Implementation Plan
 
 See [Create Local Repository plan](../../plans/create-local-repository/plan.md).
+
+The descriptor-bound macOS repair is tracked in the
+[local repository descriptor initialization plan](../../plans/fix-local-repository-darwin-init/plan.md).

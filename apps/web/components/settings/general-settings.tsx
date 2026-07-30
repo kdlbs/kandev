@@ -10,6 +10,7 @@ import {
   IconKeyboard,
   IconGitBranch,
   IconArchive,
+  IconArrowBackUp,
 } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
@@ -26,6 +27,7 @@ import type { Theme } from "@/lib/settings/types";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
+import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
 import { buildPluginShortcutEntries } from "@/lib/keyboard/plugin-shortcuts";
@@ -188,6 +190,16 @@ export function TaskActionsSettings() {
           <MCPTaskAgentProfileDefaultSettings />
           <ArchiveConfirmationSettings />
         </div>
+      </SettingsSection>
+
+      <Separator />
+
+      <SettingsSection
+        icon={<IconArrowBackUp className="h-5 w-5" />}
+        title="Transcript Navigation"
+        description="Choose which transcript navigation controls appear, including the desktop-only sticky prompt bar"
+      >
+        <AnchoredPromptBarSettings />
       </SettingsSection>
     </div>
   );

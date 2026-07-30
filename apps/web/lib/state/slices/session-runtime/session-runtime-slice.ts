@@ -211,6 +211,7 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.sessionMode.bySessionId[sessionId];
   delete state.agentCapabilities.bySessionId[sessionId];
   delete state.sessionModels.bySessionId[sessionId];
+  delete state.sessionMcpStatus.bySessionId[sessionId];
   delete state.promptUsage.bySessionId[sessionId];
   delete state.sessionTodos.bySessionId[sessionId];
   delete state.prepareProgress.bySessionId[sessionId];
@@ -275,6 +276,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   sessionMode: { bySessionId: {} },
   agentCapabilities: { bySessionId: {} },
   sessionModels: { bySessionId: {} },
+  sessionMcpStatus: { bySessionId: {} },
   promptUsage: { bySessionId: {} },
   sessionTodos: { bySessionId: {} },
   userShells: { byEnvironmentId: {}, loading: {}, loaded: {} },
@@ -589,6 +591,10 @@ export const createSessionRuntimeSlice: StateCreator<
   setSessionModels: (sessionId, data) =>
     set((draft) => {
       draft.sessionModels.bySessionId[sessionId] = data;
+    }),
+  setSessionMCPStatus: (sessionId, history) =>
+    set((draft) => {
+      draft.sessionMcpStatus.bySessionId[sessionId] = history;
     }),
   setPromptUsage: (sessionId, usage) =>
     set((draft) => {

@@ -499,7 +499,11 @@ export function useChatPanelState({
   const sessionState = useSessionState(sessionId, { taskIdHint });
   const { resolvedSessionId, taskId } = sessionState;
   const planMode = usePlanMode(resolvedSessionId, taskId);
-  const { supportsMcp, mcpServers } = useSessionMcp(sessionState.session?.agent_profile_id);
+  const {
+    supportsMcp,
+    mcpServers,
+    attachmentHistory: mcpAttachmentHistory,
+  } = useSessionMcp(sessionState.session?.agent_profile_id, sessionState.session?.id);
   const planModeAvailable = supportsMcp;
 
   // When MCP is available: full plan mode toggle (layout + chat input state)
@@ -591,7 +595,11 @@ export function useChatPanelState({
     planContextEnabled,
     planModeAvailable,
     mcpServers,
+    mcpAttachmentHistory,
     prompts,
     todoItems,
   };
 }
+
+/** The value returned by {@link useChatPanelState}, threaded through the chat input area and its extracted hooks. */
+export type ChatPanelState = ReturnType<typeof useChatPanelState>;

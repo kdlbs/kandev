@@ -157,6 +157,7 @@ export type AppState = KanbanSlice & {
   sessionTodos: (typeof defaultSessionRuntimeState)["sessionTodos"];
   agentCapabilities: (typeof defaultSessionRuntimeState)["agentCapabilities"];
   sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
+  sessionMcpStatus: (typeof defaultSessionRuntimeState)["sessionMcpStatus"];
   promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
 
@@ -302,6 +303,10 @@ export type AppState = KanbanSlice & {
   upsertProcessStatus: (status: ProcessStatusEntry) => void;
   clearProcessOutput: (processId: string) => void;
   setActiveProcess: (sessionId: string, processId: string) => void;
+  setSessionMCPStatus: (
+    sessionId: string,
+    history: import("./slices/session-runtime/types").MCPAttachmentHistory,
+  ) => void;
   setPreviewOpen: (sessionId: string, open: boolean) => void;
   togglePreviewOpen: (sessionId: string) => void;
   setPreviewView: (sessionId: string, view: PreviewViewMode) => void;

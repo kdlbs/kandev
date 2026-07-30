@@ -2069,9 +2069,9 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 	select {
 	case recovered := <-recoveryDone:
 		require.True(t, recovered)
-	default:
+	case <-time.After(2 * time.Second):
 		close(turnComplete)
-		t.Fatal("clarification recovery must return after retry dispatch acceptance")
+		t.Fatal("clarification recovery did not return after retry dispatch acceptance")
 	}
 	close(turnComplete)
 

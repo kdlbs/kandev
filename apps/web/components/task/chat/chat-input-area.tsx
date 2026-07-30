@@ -9,7 +9,8 @@ import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { AzureDevOpsTaskPullRequestChip } from "@/components/azure-devops/azure-devops-task-pull-request-chip";
-import { ShareButton, shareableSessionStateClient } from "@/components/task/share/share-button";
+import { shareableSessionStateClient } from "@/components/task/share/share-button";
+import { TranscriptNavGroup } from "@/components/task/chat/transcript-nav-group";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useKeyboardShortcut } from "@/hooks/use-keyboard-shortcut";
 import { useMessageHandler, buildTaskMentionsContext } from "@/hooks/use-message-handler";
@@ -35,7 +36,8 @@ import { useToast } from "@/components/toast-provider";
 import { isMessageSendError } from "@/lib/chat/message-send-error";
 import type { DiffComment } from "@/lib/diff/types";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
-import type { useChatPanelState } from "./use-chat-panel-state";
+import type { ChatPanelState } from "./use-chat-panel-state";
+import { useComposerProps } from "./use-composer-props";
 import { cn } from "@/lib/utils";
 import { resolveComposerWorkspaceId } from "./composer-workspace";
 
@@ -146,7 +148,7 @@ function showMessageSendToast(error: unknown, toast: ReturnType<typeof useToast>
 }
 
 /** Adapts {@link useChatPanelState}'s fields into {@link useMessageHandler}'s params. */
-function usePanelMessageHandler(panelState: ReturnType<typeof useChatPanelState>) {
+function usePanelMessageHandler(panelState: ChatPanelState) {
   const {
     resolvedSessionId,
     sessionModel,
@@ -174,7 +176,7 @@ function usePanelMessageHandler(panelState: ReturnType<typeof useChatPanelState>
 /** Builds the composer's submit handler, tracking in-flight sends and
  *  routing errors to a toast. */
 export function useSubmitHandler(
-  panelState: ReturnType<typeof useChatPanelState>,
+  panelState: ChatPanelState,
   onSend?: (payload: ChatSubmitPayload) => ChatSubmitResult,
 ) {
   const [isSending, setIsSending] = useState(false);
@@ -312,11 +314,68 @@ type TodoDisplayItem = {
   status?: "pending" | "in_progress" | "completed" | "failed";
 };
 
+export function shouldRenderChatStatusBar({
+  hasTask,
+  hasTodos,
+  hasQueueChip,
+  showRightControls,
+  showProceed,
+}: {
+  hasTask: boolean;
+  hasTodos: boolean;
+  hasQueueChip: boolean;
+  showRightControls: boolean;
+  showProceed: boolean;
+}): boolean {
+  return hasTask || hasTodos || hasQueueChip || showRightControls || showProceed;
+}
+
+function getRightControlVisibility({
+  taskId,
+  sessionId,
+  sessionState,
+  showAutoScrollControl,
+  showScrollToLastPrompt,
+  showScrollToStart,
+}: {
+  taskId: string | null;
+  sessionId: string | null;
+  sessionState: string | null;
+  showAutoScrollControl: boolean;
+  showScrollToLastPrompt: boolean | undefined;
+  showScrollToStart: boolean | undefined;
+}) {
+  const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
+  const showRightControls =
+    (showAutoScrollControl && !!sessionId) ||
+    canShare ||
+    !!showScrollToLastPrompt ||
+    !!showScrollToStart;
+  return { canShare, showRightControls };
+}
+
 /**
  * Row above the composer showing todo progress, PR/CI status chips,
  * merged/closed PR banners, the auto-scroll toggle + Share (right-aligned),
  * and a "move to next step" action when the workflow allows it.
  */
+type ChatStatusBarProps = {
+  todoItems: TodoDisplayItem[];
+  taskId: string | null;
+  sessionId: string | null;
+  sessionState: string | null;
+  nextStepName: string | null;
+  onProceed: () => void;
+  isAgentBusy: boolean;
+  isMoving: boolean;
+  queueChip?: ReactNode;
+  showScrollToLastPrompt?: boolean;
+  onScrollToLastPrompt?: () => void;
+  lastPromptScrollDirection?: "up" | "down";
+  showScrollToStart?: boolean;
+  onScrollToStart?: () => void;
+};
+
 function ChatStatusBar({
   todoItems,
   taskId,
@@ -327,23 +386,36 @@ function ChatStatusBar({
   isAgentBusy,
   isMoving,
   queueChip,
-}: {
-  todoItems: TodoDisplayItem[];
-  taskId: string | null;
-  sessionId: string | null;
-  sessionState: string | null;
-  nextStepName: string | null;
-  onProceed: () => void;
-  isAgentBusy: boolean;
-  isMoving: boolean;
-  queueChip?: ReactNode;
-}) {
+  showScrollToLastPrompt,
+  onScrollToLastPrompt,
+  lastPromptScrollDirection,
+  showScrollToStart,
+  onScrollToStart,
+}: ChatStatusBarProps) {
   const showTodos = todoItems.length > 0;
   const showProceed = !!nextStepName && !isAgentBusy;
-  const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
-  // Auto-scroll toggle only needs a session (quick-chat/ephemeral sessions
-  // have a transcript with no taskId); Share additionally needs a taskId.
-  const showRightControls = !!sessionId;
+  const showAutoScrollControl = useAppStore(
+    (state) => state.userSettings.showTranscriptAutoScrollControl,
+  );
+  const { canShare, showRightControls } = getRightControlVisibility({
+    taskId,
+    sessionId,
+    sessionState,
+    showAutoScrollControl,
+    showScrollToLastPrompt,
+    showScrollToStart,
+  });
+  if (
+    !shouldRenderChatStatusBar({
+      hasTask: !!taskId,
+      hasTodos: showTodos,
+      hasQueueChip: !!queueChip,
+      showRightControls,
+      showProceed,
+    })
+  ) {
+    return null;
+  }
   // PRMergedBanner returns null internally when not applicable
   return (
     <div
@@ -360,11 +432,18 @@ function ChatStatusBar({
       {taskId && <PRMergedBanner key={`${taskId}-merged`} taskId={taskId} />}
       {taskId && <PRClosedBanner key={`${taskId}-closed`} taskId={taskId} />}
       {showRightControls && (
-        <div className="ml-auto flex shrink-0 items-center gap-1">
+        <div className="ml-auto flex shrink-0 items-center gap-1.5">
           {sessionId && <AutoScrollToggleButton sessionId={sessionId} />}
-          {canShare && taskId && sessionId && (
-            <ShareButton taskId={taskId} sessionId={sessionId} iconOnly />
-          )}
+          <TranscriptNavGroup
+            canShare={canShare}
+            taskId={taskId}
+            sessionId={sessionId}
+            showScrollToLastPrompt={showScrollToLastPrompt}
+            onScrollToLastPrompt={onScrollToLastPrompt}
+            lastPromptScrollDirection={lastPromptScrollDirection}
+            showScrollToStart={showScrollToStart}
+            onScrollToStart={onScrollToStart}
+          />
         </div>
       )}
       {showProceed && (
@@ -398,7 +477,7 @@ type ChatInputAreaProps = {
   handleCancelTurn: () => Promise<void>;
   showRequestChangesTooltip: boolean;
   onRequestChangesTooltipDismiss?: () => void;
-  panelState: ReturnType<typeof useChatPanelState>;
+  panelState: ChatPanelState;
   isSending: boolean;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
@@ -406,6 +485,17 @@ type ChatInputAreaProps = {
   hidePlanMode?: boolean;
   placeholderOverride?: string;
   surfaceClassName?: string;
+  /** Always-on affordance: scrolls the transcript to the top of the last
+   * user prompt. Omitted callers (e.g. quick chat) render no button. */
+  showScrollToLastPrompt?: boolean;
+  onScrollToLastPrompt?: () => void;
+  /** Direction the last prompt actually sits in, driving the scroll
+   * button's icon. Ignored while `showScrollToLastPrompt` is falsy. */
+  lastPromptScrollDirection?: "up" | "down";
+  /** Shown once the first message scrolls out of view: jumps back to the
+   * start of the transcript. */
+  showScrollToStart?: boolean;
+  onScrollToStart?: () => void;
 };
 
 /** Resolves whether this session's executor environment is unavailable, and why. */
@@ -434,7 +524,7 @@ function useComposerWorkspaceId(sessionId: string | null, taskId: string | null)
 
 /** Derives the composer's plan actions, executor-availability state, and placeholder text. */
 function useChatInputDerived(
-  panelState: ReturnType<typeof useChatPanelState>,
+  panelState: ChatPanelState,
   chatInputRef: React.RefObject<ChatInputContainerHandle | null>,
   placeholderOverride: string | undefined,
 ) {
@@ -486,8 +576,13 @@ export function ChatInputArea({
   hidePlanMode,
   placeholderOverride,
   surfaceClassName,
+  showScrollToLastPrompt,
+  onScrollToLastPrompt,
+  lastPromptScrollDirection,
+  showScrollToStart,
+  onScrollToStart,
 }: ChatInputAreaProps) {
-  const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled } = panelState;
+  const { resolvedSessionId, taskId, isAgentBusy } = panelState;
   const composerWorkspaceId = useComposerWorkspaceId(resolvedSessionId, taskId);
   const sessionState = panelState.session?.state ?? null;
   const canDrainQueue = canManuallyDrainQueue(panelState.pendingClarification, sessionState);
@@ -497,6 +592,23 @@ export function ChatInputArea({
     placeholderOverride,
   );
   const { implementPlanHandler, proceedStepName, proceed, isMoving } = planActions;
+  const composerProps = useComposerProps({
+    panelState,
+    composerWorkspaceId,
+    isMoving,
+    implementPlanHandler,
+    executor,
+    placeholder,
+    handleSubmit,
+    handleCancelTurn,
+    isSending,
+    showRequestChangesTooltip,
+    onRequestChangesTooltipDismiss,
+    onClarificationResolved,
+    hideSessionsDropdown,
+    minimalToolbar,
+    hidePlanMode,
+  });
   return (
     <div
       data-testid="chat-input-area"
@@ -516,57 +628,15 @@ export function ChatInputArea({
             isAgentBusy={isAgentBusy}
             isMoving={isMoving}
             queueChip={queueChip}
+            showScrollToLastPrompt={showScrollToLastPrompt}
+            onScrollToLastPrompt={onScrollToLastPrompt}
+            lastPromptScrollDirection={lastPromptScrollDirection}
+            showScrollToStart={showScrollToStart}
+            onScrollToStart={onScrollToStart}
           />
         )}
       >
-        <ChatInputContainer
-          ref={chatInputRef}
-          key={clarificationKey}
-          onSubmit={handleSubmit}
-          sessionId={resolvedSessionId}
-          taskId={taskId}
-          workspaceId={composerWorkspaceId}
-          entityReferencesEnabled
-          taskTitle={panelState.task?.title}
-          taskDescription={panelState.taskDescription ?? ""}
-          planModeEnabled={planModeEnabled}
-          planModeAvailable={panelState.planModeAvailable}
-          mcpServers={panelState.mcpServers}
-          onPlanModeChange={panelState.handlePlanModeChange}
-          isAgentBusy={isAgentBusy}
-          isStarting={panelState.isStarting}
-          isPreparingEnvironment={panelState.isPreparingEnvironment}
-          isMoving={isMoving}
-          isSending={isSending}
-          onCancel={handleCancelTurn}
-          placeholder={placeholder}
-          pendingClarification={panelState.pendingClarification}
-          onClarificationResolved={onClarificationResolved}
-          showRequestChangesTooltip={showRequestChangesTooltip}
-          onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-          pendingCommentsByFile={panelState.pendingCommentsByFile}
-          hasContextComments={
-            panelState.planComments.length > 0 ||
-            panelState.pendingPRFeedback.length > 0 ||
-            panelState.walkthroughComments.length > 0 ||
-            panelState.messageComments.length > 0
-          }
-          submitKey={panelState.chatSubmitKey}
-          hasAgentCommands={!!(panelState.agentCommands && panelState.agentCommands.length > 0)}
-          isFailed={panelState.isFailed}
-          needsRecovery={needsRecovery}
-          executorUnavailable={executor.unavailable}
-          executorUnavailableReason={executor.reason}
-          contextItems={panelState.contextItems}
-          planContextEnabled={panelState.planContextEnabled}
-          contextFiles={panelState.contextFiles}
-          onToggleContextFile={panelState.handleToggleContextFile}
-          onAddContextFile={panelState.handleAddContextFile}
-          onImplementPlan={implementPlanHandler}
-          hideSessionsDropdown={hideSessionsDropdown}
-          minimalToolbar={minimalToolbar}
-          hidePlanMode={hidePlanMode}
-        />
+        <ChatInputContainer ref={chatInputRef} key={clarificationKey} {...composerProps} />
       </QueueAffordance>
     </div>
   );

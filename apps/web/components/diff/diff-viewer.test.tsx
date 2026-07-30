@@ -84,6 +84,17 @@ describe("DiffViewer", () => {
     await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(renderCount));
   });
 
+  it("rerenders when walkthrough annotations are disabled", async () => {
+    const { rerender } = render(<DiffViewer data={data} enableWalkthroughAnnotations />);
+
+    await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(0));
+    const renderCount = fileDiffProps.length;
+
+    rerender(<DiffViewer data={data} enableWalkthroughAnnotations={false} />);
+
+    await waitFor(() => expect(fileDiffProps.length).toBeGreaterThan(renderCount));
+  });
+
   it("keeps simple hunk separators when full-content reparse rejects expansion", async () => {
     expansionState.canExpand = false;
 

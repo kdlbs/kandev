@@ -248,6 +248,19 @@ describe("mapUserSettingsResponse", () => {
   });
 });
 
+describe("transcript navigation settings", () => {
+  it("uses the requested defaults when settings are unavailable", () => {
+    const settings = mapUserSettingsResponse(null);
+
+    expect(settings).toMatchObject({
+      showAnchoredPromptBar: false,
+      showScrollToLastPrompt: true,
+      showScrollToStart: false,
+      showTranscriptAutoScrollControl: true,
+    });
+  });
+});
+
 describe("parseChangesPanelLayout", () => {
   it('returns "tree" for "tree"', () => {
     expect(parseChangesPanelLayout("tree")).toBe("tree");

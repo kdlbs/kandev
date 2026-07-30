@@ -145,6 +145,10 @@ const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
 // reconnection. It is display metadata and is not replayed to the provider.
 const SessionMetaKeyACPModelState = "acp_model_state"
 
+// SessionMetaKeyMCPAttachmentState records bounded, safe evidence about MCP
+// attachment for this task session and its immediate prior attempts.
+const SessionMetaKeyMCPAttachmentState = "mcp_attachment_state"
+
 // SessionMetaKeyGitCredentialSnapshot records the non-secret Git credential
 // routing contract that successfully launched or resumed a session.
 const SessionMetaKeyGitCredentialSnapshot = "git_credential_snapshot"
