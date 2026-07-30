@@ -40,6 +40,15 @@ test("desktop MCP status is available from the neutral composer trigger", async 
   await expect(trigger).toBeVisible();
   await trigger.hover();
   await expect(testPage.getByTestId("mcp-status-popover")).toBeVisible();
+  const popover = testPage.locator('[data-testid="mcp-status-popover"]:visible');
+  await expect(popover.getByText("kandev", { exact: true }).first()).toBeVisible();
+  await expect(
+    popover
+      .getByText(
+        /^(Unknown|Delivered — connection unverified|Connected|Active|Failed|Filtered|Unavailable)$/,
+      )
+      .first(),
+  ).toBeVisible();
   await prCapture.screenshot("desktop-mcp-status", {
     caption: "Desktop MCP connection status disclosure",
   });

@@ -244,10 +244,10 @@ func (s *MCPServerAttachment) applyEvidenceDetails(evidence MCPAttachmentEvidenc
 	if evidence.Target != "" {
 		s.Target = evidence.Target
 	}
-	if evidence.ConnectionID != "" {
+	if evidence.ConnectionID != "" && evidence.Kind != MCPAttachmentEvidenceConnectionClosed {
 		s.ConnectionID = evidence.ConnectionID
 	}
-	if evidence.ToolCount > 0 {
+	if evidence.Kind == MCPAttachmentEvidenceToolsListObserved {
 		s.ToolCount = evidence.ToolCount
 	}
 	if evidence.ReasonCode != "" {
@@ -274,20 +274,39 @@ func (s *MCPServerAttachment) applyEvidenceStatus(evidence MCPAttachmentEvidence
 			s.Status = MCPAttachmentStatusDelivered
 		}
 	case MCPAttachmentEvidenceInitializeObserved:
-		s.ConnectedAt = &when
-		if s.Status != MCPAttachmentStatusActive {
-			s.Status = MCPAttachmentStatusConnected
-		}
+		s.applyInitializeObserved(when)
 	case MCPAttachmentEvidenceToolsListObserved:
-		s.ToolsListedAt = &when
-		s.Status = MCPAttachmentStatusActive
+		s.applyToolsListObserved(when)
 	case MCPAttachmentEvidenceToolCallObserved:
 		s.UsedAt = &when
 	case MCPAttachmentEvidenceExplicitError:
 		s.FailedAt = &when
 		s.Status = MCPAttachmentStatusFailed
 	case MCPAttachmentEvidenceConnectionClosed:
+		s.applyConnectionClosed(when, evidence.ConnectionID)
+	}
+}
+
+func (s *MCPServerAttachment) applyInitializeObserved(when time.Time) {
+	s.ConnectedAt = &when
+	if s.Status != MCPAttachmentStatusActive && s.Status != MCPAttachmentStatusFailed {
+		s.Status = MCPAttachmentStatusConnected
+	}
+}
+
+func (s *MCPServerAttachment) applyToolsListObserved(when time.Time) {
+	s.ToolsListedAt = &when
+	if s.Status != MCPAttachmentStatusFailed {
+		s.Status = MCPAttachmentStatusActive
+	}
+}
+
+func (s *MCPServerAttachment) applyConnectionClosed(when time.Time, connectionID string) {
+	if connectionID == "" || connectionID == s.ConnectionID {
 		s.DisconnectedAt = &when
+		if s.Status == MCPAttachmentStatusActive {
+			s.Status = MCPAttachmentStatusConnected
+		}
 	}
 }
 
@@ -325,6 +344,7 @@ var (
 	// reveal more configuration detail than a release diagnostic needs.
 	mcpLabeledConfigPattern = regexp.MustCompile(`(?i)\b(?:headers?|env|environment|args?|arguments|command)\s*[:=]\s*\S+`)
 	mcpArgumentsPattern     = regexp.MustCompile(`(?i)\b(?:args?|arguments|command)\s*[:=]\s*[^\r\n]*`)
+	mcpAbsolutePathPattern  = regexp.MustCompile(`(^|[\s"'(=])/(?:[^\s"'<>]+)`)
 )
 
 // SanitizeMCPNetworkTarget retains only a network target's scheme and host.
@@ -352,6 +372,7 @@ func SanitizeMCPErrorSummary(summary string) string {
 	summary = mcpArgumentsPattern.ReplaceAllString(summary, "<redacted configuration>")
 	summary = mcpLabeledConfigPattern.ReplaceAllString(summary, "<redacted configuration>")
 	summary = routingerr.Sanitize(summary)
+	summary = mcpAbsolutePathPattern.ReplaceAllString(summary, "${1}<redacted path>")
 	summary = mcpURLPattern.ReplaceAllStringFunc(summary, SanitizeMCPNetworkTarget)
 	if len(summary) > MaxMCPAttachmentErrorSummaryBytes {
 		return summary[:MaxMCPAttachmentErrorSummaryBytes]

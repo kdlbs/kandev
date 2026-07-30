@@ -18,6 +18,10 @@ import (
 
 const kandevMCPServerName = "kandev"
 
+// PublishesMCPAttachmentResults reports that this adapter emits attachment
+// results for the servers that survive its own capability filtering.
+func (a *Adapter) PublishesMCPAttachmentResults() bool { return true }
+
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
 	a.mu.Lock()

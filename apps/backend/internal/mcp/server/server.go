@@ -97,6 +97,7 @@ type Server struct {
 	running            bool
 	attachmentMu       sync.RWMutex
 	attachmentAttempt  streams.MCPAttachmentAttempt
+	attachmentAttempts map[string]streams.MCPAttachmentAttempt
 	attachmentReporter func(streams.MCPAttachmentEvidence)
 }
 
@@ -157,6 +158,7 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 		disableAskQuestion: disableAskQuestion,
 		mode:               mcpMode,
 		logger:             log.WithFields(zap.String("component", "mcp-server")),
+		attachmentAttempts: make(map[string]streams.MCPAttachmentAttempt),
 	}
 
 	// Set up optional file logger for MCP debug traces
@@ -181,7 +183,7 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 		server.WithHooks(hooks),
 	)
 	hooks.AddOnRegisterSession(func(_ context.Context, session server.ClientSession) {
-		s.observeMCPConnection(session.SessionID(), streams.MCPAttachmentEvidenceSessionAccepted, 0, "")
+		s.registerMCPConnection(session.SessionID())
 	})
 	hooks.AddAfterInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest, _ *mcp.InitializeResult) {
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
@@ -196,7 +198,7 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceExplicitError, 0, err.Error())
 	})
 	hooks.AddOnUnregisterSession(func(_ context.Context, session server.ClientSession) {
-		s.observeMCPConnection(session.SessionID(), streams.MCPAttachmentEvidenceConnectionClosed, 0, "")
+		s.unregisterMCPConnection(session.SessionID())
 	})
 	s.registerTools()
 	s.running = true
@@ -223,12 +225,49 @@ func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
 
 func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
 	s.attachmentMu.RLock()
-	attempt := s.attachmentAttempt
+	attempt, ok := s.attachmentAttempts[connectionID]
 	reporter := s.attachmentReporter
 	s.attachmentMu.RUnlock()
+	if !ok || reporter == nil || attempt.AttemptID == "" {
+		return
+	}
+	s.reportMCPConnection(reporter, attempt, connectionID, kind, toolCount, summary)
+}
+
+func (s *Server) registerMCPConnection(connectionID string) {
+	s.attachmentMu.Lock()
+	attempt := s.attachmentAttempt
+	reporter := s.attachmentReporter
+	if connectionID != "" && attempt.AttemptID != "" {
+		s.attachmentAttempts[connectionID] = attempt
+	}
+	s.attachmentMu.Unlock()
 	if reporter == nil || attempt.AttemptID == "" {
 		return
 	}
+	s.reportMCPConnection(reporter, attempt, connectionID, streams.MCPAttachmentEvidenceSessionAccepted, 0, "")
+}
+
+func (s *Server) unregisterMCPConnection(connectionID string) {
+	s.attachmentMu.Lock()
+	attempt, ok := s.attachmentAttempts[connectionID]
+	reporter := s.attachmentReporter
+	delete(s.attachmentAttempts, connectionID)
+	s.attachmentMu.Unlock()
+	if !ok || reporter == nil || attempt.AttemptID == "" {
+		return
+	}
+	s.reportMCPConnection(reporter, attempt, connectionID, streams.MCPAttachmentEvidenceConnectionClosed, 0, "")
+}
+
+func (s *Server) reportMCPConnection(
+	reporter func(streams.MCPAttachmentEvidence),
+	attempt streams.MCPAttachmentAttempt,
+	connectionID string,
+	kind streams.MCPAttachmentEvidenceKind,
+	toolCount int,
+	summary string,
+) {
 	reporter(streams.MCPAttachmentEvidence{
 		AttemptID:    attempt.AttemptID,
 		ServerName:   "kandev",

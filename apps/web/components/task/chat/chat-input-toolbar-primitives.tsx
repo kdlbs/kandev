@@ -215,6 +215,16 @@ const mcpStatusColor: Record<string, string> = {
   unknown: "bg-muted-foreground/50",
 };
 
+const mcpStatusLabel: Record<string, string> = {
+  active: "Active",
+  connected: "Connected",
+  delivered: "Delivered — connection unverified",
+  failed: "Failed",
+  filtered: "Filtered",
+  unavailable: "Unavailable",
+  unknown: "Unknown",
+};
+
 export function McpIndicator({
   mcpServers,
   attachmentHistory,
@@ -225,9 +235,11 @@ export function McpIndicator({
   const usesTouchDrawer = useTouchDrawer();
   const hasMcp = mcpServers.length > 0;
   const Icon = hasMcp ? IconPlugConnected : IconPlugConnectedX;
+  const observedServers = attachmentHistory?.current.servers;
   const servers =
-    attachmentHistory?.current.servers ??
-    mcpServers.map((name) => ({ name, status: "unknown" as const, summary: undefined }));
+    observedServers && observedServers.length > 0
+      ? observedServers
+      : mcpServers.map((name) => ({ name, status: "unknown" as const, summary: undefined }));
   const statusList = hasMcp ? (
     <div className="space-y-1">
       <div className="font-medium">MCP servers</div>
@@ -238,8 +250,12 @@ export function McpIndicator({
               "h-2 w-2 shrink-0 rounded-full",
               mcpStatusColor[server.status] ?? mcpStatusColor.unknown,
             )}
+            aria-hidden="true"
           />
           <span className="truncate">{server.name}</span>
+          <span className="text-muted-foreground">
+            {mcpStatusLabel[server.status] ?? "Unknown"}
+          </span>
           {server.summary && <span className="text-muted-foreground">{server.summary}</span>}
         </div>
       ))}

@@ -372,6 +372,9 @@ func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.
 }
 
 func (s *Server) publishMCPAttachmentResult(attemptID string, servers []types.McpServer, err error) {
+	if adapter, ok := s.procMgr.GetAdapter().(mcpAttachmentResultPublisher); ok && adapter.PublishesMCPAttachmentResults() {
+		return
+	}
 	kind := streams.MCPAttachmentEvidenceSessionAccepted
 	reasonCode := ""
 	summary := ""
@@ -383,6 +386,13 @@ func (s *Server) publishMCPAttachmentResult(attemptID string, servers []types.Mc
 	for _, mcpServer := range servers {
 		s.procMgr.PublishMCPAttachment(mcpAttachmentEvidence(attemptID, mcpServer, kind, reasonCode, summary))
 	}
+}
+
+// mcpAttachmentResultPublisher identifies adapters that emit per-server
+// delivery and session-result evidence after their own MCP capability filter.
+// Generic adapters still receive result evidence from this API boundary.
+type mcpAttachmentResultPublisher interface {
+	PublishesMCPAttachmentResults() bool
 }
 
 func mcpAttachmentEvidence(

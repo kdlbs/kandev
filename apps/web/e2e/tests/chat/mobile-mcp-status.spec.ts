@@ -30,6 +30,12 @@ test("mobile MCP status opens in a contained Drawer", async ({
   const drawer = testPage.getByTestId("mcp-status-drawer");
   await expect(drawer).toBeVisible();
   await expect(drawer.getByText("MCP servers", { exact: true })).toBeVisible();
+  await expect(drawer.getByText("kandev", { exact: true })).toBeVisible();
+  await expect(
+    drawer.getByText(
+      /^(Unknown|Delivered — connection unverified|Connected|Active|Failed|Filtered|Unavailable)$/,
+    ),
+  ).toBeVisible();
   await expect
     .poll(() =>
       testPage.evaluate(

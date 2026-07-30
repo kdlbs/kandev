@@ -259,6 +259,13 @@ func TestHandleWSNewSession_UsesExtendedDeadline(t *testing.T) {
 	if resp.Type != ws.MessageTypeResponse {
 		t.Fatalf("response type = %q, want %q", resp.Type, ws.MessageTypeResponse)
 	}
+	var payload NewSessionResponse
+	if err := resp.ParsePayload(&payload); err != nil {
+		t.Fatalf("ParsePayload: %v", err)
+	}
+	if !payload.Success || payload.SessionID != "session-1" {
+		t.Fatalf("response payload = %+v", payload)
+	}
 	const want = 2 * time.Minute
 	if capture.remaining < want-time.Second || capture.remaining > want {
 		t.Fatalf("session/new deadline = %v from now, want about %v", capture.remaining, want)
@@ -451,6 +458,10 @@ type mcpCaptureAdapter struct {
 	loadSessionServers []types.McpServer
 }
 
+type mcpResultCaptureAdapter struct{ mcpCaptureAdapter }
+
+func (*mcpResultCaptureAdapter) PublishesMCPAttachmentResults() bool { return true }
+
 type newSessionDeadlineCaptureAdapter struct {
 	promptErrorAdapter
 	remaining time.Duration
@@ -474,6 +485,22 @@ func (a *mcpCaptureAdapter) LoadSession(_ context.Context, sessionID string, ser
 	a.sessionID = sessionID
 	a.loadSessionServers = append([]types.McpServer(nil), servers...)
 	return nil
+}
+
+func TestPublishMCPAttachmentResultDoesNotDuplicateAdapterFilteredEvidence(t *testing.T) {
+	s := newTestServer(t)
+	s.procMgr.SetAdapterForTest(&mcpResultCaptureAdapter{})
+
+	s.publishMCPAttachmentResult("attempt-1", []types.McpServer{
+		{Name: "kandev", Type: "http", URL: "https://kandev.example/mcp"},
+		{Name: "kandev", Type: "sse", URL: "https://kandev.example/sse"},
+	}, nil)
+
+	select {
+	case event := <-s.procMgr.GetUpdates():
+		t.Fatalf("unexpected generic attachment result: %+v", event)
+	default:
+	}
 }
 
 func (a *promptErrorAdapter) PrepareEnvironment() (map[string]string, error) {

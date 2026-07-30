@@ -49,6 +49,61 @@ func TestMCPAttachmentHistoryUsesStrongestEvidenceForServerStatus(t *testing.T) 
 	}
 }
 
+func TestMCPAttachmentHistoryDoesNotRestoreFailedServerFromLateObservations(t *testing.T) {
+	history := MCPAttachmentHistory{}
+	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-1"})
+
+	for _, evidence := range []MCPAttachmentEvidence{
+		{AttemptID: "attempt-1", ServerName: "kandev", Kind: MCPAttachmentEvidenceExplicitError},
+		{AttemptID: "attempt-1", ServerName: "kandev", Kind: MCPAttachmentEvidenceInitializeObserved},
+		{AttemptID: "attempt-1", ServerName: "kandev", Kind: MCPAttachmentEvidenceToolsListObserved, ToolCount: 2},
+	} {
+		if !history.Apply(evidence) {
+			t.Fatal("Apply() rejected current evidence")
+		}
+	}
+
+	server, ok := history.CurrentServer("kandev")
+	if !ok || server.Status != MCPAttachmentStatusFailed {
+		t.Fatalf("server = %+v, want failed", server)
+	}
+}
+
+func TestMCPAttachmentHistoryUpdatesToolCountToZero(t *testing.T) {
+	history := MCPAttachmentHistory{}
+	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-1"})
+	for _, toolCount := range []int{2, 0} {
+		if !history.Apply(MCPAttachmentEvidence{
+			AttemptID: "attempt-1", ServerName: "kandev", Kind: MCPAttachmentEvidenceToolsListObserved, ToolCount: toolCount,
+		}) {
+			t.Fatal("Apply() rejected current evidence")
+		}
+	}
+
+	server, ok := history.CurrentServer("kandev")
+	if !ok || server.ToolCount != 0 {
+		t.Fatalf("server = %+v, want tool_count 0", server)
+	}
+}
+
+func TestMCPAttachmentHistoryConnectionClosedOnlyClearsMatchingConnection(t *testing.T) {
+	history := MCPAttachmentHistory{}
+	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-1"})
+	history.Apply(MCPAttachmentEvidence{AttemptID: "attempt-1", ServerName: "kandev", Kind: MCPAttachmentEvidenceToolsListObserved, ConnectionID: "new"})
+	history.Apply(MCPAttachmentEvidence{AttemptID: "attempt-1", ServerName: "kandev", Kind: MCPAttachmentEvidenceConnectionClosed, ConnectionID: "old"})
+
+	server, _ := history.CurrentServer("kandev")
+	if server.Status != MCPAttachmentStatusActive || server.ConnectionID != "new" || server.DisconnectedAt != nil {
+		t.Fatalf("old connection closure changed current server: %+v", server)
+	}
+
+	history.Apply(MCPAttachmentEvidence{AttemptID: "attempt-1", ServerName: "kandev", Kind: MCPAttachmentEvidenceConnectionClosed, ConnectionID: "new"})
+	server, _ = history.CurrentServer("kandev")
+	if server.Status != MCPAttachmentStatusConnected || server.DisconnectedAt == nil {
+		t.Fatalf("matching connection closure did not downgrade server: %+v", server)
+	}
+}
+
 func TestMCPAttachmentHistorySupersedesEarlierAttemptInSameExecution(t *testing.T) {
 	history := MCPAttachmentHistory{}
 	history.StartAttempt(MCPAttachmentAttempt{AttemptID: "attempt-1", ExecutionID: "execution-1"})
@@ -120,5 +175,17 @@ func TestSanitizeMCPErrorSummaryRedactsLabeledConfiguration(t *testing.T) {
 		if strings.Contains(summary, forbidden) {
 			t.Fatalf("SanitizeMCPErrorSummary() leaked %q in %q", forbidden, summary)
 		}
+	}
+}
+
+func TestSanitizeMCPErrorSummaryRedactsAbsolutePaths(t *testing.T) {
+	summary := SanitizeMCPErrorSummary("cannot read /workspace/.env while connecting to https://endpoint.example.test/mcp")
+	for _, forbidden := range []string{"/workspace/.env", "/mcp"} {
+		if strings.Contains(summary, forbidden) {
+			t.Fatalf("SanitizeMCPErrorSummary() leaked %q in %q", forbidden, summary)
+		}
+	}
+	if !strings.Contains(summary, "https://endpoint.example.test") {
+		t.Fatalf("SanitizeMCPErrorSummary() removed safe endpoint host: %q", summary)
 	}
 }

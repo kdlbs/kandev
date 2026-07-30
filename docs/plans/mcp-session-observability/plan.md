@@ -374,7 +374,7 @@ After every task's targeted RED/GREEN evidence is recorded:
 1. `make -C apps/backend test`
 2. `cd apps && pnpm --filter @kandev/web typecheck`
 3. `cd apps && pnpm --filter @kandev/web lint`
-4. `cd apps/web && pnpm e2e:run tests/chat/mcp-status.spec.ts`
+4. `cd apps/web && pnpm e2e:run tests/chat/mcp-status.spec.ts -- --project=chromium`
 5. `cd apps/web && pnpm e2e:run tests/chat/mobile-mcp-status.spec.ts -- --project=mobile-chrome`
 6. `node --test scripts/validate-public-docs.test.mjs`
 7. `node scripts/validate-public-docs.mjs`

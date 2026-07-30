@@ -68,6 +68,22 @@ func TestFilterMcpServersWithDecisionsReportsFilteredAndDuplicateServers(t *test
 	}
 }
 
+func TestFilterMcpServersWithDecisionsMarksSupportedDuplicateAsFiltered(t *testing.T) {
+	log := newTestLoggerForMcp()
+	servers := []types.McpServer{
+		{Name: "kandev", Type: "http", URL: "https://kandev.example/mcp"},
+		{Name: "kandev", Type: "sse", URL: "https://kandev.example/sse"},
+	}
+
+	selected, decisions := filterMcpServersWithDecisions(servers, acp.McpCapabilities{Http: true, Sse: true}, log)
+	if len(selected) != 1 || selected[0].Type != "http" {
+		t.Fatalf("selected = %+v, want one HTTP kandev server", selected)
+	}
+	if decisions[1].Included || decisions[1].ReasonCode != mcpFilterReasonDuplicateName {
+		t.Fatalf("duplicate decision = %+v", decisions[1])
+	}
+}
+
 // --- mapToEnvVars ---
 
 func TestMapToEnvVars_Empty(t *testing.T) {

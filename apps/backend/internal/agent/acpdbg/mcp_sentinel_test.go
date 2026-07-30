@@ -14,9 +14,9 @@ func TestMCPSentinelRecordsOnlyProtocolMilestones(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sentinel.jsonl")
 	recorder, err := NewRecorder(path)
 	require.NoError(t, err)
+	t.Cleanup(func() { _ = recorder.Close() })
 	sentinel := NewMCPSentinel(recorder)
-	defer sentinel.Close()
-	defer func() { _ = recorder.Close() }()
+	t.Cleanup(sentinel.Close)
 
 	for _, method := range []string{"initialize", "tools/list", "tools/call"} {
 		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":{}}`)
