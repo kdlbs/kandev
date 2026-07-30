@@ -10,6 +10,7 @@ import { useSessionCommits } from "@/hooks/domains/session/use-session-commits";
 import { useCommitDiff } from "@/hooks/domains/session/use-commit-diff";
 import { usePanelActions } from "@/hooks/use-panel-actions";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
+import { formatRelativeTime } from "@/lib/utils";
 import type { FileInfo } from "@/lib/state/store";
 
 type CommitDetailPanelProps = {
@@ -23,20 +24,6 @@ type CommitDiffViewProps = {
   onOpenFile?: (path: string) => void;
   wordWrap?: boolean;
 };
-
-function formatRelativeTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMin = Math.floor(diffMs / 60000);
-  if (diffMin < 1) return "just now";
-  if (diffMin < 60) return `${diffMin} minute${diffMin !== 1 ? "s" : ""} ago`;
-  const diffHours = Math.floor(diffMin / 60);
-  if (diffHours < 24) return `${diffHours} hour${diffHours !== 1 ? "s" : ""} ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 30) return `${diffDays} day${diffDays !== 1 ? "s" : ""} ago`;
-  return date.toLocaleDateString();
-}
 
 function getInitials(name: string): string {
   return name
