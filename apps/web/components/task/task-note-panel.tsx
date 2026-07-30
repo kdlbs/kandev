@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useRef } from "react";
+import { memo, useCallback, useEffect, useRef } from "react";
 import dynamic from "@/lib/routing/client-dynamic";
 import { IconFileText, IconLoader2, IconRobot } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
@@ -9,6 +9,7 @@ import { TaskNotePanelHeader } from "./task-note-panel-header";
 import { useTaskNote } from "@/hooks/domains/session/use-task-note";
 import { useNoteSessionId } from "@/hooks/domains/session/use-note-session-id";
 import { useNoteActions } from "@/hooks/domains/kanban/use-note-actions";
+import { useToast } from "@/components/toast-provider";
 
 const NoteEditor = dynamic(
   () =>
@@ -32,7 +33,7 @@ export const TaskNotePanel = memo(function TaskNotePanel({
   taskId,
   visible = true,
 }: TaskNotePanelProps) {
-  const { note, draftContent, setDraftContent, editorKey, isLoading } = useTaskNote(taskId, {
+  const { note, draftContent, setDraftContent, editorKey, isLoading, error } = useTaskNote(taskId, {
     visible,
   });
   const resolvedSessionId = useNoteSessionId(taskId);
@@ -41,6 +42,11 @@ export const TaskNotePanel = memo(function TaskNotePanel({
     taskId,
   });
   const editorWrapperRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (error) toast({ description: error, variant: "error" });
+  }, [error, toast]);
 
   const handleEmptyStateClick = useCallback(() => {
     const el = editorWrapperRef.current?.querySelector(".ProseMirror");
