@@ -88,12 +88,15 @@ spec: "../../specs/office/automations-settings.md"
      disabled option here since this is a plain native select, not a chip
      picker).
    - "Add repository" button appends a new row and immediately fills it with
-     the next available (not-yet-selected) repository — there is no
-     unfilled/placeholder row state to represent, since `RepositorySelection`
-     only has `{kind:"registered", id}` / `{kind:"discovered", path}`
-     variants and every row must resolve to one of them. The button disables
-     once every known repository (registered + discovered) is already used,
-     since there's nothing left to fill a new row with.
+     the next available (not-yet-selected) repository. `RepositorySelection`
+     retains its transient `{kind:"none"}` variant for the single-picker
+     fallback below, but the repeatable rows never produce one — each row's
+     `onChange`/`addRow` handler bails out on `kind === "none"` (an
+     unreachable defensive guard here, since `pickSelectionFromOptionId`
+     only returns it for the `"__none__"` sentinel or a stale/unresolvable
+     ID, neither of which this picker offers as an option). The button
+     disables once every known repository (registered + discovered) is
+     already used, since there's nothing left to fill a new row with.
    - Per-row remove control; removing the last row is allowed (results in an
      empty array, handled by the workspace-fallback behavior documented in
      `config-section.tsx`'s helper text below the picker).
@@ -137,7 +140,12 @@ spec: "../../specs/office/automations-settings.md"
   registers only the discovered ones and promotes just those rows.
 - With a `github_pr` condition selected, the repository picker renders as the
   single dropdown (regardless of executor profile), is disabled, and shows
-  "PR triggers always use the PR's own repository."
+  "PR triggers always use the PR's own repository." Any `repository_ids`
+  left in the saved payload from before the trigger was switched to
+  `github_pr` are inert: the orchestrator's `resolveAutomationRepository`
+  checks trigger type first and resolves from the PR's own trigger data
+  unconditionally for `github_pr`, never reading `RepositoryIDs` (task 02;
+  see `TestResolveAutomationRepository_GitHubPRIgnoresConfiguredRepositoryIDs`).
 
 ## Verification
 

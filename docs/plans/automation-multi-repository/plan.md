@@ -146,8 +146,10 @@ files, both consume the same contract), then E2E last.
 
 ### `apps/web/components/automations/config-section.tsx`
 
-- `RepositorySelection`: drop the `{kind:"none"}` variant (a per-row concept
-  doesn't apply once rows are a list — empty list == "none" == "Auto").
+- `RepositorySelection` retains its `{kind:"none"}` variant — still needed by
+  the single-picker fallback branch below — but the repeatable multi-row
+  picker never produces one (each row is always fully resolved the moment
+  it's added).
 - `ConfigSectionProps`: `repositorySelection: RepositorySelection` →
   `repositorySelections: RepositorySelection[]`; `onRepositoryChange` →
   `onRepositoriesChange: (selections: RepositorySelection[]) => void`.
@@ -170,25 +172,29 @@ files, both consume the same contract), then E2E last.
     built via `buildRepositoryItems`, marking repos already chosen in
     another row analogous to the task-creation dialog's "Already added"
     marker) plus a trailing "Add repository" button. Each click appends a
-    row pre-filled with the next not-yet-selected repository — there is no
-    unfilled/placeholder row state, since `RepositorySelection` only has
-    `{kind:"registered", id}` / `{kind:"discovered", path}` variants, so the
-    button disables once every known repo is already selected. Removing the
-    last remaining row is allowed (falls back to an empty list, which the
-    orchestrator resolves to the workspace's first repository — stated in
-    helper text beside the control).
+    row pre-filled with the next not-yet-selected repository — `onChange`/
+    `addRow` bail out on `kind === "none"` (an unreachable defensive guard
+    here, since `pickSelectionFromOptionId` only returns it for the
+    `"__none__"` sentinel or a stale ID, neither offered by this picker), so
+    every row is always fully resolved. The button disables once every
+    known repo is already selected. Removing the last remaining row is
+    allowed (falls back to an empty list, which the orchestrator resolves
+    to the workspace's first repository — stated in helper text beside the
+    control).
   - incompatible (single-repo executor, or a `github_pr` trigger): render
     the existing single `SelectField` bound to `repositorySelections[0] ??
-    {kind:"none"}` (using a `{kind:"none"}` UI-only sentinel local to this
-    branch, not part of the exported type), `onChange` replaces the whole
-    array with `[]` or `[selection]`. For `github_pr` specifically,
-    additionally disable the dropdown and show "PR triggers always use the
-    PR's own repository." — the PR's own repo always wins regardless of
-    what's selected.
+    {kind:"none"}`, `onChange` replaces the whole array with `[]` or
+    `[selection]`. For `github_pr` specifically, additionally disable the
+    dropdown and show "PR triggers always use the PR's own repository." —
+    the backend's `resolveAutomationRepository` (orchestrator) checks the
+    trigger type first and, for `github_pr`, resolves the repository from
+    the PR's own trigger data unconditionally, never reading
+    `RepositoryIDs` — so a stale multi-repo selection left over from before
+    the trigger was switched to `github_pr` has no effect. Covered by
+    `TestResolveAutomationRepository_GitHubPRIgnoresConfiguredRepositoryIDs`.
 - `pickSelectionFromOptionId`/`buildRepositoryItems`/`selectionToOptionId`:
-  keep signatures, just drop the `{kind:"none"}` branch from
-  `pickSelectionFromOptionId`'s return type (return `null` instead) and adjust
-  callers.
+  unchanged signatures; `RepositorySelection` keeps its `{kind:"none"}`
+  variant for the single-picker branch above.
 
 ### `apps/web/components/automations/automation-payload.ts`
 

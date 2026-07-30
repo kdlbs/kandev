@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -85,5 +86,34 @@ func TestResolveAutomationRepository_EmptyListFallsBackToWorkspace(t *testing.T)
 
 	if len(resolved) != 1 || resolved[0].RepositoryID != "repo-only" {
 		t.Fatalf("expected fallback to the workspace's only repository, got %+v", resolved)
+	}
+}
+
+// TestResolveAutomationRepository_GitHubPRIgnoresConfiguredRepositoryIDs is
+// the regression guard for a CodeRabbit review finding on PR #2077: the
+// frontend disables (but does not clear) the repository picker for
+// github_pr triggers, so a previously-configured multi-repo selection can
+// stay in the saved payload. Prove the backend never reads it — the PR's
+// own repository (from trigger data) always wins, regardless of what
+// RepositoryIDs holds.
+func TestResolveAutomationRepository_GitHubPRIgnoresConfiguredRepositoryIDs(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedAutomationWorkspaceRepos(t, repo, "ws-1", []string{"repo-a", "repo-b", "repo-pr"})
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.repositoryResolver = stubReviewResolver{repoID: "repo-pr", baseBranch: "main-repo-pr"}
+
+	a := &automation.Automation{WorkspaceID: "ws-1", RepositoryIDs: []string{"repo-a", "repo-b"}}
+	evt := &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeGitHubPR,
+		TriggerData: json.RawMessage(`{"repo":"owner/name","head_branch":"feature/x","base_branch":"main-repo-pr"}`),
+	}
+
+	resolved := svc.resolveAutomationRepository(context.Background(), a, evt)
+
+	if len(resolved) != 1 || resolved[0].RepositoryID != "repo-pr" {
+		t.Fatalf("expected only the PR's own repository (repo-pr), got %+v", resolved)
+	}
+	if resolved[0].CheckoutBranch != "feature/x" {
+		t.Errorf("expected checkout branch from the PR's head branch, got %q", resolved[0].CheckoutBranch)
 	}
 }
