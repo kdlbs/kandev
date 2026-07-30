@@ -1,10 +1,6 @@
 "use client";
 
-import {
-  IconGitPullRequest,
-  IconGitPullRequestClosed,
-  IconGitMerge,
-} from "@tabler/icons-react";
+import { IconGitPullRequest, IconGitPullRequestClosed, IconGitMerge } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 import { Spinner } from "@kandev/ui/spinner";
 import { cn, formatRelativeTime } from "@/lib/utils";
