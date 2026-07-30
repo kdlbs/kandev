@@ -132,6 +132,23 @@
       ]
     },
     {
+      "id": "task-notes",
+      "audiences": ["user"],
+      "stability": "stable",
+      "docs": ["tasks-and-workflows"],
+      "sources": [
+        "apps/backend/internal/task/service/note_service.go",
+        "apps/backend/internal/mcp/server/handlers.go",
+        "apps/web/components/task/task-note-panel.tsx"
+      ],
+      "tests": [
+        "apps/backend/internal/task/service/note_service_test.go",
+        "apps/backend/internal/mcp/handlers/task_note_test.go",
+        "apps/web/hooks/domains/session/use-task-note.test.ts"
+      ],
+      "mcpTools": ["get_task_note_kandev", "update_task_note_kandev"]
+    },
+    {
       "id": "developer-workbench-and-git",
       "audiences": ["user"],
       "stability": "stable",
