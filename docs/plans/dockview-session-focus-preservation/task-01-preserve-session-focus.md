@@ -1,7 +1,7 @@
 ---
 id: "01-preserve-session-focus"
 title: "Preserve session focus during Chat reconciliation"
-status: pending
+status: done
 wave: 1
 depends_on: []
 parallelism: sequential
@@ -50,8 +50,10 @@ cd apps/web && pnpm e2e:run tests/layout/saved-layout-session-isolation.spec.ts 
 
 ## Files Likely Touched
 
+- `apps/web/components/task/dockview-session-tab-activation.ts`
 - `apps/web/components/task/dockview-session-tabs.ts`
 - `apps/web/components/task/dockview-session-tabs.test.ts`
+- `apps/web/components/task/dockview-session-tabs.test-utils.ts`
 - `apps/web/e2e/tests/layout/saved-layout-session-isolation.spec.ts`
 
 ## Dependencies
@@ -91,3 +93,21 @@ Red-Green-Refactor cycle.
 Report the RED assertion and activation sequence, the minimum production
 change, exact files changed, unit/typecheck/E2E results, task and plan status
 updates, and any remaining Dockview focus ambiguity.
+
+## Results
+
+- RED unit: the center selection and global focus both became `plan`, and the
+  activation sequence recorded Plan.
+- RED E2E: the production-build screenshot showed Plan selected, Agent
+  inactive, Files unfocused, and the unseen Plan indicator consumed.
+- GREEN implementation: the session is inserted at index 0, inherits Chat's
+  group-local selection before Chat removal, and then yields global focus back
+  to the captured live panel.
+- Unit: 44 tests passed across `dockview-session-tabs.test.ts` and
+  `dockview-session-tab-activation.test.ts`.
+- Typecheck: `pnpm run typecheck` passed.
+- E2E: the focused Chromium production-build scenario passed, including Agent
+  selection, Files global focus, preserved Plan indicator, and exactly one
+  session panel.
+- Mobile/tablet: no rendered or responsive path changed; these viewports do not
+  mount `DockviewDesktopLayout` or execute the repaired reconciliation hook.

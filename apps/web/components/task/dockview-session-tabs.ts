@@ -18,6 +18,9 @@ import type { TaskPR } from "@/lib/types/github";
 import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prTaskKey } from "@/components/github/pr-utils";
 import {
+  activateChatReplacement,
+  isChatPlaceholderSelected,
+  restorePreservedActivePanel,
   shouldActivateSessionPanel,
   shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
@@ -370,7 +373,9 @@ export function resolveInitialPosition(api: DockviewApi): AddPanelOptions["posit
   // centerGroupId goes stale, and the session panel gets appended as a new row,
   // collapsing the horizontal default layout into a vertical stack.
   const chatGroupId = api.getPanel("chat")?.group?.id;
-  if (chatGroupId && isCenterCandidateGroupId(chatGroupId)) return { referenceGroup: chatGroupId };
+  if (chatGroupId && isCenterCandidateGroupId(chatGroupId)) {
+    return { referenceGroup: chatGroupId, index: 0 };
+  }
   const { centerGroupId } = useDockviewStore.getState();
   const centerGroupExists =
     centerGroupId &&
@@ -752,6 +757,7 @@ export function runAutoSessionTabEffect(
 
   const initialPosition = resolveInitialPosition(api);
   const sessionPanelExistedBefore = !!api.getPanel(`session:${effectiveSessionId}`);
+  const chatWasSelected = isChatPlaceholderSelected(api);
   // Preserve the restored/user-selected panel before adding and reordering the
   // session tab. Dockview's same-group move briefly activates a sibling even
   // with skipSetActive, so reading api.activePanel afterward loses this intent.
@@ -771,6 +777,12 @@ export function runAutoSessionTabEffect(
     refs.sessionTabCreatedRef.current,
   );
 
+  // Chat is a placeholder for the real Agent panel. Transfer its group-local
+  // selection before removing it so Dockview never chooses a neighboring Plan
+  // tab as the successor. The session is inserted at index 0 above, so the
+  // subsequent session-first normalization also has nothing active to move.
+  activateChatReplacement(api, effectiveSessionId, chatWasSelected);
+
   // Now that the session panel occupies the center group, drop the generic
   // "chat" placeholder. Order matters: removing chat first would empty and
   // destroy the center group, collapsing the horizontal layout.
@@ -784,6 +796,8 @@ export function runAutoSessionTabEffect(
     refs,
     tid,
   );
+
+  restorePreservedActivePanel(api, activePanelIdBeforeEnsure, preserveActivePanel);
 
   const siblingAnchor: AddPanelOptions["position"] = activePanel
     ? { referenceGroup: activePanel.group.id }

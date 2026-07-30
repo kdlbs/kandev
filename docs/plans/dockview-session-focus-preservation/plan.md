@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/task-layout-profiles.md
 created: 2026-07-30
-status: draft
+status: completed
 ---
 
 # Implementation Plan: Preserve Dockview Session Focus During Reconciliation
@@ -106,7 +106,10 @@ navigating to the task, seed that environment's
 - right-top `activeView: "files"` and views `[files, changes]`; and
 - `activeGroup: "group-right-top"`.
 
-Open the task through the UI and assert after session reconciliation that:
+Open the task through the UI, create the agent-authored plan while the page is
+subscribed so its unseen indicator is armed, and use the existing E2E store
+bridge to replay the late session-list hydration that triggers Agent
+reconciliation. Assert afterward that:
 
 - the active session's Agent content is visible rather than Plan content;
 - Files remains the globally active Dockview panel;
@@ -132,7 +135,7 @@ desktop workbench, not a responsive composition or interaction change.
 
 Wave 1 (sequential):
 
-- [ ] [Task 01 — Preserve session focus](task-01-preserve-session-focus.md)
+- [x] [Task 01 — Preserve session focus](task-01-preserve-session-focus.md)
 
 ## Verification
 
