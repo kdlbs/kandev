@@ -51,6 +51,20 @@ function makeNote(overrides: Partial<TaskNote> = {}): TaskNote {
   };
 }
 
+const QUEUED_EDIT = "queued edit";
+
+// Sets a draft and advances partway through the debounce window (< 1500ms),
+// leaving the autosave still queued — shared by the flush-on-teardown tests.
+async function queueUnsavedEdit(result: { current: { setDraftContent: (v: string) => void } }) {
+  await act(async () => {
+    result.current.setDraftContent(QUEUED_EDIT);
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(500);
+  });
+  expect(mockUpdateTaskNote).not.toHaveBeenCalled();
+}
+
 function seedState(note: TaskNote | null = null) {
   storeState = {
     taskNotes: {
@@ -172,5 +186,77 @@ describe("useTaskNote", () => {
 
     expect(mockDeleteTaskNote).toHaveBeenCalledWith(TASK_ID);
     expect(mockSetTaskNote).toHaveBeenCalledWith(TASK_ID, null);
+  });
+});
+
+describe("useTaskNote autosave flush on teardown", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.clearAllMocks();
+    seedState();
+    mockGetTaskNote.mockResolvedValue(null);
+    mockUpdateTaskNote.mockResolvedValue(makeNote({ content: "Saved" }));
+    mockDeleteTaskNote.mockResolvedValue(undefined);
+  });
+
+  it("flushes a queued autosave when the task changes before the debounce fires", async () => {
+    seedState(makeNote({ content: "Seed note" }));
+    const { result, rerender } = renderHook(({ id }: { id: string }) => useTaskNote(id), {
+      initialProps: { id: TASK_ID },
+    });
+    await queueUnsavedEdit(result);
+
+    seedState(makeNote({ content: "Seed note", task_id: "task-2" }));
+    await act(async () => {
+      rerender({ id: "task-2" });
+    });
+
+    expect(mockUpdateTaskNote).toHaveBeenCalledWith(TASK_ID, QUEUED_EDIT, undefined);
+  });
+
+  it("flushes a queued autosave on unmount", async () => {
+    seedState(makeNote({ content: "Seed note" }));
+    const { result, unmount } = renderHook(() => useTaskNote(TASK_ID));
+    await queueUnsavedEdit(result);
+
+    await act(async () => {
+      unmount();
+    });
+
+    expect(mockUpdateTaskNote).toHaveBeenCalledWith(TASK_ID, QUEUED_EDIT, undefined);
+  });
+
+  it("resets the draft when switching to a task whose saved content coincidentally matches", async () => {
+    const SAME_CONTENT = "Same text";
+    const OTHER_TASK_ID = "task-2";
+    storeState = {
+      ...storeState,
+      taskNotes: {
+        byTaskId: {
+          [TASK_ID]: makeNote({ content: SAME_CONTENT }),
+          [OTHER_TASK_ID]: makeNote({
+            id: "note-2",
+            task_id: OTHER_TASK_ID,
+            content: SAME_CONTENT,
+          }),
+        },
+        loadingByTaskId: {},
+        savingByTaskId: {},
+      },
+    };
+    const { result, rerender } = renderHook(({ id }: { id: string }) => useTaskNote(id), {
+      initialProps: { id: TASK_ID },
+    });
+    await queueUnsavedEdit(result);
+
+    await act(async () => {
+      rerender({ id: OTHER_TASK_ID });
+    });
+
+    // Task A's leftover draft is flushed to task A, not silently carried
+    // into task B just because their saved content strings matched.
+    expect(mockUpdateTaskNote).toHaveBeenCalledWith(TASK_ID, QUEUED_EDIT, undefined);
+    expect(mockUpdateTaskNote).not.toHaveBeenCalledWith(OTHER_TASK_ID, QUEUED_EDIT, undefined);
+    expect(result.current.draftContent).toBe(SAME_CONTENT);
   });
 });
