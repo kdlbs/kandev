@@ -30,10 +30,12 @@ func newTestNoteHandlers(t *testing.T) (*TaskHandlers, *sqliterepo.Repository) {
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "task-note-handlers.db"))
 	require.NoError(t, err)
 	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() {
+		_ = sqlxDB.Close()
+	})
 	repo, cleanup, err := taskrepository.Provide(sqlxDB, sqlxDB, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		_ = sqlxDB.Close()
 		_ = cleanup()
 	})
 	log := newTestLogger(t)
@@ -99,6 +101,26 @@ func TestTaskNoteHandlers_UpsertAndDelete(t *testing.T) {
 	require.NoError(t, json.Unmarshal(resp.Payload, &deleted))
 	if !deleted[responseKeySuccess] {
 		t.Fatalf("expected success response, got %+v", deleted)
+	}
+}
+
+func TestTaskNoteHandlers_UpsertIgnoresClientSuppliedUpdatedBy(t *testing.T) {
+	h, repo := newTestNoteHandlers(t)
+	seedTaskForNoteHandler(t, repo, "task-1")
+
+	// A raw WebSocket client cannot reach the MCP note-update action
+	// (client.go rejects "mcp." actions), so this handler must not let a
+	// client-supplied updated_by spoof agent provenance.
+	resp, err := h.wsUpsertTaskNote(context.Background(), makeTaskNoteWSMessage(t, ws.ActionTaskNoteUpdate, map[string]interface{}{
+		"task_id":    "task-1",
+		"content":    "hello",
+		"updated_by": "agent",
+	}))
+	require.NoError(t, err)
+	var note map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &note))
+	if note["updated_by"] != "user" {
+		t.Fatalf("expected updated_by to be forced to user, got %+v", note["updated_by"])
 	}
 }
 

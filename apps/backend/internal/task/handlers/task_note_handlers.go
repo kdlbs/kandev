@@ -15,18 +15,20 @@ func (h *TaskHandlers) wsGetTaskNote(ctx context.Context, msg *ws.Message) (*ws.
 	return getTaskModelResponse(ctx, msg, h.noteService.GetNote, dto.TaskNoteFromModel, "Failed to get task note")
 }
 
-// wsUpsertTaskNote creates or replaces a task note.
+// wsUpsertTaskNote creates or replaces a task note from the web client. Only
+// the MCP path (handleUpdateTaskNote, gated off the raw WS by client.go's
+// "mcp." prefix check) may attribute a note to the agent — updated_by is
+// always "user" here regardless of client input.
 func (h *TaskHandlers) wsUpsertTaskNote(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID    string `json:"task_id"`
-		Content   string `json:"content"`
-		UpdatedBy string `json:"updated_by"`
+		TaskID  string `json:"task_id"`
+		Content string `json:"content"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 
-	note, err := h.noteService.UpsertNote(ctx, req.TaskID, req.Content, req.UpdatedBy)
+	note, err := h.noteService.UpsertNote(ctx, req.TaskID, req.Content, "user")
 	if err != nil {
 		if errors.Is(err, service.ErrTaskIDRequired) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
