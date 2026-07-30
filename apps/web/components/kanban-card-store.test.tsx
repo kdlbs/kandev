@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { defaultState } from "@/lib/state/default-state";
@@ -17,18 +18,20 @@ describe("KanbanCard repository state", () => {
     expect(() =>
       render(
         <ToastProvider>
-          <StateProvider
-            initialState={{
-              workspaces: { ...defaultState.workspaces, activeId: "workspace-1" },
-              repositories: { ...defaultState.repositories, itemsByWorkspaceId: {} },
-            }}
-          >
-            <KanbanCard
-              task={{ id: "task-1", title: "Task", workflowStepId: "step-1" }}
-              workspaceId="workspace-1"
-              externalLinkAvailability={{ jira: false, linear: false, sentry: false }}
-            />
-          </StateProvider>
+          <TooltipProvider>
+            <StateProvider
+              initialState={{
+                workspaces: { ...defaultState.workspaces, activeId: "workspace-1" },
+                repositories: { ...defaultState.repositories, itemsByWorkspaceId: {} },
+              }}
+            >
+              <KanbanCard
+                task={{ id: "task-1", title: "Task", workflowStepId: "step-1" }}
+                workspaceId="workspace-1"
+                externalLinkAvailability={{ jira: false, linear: false, sentry: false }}
+              />
+            </StateProvider>
+          </TooltipProvider>
         </ToastProvider>,
       ),
     ).not.toThrow();
