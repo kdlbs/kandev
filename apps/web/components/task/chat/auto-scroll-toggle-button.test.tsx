@@ -46,11 +46,11 @@ describe("AutoScrollToggleButton", () => {
     expect(button.getAttribute("aria-label")).toMatch(/turn off/i);
   });
 
-  it("shows the icon in pale green with no forbidden overlay when enabled", () => {
+  it("shows the icon in dark green, maximized to fill its box, when enabled", () => {
     renderButton("session-a");
     const icon = screen.getByTestId("auto-scroll-toggle-icon");
-    expect(icon.getAttribute("class")).toMatch(/text-green-400/);
-    expect(screen.queryByTestId("auto-scroll-toggle-forbidden-icon")).toBeNull();
+    expect(icon.getAttribute("class")).toMatch(/text-green-600/);
+    expect(icon.getAttribute("class")).toMatch(/h-6 w-6/);
   });
 
   it("clicking while enabled disables auto-scroll for the session", () => {
@@ -67,13 +67,11 @@ describe("AutoScrollToggleButton", () => {
     expect(button.getAttribute("aria-label")).toMatch(/turn on/i);
   });
 
-  it("shows the icon with no color and a forbidden overlay when disabled", () => {
+  it("shows the icon with no color when disabled", () => {
     enabledBySessionId = { "session-a": false };
     renderButton("session-a");
     const icon = screen.getByTestId("auto-scroll-toggle-icon");
-    expect(icon.getAttribute("class")).not.toMatch(/text-green-400/);
-    const forbiddenIcon = screen.getByTestId("auto-scroll-toggle-forbidden-icon");
-    expect(forbiddenIcon.getAttribute("aria-hidden")).toBe("true");
+    expect(icon.getAttribute("class")).not.toMatch(/text-green-600/);
   });
 
   it("clicking while disabled re-enables auto-scroll for the session", () => {

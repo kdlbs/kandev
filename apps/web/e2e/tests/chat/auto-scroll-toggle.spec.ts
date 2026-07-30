@@ -75,9 +75,7 @@ test.describe("Transcript auto-scroll toggle", () => {
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
 
     const icon = toggle.getByTestId("auto-scroll-toggle-icon");
-    const forbiddenIcon = toggle.getByTestId("auto-scroll-toggle-forbidden-icon");
-    await expect(icon).toHaveClass(/text-green-400/);
-    await expect(forbiddenIcon).toBeHidden();
+    await expect(icon).toHaveClass(/text-green-600/);
 
     // Sits immediately to the left of Share within the same right-aligned cluster.
     const shareButton = statusBar.getByTestId("share-task-button");
@@ -93,13 +91,11 @@ test.describe("Transcript auto-scroll toggle", () => {
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
-    await expect(icon).not.toHaveClass(/text-green-400/);
-    await expect(forbiddenIcon).toBeVisible();
+    await expect(icon).not.toHaveClass(/text-green-600/);
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
-    await expect(icon).toHaveClass(/text-green-400/);
-    await expect(forbiddenIcon).toBeHidden();
+    await expect(icon).toHaveClass(/text-green-600/);
   });
 
   test("disabling freezes the position and suppresses auto-scroll for new messages", async ({

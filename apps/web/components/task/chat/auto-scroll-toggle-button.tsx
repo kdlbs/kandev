@@ -1,6 +1,6 @@
 "use client";
 
-import { IconArrowBarToDown, IconBan } from "@tabler/icons-react";
+import { IconArrowBarToDown } from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -25,9 +25,9 @@ type Props = {
  * disabled. See message-list-native.tsx / message-list-virtuoso.tsx for the
  * renderer-side behavior driven by this preference.
  *
- * The icon renders pale green while enabled; disabling strips the color and
- * overlays a "forbidden" (ban) icon so the off state reads unambiguously
- * without relying on color alone.
+ * The icon renders dark green while enabled and reverts to the default
+ * muted color when disabled — the color swap alone carries the on/off
+ * signal.
  */
 export function AutoScrollToggleButton({ sessionId }: Props) {
   const enabled = useTranscriptAutoScrollEnabled(sessionId);
@@ -48,19 +48,10 @@ export function AutoScrollToggleButton({ sessionId }: Props) {
           aria-pressed={enabled}
           data-testid="auto-scroll-toggle-button"
         >
-          <span className="relative inline-flex h-3.5 w-3.5 items-center justify-center">
-            <IconArrowBarToDown
-              className={cn("h-3.5 w-3.5", enabled && "text-green-400")}
-              data-testid="auto-scroll-toggle-icon"
-            />
-            {!enabled && (
-              <IconBan
-                className="absolute inset-0 h-3.5 w-3.5"
-                aria-hidden="true"
-                data-testid="auto-scroll-toggle-forbidden-icon"
-              />
-            )}
-          </span>
+          <IconArrowBarToDown
+            className={cn("h-6 w-6", enabled && "text-green-600")}
+            data-testid="auto-scroll-toggle-icon"
+          />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
