@@ -183,6 +183,7 @@ export const test = backendFixture.extend<
       enable_preview_on_click: false,
       confirm_task_archive: true,
       mcp_task_agent_profile_default: "current_task",
+      pr_panel_placement: "agent",
       sidebar_views: [],
       saved_layouts: [],
       task_create_last_used: {
@@ -287,6 +288,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     enable_preview_on_click: false,
     confirm_task_archive: true,
     mcp_task_agent_profile_default: "current_task",
+    pr_panel_placement: "agent",
     sidebar_views: [],
     saved_layouts: [],
     kanban_view_mode: "",

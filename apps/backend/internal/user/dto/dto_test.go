@@ -120,6 +120,41 @@ func TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault(t *testing
 	}
 }
 
+func TestPRPanelPlacementDTOAndPatchSemantics(t *testing.T) {
+	for _, tt := range []struct {
+		value string
+		want  string
+	}{
+		{value: models.PRPanelPlacementRight, want: models.PRPanelPlacementRight},
+		{value: "future_value", want: models.PRPanelPlacementAgent},
+	} {
+		got := FromUserSettings(&models.UserSettings{PRPanelPlacement: tt.value}).PRPanelPlacement
+		if got != tt.want {
+			t.Fatalf("PRPanelPlacement = %q, want %q", got, tt.want)
+		}
+	}
+
+	t.Run("omitted value stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.PRPanelPlacement != nil {
+			t.Fatalf("PRPanelPlacement = %#v, want nil", req.PRPanelPlacement)
+		}
+	})
+
+	t.Run("explicit value is retained", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"pr_panel_placement":"right"}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.PRPanelPlacement == nil || *req.PRPanelPlacement != models.PRPanelPlacementRight {
+			t.Fatalf("PRPanelPlacement = %#v, want right", req.PRPanelPlacement)
+		}
+	})
+}
+
 func TestUpdateUserSettingsRequestMCPTaskAgentProfileDefaultPatchSemantics(t *testing.T) {
 	t.Run("omitted value stays nil", func(t *testing.T) {
 		var req UpdateUserSettingsRequest

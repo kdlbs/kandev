@@ -77,6 +77,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontFamily              *string
 	TerminalFontSize                *int
 	ChangesPanelLayout              *string
+	PRPanelPlacement                *string
 	SystemMetricsDisplay            *SystemMetricsDisplaySettingsPatch
 	AppStatusBarOrder               *models.AppStatusBarOrder
 	VoiceMode                       *models.VoiceModeSettings
@@ -210,6 +211,9 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 		return err
 	}
 	if err := applyChangesPanelLayout(settings, req.ChangesPanelLayout); err != nil {
+		return err
+	}
+	if err := applyPRPanelPlacement(settings, req.PRPanelPlacement); err != nil {
 		return err
 	}
 	applySystemMetricsDisplay(settings, req.SystemMetricsDisplay)
@@ -395,6 +399,18 @@ func applyChangesPanelLayout(settings *models.UserSettings, value *string) error
 		return errors.New("changes_panel_layout must be 'flat' or 'tree'")
 	}
 	settings.ChangesPanelLayout = v
+	return nil
+}
+
+func applyPRPanelPlacement(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	if v != models.PRPanelPlacementAgent && v != models.PRPanelPlacementRight {
+		return errors.New("pr_panel_placement must be 'agent' or 'right'")
+	}
+	settings.PRPanelPlacement = v
 	return nil
 }
 
@@ -684,6 +700,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"terminal_font_family":                settings.TerminalFontFamily,
 		"terminal_font_size":                  settings.TerminalFontSize,
 		"changes_panel_layout":                settings.ChangesPanelLayout,
+		"pr_panel_placement":                  models.NormalizePRPanelPlacement(settings.PRPanelPlacement),
 		"system_metrics_display":              settings.SystemMetricsDisplay,
 		"app_status_bar_order":                settings.AppStatusBarOrder,
 		"voice_mode":                          settings.VoiceMode,

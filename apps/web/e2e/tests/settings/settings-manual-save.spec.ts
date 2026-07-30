@@ -25,6 +25,44 @@ async function seedNotificationProvider(
 }
 
 test.describe("Settings manual save", () => {
+  test("persists the global PR tab placement only when Appearance is saved", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const initial = await apiClient.getUserSettings();
+    const initialPlacement = initial.settings.pr_panel_placement === "right" ? "right" : "agent";
+    const nextPlacement = initialPlacement === "right" ? "agent" : "right";
+
+    try {
+      await testPage.goto(APPEARANCE_PATH);
+      const placement = testPage.getByTestId("pr-panel-placement-select");
+      await placement.click();
+      await testPage
+        .getByRole("option", { name: nextPlacement === "right" ? "Right pane" : "Agent pane" })
+        .click();
+
+      await expect(testPage.getByTestId("pr-panel-placement-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "true",
+      );
+      expect((await apiClient.getUserSettings()).settings.pr_panel_placement).toBe(
+        initialPlacement,
+      );
+
+      const floatingSave = testPage.getByTestId("settings-floating-save");
+      await floatingSave.getByRole("button", { name: "Save changes" }).click();
+      await expect(floatingSave).not.toBeVisible({ timeout: 15_000 });
+      expect((await apiClient.getUserSettings()).settings.pr_panel_placement).toBe(nextPlacement);
+
+      await testPage.reload();
+      await expect(placement).toContainText(
+        nextPlacement === "right" ? "Right pane" : "Agent pane",
+      );
+    } finally {
+      await apiClient.saveUserSettings({ pr_panel_placement: initialPlacement });
+    }
+  });
+
   test("keeps Appearance changes local and guards dirty navigation", async ({
     testPage,
     apiClient,

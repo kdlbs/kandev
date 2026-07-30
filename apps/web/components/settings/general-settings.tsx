@@ -25,6 +25,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
+import type { PRPanelPlacement } from "@/lib/types/http";
 import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
@@ -142,15 +143,77 @@ function ChangesPanelLayoutCard({
   );
 }
 
+function PRPanelPlacementCard({
+  value,
+  isDirty,
+  onChange,
+}: {
+  value: PRPanelPlacement;
+  isDirty: boolean;
+  onChange: (value: PRPanelPlacement) => void;
+}) {
+  return (
+    <SettingsCard isDirty={isDirty} data-testid="pr-panel-placement-card">
+      <CardHeader>
+        <CardTitle className="text-base">Pull Request Tabs</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="space-y-2">
+          <Label htmlFor="pr-panel-placement">Open pull requests in</Label>
+          <Select value={value} onValueChange={(next) => onChange(next as PRPanelPlacement)}>
+            <SelectTrigger
+              id="pr-panel-placement"
+              data-testid="pr-panel-placement-select"
+              data-settings-dirty={isDirty}
+              className="cursor-pointer"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="agent">Agent pane</SelectItem>
+              <SelectItem value="right">Right pane</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Controls where GitHub pull request tabs open or focus on desktop. Existing tabs move
+            only when opened again.
+          </p>
+        </div>
+      </CardContent>
+    </SettingsCard>
+  );
+}
+
 function createAppearanceSavedState(
   theme: Theme,
-  userSettings: Pick<UserSettingsState, "changesPanelLayout" | "systemMetricsDisplay">,
+  userSettings: Pick<
+    UserSettingsState,
+    "changesPanelLayout" | "prPanelPlacement" | "systemMetricsDisplay"
+  >,
 ) {
   return {
     theme,
     changesPanelLayout: userSettings.changesPanelLayout,
+    prPanelPlacement: userSettings.prPanelPlacement,
     showMetrics: userSettings.systemMetricsDisplay.showInTopbar,
     simplifiedMetrics: userSettings.systemMetricsDisplay.simplified,
+  };
+}
+
+type AppearanceSavedState = ReturnType<typeof createAppearanceSavedState>;
+
+function mergeAppearanceSettings(
+  current: UserSettingsState,
+  submitted: AppearanceSavedState,
+): UserSettingsState {
+  return {
+    ...current,
+    changesPanelLayout: submitted.changesPanelLayout,
+    prPanelPlacement: submitted.prPanelPlacement,
+    systemMetricsDisplay: {
+      showInTopbar: submitted.showMetrics,
+      simplified: submitted.simplifiedMetrics,
+    },
   };
 }
 
@@ -229,6 +292,7 @@ export function AppearanceSettings() {
         workspace_id: current.workspaceId || "",
         repository_ids: current.repositoryIds || [],
         changes_panel_layout: submitted.changesPanelLayout,
+        pr_panel_placement: submitted.prPanelPlacement,
         system_metrics_display: {
           show_in_topbar: submitted.showMetrics,
           simplified: submitted.simplifiedMetrics,
@@ -239,14 +303,7 @@ export function AppearanceSettings() {
         previewTheme(draftRef.current.theme);
       }
       setSaved(submitted);
-      setUserSettings({
-        ...storeApi.getState().userSettings,
-        changesPanelLayout: submitted.changesPanelLayout,
-        systemMetricsDisplay: {
-          showInTopbar: submitted.showMetrics,
-          simplified: submitted.simplifiedMetrics,
-        },
-      });
+      setUserSettings(mergeAppearanceSettings(storeApi.getState().userSettings, submitted));
     },
     discard: () => {
       setDraft(saved);
@@ -266,14 +323,21 @@ export function AppearanceSettings() {
         title="Appearance"
         description="Customize how the application looks"
       >
-        <ThemeSettingsCard
-          theme={draft.theme}
-          isDirty={draft.theme !== saved.theme}
-          onChange={(theme) => {
-            updateDraft({ theme });
-            previewTheme(theme);
-          }}
-        />
+        <div className="space-y-4">
+          <ThemeSettingsCard
+            theme={draft.theme}
+            isDirty={draft.theme !== saved.theme}
+            onChange={(theme) => {
+              updateDraft({ theme });
+              previewTheme(theme);
+            }}
+          />
+          <PRPanelPlacementCard
+            value={draft.prPanelPlacement}
+            isDirty={draft.prPanelPlacement !== saved.prPanelPlacement}
+            onChange={(prPanelPlacement) => updateDraft({ prPanelPlacement })}
+          />
+        </div>
       </SettingsSection>
 
       <Separator />

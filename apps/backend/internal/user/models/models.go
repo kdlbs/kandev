@@ -8,6 +8,8 @@ import (
 const (
 	MCPTaskAgentProfileDefaultCurrentTask      = "current_task"
 	MCPTaskAgentProfileDefaultWorkspaceDefault = "workspace_default"
+	PRPanelPlacementAgent                      = "agent"
+	PRPanelPlacementRight                      = "right"
 )
 
 func NormalizeMCPTaskAgentProfileDefault(value string) string {
@@ -15,6 +17,13 @@ func NormalizeMCPTaskAgentProfileDefault(value string) string {
 		return value
 	}
 	return MCPTaskAgentProfileDefaultCurrentTask
+}
+
+func NormalizePRPanelPlacement(value string) string {
+	if value == PRPanelPlacementRight {
+		return value
+	}
+	return PRPanelPlacementAgent
 }
 
 const (
@@ -86,6 +95,7 @@ type UserSettings struct {
 	TerminalFontFamily              string                            `json:"terminal_font_family"`
 	TerminalFontSize                int                               `json:"terminal_font_size"`
 	ChangesPanelLayout              string                            `json:"changes_panel_layout"` // "flat" | "tree"
+	PRPanelPlacement                string                            `json:"pr_panel_placement"`   // "agent" | "right"
 	SystemMetricsDisplay            SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarOrder               AppStatusBarOrder                 `json:"app_status_bar_order"`
 	VoiceMode                       VoiceModeSettings                 `json:"voice_mode"`

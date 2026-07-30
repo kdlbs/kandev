@@ -2,6 +2,7 @@ import type { WorkspaceId } from "./ids";
 import type { VoiceModeSettings } from "./http-voice";
 
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
+export type PRPanelPlacement = "agent" | "right";
 
 export type SavedLayout = {
   id: string;
@@ -89,6 +90,7 @@ export type UserSettings = {
   terminal_font_family?: string;
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
+  pr_panel_placement?: PRPanelPlacement;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_order?: AppStatusBarOrderApi;
   voice_mode?: VoiceModeSettings;
@@ -142,6 +144,7 @@ export type UserSettingsUpdatePayload = {
   terminal_font_family?: string;
   terminal_font_size?: number;
   changes_panel_layout?: "flat" | "tree";
+  pr_panel_placement?: PRPanelPlacement;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_order?: AppStatusBarOrderApi;
   voice_mode?: VoiceModeSettings;

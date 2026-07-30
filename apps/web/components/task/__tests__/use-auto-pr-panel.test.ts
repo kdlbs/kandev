@@ -1,17 +1,24 @@
 import { describe, it, expect } from "vitest";
 import type { DockviewApi, AddPanelOptions } from "dockview-react";
-import {
-  shouldAutoAddPRPanel,
-  resolvePRPanelTargetGroup,
-  runAutoPRPanelEffect,
-} from "../dockview-session-tabs";
+import { shouldAutoAddPRPanel, runAutoPRPanelEffect } from "../dockview-session-tabs";
+import { resolvePRPanelTargetGroup } from "@/lib/state/pr-panel-placement";
 import { CENTER_GROUP, RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
 
 function makeApi(panels: Array<{ id: string; groupId: string }>): DockviewApi {
+  const groups = Array.from(new Set([CENTER_GROUP, ...panels.map((panel) => panel.groupId)])).map(
+    (id) => ({
+      id,
+      panels: panels
+        .filter((panel) => panel.groupId === id)
+        .map((panel) => ({ id: panel.id, group: { id } })),
+      element: { getBoundingClientRect: () => ({ width: 100, height: 100 }) },
+    }),
+  );
   return {
+    groups,
+    panels: groups.flatMap((group) => group.panels),
     getPanel(id: string) {
-      const p = panels.find((x) => x.id === id);
-      return p ? { id: p.id, group: { id: p.groupId } } : undefined;
+      return groups.flatMap((group) => group.panels).find((panel) => panel.id === id);
     },
   } as unknown as DockviewApi;
 }
@@ -72,31 +79,66 @@ describe("resolvePRPanelTargetGroup", () => {
     // centerGroupId, which could lag behind layout transitions and drop the
     // PR panel in a split instead of as a tab next to the session.
     const api = makeApi([{ id: "session:abc", groupId: "group-live-center" }]);
-    expect(resolvePRPanelTargetGroup(api, "abc", "stale-center-id")).toBe("group-live-center");
+    expect(
+      resolvePRPanelTargetGroup(api, {
+        activeSessionId: "abc",
+        centerGroupId: "stale-center-id",
+        rightTopGroupId: RIGHT_TOP_GROUP,
+        placement: "agent",
+      }),
+    ).toBe("group-live-center");
   });
 
   it("falls back to centerGroupId when the session panel is missing", () => {
     const api = makeApi([]);
-    expect(resolvePRPanelTargetGroup(api, "abc", "center-id")).toBe("center-id");
+    expect(
+      resolvePRPanelTargetGroup(api, {
+        activeSessionId: "abc",
+        centerGroupId: "center-id",
+        rightTopGroupId: RIGHT_TOP_GROUP,
+        placement: "agent",
+      }),
+    ).toBe("center-id");
   });
 
   it("prefers the session panel even when its group differs from centerGroupId", () => {
     // centerGroupId still points at the old session's group during a switch;
     // the new session's chat panel is the authoritative anchor.
     const api = makeApi([{ id: "session:new", groupId: "group-new" }]);
-    expect(resolvePRPanelTargetGroup(api, "new", "group-old")).toBe("group-new");
+    expect(
+      resolvePRPanelTargetGroup(api, {
+        activeSessionId: "new",
+        centerGroupId: "group-old",
+        rightTopGroupId: RIGHT_TOP_GROUP,
+        placement: "agent",
+      }),
+    ).toBe("group-new");
   });
 
   it("falls back to the center group when the live session panel is in a right group", () => {
     // Corrupted layouts can briefly leave the session panel in the right tools
     // column. The PR panel must not follow it there.
     const api = makeApi([{ id: "session:abc", groupId: RIGHT_TOP_GROUP }]);
-    expect(resolvePRPanelTargetGroup(api, "abc", "group-center")).toBe("group-center");
+    expect(
+      resolvePRPanelTargetGroup(api, {
+        activeSessionId: "abc",
+        centerGroupId: "group-center",
+        rightTopGroupId: RIGHT_TOP_GROUP,
+        placement: "agent",
+      }),
+    ).toBe("group-center");
   });
 
   it("uses the well-known center group when both candidates are right groups", () => {
     const api = makeApi([{ id: "session:abc", groupId: RIGHT_TOP_GROUP }]);
-    expect(resolvePRPanelTargetGroup(api, "abc", RIGHT_TOP_GROUP)).toBe(CENTER_GROUP);
+    expect(
+      resolvePRPanelTargetGroup(api, {
+        activeSessionId: "abc",
+        centerGroupId: RIGHT_TOP_GROUP,
+        rightTopGroupId: RIGHT_TOP_GROUP,
+        placement: "agent",
+      }),
+    ).toBe(CENTER_GROUP);
   });
 });
 
@@ -115,21 +157,32 @@ type FullMockPanel = {
   };
 };
 
-function makeFullApi(): { api: DockviewApi; panels: FullMockPanel[] } {
+function makeFullApi(options: { includeRightGroup?: boolean } = {}): {
+  api: DockviewApi;
+  panels: FullMockPanel[];
+} {
   const panels: FullMockPanel[] = [];
-  const groups = [{ id: CENTER_GROUP }];
+  const groups = [
+    { id: CENTER_GROUP },
+    ...(options.includeRightGroup ? [{ id: RIGHT_TOP_GROUP }] : []),
+  ];
   const api = {
     get groups() {
       return groups;
+    },
+    get panels() {
+      return panels;
     },
     getPanel(id: string) {
       return panels.find((p) => p.id === id);
     },
     addPanel(opts: AddPanelOptions & { id: string }) {
+      const groupId =
+        (opts.position as { referenceGroup?: string } | undefined)?.referenceGroup ?? CENTER_GROUP;
       const panel: FullMockPanel = {
         id: opts.id,
         params: { ...(opts.params ?? {}) },
-        group: { id: CENTER_GROUP },
+        group: { id: groupId },
         api: {
           setActive() {},
           updateParameters(p: Record<string, unknown>) {
@@ -155,6 +208,8 @@ const BASE_EFFECT_PARAMS = {
   isRestoringLayout: false,
   isMaximized: false,
   centerGroupId: CENTER_GROUP,
+  rightTopGroupId: RIGHT_TOP_GROUP,
+  placement: "agent" as const,
 };
 
 describe("runAutoPRPanelEffect", () => {
@@ -216,5 +271,40 @@ describe("runAutoPRPanelEffect", () => {
 
     const panel = api.getPanel(LEGACY_PR_ID) as unknown as FullMockPanel;
     expect(panel.params.prKey).toBe(DEFAULT_PR_KEY);
+  });
+
+  it("auto-shows a new PR in the designated right content group", () => {
+    const { api } = makeFullApi({ includeRightGroup: true });
+
+    runAutoPRPanelEffect(api, "session-right", {
+      ...BASE_EFFECT_PARAMS,
+      placement: "right",
+      hasPR: true,
+      defaultPRKey: DEFAULT_PR_KEY,
+    });
+
+    const panel = api.getPanel(LEGACY_PR_ID) as unknown as FullMockPanel;
+    expect(panel.group.id).toBe(RIGHT_TOP_GROUP);
+  });
+
+  it("does not move an already-open PR when placement changes", () => {
+    const { api } = makeFullApi({ includeRightGroup: true });
+    api.addPanel({
+      id: LEGACY_PR_ID,
+      component: LEGACY_PR_ID,
+      title: "Pull Request",
+      params: { prKey: DEFAULT_PR_KEY },
+      position: { referenceGroup: CENTER_GROUP },
+    });
+
+    runAutoPRPanelEffect(api, "session-existing", {
+      ...BASE_EFFECT_PARAMS,
+      placement: "right",
+      hasPR: true,
+      defaultPRKey: DEFAULT_PR_KEY,
+    });
+
+    const panel = api.getPanel(LEGACY_PR_ID) as unknown as FullMockPanel;
+    expect(panel.group.id).toBe(CENTER_GROUP);
   });
 });

@@ -52,6 +52,20 @@ describe("user settings websocket handler", () => {
     });
   });
 
+  it("updates the PR panel placement preference and preserves it when omitted", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        pr_panel_placement: "right",
+      }),
+    );
+    expect(store.getState().userSettings.prPanelPlacement).toBe("right");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.prPanelPlacement).toBe("right");
+  });
+
   it("replaces portable status order when present and preserves it when omitted", () => {
     const store = makeStore();
 

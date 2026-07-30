@@ -8,7 +8,7 @@ import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/s
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/state/slices/settings/types";
 import type { SavedLayout, SidebarTaskPrefsApi, UserSettingsResponse } from "@/lib/types/http";
-import type { MCPTaskAgentProfileDefault } from "@/lib/types/http-user-settings";
+import type { MCPTaskAgentProfileDefault, PRPanelPlacement } from "@/lib/types/http-user-settings";
 import type { VoiceModeSettings } from "@/lib/types/http-voice";
 
 export type UserSettingsData = NonNullable<UserSettingsResponse["settings"]>;
@@ -19,6 +19,10 @@ export function parseTerminalLinkBehavior(value: string | undefined): "new_tab" 
 
 export function parseChangesPanelLayout(value: string | undefined): "flat" | "tree" {
   return value === "flat" ? "flat" : "tree";
+}
+
+export function parsePRPanelPlacement(value: string | undefined): PRPanelPlacement {
+  return value === "right" ? "right" : "agent";
 }
 
 export function parseMCPTaskAgentProfileDefault(
@@ -134,6 +138,7 @@ function buildBehaviorFields(s: UserSettingsData) {
     showReleaseNotification: s.show_release_notification ?? true,
     releaseNotesLastSeenVersion: s.release_notes_last_seen_version || null,
     keyboardShortcuts: s.keyboard_shortcuts ?? {},
+    prPanelPlacement: parsePRPanelPlacement(s.pr_panel_placement),
   };
 }
 
@@ -216,6 +221,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       terminalFontFamily: null,
       terminalFontSize: null,
       changesPanelLayout: "tree" as const,
+      prPanelPlacement: "agent" as const,
       appStatusBarOrder: parseAppStatusBarOrder(undefined),
       ...buildSystemMetricsDisplayFields(undefined),
       voiceMode: { ...DEFAULT_VOICE_MODE_STATE },

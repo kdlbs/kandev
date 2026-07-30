@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useState, type ReactNode } from "react";
+import { memo, useCallback, useState, type ReactNode } from "react";
 import {
   IconGitPullRequest,
   IconCheck,
@@ -128,9 +128,18 @@ function usePopoverInteractions() {
   return { usesTouchDrawer, ...hover };
 }
 
+function useOpenPRPanel() {
+  const addPRPanel = useDockviewStore((state) => state.addPRPanel);
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const placement = useAppStore((state) => state.userSettings.prPanelPlacement);
+  return useCallback(
+    (pr: TaskPR) => addPRPanel(prTaskKey(pr), { activeSessionId, placement }),
+    [activeSessionId, addPRPanel, placement],
+  );
+}
+
 function PRSingleButton({ pr, refreshTaskPR }: { pr: TaskPR; refreshTaskPR: () => void }) {
-  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const openPRPanel = useOpenPRPanel();
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
   const {
     usesTouchDrawer,
@@ -165,7 +174,7 @@ function PRSingleButton({ pr, refreshTaskPR }: { pr: TaskPR; refreshTaskPR: () =
       onFocus={onTriggerEnter}
       onBlur={onTriggerLeave}
       onClick={() => {
-        addPRPanel(prTaskKey(pr), activeSessionId);
+        openPRPanel(pr);
         onOpenChange(false);
       }}
     >
@@ -208,8 +217,7 @@ function PRMultiButton({ prs, refreshTaskPR }: { prs: TaskPR[]; refreshTaskPR: (
   // affordance, and the only interaction on touch). Hover adds the aggregate
   // CI popover with a tab per PR — desktop only, suppressed on touch where
   // there is no hover.
-  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const openPRPanel = useOpenPRPanel();
   const {
     usesTouchDrawer,
     open,
@@ -291,7 +299,7 @@ function PRMultiButton({ prs, refreshTaskPR }: { prs: TaskPR[]; refreshTaskPR: (
           enabled={open}
           refreshTaskPR={refreshTaskPR}
           onOpenDetailPanel={(pr) => {
-            addPRPanel(prTaskKey(pr), activeSessionId);
+            openPRPanel(pr);
             onOpenChange(false);
           }}
         />
@@ -301,8 +309,7 @@ function PRMultiButton({ prs, refreshTaskPR }: { prs: TaskPR[]; refreshTaskPR: (
 }
 
 function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
-  const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const openPRPanel = useOpenPRPanel();
   return (
     <DropdownMenuContent align="end" className="w-72">
       <DropdownMenuLabel className="text-xs">Pull requests</DropdownMenuLabel>
@@ -310,7 +317,7 @@ function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
       {prs.map((pr) => (
         <DropdownMenuItem
           key={pr.id}
-          onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
+          onClick={() => openPRPanel(pr)}
           className="cursor-pointer gap-2"
           data-testid={`pr-topbar-menu-item-${prIdentitySlug(pr)}`}
         >

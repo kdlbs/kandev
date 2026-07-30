@@ -72,3 +72,21 @@ func TestMapUserSettingsStateIncludesSystemMetricsDisplayPreference(t *testing.T
 		t.Fatalf("simplified = %#v, want true", got["simplified"])
 	}
 }
+
+func TestMapUserSettingsStateIncludesPRPanelPlacementDefault(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{}, "workspace-1")
+
+	if got := state["prPanelPlacement"]; got != "agent" {
+		t.Fatalf("prPanelPlacement = %#v, want agent", got)
+	}
+}
+
+func TestMapUserSettingsStateIncludesExplicitPRPanelPlacement(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{PRPanelPlacement: usermodels.PRPanelPlacementRight},
+	}, "workspace-1")
+
+	if got := state["prPanelPlacement"]; got != "right" {
+		t.Fatalf("prPanelPlacement = %#v, want right", got)
+	}
+}

@@ -46,6 +46,8 @@ test.describe("Mobile general settings", () => {
     const initial = await apiClient.getUserSettings();
     const initialLayout = initial.settings.changes_panel_layout === "tree" ? "tree" : "flat";
     const nextLayout = initialLayout === "tree" ? "flat" : "tree";
+    const initialPlacement = initial.settings.pr_panel_placement === "right" ? "right" : "agent";
+    const nextPlacement = initialPlacement === "right" ? "agent" : "right";
 
     try {
       await testPage.goto("/settings/general/appearance");
@@ -54,12 +56,21 @@ test.describe("Mobile general settings", () => {
       await testPage
         .getByRole("option", { name: nextLayout === "tree" ? "Tree" : "Flat list" })
         .click();
+      const placement = testPage.getByTestId("pr-panel-placement-select");
+      await placement.click();
+      await testPage
+        .getByRole("option", { name: nextPlacement === "right" ? "Right pane" : "Agent pane" })
+        .click();
 
       const floating = testPage.getByTestId("settings-floating-save");
       const saveButton = floating.getByRole("button", { name: "Save changes" });
       await expect(saveButton).toBeVisible();
       await expect(layout).toHaveAttribute("data-settings-dirty", "true");
       await expect(testPage.getByTestId("changes-panel-layout-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "true",
+      );
+      await expect(testPage.getByTestId("pr-panel-placement-card")).toHaveAttribute(
         "data-settings-dirty",
         "true",
       );
@@ -85,9 +96,15 @@ test.describe("Mobile general settings", () => {
         "data-settings-dirty",
         "false",
       );
+      await expect(testPage.getByTestId("pr-panel-placement-card")).toHaveAttribute(
+        "data-settings-dirty",
+        "false",
+      );
+      expect((await apiClient.getUserSettings()).settings.pr_panel_placement).toBe(nextPlacement);
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         changes_panel_layout: initialLayout,
+        pr_panel_placement: initialPlacement,
       });
     }
   });

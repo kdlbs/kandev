@@ -47,6 +47,7 @@ import {
   type OpenPanelOpts,
   type PreviewType,
 } from "./dockview-panel-actions";
+import type { PRPanelOpenOptions } from "./pr-panel-placement";
 import { preserveChatScrollDuringLayout } from "./dockview-scroll-preserve";
 import { measureDockviewContainer } from "./dockview-measure";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
@@ -158,10 +159,8 @@ type DockviewStore = {
   addVscodePanel: () => void;
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
   addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
-  /** Open a PR detail panel. prKey (owner/repo/pr_number) gives multi-repo tasks one tab per PR.
-   *  activeSessionId anchors the new panel to the session's current group so it lands as a tab
-   *  next to the session, not as a split. Falls back to centerGroupId when omitted. */
-  addPRPanel: (prKey?: string, activeSessionId?: string | null) => void;
+  /** Open or relocate one exact PR detail tab using the global placement choice. */
+  addPRPanel: (prKey?: string, options?: PRPanelOpenOptions) => void;
   /** Open a GitLab merge request detail panel keyed by host/project/iid. */
   addMRPanel: (mrKey: string, activeSessionId?: string | null) => void;
   addTerminalPanel: (

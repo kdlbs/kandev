@@ -856,6 +856,39 @@ export class SessionPage {
     ).toBe(true);
   }
 
+  /** Assert every open PR tab is in the default right content group (Files/Changes). */
+  async expectAnyPrPanelInRightContentGroup(): Promise<void> {
+    const result = await this.page.evaluate(() => {
+      type Panel = { id: string; group?: { id?: string } };
+      type Api = { panels: Panel[]; getPanel: (id: string) => Panel | undefined };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      if (!api) return { error: "dockview api not exposed" };
+      const files = api.getPanel("files");
+      const changes = api.getPanel("changes");
+      const rightGroupId = files?.group?.id;
+      if (!rightGroupId || changes?.group?.id !== rightGroupId) {
+        return {
+          error: `Files/Changes do not share a right content group: files=${files?.group?.id ?? "?"} changes=${changes?.group?.id ?? "?"}`,
+        };
+      }
+      const prPanels = api.panels.filter(
+        (panel) => panel.id === "pr-detail" || panel.id.startsWith("pr-detail|"),
+      );
+      if (prPanels.length === 0) return { error: "no pr-detail panel" };
+      return {
+        allPrsInRightGroup: prPanels.every((panel) => panel.group?.id === rightGroupId),
+        rightGroupId,
+        prLocations: prPanels.map((panel) => `${panel.id}@${panel.group?.id ?? "?"}`),
+      };
+    });
+    expect(result.error, result.error).toBeUndefined();
+    expect(
+      result.allPrsInRightGroup,
+      `PR panel(s) landed outside the Files/Changes group. ` +
+        `right=${result.rightGroupId} prs=[${result.prLocations?.join(", ")}]`,
+    ).toBe(true);
+  }
+
   /** Dockview tab for the PR detail panel (title starts as "Pull Request", updated to "PR #N"). */
   prDetailTab(): Locator {
     return this.page.locator(".dv-default-tab").filter({ hasText: /^(Pull Request|PR #\d+)$/ });

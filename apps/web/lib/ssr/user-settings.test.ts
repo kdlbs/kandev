@@ -248,6 +248,26 @@ describe("mapUserSettingsResponse", () => {
   });
 });
 
+describe("mapUserSettingsResponse PR panel placement", () => {
+  it("maps the right-side preference", () => {
+    const result = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        pr_panel_placement: "right",
+        updated_at: UPDATED_AT,
+      },
+    });
+
+    expect(result.prPanelPlacement).toBe("right");
+  });
+
+  it("defaults to agent", () => {
+    expect(mapUserSettingsResponse(null).prPanelPlacement).toBe("agent");
+  });
+});
+
 describe("transcript navigation settings", () => {
   it("uses the requested defaults when settings are unavailable", () => {
     const settings = mapUserSettingsResponse(null);

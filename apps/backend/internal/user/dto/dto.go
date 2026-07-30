@@ -58,6 +58,7 @@ type UserSettingsDTO struct {
 	TerminalFontFamily              string                              `json:"terminal_font_family"`
 	TerminalFontSize                int                                 `json:"terminal_font_size"`
 	ChangesPanelLayout              string                              `json:"changes_panel_layout"`
+	PRPanelPlacement                string                              `json:"pr_panel_placement"`
 	SystemMetricsDisplay            models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 	AppStatusBarOrder               models.AppStatusBarOrder            `json:"app_status_bar_order"`
 	VoiceMode                       models.VoiceModeSettings            `json:"voice_mode"`
@@ -122,6 +123,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontFamily              *string                            `json:"terminal_font_family,omitempty"`
 	TerminalFontSize                *int                               `json:"terminal_font_size,omitempty"`
 	ChangesPanelLayout              *string                            `json:"changes_panel_layout,omitempty"`
+	PRPanelPlacement                *string                            `json:"pr_panel_placement,omitempty"`
 	SystemMetricsDisplay            *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
 	AppStatusBarOrder               *models.AppStatusBarOrder          `json:"app_status_bar_order,omitempty"`
 	VoiceMode                       *models.VoiceModeSettings          `json:"voice_mode,omitempty"`
@@ -247,6 +249,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		TerminalFontFamily:              settings.TerminalFontFamily,
 		TerminalFontSize:                settings.TerminalFontSize,
 		ChangesPanelLayout:              settings.ChangesPanelLayout,
+		PRPanelPlacement:                models.NormalizePRPanelPlacement(settings.PRPanelPlacement),
 		SystemMetricsDisplay:            settings.SystemMetricsDisplay,
 		AppStatusBarOrder:               settings.AppStatusBarOrder,
 		VoiceMode:                       settings.VoiceMode,

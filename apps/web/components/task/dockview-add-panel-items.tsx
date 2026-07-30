@@ -57,6 +57,7 @@ export function AddPanelMenuItems({
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   const addMRPanel = useDockviewStore((s) => s.addMRPanel);
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
+  const prPanelPlacement = useAppStore((s) => s.userSettings.prPanelPlacement);
 
   return (
     <>
@@ -100,7 +101,12 @@ export function AddPanelMenuItems({
       {state.prs.map((pr) => (
         <DropdownMenuItem
           key={pr.id}
-          onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
+          onClick={() =>
+            addPRPanel(prTaskKey(pr), {
+              activeSessionId,
+              placement: prPanelPlacement,
+            })
+          }
           className={MENU_ITEM_CLASS}
           data-testid={`add-panel-pr-item-${prIdentitySlug(pr)}`}
         >

@@ -80,6 +80,7 @@ function carryForwardCoreSettings(current: DisplaySettings) {
     tasksListSort: current.tasksListSort ?? DEFAULT_TASKS_LIST_SORT,
     tasksListGroup: current.tasksListGroup ?? DEFAULT_TASKS_LIST_GROUP,
     changesPanelLayout: current.changesPanelLayout ?? "tree",
+    prPanelPlacement: current.prPanelPlacement ?? "agent",
     ...carryForwardAppStatusSettings(current),
     voiceMode: current.voiceMode ?? { ...DEFAULT_VOICE_MODE_STATE },
   };

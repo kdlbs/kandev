@@ -1,40 +1,72 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { DockviewApi, AddPanelOptions } from "dockview-react";
 import { buildPanelActions, buildExtraPanelActions } from "./dockview-panel-actions";
-import { CENTER_GROUP } from "./layout-manager";
+import { CENTER_GROUP, RIGHT_TOP_GROUP } from "./layout-manager";
 
 // ---------------------------------------------------------------------------
 // Minimal DockviewApi mock
 // ---------------------------------------------------------------------------
 
+type MockGroup = {
+  id: string;
+  panels: MockPanel[];
+  element: {
+    getBoundingClientRect: () => DOMRect;
+  };
+};
+
 type MockPanel = {
   id: string;
   title: string;
   params: Record<string, unknown>;
-  group: { id: string };
+  group: MockGroup;
   isActive: boolean;
   api: {
     setActive: () => void;
     updateParameters: (p: Record<string, unknown>) => void;
-    moveTo: (opts: { group: { id: string } }) => void;
+    moveTo: (opts: { group: MockGroup }) => void;
   };
   setTitle: (t: string) => void;
 };
 
-function makeApi(options: { centerGroupId?: string; extraGroupIds?: string[] } = {}): DockviewApi {
+function makeApi(
+  options: {
+    centerGroupId?: string;
+    extraGroupIds?: string[];
+  } = {},
+): DockviewApi {
   const centerId = options.centerGroupId ?? CENTER_GROUP;
   const panels: MockPanel[] = [];
-  const groups = [{ id: centerId }, ...(options.extraGroupIds ?? []).map((id) => ({ id }))];
+  const groups: MockGroup[] = [];
+
+  function addGroup(id: string): MockGroup {
+    const group: MockGroup = {
+      id,
+      panels: [],
+      element: {
+        getBoundingClientRect: () => ({}) as DOMRect,
+      },
+    };
+    groups.push(group);
+    return group;
+  }
+
+  function getOrAddGroup(id: string): MockGroup {
+    return groups.find((group) => group.id === id) ?? addGroup(id);
+  }
+
+  addGroup(centerId);
+  for (const id of options.extraGroupIds ?? []) getOrAddGroup(id);
 
   function makePanel(add: AddPanelOptions & { id: string }): MockPanel {
     const groupId =
       (add.position as { referenceGroup?: string } | undefined)?.referenceGroup ?? centerId;
-    if (!groups.some((g) => g.id === groupId)) groups.push({ id: groupId });
+    const group = getOrAddGroup(groupId);
     const panel: MockPanel = {
       id: add.id,
       title: (add.title as string) ?? "",
       params: { ...(add.params ?? {}) },
-      group: { id: groupId },
+      group,
       isActive: false,
       setTitle(t: string) {
         this.title = t;
@@ -47,8 +79,11 @@ function makeApi(options: { centerGroupId?: string; extraGroupIds?: string[] } =
         updateParameters(p: Record<string, unknown>) {
           Object.assign(panel.params, p);
         },
-        moveTo({ group }: { group: { id: string } }) {
-          panel.group = { id: group.id };
+        moveTo({ group: nextGroup }: { group: MockGroup }) {
+          const oldIndex = panel.group.panels.indexOf(panel);
+          if (oldIndex >= 0) panel.group.panels.splice(oldIndex, 1);
+          panel.group = nextGroup;
+          nextGroup.panels.push(panel);
         },
       },
     };
@@ -71,12 +106,17 @@ function makeApi(options: { centerGroupId?: string; extraGroupIds?: string[] } =
     addPanel(opts: AddPanelOptions & { id: string }) {
       const p = makePanel(opts);
       panels.push(p);
+      p.group.panels.push(p);
       if (!opts.inactive) p.api.setActive();
       return p;
     },
     removePanel(panel: { id: string }) {
       const i = panels.findIndex((p) => p.id === panel.id);
-      if (i >= 0) panels.splice(i, 1);
+      if (i >= 0) {
+        const [removed] = panels.splice(i, 1);
+        const groupIndex = removed.group.panels.indexOf(removed);
+        if (groupIndex >= 0) removed.group.panels.splice(groupIndex, 1);
+      }
     },
     get activePanel() {
       return panels.find((p) => p.isActive);
@@ -564,16 +604,19 @@ describe("addPRPanel — group placement", () => {
   const KEYED_PR_ID = `pr-detail|${PR_KEY}`;
   const SESSION_ID = "s-1";
   const SESSION_PANEL_ID = `session:${SESSION_ID}`;
-  const SESSION_GROUP = "group-session-host";
 
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
     return { api, actions: buildExtraPanelActions(store.get) };
   }
 
-  // Seed the api with a session panel in a group that is NOT the store's
-  // centerGroupId. This mirrors the post-transition state where the store's
-  // tracked centerGroupId has gone stale and the live session sits elsewhere.
+  function openPRPanel(
+    actions: ReturnType<typeof buildExtraPanelActions>,
+    placement: "agent" | "right",
+  ): void {
+    actions.addPRPanel(PR_KEY, { activeSessionId: SESSION_ID, placement });
+  }
+
   function seedSessionInGroup(api: DockviewApi, groupId: string): void {
     api.addPanel({
       id: SESSION_PANEL_ID,
@@ -584,40 +627,59 @@ describe("addPRPanel — group placement", () => {
     });
   }
 
-  it("places the PR panel in the same group as the active session panel", () => {
-    const { api, actions } = buildExtra(makeApi());
-    seedSessionInGroup(api, SESSION_GROUP);
+  it("moves an existing keyed PR to the current target without duplicating it", () => {
+    const { api, actions } = buildExtra(
+      makeApi({
+        extraGroupIds: [RIGHT_TOP_GROUP],
+      }),
+    );
+    seedSessionInGroup(api, CENTER_GROUP);
+    openPRPanel(actions, "agent");
 
-    actions.addPRPanel(PR_KEY, SESSION_ID);
+    openPRPanel(actions, "right");
 
+    expect(api.panels.filter((panel) => panel.id === KEYED_PR_ID)).toHaveLength(1);
     const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
-    const session = api.getPanel(SESSION_PANEL_ID) as unknown as MockPanel;
-    expect(pr).toBeDefined();
-    expect(pr.group.id).toBe(session.group.id);
-    expect(pr.group.id).toBe(SESSION_GROUP);
-    // Critical: must NOT have landed in the store's centerGroupId (the bug).
-    expect(pr.group.id).not.toBe(CENTER_GROUP);
+    expect(pr.group.id).toBe(RIGHT_TOP_GROUP);
+    expect(pr.isActive).toBe(true);
   });
 
-  it("falls back to centerGroupId when no session panel exists for the id", () => {
-    const { api, actions } = buildExtra(makeApi());
-    // No session panel seeded — resolver should fall back.
-    actions.addPRPanel(PR_KEY, SESSION_ID);
+  it("moves a matching legacy PR to the current target without duplicating it", () => {
+    const { api, actions } = buildExtra(
+      makeApi({
+        extraGroupIds: [RIGHT_TOP_GROUP],
+      }),
+    );
+    api.addPanel({
+      id: "pr-detail",
+      component: "pr-detail",
+      title: "Pull Request",
+      params: { prKey: PR_KEY },
+      position: { referenceGroup: CENTER_GROUP },
+    });
 
-    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
-    expect(pr).toBeDefined();
-    expect(pr.group.id).toBe(CENTER_GROUP);
+    openPRPanel(actions, "right");
+
+    expect(api.panels.filter((panel) => panel.id.startsWith("pr-detail"))).toHaveLength(1);
+    const pr = api.getPanel("pr-detail") as unknown as MockPanel;
+    expect(pr.group.id).toBe(RIGHT_TOP_GROUP);
+    expect(pr.isActive).toBe(true);
   });
 
-  it("falls back to centerGroupId when sessionId is not provided", () => {
-    const { api, actions } = buildExtra(makeApi());
-    // Even with a session panel present, omitting the id keeps legacy behavior.
-    seedSessionInGroup(api, SESSION_GROUP);
-    actions.addPRPanel(PR_KEY);
+  it("moves an existing PR back beside Agent when that is the current target", () => {
+    const { api, actions } = buildExtra(
+      makeApi({
+        extraGroupIds: [RIGHT_TOP_GROUP],
+      }),
+    );
+    seedSessionInGroup(api, CENTER_GROUP);
+    openPRPanel(actions, "right");
+
+    openPRPanel(actions, "agent");
 
     const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
-    expect(pr).toBeDefined();
     expect(pr.group.id).toBe(CENTER_GROUP);
+    expect(pr.isActive).toBe(true);
   });
 });
 

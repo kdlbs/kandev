@@ -68,6 +68,48 @@ func TestScanUserSettingsChangesPanelLayoutDefault(t *testing.T) {
 	})
 }
 
+func TestScanUserSettingsPRPanelPlacementRoundTrip(t *testing.T) {
+	settings, err := scanUserSettings(
+		settingsScanner{raw: `{"pr_panel_placement":"right"}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan settings: %v", err)
+	}
+
+	raw, err := marshalUserSettingsPayload(settings)
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode settings payload: %v", err)
+	}
+	if got := payload["pr_panel_placement"]; got != "right" {
+		t.Fatalf("pr_panel_placement = %#v, want right", got)
+	}
+}
+
+func TestScanUserSettingsPRPanelPlacementDefaults(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "missing", raw: `{}`},
+		{name: "unknown", raw: `{"pr_panel_placement":"future_value"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.PRPanelPlacement != models.PRPanelPlacementAgent {
+				t.Fatalf("PRPanelPlacement = %q, want agent", settings.PRPanelPlacement)
+			}
+		})
+	}
+}
+
 func TestScanUserSettingsConfirmTaskArchiveDefault(t *testing.T) {
 	tests := []struct {
 		name string

@@ -25,6 +25,7 @@ export type {
   TaskCreateLastUsedApi,
   AppStatusBarOrderApi,
   MCPTaskAgentProfileDefault,
+  PRPanelPlacement,
   UserSettings,
   UserSettingsResponse,
   UserSettingsUpdatePayload,

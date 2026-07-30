@@ -444,6 +444,54 @@ func TestApplyChangesPanelLayout(t *testing.T) {
 	})
 }
 
+func TestApplyPRPanelPlacement(t *testing.T) {
+	t.Run("nil leaves settings unchanged", func(t *testing.T) {
+		settings := &models.UserSettings{PRPanelPlacement: models.PRPanelPlacementRight}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.PRPanelPlacement != models.PRPanelPlacementRight {
+			t.Fatalf("PRPanelPlacement = %q, want right", settings.PRPanelPlacement)
+		}
+	})
+
+	for _, value := range []string{models.PRPanelPlacementAgent, models.PRPanelPlacementRight} {
+		t.Run("accepts "+value, func(t *testing.T) {
+			settings := &models.UserSettings{}
+			if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+				PRPanelPlacement: ptr(value),
+			}); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if settings.PRPanelPlacement != value {
+				t.Fatalf("PRPanelPlacement = %q, want %q", settings.PRPanelPlacement, value)
+			}
+		})
+	}
+
+	t.Run("trims whitespace", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+			PRPanelPlacement: ptr("  right  "),
+		}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if settings.PRPanelPlacement != models.PRPanelPlacementRight {
+			t.Fatalf("PRPanelPlacement = %q, want right", settings.PRPanelPlacement)
+		}
+	})
+
+	t.Run("rejects unknown value", func(t *testing.T) {
+		settings := &models.UserSettings{}
+		err := applyBasicSettings(settings, &UpdateUserSettingsRequest{
+			PRPanelPlacement: ptr("new_split"),
+		})
+		if err == nil {
+			t.Fatal("expected validation error")
+		}
+	})
+}
+
 func TestApplyBasicSettings_TerminalFontSize(t *testing.T) {
 	t.Run("nil leaves settings unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{TerminalFontSize: 14}

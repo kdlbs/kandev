@@ -834,6 +834,7 @@ export class ApiClient {
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
+      pr_panel_placement?: "agent" | "right";
       [key: string]: unknown;
     };
   }> {
@@ -863,6 +864,7 @@ export class ApiClient {
     tasks_list_show_details?: boolean;
     tasks_list_sort?: string;
     tasks_list_group?: string;
+    pr_panel_placement?: "agent" | "right";
     task_create_last_used?: TaskCreateLastUsedApi;
     voice_mode?: VoiceModeSettings;
   }): Promise<void> {

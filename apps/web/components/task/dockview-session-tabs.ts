@@ -4,6 +4,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { releaseLayoutToDefault, useDockviewStore } from "@/lib/state/dockview-store";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
+import { resolvePRPanelTargetGroup as resolveConfiguredPRPanelTargetGroup } from "@/lib/state/pr-panel-placement";
 import {
   CENTER_GROUP,
   isCenterCandidateGroupId,
@@ -169,23 +170,18 @@ export function shouldAutoAddPRPanel(params: {
   return "add";
 }
 
-/**
- * Resolve the group ID to anchor the PR detail panel to.
- *
- * Preference: the live session chat panel's group. It's the group the user is
- * actively looking at, and reading it directly avoids the stale-id window the
- * store's centerGroupId has across layout transitions (which caused the PR
- * panel to land in a split instead of as a tab next to the session).
- */
+/** Agent-adjacent target retained for GitLab MR placement. */
 export function resolvePRPanelTargetGroup(
   api: DockviewApi,
   sessionId: string,
   centerGroupId: string,
 ): string {
-  const sessionPanel = api.getPanel(`session:${sessionId}`);
-  const sessionGroupId = sessionPanel?.group?.id;
-  if (sessionGroupId && isCenterCandidateGroupId(sessionGroupId)) return sessionGroupId;
-  return isCenterCandidateGroupId(centerGroupId) ? centerGroupId : CENTER_GROUP;
+  return resolveConfiguredPRPanelTargetGroup(api, {
+    activeSessionId: sessionId,
+    centerGroupId,
+    rightTopGroupId: RIGHT_TOP_GROUP,
+    placement: "agent",
+  });
 }
 
 /**
@@ -226,6 +222,8 @@ function resolveAutoPRPanelState(taskPRs: TaskPR[] | undefined): {
  *   maximized.
  * @param params.centerGroupId - Fallback group when no live session panel
  *   can anchor the new PR panel.
+ * @param params.rightTopGroupId - Designated right content group.
+ * @param params.placement - Current global PR placement preference.
  */
 export function runAutoPRPanelEffect(
   api: DockviewApi,
@@ -237,6 +235,8 @@ export function runAutoPRPanelEffect(
     isRestoringLayout: boolean;
     isMaximized: boolean;
     centerGroupId: string;
+    rightTopGroupId: string;
+    placement: "agent" | "right";
   },
 ): void {
   const decision = shouldAutoAddPRPanel({
@@ -252,7 +252,12 @@ export function runAutoPRPanelEffect(
   }
 
   if (decision === "add") {
-    const targetGroupId = resolvePRPanelTargetGroup(api, sessionId, params.centerGroupId);
+    const targetGroupId = resolveConfiguredPRPanelTargetGroup(api, {
+      activeSessionId: sessionId,
+      centerGroupId: params.centerGroupId,
+      rightTopGroupId: params.rightTopGroupId,
+      placement: params.placement,
+    });
     focusOrAddPanel(api, {
       id: "pr-detail",
       component: "pr-detail",
@@ -288,9 +293,9 @@ export function runAutoPRPanelEffect(
 }
 
 /**
- * Auto-add the PR detail panel to the center group when the active task
- * has an associated pull request. The panel is added as a background tab
- * (the session/agent tab stays focused).
+ * Auto-add the PR detail panel using the global placement preference when
+ * the active task has an associated pull request. The panel is added as a
+ * background tab, so the currently active tab stays focused.
  *
  * Dismissal is persisted to sessionStorage: if the user closes the PR panel,
  * it won't be re-added for that session — even after a page refresh.
@@ -308,6 +313,7 @@ export function useAutoPRPanel() {
     const tid = s.tasks.activeTaskId;
     return resolveAutoPRPanelState(tid ? s.taskPRs.byTaskId[tid] : undefined).defaultPRKey;
   });
+  const prPanelPlacement = useAppStore((s) => s.userSettings.prPanelPlacement);
   const hasApi = useDockviewStore((s) => !!s.api);
   const appStore = useAppStoreApi();
 
@@ -329,16 +335,19 @@ export function useAutoPRPanel() {
         if (liveTasks.activeTaskId !== taskId || liveTasks.activeSessionId !== sessionId) return;
         const live = resolveAutoPRPanelState(appStore.getState().taskPRs.byTaskId[taskId]);
 
+        const dockviewState = useDockviewStore.getState();
         runAutoPRPanelEffect(api, sessionId, {
           hasPR: live.hasPR,
           defaultPRKey: live.defaultPRKey,
-          isRestoringLayout: useDockviewStore.getState().isRestoringLayout,
-          isMaximized: useDockviewStore.getState().preMaximizeLayout !== null,
-          centerGroupId: useDockviewStore.getState().centerGroupId,
+          isRestoringLayout: dockviewState.isRestoringLayout,
+          isMaximized: dockviewState.preMaximizeLayout !== null,
+          centerGroupId: dockviewState.centerGroupId,
+          rightTopGroupId: dockviewState.rightTopGroupId,
+          placement: appStore.getState().userSettings.prPanelPlacement,
         });
       });
     });
-  }, [taskId, hasPR, hasApi, sessionId, defaultPRKey, appStore]);
+  }, [taskId, hasPR, hasApi, sessionId, defaultPRKey, prPanelPlacement, appStore]);
 }
 
 /**

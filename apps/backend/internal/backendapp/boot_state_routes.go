@@ -478,6 +478,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"terminalFontFamily":              nullString(settings.TerminalFontFamily),
 		"terminalFontSize":                nullInt(settings.TerminalFontSize),
 		"changesPanelLayout":              changesPanelLayout(settings.ChangesPanelLayout),
+		"prPanelPlacement":                usermodels.NormalizePRPanelPlacement(settings.PRPanelPlacement),
 		"systemMetricsDisplay": map[string]any{
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,

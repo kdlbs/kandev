@@ -8,7 +8,7 @@ test.describe("PR detail panel — manual open", () => {
    * it manually via the topbar PR button, the new panel must land as a tab
    * inside the session's dockview group — not as a separate split group.
    *
-   * The manual path uses `addPRPanel(prKey)` which historically anchored on
+   * The manual path uses `addPRPanel(prKey, options)`, which historically anchored on
    * the store's `centerGroupId`. That value can be stale across layout
    * transitions and produces the "PR opens in a split" bug captured in the
    * screenshot from the issue.
@@ -111,7 +111,7 @@ test.describe("PR detail panel — manual open", () => {
     await closeBtn.click();
     await expect(session.prDetailTab()).not.toBeVisible({ timeout: 10_000 });
 
-    // Click the topbar PR button — exercises addPRPanel(prKey, activeSessionId)
+    // Click the topbar PR button — exercises addPRPanel(prKey, options)
     // and creates a keyed `pr-detail|owner/repo/N` panel.
     await session.prTopbarButton().click();
     await expect(session.prDetailPanel()).toBeVisible({ timeout: 10_000 });
@@ -120,5 +120,27 @@ test.describe("PR detail panel — manual open", () => {
     // Invariant: PR panel is a tab in the session's dockview group, not a
     // split into a separate group. Matches keyed (pr-detail|...) panel id.
     await session.expectAnyPrPanelAndSessionShareGroup();
+
+    // Saving a new global placement does not relocate an already-open tab.
+    await apiClient.saveUserSettings({ pr_panel_placement: "right" });
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => {
+          type StoreWindow = Window & {
+            __KANDEV_E2E_STORE__?: {
+              getState: () => { userSettings: { prPanelPlacement: string } };
+            };
+          };
+          return (window as StoreWindow).__KANDEV_E2E_STORE__?.getState().userSettings
+            .prPanelPlacement;
+        }),
+      )
+      .toBe("right");
+    await session.expectAnyPrPanelAndSessionShareGroup();
+
+    // Explicitly opening the same PR again moves that exact tab to the
+    // designated right content group — the default Files/Changes group.
+    await session.prTopbarButton().click();
+    await session.expectAnyPrPanelInRightContentGroup();
   });
 });
