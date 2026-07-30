@@ -85,7 +85,7 @@ test.describe("@chat last prompt scroll affordance", () => {
       apiClient,
       seedData,
       "paginated-last-prompt-scroll",
-      { trailingFillerCount: 120 },
+      { trailingFillerCount: 80 },
     );
     const olderPageRequests: string[] = [];
     testPage.on("request", (request) => {
@@ -156,7 +156,7 @@ test.describe("@chat last prompt scroll affordance", () => {
       apiClient,
       seedData,
       "paginated-scroll-to-start",
-      { trailingFillerCount: 120 },
+      { trailingFillerCount: 80 },
     );
     const olderPageRequests: string[] = [];
     testPage.on("request", (request) => {
