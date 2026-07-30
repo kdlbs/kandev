@@ -20,7 +20,13 @@ export function useNoteActions(opts: { resolvedSessionId: string | null; taskId:
     async (currentContent: string): Promise<boolean> => {
       if (!opts.resolvedSessionId || !opts.taskId || currentContent.trim() === "") return false;
       const client = getWebSocketClient();
-      if (!client) return false;
+      if (!client) {
+        toast({
+          description: "Not connected — can't enhance note with AI right now",
+          variant: "error",
+        });
+        return false;
+      }
 
       setIsEnhancing(true);
       try {
