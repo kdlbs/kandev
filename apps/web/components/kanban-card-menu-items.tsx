@@ -347,7 +347,43 @@ function buildLinkSubmenu({
   };
 }
 
-// eslint-disable-next-line max-lines-per-function, complexity -- task-card menu assembly is an explicit static structure.
+function buildEditSubmenu({
+  disabled,
+  onEdit,
+  onEditNotes,
+}: {
+  disabled: boolean;
+  onEdit?: () => void;
+  onEditNotes?: () => void;
+}): KanbanCardMenuEntry {
+  return {
+    kind: "submenu",
+    key: "edit",
+    icon: <IconPencil className="mr-2 h-4 w-4" />,
+    label: "Edit",
+    disabled: disabled || (!onEdit && !onEditNotes),
+    className: "w-48",
+    children: [
+      {
+        kind: "item",
+        key: "edit-task",
+        testId: "task-context-edit-task",
+        label: "Edit task",
+        disabled: disabled || !onEdit,
+        onSelect: onEdit,
+      },
+      {
+        kind: "item",
+        key: "edit-notes",
+        testId: "task-context-edit-notes",
+        label: "Edit notes",
+        disabled: disabled || !onEditNotes,
+        onSelect: onEditNotes,
+      },
+    ],
+  };
+}
+
 export function buildKanbanCardMenuEntries({
   currentWorkflowId,
   currentStepId,
@@ -376,32 +412,7 @@ export function buildKanbanCardMenuEntries({
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
   const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
   const entries: KanbanCardMenuEntry[] = [
-    {
-      kind: "submenu",
-      key: "edit",
-      icon: <IconPencil className="mr-2 h-4 w-4" />,
-      label: "Edit",
-      disabled: isProcessing || (!onEdit && !onEditNotes),
-      className: "w-48",
-      children: [
-        {
-          kind: "item",
-          key: "edit-task",
-          testId: "task-context-edit-task",
-          label: "Edit task",
-          disabled: isProcessing || !onEdit,
-          onSelect: onEdit,
-        },
-        {
-          kind: "item",
-          key: "edit-notes",
-          testId: "task-context-edit-notes",
-          label: "Edit notes",
-          disabled: isProcessing || !onEditNotes,
-          onSelect: onEditNotes,
-        },
-      ],
-    },
+    buildEditSubmenu({ disabled: isProcessing, onEdit, onEditNotes }),
   ];
 
   const moveToEntry = buildMoveToCurrentWorkflowSubmenu({
