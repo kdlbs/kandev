@@ -57,19 +57,19 @@ function carryForwardUtilitySettings(current: DisplaySettings) {
   };
 }
 
+function carryForwardAppearanceSettings(current: DisplaySettings) {
+  return {
+    changesPanelLayout: current.changesPanelLayout ?? "tree",
+    prPanelPlacement: current.prPanelPlacement ?? "agent",
+  };
+}
+
 function carryForwardTranscriptNavigationSettings(current: DisplaySettings) {
   return {
     showAnchoredPromptBar: current.showAnchoredPromptBar ?? false,
     showScrollToLastPrompt: current.showScrollToLastPrompt ?? true,
     showScrollToStart: current.showScrollToStart ?? false,
     showTranscriptAutoScrollControl: current.showTranscriptAutoScrollControl ?? true,
-  };
-}
-
-function carryForwardAppearanceSettings(current: DisplaySettings) {
-  return {
-    changesPanelLayout: current.changesPanelLayout ?? "tree",
-    prPanelPlacement: current.prPanelPlacement ?? "agent",
   };
 }
 

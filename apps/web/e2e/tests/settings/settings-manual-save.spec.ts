@@ -38,6 +38,7 @@ test.describe("Settings manual save", () => {
       const placement = testPage.getByTestId("pr-panel-placement-select");
       await placement.click();
       await testPage
+        .getByRole("listbox")
         .getByRole("option", { name: nextPlacement === "right" ? "Right pane" : "Agent pane" })
         .click();
 

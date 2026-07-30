@@ -54,11 +54,13 @@ test.describe("Mobile general settings", () => {
       const layout = testPage.getByTestId("changes-panel-layout-select");
       await layout.click();
       await testPage
+        .getByRole("listbox")
         .getByRole("option", { name: nextLayout === "tree" ? "Tree" : "Flat list" })
         .click();
       const placement = testPage.getByTestId("pr-panel-placement-select");
       await placement.click();
       await testPage
+        .getByRole("listbox")
         .getByRole("option", { name: nextPlacement === "right" ? "Right pane" : "Agent pane" })
         .click();
 
