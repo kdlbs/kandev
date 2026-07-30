@@ -312,21 +312,8 @@ function buildFlatTree(files: ReviewFile[]): FileTreeNode[] {
 
   const collapsed = collapse(root);
 
-  // Sort: directories first, then files, alphabetically
-  function sortTree(nodes: FileTreeNode[]): FileTreeNode[] {
-    return nodes
-      .sort((a, b) => {
-        if (a.isDir && !b.isDir) return -1;
-        if (!a.isDir && b.isDir) return 1;
-        return a.name.localeCompare(b.name);
-      })
-      .map((node) => {
-        if (node.isDir && node.children) {
-          return { ...node, children: sortTree(node.children) };
-        }
-        return node;
-      });
-  }
-
-  return sortTree(collapsed.children ?? []);
+  // Preserve the caller's canonical file order. Re-sorting tree nodes (for
+  // example, directories before files) makes the sidebar traversal disagree
+  // with the linear review list even when both receive the same files.
+  return collapsed.children ?? [];
 }

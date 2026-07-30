@@ -481,6 +481,7 @@ function ChangesPanelContent({
       sessionId={activeSessionId}
       autoMarkOnScroll={autoMarkOnScroll}
       wordWrap={wordWrap}
+      enableWalkthroughAnnotations
       selectedFile={selectedFile}
       onToggleReviewed={onToggleReviewed}
       onDiscard={onDiscard}

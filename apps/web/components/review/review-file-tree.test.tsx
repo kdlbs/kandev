@@ -67,6 +67,17 @@ describe("ReviewFileTree", () => {
     expect(screen.getByText("b.ts")).toBeTruthy();
   });
 
+  it("preserves review-list order across root files and directories", () => {
+    const files = [file({ path: "a-root.ts" }), file({ path: "z-dir/nested.ts" })];
+
+    renderTree(files);
+
+    const renderedPaths = screen
+      .getAllByTestId("review-file-row")
+      .map((row) => row.dataset.filePath);
+    expect(renderedPaths).toEqual(files.map((entry) => entry.path));
+  });
+
   it("clicking a file row fires onSelectFile with the composite key", () => {
     const f = file({ path: APP_PATH, repository_name: "frontend", repository_id: "f" });
     const { onSelectFile } = renderTree([f]);
