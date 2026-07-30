@@ -18,13 +18,8 @@ import {
   setChatDraftContent,
   restoreAttachmentPreview,
 } from "@/lib/local-storage";
-import {
-  processFile,
-  formatBytes,
-  MAX_FILES,
-  MAX_TOTAL_SIZE,
-  type FileAttachment,
-} from "./file-attachment";
+import { formatBytes } from "@/lib/utils/format-bytes";
+import { processFile, MAX_FILES, MAX_TOTAL_SIZE, type FileAttachment } from "./file-attachment";
 import {
   useAttachmentCountFeedback,
   useAttachmentFileFeedback,
