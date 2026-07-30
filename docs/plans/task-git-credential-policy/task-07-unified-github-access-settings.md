@@ -19,6 +19,8 @@ spec: "../../specs/integrations/github-authentication.md"
   identity section.
 - The workspace identity and task-access summary lines provide accessible help: a tooltip on
   hover/keyboard focus and an equivalent 44px-target Drawer interaction on touch devices.
+- The connection status restores the workspace-scoped GitHub API, GraphQL query, and Search quota
+  disclosure through the same tooltip/Drawer pattern when snapshots are available.
 - Change GitHub connection contains the managed/executor task-access controls and an explicit
   dialog submission; success refreshes the summary, failure preserves the draft, closing without
   saving restores the persisted mode, and neither task-policy changes nor connection changes
@@ -42,6 +44,7 @@ node scripts/validate-public-docs.mjs
 
 - `apps/web/components/github/github-settings.tsx`
 - `apps/web/components/github/github-status.tsx`
+- `apps/web/components/github/github-rate-limit.tsx`
 - `apps/web/components/github/github-task-credentials-section.tsx`
 - `apps/web/components/github/github-connection-dialog.tsx`
 - `apps/web/components/github/github-connection-dialog.test.tsx`
@@ -114,9 +117,10 @@ component and E2E results, docs validation, files changed, risks, and task/plan 
   passed (6 tests).
 - `pnpm --filter @kandev/web lint` and `pnpm run typecheck` — passed.
 - Chromium E2E for `configures task Git access from the workspace connection dialog` — passed after
-  a deliberate RED failure for the missing summary and now covers both summary help tooltips.
+  deliberate RED failures for the missing summary and missing API-limit control; it now covers the
+  identity, task-access, and rate-limit tooltips.
 - `mobile-chrome` E2E for `configures task Git access in the connection drawer` — passed, including
-  single-scroll, 44px-control, no-overflow, and both summary help Drawer assertions.
+  single-scroll, 44px-control, no-overflow, identity/task help, and the API-limit Drawer assertions.
 - `node --test scripts/validate-public-docs.test.mjs` and
   `node scripts/validate-public-docs.mjs` — passed (58 tests; 41 published docs pages).
 - `git diff --check` — passed.

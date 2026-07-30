@@ -67,7 +67,7 @@ managed repository clones. When both environment variables are set, `GH_TOKEN` t
 matching GitHub CLI behavior. Its token remains in memory during use. Choosing a new workspace
 connection leaves compatibility mode permanently.
 
-The status panel identifies the selected source, verified actor, connection state, rate limits, and any missing App capabilities. A failed PAT or CLI validation leaves the previous connection intact. An unknown CLI login, revoked PAT, suspended/deleted installation, or missing App permission affects only the bound workspace and displays a reconnect or capability-specific error.
+The status panel identifies the selected source, verified actor, connection state, and any missing App capabilities. When GitHub has reported quota data, use **Show GitHub API limits** to inspect the remaining API requests, GraphQL query points, Search requests, and reset times for that workspace connection. The disclosure appears as a tooltip on desktop and a tap-accessible drawer on touch devices. A failed PAT or CLI validation leaves the previous connection intact. An unknown CLI login, revoked PAT, suspended/deleted installation, or missing App permission affects only the bound workspace and displays a reconnect or capability-specific error.
 
 ### Automation and personal identity
 

@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { stubGitHubRateLimits } from "./github-rate-limit-fixture";
 
 type ReviewWatchesResponse = {
   watches: Array<{ id: string; enabled: boolean }>;
@@ -78,6 +79,7 @@ test.describe("GitHub workspace settings", () => {
       source: "legacy_shared",
       status: "active",
     });
+    await stubGitHubRateLimits(testPage, seedData.workspaceId);
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
@@ -101,6 +103,16 @@ test.describe("GitHub workspace settings", () => {
         name: /newly launched tasks authenticate to GitHub/,
       }),
     ).toBeVisible();
+    const rateLimitHelp = automation.getByRole("button", { name: "Show GitHub API limits" });
+    await expect(rateLimitHelp).toBeVisible();
+    await rateLimitHelp.hover();
+    const rateLimitTooltip = testPage.getByRole("tooltip", { name: /API rate limit/ });
+    await expect(rateLimitTooltip).toContainText(
+      "API rate limit: 4,321 of 5,000 requests remaining",
+    );
+    await expect(rateLimitTooltip).toContainText(
+      "GraphQL query limit: 4,900 of 5,000 points remaining",
+    );
 
     await automation.getByRole("button", { name: "Change connection" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });

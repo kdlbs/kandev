@@ -35,6 +35,7 @@ import type {
 import { GitHubConnectionDialog } from "./github-connection-dialog";
 import { GitHubAccessHelp } from "./github-access-help";
 import { GitHubPermissionsDialog } from "./github-permissions-dialog";
+import { GitHubRateLimitDisplay } from "./github-rate-limit";
 import { GitHubTaskAccessSummary } from "./github-task-credentials-section";
 
 const sourceLabels: Record<GitHubConnectionSource, string> = {
@@ -87,6 +88,7 @@ function StatusLine({ status }: { status: GitHubStatus }) {
         {sourceLabels[connection.source]}
       </Badge>
       {connection.status !== "active" && <Badge variant="outline">{connection.status}</Badge>}
+      <GitHubRateLimitDisplay info={status.rate_limit} />
     </div>
   );
 }

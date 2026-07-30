@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { stubGitHubRateLimits } from "./github-rate-limit-fixture";
 
 test.describe("GitHub workspace settings on mobile", () => {
   test("configures task Git access in the connection drawer", async ({
@@ -11,6 +12,7 @@ test.describe("GitHub workspace settings on mobile", () => {
       source: "legacy_shared",
       status: "active",
     });
+    await stubGitHubRateLimits(testPage, seedData.workspaceId);
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
@@ -36,6 +38,19 @@ test.describe("GitHub workspace settings on mobile", () => {
     await taskAccessHelp.tap();
     await expect(testPage.getByRole("dialog", { name: "Task Git access" })).toContainText(
       "newly launched tasks authenticate to GitHub",
+    );
+    await testPage.keyboard.press("Escape");
+    const rateLimitHelp = automation.getByRole("button", { name: "Show GitHub API limits" });
+    await expect(rateLimitHelp).toBeVisible();
+    const rateLimitHelpBox = await rateLimitHelp.boundingBox();
+    expect(rateLimitHelpBox?.height).toBeGreaterThanOrEqual(44);
+    await rateLimitHelp.tap();
+    const rateLimitDrawer = testPage.getByRole("dialog", { name: "GitHub API limits" });
+    await expect(rateLimitDrawer).toContainText(
+      "API rate limit: 4,321 of 5,000 requests remaining",
+    );
+    await expect(rateLimitDrawer).toContainText(
+      "GraphQL query limit: 4,900 of 5,000 points remaining",
     );
     await testPage.keyboard.press("Escape");
 

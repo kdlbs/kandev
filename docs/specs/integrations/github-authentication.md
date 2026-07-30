@@ -444,6 +444,10 @@ registration and never creates a global default.
   human identity; the page does not render a redundant identity section or a fake selector.
 - The workspace identity and task-access summary lines expose concise help through a tooltip on
   hover or keyboard focus and the same explanation in a 44px-target drawer on touch devices.
+- When rate-limit snapshots are available, the connection status row exposes a **Show GitHub API
+  limits** icon. Its desktop tooltip and touch drawer show remaining and total API requests,
+  GraphQL query points, Search requests, and reset timing. Exhausted buckets explain that
+  background PR and issue checks are paused.
 - Desktop and mobile support the same create/import/select/install/switch/disconnect flows. Mobile
   uses a single-column sheet/page, one scroll owner, safe-area padding, 44px targets, no fixed footer,
   and no horizontal overflow. External GitHub navigation is deliberate and returns to the same
@@ -496,6 +500,9 @@ registration and never creates a global default.
   the page states that the same account powers My GitHub and user-triggered actions without
   rendering a separate My GitHub identity section, and accessible help explains both the workspace
   identity and task-access summary.
+- **GIVEN** a workspace status with GitHub rate-limit snapshots, **WHEN** the user hovers, focuses,
+  or taps **Show GitHub API limits**, **THEN** the disclosure shows the remaining and total API,
+  GraphQL query, and Search quotas with reset timing for that workspace connection.
 - **GIVEN** either task access mode, **WHEN** the user opens Change GitHub connection and submits
   the other mode, **THEN** the dialog persists that policy, reports the result, and the page summary
   reflects the saved mode without changing the selected automation identity.

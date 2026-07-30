@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -18,10 +18,12 @@ export function GitHubAccessHelp({
   label,
   title,
   description,
+  content,
 }: {
   label: string;
   title: string;
   description: string;
+  content?: ReactNode;
 }) {
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
@@ -45,7 +47,7 @@ export function GitHubAccessHelp({
     <Tooltip>
       <TooltipTrigger asChild>{drawerTrigger}</TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[320px] text-xs leading-relaxed">
-        {description}
+        {content ?? description}
       </TooltipContent>
     </Tooltip>
   );
@@ -56,8 +58,11 @@ export function GitHubAccessHelp({
       <DrawerContent>
         <DrawerHeader>
           <DrawerTitle>{title}</DrawerTitle>
-          <DrawerDescription>{description}</DrawerDescription>
+          <DrawerDescription className={content ? "sr-only" : undefined}>
+            {description}
+          </DrawerDescription>
         </DrawerHeader>
+        {content && <div className="px-4 pb-4">{content}</div>}
       </DrawerContent>
     </Drawer>
   );
