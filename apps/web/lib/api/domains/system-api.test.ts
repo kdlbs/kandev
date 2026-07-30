@@ -33,6 +33,7 @@ import {
   fetchStorageOverview,
   fetchStorageQuarantine,
   fetchStorageRuns,
+  purgeStorageQuarantine,
   restoreStorageQuarantine,
   runStorageMaintenance,
   saveStorageSettings,
@@ -378,6 +379,24 @@ describe("storage maintenance", () => {
     expect(method()).toBe("DELETE");
     expect(JSON.parse(String(lastCall().init?.body))).toEqual({ confirm: "DELETE" });
     expect(response.job_id).toBe("delete-job");
+  });
+
+  it("uses typed confirmations for bulk quarantine purge", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ job_id: "eligible-job" }));
+    await purgeStorageQuarantine("eligible");
+    expect(lastCall().url).toBe(`${BASE}/storage/quarantine`);
+    expect(method()).toBe("DELETE");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      scope: "eligible",
+      confirm: "DELETE ELIGIBLE",
+    });
+
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ job_id: "all-job" }));
+    await purgeStorageQuarantine("all");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      scope: "all",
+      confirm: "DELETE ALL NOW",
+    });
   });
 
   it("starts analysis, selected cleanup, and restore operations", async () => {

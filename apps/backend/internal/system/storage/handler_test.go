@@ -71,6 +71,54 @@ func TestGetStorageReturnsSnapshotAnalyzedAt(t *testing.T) {
 	}
 }
 
+func TestDeleteQuarantineBulkValidatesConfirmation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mutations := &recordingMutations{}
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{Mutations: mutations}))
+
+	for _, test := range []struct {
+		body string
+		want int
+	}{
+		{`{"scope":"eligible","confirm":"DELETE ALL NOW"}`, http.StatusBadRequest},
+		{`{"scope":"all","confirm":"DELETE ELIGIBLE"}`, http.StatusBadRequest},
+		{`{"scope":"eligible","confirm":"DELETE ELIGIBLE"}`, http.StatusAccepted},
+		{`{"scope":"all","confirm":"DELETE ALL NOW"}`, http.StatusAccepted},
+	} {
+		request := httptest.NewRequest(http.MethodDelete, "/api/v1/system/storage/quarantine", strings.NewReader(test.body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != test.want {
+			t.Fatalf("body %s status = %d, want %d", test.body, response.Code, test.want)
+		}
+	}
+	if mutations.purgeCalls != 2 {
+		t.Fatalf("purge calls = %d, want 2", mutations.purgeCalls)
+	}
+}
+
+type recordingMutations struct{ purgeCalls int }
+
+func (m *recordingMutations) AdoptGoCache(context.Context, string, string) (StorageMaintenanceSettings, Capabilities, error) {
+	return DefaultSettings(), Capabilities{}, nil
+}
+func (m *recordingMutations) Analyze(context.Context) (string, error) { return "job", nil }
+func (m *recordingMutations) RunNow(context.Context, []string, bool) (string, error) {
+	return "job", nil
+}
+func (m *recordingMutations) RestoreQuarantine(context.Context, string) (QuarantineEntry, error) {
+	return QuarantineEntry{}, nil
+}
+func (m *recordingMutations) DeleteQuarantine(context.Context, string, string) (string, error) {
+	return "job", nil
+}
+func (m *recordingMutations) PurgeQuarantine(context.Context, QuarantinePurgeScope, string) (string, error) {
+	m.purgeCalls++
+	return "job", nil
+}
+
 type failingSettingsManager struct{ err error }
 
 func (f failingSettingsManager) GetSettings(context.Context) (StorageMaintenanceSettings, error) {

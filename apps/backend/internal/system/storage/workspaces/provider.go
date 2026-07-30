@@ -340,7 +340,28 @@ func (p *Provider) PermanentDelete(
 	id string,
 	confirmation string,
 ) (storage.QuarantineEntry, error) {
-	if confirmation != "DELETE" {
+	return p.permanentDelete(ctx, id, confirmation, false)
+}
+
+func (p *Provider) PermanentDeleteForce(
+	ctx context.Context,
+	id string,
+	confirmation string,
+) (storage.QuarantineEntry, error) {
+	return p.permanentDelete(ctx, id, confirmation, true)
+}
+
+func (p *Provider) permanentDelete(
+	ctx context.Context,
+	id string,
+	confirmation string,
+	force bool,
+) (storage.QuarantineEntry, error) {
+	if force {
+		if confirmation != storage.QuarantineConfirmationForce {
+			return storage.QuarantineEntry{}, storage.ErrForceDeleteConfirmation
+		}
+	} else if confirmation != storage.QuarantineConfirmationDelete {
 		return storage.QuarantineEntry{}, ErrDeleteConfirmation
 	}
 	if p.config.Store == nil {
@@ -353,13 +374,13 @@ func (p *Provider) PermanentDelete(
 	if err := p.validateEntryPaths(entry); err != nil {
 		return entry, err
 	}
-	if p.config.Now().Before(entry.DeleteAfter) {
+	if !force && p.config.Now().Before(entry.DeleteAfter) {
 		return entry, fmt.Errorf("%w: quarantine retention deadline has not elapsed", storage.ErrConflict)
 	}
 	if _, err := directorySizeNoFollow(entry.QuarantinePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return entry, fmt.Errorf("validate quarantined workspace: %w", err)
 	}
-	if p.config.Pruner != nil && !p.config.Now().Before(entry.DeleteAfter) {
+	if p.config.Pruner != nil {
 		if err := p.config.Pruner.PruneQuarantinedWorkspace(ctx, entry); err != nil {
 			_, _ = p.config.Store.TransitionQuarantineEntry(ctx, id, storage.QuarantineStateFailed, err.Error())
 			return entry, fmt.Errorf("prune stale Git worktree registration: %w", err)
@@ -369,7 +390,7 @@ func (p *Provider) PermanentDelete(
 		_, _ = p.config.Store.TransitionQuarantineEntry(ctx, id, storage.QuarantineStateFailed, err.Error())
 		return entry, fmt.Errorf("delete quarantined workspace: %w", err)
 	}
-	deleted, err := p.config.Store.TransitionQuarantineEntry(ctx, id, storage.QuarantineStateDeleted, "")
+	deleted, err := p.config.Store.TransitionQuarantineEntry(context.WithoutCancel(ctx), id, storage.QuarantineStateDeleted, "")
 	if err != nil {
 		return entry, fmt.Errorf("persist workspace deletion: %w", err)
 	}

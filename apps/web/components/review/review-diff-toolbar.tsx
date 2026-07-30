@@ -34,6 +34,7 @@ import {
 } from "@/components/editors/external-vcs-file-link";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { isMarkdownFile } from "@/lib/utils/file-types";
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
 const iconBtnActive = "h-6 w-6 p-0 cursor-pointer bg-muted opacity-100";
@@ -41,11 +42,6 @@ const iconBtnDestructive =
   "h-6 w-6 p-0 cursor-pointer opacity-60 hover:text-destructive hover:opacity-100";
 const mobileMenuItem = "cursor-pointer gap-3 text-sm";
 const mobileMenuIcon = "size-4 text-muted-foreground";
-
-function isMarkdownPath(filePath: string): boolean {
-  const ext = filePath.split(".").pop()?.toLowerCase();
-  return ext === "md" || ext === "mdx";
-}
 
 export type FileDiffToolbarProps = {
   diff: string;
@@ -62,7 +58,8 @@ export type FileDiffToolbarProps = {
   expandUnchanged: boolean;
   onDiscard: () => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
-  onPreviewMarkdown?: (filePath: string) => void;
+  onToggleMarkdownPreview?: () => void;
+  markdownPreview?: boolean;
   onToggleExpandUnchanged: () => void;
   onToggleWordWrap: () => void;
   /** Multi-repo subpath (repository_name) so the Edit action opens the file
@@ -199,7 +196,8 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
     expandUnchanged,
     onDiscard,
     onOpenFile,
-    onPreviewMarkdown,
+    onToggleMarkdownPreview,
+    markdownPreview,
     onToggleExpandUnchanged,
     onToggleWordWrap,
     repo,
@@ -208,7 +206,6 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
     void navigator.clipboard.writeText(diff || "");
   }, [diff]);
   const [open, setOpen] = useState(false);
-  const fileName = filePath.split("/").pop() || filePath;
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -233,7 +230,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
         className="w-64"
       >
         <DropdownMenuLabel className="truncate font-medium text-foreground" title={filePath}>
-          {fileName}
+          {filePath.split("/").pop() || filePath}
         </DropdownMenuLabel>
         <DropdownMenuItem className={mobileMenuItem} onSelect={handleCopyDiff}>
           <IconCopy className={mobileMenuIcon} />
@@ -245,10 +242,10 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
             Edit file
           </DropdownMenuItem>
         )}
-        {onPreviewMarkdown && isMarkdownPath(filePath) && (
-          <DropdownMenuItem className={mobileMenuItem} onSelect={() => onPreviewMarkdown(filePath)}>
+        {onToggleMarkdownPreview && isMarkdownFile(filePath) && (
+          <DropdownMenuItem className={mobileMenuItem} onSelect={onToggleMarkdownPreview}>
             <IconEye className={mobileMenuIcon} />
-            Preview markdown
+            {markdownPreview ? "Show diff" : "Preview markdown"}
           </DropdownMenuItem>
         )}
         <ExternalVcsFileMenuItem
@@ -299,7 +296,8 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
     expandUnchanged,
     onDiscard,
     onOpenFile,
-    onPreviewMarkdown,
+    onToggleMarkdownPreview,
+    markdownPreview,
     onToggleExpandUnchanged,
     onToggleWordWrap,
     repo,
@@ -338,8 +336,11 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
         onToggleViewMode={handleToggleViewMode}
         onToggleWordWrap={onToggleWordWrap}
       />
-      {onPreviewMarkdown && isMarkdownPath(filePath) && (
-        <ToolbarIconBtn onClick={() => onPreviewMarkdown(filePath)} tooltip="Preview markdown">
+      {onToggleMarkdownPreview && isMarkdownFile(filePath) && (
+        <ToolbarIconBtn
+          onClick={onToggleMarkdownPreview}
+          tooltip={markdownPreview ? "Show diff" : "Preview markdown"}
+        >
           <IconEye className="h-3.5 w-3.5" />
         </ToolbarIconBtn>
       )}

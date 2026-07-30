@@ -85,6 +85,9 @@ function buildBehaviorSettings(state: AppState, payload: UserSettingsUpdatedPayl
     mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(
       payload.mcp_task_agent_profile_default,
     ),
+    showAnchoredPromptBar: payload.show_anchored_prompt_bar ?? true,
+    showScrollToLastPrompt: payload.show_scroll_to_last_prompt ?? true,
+    showScrollToStart: payload.show_scroll_to_start ?? true,
     showReleaseNotification: payload.show_release_notification ?? true,
     releaseNotesLastSeenVersion: (payload.release_notes_last_seen_version as string) || null,
     terminalLinkBehavior:

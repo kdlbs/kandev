@@ -28,7 +28,8 @@ type ReviewDiffHeaderProps = ReviewExternalLinkContext & {
   onCheckboxChange: (checked: boolean | "indeterminate") => void;
   onDiscard: () => void;
   onOpenFile?: (filePath: string, repo?: string) => void;
-  onPreviewMarkdown?: (filePath: string) => void;
+  markdownPreview?: boolean;
+  onToggleMarkdownPreview?: () => void;
   onToggleCollapse: () => void;
   onToggleExpandUnchanged: () => void;
   onToggleWordWrap: () => void;
@@ -242,7 +243,8 @@ export function ReviewDiffHeader({
   onCheckboxChange,
   onDiscard,
   onOpenFile,
-  onPreviewMarkdown,
+  markdownPreview,
+  onToggleMarkdownPreview,
   onToggleCollapse,
   onToggleExpandUnchanged,
   onToggleWordWrap,
@@ -275,7 +277,8 @@ export function ReviewDiffHeader({
       expandUnchanged={expandUnchanged}
       onDiscard={onDiscard}
       onOpenFile={onOpenFile}
-      onPreviewMarkdown={onPreviewMarkdown}
+      markdownPreview={markdownPreview}
+      onToggleMarkdownPreview={onToggleMarkdownPreview}
       onToggleExpandUnchanged={onToggleExpandUnchanged}
       onToggleWordWrap={onToggleWordWrap}
       repo={file.repository_name}

@@ -170,7 +170,7 @@ export type ReviewDialogProps = {
   sessionId: string;
   baseBranch?: string;
   onSendComments: (comments: DiffComment[]) => void;
-  onOpenFile?: (filePath: string) => void;
+  onOpenFile?: (filePath: string, repo?: string) => void;
   gitStatusFiles: Record<string, FileInfo> | null;
   cumulativeDiff: CumulativeDiff | null;
   prs?: TaskPR[];
@@ -515,7 +515,6 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
     allFiles: s.allFiles,
   });
   useWalkthroughFileSelection(open, s.allFiles, s.filter, s.setFilter, s.handleSelectFile);
-
   return (
     <ReviewDialogSurface
       open={open}

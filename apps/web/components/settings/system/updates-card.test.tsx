@@ -92,6 +92,36 @@ afterEach(() => {
 });
 
 describe("UpdatesCard self-update", () => {
+  it("passes a stable document reload instead of the update-metadata refetch", () => {
+    const reloadDocument = vi.fn();
+    const reloadMetadataFirst = vi.fn();
+    const reloadMetadataSecond = vi.fn();
+    mocks.useUpdates
+      .mockReturnValueOnce({
+        updates: updates(),
+        check: vi.fn(),
+        reload: reloadMetadataFirst,
+      })
+      .mockReturnValue({
+        updates: updates(),
+        check: vi.fn(),
+        reload: reloadMetadataSecond,
+      });
+
+    const { rerender } = render(<UpdatesCard reloadDocument={reloadDocument} />);
+    const firstCompletion = mocks.useSelfUpdate.mock.calls.at(-1)?.[0]?.onComplete;
+
+    rerender(<UpdatesCard reloadDocument={reloadDocument} />);
+    const secondCompletion = mocks.useSelfUpdate.mock.calls.at(-1)?.[0]?.onComplete;
+
+    expect(firstCompletion).toBe(reloadDocument);
+    expect(secondCompletion).toBe(reloadDocument);
+    firstCompletion?.();
+    expect(reloadDocument).toHaveBeenCalledOnce();
+    expect(reloadMetadataFirst).not.toHaveBeenCalled();
+    expect(reloadMetadataSecond).not.toHaveBeenCalled();
+  });
+
   it("does not render Apply update when the install is not a managed service", () => {
     mocks.useUpdates.mockReturnValue({
       updates: updates({

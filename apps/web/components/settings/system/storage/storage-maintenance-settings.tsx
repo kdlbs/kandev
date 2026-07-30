@@ -277,9 +277,16 @@ export function StorageMaintenanceSettings() {
       <StorageQuarantineCard
         entries={controller.quarantine}
         deleteJobId={controller.deleteJob?.id}
+        deleteJobActive={
+          controller.deleteJob?.state === "queued" || controller.deleteJob?.state === "running"
+        }
         disabledReason={actionDisabledReason}
+        schedulingEnabled={controller.overview?.settings.enabled ?? false}
+        checkIntervalHours={controller.overview?.settings.check_interval_hours ?? 24}
         onRestore={controller.restore}
         onDelete={controller.permanentlyDelete}
+        onClearEligible={controller.clearEligible}
+        onForceClearAll={controller.forceClearAll}
       />
     </div>
   );
