@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -261,6 +262,55 @@ func TestHandleWSNewSession_UsesExtendedDeadline(t *testing.T) {
 	const want = 2 * time.Minute
 	if capture.remaining < want-time.Second || capture.remaining > want {
 		t.Fatalf("session/new deadline = %v from now, want about %v", capture.remaining, want)
+	}
+}
+
+func TestHandleWSNewSessionStartsAndConfiguresMCPAttachmentAttempt(t *testing.T) {
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{
+		Port:       0,
+		WorkDir:    t.TempDir(),
+		InstanceID: "execution-1",
+		TaskID:     "task-1",
+		SessionID:  "session-1",
+		AgentType:  "auggie",
+	}
+	procMgr := process.NewManager(cfg, log)
+	s := NewServer(cfg, procMgr, nil, nil, log)
+	s.procMgr.SetAdapterForTest(&mcpCaptureAdapter{})
+
+	msg, err := ws.NewRequest("req-1", "agent.session.new", NewSessionRequest{McpServers: []types.McpServer{{
+		Name: "profile-server", Type: "http", URL: "https://user:secret@mcp.example.test/path",
+	}}})
+	if err != nil {
+		t.Fatalf("NewRequest: %v", err)
+	}
+	if response := s.handleWSNewSession(context.Background(), msg); response.Type != ws.MessageTypeResponse {
+		t.Fatalf("response type = %q, want response", response.Type)
+	}
+
+	readUpdate := func() adapter.AgentEvent {
+		select {
+		case event := <-s.procMgr.GetUpdates():
+			return event
+		default:
+			t.Fatal("expected MCP attachment update")
+			return adapter.AgentEvent{}
+		}
+	}
+	first := readUpdate()
+	if first.Type != streams.EventTypeMCPAttachment || first.MCPAttachmentAttempt == nil {
+		t.Fatalf("first event = %+v, want attachment attempt", first)
+	}
+	if got := first.MCPAttachmentAttempt; got.TaskID != "task-1" || got.SessionID != "session-1" || got.ExecutionID != "execution-1" {
+		t.Fatalf("attempt identity = %+v", got)
+	}
+	second := readUpdate()
+	if second.MCPAttachment == nil || second.MCPAttachment.Kind != streams.MCPAttachmentEvidenceConfigured {
+		t.Fatalf("second event = %+v, want configured evidence", second)
+	}
+	if second.MCPAttachment.Target != "https://mcp.example.test" {
+		t.Fatalf("configured target = %q, want sanitized host", second.MCPAttachment.Target)
 	}
 }
 

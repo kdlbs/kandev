@@ -4,6 +4,7 @@ package mcp
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -93,6 +95,9 @@ type Server struct {
 	mcpLogger          *zap.Logger // optional file logger for MCP debug traces
 	mu                 sync.Mutex
 	running            bool
+	attachmentMu       sync.RWMutex
+	attachmentAttempt  streams.MCPAttachmentAttempt
+	attachmentReporter func(streams.MCPAttachmentEvidence)
 }
 
 // New creates a new MCP server for agentctl.
@@ -168,14 +173,88 @@ func newServer(backend BackendClient, sessionID, taskID string, log *logger.Logg
 		}
 	}
 
+	hooks := &server.Hooks{}
 	s.mcpServer = server.NewMCPServer(
 		"kandev-mcp",
 		"1.0.0",
 		server.WithToolCapabilities(true),
+		server.WithHooks(hooks),
 	)
+	hooks.AddOnRegisterSession(func(_ context.Context, session server.ClientSession) {
+		s.observeMCPConnection(session.SessionID(), streams.MCPAttachmentEvidenceSessionAccepted, 0, "")
+	})
+	hooks.AddAfterInitialize(func(ctx context.Context, _ any, _ *mcp.InitializeRequest, _ *mcp.InitializeResult) {
+		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
+	})
+	hooks.AddAfterListTools(func(ctx context.Context, _ any, _ *mcp.ListToolsRequest, result *mcp.ListToolsResult) {
+		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolsListObserved, len(result.Tools), "")
+	})
+	hooks.AddAfterCallTool(func(ctx context.Context, _ any, _ *mcp.CallToolRequest, _ *mcp.CallToolResult) {
+		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceToolCallObserved, 0, "")
+	})
+	hooks.AddOnError(func(ctx context.Context, _ any, _ mcp.MCPMethod, _ any, err error) {
+		s.observeMCPConnection(mcpConnectionID(ctx), streams.MCPAttachmentEvidenceExplicitError, 0, err.Error())
+	})
+	hooks.AddOnUnregisterSession(func(_ context.Context, session server.ClientSession) {
+		s.observeMCPConnection(session.SessionID(), streams.MCPAttachmentEvidenceConnectionClosed, 0, "")
+	})
 	s.registerTools()
 	s.running = true
 	return s
+}
+
+// SetAttachmentReporter routes safe MCP observations to the instance's
+// existing agent update stream. It accepts a concrete callback to keep the MCP
+// package independent of process-manager implementation details.
+func (s *Server) SetAttachmentReporter(reporter func(streams.MCPAttachmentEvidence)) {
+	s.attachmentMu.Lock()
+	defer s.attachmentMu.Unlock()
+	s.attachmentReporter = reporter
+}
+
+// SetAttachmentAttempt selects the backend-owned attempt to which subsequent
+// MCP endpoint observations belong. It is called only by the local agentctl
+// API before handing configuration to an agent adapter.
+func (s *Server) SetAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
+	s.attachmentMu.Lock()
+	defer s.attachmentMu.Unlock()
+	s.attachmentAttempt = attempt
+}
+
+func (s *Server) observeMCPConnection(connectionID string, kind streams.MCPAttachmentEvidenceKind, toolCount int, summary string) {
+	s.attachmentMu.RLock()
+	attempt := s.attachmentAttempt
+	reporter := s.attachmentReporter
+	s.attachmentMu.RUnlock()
+	if reporter == nil || attempt.AttemptID == "" {
+		return
+	}
+	reporter(streams.MCPAttachmentEvidence{
+		AttemptID:    attempt.AttemptID,
+		ServerName:   "kandev",
+		Kind:         kind,
+		OccurredAt:   time.Now().UTC(),
+		Source:       streams.MCPServerSourceKandev,
+		ConnectionID: opaqueMCPConnectionID(connectionID),
+		ToolCount:    toolCount,
+		Summary:      streams.SanitizeMCPErrorSummary(summary),
+	})
+}
+
+func mcpConnectionID(ctx context.Context) string {
+	session := server.ClientSessionFromContext(ctx)
+	if session == nil {
+		return ""
+	}
+	return session.SessionID()
+}
+
+func opaqueMCPConnectionID(connectionID string) string {
+	if connectionID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(connectionID))
+	return fmt.Sprintf("mcp-%x", sum[:8])
 }
 
 // RegisterRoutes adds MCP routes to the gin router at the root.

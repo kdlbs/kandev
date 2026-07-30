@@ -33,6 +33,7 @@ import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
   SessionModelsPayload,
+  SessionMCPStatusPayload,
   SessionPromptUsagePayload,
   SessionTodosPayload,
 } from "./session-runtime-payloads";
@@ -489,6 +490,7 @@ export {
   type SessionModelInfoPayload,
   type ConfigOptionPayload,
   type SessionModelsPayload,
+  type SessionMCPStatusPayload,
   type SessionInfoPayload,
   type SessionTodosPayload,
 } from "./session-runtime-payloads";
@@ -601,6 +603,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
       AgentCapabilitiesPayload
     >;
     "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
+    "session.mcp_status_updated": BackendMessage<
+      "session.mcp_status_updated",
+      SessionMCPStatusPayload
+    >;
     "session.info_updated": BackendMessage<"session.info_updated", SessionInfoPayload>;
     "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
     "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;

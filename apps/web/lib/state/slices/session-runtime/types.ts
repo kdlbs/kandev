@@ -250,6 +250,45 @@ export type SessionModelsState = {
   >;
 };
 
+export type MCPAttachmentStatus =
+  | "unknown"
+  | "delivered"
+  | "connected"
+  | "active"
+  | "failed"
+  | "filtered"
+  | "unavailable";
+
+export type MCPAttachmentServer = {
+  name: string;
+  source?: "kandev" | "profile";
+  transport?: string;
+  target?: string;
+  status: MCPAttachmentStatus;
+  reason_code?: string;
+  summary?: string;
+  connection_id?: string;
+  tool_count?: number;
+};
+
+export type MCPAttachmentHistory = {
+  version: number;
+  current: {
+    attachment_attempt_id: string;
+    started_at: string;
+    updated_at?: string;
+    servers?: MCPAttachmentServer[];
+  };
+  previous?: Array<{
+    attachment_attempt_id: string;
+    started_at: string;
+    updated_at?: string;
+    servers?: MCPAttachmentServer[];
+  }>;
+};
+
+export type SessionMCPStatusState = { bySessionId: Record<string, MCPAttachmentHistory> };
+
 export type PromptUsageState = {
   bySessionId: Record<string, PromptUsageEntry>;
 };
@@ -352,6 +391,7 @@ export type SessionRuntimeSliceState = {
   sessionMode: SessionModeState;
   agentCapabilities: AgentCapabilitiesState;
   sessionModels: SessionModelsState;
+  sessionMcpStatus: SessionMCPStatusState;
   promptUsage: PromptUsageState;
   sessionTodos: SessionTodosState;
   userShells: UserShellsState;
@@ -414,6 +454,7 @@ export type SessionRuntimeSliceActions = {
       configBaseline?: Record<string, string>;
     },
   ) => void;
+  setSessionMCPStatus: (sessionId: string, history: MCPAttachmentHistory) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
   // Session todos actions

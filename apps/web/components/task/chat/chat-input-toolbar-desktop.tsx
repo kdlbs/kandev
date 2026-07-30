@@ -87,7 +87,7 @@ function buildCollapsibleItems(props: DesktopToolbarProps): ToolbarItemConfig[] 
     {
       id: "mcp",
       section: "left",
-      render: () => <McpIndicator mcpServers={props.mcpServers} />,
+      render: () => <McpIndicator mcpServers={props.mcpServers} sessionId={props.sessionId} />,
     },
     {
       id: "mode",

@@ -94,7 +94,7 @@ function MobileLeftActions(props: MobileToolbarProps) {
           {!props.hideAgentControls && (
             <>
               <div data-testid="toolbar-item-mcp">
-                <McpIndicator mcpServers={props.mcpServers} />
+                <McpIndicator mcpServers={props.mcpServers} sessionId={props.sessionId} />
               </div>
               <div data-testid="toolbar-item-mode">
                 <ModeSelector sessionId={props.sessionId} triggerClassName="max-w-[46vw]" />

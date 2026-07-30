@@ -13,7 +13,9 @@ import {
 import { GridSpinner } from "@/components/grid-spinner";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 import { useAppStore } from "@/components/state-provider";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { Button } from "@kandev/ui/button";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -202,25 +204,101 @@ export function PlanToggleButton({
   );
 }
 
-export function McpIndicator({ mcpServers }: { mcpServers: string[] }) {
+const mcpStatusColor: Record<string, string> = {
+  active: "bg-emerald-500",
+  connected: "bg-amber-500",
+  delivered: "bg-amber-500",
+  failed: "bg-destructive",
+  filtered: "bg-muted-foreground/50",
+  unavailable: "bg-muted-foreground/50",
+  unknown: "bg-muted-foreground/50",
+};
+
+export function McpIndicator({
+  mcpServers,
+  sessionId,
+}: {
+  mcpServers: string[];
+  sessionId?: string | null;
+}) {
+  const attachmentHistory = useAppStore((state) =>
+    sessionId ? state.sessionMcpStatus.bySessionId[sessionId] : undefined,
+  );
+  const usesTouchDrawer = useTouchDrawer();
   const hasMcp = mcpServers.length > 0;
-  const tooltipText = hasMcp
-    ? `MCP Servers: ${mcpServers.join(", ")}`
-    : "Agent does not support MCP";
   const Icon = hasMcp ? IconPlugConnected : IconPlugConnectedX;
+  const servers =
+    attachmentHistory?.current.servers ??
+    mcpServers.map((name) => ({ name, status: "unknown" as const, summary: undefined }));
+  const statusList = hasMcp ? (
+    <div className="space-y-1">
+      <div className="font-medium">MCP servers</div>
+      {servers.map((server) => (
+        <div key={server.name} className="flex items-center gap-2">
+          <span
+            className={cn(
+              "h-2 w-2 shrink-0 rounded-full",
+              mcpStatusColor[server.status] ?? mcpStatusColor.unknown,
+            )}
+          />
+          <span className="truncate">{server.name}</span>
+          {server.summary && <span className="text-muted-foreground">{server.summary}</span>}
+        </div>
+      ))}
+    </div>
+  ) : (
+    "Agent does not support MCP"
+  );
+  const trigger = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      aria-label="Show MCP connection status"
+      className={cn(
+        "h-7 w-7 cursor-pointer rounded-md hover:bg-muted/40",
+        hasMcp ? "text-foreground" : "text-muted-foreground/40",
+      )}
+      data-testid="mcp-status-trigger"
+    >
+      <Icon className="h-4 w-4" />
+    </Button>
+  );
+
+  if (usesTouchDrawer) {
+    return (
+      <Drawer>
+        <DrawerTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            aria-label="Show MCP connection status"
+            className={cn(
+              "h-11 w-11 cursor-pointer rounded-md active:scale-95",
+              hasMcp ? "text-foreground" : "text-muted-foreground/40",
+            )}
+            data-testid="mcp-status-trigger"
+          >
+            <Icon className="h-4 w-4" />
+          </Button>
+        </DrawerTrigger>
+        <DrawerContent data-testid="mcp-status-drawer" className="max-h-[80dvh]">
+          <DrawerHeader>
+            <DrawerTitle>MCP connection status</DrawerTitle>
+          </DrawerHeader>
+          <div className="min-h-0 overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] text-sm">
+            {statusList}
+          </div>
+        </DrawerContent>
+      </Drawer>
+    );
+  }
+
   return (
     <Tooltip>
-      <TooltipTrigger asChild>
-        <div
-          className={cn(
-            "h-7 w-7 flex items-center justify-center rounded-md",
-            hasMcp ? "text-foreground" : "text-muted-foreground/40",
-          )}
-        >
-          <Icon className="h-4 w-4" />
-        </div>
-      </TooltipTrigger>
-      <TooltipContent>{tooltipText}</TooltipContent>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipContent data-testid="mcp-status-popover">{statusList}</TooltipContent>
     </Tooltip>
   );
 }

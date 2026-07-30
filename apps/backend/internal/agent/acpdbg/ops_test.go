@@ -1,6 +1,26 @@
 package acpdbg
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
+
+func TestNewRunnerUsesResolvedTemporaryWorkdirForProtocolRequests(t *testing.T) {
+	runner, err := NewRunner(context.Background(), t.TempDir()+"/probe.jsonl", RunConfig{
+		AgentID: "test-agent",
+		Command: []string{"cat"},
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	t.Cleanup(func() { runner.Close("test complete") })
+	if runner.cfg.Workdir == "" {
+		t.Fatal("runner workdir is empty; session/new would receive an empty cwd")
+	}
+	if runner.cfg.Workdir != runner.tmpDir {
+		t.Fatalf("protocol workdir = %q, child temporary dir = %q", runner.cfg.Workdir, runner.tmpDir)
+	}
+}
 
 func TestSessionLoadParamsIncludeChangedWorkdir(t *testing.T) {
 	t.Parallel()

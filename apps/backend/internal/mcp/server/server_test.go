@@ -3,11 +3,38 @@ package mcp
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMCPAttachmentObserverEmitsSafeConnectionEvidence(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTask)
+	events := make(chan streams.MCPAttachmentEvidence, 4)
+	s.SetAttachmentReporter(func(evidence streams.MCPAttachmentEvidence) { events <- evidence })
+	s.SetAttachmentAttempt(streams.MCPAttachmentAttempt{AttemptID: "attempt-1"})
+
+	s.observeMCPConnection("agent session containing secret", streams.MCPAttachmentEvidenceInitializeObserved, 0, "")
+	s.observeMCPConnection("agent session containing secret", streams.MCPAttachmentEvidenceToolsListObserved, 7, "")
+
+	first := <-events
+	second := <-events
+	if first.AttemptID != "attempt-1" || first.ServerName != "kandev" || first.ConnectionID == "agent session containing secret" {
+		t.Fatalf("first evidence = %+v", first)
+	}
+	if second.Kind != streams.MCPAttachmentEvidenceToolsListObserved || second.ToolCount != 7 {
+		t.Fatalf("second evidence = %+v", second)
+	}
+	if first.OccurredAt.IsZero() || time.Since(first.OccurredAt) > time.Second {
+		t.Fatalf("timestamp = %v", first.OccurredAt)
+	}
+}
 
 func newTestLogger(t *testing.T) *logger.Logger {
 	t.Helper()
