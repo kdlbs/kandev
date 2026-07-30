@@ -283,6 +283,9 @@ func (s *Store) listRepositoryIDsForAutomations(ctx context.Context, automationI
 		return nil, err
 	}
 	result := make(map[string][]string, len(automationIDs))
+	for _, id := range automationIDs {
+		result[id] = []string{}
+	}
 	for _, r := range rows {
 		result[r.AutomationID] = append(result[r.AutomationID], r.RepositoryID)
 	}

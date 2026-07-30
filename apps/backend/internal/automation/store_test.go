@@ -109,6 +109,9 @@ func TestCreateAutomation_EmptyRepositoryIDs(t *testing.T) {
 	if len(got.RepositoryIDs) != 0 {
 		t.Fatalf("expected no repository_ids, got %v", got.RepositoryIDs)
 	}
+	if got.RepositoryIDs == nil {
+		t.Fatal("expected repository_ids to be a non-nil empty slice, got nil (would encode as JSON null)")
+	}
 }
 
 func TestUpdateAutomation_ReplacesRepositoryIDs(t *testing.T) {
@@ -199,6 +202,9 @@ func TestListAutomations_BatchHydratesRepositoryIDs(t *testing.T) {
 	}
 	if got := byID[a2.ID].RepositoryIDs; len(got) != 0 {
 		t.Fatalf("expected a2 repository_ids empty, got %v", got)
+	}
+	if byID[a2.ID].RepositoryIDs == nil {
+		t.Fatal("expected a2 repository_ids to be a non-nil empty slice, got nil (would encode as JSON null)")
 	}
 }
 
