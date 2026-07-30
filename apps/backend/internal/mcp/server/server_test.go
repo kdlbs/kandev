@@ -53,6 +53,8 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_task_plan_kandev")
 	assert.Contains(t, tools, "update_task_plan_kandev")
 	assert.Contains(t, tools, "delete_task_plan_kandev")
+	assert.Contains(t, tools, "get_task_note_kandev")
+	assert.Contains(t, tools, "update_task_note_kandev")
 
 	// Task mode should have interaction tools
 	assert.Contains(t, tools, "ask_user_question_kandev")
@@ -216,15 +218,15 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	tools := getRegisteredToolNames(s)
 	// 15 kanban (incl. delete + archive task + stop_task + spawn_session) +
 	// 1 add_branch_to_task + 1 add_workspace_sources + 1 update_repository_base_branch +
-	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
-	// 1 publish_review_findings + 1 related-tasks = 29.
+	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 2 note + 3 walkthrough +
+	// 1 publish_review_findings + 1 related-tasks = 31.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
 	assert.Contains(t, tools, "publish_review_findings_kandev", "native code-review publishing must be registered in task mode")
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
 	assert.Contains(t, tools, "add_workspace_sources_kandev")
-	assert.Equal(t, 29, len(tools))
+	assert.Equal(t, 31, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
@@ -291,6 +293,8 @@ func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_task_plan_kandev")
 	assert.Contains(t, tools, "update_task_plan_kandev")
 	assert.Contains(t, tools, "delete_task_plan_kandev")
+	assert.Contains(t, tools, "get_task_note_kandev")
+	assert.Contains(t, tools, "update_task_note_kandev")
 
 	// Office mode should have interaction tools
 	assert.Contains(t, tools, "ask_user_question_kandev")
@@ -330,10 +334,10 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeOffice)
 	tools := getRegisteredToolNames(s)
-	// 4 plan + 1 interaction + 1 related-tasks + 3 task-documents = 9
+	// 4 plan + 2 note + 1 interaction + 1 related-tasks + 3 task-documents = 11
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev is kanban-task-only; office mode advances tasks via its own approval surface")
-	assert.Equal(t, 9, len(tools))
+	assert.Equal(t, 11, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -350,8 +354,8 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// delegate_task_kandev was retired from ModeOffice (now lives in
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
-	// 4 plan + 1 related-tasks + 3 task-documents = 8 (no ask_user_question, no delegate)
-	assert.Equal(t, 8, len(tools))
+	// 4 plan + 2 note + 1 related-tasks + 3 task-documents = 10 (no ask_user_question, no delegate)
+	assert.Equal(t, 10, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {

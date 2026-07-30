@@ -45,6 +45,8 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskPlanCreated, ws.ActionTaskPlanCreated)
 	b.subscribe(eventBus, events.TaskPlanUpdated, ws.ActionTaskPlanUpdated)
 	b.subscribe(eventBus, events.TaskPlanDeleted, ws.ActionTaskPlanDeleted)
+	b.subscribe(eventBus, events.TaskNoteUpdated, ws.ActionTaskNoteUpdated)
+	b.subscribe(eventBus, events.TaskNoteDeleted, ws.ActionTaskNoteDeleted)
 	b.subscribe(eventBus, events.TaskPlanRevisionCreated, ws.ActionTaskPlanRevisionCreated)
 	b.subscribe(eventBus, events.TaskPlanReverted, ws.ActionTaskPlanReverted)
 	b.subscribe(eventBus, events.TaskWalkthroughCreated, ws.ActionTaskWalkthroughCreated)

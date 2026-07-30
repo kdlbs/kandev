@@ -15,5 +15,8 @@ var ErrTaskNotFound = errors.New("task not found")
 // ErrTaskPlanNotFound reports that no task plan row matched the supplied task id.
 var ErrTaskPlanNotFound = errors.New("task plan not found")
 
+// ErrTaskNoteNotFound reports that no task note row matched the supplied task id.
+var ErrTaskNoteNotFound = errors.New("task note not found")
+
 // ErrRepositoryNotFound reports that no live repository row matched the supplied id.
 var ErrRepositoryNotFound = errors.New("repository not found")

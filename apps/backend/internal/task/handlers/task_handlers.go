@@ -36,6 +36,7 @@ type TaskHandlers struct {
 	foregroundActivity         dto.ForegroundActivityProvider
 	repo                       handlerRepo
 	planService                *service.PlanService
+	noteService                *service.NoteService
 	handoffSvc                 *service.HandoffService
 	workspaceRestorer          WorkspaceQuarantineRestorer
 	unarchiveRecoveryTimeout   time.Duration
@@ -91,12 +92,13 @@ type OrchestratorStarter interface {
 	EnsureSession(ctx context.Context, taskID string, opts ...orchestrator.EnsureSessionOptions) (*orchestrator.EnsureSessionResponse, error)
 }
 
-func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
+func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, noteService *service.NoteService, log *logger.Logger) *TaskHandlers {
 	h := &TaskHandlers{
 		service:      svc,
 		orchestrator: orchestrator,
 		repo:         repo,
 		planService:  planService,
+		noteService:  noteService,
 		logger:       log.WithFields(zap.String("component", "task-task-handlers")),
 	}
 	// The orchestrator also surfaces the in-memory fine-grained busy substate
@@ -111,8 +113,8 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	return h
 }
 
-func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, log *logger.Logger) *TaskHandlers {
-	handlers := NewTaskHandlers(svc, orchestrator, repo, planService, log)
+func RegisterTaskRoutes(router *gin.Engine, dispatcher *ws.Dispatcher, svc *service.Service, orchestrator OrchestratorStarter, repo handlerRepo, planService *service.PlanService, noteService *service.NoteService, log *logger.Logger) *TaskHandlers {
+	handlers := NewTaskHandlers(svc, orchestrator, repo, planService, noteService, log)
 	handlers.registerHTTP(router)
 	handlers.registerWS(dispatcher)
 	return handlers
@@ -179,6 +181,9 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanGet, h.wsGetTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanUpdate, h.wsUpdateTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanDelete, h.wsDeleteTaskPlan)
+	dispatcher.RegisterFunc(ws.ActionTaskNoteGet, h.wsGetTaskNote)
+	dispatcher.RegisterFunc(ws.ActionTaskNoteUpdate, h.wsUpsertTaskNote)
+	dispatcher.RegisterFunc(ws.ActionTaskNoteDelete, h.wsDeleteTaskNote)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevisionsList, h.wsListTaskPlanRevisions)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevisionGet, h.wsGetTaskPlanRevision)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevert, h.wsRevertTaskPlan)

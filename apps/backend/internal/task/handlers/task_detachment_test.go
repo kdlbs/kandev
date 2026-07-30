@@ -83,7 +83,7 @@ func testDetachRouter(t *testing.T, repo *detachHandlerRepo) *gin.Engine {
 		Tasks: repo, TaskRepos: repo, Sessions: repo, Messages: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
 	router := gin.New()
-	NewTaskHandlers(svc, nil, repo, nil, log).registerHTTP(router)
+	NewTaskHandlers(svc, nil, repo, nil, nil, log).registerHTTP(router)
 	return router
 }
 

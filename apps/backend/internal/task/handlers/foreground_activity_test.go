@@ -59,13 +59,13 @@ func newSessionHandlerService(t *testing.T, session *models.TaskSession) (*servi
 func TestNewTaskHandlers_DerivesForegroundActivityProvider(t *testing.T) {
 	// An orchestrator that implements the provider is picked up…
 	withActivity := &orchestratorWithActivity{value: v1.ForegroundActivityBackground}
-	h := NewTaskHandlers(nil, withActivity, nil, nil, newTestLogger(t))
+	h := NewTaskHandlers(nil, withActivity, nil, nil, nil, newTestLogger(t))
 	require.NotNil(t, h.foregroundActivity, "provider should be derived from the orchestrator")
 	assert.Equal(t, v1.ForegroundActivityBackground, h.foregroundActivity.ForegroundActivity("s"))
 
 	// …and one that does not implement it leaves the field nil (field simply omitted).
 	plain := &captureOrchestrator{}
-	h2 := NewTaskHandlers(nil, plain, nil, nil, newTestLogger(t))
+	h2 := NewTaskHandlers(nil, plain, nil, nil, nil, newTestLogger(t))
 	assert.Nil(t, h2.foregroundActivity)
 }
 

@@ -51,25 +51,7 @@ func (h *TaskHandlers) wsCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 
 // wsGetTaskPlan retrieves a task plan
 func (h *TaskHandlers) wsGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID string `json:"task_id"`
-	}
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-
-	plan, err := h.planService.GetPlan(ctx, req.TaskID)
-	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task plan", nil)
-	}
-	if plan == nil {
-		return ws.NewResponse(msg.ID, msg.Action, nil)
-	}
-
-	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+	return getTaskModelResponse(ctx, msg, h.planService.GetPlan, dto.TaskPlanFromModel, "Failed to get task plan")
 }
 
 // wsUpdateTaskPlan updates an existing task plan
@@ -110,6 +92,34 @@ func (h *TaskHandlers) wsUpdateTaskPlan(ctx context.Context, msg *ws.Message) (*
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+}
+
+func getTaskModelResponse[T any, D any](
+	ctx context.Context,
+	msg *ws.Message,
+	getter func(context.Context, string) (*T, error),
+	toDTO func(*T) D,
+	failure string,
+) (*ws.Message, error) {
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	model, err := getter(ctx, req.TaskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, failure, nil)
+	}
+	if model == nil {
+		return ws.NewResponse(msg.ID, msg.Action, nil)
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, toDTO(model))
 }
 
 // wsDeleteTaskPlan deletes a task plan

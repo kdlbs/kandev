@@ -11,6 +11,7 @@ Available tools:
 - get_task_plan_kandev: Retrieve the current plan for a task (includes any user edits). Required params: task_id.
 - update_task_plan_kandev: Update an existing plan. Required params: task_id, content (markdown). Optional: title.
 - delete_task_plan_kandev: Delete a task plan. Required params: task_id.
+- Task notes are user-owned: read freely via get_task_note_kandev, but only write via update_task_note_kandev when the user has explicitly asked.
 - list_workspaces_kandev: List all workspaces.
 - list_workflows_kandev: List workflows in a workspace. Required params: workspace_id.
 - list_tasks_kandev: List tasks in a workflow. Required params: workflow_id.

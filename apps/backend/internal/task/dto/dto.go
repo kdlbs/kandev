@@ -914,6 +914,31 @@ func TaskPlanFromModel(plan *models.TaskPlan) *TaskPlanDTO {
 	}
 }
 
+// TaskNoteDTO represents a task note for API responses.
+type TaskNoteDTO struct {
+	ID        string    `json:"id"`
+	TaskID    string    `json:"task_id"`
+	Content   string    `json:"content"`
+	UpdatedBy string    `json:"updated_by"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// TaskNoteFromModel converts a TaskNote model to a TaskNoteDTO.
+func TaskNoteFromModel(note *models.TaskNote) *TaskNoteDTO {
+	if note == nil {
+		return nil
+	}
+	return &TaskNoteDTO{
+		ID:        note.ID,
+		TaskID:    note.TaskID,
+		Content:   note.Content,
+		UpdatedBy: note.UpdatedBy,
+		CreatedAt: note.CreatedAt,
+		UpdatedAt: note.UpdatedAt,
+	}
+}
+
 // TaskPlanRevisionDTO represents a plan revision for API responses.
 // Content is optional so list responses can omit it (fetched on demand).
 type TaskPlanRevisionDTO struct {

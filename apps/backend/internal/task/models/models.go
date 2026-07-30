@@ -1377,6 +1377,19 @@ type TaskPlanRevision struct {
 	UpdatedAt          time.Time `json:"updated_at"` // bumps on coalesce merge
 }
 
+// TaskNote is a user-owned, free-form markdown scratchpad attached to a task.
+// Unlike TaskPlan, it has no revision history and is not agent-authored: the
+// agent may read it freely but should only write it when the user explicitly
+// asks (e.g. via the "Enhance note with AI" action).
+type TaskNote struct {
+	ID        string    `json:"id"`
+	TaskID    string    `json:"task_id"`
+	Content   string    `json:"content"`
+	UpdatedBy string    `json:"updated_by"` // "agent" or "user"
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 // TaskWalkthrough is an agent-authored guided code tour attached to a task.
 // It is the "what & where" of a review narration: an ordered list of Steps,
 // each anchored to a concrete repo/file/line, rendered as popovers over the

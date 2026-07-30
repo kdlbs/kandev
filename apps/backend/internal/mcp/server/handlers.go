@@ -732,31 +732,7 @@ func (s *Server) createTaskPlanHandler() server.ToolHandlerFunc {
 }
 
 func (s *Server) getTaskPlanHandler() server.ToolHandlerFunc {
-	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		taskID, err := s.resolveTaskID(req)
-		if err != nil {
-			return mcp.NewToolResultError("task_id is required"), nil
-		}
-
-		payload := map[string]string{"task_id": taskID}
-		var result map[string]interface{}
-		if err := s.backend.RequestPayload(ctx, ws.ActionMCPGetTaskPlan, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-
-		// Check if plan exists
-		if len(result) == 0 {
-			return mcp.NewToolResultText("No plan exists for this task yet."), nil
-		}
-
-		// Return the plan content for easy reading
-		if content, ok := result["content"].(string); ok {
-			return mcp.NewToolResultText(content), nil
-		}
-
-		data, _ := json.MarshalIndent(result, "", "  ")
-		return mcp.NewToolResultText(string(data)), nil
-	}
+	return s.getTaskTextToolHandler(ws.ActionMCPGetTaskPlan, "No plan exists for this task yet.")
 }
 
 func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
@@ -789,6 +765,35 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) getTaskNoteHandler() server.ToolHandlerFunc {
+	return s.getTaskTextToolHandler(ws.ActionMCPGetTaskNote, "No notes exist for this task yet.")
+}
+
+func (s *Server) updateTaskNoteHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+		content, err := req.RequireString("content")
+		if err != nil {
+			return mcp.NewToolResultError("content is required"), nil
+		}
+
+		payload := map[string]interface{}{
+			"task_id":    taskID,
+			"content":    content,
+			"updated_by": "agent",
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskNote, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(fmt.Sprintf("Task note updated successfully:\n%s", string(data))), nil
+	}
+}
+
 func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID, err := s.resolveTaskID(req)
@@ -802,6 +807,29 @@ func (s *Server) deleteTaskPlanHandler() server.ToolHandlerFunc {
 			return mcp.NewToolResultError(err.Error()), nil
 		}
 		return mcp.NewToolResultText("Plan deleted successfully."), nil
+	}
+}
+
+func (s *Server) getTaskTextToolHandler(action, missingMessage string) server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		taskID, err := s.resolveTaskID(req)
+		if err != nil {
+			return mcp.NewToolResultError("task_id is required"), nil
+		}
+
+		payload := map[string]string{"task_id": taskID}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, action, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		if len(result) == 0 {
+			return mcp.NewToolResultText(missingMessage), nil
+		}
+		if content, ok := result["content"].(string); ok {
+			return mcp.NewToolResultText(content), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
 	}
 }
 

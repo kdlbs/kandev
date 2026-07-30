@@ -190,6 +190,7 @@ type Handlers struct {
 	taskRepo             TaskRepository
 	eventBus             EventBus
 	planService          *service.PlanService
+	noteService          *service.NoteService
 	walkthroughService   *service.WalkthroughService
 	sessionLauncher      SessionLauncher
 	taskStopper          TaskStopper
@@ -275,6 +276,11 @@ func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 	h.taskStopper = stopper
 }
 
+// SetNoteService wires the task note service used by note MCP tools.
+func (h *Handlers) SetNoteService(svc *service.NoteService) {
+	h.noteService = svc
+}
+
 // SetUserSettingsProvider wires portable user preferences into MCP task creation.
 func (h *Handlers) SetUserSettingsProvider(provider UserSettingsProvider) {
 	h.userSettingsProvider = provider
@@ -315,6 +321,8 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
+	d.RegisterFunc(ws.ActionMCPGetTaskNote, h.handleGetTaskNote)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskNote, h.handleUpdateTaskNote)
 	d.RegisterFunc(ws.ActionMCPShowWalkthrough, h.handleShowWalkthrough)
 	d.RegisterFunc(ws.ActionMCPGetWalkthrough, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionMCPDeleteWalkthrough, h.handleDeleteWalkthrough)
@@ -3232,26 +3240,7 @@ func (h *Handlers) handleCreateTaskPlan(ctx context.Context, msg *ws.Message) (*
 
 // handleGetTaskPlan retrieves a task plan.
 func (h *Handlers) handleGetTaskPlan(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req struct {
-		TaskID string `json:"task_id"`
-	}
-	if err := json.Unmarshal(msg.Payload, &req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
-
-	plan, err := h.planService.GetPlan(ctx, req.TaskID)
-	if err != nil {
-		if errors.Is(err, service.ErrTaskIDRequired) {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
-		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task plan", nil)
-	}
-	if plan == nil {
-		// Return empty object if no plan exists
-		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{})
-	}
-
-	return ws.NewResponse(msg.ID, msg.Action, dto.TaskPlanFromModel(plan))
+	return handleGetTaskArtifact(ctx, msg, h.planService.GetPlan, dto.TaskPlanFromModel, "Failed to get task plan")
 }
 
 // handleUpdateTaskPlan updates an existing task plan.
@@ -3314,6 +3303,64 @@ func (h *Handlers) handleDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
+}
+
+// handleGetTaskNote retrieves a task note.
+func (h *Handlers) handleGetTaskNote(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	return handleGetTaskArtifact(ctx, msg, h.noteService.GetNote, dto.TaskNoteFromModel, "Failed to get task note")
+}
+
+func handleGetTaskArtifact[T any, D any](
+	ctx context.Context,
+	msg *ws.Message,
+	getter func(context.Context, string) (*T, error),
+	toDTO func(*T) D,
+	failure string,
+) (*ws.Message, error) {
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	model, err := getter(ctx, req.TaskID)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, failure, nil)
+	}
+	if model == nil {
+		return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{})
+	}
+
+	return ws.NewResponse(msg.ID, msg.Action, toDTO(model))
+}
+
+// handleUpdateTaskNote creates or replaces a task note.
+func (h *Handlers) handleUpdateTaskNote(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID    string `json:"task_id"`
+		Content   string `json:"content"`
+		UpdatedBy string `json:"updated_by"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+
+	updatedBy := req.UpdatedBy
+	if updatedBy == "" {
+		updatedBy = "agent"
+	}
+	note, err := h.noteService.UpsertNote(ctx, req.TaskID, req.Content, updatedBy)
+	if err != nil {
+		if errors.Is(err, service.ErrTaskIDRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task note: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, dto.TaskNoteFromModel(note))
 }
 
 // handleShowWalkthrough creates or replaces a task's agent-authored code walkthrough.

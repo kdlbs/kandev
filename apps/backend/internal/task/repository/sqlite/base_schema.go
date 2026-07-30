@@ -17,6 +17,7 @@ func (r *Repository) initSchema() error {
 	steps := []func() error{
 		r.initCoreSchema,
 		r.initPlansSchema,
+		r.initNotesSchema,
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
@@ -414,6 +415,22 @@ func (r *Repository) initPlansSchema() error {
 		return err
 	}
 	return r.backfillInitialPlanRevisions()
+}
+
+func (r *Repository) initNotesSchema() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_notes (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL UNIQUE,
+		content TEXT NOT NULL DEFAULT '',
+		updated_by TEXT NOT NULL DEFAULT 'user',
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_notes_task_id ON task_notes(task_id);
+	`)
+	return err
 }
 
 // initWalkthroughsSchema creates the task_walkthroughs table. Steps are stored

@@ -15,6 +15,7 @@ var ErrWorkspaceNameMismatch = repoerrors.ErrWorkspaceNameMismatch
 var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+var ErrTaskNoteNotFound = repoerrors.ErrTaskNoteNotFound
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 
@@ -415,4 +416,11 @@ type PlanRepository interface {
 	// single transaction. Pass a non-nil coalesceLatestID to merge into an existing revision;
 	// otherwise a new revision is appended with revision_number computed inside the tx.
 	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string) error
+}
+
+// NoteRepository handles task note CRUD (single row per task, no revision history).
+type NoteRepository interface {
+	GetTaskNote(ctx context.Context, taskID string) (*models.TaskNote, error)
+	UpsertTaskNote(ctx context.Context, note *models.TaskNote) error
+	DeleteTaskNote(ctx context.Context, taskID string) error
 }

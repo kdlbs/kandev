@@ -82,7 +82,7 @@ func TestRegisterTaskRoutesWiresProductionWorkspaceRestorer(t *testing.T) {
 	registerTaskRoutes(routeParams{
 		router: router, gateway: gateway, taskSvc: harness.taskSvc, taskRepo: harness.taskRepo,
 		services: &Services{Workflow: harness.workflowSvc}, workspaceRestorer: composition.workspaceRestorer, log: log,
-	}, taskservice.NewPlanService(harness.taskRepo, nil, log), handoff)
+	}, taskservice.NewPlanService(harness.taskRepo, nil, log), taskservice.NewNoteService(harness.taskRepo, nil, log), handoff)
 
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+task.ID+"/unarchive", nil)

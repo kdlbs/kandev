@@ -503,6 +503,8 @@ func registerRoutes(p routeParams) {
 	planService := taskservice.NewPlanService(p.taskRepo, p.eventBus, p.log)
 	// Per-user task scoping for plan reads/writes (opt-in auth).
 	planService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
+	noteService := taskservice.NewNoteService(p.taskRepo, p.eventBus, p.log)
+	noteService.SetTaskAuthorizer(p.taskSvc.AuthorizeTaskAccess)
 	clarificationStore := clarification.NewStore(2 * time.Hour)
 	clarificationCanceller := clarification.NewCanceller(clarificationStore, p.taskRepo, p.eventBus, p.log)
 	p.orchestratorSvc.SetClarificationCanceller(clarificationCanceller)
@@ -593,8 +595,8 @@ func registerRoutes(p routeParams) {
 	}
 
 	p.gateway.SetupRoutes(p.router)
-	registerTaskRoutes(p, planService, handoffSvc)
-	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	registerTaskRoutes(p, planService, noteService, handoffSvc)
+	registerSecondaryRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, noteService, handoffSvc)
 	if p.authSvc != nil {
 		authhttpapi.RegisterRoutes(p.router, p.authSvc, p.log)
 	}
@@ -871,14 +873,14 @@ func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliter
 }
 
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
-func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
+func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, noteService *taskservice.NoteService, handoffSvc *taskservice.HandoffService) {
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	if p.services != nil {
 		registerMentionRoutes(p.router, p.services.Mentions)
 	}
 	workflowH := taskhandlers.RegisterWorkflowRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.services.Workflow, p.log)
 	workflowH.SetForegroundActivityProvider(p.orchestratorSvc)
-	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, p.log)
+	taskH := taskhandlers.RegisterTaskRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.orchestratorSvc, p.taskRepo, planService, noteService, p.log)
 	if p.services != nil && p.services.User != nil {
 		taskH.SetTaskCreateLastUsedRecorder(p.services.User)
 	}
@@ -938,6 +940,7 @@ func registerSecondaryRoutes(
 	clarificationStore *clarification.Store,
 	clarificationCanceller *clarification.Canceller,
 	planService *taskservice.PlanService,
+	noteService *taskservice.NoteService,
 	handoffSvc *taskservice.HandoffService,
 ) {
 	workflowhandlers.RegisterRoutes(p.router, p.gateway.Dispatcher, workflowCtrl, p.eventBus, p.log)
@@ -1087,7 +1090,7 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Improve Kandev handlers (HTTP)")
 	}
 
-	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, handoffSvc)
+	registerMCPAndDebugRoutes(p, workflowCtrl, clarificationStore, clarificationCanceller, planService, noteService, handoffSvc)
 
 	var automationSvc *automation.Service
 	if p.services.Automation != nil {
@@ -1372,6 +1375,7 @@ func registerMCPAndDebugRoutes(
 	clarificationStore *clarification.Store,
 	clarificationCanceller *clarification.Canceller,
 	planService *taskservice.PlanService,
+	noteService *taskservice.NoteService,
 	handoffSvc *taskservice.HandoffService,
 ) {
 	walkthroughService := taskservice.NewWalkthroughService(p.taskRepo, p.eventBus, p.log)
@@ -1380,6 +1384,7 @@ func registerMCPAndDebugRoutes(
 		p.taskSvc, wfCtrl,
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
+	mcpHandlers.SetNoteService(noteService)
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
