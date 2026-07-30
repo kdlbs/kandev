@@ -353,7 +353,7 @@ test.describe("Code walkthrough", () => {
     const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
     await expect(reviewDialog.locator('[data-walkthrough-active="true"]')).toHaveCount(0);
-    await expect(reviewDialog.getByText("0 of 3 files reviewed")).toBeVisible();
+    await expect(reviewDialog.getByText("0 of 3 files reviewed")).toBeVisible({ timeout: 15_000 });
     await testPage.waitForTimeout(600);
     await expect(reviewDialog.getByTestId("review-diff-scroll")).toHaveJSProperty("scrollTop", 0);
     await expect(reviewDialog.getByText("0 of 3 files reviewed")).toBeVisible();

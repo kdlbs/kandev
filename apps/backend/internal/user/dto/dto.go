@@ -31,6 +31,9 @@ type UserSettingsDTO struct {
 	ReviewAutoMarkOnScroll      bool                                `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive          bool                                `json:"confirm_task_archive"`
 	MCPTaskAgentProfileDefault  string                              `json:"mcp_task_agent_profile_default"`
+	ShowAnchoredPromptBar       bool                                `json:"show_anchored_prompt_bar"`
+	ShowScrollToLastPrompt      bool                                `json:"show_scroll_to_last_prompt"`
+	ShowScrollToStart           bool                                `json:"show_scroll_to_start"`
 	ShowReleaseNotification     bool                                `json:"show_release_notification"`
 	ReleaseNotesLastSeenVersion string                              `json:"release_notes_last_seen_version"`
 	LspAutoStartLanguages       []string                            `json:"lsp_auto_start_languages"`
@@ -91,6 +94,9 @@ type UpdateUserSettingsRequest struct {
 	ReviewAutoMarkOnScroll      *bool                              `json:"review_auto_mark_on_scroll,omitempty"`
 	ConfirmTaskArchive          *bool                              `json:"confirm_task_archive,omitempty"`
 	MCPTaskAgentProfileDefault  *string                            `json:"mcp_task_agent_profile_default,omitempty"`
+	ShowAnchoredPromptBar       *bool                              `json:"show_anchored_prompt_bar,omitempty"`
+	ShowScrollToLastPrompt      *bool                              `json:"show_scroll_to_last_prompt,omitempty"`
+	ShowScrollToStart           *bool                              `json:"show_scroll_to_start,omitempty"`
 	ShowReleaseNotification     *bool                              `json:"show_release_notification,omitempty"`
 	ReleaseNotesLastSeenVersion *string                            `json:"release_notes_last_seen_version,omitempty"`
 	LspAutoStartLanguages       *[]string                          `json:"lsp_auto_start_languages,omitempty"`
@@ -212,6 +218,9 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ReviewAutoMarkOnScroll:      settings.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:          settings.ConfirmTaskArchive,
 		MCPTaskAgentProfileDefault:  models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
+		ShowAnchoredPromptBar:       settings.ShowAnchoredPromptBar,
+		ShowScrollToLastPrompt:      settings.ShowScrollToLastPrompt,
+		ShowScrollToStart:           settings.ShowScrollToStart,
 		ShowReleaseNotification:     settings.ShowReleaseNotification,
 		ReleaseNotesLastSeenVersion: settings.ReleaseNotesLastSeenVersion,
 		LspAutoStartLanguages:       settings.LspAutoStartLanguages,

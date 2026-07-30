@@ -1,9 +1,9 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 
-/** Maps old state-section labels to the new per-task state icon data-testid. */
+/** Maps state-section labels to the per-task state icon data-testid. */
 function sectionLabelToStateTestId(label: string): string {
   if (label === "Running") return "task-state-running";
-  if (label === "Turn Finished") return "task-state-review";
+  if (label === "Turn Finished") return "task-state-turn-finished";
   return "task-state-backlog";
 }
 
@@ -286,6 +286,13 @@ export class SessionPage {
    * Accepts "Turn Finished" (review/completed), "Running" (in-progress), or "Backlog".
    */
   sidebarSection(label: string): Locator {
+    if (label === "Turn Finished") {
+      return this.sidebar
+        .locator(
+          '[data-testid="task-state-turn-finished"], [data-testid="task-state-workflow-complete"]',
+        )
+        .first();
+    }
     const testId = sectionLabelToStateTestId(label);
     return this.sidebar.getByTestId(testId).first();
   }
@@ -295,6 +302,16 @@ export class SessionPage {
    * Accepts "Turn Finished" (review/completed), "Running" (in-progress), or "Backlog".
    */
   taskInSection(title: string, sectionLabel: string): Locator {
+    if (sectionLabel === "Turn Finished") {
+      return this.sidebar
+        .getByTestId("sidebar-task-item")
+        .filter({ has: this.page.getByText(title, { exact: false }) })
+        .filter({
+          has: this.page.locator(
+            '[data-testid="task-state-turn-finished"], [data-testid="task-state-workflow-complete"]',
+          ),
+        });
+    }
     const testId = sectionLabelToStateTestId(sectionLabel);
     return this.sidebar
       .getByTestId("sidebar-task-item")

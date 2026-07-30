@@ -9,6 +9,7 @@ import {
   IconDots,
   IconGitPullRequest,
   IconMessageQuestion,
+  IconProgressCheck,
   IconPinFilled,
   IconShieldQuestion,
 } from "@tabler/icons-react";
@@ -68,6 +69,8 @@ type TaskItemProps = {
   hasPendingPermission?: boolean;
   parentTaskTitle?: string;
   isSubTask?: boolean;
+  /** Whether the task is currently on the final ordered step of its workflow. */
+  isOnLastWorkflowStep?: boolean;
   /**
    * Nesting depth in the sidebar tree (0 = root). Drives left indentation so
    * arbitrarily deep subtask trees read as a hierarchy. Falls back to
@@ -194,6 +197,7 @@ function TaskStateIcon({
   isInProgress,
   hasPendingClarification,
   hasPendingPermission,
+  isOnLastWorkflowStep,
 }: {
   sessionState?: TaskSessionState;
   state?: TaskState;
@@ -201,6 +205,7 @@ function TaskStateIcon({
   isInProgress: boolean;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;
+  isOnLastWorkflowStep?: boolean;
 }) {
   if (shouldUsePermissionTaskIcon(hasPendingPermission)) {
     return (
@@ -259,9 +264,17 @@ function TaskStateIcon({
     );
   }
   if (classifyTask(sessionState, state) === "review") {
+    if (isOnLastWorkflowStep) {
+      return (
+        <IconCircleCheck
+          data-testid="task-state-workflow-complete"
+          className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
+        />
+      );
+    }
     return (
-      <IconCircleCheck
-        data-testid="task-state-review"
+      <IconProgressCheck
+        data-testid="task-state-turn-finished"
         className="mt-[1px] h-3.5 w-3.5 shrink-0 text-green-500"
       />
     );
@@ -478,6 +491,7 @@ export const TaskItem = memo(function TaskItem({
   issueInfo,
   isPinned,
   agentErrorMessage,
+  isOnLastWorkflowStep = false,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
   const isInProgress = computeIsInProgress(state, sessionState);
@@ -506,6 +520,7 @@ export const TaskItem = memo(function TaskItem({
         isInProgress={isInProgress}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
+        isOnLastWorkflowStep={isOnLastWorkflowStep}
       />
       <TaskItemContent
         title={title}

@@ -11,6 +11,7 @@ var ErrValidation = errors.New("storage maintenance settings validation")
 var (
 	ErrAdoptionRequired            = errors.New("go cache adoption requires the dedicated endpoint")
 	ErrDedicatedDockerConfirmation = errors.New("dedicated Docker acknowledgement requires confirmation")
+	ErrForceDeleteConfirmation     = errors.New("quarantine force deletion requires DELETE ALL NOW confirmation")
 	ErrInvalidPersistedSettings    = errors.New("invalid persisted storage maintenance settings")
 )
 

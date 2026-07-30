@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -28,11 +28,10 @@ import { EXECUTOR_ICON_MAP } from "@/lib/executor-icons";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 
-export default function ExecutorEditPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params);
+export default function ExecutorEditPage({ executorId }: { executorId: string }) {
   const router = useRouter();
   const executor = useAppStore(
-    (state) => state.executors.items.find((item: Executor) => item.id === id) ?? null,
+    (state) => state.executors.items.find((item: Executor) => item.id === executorId) ?? null,
   );
 
   if (!executor) {

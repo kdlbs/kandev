@@ -17,7 +17,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconDownload, IconExternalLink, IconRefresh } from "@tabler/icons-react";
-import { useSelfUpdate } from "@/hooks/domains/system/use-self-update";
+import { useSelfUpdate, type SelfUpdateController } from "@/hooks/domains/system/use-self-update";
 import {
   useDesktopUpdater,
   type DesktopUpdaterController,
@@ -30,6 +30,14 @@ interface ApplyGate {
   canApply: boolean;
   cannotApplyReason?: string;
   manualCommands: string[];
+}
+
+type UpdatesCardProps = {
+  reloadDocument?: () => void;
+};
+
+function reloadCurrentDocument(): void {
+  window.location.reload();
 }
 
 function formatChecked(value: string | number | null | undefined): string {
@@ -63,9 +71,26 @@ function getApplyGate(updates: UpdatesResponse | null | undefined): ApplyGate {
   };
 }
 
-export function UpdatesCard() {
-  const { updates, check, reload } = useUpdates();
-  const selfUpdate = useSelfUpdate({ latestVersion: updates?.latest, onComplete: reload });
+function serviceCardView(
+  updates: UpdatesResponse | null | undefined,
+  selfUpdate: SelfUpdateController,
+) {
+  const available = updates?.update_available === true;
+  const gate = getApplyGate(updates);
+  return {
+    current: updates?.current ?? "-",
+    latest: updates?.latest ?? "-",
+    available,
+    showApply: gate.canApply && !selfUpdate.isUpdating && selfUpdate.phase !== "done",
+    showManual: available && !gate.canApply && !selfUpdate.isUpdating,
+    cannotApplyReason: gate.cannotApplyReason,
+    manualCommands: gate.manualCommands,
+  };
+}
+
+export function UpdatesCard({ reloadDocument = reloadCurrentDocument }: UpdatesCardProps = {}) {
+  const { updates, check } = useUpdates();
+  const selfUpdate = useSelfUpdate({ latestVersion: updates?.latest, onComplete: reloadDocument });
   const desktopUpdater = useDesktopUpdater();
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -90,34 +115,28 @@ export function UpdatesCard() {
     }
   };
 
-  const current = updates?.current ?? "-";
-  const latest = updates?.latest ?? "-";
-  const available = updates?.update_available === true;
-  const gate = getApplyGate(updates);
-  // Hide the Apply button while an update is in flight (and once it's done —
-  // the version has flipped) so it can't be re-triggered mid-restart.
-  const showApply = gate.canApply && !selfUpdate.isUpdating && selfUpdate.phase !== "done";
+  const view = serviceCardView(updates, selfUpdate);
 
   return (
     <Card data-testid="system-updates-card">
       <CardHeader>
-        <UpdatesHeader available={available} />
+        <UpdatesHeader available={view.available} />
       </CardHeader>
       <CardContent className="space-y-4">
-        <VersionGrid current={current} latest={latest} />
+        <VersionGrid current={view.current} latest={view.latest} />
         <LastChecked checkedAt={updates?.latest_checked_at} />
         <UpdateActions
           checking={checking}
-          showApply={showApply}
-          latest={latest}
+          showApply={view.showApply}
+          latest={view.latest}
           url={updates?.latest_url}
           onCheck={onCheck}
           onApply={selfUpdate.start}
         />
         <ManualUpdateInstructions
-          show={available && !gate.canApply && !selfUpdate.isUpdating}
-          reason={gate.cannotApplyReason}
-          commands={gate.manualCommands}
+          show={view.showManual}
+          reason={view.cannotApplyReason}
+          commands={view.manualCommands}
         />
         <SelfUpdateProgress
           phase={selfUpdate.phase}

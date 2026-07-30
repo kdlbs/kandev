@@ -146,10 +146,12 @@ test.describe("Transcript auto-scroll toggle", () => {
     await waitForOverflow(testPage);
 
     const list = chatList(testPage);
-    // The renderer auto-scrolls to the bottom by default, so this should
-    // already hold — assert it explicitly so the test fails loudly if that
-    // assumption ever breaks instead of silently passing for the wrong
-    // reason.
+    // A task can become idle just before the final layout settles. Explicitly
+    // place the view at the bottom so this test isolates the disabled-at-bottom
+    // behavior instead of relying on that timing.
+    await list.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
     await expect
       .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
         timeout: 5_000,
@@ -161,6 +163,7 @@ test.describe("Transcript auto-scroll toggle", () => {
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(list).toHaveCSS("overflow-anchor", "none");
 
     // A new message arrives while disabled from the true bottom. The
     // browser's native bottom overflow-anchor must not override the

@@ -16,6 +16,7 @@ import type {
   StorageMaintenanceSettings,
   StorageOverviewResponse,
   StorageQuarantineEntry,
+  StorageQuarantinePurgeScope,
   StorageSettingsResponse,
 } from "@/lib/types/system";
 
@@ -310,4 +311,21 @@ export function deleteStorageQuarantine(
       },
     },
   );
+}
+
+export function purgeStorageQuarantine(
+  scope: StorageQuarantinePurgeScope,
+  options?: ApiRequestOptions,
+): Promise<JobAcceptResponse> {
+  return fetchJson<JobAcceptResponse>(`${SYSTEM_BASE}/storage/quarantine`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "DELETE",
+      body: JSON.stringify({
+        scope,
+        confirm: scope === "eligible" ? "DELETE ELIGIBLE" : "DELETE ALL NOW",
+      }),
+    },
+  });
 }

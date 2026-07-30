@@ -2,11 +2,17 @@ import { useState } from "react";
 import type { ReactNode } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { RenderItem } from "@/hooks/use-processed-messages";
+import { buildGroupedRenderItems, type RenderItem } from "@/hooks/use-processed-messages";
 import type { Message } from "@/lib/types/http";
 
 const rendererSpy = vi.fn();
 const turnGroupSpy = vi.fn();
+
+function elementWithRect(top: number, bottom: number): HTMLElement {
+  const el = document.createElement("div");
+  el.getBoundingClientRect = () => ({ top, bottom }) as DOMRect;
+  return el;
+}
 const mockStoreState = vi.hoisted(() => ({
   taskSessions: {
     items: {
@@ -70,7 +76,15 @@ import {
   MessageListStatus,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
+  getItemKey,
   getStreamingAgentMessageId,
+  getLastUserMessageId,
+  getFirstUserMessageId,
+  isElementFullyVisible,
+  resolveLastPromptControls,
+  resolveLastPromptEdge,
+  shouldAutoScrollToBottom,
+  shouldLoadMoreForTranscriptTarget,
 } from "./message-list-shared";
 
 const item: RenderItem = { type: "message", message: { id: "m1" } as Message };
@@ -314,6 +328,236 @@ describe("getStreamingAgentMessageId", () => {
     expect(getStreamingAgentMessageId([message("auto-started-reply", "agent")])).toBe(
       "auto-started-reply",
     );
+  });
+});
+
+describe("getLastUserMessageId", () => {
+  it("returns the id of the most recent user-authored message", () => {
+    const message = (id: string, author_type: "user" | "agent") => ({ id, author_type }) as Message;
+
+    expect(
+      getLastUserMessageId([
+        message("first-prompt", "user"),
+        message("reply", "agent"),
+        message("second-prompt", "user"),
+        message("reply-2", "agent"),
+      ]),
+    ).toBe("second-prompt");
+  });
+
+  it("returns null when there are no user messages", () => {
+    const message = (id: string, author_type: "user" | "agent") => ({ id, author_type }) as Message;
+
+    expect(getLastUserMessageId([message("reply", "agent")])).toBeNull();
+    expect(getLastUserMessageId([])).toBeNull();
+  });
+});
+
+describe("getFirstUserMessageId", () => {
+  it("returns the id of the earliest user-authored message", () => {
+    const message = (id: string, author_type: "user" | "agent") => ({ id, author_type }) as Message;
+
+    expect(
+      getFirstUserMessageId([
+        message("agent-status", "agent"),
+        message("first-prompt", "user"),
+        message("reply", "agent"),
+        message("second-prompt", "user"),
+      ]),
+    ).toBe("first-prompt");
+  });
+
+  it("returns null when there are no user messages", () => {
+    const message = (id: string, author_type: "user" | "agent") => ({ id, author_type }) as Message;
+
+    expect(getFirstUserMessageId([message("reply", "agent")])).toBeNull();
+    expect(getFirstUserMessageId([])).toBeNull();
+  });
+});
+
+describe("shouldLoadMoreForTranscriptTarget", () => {
+  const message = (id: string, author_type: "user" | "agent") => ({ id, author_type }) as Message;
+
+  it("keeps loading older pages when the latest loaded page has no user prompt", () => {
+    expect(
+      shouldLoadMoreForTranscriptTarget("last_prompt", [message("reply", "agent")], true),
+    ).toBe(true);
+  });
+
+  it("keeps loading for scroll-to-start until pagination reaches the real first prompt", () => {
+    expect(
+      shouldLoadMoreForTranscriptTarget("start", [message("loaded-prompt", "user")], true),
+    ).toBe(true);
+  });
+});
+
+describe("shouldAutoScrollToBottom", () => {
+  const base = {
+    isNearBottom: true,
+    isProgrammaticScrollLocked: false,
+    hasPendingLayoutRestore: false,
+  };
+
+  it("forces the scroll when near bottom with nothing else claiming it", () => {
+    expect(shouldAutoScrollToBottom(base)).toBe(true);
+  });
+
+  it("does not force the scroll while not near the bottom", () => {
+    expect(shouldAutoScrollToBottom({ ...base, isNearBottom: false })).toBe(false);
+  });
+
+  it("does not force the scroll while a programmatic scroll-to-start/last-prompt is in flight", () => {
+    // Regression: a message streaming in mid-flight must not silently
+    // cancel a user-initiated scroll-to-start/scroll-to-last-prompt action.
+    expect(shouldAutoScrollToBottom({ ...base, isProgrammaticScrollLocked: true })).toBe(false);
+  });
+
+  it("does not force the scroll while a layout-rebuild restore is pending", () => {
+    expect(shouldAutoScrollToBottom({ ...base, hasPendingLayoutRestore: true })).toBe(false);
+  });
+
+  it("does not force the scroll when multiple claims are active at once", () => {
+    expect(
+      shouldAutoScrollToBottom({
+        isNearBottom: true,
+        isProgrammaticScrollLocked: true,
+        hasPendingLayoutRestore: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("prompt row identity survives turn-group merging", () => {
+  // CodeRabbit review #3668338263 worried that `getItemKey` returns a
+  // `turn_group` id for the row backing `lastPromptMessageId`/`firstMessageId`,
+  // which would break the `msg-<id>` DOM lookup in
+  // `useTranscriptEdgeTracking`. That can't happen: `groupActivityMessages`
+  // only merges consecutive ACTIVITY_MESSAGE_TYPES messages (thinking/tool_*)
+  // sharing a turn id, and user prompts are always emitted with
+  // `type: "message"`, so they can never join a turn group. Lock in the
+  // invariant so a future change to the activity type set can't silently
+  // break the scroll affordances.
+  function activityMessage(id: string, turnId: string): Message {
+    return {
+      id,
+      session_id: "s1",
+      task_id: "t1",
+      author_type: "agent",
+      content: "",
+      type: "tool_call",
+      turn_id: turnId,
+      created_at: "",
+    } as Message;
+  }
+
+  function promptMessage(id: string): Message {
+    return {
+      id,
+      session_id: "s1",
+      task_id: "t1",
+      author_type: "user",
+      content: "hi",
+      type: "message",
+      created_at: "",
+    } as Message;
+  }
+
+  it("renders the first and last prompts as standalone message items, not turn_group members", () => {
+    const firstPrompt = promptMessage("earliest-prompt");
+    const activityA = activityMessage("think-1", "turn-1");
+    const activityB = activityMessage("tool-1", "turn-1");
+    const lastPrompt = promptMessage("latest-prompt");
+    const allMessages = [firstPrompt, activityA, activityB, lastPrompt];
+
+    const items = buildGroupedRenderItems(allMessages, "s1", { canAnchorPrepareProgress: false });
+
+    const firstItem = items[0];
+    const middleItem = items[1];
+    const lastItem = items[items.length - 1];
+
+    expect(firstItem.type).toBe("message");
+    expect(middleItem.type).toBe("turn_group");
+    expect(lastItem.type).toBe("message");
+
+    expect(getItemKey(firstItem)).toBe(getFirstUserMessageId(allMessages));
+    expect(getItemKey(lastItem)).toBe(getLastUserMessageId(allMessages));
+    // The grouped activity's key is a synthetic turn-group id, never a raw message id.
+    expect(getItemKey(middleItem)).not.toBe(activityA.id);
+    expect(getItemKey(middleItem)).not.toBe(activityB.id);
+  });
+});
+
+describe("resolveLastPromptEdge", () => {
+  it("is 'above' once the target's bottom clears the two-pixel settle tolerance past the top", () => {
+    const container = elementWithRect(40, 200);
+    const target = elementWithRect(20, 35);
+
+    expect(resolveLastPromptEdge(container, target)).toBe("above");
+  });
+
+  it("is 'visible' while any part of a prompt remains visible above the viewport", () => {
+    const container = elementWithRect(40, 200);
+
+    expect(resolveLastPromptEdge(container, elementWithRect(20, 80))).toBe("visible");
+  });
+
+  it("is 'below' once the target's top clears the tolerance past the bottom", () => {
+    const container = elementWithRect(40, 200);
+
+    expect(resolveLastPromptEdge(container, elementWithRect(220, 260))).toBe("below");
+  });
+
+  it("is 'visible' while the target is within the two-pixel settle tolerance", () => {
+    const container = elementWithRect(40, 200);
+
+    expect(resolveLastPromptEdge(container, elementWithRect(40, 80))).toBe("visible");
+    expect(resolveLastPromptEdge(container, elementWithRect(38, 78))).toBe("visible");
+  });
+});
+
+describe("resolveLastPromptControls", () => {
+  it("shows the anchored bar and an upward scroll arrow only once the prompt is above the viewport", () => {
+    expect(resolveLastPromptControls("above")).toEqual({
+      anchoredBarVisible: true,
+      scrollButtonEligible: true,
+      scrollDirection: "up",
+    });
+  });
+
+  it("hides the anchored bar and points the scroll arrow down while the prompt sits below the viewport", () => {
+    expect(resolveLastPromptControls("below")).toEqual({
+      anchoredBarVisible: false,
+      scrollButtonEligible: true,
+      scrollDirection: "down",
+    });
+  });
+
+  it("hides both the anchored bar and the scroll button while the prompt is visible", () => {
+    expect(resolveLastPromptControls("visible")).toEqual({
+      anchoredBarVisible: false,
+      scrollButtonEligible: false,
+      scrollDirection: "up",
+    });
+  });
+});
+
+describe("isElementFullyVisible", () => {
+  it("is true when the target sits entirely within the container's viewport", () => {
+    const container = elementWithRect(0, 100);
+    const target = elementWithRect(10, 50);
+    expect(isElementFullyVisible(container, target)).toBe(true);
+  });
+
+  it("is false once the target's top has scrolled even slightly above the container's top", () => {
+    const container = elementWithRect(40, 200);
+    const target = elementWithRect(30, 80);
+    expect(isElementFullyVisible(container, target)).toBe(false);
+  });
+
+  it("is false when the target's bottom overflows below the container's bottom", () => {
+    const container = elementWithRect(0, 100);
+    const target = elementWithRect(60, 150);
+    expect(isElementFullyVisible(container, target)).toBe(false);
   });
 });
 

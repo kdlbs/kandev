@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Button } from "@kandev/ui/button";
@@ -171,8 +171,7 @@ function useGitIdentityState(isRemote: boolean, profile: ExecutorProfile) {
   };
 }
 
-export default function ProfileEditPage({ params }: { params: Promise<{ profileId: string }> }) {
-  const { profileId } = use(params);
+export default function ProfileEditPage({ profileId }: { profileId: string }) {
   const router = useRouter();
   const result = useProfileFromStore(profileId);
 

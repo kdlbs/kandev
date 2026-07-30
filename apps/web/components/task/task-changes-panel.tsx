@@ -455,7 +455,7 @@ function ChangesPanelContent({
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => Promise<void>;
   onOpenFile: (path: string, repo?: string) => void;
-  onPreviewMarkdown?: (path: string) => void;
+  onPreviewMarkdown?: (path: string, repo?: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
 }) {
   if (isLoading && files.length === 0) {

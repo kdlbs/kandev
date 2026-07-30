@@ -81,6 +81,32 @@ Open **Settings → General → Task Actions → Profile for Tasks Created by Ag
 
 Select an option, then choose **Save changes**. The only affected Kandev MCP tool is `create_task_kandev`; the preference covers both new tasks and subtasks when the call omits `agent_profile_id`. It does not affect `spawn_session_kandev`, because that tool adds a session to the current task instead of creating a task. It also does not affect tasks you create in the UI. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. An explicit `agent_profile_id` in the tool call always overrides the saved preference. If **Workspace default profile** is selected and neither the workflow nor the target workspace supplies a profile, task creation fails without creating the task, including when `start_agent=false`.
 
+### Navigate long chat transcripts
+
+When your latest prompt has fully left the transcript viewport, **Scroll to
+last prompt** appears beside the Chat share control. Select it to return to
+that prompt; it hides again after any part of the prompt is back in view. Its
+arrow points the direction the transcript will actually scroll: upward once
+you've scrolled further down past your prompt, or downward if you've scrolled
+back up above it while browsing earlier history. **Scroll to start of
+transcript** appears when the first prompt is no longer fully visible. You can
+show or hide each action independently in **Settings → General → Task
+Actions → Transcript Navigation**.
+
+For a compact reminder while you read later replies, enable **Show anchored
+prompt bar** in the same settings section. On desktop, it pins a shortened
+copy of your latest prompt below the session tabs once you've scrolled past
+it further down the transcript. It stays hidden while you're browsing earlier
+history above your prompt, even though the prompt itself is out of view —
+use **Scroll to last prompt** to jump back to it instead. Expand the bar for
+longer prompts, or use its scroll action to return to the full prompt; the
+expanded view is capped at 40% of the transcript panel's height so it stays
+proportionate whether the panel is a full-screen view or a small embedded
+split. The anchored bar is desktop-only; phones use the scroll-to-last-prompt
+action instead. Both scroll actions keep the transcript at your requested
+position even if the agent streams new replies while the scroll is still in
+progress.
+
 ### Multiple repositories
 
 A task can include several local or remote repository rows. Multi-repository creation supports **Worktree**, **Local Docker**, **SSH**, and **Sprites**. Local/Local PC creation remains unavailable until its initial-launch path can materialize sibling repositories, and Remote Docker is not implemented. Public GitHub and GitLab repositories can be cloned and fetched anonymously. Private repositories and authenticated browse/write features need credentials that can access the selected base branch.

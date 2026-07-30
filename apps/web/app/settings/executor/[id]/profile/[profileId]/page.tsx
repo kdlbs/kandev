@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { Button } from "@kandev/ui/button";
@@ -70,11 +70,12 @@ function rowsToEnvVars(rows: EnvVarRow[]): ProfileEnvVar[] {
 }
 
 export default function ProfileDetailPage({
-  params,
+  executorId,
+  profileId,
 }: {
-  params: Promise<{ id: string; profileId: string }>;
+  executorId: string;
+  profileId: string;
 }) {
-  const { id: executorId, profileId } = use(params);
   const router = useRouter();
   const executor = useAppStore(
     (state) => state.executors.items.find((e: Executor) => e.id === executorId) ?? null,

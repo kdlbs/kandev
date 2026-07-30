@@ -574,6 +574,36 @@ func TestPermanentDeleteBeforeRetentionReturnsConflictAndKeepsQuarantine(t *test
 	}
 }
 
+func TestPermanentDeleteForceBypassesRetentionWithDedicatedConfirmation(t *testing.T) {
+	provider, root, store := newProviderFixture(t, Inventory{Complete: true}, nil)
+	pruner := &recordingPruner{}
+	provider.config.Pruner = pruner
+	candidate := createOwnedCandidate(t, root, "force-delete-task_abc", OwnershipMarker{
+		TaskID: "force-delete-task", TaskDirName: "force-delete-task_abc", LayoutVersion: LayoutVersionSemantic,
+	})
+	old := time.Date(2026, time.July, 1, 0, 0, 0, 0, time.UTC)
+	if err := os.Chtimes(candidate, old, old); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+	if _, err := provider.Cleanup(context.Background()); err != nil {
+		t.Fatalf("Cleanup: %v", err)
+	}
+	entry := store.entries["entry-1"]
+
+	if _, err := provider.PermanentDeleteForce(context.Background(), entry.ID, "DELETE"); !errors.Is(err, storage.ErrForceDeleteConfirmation) {
+		t.Fatalf("wrong force confirmation error = %v, want %v", err, storage.ErrForceDeleteConfirmation)
+	}
+	if _, err := provider.PermanentDeleteForce(context.Background(), entry.ID, "DELETE ALL NOW"); err != nil {
+		t.Fatalf("PermanentDeleteForce: %v", err)
+	}
+	if pruner.calls != 1 {
+		t.Fatalf("pruner calls = %d, want 1", pruner.calls)
+	}
+	if _, err := os.Stat(entry.QuarantinePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("quarantine path still exists: %v", err)
+	}
+}
+
 func TestReconcileRecreatesMissingRecordFromQuarantineManifest(t *testing.T) {
 	provider, root, store := newProviderFixture(t, Inventory{Complete: true}, nil)
 	candidate := createOwnedCandidate(t, root, "reconcile-task_abc", OwnershipMarker{TaskID: "reconcile-task", TaskDirName: "reconcile-task_abc", LayoutVersion: LayoutVersionSemantic})

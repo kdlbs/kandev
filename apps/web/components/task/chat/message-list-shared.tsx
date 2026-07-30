@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback } from "react";
+import { memo, useCallback, type ReactNode } from "react";
 import { Button } from "@kandev/ui/button";
 import { IconAlertCircle, IconX } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
@@ -31,6 +31,32 @@ export type MessageListProps = {
   sessionState?: TaskSessionState;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
+  /** Id of the most recent user-sent message, when known. Drives the
+   * scroll-to-last-prompt button (always active) and the anchored-bar
+   * affordance (opt-in, desktop only). */
+  lastPromptMessageId?: string | null;
+  /** Called whenever the last prompt's position relative to the transcript
+   * viewport changes: fully `"above"` it (scrolled past, further down the
+   * transcript), fully `"below"` it (not yet reached, e.g. browsing earlier
+   * history), or still `"visible"` (some intersection remains). */
+  onLastPromptEdgeChange?: (edge: LastPromptEdge) => void;
+  /** Id of the earliest user-sent message, when known. Drives the
+   * scroll-to-start button. */
+  firstMessageId?: string | null;
+  /** Called whenever the first message stops being fully visible (`true`) or
+   * becomes fully visible again (`false`). */
+  onFirstMessageHiddenChange?: (isHidden: boolean) => void;
+  /** Rendered as the first child inside the scroll container, sticky at its
+   * top — the desktop-only, opt-in anchored last-prompt bar. `null`/`undefined`
+   * when the setting is off or on mobile. */
+  stickyPromptBar?: ReactNode;
+};
+
+/** Imperative handle exposed by `MessageList` and both rendering strategies,
+ * letting the chat panel scroll to an arbitrary message (e.g. the last
+ * prompt) from outside the list — from the composer's scroll-up button. */
+export type MessageListHandle = {
+  scrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
 };
 
 export function getItemKey(item: RenderItem): string {
@@ -50,15 +76,112 @@ export function getEffectiveActiveTurnId(
   return isWorking ? activeTurnId : null;
 }
 
+/** Index of the most recent user-authored message, or -1 when there is none. */
+function findLastUserMessageIndex(messages: Message[]): number {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].author_type === "user") return i;
+  }
+  return -1;
+}
+
+/** Id of the most recent user-authored message — the "last prompt" the user
+ * sent. Used to power the transcript's scroll-to-last-prompt affordances. */
+export function getLastUserMessageId(messages: Message[]): string | null {
+  const index = findLastUserMessageIndex(messages);
+  return index >= 0 ? messages[index].id : null;
+}
+
+/** Id of the earliest user-authored message — the "first prompt" (usually
+ * the task description). Used to power the transcript's scroll-to-start
+ * affordance. */
+export function getFirstUserMessageId(messages: Message[]): string | null {
+  const first = messages.find((message) => message.author_type === "user");
+  return first ? first.id : null;
+}
+
+export type TranscriptNavigationTarget = "last_prompt" | "start";
+
+/**
+ * Whether resolving a transcript-navigation target needs another older page.
+ * The latest prompt may sit before a long agent response; the true start can
+ * only be known after the pagination cursor is exhausted.
+ */
+export function shouldLoadMoreForTranscriptTarget(
+  target: TranscriptNavigationTarget,
+  messages: Message[],
+  hasMore: boolean,
+): boolean {
+  if (!hasMore) return false;
+  return target === "start" || getLastUserMessageId(messages) === null;
+}
+
+/**
+ * Whether the transcript's auto-follow-bottom behavior should force a scroll
+ * to the bottom right now. `false` whenever a user-initiated programmatic
+ * scroll (scroll-to-start / scroll-to-last-prompt) is still in flight or a
+ * layout-rebuild restore is pending — otherwise a message streaming in
+ * mid-scroll would silently snap the transcript back down and cancel the
+ * user's action.
+ */
+export function shouldAutoScrollToBottom(params: {
+  isNearBottom: boolean;
+  isProgrammaticScrollLocked: boolean;
+  hasPendingLayoutRestore: boolean;
+}): boolean {
+  return (
+    params.isNearBottom && !params.isProgrammaticScrollLocked && !params.hasPendingLayoutRestore
+  );
+}
+
+/** Where the last prompt sits relative to the transcript viewport: fully
+ * `"above"` it (scrolled past going down), fully `"below"` it (not yet
+ * reached, e.g. still browsing earlier history), or `"visible"` (some
+ * intersection remains). The two-pixel tolerance avoids flickering at
+ * fractional layout boundaries while scrolling settles. */
+export type LastPromptEdge = "above" | "below" | "visible";
+
+export function resolveLastPromptEdge(container: HTMLElement, target: HTMLElement): LastPromptEdge {
+  const containerRect = container.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+  const tolerance = 2;
+  if (targetRect.bottom < containerRect.top - tolerance) return "above";
+  if (targetRect.top > containerRect.bottom + tolerance) return "below";
+  return "visible";
+}
+
+/** Derives the anchored bar's visibility and the always-on scroll button's
+ * eligibility/direction from the last prompt's edge state. The anchored bar
+ * only ever represents "you scrolled past it going down" (`above`) — it
+ * must stay closed while the prompt is merely below the viewport because
+ * the user hasn't reached it yet (e.g. browsing earlier history). The
+ * scroll button instead stays eligible in both out-of-view states, but
+ * points toward wherever the prompt actually is. */
+export function resolveLastPromptControls(edge: LastPromptEdge): {
+  anchoredBarVisible: boolean;
+  scrollButtonEligible: boolean;
+  scrollDirection: "up" | "down";
+} {
+  return {
+    anchoredBarVisible: edge === "above",
+    scrollButtonEligible: edge !== "visible",
+    scrollDirection: edge === "below" ? "down" : "up",
+  };
+}
+
+/** True when `target` sits entirely within `container`'s visible viewport —
+ * neither edge clipped above or below. Powers the "scroll to start" button's
+ * visibility, which appears as soon as the first prompt is even partially
+ * clipped. */
+export function isElementFullyVisible(container: HTMLElement, target: HTMLElement): boolean {
+  const c = container.getBoundingClientRect();
+  const t = target.getBoundingClientRect();
+  const tolerance = 0.5;
+  return t.top >= c.top - tolerance && t.bottom <= c.bottom + tolerance;
+}
+
 /** Only the latest ordinary agent row in the active turn can be the streaming reply. */
 export function getStreamingAgentMessageId(messages: Message[]): string | null {
-  let latestUserIndex = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].author_type === "user") {
-      latestUserIndex = i;
-      break;
-    }
-  }
+  const latestUserIndex = findLastUserMessageIndex(messages);
   for (let i = messages.length - 1; i > latestUserIndex; i--) {
     const message = messages[i];
     if (

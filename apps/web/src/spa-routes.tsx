@@ -211,20 +211,30 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   }
   if (route.kind === "settings") {
     return (
-      <Suspense fallback={null}>
+      <Suspense fallback={<RouteLoading routeName="Settings" />}>
         <SettingsRoutes pathname={route.pathname} />
       </Suspense>
     );
   }
   if (route.kind === "office") {
     return (
-      <Suspense fallback={null}>
+      <Suspense fallback={<RouteLoading routeName="Office" />}>
         <OfficeRoutes pathname={route.pathname} />
       </Suspense>
     );
   }
 
   return <DataBackedRoute route={route} routeData={routeData} />;
+}
+
+function RouteLoading({ routeName }: { routeName: string }) {
+  return (
+    <div className="flex h-full min-h-0 w-full items-center justify-center bg-background">
+      <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
+        Loading {routeName}…
+      </p>
+    </div>
+  );
 }
 
 function AuthRouteRedirect() {

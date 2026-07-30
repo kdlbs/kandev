@@ -96,6 +96,11 @@ export function getFileCategory(path: string): FileCategory {
   return "text";
 }
 
+export function isMarkdownFile(path: string): boolean {
+  const ext = getExtension(path);
+  return ext === "md" || ext === "mdx";
+}
+
 /** Return the MIME type for a known image extension, or a fallback. */
 export function getImageMimeType(path: string): string {
   const ext = getExtension(path);

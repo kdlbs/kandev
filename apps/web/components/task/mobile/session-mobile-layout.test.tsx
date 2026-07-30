@@ -101,6 +101,26 @@ describe("useMobilePanelHandlers", () => {
     expect(handlePanelChange).toHaveBeenCalledWith("files");
   });
 
+  it("opens a fetched Markdown file with preview intent", () => {
+    const { result, handlePanelChange } = renderHandlers();
+    act(() => result.current.handleOpenFileFromChat("README.md", REPO, true));
+
+    expect(fetchAndOpenFileMock).toHaveBeenCalledWith(
+      "s1",
+      "README.md",
+      expect.any(Function),
+      expect.any(Function),
+      { repo: REPO, signal: expect.objectContaining({ aborted: false }) },
+    );
+
+    const openFile = fetchAndOpenFileMock.mock.calls[0]?.[2] as (file: OpenFileTab) => void;
+    act(() => openFile({ ...MOCK_FILE, path: "README.md", name: "README.md" }));
+
+    expect(result.current.selectedFile).toMatchObject({ path: "README.md" });
+    expect(result.current.selectedFilePreview).toBe(true);
+    expect(handlePanelChange).toHaveBeenCalledWith("files");
+  });
+
   it("passes repo through when opening a walkthrough file from mobile", () => {
     const { result } = renderHandlers();
     act(() => result.current.handleOpenFileFromChat(CHAT_LINK_PATH, REPO));
@@ -120,6 +140,12 @@ describe("useMobilePanelHandlers", () => {
 
     expect(fetchAndOpenFileMock).not.toHaveBeenCalled();
     expect(result.current.selectedFile).toBeNull();
+  });
+});
+
+describe("useMobilePanelHandlers selection state", () => {
+  beforeEach(() => {
+    fetchAndOpenFileMock.mockReset();
   });
 
   it("handlePanelChangeAndClearSheet clears the viewer when switching panels", () => {
@@ -236,6 +262,7 @@ describe("MobilePanelArea PR identity", () => {
           isPassthroughMode={false}
           effectiveSessionId="session-1"
           selectedFile={null}
+          selectedFilePreview={false}
           selectedDiff={null}
           handleOpenFileFromChat={vi.fn()}
           handleClearSelectedDiff={vi.fn()}
