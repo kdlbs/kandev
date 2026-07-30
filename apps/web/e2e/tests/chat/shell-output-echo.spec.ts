@@ -168,6 +168,7 @@ test.describe("shell command output echo stripping", () => {
     await responsePromise;
 
     const outputRegion = chat.getByTestId("tool-execute-output");
+    await expect(outputRegion).toContainText("start");
     await expect(outputRegion).toContainText("hello");
     // Critical: neither the workDir-prefixed absolute path nor a repeat of
     // the resolved multi-line command may leak into the Output disclosure.
