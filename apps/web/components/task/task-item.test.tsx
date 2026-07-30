@@ -5,7 +5,8 @@ import { StateProvider } from "@/components/state-provider";
 import { TaskItem } from "./task-item";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
-const REVIEW_ICON_TEST_ID = "task-state-review";
+const TURN_FINISHED_ICON_TEST_ID = "task-state-turn-finished";
+const WORKFLOW_COMPLETE_ICON_TEST_ID = "task-state-workflow-complete";
 const RUNNING_ICON_TEST_ID = "task-state-running";
 const BACKGROUND_ICON_TEST_ID = "task-state-background-running";
 const WAITING_FOR_INPUT_ICON_TEST_ID = "task-state-waiting-for-input";
@@ -41,32 +42,40 @@ function expectPreparingSpinner(): void {
 }
 
 describe("TaskItem status icon", () => {
-  it("keeps the review check when the session is idle after a turn", () => {
+  it("shows a dashed progress check when the session is idle after a non-final turn", () => {
     renderTaskItem({ sessionState: "WAITING_FOR_INPUT" });
 
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(WORKFLOW_COMPLETE_ICON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
+  });
+
+  it("shows the continuous check when the finished turn is on the final workflow step", () => {
+    renderTaskItem({ sessionState: "COMPLETED", isOnLastWorkflowStep: true });
+
+    expect(screen.queryByTestId(WORKFLOW_COMPLETE_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
   });
 
   it("shows question icon when a clarification is pending", () => {
     renderTaskItem({ sessionState: "WAITING_FOR_INPUT", hasPendingClarification: true });
 
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
   });
 
   it("shows question icon when task state is waiting for input", () => {
     renderTaskItem({ state: "WAITING_FOR_INPUT", hasPendingClarification: false });
 
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).not.toBeNull();
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
   });
 
   it("shows alert icon when a permission request is pending", () => {
     renderTaskItem({ sessionState: "WAITING_FOR_INPUT", hasPendingPermission: true });
 
     expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).not.toBeNull();
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
   });
 
@@ -125,7 +134,7 @@ describe("TaskItem status icon", () => {
   it("does not show preparing spinner for a review task whose session transiently hits STARTING", () => {
     renderTaskItem({ state: "REVIEW", sessionState: "STARTING" });
 
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).not.toBeNull();
     expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
   });
 
@@ -139,10 +148,10 @@ describe("TaskItem status icon", () => {
     expect(icon.classList.contains(PREPARING_SPINNER_CLASS)).toBe(false);
   });
 
-  it("keeps the review check for completed review tasks", () => {
+  it("shows a progress check for completed review tasks without final-step context", () => {
     renderTaskItem({ sessionState: "COMPLETED" });
 
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).not.toBeNull();
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
   });
 
@@ -152,7 +161,7 @@ describe("TaskItem status icon", () => {
     const errorIcon = screen.getByTestId(AGENT_ERROR_ICON_TEST_ID);
     expect(errorIcon).not.toBeNull();
     expect(errorIcon.classList.contains("cursor-help")).toBe(true);
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).not.toBeNull();
   });
 });
 
@@ -194,7 +203,7 @@ describe("TaskItem background-running indicator", () => {
     expect(icon.parentElement?.classList.contains("focus-visible:ring-2")).toBe(true);
     expect(screen.getByLabelText("Background work is running")).not.toBeNull();
     expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
   });
 
   it("reads background from the task aggregate even when the most-active client session is done", () => {
@@ -209,7 +218,7 @@ describe("TaskItem background-running indicator", () => {
     });
 
     expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).not.toBeNull();
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
   });
 
   it("shows pending clarification instead of background-running", () => {
@@ -259,7 +268,7 @@ describe("TaskItem background-running indicator", () => {
       hasPendingPermission: true,
     });
 
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(PENDING_PERMISSION_ICON_TEST_ID)).not.toBeNull();
     expect(screen.queryByTestId(WAITING_FOR_INPUT_ICON_TEST_ID)).toBeNull();
   });
@@ -277,7 +286,7 @@ describe("TaskItem background-running indicator", () => {
     expect(icon.getAttribute(DATA_LOADING_PHASE)).toBe(RUNNING_PHASE);
     expect(icon.classList.contains(YELLOW_SPINNER_CLASS)).toBe(true);
     expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).toBeNull();
   });
 
   it("falls back to the generating spinner when the aggregate substate is unknown", () => {
@@ -337,7 +346,7 @@ describe("TaskItem background-running lifecycle", () => {
         </TooltipProvider>
       </StateProvider>,
     );
-    expect(screen.queryByTestId(REVIEW_ICON_TEST_ID)).not.toBeNull();
+    expect(screen.queryByTestId(TURN_FINISHED_ICON_TEST_ID)).not.toBeNull();
     expect(screen.queryByTestId(BACKGROUND_ICON_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(RUNNING_ICON_TEST_ID)).toBeNull();
   });

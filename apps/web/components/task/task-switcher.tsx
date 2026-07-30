@@ -223,8 +223,6 @@ function TaskRow({
   ...props
 }: TaskRowProps) {
   const isSelected = task.id === selectedTaskId || task.id === activeTaskId;
-  const isMultiSelected = selectedTaskIds?.has(task.id) ?? false;
-  const isSelecting = (selectedTaskIds?.size ?? 0) > 0;
   const taskSteps = task.workflowId ? stepsByWorkflowId?.[task.workflowId] : undefined;
   return (
     <TaskItemWithContextMenu
@@ -252,9 +250,9 @@ function TaskRow({
       isMixedWorkflowSelection={isMixedWorkflowSelection}
     >
       <TaskItem
-        isMultiSelected={isMultiSelected}
+        isMultiSelected={selectedTaskIds?.has(task.id) ?? false}
         onSelect={(e) =>
-          dispatchSidebarRowClick(e, task.id, isSelecting, {
+          dispatchSidebarRowClick(e, task.id, (selectedTaskIds?.size ?? 0) > 0, {
             onSelectTask,
             onToggleSelectTask,
             onSelectTaskRange,
@@ -280,6 +278,7 @@ function TaskRow({
         issueInfo={task.issueInfo}
         agentErrorMessage={task.agentErrorMessage}
         isSubTask={isSubTask}
+        isOnLastWorkflowStep={taskSteps?.at(-1)?.id === task.workflowStepId}
         depth={depth}
         subtaskCount={subtaskToggle?.subtaskCount}
         subtasksCollapsed={subtaskToggle?.subtasksCollapsed}
