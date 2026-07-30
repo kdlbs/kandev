@@ -13,30 +13,62 @@
  *     CSS animation timelines. `document.timeline.currentTime` stays at 0 and a
  *     100ms exit animation reports playState "running" indefinitely.
  *
- * The fix is not to remove the animation — it is to stop treating an animation
- * callback as the only path back to a usable page.
+ * Recovery cancels only closing dialog animations. Radix Presence handles the
+ * resulting `animationcancel` event as a normal terminal event, unmounts the
+ * closing owner, and releases its own pointer and scroll-lock bookkeeping.
  */
 
 /** Grace period after a close before sweeping. Must exceed the exit duration. */
-export const DIALOG_BODY_LOCK_SWEEP_MS = 400;
+export const DIALOG_CLOSE_RECOVERY_MS = 400;
 
-/** Slot suffix shared by every content element that can hold the modal lock. */
-const OPEN_MODAL_CONTENT = '[data-state="open"][data-slot$="content"]';
+const CLOSING_DIALOG_PARTS = [
+  '[data-state="closed"][data-slot="dialog-content"]',
+  '[data-state="closed"][data-slot="dialog-overlay"]',
+].join(",");
+
+type VisibilitySubscription = {
+  subscribers: number;
+  onVisibilityChange: () => void;
+};
+
+const visibilitySubscriptions = new WeakMap<Document, VisibilitySubscription>();
 
 /**
- * Release the body pointer-events / scroll lock, but only when nothing still
- * needs it. Returns true when a stuck lock was cleared.
- *
- * Deliberately conservative: if any modal content is still open the lock is
- * legitimate and is left alone. Failing to release leaves the status quo;
- * releasing while a real modal is open would break that modal.
+ * Ask Radix Presence to finish closing dialog owners through its supported
+ * animation-cancellation path. Returns true when at least one animation was
+ * cancelled.
  */
-export function releaseStuckDialogBodyLock(doc: Document): boolean {
-  const locked =
-    doc.body.style.pointerEvents === "none" || doc.body.hasAttribute("data-scroll-locked");
-  if (!locked) return false;
-  if (doc.querySelector(OPEN_MODAL_CONTENT)) return false;
-  doc.body.style.removeProperty("pointer-events");
-  doc.body.removeAttribute("data-scroll-locked");
-  return true;
+export function finishClosingDialogAnimations(doc: Document): boolean {
+  let cancelled = false;
+  for (const element of doc.querySelectorAll<HTMLElement>(CLOSING_DIALOG_PARTS)) {
+    for (const animation of element.getAnimations()) {
+      animation.cancel();
+      cancelled = true;
+    }
+  }
+  return cancelled;
+}
+
+/** Share one document-level foreground recovery listener across dialog roots. */
+export function subscribeDialogCloseRecovery(doc: Document): () => void {
+  let subscription = visibilitySubscriptions.get(doc);
+  if (!subscription) {
+    const onVisibilityChange = () => {
+      if (doc.visibilityState === "visible") finishClosingDialogAnimations(doc);
+    };
+    subscription = { subscribers: 0, onVisibilityChange };
+    visibilitySubscriptions.set(doc, subscription);
+    doc.addEventListener("visibilitychange", onVisibilityChange);
+  }
+  subscription.subscribers += 1;
+
+  let subscribed = true;
+  return () => {
+    if (!subscribed) return;
+    subscribed = false;
+    subscription.subscribers -= 1;
+    if (subscription.subscribers > 0) return;
+    doc.removeEventListener("visibilitychange", subscription.onVisibilityChange);
+    visibilitySubscriptions.delete(doc);
+  };
 }

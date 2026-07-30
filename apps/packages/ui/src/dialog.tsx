@@ -7,39 +7,39 @@ import { cn } from "./lib/utils";
 import { Button } from "./button";
 import { IconX } from "@tabler/icons-react";
 import { handleDialogDefaultActionKeyDown } from "./lib/dialog-default-action";
-import { DIALOG_BODY_LOCK_SWEEP_MS, releaseStuckDialogBodyLock } from "./lib/dialog-body-lock";
+import {
+  DIALOG_CLOSE_RECOVERY_MS,
+  finishClosingDialogAnimations,
+  subscribeDialogCloseRecovery,
+} from "./lib/dialog-body-lock";
 
 function Dialog({ onOpenChange, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
-  const sweep = React.useCallback(() => releaseStuckDialogBodyLock(document), []);
+  const finishClosingAnimations = React.useCallback(
+    () => finishClosingDialogAnimations(document),
+    [],
+  );
 
   // Unmount is one way to strand the lock — Radix's animation-based cleanup
   // never runs when the dialog disappears mid-close.
   React.useEffect(
     () => () => {
-      sweep();
+      finishClosingAnimations();
     },
-    [sweep],
+    [finishClosingAnimations],
   );
 
-  // Becoming visible again is the other. A hidden document freezes CSS animation
-  // timelines, so the exit animation that Radix waits on never ends; by the time
-  // the user is looking at the page again the lock has outlived its dialog.
-  React.useEffect(() => {
-    const onVisible = () => {
-      if (document.visibilityState === "visible") sweep();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
-  }, [sweep]);
+  // Becoming visible again is the other. Dialog roots share one document-level
+  // listener because the body lock and closing portals are document-global.
+  React.useEffect(() => subscribeDialogCloseRecovery(document), []);
 
   // And the general case: once a close has been requested, the page must be
   // usable shortly afterwards whether or not animationend ever arrives.
   const handleOpenChange = React.useCallback(
     (open: boolean) => {
       onOpenChange?.(open);
-      if (!open) window.setTimeout(sweep, DIALOG_BODY_LOCK_SWEEP_MS);
+      if (!open) window.setTimeout(finishClosingAnimations, DIALOG_CLOSE_RECOVERY_MS);
     },
-    [onOpenChange, sweep],
+    [finishClosingAnimations, onOpenChange],
   );
 
   return <DialogPrimitive.Root data-slot="dialog" onOpenChange={handleOpenChange} {...props} />;

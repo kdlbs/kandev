@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { releaseStuckDialogBodyLock } from "@kandev/ui/lib/dialog-body-lock";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { finishClosingDialogAnimations } from "@kandev/ui/lib/dialog-body-lock";
 
 /**
  * Unit coverage for the modal body-lock recovery used by the base Dialog.
@@ -10,9 +10,11 @@ import { releaseStuckDialogBodyLock } from "@kandev/ui/lib/dialog-body-lock";
  * closing, so animation timelines were frozen, or the dialog unmounted mid-close
  * — the lock outlives its dialog and every control on the page stops responding
  * with nothing visible to close. These tests pin the two halves of the contract:
- * a stranded lock is cleared, and a lock a live modal still needs is not.
+ * recovery terminates only closing modal animations and leaves Radix to release
+ * its own body-lock bookkeeping when those modal owners unmount.
  */
 const SCROLL_LOCKED = "data-scroll-locked";
+const DIALOG_CONTENT = "dialog-content";
 
 function lockBody() {
   document.body.style.pointerEvents = "none";
@@ -23,12 +25,21 @@ function isLocked() {
   return document.body.style.pointerEvents === "none" || document.body.hasAttribute(SCROLL_LOCKED);
 }
 
-/** Mirrors what DialogContent renders, so the guard sees realistic markup. */
-function mountContent(state: "open" | "closed", slot = "dialog-content") {
+function animation() {
+  return { cancel: vi.fn() } as unknown as Animation;
+}
+
+/** Mirrors modal/content primitives so selectors see realistic markup. */
+function mountContent(
+  state: "open" | "closed",
+  slot = DIALOG_CONTENT,
+  animations: Animation[] = [],
+) {
   const el = document.createElement("div");
   el.setAttribute("role", "dialog");
   el.setAttribute("data-slot", slot);
   el.setAttribute("data-state", state);
+  el.getAnimations = () => animations;
   document.body.appendChild(el);
   return el;
 }
@@ -39,48 +50,61 @@ beforeEach(() => {
   document.body.style.removeProperty("pointer-events");
 });
 
-describe("releaseStuckDialogBodyLock", () => {
-  it("clears a lock stranded by a dialog that closed but never unmounted", () => {
-    mountContent("closed");
+describe("finishClosingDialogAnimations", () => {
+  it("cancels a closing dialog animation without mutating its owner's body lock", () => {
+    const exit = animation();
+    mountContent("closed", DIALOG_CONTENT, [exit]);
     lockBody();
 
-    expect(releaseStuckDialogBodyLock(document)).toBe(true);
-    expect(isLocked()).toBe(false);
-  });
-
-  it("clears a lock stranded by a dialog that unmounted mid-close", () => {
-    lockBody(); // no content in the DOM at all
-
-    expect(releaseStuckDialogBodyLock(document)).toBe(true);
-    expect(isLocked()).toBe(false);
-  });
-
-  it("leaves the lock alone while a dialog is still open", () => {
-    mountContent("open");
-    lockBody();
-
-    expect(releaseStuckDialogBodyLock(document)).toBe(false);
+    expect(finishClosingDialogAnimations(document)).toBe(true);
+    expect(exit.cancel).toHaveBeenCalledOnce();
     expect(isLocked()).toBe(true);
   });
 
-  it("leaves the lock alone when a second modal is open behind a closed one", () => {
-    mountContent("closed");
-    mountContent("open", "alert-dialog-content");
+  it("cancels a closing overlay so an invisible portal cannot intercept clicks", () => {
+    const exit = animation();
+    mountContent("closed", "dialog-overlay", [exit]);
+
+    expect(finishClosingDialogAnimations(document)).toBe(true);
+    expect(exit.cancel).toHaveBeenCalledOnce();
+  });
+
+  it("ignores open dialog animations", () => {
+    const open = animation();
+    mountContent("open", DIALOG_CONTENT, [open]);
     lockBody();
 
-    expect(releaseStuckDialogBodyLock(document)).toBe(false);
+    expect(finishClosingDialogAnimations(document)).toBe(false);
+    expect(open.cancel).not.toHaveBeenCalled();
     expect(isLocked()).toBe(true);
   });
 
-  it("clears a scroll lock even when pointer-events was already released", () => {
-    mountContent("closed");
-    document.body.setAttribute(SCROLL_LOCKED, "1");
+  it("cancels the closing owner while preserving a second open modal's lock", () => {
+    const closing = animation();
+    const open = animation();
+    mountContent("closed", DIALOG_CONTENT, [closing]);
+    mountContent("open", "alert-dialog-content", [open]);
+    lockBody();
 
-    expect(releaseStuckDialogBodyLock(document)).toBe(true);
-    expect(document.body.hasAttribute(SCROLL_LOCKED)).toBe(false);
+    expect(finishClosingDialogAnimations(document)).toBe(true);
+    expect(closing.cancel).toHaveBeenCalledOnce();
+    expect(open.cancel).not.toHaveBeenCalled();
+    expect(isLocked()).toBe(true);
   });
 
-  it("reports nothing to do on an unlocked body", () => {
-    expect(releaseStuckDialogBodyLock(document)).toBe(false);
+  it("does not let unrelated open content suppress dialog recovery", () => {
+    const closing = animation();
+    mountContent("closed", DIALOG_CONTENT, [closing]);
+    mountContent("open", "accordion-content");
+    mountContent("open", "collapsible-content");
+    lockBody();
+
+    expect(finishClosingDialogAnimations(document)).toBe(true);
+    expect(closing.cancel).toHaveBeenCalledOnce();
+    expect(isLocked()).toBe(true);
+  });
+
+  it("reports nothing to do without a closing dialog animation", () => {
+    expect(finishClosingDialogAnimations(document)).toBe(false);
   });
 });
