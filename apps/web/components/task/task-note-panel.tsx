@@ -7,8 +7,8 @@ import { cn } from "@/lib/utils";
 import { PanelBody, PanelRoot } from "./panel-primitives";
 import { TaskNotePanelHeader } from "./task-note-panel-header";
 import { useTaskNote } from "@/hooks/domains/session/use-task-note";
+import { useNoteSessionId } from "@/hooks/domains/session/use-note-session-id";
 import { useNoteActions } from "@/hooks/domains/kanban/use-note-actions";
-import { useAppStore } from "@/components/state-provider";
 
 const NoteEditor = dynamic(
   () =>
@@ -35,9 +35,9 @@ export const TaskNotePanel = memo(function TaskNotePanel({
   const { note, draftContent, setDraftContent, editorKey, isLoading } = useTaskNote(taskId, {
     visible,
   });
-  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  const resolvedSessionId = useNoteSessionId(taskId);
   const { enhanceNoteWithAI, isEnhancing } = useNoteActions({
-    resolvedSessionId: activeSessionId,
+    resolvedSessionId,
     taskId,
   });
   const editorWrapperRef = useRef<HTMLDivElement>(null);
@@ -67,7 +67,7 @@ export const TaskNotePanel = memo(function TaskNotePanel({
   return (
     <PanelRoot data-testid="notes-panel">
       <TaskNotePanelHeader
-        canEnhance={Boolean(activeSessionId) && draftContent.trim().length > 0}
+        canEnhance={Boolean(resolvedSessionId) && draftContent.trim().length > 0}
         isEnhancing={isEnhancing}
         onEnhance={() => void enhanceNoteWithAI(draftContent)}
       />
