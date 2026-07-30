@@ -252,6 +252,55 @@ func TestApplyBasicSettingsMCPTaskAgentProfileDefault(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettingsShowAnchoredPromptBar(t *testing.T) {
+	t.Run("omission preserves saved value", func(t *testing.T) {
+		settings := &models.UserSettings{ShowAnchoredPromptBar: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if !settings.ShowAnchoredPromptBar {
+			t.Fatal("ShowAnchoredPromptBar = false, want true (unchanged)")
+		}
+	})
+
+	t.Run("explicit value replaces saved value", func(t *testing.T) {
+		settings := &models.UserSettings{ShowAnchoredPromptBar: false}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{ShowAnchoredPromptBar: ptr(true)}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if !settings.ShowAnchoredPromptBar {
+			t.Fatal("ShowAnchoredPromptBar = false, want true")
+		}
+	})
+
+	t.Run("explicit false disables it", func(t *testing.T) {
+		settings := &models.UserSettings{ShowAnchoredPromptBar: true}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{ShowAnchoredPromptBar: ptr(false)}); err != nil {
+			t.Fatalf("apply settings: %v", err)
+		}
+		if settings.ShowAnchoredPromptBar {
+			t.Fatal("ShowAnchoredPromptBar = true, want false")
+		}
+	})
+}
+
+func TestApplyBasicSettingsTranscriptNavigation(t *testing.T) {
+	settings := &models.UserSettings{ShowScrollToLastPrompt: true, ShowScrollToStart: true}
+	if err := applyBasicSettings(
+		settings,
+		&UpdateUserSettingsRequest{ShowScrollToLastPrompt: ptr(false)},
+	); err != nil {
+		t.Fatalf("apply settings: %v", err)
+	}
+	if settings.ShowScrollToLastPrompt || !settings.ShowScrollToStart {
+		t.Fatalf(
+			"transcript controls = (%t, %t), want (false, true)",
+			settings.ShowScrollToLastPrompt,
+			settings.ShowScrollToStart,
+		)
+	}
+}
+
 func TestApplyBasicSettings_TasksListPreferences(t *testing.T) {
 	t.Run("sets valid sort and group", func(t *testing.T) {
 		settings := &models.UserSettings{}

@@ -7,7 +7,9 @@ import { BackendFixtureEnvOverrides, createScopedEnvUse } from "./backend-env";
 
 const BACKEND_DIR = path.resolve(__dirname, "../../../../apps/backend");
 const WEB_DIR = path.resolve(__dirname, "../..");
-const KANDEV_BIN = path.join(BACKEND_DIR, "bin", "kandev");
+// Lets a local or CI run exercise a freshly built backend without replacing
+// the default artifact that `make build` provides for ordinary E2E runs.
+const KANDEV_BIN = process.env.KANDEV_E2E_BIN || path.join(BACKEND_DIR, "bin", "kandev");
 const WEB_DIST_DIR = path.join(WEB_DIR, "dist");
 // Auto-derive from PID if not explicitly set — prevents port clashes between concurrent test runs
 // Modulo 30 keeps agentctl ports under 65535 (30001 + 30*1000 = 60001 max)
