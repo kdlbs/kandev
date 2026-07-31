@@ -17,8 +17,18 @@ lets checkout-provided GitHub credentials remain in that worktree.
 
 `.github/workflows/claude.yml` keeps the default branch at the workspace root
 and does not check out pull request content. For a top-level pull request
-comment containing `@claude review`, Claude reads the exact current pull
-request through constrained `gh pr diff` and `gh pr view` commands.
+comment containing `@claude review`, Claude may explore trusted default-branch
+files with read-only local tools and reads the exact current pull request
+through constrained `gh pr diff` and `gh pr view` commands. When semantic
+review requires a complete current-head file rather than a diff hunk, Claude
+uses the trusted `.github/scripts/claude-read-pr-file.py` helper.
+
+The helper is bound to the event's pull request number by workflow environment,
+resolves that pull request's head SHA through a GET request, and fetches one
+repository-relative path at that SHA through a second GET request. It rejects
+path traversal, non-regular files, path mismatches, files over 256 KiB, and
+non-UTF-8 content. Claude is not granted generic `gh api` or arbitrary Python
+access.
 
 The manual review uses an explicit prompt so the Claude action selects its
 automation mode rather than its write-capable mention mode. Its tool policy is
@@ -30,14 +40,15 @@ workspace and the existing generic behavior.
 
 ## Consequences
 
-- Manual reviews can inspect newly added pull request files without placing
-  pull request content in the privileged runner workspace.
+- Manual reviews can inspect trusted surrounding code plus complete changed
+  pull request files without placing pull request content in the privileged
+  runner workspace.
 - The checkout-provided GitHub token is not retained in the trusted worktree.
   The Claude action still manages its own short-lived authentication, while
   its review process can write review comments but cannot use repository
   mutation or arbitrary network tools.
-- Reviewing files beyond the pull request diff requires adding another
-  explicitly allowlisted read-only GitHub command.
+- Pull request file reads are limited to text files small enough for review;
+  large or binary assets remain available only as diff metadata.
 - Manual review mode is intentionally unsuitable for implementing requested
   changes; implementation requests continue through the generic mention path.
 
@@ -52,3 +63,5 @@ workspace and the existing generic behavior.
   checkout as flowing into a privileged comment-triggered action.
 - Keeping only the default-branch checkout without read-only pull request API
   access was rejected because Claude could not inspect newly added files.
+- Granting generic `gh api` access was rejected because it would let untrusted
+  review content steer the agent to unrelated endpoints or repository writes.

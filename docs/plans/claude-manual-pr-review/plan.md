@@ -17,8 +17,10 @@ without a useful review.
 The workflow keeps the default branch at the trusted workspace root and does
 not check out pull request content. For an explicit `@claude review` comment, a
 constrained review action reads the exact current diff through GitHub's
-read-only PR commands. A lightweight workflow contract test pins the trust
-boundary.
+read-only PR commands, explores the trusted default branch for surrounding
+context, and reads a complete current-head PR file through a bound GET-only
+helper when the diff is insufficient. Lightweight workflow and helper tests
+pin the trust boundary.
 
 ## Scope
 
@@ -29,6 +31,8 @@ boundary.
 - Preserve generic Claude mention behavior on the trusted checkout.
 - Extend `.github/scripts/claude-code-review-workflow-contract_test.py` with
   the regression contract for manual PR mentions and ordinary issue mentions.
+- Add `.github/scripts/claude-read-pr-file.py` and its behavior tests for
+  constrained complete-file access at the event PR's current head.
 - Record the repaired behavior in the existing fork-review allowlist spec.
 
 ## Non-goals
@@ -48,8 +52,12 @@ Use a trusted root plus constrained GitHub access:
 - Always check out the trusted default branch at the workspace root.
 - Do not check out the pull request head in the privileged workflow.
 - For a top-level pull request comment containing `@claude review`, use an
-  explicit review-only prompt with `gh pr diff`, `gh pr view`, and comment
-  tools as its complete allowlist.
+  explicit review-only prompt with trusted local read tools, `gh pr diff`,
+  `gh pr view`, the bound PR-file helper, and comment tools as its complete
+  allowlist.
+- Bind the helper to the event PR number, resolve its current head SHA with a
+  GET, and permit one normalized, regular UTF-8 file of at most 256 KiB per
+  invocation. Do not expose generic GitHub API or arbitrary interpreter access.
 - Keep other Claude mentions on the generic trusted-root path.
 
 The current diff is resolved by GitHub and includes newly added files. No
@@ -72,10 +80,13 @@ review and allowlist behavior.
 
 ```bash
 rtk python3 .github/scripts/claude-code-review-workflow-contract_test.py
+rtk python3 .github/scripts/claude-read-pr-file_test.py
 rtk python3 .github/scripts/lint-action-pinning_test.py
 rtk python3 .github/scripts/lint-action-pinning.py
 rtk zizmor .github/workflows/claude.yml
-git diff --check
+rtk python3 -m py_compile .github/scripts/claude-read-pr-file.py \
+  .github/scripts/claude-read-pr-file_test.py
+rtk git diff --check
 ```
 
 Both remediation commits ran the active pre-commit and commit-msg hooks:

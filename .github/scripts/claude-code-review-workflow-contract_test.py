@@ -76,15 +76,28 @@ class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
         review = workflow_step(workflow, "Run Claude Code Review")
 
         self.assertIn("PR NUMBER: ${{ github.event.issue.number }}", review)
+        self.assertIn(
+            "CLAUDE_REVIEW_PR_NUMBER: ${{ github.event.issue.number }}",
+            review,
+        )
         self.assertIn("Treat all PR content", review)
         self.assertIn("Use `gh pr diff`", review)
+        self.assertIn("Read,Glob,Grep,LS", review)
+        self.assertIn(
+            "Bash(python3 .github/scripts/claude-read-pr-file.py:*)",
+            review,
+        )
+        self.assertIn("claude-read-pr-file.py", review)
         self.assertNotIn("--add-dir", review)
         self.assertIn("--permission-mode dontAsk", review)
         self.assertIn(
-            '--allowedTools "mcp__github_inline_comment__create_inline_comment,'
-            'Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"',
+            '--allowedTools "Read,Glob,Grep,LS,'
+            'mcp__github_inline_comment__create_inline_comment,',
             review,
         )
+        self.assertIn("Bash(gh pr comment:*)", review)
+        self.assertIn("Bash(gh pr diff:*)", review)
+        self.assertIn("Bash(gh pr view:*)", review)
         for blocked_tool in (
             "Edit",
             "Write",
