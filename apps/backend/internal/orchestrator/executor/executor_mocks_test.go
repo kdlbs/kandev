@@ -286,6 +286,10 @@ type mockRepository struct {
 	// Track calls for verification
 	createTaskSessionCalls            []*models.TaskSession
 	updateTaskSessionCalls            []*models.TaskSession
+	updateTaskSessionSnapshots        []*models.TaskSession
+	updateTaskSessionIfCurrentCalls   int
+	updateTaskSessionIfCurrentFailOn  int
+	updateTaskSessionIfCurrentFailErr error
 	setSessionMetadataKeyCalls        []setSessionMetadataKeyCall
 	setSessionPrimaryCalls            []string
 	createTaskEnvironmentCalls        []*models.TaskEnvironment
@@ -405,6 +409,12 @@ func (m *mockRepository) UpdateTaskSessionIfCurrentState(
 	if current.State != expected {
 		return false, nil
 	}
+	m.updateTaskSessionIfCurrentCalls++
+	if m.updateTaskSessionIfCurrentFailOn > 0 &&
+		m.updateTaskSessionIfCurrentCalls == m.updateTaskSessionIfCurrentFailOn {
+		return false, m.updateTaskSessionIfCurrentFailErr
+	}
+	m.updateTaskSessionSnapshots = append(m.updateTaskSessionSnapshots, cloneMockTaskSession(session))
 	m.updateTaskSessionCalls = append(m.updateTaskSessionCalls, session)
 	m.sessions[session.ID] = session
 	return true, nil

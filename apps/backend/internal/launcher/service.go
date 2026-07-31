@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -13,6 +12,7 @@ import (
 type serviceArgs struct {
 	Action      string
 	System      bool
+	RunAs       string
 	Port        int
 	HomeDir     string
 	NoBootStart bool
@@ -41,7 +41,7 @@ const (
 const serviceHelp = `kandev service — install kandev as an OS-managed service
 
 Usage:
-  kandev service install [--system] [--port <port>] [--home-dir <path>] [--no-boot-start]
+  kandev service install [--system] [--run-as <user>] [--port <port>] [--home-dir <path>] [--no-boot-start]
   kandev service uninstall [--system]
   kandev service start|stop|restart|status [--system]
   kandev service logs [-f] [--system]
@@ -101,6 +101,9 @@ func parseServiceArgs(argv []string) (serviceArgs, error) {
 		}
 		i = next
 	}
+	if out.RunAs != "" && (action != actionInstall || !out.System) {
+		return out, ParseError{Message: "--run-as is valid only for kandev service install --system"}
+	}
 	if action == actionSelfUpdate && !out.ShowHelp && out.Intent == "" {
 		return out, ParseError{Message: "kandev service self-update requires --intent <path>"}
 	}
@@ -124,6 +127,24 @@ func parseServiceFlag(argv []string, i int, action string, out *serviceArgs) (in
 		out.ShowHelp = true
 	case arg == "--system":
 		out.System = true
+	case arg == "--run-as":
+		if action != actionInstall {
+			return i, ParseError{Message: "--run-as is valid only for kandev service install --system"}
+		}
+		value, err := takeValue(argv, i, "--run-as")
+		if err != nil {
+			return i, err
+		}
+		out.RunAs = value
+		return i + 1, nil
+	case strings.HasPrefix(arg, "--run-as="):
+		if action != actionInstall {
+			return i, ParseError{Message: "--run-as is valid only for kandev service install --system"}
+		}
+		out.RunAs = strings.TrimPrefix(arg, "--run-as=")
+		if out.RunAs == "" {
+			return i, ParseError{Message: "--run-as requires a value"}
+		}
 	case arg == "--no-boot-start":
 		out.NoBootStart = true
 	case arg == "-f" || arg == "--follow":
@@ -232,7 +253,15 @@ func installSystemd(args serviceArgs, build BuildInfo, unitPath string) int {
 	homeDir := serviceHomeDir(args)
 	logDir := filepath.Join(homeDir, "logs")
 	bundleDir := serviceBundleDir(self)
-	systemUser := serviceUser(args.System)
+	systemUser, err := resolveSystemServiceUser(args, unitPath, nativeServiceManagerSystemd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	if err := validateSystemServiceHomeOwner(homeDir, systemUser); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
 	input := nativeServiceUnitInput{
 		Executable:   self,
 		HomeDir:      homeDir,
@@ -341,7 +370,15 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 	homeDir := serviceHomeDir(args)
 	logDir := filepath.Join(homeDir, "logs")
 	bundleDir := serviceBundleDir(self)
-	systemUser := serviceUser(args.System)
+	systemUser, err := resolveSystemServiceUser(args, plistPath, nativeServiceManagerLaunchd)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
+	if err := validateSystemServiceHomeOwner(homeDir, systemUser); err != nil {
+		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
+		return 1
+	}
 	input := nativeServiceUnitInput{
 		Executable:   self,
 		HomeDir:      homeDir,
@@ -719,20 +756,6 @@ func serviceHomeDir(args serviceArgs) string {
 		return "/var/lib/kandev"
 	}
 	return resolveHomeDir()
-}
-
-func serviceUser(system bool) string {
-	if !system {
-		return ""
-	}
-	if sudo := os.Getenv("SUDO_USER"); sudo != "" && sudo != "root" {
-		return sudo
-	}
-	u, err := user.Current()
-	if err != nil {
-		return ""
-	}
-	return u.Username
 }
 
 func printServiceConfig(args serviceArgs) {

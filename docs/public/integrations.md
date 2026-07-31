@@ -119,6 +119,13 @@ path on desktop hover or focus and in a touch-accessible drawer on mobile.
   match `remote.*.url` apply; switching back to managed credentials restores the canonical HTTPS
   origin. Repositories you registered from an existing local checkout are never rewritten.
 
+If Git rejects a managed checkout with **detected dubious ownership**, the Kandev service account
+and the checkout owner do not match. Repository preparation stops and the session error identifies
+the ownership boundary; inspect the service unit and the managed home/repository owner, then
+preserve or deliberately reconcile the service account. The diagnostic is credential-safe and
+bounded. Do not add `safe.directory=*` or let Kandev recursively chown the checkout: those actions
+hide an installation identity problem instead of fixing it.
+
 Selecting a GitHub CLI workspace connection does not implicitly select host Git credentials; use
 the explicit inheritance mode when that is the intended boundary. The Changes panel's branch
 details show the non-secret identity and delivery route captured for a successfully launched

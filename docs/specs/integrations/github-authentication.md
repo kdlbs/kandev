@@ -65,6 +65,15 @@ automation under different GitHub Apps without operating separate Kandev deploym
   an existing managed checkout when the policy changes. This makes Git conditional includes based
   on `remote.*.url` observe the same transport the task uses. Kandev never rewrites the remote of a
   repository registered as a user-managed local checkout.
+- Repository preparation resolves each attached repository once per launch or resume and reuses
+  that result for primary-repository configuration, multi-repository configuration, and credential
+  routing. Origin reconciliation is serialized per managed checkout, compares the current and
+  desired canonical URLs, and performs no write when they already match.
+- Git failures while inspecting or reconciling a managed checkout preserve a bounded,
+  credential-redacted diagnostic. Git's dubious-ownership failure is classified as a service/data
+  ownership mismatch with guidance to restore the intended Kandev service account or reconcile the
+  managed data owner. Kandev does not bypass Git's ownership protection with a broad
+  `safe.directory` entry.
 - Under managed routing, App installation tokens are minted for the requested repository and cached
   only in memory. PAT/CLI tokens retain their provider-granted scope once delivered to a trusted
   agent subprocess. GitHub HTTPS and the broker-aware `gh` shim fail closed rather than consulting
@@ -345,6 +354,9 @@ post-signature processing failures produce `failing`; a later valid successful d
 - `executor -> executor-visible credentials`, regardless of PAT/CLI/App automation method.
 - Initial launch and resume run the same resolution. A successful operation replaces the session
   snapshot; a failed operation leaves the previous snapshot unchanged.
+- Each attached repository is resolved once for an individual launch or resume. The resolved
+  repository set is shared by task configuration and credential-snapshot construction rather than
+  triggering repeated materialization or origin mutation.
 - Changing the workspace policy affects new launches and the next resume, not an already-running
   process.
 
@@ -407,6 +419,12 @@ post-signature processing failures produce `failing`; a later valid successful d
 - If Kandev cannot reconcile a managed checkout's `origin` with the selected task policy, Local and
   Worktree preparation fails before the agent starts instead of silently using the other policy's
   transport.
+- If Git rejects a managed checkout because its filesystem owner differs from the Kandev service
+  account, preparation fails with an ownership-specific, credential-safe diagnostic. Kandev does
+  not retry with a global trust override, suppress the Git check, or mutate filesystem ownership.
+- Generic origin-inspection and origin-update failures include only bounded, credential-redacted
+  Git output. Credentials embedded in URL userinfo or known authentication material never appear
+  in logs, session errors, or browser payloads.
 - Deleting a registration with any workspace or personal reference returns
   `github_app_registration_in_use` with a non-secret binding count.
 - Changing workspace auth while a flow is open makes the stale callback fail without reverting the
@@ -536,6 +554,19 @@ registration and never creates a global default.
 - **GIVEN** a Kandev-managed GitHub checkout currently has an SSH `origin`, **WHEN** the workspace
   selects managed credentials and launches a Local or Worktree task, **THEN** Kandev changes that
   managed checkout's `origin` to canonical HTTPS before task preparation.
+- **GIVEN** a Kandev-managed checkout already has the canonical origin selected by the task policy,
+  **WHEN** a task launches or resumes, **THEN** Kandev inspects the origin but does not rewrite
+  `.git/config`.
+- **GIVEN** a task with one or more attached repositories, **WHEN** launch or resume builds the
+  primary, multi-repository, and credential configuration, **THEN** each repository is prepared
+  once and the same resolved result is reused by all three consumers.
+- **GIVEN** a managed checkout is owned by `brewuser` while the Kandev service runs as root,
+  **WHEN** Git rejects origin inspection or reconciliation as dubious ownership, **THEN** task
+  preparation stops and reports that the service account and managed repository owner disagree,
+  without suggesting `safe.directory=*`.
+- **GIVEN** Git emits a failure containing credential-bearing URL userinfo, **WHEN** the failure is
+  returned through task preparation, **THEN** the diagnostic retains actionable Git context but
+  redacts the credential and bounds the output length.
 - **GIVEN** a repository is registered from a user-managed local checkout, **WHEN** either task Git
   credential policy is selected, **THEN** Kandev leaves its configured `origin` unchanged.
 - **GIVEN** managed mode and an explicit executor-profile GitHub token, **WHEN** a task launches,
@@ -604,10 +635,14 @@ and the
 [task Git credential policy follow-up plan](../../plans/task-git-credential-policy/plan.md), plus
 the
 [executor clone transport repair plan](../../plans/github-executor-clone-transport/plan.md), and
-the [managed task terminal environment plan](../../plans/task-terminal-git-environment/plan.md).
+the [managed task terminal environment plan](../../plans/task-terminal-git-environment/plan.md),
+and the
+[system-service identity guardrails repair plan](../../plans/system-service-identity-guardrails/plan.md).
 
 ## Decision
 
 See [ADR-2026-07-21-workspace-selectable-github-app-registrations](../../decisions/2026-07-21-workspace-selectable-github-app-registrations.md)
 and
 [ADR-2026-07-27-task-git-credential-policy](../../decisions/2026-07-27-task-git-credential-policy.md).
+The system-service ownership boundary is defined by
+[ADR-2026-07-31-system-service-user-continuity](../../decisions/2026-07-31-system-service-user-continuity.md).
