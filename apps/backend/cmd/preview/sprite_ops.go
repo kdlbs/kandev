@@ -74,6 +74,13 @@ func isTransientSpriteError(err error) bool {
 	if errors.As(err, &networkErr) && networkErr.Timeout() {
 		return true
 	}
+	// Temporary is deprecated on net.Error, but older transports still expose
+	// it. Keep compatibility through a local interface without calling the
+	// deprecated method on net.Error directly.
+	var temporaryErr interface{ Temporary() bool }
+	if errors.As(err, &temporaryErr) && temporaryErr.Temporary() {
+		return true
+	}
 
 	var apiErr *sprites.APIError
 	if errors.As(err, &apiErr) {

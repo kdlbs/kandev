@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,23 @@ import (
 
 	sprites "github.com/superfly/sprites-go"
 )
+
+type testNetworkError struct {
+	temporary bool
+}
+
+func (e testNetworkError) Error() string   { return "test network error" }
+func (e testNetworkError) Timeout() bool   { return false }
+func (e testNetworkError) Temporary() bool { return e.temporary }
+
+func TestIsTransientSpriteErrorClassifiesTemporaryNetworkErrors(t *testing.T) {
+	if !isTransientSpriteError(fmt.Errorf("lookup: %w", testNetworkError{temporary: true})) {
+		t.Fatal("temporary network error should be retryable")
+	}
+	if isTransientSpriteError(testNetworkError{}) {
+		t.Fatal("permanent network error should not be retryable")
+	}
+}
 
 func TestGetOrCreateSpriteRetriesTransientGet(t *testing.T) {
 	getCalls := 0
