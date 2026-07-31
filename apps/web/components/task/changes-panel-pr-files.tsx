@@ -123,8 +123,10 @@ function PRFileRow({
       data-pr-key={file.prKey}
       data-active={isActive ? "true" : "false"}
       className={cn(
-        "group flex items-center justify-between gap-2 text-sm rounded-md px-2 py-1.5 -mx-1 cursor-pointer md:px-1 md:py-0.5",
-        isActive ? "bg-accent/60 text-accent-foreground hover:bg-accent/50" : "hover:bg-muted/60",
+        "group flex items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1.5 -mx-1 text-sm cursor-pointer md:px-1 md:py-0.5",
+        isActive
+          ? "border-primary/50 bg-card text-foreground hover:bg-muted/70"
+          : "hover:bg-muted/60",
       )}
       onClick={() =>
         onOpenDiff(file.path, {

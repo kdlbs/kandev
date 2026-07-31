@@ -206,8 +206,8 @@ function BranchListBody({
           aria-selected={b.name === currentBase}
           data-testid={`base-branch-picker-option-${b.name}`}
           className={cn(
-            "flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs cursor-pointer hover:bg-accent text-left",
-            b.name === currentBase && "bg-accent/40 font-medium",
+            "flex w-full items-center gap-2 rounded border border-transparent px-2 py-1.5 text-left text-xs cursor-pointer hover:bg-muted",
+            b.name === currentBase && "border-primary/50 bg-card font-medium",
           )}
           onClick={() => onSelect(b.name)}
         >
@@ -246,7 +246,7 @@ export function BaseBranchPicker({
           aria-expanded={logic.open}
           data-testid="base-branch-picker-trigger"
           className={cn(
-            "inline-flex items-center gap-1 cursor-pointer rounded px-1 py-px text-foreground font-medium hover:bg-accent/50",
+            "inline-flex items-center gap-1 cursor-pointer rounded px-1 py-px text-foreground font-medium hover:bg-muted",
             logic.isSaving && "opacity-60 cursor-wait",
           )}
           disabled={logic.isSaving}

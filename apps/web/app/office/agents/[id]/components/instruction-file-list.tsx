@@ -104,9 +104,9 @@ function FileRow({
     <button
       onClick={onSelect}
       className={cn(
-        "w-full flex items-center gap-2 px-3 py-1.5 text-left text-sm cursor-pointer",
-        "hover:bg-accent/50 transition-colors",
-        isSelected && "bg-accent",
+        "w-full flex items-center gap-2 border border-transparent px-3 py-1.5 text-left text-sm cursor-pointer",
+        isSelected ? "border-primary/50 bg-card" : "hover:bg-muted",
+        "transition-colors",
       )}
     >
       <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />

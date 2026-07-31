@@ -120,7 +120,7 @@ describe("FileTree rendering and selection", () => {
     const tree: FileTreeNode[] = [file("a.ts")];
     renderTree(tree, { selectedPath: "a.ts" });
     const row = screen.getByText("a.ts").parentElement!;
-    expect(row.className).toContain("bg-accent");
+    expect(row.className).toContain("border-primary");
   });
 
   it("renderExtra slot is invoked per row and its output appears in the DOM", () => {

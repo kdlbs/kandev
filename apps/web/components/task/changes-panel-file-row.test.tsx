@@ -287,7 +287,7 @@ describe("FileRow tree-mode hover stage action", () => {
 });
 
 describe("FileRow active-tab highlight", () => {
-  it("renders data-active='true' and bg-accent/60 when isActive", () => {
+  it("renders data-active='true' and border-primary when isActive", () => {
     const { container } = render(
       <TooltipProvider>
         <ul>
@@ -309,7 +309,7 @@ describe("FileRow active-tab highlight", () => {
     const row = container.querySelector("[data-changes-file='active.ts']") as HTMLElement | null;
     expect(row).not.toBeNull();
     expect(row!.getAttribute("data-active")).toBe("true");
-    expect(row!.className).toContain("bg-accent/60");
+    expect(row!.className).toContain("border-primary/50");
   });
 
   it("keeps highlight when isActive and isSelected are both true", () => {
@@ -336,6 +336,6 @@ describe("FileRow active-tab highlight", () => {
     expect(row).not.toBeNull();
     expect(row!.getAttribute("data-active")).toBe("true");
     expect(row!.getAttribute("data-selected")).toBe("true");
-    expect(row!.className).toContain("bg-accent/60");
+    expect(row!.className).toContain("border-primary/50");
   });
 });

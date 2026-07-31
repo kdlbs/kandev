@@ -69,7 +69,7 @@ function StatusChip({ draft, onUpdate }: Props) {
           <button
             key={opt.value}
             type="button"
-            className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-accent cursor-pointer flex items-center gap-2"
+            className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted cursor-pointer flex items-center gap-2"
             onClick={() => onUpdate({ status: opt.value })}
           >
             <IconCircleDot className={`h-3.5 w-3.5 ${opt.className}`} />
@@ -114,7 +114,7 @@ function PriorityChip({ draft, onUpdate }: Props) {
             <button
               key={opt.value}
               type="button"
-              className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-accent cursor-pointer flex items-center gap-2"
+              className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted cursor-pointer flex items-center gap-2"
               onClick={() => onUpdate({ priority: opt.value })}
             >
               <Icon className={`h-3.5 w-3.5 ${opt.className}`} />
