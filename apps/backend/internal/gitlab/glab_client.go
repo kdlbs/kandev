@@ -114,16 +114,28 @@ func glabReadToken(ctx context.Context, hostname string) (string, error) {
 	return parseGlabToken(stdout.String() + "\n" + stderr.String()), nil
 }
 
-// parseGlabToken finds a "Token: <value>" line in the combined output of
+// glabTokenLabels are the label variants `glab auth status -t` has used for
+// the token line. glab >= 1.x prints "Token found:"; older builds printed a
+// bare "Token:". Longest first so "Token found:" is not mis-split by "Token:".
+var glabTokenLabels = []string{"token found:", "token:"}
+
+// parseGlabToken finds the token line in the combined output of
 // `glab auth status -t` and returns the token (or "" if none).
 func parseGlabToken(output string) string {
 	for _, line := range strings.Split(output, "\n") {
 		line = strings.TrimSpace(line)
-		idx := strings.Index(strings.ToLower(line), "token:")
+		lower := strings.ToLower(line)
+		idx, label := -1, ""
+		for _, candidate := range glabTokenLabels {
+			if at := strings.Index(lower, candidate); at >= 0 {
+				idx, label = at, candidate
+				break
+			}
+		}
 		if idx < 0 {
 			continue
 		}
-		token := strings.TrimSpace(line[idx+len("token:"):])
+		token := strings.TrimSpace(line[idx+len(label):])
 		// glab sometimes prefixes lines with ANSI / arrows; strip leading
 		// non-alphanumerics until we hit token characters.
 		token = strings.TrimLeft(token, " \t-→>")

@@ -38,6 +38,9 @@ export type SessionStatus = {
   remote_created_at?: string;
   remote_checked_at?: string;
   remote_status_error?: string;
+  capabilities?: {
+    embedded_vscode: boolean;
+  };
   error?: string;
 };
 
@@ -106,7 +109,7 @@ async function resumeViaLaunch(
     taskId: string,
     sessionId: string,
   ) => { request: import("@/lib/services/session-launch-service").LaunchSessionRequest },
-): Promise<void> {
+): Promise<boolean> {
   setters.setResumptionState("resuming");
   const { request } = buildRequest(taskId, sessionId);
   const launchResp = await launchSession(request);
@@ -132,6 +135,7 @@ async function resumeViaLaunch(
   if (ok && request.intent === "restore_workspace" && setters.setAgentctlReady) {
     setters.setAgentctlReady(sessionId);
   }
+  return ok;
 }
 
 /** Attempt resume, silently falling back to restore_workspace on any failure.
@@ -145,7 +149,7 @@ export async function resumeWithSilentFallback(
   sessionId: string,
   session: SessionLike,
   setters: ResumeStateSetter,
-): Promise<void> {
+): Promise<boolean> {
   setters.setResumptionState("resuming");
   if (
     await tryLaunch(
@@ -156,7 +160,7 @@ export async function resumeWithSilentFallback(
       setters,
     )
   ) {
-    return;
+    return true;
   }
   // Resume failed (returned success=false OR threw). Fall back to read-only
   // workspace restore so the user keeps file/terminal/git access.
@@ -169,10 +173,11 @@ export async function resumeWithSilentFallback(
       setters,
     )
   ) {
-    return;
+    return true;
   }
   setters.setResumptionState("error");
   setters.setError("Failed to resume session — workspace restore also unavailable");
+  return false;
 }
 
 /** Run a single launch attempt; returns true on success, false on any failure.
@@ -246,6 +251,38 @@ function applyStatusToState(
   }
 }
 
+type RefreshSessionStatusParams = {
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>;
+  taskId: string;
+  sessionId: string;
+  session: SessionLike;
+  setSessionStatus: (status: SessionStatus) => void;
+  setters: ResumeStateSetter;
+};
+
+async function refreshSessionStatus({
+  client,
+  taskId,
+  sessionId,
+  session,
+  setSessionStatus,
+  setters,
+}: RefreshSessionStatusParams): Promise<void> {
+  try {
+    const status = await client.request<SessionStatus>("task.session.status", {
+      task_id: taskId,
+      session_id: sessionId,
+    });
+    setSessionStatus(status);
+    applyStatusToState(status, taskId, sessionId, session, setters);
+    if (status.is_agent_running && setters.setAgentctlReady) {
+      setters.setAgentctlReady(sessionId);
+    }
+  } catch (err) {
+    console.error("[refreshSessionStatus] failed to refresh session status", { sessionId, err });
+  }
+}
+
 async function checkAndResume({
   taskId,
   sessionId,
@@ -274,14 +311,24 @@ async function checkAndResume({
     if (status.is_agent_running && setters.setAgentctlReady) {
       setters.setAgentctlReady(sessionId);
     }
+    let resumed = false;
     if (status.is_agent_running) {
       setters.setResumptionState("running");
     } else if (status.needs_resume && status.is_resumable) {
-      await resumeWithSilentFallback(taskId, sessionId, session, setters);
+      resumed = await resumeWithSilentFallback(taskId, sessionId, session, setters);
     } else if (status.needs_workspace_restore) {
-      await resumeViaLaunch(taskId, sessionId, session, setters, buildRestoreWorkspaceRequest);
+      resumed = await resumeViaLaunch(
+        taskId,
+        sessionId,
+        session,
+        setters,
+        buildRestoreWorkspaceRequest,
+      );
     } else {
       setters.setResumptionState("idle");
+    }
+    if (resumed) {
+      await refreshSessionStatus({ client, taskId, sessionId, session, setSessionStatus, setters });
     }
   } catch (err) {
     setters.setResumptionState("error");

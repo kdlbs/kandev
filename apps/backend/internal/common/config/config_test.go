@@ -174,7 +174,6 @@ func TestFeatures_ProductionDefaults(t *testing.T) {
 	// Force a clean env so KANDEV_FEATURES_* and profile-selector vars from the
 	// host shell cannot change the production-profile defaults under test.
 	t.Setenv("KANDEV_FEATURES_OFFICE", "")
-	t.Setenv("KANDEV_FEATURES_PLUGINS", "")
 	unsetEnv(t, "KANDEV_FEATURES_APP_STATUS_BAR")
 	t.Setenv("KANDEV_DEBUG_DEV_MODE", "")
 	t.Setenv("KANDEV_DEBUG_PPROF_ENABLED", "")
@@ -187,9 +186,6 @@ func TestFeatures_ProductionDefaults(t *testing.T) {
 	}
 	if cfg.Features.Office {
 		t.Errorf("Features.Office = true, want false (production default must be off)")
-	}
-	if cfg.Features.Plugins {
-		t.Errorf("Features.Plugins = true, want false (production default must be off)")
 	}
 	if cfg.Features.AppStatusBar {
 		t.Error("Features.AppStatusBar = true, want false (status surface must remain opt-in by default)")
@@ -210,21 +206,6 @@ func TestFeatures_OfficeEnabledByEnv(t *testing.T) {
 	}
 	if !cfg.Features.Office {
 		t.Errorf("Features.Office = false, want true (KANDEV_FEATURES_OFFICE=true must flip the flag)")
-	}
-}
-
-// TestFeatures_PluginsEnabledByEnv proves the documented opt-in path:
-// setting KANDEV_FEATURES_PLUGINS=true flips Features.Plugins to true.
-func TestFeatures_PluginsEnabledByEnv(t *testing.T) {
-	t.Setenv("KANDEV_FEATURES_PLUGINS", "true")
-
-	dir := t.TempDir()
-	cfg, err := LoadWithPath(dir)
-	if err != nil {
-		t.Fatalf("LoadWithPath: %v", err)
-	}
-	if !cfg.Features.Plugins {
-		t.Errorf("Features.Plugins = false, want true (KANDEV_FEATURES_PLUGINS=true must flip the flag)")
 	}
 }
 
@@ -436,7 +417,6 @@ func TestServerHostsFromConfigWhenHostUnset(t *testing.T) {
 func TestFeaturesConfig_JSONShape(t *testing.T) {
 	cfg := FeaturesConfig{
 		Office:       true,
-		Plugins:      true,
 		AppStatusBar: true,
 		Auth:         true,
 	}
@@ -445,7 +425,7 @@ func TestFeaturesConfig_JSONShape(t *testing.T) {
 		t.Fatalf("json.Marshal: %v", err)
 	}
 	got := string(raw)
-	want := `{"office":true,"plugins":true,"appStatusBar":true,"auth":true,"claudeBackgroundPromptHandoff":false}`
+	want := `{"office":true,"appStatusBar":true,"auth":true,"claudeBackgroundPromptHandoff":false}`
 	if got != want {
 		t.Errorf("FeaturesConfig JSON = %s; want %s — missing or wrong `json:` struct tag", got, want)
 	}

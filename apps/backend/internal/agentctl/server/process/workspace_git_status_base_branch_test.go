@@ -102,6 +102,38 @@ func TestComputeBaseCommit_FallsBackToTipWhenNoMergeBase(t *testing.T) {
 	}
 }
 
+func TestComputeBaseCommit_CorrectsMergedDeletedParent(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	runGit(t, repoDir, "checkout", "-b", "feature/parent")
+	writeFile(t, repoDir, "parent.txt", "parent work")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "parent work")
+	parentTip := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	runGit(t, repoDir, "checkout", "main")
+	runGit(t, repoDir, "merge", "--ff-only", "feature/parent")
+	writeFile(t, repoDir, "main-after.txt", "main advanced")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "main advanced")
+	runGit(t, repoDir, "push", "origin", "main")
+	integrationBase := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "origin/main"))
+	if integrationBase == parentTip {
+		t.Fatal("test setup invalid: integration base must advance past the stale parent")
+	}
+
+	runGit(t, repoDir, "checkout", "-b", "feature/child", "origin/main")
+	writeFile(t, repoDir, "child.txt", "child work")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "child work")
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	if got := wt.computeBaseCommit(context.Background(), "feature/parent"); got != integrationBase {
+		t.Errorf("computeBaseCommit = %q, want corrected integration base %q", got, integrationBase)
+	}
+}
+
 // TestResolveBaseBranch_InvalidStoredFallsThrough handles tasks whose recorded
 // base_branch no longer exists locally (deleted, renamed, never fetched). The
 // resolver must continue to the hardcoded list instead of returning a ref git

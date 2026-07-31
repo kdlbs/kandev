@@ -8,7 +8,7 @@ import { FileViewerContent } from "../file-viewer-content";
 import { MarkdownPreviewContent } from "../markdown-preview-content";
 import { FileImageViewer } from "../file-image-viewer";
 import { FileBinaryViewer } from "../file-binary-viewer";
-import { getFileCategory } from "@/lib/utils/file-types";
+import { getFileCategory, isMarkdownFile } from "@/lib/utils/file-types";
 import { useAppStore } from "@/components/state-provider";
 import type { OpenFileTab } from "@/lib/types/backend";
 import {
@@ -20,12 +20,8 @@ type MobileFileViewerPanelProps = {
   file: OpenFileTab;
   sessionId: string | null;
   onClose: () => void;
+  initialMarkdownPreview?: boolean;
 };
-
-function isMarkdownFile(path: string): boolean {
-  const ext = path.split(".").pop()?.toLowerCase();
-  return ext === "md" || ext === "mdx";
-}
 
 function resolveViewerKind(file: OpenFileTab): "image" | "binary" | "text" {
   if (!file.isBinary) return "text";
@@ -80,7 +76,12 @@ function MobileViewerBody({
   );
 }
 
-export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileViewerPanelProps) {
+export function MobileFileViewerPanel({
+  file,
+  sessionId,
+  onClose,
+  initialMarkdownPreview = false,
+}: MobileFileViewerPanelProps) {
   const activeSession = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
@@ -91,15 +92,16 @@ export function MobileFileViewerPanel({ file, sessionId, onClose }: MobileFileVi
   const viewerKind = useMemo(() => resolveViewerKind(file), [file]);
   const markdownFile = isMarkdownFile(file.path);
 
-  const [markdownPreview, setMarkdownPreview] = useState(false);
-  const [lastPath, setLastPath] = useState(file.path);
+  const [markdownPreview, setMarkdownPreview] = useState(initialMarkdownPreview);
+  const fileIdentity = `${file.repo ?? ""}\u0000${file.path}`;
+  const [lastFileIdentity, setLastFileIdentity] = useState(fileIdentity);
 
   // Reset preview mode when the file changes so reopening a markdown file
   // always starts in editor view, not the previous preview state.
   // Adjust state during render per React docs recommendation.
-  if (lastPath !== file.path) {
-    setLastPath(file.path);
-    setMarkdownPreview(false);
+  if (lastFileIdentity !== fileIdentity) {
+    setLastFileIdentity(fileIdentity);
+    setMarkdownPreview(initialMarkdownPreview);
   }
 
   return (

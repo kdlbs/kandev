@@ -1,4 +1,4 @@
-import type { ConnectionStatus } from "@/lib/types/connection";
+import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
 import type { StateSnapshot } from "react-virtuoso";
 import type {
@@ -34,6 +34,7 @@ export type DiffState = {
 export type ConnectionState = {
   status: ConnectionStatus;
   error: string | null;
+  issueSeverity: ConnectionIssueSeverity;
 };
 
 export type MobileKanbanState = {
@@ -98,6 +99,8 @@ export type QuickChatSession = {
   kind: QuickChatSessionKind;
   sessionId: string;
   workspaceId: string;
+  /** Backing ephemeral task. Absent only on unstarted "New chat" setup tabs. */
+  taskId?: string;
   name?: string;
   agentProfileId?: string;
   initialPrompt?: string;
@@ -218,6 +221,7 @@ export type UISliceActions = {
   setPreviewUrlDraft: (sessionId: string, url: string) => void;
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
+  setConnectionIssueSeverity: (severity: ConnectionIssueSeverity) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
@@ -238,17 +242,25 @@ export type UISliceActions = {
     workspaceId: string,
     agentProfileId?: string,
     kind?: QuickChatSessionKind,
+    taskId?: string,
   ) => void;
   addQuickChatSession: (
     sessionId: string,
     workspaceId: string,
     agentProfileId?: string,
     kind?: QuickChatSessionKind,
+    taskId?: string,
   ) => void;
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
+  /** Replaces a workspace's quick-chat tabs with the server's authoritative list. */
+  syncQuickChatSessions: (workspaceId: string, sessions: QuickChatSession[]) => void;
+  /** Adds or updates a tab observed on the wire, without stealing focus. */
+  upsertQuickChatSessionFromEvent: (session: QuickChatSession) => void;
+  /** Drops tabs whose backing task was deleted (possibly on another device). */
+  removeQuickChatSessionsForTask: (taskId: string) => void;
   setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;

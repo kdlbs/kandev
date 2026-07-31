@@ -593,6 +593,9 @@ func (m *mockRepository) DismissLastAgentError(_ context.Context, _ string, _ mo
 func (m *mockRepository) GetLastAgentMessage(_ context.Context, _ string) (string, error) {
 	return "", nil
 }
+func (m *mockRepository) UpdateTaskSessionLastReadMessageID(_ context.Context, _ string, _ string) error {
+	return nil
+}
 
 // Task Plan operations
 func (m *mockRepository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {

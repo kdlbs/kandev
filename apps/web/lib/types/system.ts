@@ -298,6 +298,25 @@ export interface StorageQuarantineEntry {
   metadata: Record<string, unknown>;
 }
 
+export type StorageQuarantinePurgeScope = "eligible" | "all";
+
+export interface StorageQuarantinePurgeFailure {
+  id: string;
+  error: string;
+}
+
+export interface StorageQuarantinePurgeResult {
+  scope: StorageQuarantinePurgeScope;
+  considered: number;
+  deleted: number;
+  deleted_bytes: number;
+  protected: number;
+  protected_bytes: number;
+  failed: number;
+  failed_bytes: number;
+  failures?: StorageQuarantinePurgeFailure[];
+}
+
 export interface StorageOverviewResponse {
   settings: StorageMaintenanceSettings;
   capabilities: StorageCapabilities;

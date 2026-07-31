@@ -606,33 +606,25 @@ test.describe("Branch refresh + filter", () => {
     // disabled when we click it.
     await expect(refreshButton).toBeEnabled({ timeout: 10_000 });
 
-    // Also wait for the branch list inside the popover to render at least one
-    // option. `toBeEnabled` only checks the button itself; there's a small
-    // window where `refreshing` flips to false while the popover is still
-    // hydrating its CommandList, and a click during that window is swallowed
-    // before the refresh handler is wired, so the ?refresh=true request never
-    // fires and `waitForRequest` hangs the full test timeout.
+    // The enabled button and a rendered option together establish that both
+    // the branch request and the popover's selected-repository state settled.
     await expect(testPage.getByRole("option").first()).toBeVisible({ timeout: 10_000 });
 
-    // Retry the click until the ?refresh=true request actually fires. Even
-    // with the button enabled and an option visible, there's a brief
-    // hydration window (documented above) where a click is swallowed before
-    // the refresh handler is wired — so a single click can never produce the
-    // request and the listener hangs the full test timeout. `toPass` re-runs
-    // the whole block: a swallowed click just clicks again next attempt, and
-    // once the handler is wired the request fires and the block passes. The
-    // refresh is idempotent, so an extra click is harmless.
-    await expect(async () => {
-      const requestPromise = testPage.waitForRequest(
-        (req) =>
-          req.url().includes(`/repositories/${seedData.repositoryId}/branches`) &&
-          req.url().includes("refresh=true") &&
-          req.method() === "GET",
-        { timeout: 4_000 },
-      );
-      await refreshButton.click();
-      await requestPromise;
-    }).toPass({ timeout: 30_000 });
+    await expect(testPage.getByTestId("repo-chip").first()).toHaveAttribute(
+      "data-repository-id",
+      seedData.repositoryId,
+    );
+    const requestPromise = testPage.waitForRequest(
+      (req) =>
+        req.url().includes(`/repositories/${seedData.repositoryId}/branches`) &&
+        req.url().includes("refresh=true") &&
+        req.method() === "GET",
+    );
+    // Dispatch through the rendered control after its options are ready. This
+    // exercises the React click handler once without a retry loop that can hide
+    // a wrong repository selection or issue several fetches.
+    await refreshButton.dispatchEvent("click");
+    await requestPromise;
   });
 
   test("branch filter ranks exact match above substring matches", async ({

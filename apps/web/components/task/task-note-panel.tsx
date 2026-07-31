@@ -87,6 +87,7 @@ export const TaskNotePanel = memo(function TaskNotePanel({
       >
         <NoteEditor
           key={`${taskId}-${editorKey}`}
+          taskId={taskId}
           value={draftContent}
           onChange={setDraftContent}
           placeholder="Start typing task notes..."

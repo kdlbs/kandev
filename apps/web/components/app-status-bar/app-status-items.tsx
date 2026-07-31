@@ -28,7 +28,10 @@ type AppStatusContext = Pick<
   "pathname" | "activeWorkspaceId" | "activeTaskId" | "activeSessionId"
 >;
 
-export function useAppStatusItems(context: AppStatusContext): AppStatusItem[] {
+export function useAppStatusItems(
+  context: AppStatusContext,
+  { connectionOnly = false }: { connectionOnly?: boolean } = {},
+): AppStatusItem[] {
   const registry = usePluginRegistry();
   const registryVersion = registry.getVersion();
   const metricsEnabled = useAppStore(
@@ -38,13 +41,14 @@ export function useAppStatusItems(context: AppStatusContext): AppStatusItem[] {
   return useMemo(() => {
     const left = registry.getSlotRegistrations("app-status-bar-left");
     const right = registry.getSlotRegistrations("app-status-bar-right");
+    if (connectionOnly) return [connectionItem()];
     return [
       connectionItem(),
       ...left.map((registration) => pluginItem(registration, "left", context)),
       ...(metricsEnabled ? [metricsItem()] : []),
       ...right.map((registration) => pluginItem(registration, "right", context)),
     ];
-  }, [context, metricsEnabled, registry, registryVersion]);
+  }, [connectionOnly, context, metricsEnabled, registry, registryVersion]);
 }
 
 function connectionItem(): AppStatusItem {

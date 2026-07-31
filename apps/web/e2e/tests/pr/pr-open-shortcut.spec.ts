@@ -2,6 +2,8 @@ import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
+import { GITLAB_HOST, GITLAB_PROJECT, seedGitLabReview } from "../../helpers/gitlab";
+import type { Page } from "@playwright/test";
 
 const OWNER = "acme";
 const SHORTCUT = "ControlOrMeta+Shift+G";
@@ -12,6 +14,64 @@ type SeedResult = {
   doneStepId: string;
   taskId: string;
 };
+
+type AssociateMRArgs = {
+  apiClient: ApiClient;
+  workspaceId: string;
+  taskId: string;
+  repositoryId: string;
+  iid: number;
+  title: string;
+};
+
+function taskReviewModifier() {
+  return process.platform === "darwin" ? "Meta" : "Control";
+}
+
+async function associateMR({
+  apiClient,
+  workspaceId,
+  taskId,
+  repositoryId,
+  iid,
+  title,
+}: AssociateMRArgs): Promise<string> {
+  await seedGitLabReview(apiClient, workspaceId, iid, title);
+  await apiClient.updateRepository(repositoryId, {
+    provider: "gitlab",
+    provider_host: GITLAB_HOST,
+    provider_owner: "platform",
+    provider_name: "kandev",
+  });
+  const mrURL = `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${iid}`;
+  await apiClient.linkTaskGitLabMR(workspaceId, {
+    task_id: taskId,
+    repository_id: repositoryId,
+    mr_url: mrURL,
+  });
+  return mrURL;
+}
+
+async function stubExternalProviders(page: Page) {
+  await page
+    .context()
+    .route("https://github.com/**", (route) =>
+      route.fulfill({ contentType: "text/html", body: "<html>github stub</html>" }),
+    );
+  await page
+    .context()
+    .route(`${GITLAB_HOST}/**`, (route) =>
+      route.fulfill({ contentType: "text/html", body: "<html>gitlab stub</html>" }),
+    );
+}
+
+async function holdTaskReviewShortcut(page: Page): Promise<string> {
+  const modifier = taskReviewModifier();
+  await page.keyboard.down(modifier);
+  await page.keyboard.down("Shift");
+  await page.keyboard.press("g");
+  return modifier;
+}
 
 /**
  * Stand up a workspace + workflow + task that reaches the Done column
@@ -107,7 +167,7 @@ async function openTaskAndWait(
 }
 
 test.describe("Open-task-PR keyboard shortcut", () => {
-  test("Cmd+Shift+G with several linked PRs opens the picker; Enter opens the focused PR", async ({
+  test("Cmd+Shift+G cycles linked PRs and MRs until primary modifier release", async ({
     testPage,
     apiClient,
     seedData,
@@ -124,32 +184,97 @@ test.describe("Open-task-PR keyboard shortcut", () => {
     );
     await associatePR(apiClient, seed.taskId, "web", 42, "Web feature PR");
     await associatePR(apiClient, seed.taskId, "api", 77, "API feature PR");
+    const mrURL = await associateMR({
+      apiClient,
+      workspaceId: seedData.workspaceId,
+      taskId: seed.taskId,
+      repositoryId: seedData.repositoryId,
+      iid: 88,
+      title: "GitLab linked review",
+    });
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
     await expect(session.prTopbarButton()).toHaveAttribute("data-pr-count", "2");
 
-    // Keep the picked PR's navigation offline-deterministic.
-    await testPage
-      .context()
-      .route("https://github.com/**", (route) =>
-        route.fulfill({ contentType: "text/html", body: "<html>github stub</html>" }),
-      );
+    await stubExternalProviders(testPage);
 
-    await testPage.keyboard.press(SHORTCUT);
+    const modifier = await holdTaskReviewShortcut(testPage);
     const list = testPage.getByTestId("task-pr-picker-list");
     await expect(list).toBeVisible();
-    await expect(list.locator("button[data-pr-row]")).toHaveCount(2);
+    const rows = list.locator("button[data-pr-row]");
+    const firstPR = rows.nth(0);
+    const secondPR = rows.nth(1);
+    const mergeRequest = rows.nth(2);
+    await expect(rows).toHaveCount(3);
+    await expect(firstPR).toHaveAttribute("data-selected", "true");
+    await expect(mergeRequest).toContainText("GitLab linked review");
     await prCapture.screenshot("pr-picker-modal", {
-      caption: "Cmd+Shift+G on a task with two linked PRs opens the picker modal",
+      caption: "Cmd+Shift+G opens a held shortcut picker for linked code reviews",
     });
+    if (process.env.CAPTURE_PR_ASSETS) {
+      await testPage.setViewportSize({ width: 390, height: 844 });
+      await prCapture.screenshot("mobile-pr-picker-modal", {
+        caption: "Linked code review picker on a mobile viewport",
+      });
+      await testPage.setViewportSize({ width: 1280, height: 720 });
+    }
 
-    // First row (web#42) is auto-focused; ArrowDown moves to api#77, Enter opens it.
-    await testPage.keyboard.press("ArrowDown");
+    // Shift release alone does not commit; Ctrl/Cmd remains held for raw G cycling.
+    const pageCountBeforeRelease = testPage.context().pages().length;
+    await testPage.keyboard.up("Shift");
+    await expect(list).toBeVisible();
+    await expect(firstPR).toHaveAttribute("data-selected", "true");
+    expect(testPage.context().pages()).toHaveLength(pageCountBeforeRelease);
+
+    await testPage.keyboard.press("g");
+    await expect(secondPR).toHaveAttribute("data-selected", "true");
+    await testPage.keyboard.press("g");
+    await expect(mergeRequest).toHaveAttribute("data-selected", "true");
+    await testPage.keyboard.press("g");
+    await expect(firstPR).toHaveAttribute("data-selected", "true");
+    await testPage.keyboard.press("g");
+    await expect(secondPR).toHaveAttribute("data-selected", "true");
+    await testPage.keyboard.press("g");
+    await expect(mergeRequest).toHaveAttribute("data-selected", "true");
+
     const popupPromise = testPage.context().waitForEvent("page");
-    await testPage.keyboard.press("Enter");
+    await testPage.keyboard.up(modifier);
     const popup = await popupPromise;
-    await popup.waitForURL(`https://github.com/${OWNER}/api/pull/77`, { timeout: 10_000 });
+    await popup.waitForURL(mrURL, { timeout: 10_000 });
     await expect(list).not.toBeVisible();
     await popup.close();
+  });
+
+  test("Escape cancels a held picker without opening a review on release", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "PR Shortcut Cancel";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associatePR(apiClient, seed.taskId, "web", 42, "Web feature PR");
+    await associatePR(apiClient, seed.taskId, "api", 77, "API feature PR");
+    await openTaskAndWait(testPage, apiClient, seed, title);
+    await stubExternalProviders(testPage);
+
+    const modifier = await holdTaskReviewShortcut(testPage);
+    const list = testPage.getByTestId("task-pr-picker-list");
+    await expect(list).toBeVisible();
+
+    await testPage.keyboard.press("Escape");
+    await expect(list).not.toBeVisible();
+    const pageCountBeforeRelease = testPage.context().pages().length;
+    await testPage.keyboard.up("Shift");
+    await testPage.keyboard.up(modifier);
+
+    expect(testPage.context().pages()).toHaveLength(pageCountBeforeRelease);
+    await expect(testPage).toHaveURL(new RegExp(`/[st]/${seed.taskId}`));
   });
 
   test("Cmd+Shift+G with one linked PR opens it directly without a modal", async ({
@@ -169,11 +294,7 @@ test.describe("Open-task-PR keyboard shortcut", () => {
     await associatePR(apiClient, seed.taskId, "web", 42, "Web feature PR");
     await openTaskAndWait(testPage, apiClient, seed, title);
 
-    await testPage
-      .context()
-      .route("https://github.com/**", (route) =>
-        route.fulfill({ contentType: "text/html", body: "<html>github stub</html>" }),
-      );
+    await stubExternalProviders(testPage);
 
     const popupPromise = testPage.context().waitForEvent("page");
     await testPage.keyboard.press(SHORTCUT);

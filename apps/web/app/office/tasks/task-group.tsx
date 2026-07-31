@@ -46,8 +46,10 @@ export function TaskGroup({ groupBy, onGroupByChange }: IssueGroupProps) {
               key={opt.value}
               onClick={() => onGroupByChange(opt.value)}
               className={cn(
-                "flex items-center gap-2 px-2 py-1.5 text-sm rounded-md cursor-pointer text-left",
-                groupBy === opt.value ? "bg-accent text-foreground" : "hover:bg-accent/50",
+                "flex items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-left text-sm cursor-pointer",
+                groupBy === opt.value
+                  ? "border-primary/50 bg-card text-foreground"
+                  : "hover:bg-muted",
               )}
             >
               {opt.label}

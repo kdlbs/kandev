@@ -1,4 +1,4 @@
-// The WS gateway forwards run events verbatim: id at top level, row under `event`.
+/** The WS gateway forwards run events verbatim: id at top level, row under `event`. */
 export type RunEventAppendedPayload = {
   run_id: string;
   event: {

@@ -4,6 +4,7 @@
  */
 
 import { generateUUID } from "@/lib/utils";
+import { formatBytes } from "@/lib/utils/format-bytes";
 
 export type FileAttachment = {
   id: string;
@@ -21,14 +22,6 @@ export const PREVIEWABLE_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", 
 export const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB per file
 export const MAX_TOTAL_SIZE = 20 * 1024 * 1024; // 20MB total
 export const MAX_FILES = 10;
-
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
 
 function isPreviewableImage(mimeType: string): boolean {
   return PREVIEWABLE_IMAGE_TYPES.includes(mimeType);

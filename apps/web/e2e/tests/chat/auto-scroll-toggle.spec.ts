@@ -46,6 +46,8 @@ function chatList(testPage: Page) {
   return testPage.locator(".chat-message-list:visible").first();
 }
 
+const AUTO_SCROLL_END_TOLERANCE_PX = 50;
+
 async function waitForOverflow(testPage: Page) {
   await expect
     .poll(async () => chatList(testPage).evaluate((el) => el.scrollHeight - el.clientHeight), {
@@ -56,6 +58,29 @@ async function waitForOverflow(testPage: Page) {
 }
 
 test.describe("Transcript auto-scroll toggle", () => {
+  test("can be hidden without changing the default auto-scroll state", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({ show_transcript_auto_scroll_control: false });
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Auto-scroll Toggle Hidden",
+    );
+    await waitForOverflow(testPage);
+
+    await expect(session.chatStatusBar().getByTestId("auto-scroll-toggle-button")).toHaveCount(0);
+    const list = session.activeChat().locator(".chat-message-list");
+    await expect
+      .poll(async () => {
+        return list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+      })
+      .toBeLessThan(AUTO_SCROLL_END_TOLERANCE_PX);
+  });
+
   test("is visible next to Share, enabled by default, and toggles on click", async ({
     testPage,
     apiClient,
@@ -74,6 +99,9 @@ test.describe("Transcript auto-scroll toggle", () => {
     await expect(toggle).toBeVisible({ timeout: 10_000 });
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
 
+    const icon = toggle.getByTestId("auto-scroll-toggle-icon");
+    await expect(icon).toHaveClass(/text-green-600/);
+
     // Sits immediately to the left of Share within the same right-aligned cluster.
     const shareButton = statusBar.getByTestId("share-task-button");
     if (await shareButton.isVisible()) {
@@ -88,9 +116,11 @@ test.describe("Transcript auto-scroll toggle", () => {
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(icon).not.toHaveClass(/text-green-600/);
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "true");
+    await expect(icon).toHaveClass(/text-green-600/);
   });
 
   test("disabling freezes the position and suppresses auto-scroll for new messages", async ({
@@ -146,21 +176,28 @@ test.describe("Transcript auto-scroll toggle", () => {
     await waitForOverflow(testPage);
 
     const list = chatList(testPage);
-    // The renderer auto-scrolls to the bottom by default, so this should
-    // already hold — assert it explicitly so the test fails loudly if that
-    // assumption ever breaks instead of silently passing for the wrong
-    // reason.
+    // Establish the scenario's true-bottom precondition explicitly. The
+    // sticky prompt bar can settle after the renderer's initial auto-scroll,
+    // which is unrelated to the disabled-state behavior under test.
     await expect
-      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight), {
-        timeout: 5_000,
-        message: "expected to be at the bottom before disabling",
-      })
+      .poll(
+        async () =>
+          list.evaluate((el) => {
+            el.scrollTop = el.scrollHeight;
+            return el.scrollHeight - el.scrollTop - el.clientHeight;
+          }),
+        {
+          timeout: 5_000,
+          message: "expected to be at the bottom before disabling",
+        },
+      )
       .toBeLessThan(5);
     const bottomScrollTop = await list.evaluate((el) => el.scrollTop);
 
     const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-pressed", "false");
+    await expect(list).toHaveCSS("overflow-anchor", "none");
 
     // A new message arrives while disabled from the true bottom. The
     // browser's native bottom overflow-anchor must not override the
@@ -172,8 +209,15 @@ test.describe("Transcript auto-scroll toggle", () => {
     );
 
     await expect
-      .poll(async () => list.evaluate((el) => el.scrollTop), { timeout: 2_000 })
-      .toBeLessThanOrEqual(bottomScrollTop + 2);
+      .poll(
+        async () =>
+          list.evaluate(
+            (el, expectedScrollTop) => Math.abs(el.scrollTop - expectedScrollTop),
+            bottomScrollTop,
+          ),
+        { timeout: 2_000 },
+      )
+      .toBeLessThanOrEqual(2);
   });
 
   test("preserves the frozen scroll position across navigating away and back", async ({

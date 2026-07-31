@@ -1,10 +1,11 @@
+"use client";
+
 import { AutomationEditor } from "@/components/automations/automation-editor";
 
 type Props = {
-  params: Promise<{ id: string }>;
+  workspaceId: string;
 };
 
-export default async function NewAutomationPage({ params }: Props) {
-  const { id } = await params;
-  return <AutomationEditor workspaceId={id} automationId={null} />;
+export default function NewAutomationPage({ workspaceId }: Props) {
+  return <AutomationEditor workspaceId={workspaceId} automationId={null} />;
 }

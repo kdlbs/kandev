@@ -87,10 +87,23 @@ snapshot was last analyzed. Select **Analyze** to force a fresh scan; restarting
 clears the in-memory snapshot.
 
 Scheduled cleanup is disabled by default and runs only after the configured resource-idle quiet
-period. Orphaned task workspaces move into Kandev's quarantine before permanent deletion; review
-the quarantine list to restore an entry or request deletion as a background job. Host-wide Docker
-build-cache and unused-image cleanup remain disabled until you confirm that Kandev owns a dedicated
-Docker daemon.
+period. Orphaned task workspaces and rotated Go caches move into Kandev's quarantine before
+permanent deletion. Each entry shows its `delete_after` retention deadline: **Delete** and
+**Clear eligible** cannot remove it before that time. The deadline is the earliest safe deletion
+time, not an exact promise—the first successful scheduled or full manual maintenance run after the
+deadline performs the purge, subject to the idle gate and any preemption.
+
+Use **Clear eligible** to remove only entries whose deadlines have passed. It reports protected
+entries that remain. **Force clear all** requires typing `DELETE ALL NOW` and attempts to permanently
+remove every active quarantine entry, discarding restore windows for entries that are successfully
+deleted. Safety-validation or deletion failures may leave entries visible and retryable. This
+override bypasses only the retention timestamp; path, ownership, state, and filesystem safety
+checks still apply.
+If scheduled cleanup is disabled, no independent quarantine sweeper runs: use a full **Run now** or
+one of the quarantine actions when you want cleanup.
+
+Host-wide Docker build-cache and unused-image cleanup remain disabled until you confirm that Kandev
+owns a dedicated Docker daemon.
 Do not enable those rules on a daemon shared with unrelated workloads.
 
 Host-local agents inherit the Kandev service's `TMPDIR`, `TMP`, and `TEMP` values unchanged. If the
@@ -261,16 +274,21 @@ Collection starts only while at least one connected client displays metrics in t
 
 These metrics are lightweight UI observability. Set alerts, retention, CPU/memory limits, and disk quotas in the host, container platform, or external monitoring stack.
 
+## WebSocket connectivity warnings
+
+Kandev warns when its live WebSocket connection has not recovered for three seconds: yellow means the connection is unstable and reconnecting; after ten seconds the warning turns red, meaning live updates may be stale. The warning clears as soon as the connection recovers. With **App status bar** enabled, it appears in the bottom bar on desktop/tablet and through the existing Status controls on phones. When that feature is disabled, an active warning still appears beside the sidebar theme control on desktop/tablet and opens a connection-only Status drawer on phones.
+
 ## Feature toggles
 
 **Settings > System > Feature Toggles** currently exposes:
 
 - **Office mode** — experimental, medium risk, and off in the production profile by default.
-- **App status bar** — stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins.
+- **App status bar** — stable, low risk, and off in the production profile by default. Enabling it adds the desktop/tablet bar and phone Status entry after restart; disabling it again does not stop connections, metrics collection requested by other clients, or plugins. Urgent WebSocket connectivity warnings still remain visible while the feature is off.
 - **Claude background prompt handoff** — experimental, high risk, and off in every profile by default. Enabling it lets Claude Code accept another prompt after its foreground yields while recognized async subagent, `run_in_background` shell, or Monitor work remains active. ACP lifecycle gaps can misclassify activity or overlap prompts; use it only for controlled testing.
+- **Unread divider** — a per-user setting at **Settings > General > Task Actions**. It defaults on, takes effect immediately, and controls both the Slack-style **New** divider and read-cursor updates while that user's transcript view is visible.
 - **Debug mode** — high risk; enables diagnostic endpoints and agent-message logging that can contain sensitive content.
 
-Each requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
+Each feature toggle requires restart. A value supplied explicitly by its environment variable locks the UI control; the debug toggle is also locked by explicit legacy/debug-message environment variables. Otherwise the UI stores an override in the database. The page can request restart only when the native local supervisor is available. A normal Unix `kandev` terminal launch is supervised; Desktop, a service, a container, a directly started backend, a deploy preview, or Windows requires a manual application restart.
 
 Status-bar layout is a separate per-user preference. Hold Cmd on macOS or Ctrl
 elsewhere while mouse-dragging an item to move it across the desktop/tablet bar.

@@ -1,7 +1,8 @@
 import { useEffect, useMemo } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import type { TaskSession } from "@/lib/types/http";
+import { acquireSessionStateReconciliation } from "./session-state-reconciler";
 
 type UseSessionResult = {
   session: TaskSession | null;
@@ -11,6 +12,7 @@ type UseSessionResult = {
 };
 
 export function useSession(sessionId: string | null): UseSessionResult {
+  const store = useAppStoreApi();
   const session = useAppStore((state) =>
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
@@ -36,11 +38,20 @@ export function useSession(sessionId: string | null): UseSessionResult {
     if (!session?.id) return;
     const client = getWebSocketClient();
     if (!client) return;
-    const unsubscribe = client.subscribeSession(session.id);
+    const sessionId = session.id;
+    const unsubscribe = client.subscribeSession(sessionId);
+
+    // Close the post-subscribe race where a fast terminal state can fan out
+    // before the server registers this session subscription. The keyed
+    // coordinator shares one bounded poller across every hook consumer and
+    // rejects HTTP snapshots older than the live WebSocket state.
+    const releaseReconciliation = acquireSessionStateReconciliation(store, sessionId);
+
     return () => {
+      releaseReconciliation();
       unsubscribe();
     };
-  }, [session?.id, connectionStatus]);
+  }, [session?.id, connectionStatus, store]);
 
   return { session, isActive, isFailed, errorMessage: session?.error_message };
 }

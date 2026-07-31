@@ -628,10 +628,8 @@ func startAgentInfrastructure(
 	}
 
 	// Start the plugin system's event delivery and health monitor
-	// background loops. Gated on features.Plugins so an unconfigured/
-	// disabled deployment doesn't poll plugin health endpoints that were
-	// never registered.
-	if services.Plugins != nil && cfg.Features.Plugins {
+	// background loops.
+	if services.Plugins != nil {
 		startPluginsSubsystems(ctx, services.Plugins, eventBus, log, addCleanup)
 	}
 
@@ -770,6 +768,23 @@ func startGatewayAndServe(
 		return false
 	}
 	log.Info("Orchestrator initialized")
+
+	// Wire the Host data API's late write dependencies (ADR 0043 phase 2): the
+	// task-message delivery path backs SendMessage (api_write:messages), and
+	// the orchestrator backs CreateTask's start_agent. The orchestrator is
+	// constructed after StartActivePlugins spawns boot-active plugins, so the
+	// plugins service reads these live rather than snapshotting (see
+	// SetWriteDeps).
+	//
+	// Deliberately wired here rather than inside initOfficeServices: that
+	// function returns early when features.office=false (the production
+	// default), while plugins start whenever services.Plugins is non-nil.
+	// Wiring it there would leave every default production backend with
+	// Unimplemented SendMessage and a silently no-op start_agent.
+	if services.Plugins != nil {
+		messenger := pluginsTaskMessengerAdapter{tasks: services.Task, orch: orchestratorSvc, log: log}
+		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc, log: log})
+	}
 
 	// ============================================
 	// ORCHESTRATE CONFIG LOADER + WAKEUP SCHEDULER
@@ -1007,17 +1022,6 @@ func initOfficeServices(
 	// Wire office-owned repositories into the task service for cross-package operations.
 	services.Task.SetBlockerRepository(repos.Office)
 	services.Task.SetCommentRepository(repos.Office)
-
-	// Wire the Host data API's late write dependencies (ADR 0043 phase 2): the
-	// task-message delivery path backs SendMessage (api_write:messages), and
-	// the orchestrator backs CreateTask's start_agent. The orchestrator is
-	// constructed after StartActivePlugins spawns boot-active plugins, so the
-	// plugins service reads these live rather than snapshotting (see
-	// SetWriteDeps).
-	if services.Plugins != nil {
-		messenger := pluginsTaskMessengerAdapter{tasks: services.Task, orch: orchestratorSvc, log: log}
-		services.Plugins.SetWriteDeps(messenger, pluginsTaskStarterAdapter{orch: orchestratorSvc, log: log})
-	}
 
 	// Build feature-package services and wire all inter-service dependencies.
 	services.OfficeSvcs = buildOfficeFeatureServices(

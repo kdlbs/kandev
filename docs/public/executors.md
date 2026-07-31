@@ -22,6 +22,15 @@ An executor determines where Kandev creates a task environment and runs `agentct
 
 Remote Docker deserves explicit treatment: the backend registers the runtime type, but its create and stop methods return `remote_docker runtime is not yet implemented`. The current **Settings > Executors** hub does not offer it. Older routes and stored fields such as `docker_host`, `docker_tls_verify`, and `docker_cert_path` do not make it operational.
 
+## Embedded VS Code availability
+
+**VS Code (Embedded)** starts code-server inside the active task environment, so its availability
+follows that session's executor rather than the operating system of the browser or desktop app.
+It is available for Local and Worktree sessions on Linux or macOS, and for Linux-backed Local
+Docker, Sprites, and supported SSH sessions. Native Windows Local and Worktree sessions do not
+offer it. See [Developer tools](developer-tools.md#files-and-editor-integrations) for code-server network and
+download requirements.
+
 ## Create and select a profile
 
 Open **Settings > Executors**, then choose **Local**, **Worktree**, **Docker**, **Sprites.dev**, or **SSH** under **Create New Profile**. Local and Worktree profiles already exist in a new database.

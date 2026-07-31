@@ -25,7 +25,9 @@ test("warns when a pasted image is too large for a new task", async ({ testPage 
   const warning = testPage
     .getByTestId("toast-message")
     .filter({ hasText: "Attachment is too large" });
-  await expect(warning).toContainText("copied-image.png is 14 MB. The maximum file size is 10 MB.");
+  await expect(warning).toContainText(
+    "copied-image.png is 14.0 MB. The maximum file size is 10.0 MB.",
+  );
 
   const overlay = testPage.locator('[data-slot="dialog-overlay"]:visible');
   await expect(overlay).toBeVisible();

@@ -129,7 +129,9 @@ interface PluginRegistry {
   registerRoute(path: string, Component: React.ComponentType, options?: PluginRouteOptions): void;
 
   // Sidebar/main nav entry. Rendered by <PluginNavItems/> in the app sidebar,
-  // with item.icon resolved against the curated icon map (fallback: puzzle).
+  // and by <MobilePluginNavSection/> in the phone menu sheet (the sidebar is
+  // hidden below md), with item.icon resolved against the curated icon map
+  // (fallback: puzzle).
   registerNavItem(item: NavItem): void;
 
   // Route under /settings/plugins/{id}/... rendered inside settings shell.

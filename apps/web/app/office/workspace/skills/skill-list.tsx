@@ -292,8 +292,8 @@ function SkillItemsGroup({
             type="button"
             onClick={() => onSelect(s.id)}
             className={cn(
-              "flex items-center gap-2 px-3 py-2 rounded-md text-sm w-full text-left cursor-pointer",
-              selectedId === s.id ? "bg-accent" : "hover:bg-accent/50",
+              "flex items-center gap-2 rounded-md border border-transparent px-3 py-2 text-sm w-full text-left cursor-pointer",
+              selectedId === s.id ? "border-primary/50 bg-card" : "hover:bg-muted",
             )}
           >
             <IconBoxMultiple className="h-4 w-4 text-muted-foreground shrink-0" />

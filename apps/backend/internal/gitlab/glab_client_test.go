@@ -23,9 +23,27 @@ func TestParseGlabToken_LowercaseLabel(t *testing.T) {
 	}
 }
 
+// glab >= 1.x prints "Token found:" rather than a bare "Token:" label.
+func TestParseGlabToken_TokenFoundLabel(t *testing.T) {
+	output := `gitlab.example.com
+  ✓ Logged in to gitlab.example.com as example-user (/home/example/.config/glab-cli/config.yml)
+  ✓ REST API Endpoint: https://gitlab.example.com/api/v4/
+  ✓ Token found: glpat-AAAAA-BBBBB`
+	got := parseGlabToken(output)
+	if got != "glpat-AAAAA-BBBBB" {
+		t.Errorf("got %q, want glpat-AAAAA-BBBBB", got)
+	}
+}
+
 func TestParseGlabToken_NoToken(t *testing.T) {
 	got := parseGlabToken("Token: <no token>")
 	if got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
+func TestParseGlabToken_NoTokenFound(t *testing.T) {
+	if got := parseGlabToken("✓ Token found: <no token>"); got != "" {
 		t.Errorf("got %q, want empty", got)
 	}
 }

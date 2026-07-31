@@ -60,8 +60,10 @@ function PRTab({
       data-active={active ? "true" : "false"}
       onClick={() => onSelect(pr)}
       className={cn(
-        "flex shrink-0 cursor-pointer items-center gap-1 rounded-md px-2 py-1 text-xs whitespace-nowrap transition-colors",
-        active ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/50",
+        "flex shrink-0 cursor-pointer items-center gap-1 rounded-md border border-transparent px-2 py-1 text-xs whitespace-nowrap transition-colors",
+        active
+          ? "border-primary/50 bg-card text-foreground"
+          : "text-muted-foreground hover:bg-muted",
       )}
     >
       <IconGitPullRequest className={cn("h-3.5 w-3.5", getPRStatusColor(pr))} />

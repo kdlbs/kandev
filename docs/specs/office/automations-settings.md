@@ -15,8 +15,13 @@ The Automations feature, originating in PR #406, gives kandev a standalone trigg
 ## What
 
 - Every automation has an `execution_mode` field — `task` (default) or `run`. The choice is per-automation, editable in the editor.
-- Every automation has an optional `repository_id` field. When set, scheduled and webhook firings pin the task to that repository on its default branch. When empty, falls back to the workspace's first repository (legacy behavior). `github_pr` triggers always use the PR's own repository and ignore `repository_id`.
+- Every automation has an optional `repository_ids` field — an ordered list of repository IDs. When non-empty, scheduled and webhook firings pin the task to every listed repository (each on its own default branch, mirroring how the task-creation dialog resolves an explicit repository). When empty, falls back to the workspace's first repository (legacy behavior). `github_pr` triggers always use the PR's own repository and ignore `repository_ids`.
 - The editor's repository picker matches the task-creation dialog's UX: lists both registered workspace repositories AND filesystem-discovered repositories under the workspace's roots. Picking a discovered repo registers it with the workspace at automation-save time (one round-trip via `createRepositoryAction`), then stores the resulting id on the automation. After the first save, the selection is promoted from `discovered` to `registered` so subsequent edits don't try to re-register.
+- **Multi-repository selection is gated on the selected executor profile's capability**, reusing the task-creation dialog's `getMultiRepoExecutorDisabledReason` predicate (`apps/web/components/task-create-dialog-multi-repo-guard.ts`): `worktree`, `local_docker`, `ssh`, and `sprites` executor types support sibling repositories; `local`, `local_pc`, and `remote_docker` do not.
+  - When the selected executor profile's type supports multi-repo, the picker renders as a repeatable list (0..N rows) with an "Add repository" control. Each row independently picks a registered or discovered repository; a repository already selected in another row is marked and not independently selectable a second time (mirrors the task-creation dialog's "Already added" marker).
+  - When the selected executor profile's type does not support multi-repo, the picker renders as today's single dropdown (registered/discovered repos, or "Auto").
+  - The Executor Profile picker disables executor profiles that don't support multi-repo whenever two or more repositories are currently selected, with the same disabled-reason text as the task-creation dialog, so a user cannot silently strand a multi-repository automation on an incompatible executor.
+  - Automations created via the WS API directly (bypassing the editor) may still combine an incompatible executor with multiple repository IDs; this is a client-side authoring guard, not a backend rejection. Task launch on an incompatible executor fails the same way manual multi-repo task creation would.
 - `execution_mode = task`: trigger fires → a normal kanban task is created (current PR #406 behavior). Task is visible on the kanban, commentable, reviewable, and has full lifecycle.
 - `execution_mode = run`: trigger fires → an ephemeral task is created (`is_ephemeral = true`, `origin = "automation_run"`) so the existing session pipeline still launches an agent. The kanban hides ephemeral tasks. The AutomationRun row is the surfaced artifact; the linked task is plumbing only.
 - Run-mode automations **auto-start** their agent regardless of the workflow step's `auto_start_agent` setting — the user never opens the task to drag it, so the trigger MUST be the start signal.
@@ -29,12 +34,25 @@ The Automations feature, originating in PR #406, gives kandev a standalone trigg
 
 ## Data model
 
-Builds on PR #406's `internal/automation/` schema. Two columns added (folded into the canonical `CREATE TABLE` since PR #406 itself introduces the `automations` table — no in-branch migrations are needed):
+Builds on PR #406's `internal/automation/` schema. `execution_mode` folded into the canonical `CREATE TABLE` (no in-branch migration needed). Repository selection moved from a single column to a join table:
 
 ```
 automations.execution_mode TEXT NOT NULL DEFAULT 'task'   -- 'task' | 'run'
-automations.repository_id  TEXT NOT NULL DEFAULT ''       -- optional FK-by-id to repositories
 ```
+
+```
+automation_repositories
+  id            string  PK
+  automation_id string  FK -> automations.id (ON DELETE CASCADE)
+  repository_id string  FK-by-id to repositories, not enforced at the DB layer
+  position      integer 0-based order, preserved for resolution and UI row order
+  created_at    timestamp
+  UNIQUE(automation_id, repository_id)
+```
+
+The legacy `automations.repository_id TEXT NOT NULL DEFAULT ''` column is dropped by the `automation_repositories` migration. Every pre-existing automation with a non-empty `repository_id` is backfilled into `automation_repositories` (position 0) before the column is dropped, so no automation silently loses its configured repository across the upgrade.
+
+`CreateAutomation`/`UpdateAutomation` validate that every submitted repository ID belongs to the automation's `workspace_id` and reject unknown, foreign, or duplicate IDs.
 
 The `tasks.is_ephemeral` and `tasks.origin` columns already exist (used by quick-chat). Run-mode automations set both at task-create time. New task origin constant `TaskOriginAutomationRun = "automation_run"` lives in `internal/task/models/models.go`.
 
@@ -42,11 +60,11 @@ The `tasks.is_ephemeral` and `tasks.origin` columns already exist (used by quick
 
 ## API surface
 
-PR #406's WS-based API gets two new fields — `execution_mode` and `repository_id` — on:
+PR #406's WS-based API gets `execution_mode` and `repository_ids` (an ordered `string[]`, replacing the old singular `repository_id`) on:
 
-- `automation.create` payload (input)
-- `automation.update` payload (input)
-- `automation.get` / `automation.list` responses (output)
+- `automation.create` payload (input) — `repository_ids?: string[]`
+- `automation.update` payload (input) — `repository_ids?: string[]`; a present-but-empty array clears the automation's repositories, an absent field leaves them unchanged (matches the existing task-update `repositories` convention)
+- `automation.get` / `automation.list` responses (output) — `repository_ids: string[]`, ordered by `position`
 
 No new endpoints. No HTTP routes change. Sidebar deep-links to `/settings/automations` (flat).
 
@@ -78,11 +96,14 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 | Run-mode automation's turn is cancelled by the user                       | AutomationRun transitions from `task_created` to `failed` with a cancellation error; the hidden session is marked `CANCELLED` and the agent execution is torn down.                  |
 | User manually drags a run-mode task on the kanban                         | Cannot happen — ephemeral tasks are hidden from the kanban. The "auto-start" rule fires once at trigger time; no manual recovery path.                                               |
 | Existing automation upgraded from pre-execution_mode version              | Migration sets `execution_mode = 'task'` for all existing rows. UI shows them with "Task" badge.                                                                                     |
+| Existing automation upgraded from before `automation_repositories` existed | Its non-empty legacy `repository_id` is backfilled into `automation_repositories` at position 0 before the column is dropped; an empty legacy value backfills nothing (unchanged fallback-to-first-repository behavior).                                                              |
+| `automation.create`/`automation.update` submits a `repository_ids` entry outside the automation's workspace, or a duplicate ID | Request is rejected with a validation error; no partial repository list is persisted.                                                                                                                              |
+| Editor has 2+ repositories selected and the user picks an executor profile whose type doesn't support multi-repo | Editor disables that executor profile in the picker with the same reason text as the task-creation dialog; the WS API itself does not reject the combination if reached directly. |
 | User edits `execution_mode` from `task` to `run` on an enabled automation | Next firing uses the new mode. In-flight runs are unaffected.                                                                                                                        |
 
 ## Persistence guarantees
 
-`automations.execution_mode` and `tasks.is_ephemeral` survive restart. Run-mode AutomationRuns and their hidden tasks persist normally. The kanban filter on `is_ephemeral` is applied at query time, not at write time — so re-marking a task non-ephemeral via direct DB update would reveal it.
+`automations.execution_mode` and `tasks.is_ephemeral` survive restart. `automation_repositories` rows survive restart and automation edits (replaced transactionally on update, cascade-deleted with the automation). Run-mode AutomationRuns and their hidden tasks persist normally. The kanban filter on `is_ephemeral` is applied at query time, not at write time — so re-marking a task non-ephemeral via direct DB update would reveal it.
 
 ## Scenarios
 
@@ -95,9 +116,14 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 - **GIVEN** a user opens `/settings/automations` in a multi-workspace install, **WHEN** the page loads, **THEN** it renders the picker from the already-loaded workspace list and issues **no** additional `GET /api/v1/workspaces` request on load (guards against the render/refetch loop that a server-style `await listWorkspaces()` in the page body caused after the SPA migration).
 - **GIVEN** a user toggles an existing task-mode automation to run mode in the editor, **WHEN** the next trigger fires, **THEN** the resulting task is hidden from the kanban; previously-created tasks (from task-mode firings) remain visible.
 - **GIVEN** a run-mode automation triggered by a GitHub PR event, **WHEN** the trigger fires, **THEN** the PR is associated with the ephemeral task via `AssociatePRWithTask` exactly as in task mode.
-- **GIVEN** a scheduled automation with `repository_id` set to a specific repo, **WHEN** the cron fires, **THEN** the resulting task is pinned to that repo's default branch — regardless of whether the workspace has other repositories.
-- **GIVEN** a scheduled automation with `repository_id = ""` in a multi-repo workspace, **WHEN** the cron fires, **THEN** the task uses the workspace's first repository (legacy fallback) and a warning is logged.
-- **GIVEN** an automation with `repository_id` set and a `github_pr` trigger, **WHEN** a PR event fires, **THEN** the task uses the PR's own repository, not the configured `repository_id` — the editor disables the picker for PR triggers with a hint.
+- **GIVEN** a scheduled automation with `repository_ids` set to one repo, **WHEN** the cron fires, **THEN** the resulting task is pinned to that repo's default branch — regardless of whether the workspace has other repositories.
+- **GIVEN** a scheduled automation with `repository_ids` set to two or more repos, **WHEN** the cron fires, **THEN** the resulting task is created with all of them attached, each pinned to its own default branch, same as a manually created multi-repository task.
+- **GIVEN** a scheduled automation with `repository_ids = []` in a multi-repo workspace, **WHEN** the cron fires, **THEN** the task uses the workspace's first repository (legacy fallback) and a warning is logged.
+- **GIVEN** an automation with `repository_ids` set and a `github_pr` trigger, **WHEN** a PR event fires, **THEN** the task uses the PR's own repository, not the configured `repository_ids` — the editor disables the picker for PR triggers with a hint.
+- **GIVEN** the editor's selected executor profile type is `worktree`, `local_docker`, `ssh`, or `sprites`, **WHEN** the user opens the repository picker, **THEN** it renders as a repeatable list and "Add repository" is enabled.
+- **GIVEN** the editor's selected executor profile type is `local`, `local_pc`, or `remote_docker`, **WHEN** the user opens the repository picker, **THEN** it renders as a single dropdown and there is no "Add repository" control.
+- **GIVEN** the editor has two or more repositories selected, **WHEN** the user opens the Executor Profile picker, **THEN** profiles whose type doesn't support multi-repo are disabled with an explanatory reason, matching the task-creation dialog's guard text.
+- **GIVEN** an automation created before `repository_ids` existed with a non-empty legacy `repository_id`, **WHEN** the schema migration runs, **THEN** the editor shows that repository pre-selected as the sole row after upgrade.
 - **GIVEN** a user picks a discovered (not-yet-registered) repository in the editor and clicks Save, **WHEN** the save flow runs, **THEN** the discovered repo is registered with the workspace first (`createRepositoryAction`), its new id is written onto the automation, and the picker selection is promoted to `registered` so re-saving doesn't duplicate the registration.
 - **GIVEN** an upgrade from a pre-execution_mode kandev version, **WHEN** the user opens the editor for an existing automation, **THEN** the execution-mode selector defaults to "Task" (preserving previous behavior).
 

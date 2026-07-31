@@ -142,3 +142,81 @@ func TestMultiRepoReviewEndpointsUseStoredBaseBranches(t *testing.T) {
 		}
 	}
 }
+
+func TestMultiRepoReviewEndpointsCorrectStaleBases(t *testing.T) {
+	taskRoot := t.TempDir()
+	bases := map[string]string{
+		"frontend": "feature/parent",
+		"backend":  "feature/parent",
+	}
+	integrationBases := make(map[string]string, len(bases))
+	for repo := range bases {
+		repoDir := filepath.Join(taskRoot, repo)
+		if err := os.Mkdir(repoDir, 0o755); err != nil {
+			t.Fatalf("mkdir %s: %v", repo, err)
+		}
+		integrationBases[repo] = setupStaleComparisonRepoAt(t, repoDir)
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error"})
+	cfg := &config.InstanceConfig{WorkDir: taskRoot, BaseBranches: bases}
+	srv := NewServer(cfg, process.NewManager(cfg, log), nil, nil, log)
+
+	logResponse := httptest.NewRecorder()
+	srv.Router().ServeHTTP(
+		logResponse,
+		httptest.NewRequest(http.MethodGet, "/api/v1/git/log?limit=100", nil),
+	)
+	if logResponse.Code != http.StatusOK {
+		t.Fatalf("git log status = %d: %s", logResponse.Code, logResponse.Body.String())
+	}
+	var commits process.GitLogResult
+	if err := json.Unmarshal(logResponse.Body.Bytes(), &commits); err != nil {
+		t.Fatalf("decode git log: %v", err)
+	}
+	commitsByRepo := make(map[string]int)
+	for _, commit := range commits.Commits {
+		commitsByRepo[commit.RepositoryName]++
+		if commit.CommitMessage != "feat: child work" {
+			t.Errorf("unexpected commit for %s: %s", commit.RepositoryName, commit.CommitMessage)
+		}
+	}
+	for repo := range bases {
+		if commitsByRepo[repo] != 1 {
+			t.Fatalf("commits for %s = %d, want 1: %s", repo, commitsByRepo[repo], logResponse.Body.String())
+		}
+	}
+
+	diffResponse := httptest.NewRecorder()
+	srv.Router().ServeHTTP(
+		diffResponse,
+		httptest.NewRequest(
+			http.MethodGet,
+			"/api/v1/git/cumulative-diff?base="+integrationBases["frontend"],
+			nil,
+		),
+	)
+	if diffResponse.Code != http.StatusOK {
+		t.Fatalf("cumulative diff status = %d: %s", diffResponse.Code, diffResponse.Body.String())
+	}
+	var diff process.CumulativeDiffResult
+	if err := json.Unmarshal(diffResponse.Body.Bytes(), &diff); err != nil {
+		t.Fatalf("decode cumulative diff: %v", err)
+	}
+	for repo, integrationBase := range integrationBases {
+		payload, ok := diff.Files[repo+"\x00child.txt"]
+		if !ok {
+			t.Fatalf("cumulative diff missing %s/child.txt: %s", repo, diffResponse.Body.String())
+		}
+		file, ok := payload.(map[string]interface{})
+		if !ok {
+			t.Fatalf("cumulative diff payload for %s has type %T", repo, payload)
+		}
+		if got := file["base_ref"]; got != integrationBase {
+			t.Errorf("cumulative diff base_ref for %s = %v, want %s", repo, got, integrationBase)
+		}
+		if _, ok := diff.Files[repo+"\x00parent.txt"]; ok {
+			t.Errorf("cumulative diff includes stale parent range for %s", repo)
+		}
+	}
+}

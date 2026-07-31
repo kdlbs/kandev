@@ -18,6 +18,7 @@ type E2EModelStoreWindow = Window & {
                 id: string;
                 options?: { value: string; name: string; description?: string }[];
               }[];
+              configBaseline?: Record<string, string>;
             }
           >;
         };
@@ -47,29 +48,40 @@ async function seedAndOpenTask(testPage: Page, apiClient: ApiClient, seedData: S
 }
 
 async function seedLongReasoningMenu(testPage: Page, sessionId: string) {
-  await testPage.evaluate((sid) => {
-    const store = (window as E2EModelStoreWindow).__KANDEV_E2E_STORE__;
-    if (!store) throw new Error("E2E store bridge is unavailable");
-    store.setState((state) => {
-      const sessionModels = state.sessionModels.bySessionId[sid];
-      if (!sessionModels) throw new Error(`Session ${sid} has no model state`);
-      sessionModels.configOptions = sessionModels.configOptions.map((option) =>
-        option.id === "effort"
-          ? {
-              ...option,
-              options: Array.from({ length: 10 }, (_, index) => ({
-                value: index === 0 ? "low" : `effort-${index + 1}`,
-                name: index === 0 ? "Low" : `Reasoning level ${index + 1}`,
-                description:
-                  index === 0
-                    ? "Faster responses with less reasoning"
-                    : `Reasoning depth description for level ${index + 1}`,
-              })),
-            }
-          : option,
-      );
-    });
-  }, sessionId);
+  await expect
+    .poll(() =>
+      testPage.evaluate((sid) => {
+        const store = (window as E2EModelStoreWindow).__KANDEV_E2E_STORE__;
+        if (!store) return false;
+        let seeded = false;
+        store.setState((state) => {
+          const sessionModels = state.sessionModels.bySessionId[sid];
+          if (!sessionModels?.configOptions.some((option) => option.id === "effort")) return;
+          sessionModels.configBaseline = {
+            ...sessionModels.configBaseline,
+            effort: "medium",
+          };
+          sessionModels.configOptions = sessionModels.configOptions.map((option) =>
+            option.id === "effort"
+              ? {
+                  ...option,
+                  options: Array.from({ length: 10 }, (_, index) => ({
+                    value: index === 0 ? "low" : `effort-${index + 1}`,
+                    name: index === 0 ? "Low" : `Reasoning level ${index + 1}`,
+                    description:
+                      index === 0
+                        ? "Faster responses with less reasoning"
+                        : `Reasoning depth description for level ${index + 1}`,
+                  })),
+                }
+              : option,
+          );
+          seeded = true;
+        });
+        return seeded;
+      }, sessionId),
+    )
+    .toBe(true);
 }
 
 test.describe("Mobile chat model selector", () => {

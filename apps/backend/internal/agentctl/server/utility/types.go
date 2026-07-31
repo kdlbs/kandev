@@ -180,6 +180,8 @@ type InferenceConfigDTO struct {
 	ModelFlag []string `json:"model_flag,omitempty"`
 	// WorkDir is the working directory for the agent process.
 	WorkDir string `json:"work_dir"`
+	// Env lists agent runtime environment overrides for the inference subprocess.
+	Env map[string]string `json:"env,omitempty"`
 	// StripEnv lists environment variables to strip from the inference
 	// subprocess environment entirely (not just set to empty).
 	StripEnv []string `json:"strip_env,omitempty"`

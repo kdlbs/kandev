@@ -1,13 +1,88 @@
 package acp
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 )
+
+func TestEmitMCPAttachmentEvidenceUsesBackendOwnedAttempt(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	a := &Adapter{updatesCh: make(chan AgentEvent, 1), logger: log}
+	ctx := streams.WithMCPAttachmentContext(context.Background(), streams.MCPAttachmentAttempt{
+		AttemptID: "attempt-1", TaskID: "task-1", SessionID: "session-1", ExecutionID: "execution-1",
+	})
+
+	a.emitMCPAttachmentEvidence(ctx, types.McpServer{
+		Name: "kandev", Type: "http", URL: "https://token@example.test/mcp",
+	}, streams.MCPAttachmentEvidenceDelivered, "", "")
+
+	select {
+	case event := <-a.updatesCh:
+		if event.Type != streams.EventTypeMCPAttachment || event.MCPAttachment == nil {
+			t.Fatalf("event = %+v, want MCP attachment", event)
+		}
+		if event.MCPAttachment.AttemptID != "attempt-1" || event.MCPAttachment.Target != "https://example.test" {
+			t.Fatalf("evidence = %+v", event.MCPAttachment)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected attachment evidence")
+	}
+}
+
+func TestFilterMcpServersWithDecisionsReportsFilteredAndDuplicateServers(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
+	if err != nil {
+		t.Fatalf("new logger: %v", err)
+	}
+	servers := []types.McpServer{
+		{Name: "kandev", Type: "http", URL: "https://kandev.example/mcp"},
+		{Name: "kandev", Type: "sse", URL: "https://kandev.example/sse"},
+		{Name: "stdio", Type: "stdio", Command: "mcp-server"},
+	}
+
+	selected, decisions := filterMcpServersWithDecisions(servers, acp.McpCapabilities{Sse: true}, log)
+	if len(selected) != 2 || selected[0].Type != "sse" || selected[1].Name != "stdio" {
+		t.Fatalf("selected = %+v, want SSE kandev and stdio", selected)
+	}
+	if len(decisions) != len(servers) {
+		t.Fatalf("decision count = %d, want %d", len(decisions), len(servers))
+	}
+	if decisions[0].Included || decisions[0].ReasonCode != mcpFilterReasonHTTPUnsupported {
+		t.Fatalf("HTTP decision = %+v", decisions[0])
+	}
+	if !decisions[1].Included || decisions[1].ReasonCode != "" {
+		t.Fatalf("SSE decision = %+v", decisions[1])
+	}
+	if !decisions[2].Included || decisions[2].ReasonCode != "" {
+		t.Fatalf("stdio decision = %+v", decisions[2])
+	}
+}
+
+func TestFilterMcpServersWithDecisionsMarksSupportedDuplicateAsFiltered(t *testing.T) {
+	log := newTestLoggerForMcp()
+	servers := []types.McpServer{
+		{Name: "kandev", Type: "http", URL: "https://kandev.example/mcp"},
+		{Name: "kandev", Type: "sse", URL: "https://kandev.example/sse"},
+	}
+
+	selected, decisions := filterMcpServersWithDecisions(servers, acp.McpCapabilities{Http: true, Sse: true}, log)
+	if len(selected) != 1 || selected[0].Type != "http" {
+		t.Fatalf("selected = %+v, want one HTTP kandev server", selected)
+	}
+	if decisions[1].Included || decisions[1].ReasonCode != mcpFilterReasonDuplicateName {
+		t.Fatalf("duplicate decision = %+v", decisions[1])
+	}
+}
 
 // --- mapToEnvVars ---
 

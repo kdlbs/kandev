@@ -74,6 +74,16 @@ function buildSyncedLocalSettings(state: AppState, payload: UserSettingsUpdatedP
   };
 }
 
+function buildTranscriptBehaviorSettings(payload: UserSettingsUpdatedPayload) {
+  return {
+    unreadDivider: payload.unread_divider ?? true,
+    showAnchoredPromptBar: payload.show_anchored_prompt_bar ?? false,
+    showScrollToLastPrompt: payload.show_scroll_to_last_prompt ?? true,
+    showScrollToStart: payload.show_scroll_to_start ?? false,
+    showTranscriptAutoScrollControl: payload.show_transcript_auto_scroll_control ?? true,
+  };
+}
+
 function buildBehaviorSettings(state: AppState, payload: UserSettingsUpdatedPayload) {
   return {
     preferredShell: payload.preferred_shell || null,
@@ -85,6 +95,7 @@ function buildBehaviorSettings(state: AppState, payload: UserSettingsUpdatedPayl
     mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(
       payload.mcp_task_agent_profile_default,
     ),
+    ...buildTranscriptBehaviorSettings(payload),
     showReleaseNotification: payload.show_release_notification ?? true,
     releaseNotesLastSeenVersion: (payload.release_notes_last_seen_version as string) || null,
     terminalLinkBehavior:

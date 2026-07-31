@@ -3,6 +3,7 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
 import { ApiError } from "@/lib/api/client";
 import { updateUserSettings } from "@/lib/api/domains/settings-api";
 import { pluginRegistry } from "@/lib/plugins/registry";
@@ -102,6 +103,23 @@ describe("AppStatusBar rendering", () => {
     renderBar();
 
     expect(document.querySelector(`[data-status-item-id="${APP_STATUS_METRICS_ID}"]`)).toBeNull();
+  });
+
+  it("keeps the saved connection item identity while collapsing its healthy content", () => {
+    renderBar();
+
+    expect(statusItem(APP_STATUS_CONNECTION_ID)).toBeTruthy();
+    expect(screen.queryByTestId("app-status-connection")).toBeNull();
+  });
+
+  it("shows the active connection warning in the bottom status bar", () => {
+    renderBar({
+      connection: { status: "reconnecting", error: null, issueSeverity: "lost" },
+    });
+
+    expect(screen.getByTestId("app-status-connection").getAttribute("aria-label")).toBe(
+      "Connection lost for at least 10 seconds. Live updates may be stale.",
+    );
   });
 
   it("collapses a plugin item when its contribution renders nothing", () => {
@@ -263,9 +281,9 @@ describe("AppStatusBar persistence and recovery", () => {
   });
 });
 
-function renderBar() {
+function renderBar(initialState?: Partial<AppState>) {
   return render(
-    <StateProvider>
+    <StateProvider initialState={initialState}>
       <TooltipProvider>
         <AppStatusBar
           pathname="/"

@@ -154,6 +154,49 @@ describe("fetchSessionDataForTask initial hydration", () => {
       runtime_config_snapshot: runtimeConfigSnapshot,
     });
   });
+
+  it("hydrates the persisted model selector before the first render", async () => {
+    const session = {
+      ...makeSession(),
+      metadata: {
+        runtime_config: {
+          model: "mock-fast",
+          config_options: { effort: "medium" },
+        },
+        runtime_config_overrides: {
+          config_options: { effort: "high" },
+        },
+        acp_config_baseline: { model: "mock-fast", effort: "medium" },
+        acp_model_state: {
+          current_model_id: "mock-fast",
+          models: [{ model_id: "mock-fast", name: "Mock Fast" }],
+          config_options: [
+            {
+              type: "select",
+              id: "effort",
+              name: "Effort",
+              current_value: "medium",
+              options: [
+                { value: "medium", name: "Medium" },
+                { value: "high", name: "High" },
+              ],
+            },
+          ],
+        },
+      },
+    };
+    mocks.listTaskSessions.mockResolvedValue({ sessions: [session], total: 1 });
+    mocks.fetchTaskSession.mockResolvedValue({ session });
+
+    const result = await fetchSessionDataForTask(TASK_ID);
+    const initialState = result.initialState as unknown as Partial<AppState>;
+
+    expect(initialState.sessionModels?.bySessionId[session.id]).toMatchObject({
+      currentModelId: "mock-fast",
+      configBaseline: { model: "mock-fast", effort: "medium" },
+      configOptions: [expect.objectContaining({ id: "effort", currentValue: "high" })],
+    });
+  });
 });
 
 describe("fetchSessionDataForTask agent hydration", () => {

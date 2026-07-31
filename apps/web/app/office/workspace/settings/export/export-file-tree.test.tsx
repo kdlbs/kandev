@@ -141,6 +141,6 @@ describe("ExportFileTree", () => {
   it("previewPath highlights the matching file row", () => {
     renderExport({ previewPath: ALPHA_PATH });
     const row = screen.getByText(ALPHA_NAME).parentElement!;
-    expect(row.className).toContain("bg-accent");
+    expect(row.className).toContain("border-primary/50");
   });
 });

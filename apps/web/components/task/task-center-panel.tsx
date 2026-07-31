@@ -37,6 +37,7 @@ import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { PRDetailContent } from "@/components/github/pr-detail-panel";
 import { MRDetailPanelComponent, mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { useTaskMRs } from "@/hooks/domains/gitlab/use-task-mr";
+import { getFileTabKey, upsertOpenFileTab } from "./task-center-panel-file-tabs";
 
 import type { SelectedDiff } from "./task-layout";
 
@@ -143,12 +144,8 @@ function useFileTabOperations({
 
   const addFileTab = useCallback(
     (fileTab: OpenFileTab) => {
-      setOpenFileTabs((prev) => {
-        if (prev.some((t) => t.path === fileTab.path)) return prev;
-        const maxTabs = 4;
-        return prev.length >= maxTabs ? [...prev.slice(1), fileTab] : [...prev, fileTab];
-      });
-      setLeftTab(`file:${fileTab.path}`);
+      setOpenFileTabs((prev) => upsertOpenFileTab(prev, fileTab));
+      setLeftTab(`file:${getFileTabKey(fileTab)}`);
     },
     [setOpenFileTabs, setLeftTab],
   );
@@ -186,20 +183,32 @@ function useFileTabOperations({
   );
 
   const handleCloseFileTab = useCallback(
-    (path: string) => {
-      setOpenFileTabs((prev) => prev.filter((t) => t.path !== path));
-      if (leftTab === `file:${path}`) handleTabChange("chat");
+    (fileKey: string) => {
+      setOpenFileTabs((prev) => prev.filter((tab) => getFileTabKey(tab) !== fileKey));
+      if (leftTab === `file:${fileKey}`) handleTabChange("chat");
     },
     [leftTab, handleTabChange, setOpenFileTabs],
   );
 
   const handleFileChange = useCallback(
-    (path: string, newContent: string) => {
+    (path: string, newContent: string, repo?: string) => {
+      const fileKey = getFileTabKey({ path, repo });
       setOpenFileTabs((prev) =>
         prev.map((tab) =>
-          tab.path === path
+          getFileTabKey(tab) === fileKey
             ? { ...tab, content: newContent, isDirty: newContent !== tab.originalContent }
             : tab,
+        ),
+      );
+    },
+    [setOpenFileTabs],
+  );
+
+  const handleMarkdownPreviewToggle = useCallback(
+    (fileKey: string) => {
+      setOpenFileTabs((prev) =>
+        prev.map((tab) =>
+          getFileTabKey(tab) === fileKey ? { ...tab, markdownPreview: !tab.markdownPreview } : tab,
         ),
       );
     },
@@ -218,6 +227,7 @@ function useFileTabOperations({
     handleOpenFileFromChat,
     handleCloseFileTab,
     handleFileChange,
+    handleMarkdownPreviewToggle,
     handleFileSave,
     handleFileDelete,
     addFileTab,
@@ -226,7 +236,7 @@ function useFileTabOperations({
 
 function useCenterPanelTabs(
   openFileTabs: OpenFileTab[],
-  handleCloseFileTab: (path: string) => void,
+  handleCloseFileTab: (fileKey: string) => void,
   hasChanges: boolean | undefined,
   reviewLabel: "Pull Request" | "Merge Request" | null,
 ) {
@@ -237,13 +247,13 @@ function useCenterPanelTabs(
       ...(reviewLabel ? [{ id: "pr", label: reviewLabel }] : []),
     ];
     const fileTabs: SessionTab[] = openFileTabs.map((tab) => ({
-      id: `file:${tab.path}`,
+      id: `file:${getFileTabKey(tab)}`,
       label: tab.isDirty ? `${tab.name} *` : tab.name,
       icon: tab.isDirty ? <span className="h-2 w-2 rounded-full bg-yellow-500" /> : undefined,
       closable: true,
       onClose: (e: React.MouseEvent) => {
         e.stopPropagation();
-        handleCloseFileTab(tab.path);
+        handleCloseFileTab(getFileTabKey(tab));
       },
       className: "cursor-pointer group gap-1.5 data-[state=active]:bg-muted",
     }));
@@ -264,6 +274,21 @@ function useTaskReview(taskId: string | null) {
   if (taskPR) reviewLabel = "Pull Request";
   else if (taskMR) reviewLabel = "Merge Request";
   return { taskPR, taskMR, reviewLabel };
+}
+
+function usePersistOpenFileTabs(activeSessionId: string | null, openFileTabs: OpenFileTab[]) {
+  useEffect(() => {
+    if (!activeSessionId) return;
+    saveOpenFileTabs(
+      activeSessionId,
+      openFileTabs.map(({ path, name, repo, markdownPreview }) => ({
+        path,
+        name,
+        repo,
+        markdownPreview,
+      })),
+    );
+  }, [activeSessionId, openFileTabs]);
 }
 
 function useCenterPanelState(props: TaskCenterPanelProps) {
@@ -299,13 +324,7 @@ function useCenterPanelState(props: TaskCenterPanelProps) {
     handleRequestChanges,
   } = useLeftTabState(activeSessionId, hasChanges, onActiveFileChange);
   useFileTabRestoration({ activeSessionId, leftTab, setLeftTab, setOpenFileTabs });
-  useEffect(() => {
-    if (!activeSessionId) return;
-    saveOpenFileTabs(
-      activeSessionId,
-      openFileTabs.map(({ path, name }) => ({ path, name })),
-    );
-  }, [activeSessionId, openFileTabs]);
+  usePersistOpenFileTabs(activeSessionId, openFileTabs);
   const fileTabOps = useFileTabOperations({
     activeSessionId,
     openFileTabs,
@@ -395,7 +414,13 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
     tabs,
     separatorAfterIndex,
   } = state;
-  const { handleOpenFileFromChat, handleFileChange, handleFileSave, handleFileDelete } = fileTabOps;
+  const {
+    handleOpenFileFromChat,
+    handleFileChange,
+    handleMarkdownPreviewToggle,
+    handleFileSave,
+    handleFileDelete,
+  } = fileTabOps;
 
   const approveContent = showApproveButton ? (
     <ApproveButtonGroup onApprove={handleApprove} onRequestChanges={handleRequestChanges} />
@@ -442,15 +467,16 @@ export const TaskCenterPanel = memo(function TaskCenterPanel(props: TaskCenterPa
         )}
         {openFileTabs.map((tab) => (
           <FileTabContent
-            key={tab.path}
+            key={getFileTabKey(tab)}
             tab={tab}
             activeSession={activeSession}
             activeSessionId={activeSessionId}
             taskId={activeSessionId ? activeTaskId : null}
-            isSaving={savingFiles.has(tab.path)}
+            isSaving={savingFiles.has(getFileTabKey(tab))}
             onFileChange={handleFileChange}
             onFileSave={handleFileSave}
             onFileDelete={handleFileDelete}
+            onToggleMarkdownPreview={() => handleMarkdownPreviewToggle(getFileTabKey(tab))}
           />
         ))}
       </SessionTabs>

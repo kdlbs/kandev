@@ -10,13 +10,11 @@ import (
 
 const (
 	featureOfficeKey                         = "features.office"
-	featurePluginsKey                        = "features.plugins"
 	featureAppStatusBarKey                   = "features.appStatusBar"
 	featureAuthKey                           = "features.auth"
 	featureClaudeBackgroundPromptHandoffKey  = "features.claudeBackgroundPromptHandoff"
 	debugDevModeKey                          = "debug.devMode"
 	envFeaturesOffice                        = "KANDEV_FEATURES_OFFICE"
-	envFeaturesPlugins                       = "KANDEV_FEATURES_PLUGINS"
 	envFeaturesAppStatusBar                  = "KANDEV_FEATURES_APP_STATUS_BAR"
 	envFeaturesAuth                          = "KANDEV_FEATURES_AUTH"
 	envFeaturesClaudeBackgroundPromptHandoff = "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF"
@@ -31,7 +29,6 @@ func OptionsFromConfig(cfg *config.Config) Options {
 		RuntimeValues: ValuesFromConfig(cfg),
 		EnvValues: map[string]bool{
 			envFeaturesOffice:       isTruthy(os.Getenv(envFeaturesOffice)),
-			envFeaturesPlugins:      isTruthy(os.Getenv(envFeaturesPlugins)),
 			envFeaturesAppStatusBar: isTruthy(os.Getenv(envFeaturesAppStatusBar)),
 			envFeaturesAuth:         isTruthy(os.Getenv(envFeaturesAuth)),
 			envFeaturesClaudeBackgroundPromptHandoff: isTruthy(
@@ -52,7 +49,6 @@ func ValuesFromConfig(cfg *config.Config) map[string]bool {
 	debugEnabled := cfg.Debug.DevMode || cfg.Debug.PprofEnabled
 	return map[string]bool{
 		featureOfficeKey:                        cfg.Features.Office,
-		featurePluginsKey:                       cfg.Features.Plugins,
 		featureAppStatusBarKey:                  cfg.Features.AppStatusBar,
 		featureAuthKey:                          cfg.Features.Auth,
 		featureClaudeBackgroundPromptHandoffKey: cfg.Features.ClaudeBackgroundPromptHandoff,
@@ -65,8 +61,6 @@ func ApplyStatesToConfig(cfg *config.Config, states []RuntimeFlagState) {
 		switch state.Key {
 		case featureOfficeKey:
 			cfg.Features.Office = state.EffectiveValue
-		case featurePluginsKey:
-			cfg.Features.Plugins = state.EffectiveValue
 		case featureAppStatusBarKey:
 			cfg.Features.AppStatusBar = state.EffectiveValue
 		case featureAuthKey:

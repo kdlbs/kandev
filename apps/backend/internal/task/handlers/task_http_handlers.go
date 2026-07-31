@@ -471,6 +471,45 @@ func (h *TaskHandlers) httpDismissLastAgentError(c *gin.Context) {
 	})
 }
 
+type markSessionReadRequest struct {
+	MessageID string `json:"message_id"`
+}
+
+// httpMarkSessionRead advances the session's Slack-style unread-divider read
+// cursor to req.MessageID. A missing session is a 404; bad caller input
+// (empty ids, an unknown message, or a message belonging to a different
+// session — see service.ErrInvalidMarkSessionRead) is a 400; any other,
+// unexpected failure (a repository/DB error) is logged and returned as a
+// sanitized 500 rather than leaking the raw internal error to the caller.
+func (h *TaskHandlers) httpMarkSessionRead(c *gin.Context) {
+	var req markSessionReadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+	sessionID := c.Param("id")
+	session, err := h.service.MarkSessionRead(c.Request.Context(), sessionID, req.MessageID)
+	if err != nil {
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "task session not found"})
+			return
+		}
+		if errors.Is(err, service.ErrInvalidMarkSessionRead) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		h.logger.Error("failed to mark session read",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to mark session read"})
+		return
+	}
+	c.JSON(http.StatusOK, dto.MarkSessionReadResponse{
+		SessionID:         session.ID,
+		LastReadMessageID: session.LastReadMessageID,
+	})
+}
+
 func (h *TaskHandlers) httpListSessionTurns(c *gin.Context) {
 	sessionID := c.Param("id")
 	if sessionID == "" {
@@ -1643,6 +1682,51 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		TaskID:    task.ID,
 		SessionID: resp.SessionID,
 	})
+}
+
+// httpQuickChatSession is one restorable quick-chat tab.
+type httpQuickChatSession struct {
+	SessionID      string `json:"session_id"`
+	TaskID         string `json:"task_id"`
+	WorkspaceID    string `json:"workspace_id"`
+	Kind           string `json:"kind"`
+	Name           string `json:"name,omitempty"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
+}
+
+// httpListQuickChatSessionsResponse mirrors the quick-chat slice of the boot
+// payload so a running client can resync its tab strip without a full reload.
+type httpListQuickChatSessionsResponse struct {
+	Sessions     []httpQuickChatSession `json:"sessions"`
+	TaskSessions []dto.TaskSessionDTO   `json:"task_sessions"`
+}
+
+// httpListQuickChatSessions returns the workspace's restorable quick-chat tabs.
+// Quick chats are created and closed from any device, so clients poll this on
+// (re)connect to converge on the server's list instead of drifting apart.
+func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
+	workspaceID := c.Param("id")
+	items, err := h.service.ListQuickChatSessions(c.Request.Context(), workspaceID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workspace not found")
+		return
+	}
+	response := httpListQuickChatSessionsResponse{
+		Sessions:     make([]httpQuickChatSession, 0, len(items)),
+		TaskSessions: make([]dto.TaskSessionDTO, 0, len(items)),
+	}
+	for _, item := range items {
+		response.Sessions = append(response.Sessions, httpQuickChatSession{
+			SessionID:      item.SessionID,
+			TaskID:         item.TaskID,
+			WorkspaceID:    item.WorkspaceID,
+			Kind:           item.Kind,
+			Name:           item.Name,
+			AgentProfileID: item.AgentProfileID,
+		})
+		response.TaskSessions = append(response.TaskSessions, dto.FromTaskSession(item.Session))
+	}
+	c.JSON(http.StatusOK, response)
 }
 
 // httpStartConfigChatRequest is the request body for starting a config chat session.

@@ -1,9 +1,13 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 
-/** Maps old state-section labels to the new per-task state icon data-testid. */
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Maps state-section labels to the per-task state icon data-testid. */
 function sectionLabelToStateTestId(label: string): string {
   if (label === "Running") return "task-state-running";
-  if (label === "Turn Finished") return "task-state-review";
+  if (label === "Turn Finished") return "task-state-turn-finished";
   return "task-state-backlog";
 }
 
@@ -119,7 +123,7 @@ export class SessionPage {
    * already foregrounded.
    */
   async showSessionContext(timeout = 15_000): Promise<void> {
-    const tab = this.page.locator("[data-testid^='session-tab-']").first();
+    const tab = this.page.locator("[data-testid^='session-tab-']:visible").first();
     await tab.waitFor({ state: "visible", timeout });
     // Clicking a tab that's already active is harmless; clicking a background
     // one promotes its panel to the foreground.
@@ -151,7 +155,7 @@ export class SessionPage {
     const pollSlice = 1_500;
     const idle = this.anyIdleInput();
     const start = Date.now();
-    let reloaded = false;
+    let lastReloadAt = start;
 
     while (Date.now() - start < softTotalTimeout) {
       if (await idle.isVisible()) return;
@@ -165,23 +169,29 @@ export class SessionPage {
         continue;
       }
 
-      const elapsed = Date.now() - start;
-      if (!reloaded && elapsed >= attemptTimeout) {
-        reloaded = true;
+      const now = Date.now();
+      const remaining = Math.max(1, softTotalTimeout - (now - start));
+      // Re-drive SSR hydration once per attemptTimeout slice (not just once):
+      // under CI shard load a single reload isn't always enough for the
+      // idle-input state to hydrate. Only reload while enough budget remains
+      // for the reloaded page to settle.
+      if (now - lastReloadAt >= attemptTimeout && remaining > pollSlice) {
+        lastReloadAt = now;
         await this.page.reload();
         await this.activeChat()
-          .waitFor({ state: "visible", timeout: attemptTimeout })
+          .waitFor({ state: "visible", timeout: Math.min(attemptTimeout, remaining) })
           .catch(() => undefined);
         continue;
       }
 
-      const remaining = softTotalTimeout - elapsed;
       await idle
         .waitFor({ state: "visible", timeout: Math.min(pollSlice, remaining) })
         .catch(() => undefined);
     }
 
-    await idle.waitFor({ state: "visible", timeout: 1_000 });
+    // Final bounded check: still throws on a genuinely stuck session, but gives
+    // the last hydration attempt a full attemptTimeout slice to land.
+    await idle.waitFor({ state: "visible", timeout: attemptTimeout });
   }
 
   /** Wait for the passthrough terminal to be visible (for TUI/passthrough sessions). */
@@ -286,6 +296,13 @@ export class SessionPage {
    * Accepts "Turn Finished" (review/completed), "Running" (in-progress), or "Backlog".
    */
   sidebarSection(label: string): Locator {
+    if (label === "Turn Finished") {
+      return this.sidebar
+        .locator(
+          '[data-testid="task-state-turn-finished"], [data-testid="task-state-workflow-complete"]',
+        )
+        .first();
+    }
     const testId = sectionLabelToStateTestId(label);
     return this.sidebar.getByTestId(testId).first();
   }
@@ -295,6 +312,16 @@ export class SessionPage {
    * Accepts "Turn Finished" (review/completed), "Running" (in-progress), or "Backlog".
    */
   taskInSection(title: string, sectionLabel: string): Locator {
+    if (sectionLabel === "Turn Finished") {
+      return this.sidebar
+        .getByTestId("sidebar-task-item")
+        .filter({ has: this.page.getByText(title, { exact: false }) })
+        .filter({
+          has: this.page.locator(
+            '[data-testid="task-state-turn-finished"], [data-testid="task-state-workflow-complete"]',
+          ),
+        });
+    }
     const testId = sectionLabelToStateTestId(sectionLabel);
     return this.sidebar
       .getByTestId("sidebar-task-item")
@@ -846,7 +873,11 @@ export class SessionPage {
 
   /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */
   async clickTab(label: string): Promise<void> {
-    const tab = this.page.locator(`.dv-default-tab:has-text('${label}')`);
+    const tab = this.page
+      .locator(".dv-default-tab:visible")
+      .filter({ hasText: new RegExp(`^${escapeRegExp(label)}(?: \\(\\d+\\))?$`) })
+      .first();
+    await expect(tab).toBeVisible();
     await tab.click();
   }
 
@@ -856,7 +887,7 @@ export class SessionPage {
    * so this uses the stable data-testid on the ContextMenuTrigger instead.
    */
   async clickSessionChatTab(): Promise<void> {
-    await this.page.locator('[data-testid^="session-tab-"]').first().click();
+    await this.page.locator('[data-testid^="session-tab-"]:visible').first().click();
   }
 
   /** Main Changes-panel button that asks the agent to create a walkthrough. */
@@ -986,7 +1017,8 @@ export class SessionPage {
    * TipTap maps "Mod" to Meta on macOS and Control on Linux/Windows.
    */
   async sendMessage(text: string) {
-    const editor = this.page.locator(".tiptap.ProseMirror").first();
+    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
+    await expect(editor).toBeEditable();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -998,7 +1030,8 @@ export class SessionPage {
    * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
    */
   async sendMessageViaButton(text: string) {
-    const editor = this.page.locator(".tiptap.ProseMirror").first();
+    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
+    await expect(editor).toBeEditable();
     await editor.click();
     await editor.fill(text);
     await this.page.getByTestId("submit-message-button").click();

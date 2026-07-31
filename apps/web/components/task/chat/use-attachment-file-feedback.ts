@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useToast } from "@/components/toast-provider";
-import { formatBytes, MAX_FILES, MAX_FILE_SIZE, MAX_TOTAL_SIZE } from "./file-attachment";
+import { formatBytes } from "@/lib/utils/format-bytes";
+import { MAX_FILES, MAX_FILE_SIZE, MAX_TOTAL_SIZE } from "./file-attachment";
 
 export function useAttachmentCountFeedback() {
   const { toast } = useToast();

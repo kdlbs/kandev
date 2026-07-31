@@ -42,6 +42,8 @@ func run() int {
 		err = runList(args)
 	case "probe":
 		err = runProbe(ctx, args)
+	case "mcp-probe":
+		err = runMCPProbe(ctx, args)
 	case "prompt":
 		err = runPrompt(ctx, args)
 	case "session-load":
@@ -70,6 +72,7 @@ Usage:
   acpdbg list
   acpdbg probe <agent> [flags]
   acpdbg probe --exec "<cmd> [args...]" [flags]
+  acpdbg mcp-probe <agent> [flags]
   acpdbg prompt <agent> --prompt TEXT [--model M] [--mode M] [flags]
   acpdbg session-load <agent> --session-id ID [--prompt TEXT] [flags]
   acpdbg matrix [flags]
@@ -183,6 +186,46 @@ func runProbe(ctx context.Context, args []string) error {
 		return err
 	}
 	printProbeSummary(cfg.AgentID, runner.Path(), res)
+	return nil
+}
+
+// --- mcp-probe ---
+
+func runMCPProbe(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("mcp-probe", flag.ExitOnError)
+	shared := registerShared(fs)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	cfg, err := resolveRunConfig(fs, shared, "mcp-probe")
+	if err != nil {
+		return err
+	}
+	jsonlPath := resolveJSONLPath(shared, cfg.AgentID, "mcp-probe")
+	runCtx, cancel := context.WithTimeout(ctx, shared.timeout)
+	defer cancel()
+	runner, err := acpdbg.NewRunner(runCtx, jsonlPath, cfg)
+	if err != nil {
+		return err
+	}
+	defer runner.Close("completed")
+
+	result, err := acpdbg.MCPProbe(runCtx, runner)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp probe failed: %v\n", err)
+		fmt.Fprintf(os.Stderr, "jsonl: %s\n", runner.Path())
+		return err
+	}
+	printProbeSummary(cfg.AgentID, runner.Path(), &result.ProbeResult)
+	fmt.Printf("mcp_http_advertised: %t\n", result.MCPHTTP)
+	fmt.Printf("mcp_sse_advertised:  %t\n", result.MCPSSE)
+	fmt.Printf("sentinel_delivered:  %t\n", result.Delivered)
+	fmt.Printf("initialize_observed: %t\n", result.Sentinel.InitializeObserved)
+	fmt.Printf("tools_list_observed: %t (tools: %d)\n", result.Sentinel.ToolsListObserved, result.Sentinel.ToolCount)
+	fmt.Printf("tool_call_observed:  %t\n", result.Sentinel.ToolCallObserved)
+	if !result.Sentinel.InitializeObserved {
+		fmt.Println("status: unobserved (the agent accepted delivery but did not contact the sentinel during the probe window)")
+	}
 	return nil
 }
 

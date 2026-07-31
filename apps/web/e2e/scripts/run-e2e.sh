@@ -184,7 +184,7 @@ run_host() {
   done
   for p in "${pids[@]}"; do wait "$p" || rc=1; done
   for ((i=1; i<=SHARDS; i++)); do
-    printf '  shard %s: %s\n' "$i" "$(grep -Eo '[0-9]+ (passed|failed|flaky)' "/tmp/e2e-host-shard-$i.log" | paste -sd' ')" >&2
+    printf '  shard %s: %s\n' "$i" "$(grep -Eo '[0-9]+ (passed|failed|flaky)' "/tmp/e2e-host-shard-$i.log" | tr '\n' ' ')" >&2
   done
   log "host shard logs: /tmp/e2e-host-shard-*.log"
   return $rc
@@ -225,7 +225,7 @@ run_docker() {
   done
   for p in "${pids[@]}"; do wait "$p" || rc=1; done
   for ((i=1; i<=SHARDS; i++)); do
-    printf '  shard %s: %s\n' "$i" "$(grep -Eo '[0-9]+ (passed|failed|flaky)' "/tmp/e2e-docker-shard-$i.log" | paste -sd' ')" >&2
+    printf '  shard %s: %s\n' "$i" "$(grep -Eo '[0-9]+ (passed|failed|flaky)' "/tmp/e2e-docker-shard-$i.log" | tr '\n' ' ')" >&2
   done
   log "docker shard logs: /tmp/e2e-docker-shard-*.log"
   return $rc

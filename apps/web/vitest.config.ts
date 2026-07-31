@@ -22,7 +22,10 @@ export default mergeConfig(
         },
       },
       setupFiles: ["./vitest.setup.ts"],
-      exclude: ["e2e/**", "node_modules/**"],
+      // `e2e/**/*.spec.ts` belongs to Playwright, but plain unit tests for the
+      // e2e helpers themselves (`*.test.ts`) still run here — excluding the
+      // whole tree would let them sit in the repo without ever executing.
+      exclude: ["e2e/**/*.spec.ts", "e2e/fixtures/**", "e2e/pages/**", "node_modules/**"],
       pool: "threads",
       maxWorkers,
     },

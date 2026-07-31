@@ -1,6 +1,28 @@
 package acpdbg
 
-import "testing"
+import (
+	"context"
+	"os"
+	"strings"
+	"testing"
+)
+
+func TestNewRunnerUsesResolvedTemporaryWorkdirForProtocolRequests(t *testing.T) {
+	runner, err := NewRunner(context.Background(), t.TempDir()+"/probe.jsonl", RunConfig{
+		AgentID: "test-agent",
+		Command: []string{"cat"},
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	t.Cleanup(func() { runner.Close("test complete") })
+	if runner.cfg.Workdir == "" {
+		t.Fatal("runner workdir is empty; session/new would receive an empty cwd")
+	}
+	if runner.cfg.Workdir != runner.tmpDir {
+		t.Fatalf("protocol workdir = %q, child temporary dir = %q", runner.cfg.Workdir, runner.tmpDir)
+	}
+}
 
 func TestSessionLoadParamsIncludeChangedWorkdir(t *testing.T) {
 	t.Parallel()
@@ -107,6 +129,45 @@ func TestBuildProbeResult_PrefersLegacyModes(t *testing.T) {
 	}
 	if len(got.Modes) != 1 || got.Modes[0] != "legacy-mode" {
 		t.Fatalf("Modes = %+v, want [legacy-mode]", got.Modes)
+	}
+}
+
+func TestMCPProbeInjectsSentinelAndSummarizesDelivery(t *testing.T) {
+	const peer = `
+IFS= read -r init
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"agentInfo":{"name":"scripted-agent","version":"1.0"},"capabilities":{"mcpCapabilities":{"http":true}}}}'
+IFS= read -r session
+case "$session" in
+  *'"name":"acpdbg-sentinel"'*'"type":"http"'*) ;;
+  *) printf '%s\n' '{"jsonrpc":"2.0","id":2,"error":{"code":-32602,"message":"missing sentinel"}}'; exit 0 ;;
+esac
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"sessionId":"session-1"}}'
+`
+	runner, err := NewRunner(context.Background(), t.TempDir()+"/probe.jsonl", RunConfig{
+		AgentID: "scripted-agent", Command: []string{"sh", "-c", peer},
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	t.Cleanup(func() { runner.Close("test complete") })
+
+	result, err := MCPProbe(context.Background(), runner)
+	if err != nil {
+		t.Fatalf("MCPProbe: %v", err)
+	}
+	if !result.Delivered || result.SessionID != "session-1" || result.AgentName != "scripted-agent" || !result.MCPHTTP {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Sentinel.InitializeObserved || result.Sentinel.ToolsListObserved || result.Sentinel.ToolCallObserved {
+		t.Fatalf("unexpected sentinel observation = %+v", result.Sentinel)
+	}
+
+	content, err := os.ReadFile(runner.Path())
+	if err != nil {
+		t.Fatalf("read probe JSONL: %v", err)
+	}
+	if !strings.Contains(string(content), "acpdbg-sentinel") {
+		t.Fatalf("session/new did not record injected sentinel: %s", content)
 	}
 }
 

@@ -110,10 +110,14 @@ describe("MermaidBlock streaming behaviour", () => {
   it("clears a previous transient error when a later render succeeds", async () => {
     // First attempt: fail.
     nextResult = { kind: "fail", message: "Parse error on line 3" };
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const { rerender, container } = render(<MermaidBlock code={"flowchart LR\n  subgraph"} />);
     await flush(500);
     expect(renderCalls).toHaveLength(1);
     expect(mockToast).toHaveBeenCalledOnce();
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("Original diagram:\nflowchart LR\n  subgraph"),
+    );
     expect(container.textContent).toContain("Failed to render diagram");
 
     // Second attempt with full, valid code: succeed. The error UI must clear

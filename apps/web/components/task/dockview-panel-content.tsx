@@ -8,6 +8,7 @@ import { useSessionChangesCount } from "@/hooks/domains/session/use-session-chan
 import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useFileEditors } from "@/hooks/use-file-editors";
+import { usePanelActive } from "@/hooks/use-panel-active";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { BrowserPanel } from "./browser-panel";
@@ -61,6 +62,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     sessionId ? state.taskSessions.items[sessionId]?.is_passthrough === true : false,
   );
   useChatSessionTitle(panelId, sessionId);
+  const isVisible = usePanelActive(panelId);
 
   if (isPassthrough) {
     return (
@@ -78,6 +80,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       onOpenFile={openFile}
       onOpenFileAtLine={openFile}
       hideSessionsDropdown
+      isVisible={isVisible}
     />
   );
 }

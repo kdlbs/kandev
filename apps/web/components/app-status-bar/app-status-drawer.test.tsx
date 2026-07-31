@@ -26,6 +26,39 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 const LEFT_PLUGIN_ID = "drawer-left";
 const RIGHT_PLUGIN_ID = "drawer-right";
 
+function renderConnectionOnlyDrawer() {
+  pluginRegistry
+    .forPlugin(LEFT_PLUGIN_ID)
+    .registerComponent("app-status-bar-left", () => <span>Left plugin</span>);
+  pluginRegistry
+    .forPlugin(RIGHT_PLUGIN_ID)
+    .registerComponent("app-status-bar-right", () => <span>Right plugin</span>);
+
+  render(
+    <StateProvider
+      initialState={{
+        userSettings: {
+          ...defaultSettingsState.userSettings,
+          systemMetricsDisplay: { showInTopbar: true, simplified: false },
+        },
+        connection: { status: "reconnecting", error: null, issueSeverity: "unstable" },
+      }}
+    >
+      <TooltipProvider>
+        <AppStatusDrawer
+          pathname="/"
+          activeWorkspaceId={null}
+          activeTaskId={null}
+          activeSessionId={null}
+          open
+          onOpenChange={() => {}}
+          connectionOnly
+        />
+      </TooltipProvider>
+    </StateProvider>,
+  );
+}
+
 describe("AppStatusDrawer", () => {
   afterEach(() => {
     cleanup();
@@ -113,5 +146,14 @@ describe("AppStatusDrawer", () => {
       `[data-status-item-id="plugin:${RIGHT_PLUGIN_ID}:app-status-bar-right:0"]`,
     );
     expect(row?.className).toContain("empty:hidden");
+  });
+
+  it("renders only connection state in connection-only mode", () => {
+    renderConnectionOnlyDrawer();
+
+    const rows = screen
+      .getByTestId("app-status-drawer")
+      .querySelectorAll<HTMLElement>("[data-status-item-id]");
+    expect(Array.from(rows, (row) => row.dataset.statusItemId)).toEqual([APP_STATUS_CONNECTION_ID]);
   });
 });

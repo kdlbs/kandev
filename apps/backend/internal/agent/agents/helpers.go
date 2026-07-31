@@ -37,6 +37,21 @@ func StripEnvFor(ia InferenceAgent) []string {
 	return nil
 }
 
+// RuntimeEnvFor returns a defensive copy of the agent runtime environment for
+// one-shot probe and inference subprocesses.
+func RuntimeEnvFor(ia InferenceAgent) map[string]string {
+	if a, ok := ia.(Agent); ok {
+		if rt := a.Runtime(); rt != nil && len(rt.Env) > 0 {
+			env := make(map[string]string, len(rt.Env))
+			for key, value := range rt.Env {
+				env[key] = value
+			}
+			return env
+		}
+	}
+	return nil
+}
+
 func mergeAgentctlAutoApprove(settings map[string]PermissionSetting) map[string]PermissionSetting {
 	merged := make(map[string]PermissionSetting, len(settings)+1)
 	for k, v := range settings {

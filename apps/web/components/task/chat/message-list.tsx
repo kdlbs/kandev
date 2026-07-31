@@ -1,12 +1,19 @@
 "use client";
 
-import type { ComponentType } from "react";
-import { memo, useMemo } from "react";
+import {
+  memo,
+  useMemo,
+  forwardRef,
+  type ForwardRefExoticComponent,
+  type RefAttributes,
+} from "react";
 import { NativeMessageList } from "./message-list-native";
 import { VirtuosoMessageList } from "./message-list-virtuoso";
-import type { MessageListProps } from "./message-list-shared";
+import type { MessageListProps, MessageListHandle } from "./message-list-shared";
 
-const strategies: Record<string, ComponentType<MessageListProps>> = {
+type Strategy = ForwardRefExoticComponent<MessageListProps & RefAttributes<MessageListHandle>>;
+
+const strategies: Record<string, Strategy> = {
   native: NativeMessageList,
   virtuoso: VirtuosoMessageList,
 };
@@ -29,8 +36,10 @@ function resolveStrategy(): string {
   return override && override in strategies ? override : STRATEGY;
 }
 
-export const MessageList = memo(function MessageList(props: MessageListProps) {
-  const key = useMemo(() => resolveStrategy(), []);
-  const Renderer = strategies[key] ?? NativeMessageList;
-  return <Renderer {...props} />;
-});
+export const MessageList = memo(
+  forwardRef<MessageListHandle, MessageListProps>(function MessageList(props, ref) {
+    const key = useMemo(() => resolveStrategy(), []);
+    const Renderer = strategies[key] ?? NativeMessageList;
+    return <Renderer {...props} ref={ref} />;
+  }),
+);

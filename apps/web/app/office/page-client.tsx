@@ -141,7 +141,7 @@ function RecentTaskRow({ task, agents }: { task: RecentTask; agents: AgentProfil
   return (
     <Link
       href={`/office/tasks/${task.id}`}
-      className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-accent/50 transition-colors cursor-pointer"
+      className="flex items-center gap-3 px-4 py-2.5 text-sm hover:bg-muted/50 transition-colors cursor-pointer"
     >
       <StatusIcon status={task.status} className="h-3.5 w-3.5" />
       <span className="font-mono text-xs text-muted-foreground shrink-0 w-14 truncate">

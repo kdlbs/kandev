@@ -870,6 +870,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if err != nil {
 		return nil, err
 	}
+	if execCfg.ExecutorID != "" {
+		session.ExecutorID = execCfg.ExecutorID
+	}
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
 		req.OfficeAgentProfileID = session.AgentProfileID

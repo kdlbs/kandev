@@ -2,7 +2,9 @@ package process
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os/exec"
 	"sort"
 	"strings"
 )
@@ -538,6 +540,30 @@ func (g *GitOperator) GetMergeBase(ctx context.Context, ref1, ref2 string) (stri
 		return "", fmt.Errorf("failed to compute merge-base: %w", err)
 	}
 	return strings.TrimSpace(output), nil
+}
+
+// IsAncestor reports whether `ancestor` is an ancestor of `descendant`
+// (git merge-base --is-ancestor). Exit 0 => true, exit 1 => false, any other
+// exit status => error. git treats a commit as an ancestor of itself, so an
+// equal SHA returns true; callers wanting a STRICT ancestor check compare the
+// SHAs themselves first. Empty ancestor or descendant returns (false, nil)
+// without invoking git.
+func (g *GitOperator) IsAncestor(ctx context.Context, ancestor, descendant string) (bool, error) {
+	if ancestor == "" || descendant == "" {
+		return false, nil
+	}
+	_, err := g.runGitCommand(ctx, "merge-base", "--is-ancestor", ancestor, descendant)
+	if err == nil {
+		return true, nil
+	}
+	// runGitCommand wraps the underlying *exec.ExitError with fmt.Errorf("%w: ..."),
+	// so errors.As recovers the exit code. Exit 1 is git's "not an ancestor"
+	// signal; anything else is a genuine failure (bad repo, unknown SHA).
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ExitCode() == 1 {
+		return false, nil
+	}
+	return false, err
 }
 
 // GetRevParse resolves a ref name to its commit SHA. Returns the empty

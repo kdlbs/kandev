@@ -12,7 +12,6 @@ import {
 } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useConfiguredIntegrationLinks } from "@/components/integrations/integrations-menu";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import { cn } from "@/lib/utils";
@@ -96,13 +95,9 @@ export function IntegrationsSection({ collapsed }: IntegrationsSectionProps) {
   const links = useConfiguredIntegrationLinks();
   // Plugin-registered nav items that target this section
   // (`registerNavItem({ section: "integrations" })`), rendered after the
-  // first-party links. Gated on the "plugins" feature flag like every other
-  // plugin surface.
-  const pluginsEnabled = useFeature("plugins");
+  // first-party links.
   const registry = usePluginRegistry();
-  const pluginItems = pluginsEnabled
-    ? registry.getNavItems().filter((item) => item.section === "integrations")
-    : [];
+  const pluginItems = registry.getNavItems().filter((item) => item.section === "integrations");
 
   if (links.length === 0 && pluginItems.length === 0) return null;
 

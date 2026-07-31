@@ -43,12 +43,12 @@ export function AppShell({ children }: AppShellProps) {
               <RecentTaskSwitcher />
               <ConfigChatProvider>
                 <QuickChatProvider>
-                  <AppStatusSurfaceProvider>
-                    <div className="flex min-h-0 flex-1 overflow-hidden">
-                      <AppSidebar />
+                  <div className="flex h-dvh min-h-0 w-full overflow-hidden">
+                    <AppSidebar />
+                    <AppStatusSurfaceProvider>
                       <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
-                    </div>
-                  </AppStatusSurfaceProvider>
+                    </AppStatusSurfaceProvider>
+                  </div>
                 </QuickChatProvider>
               </ConfigChatProvider>
             </CommandRegistryProvider>

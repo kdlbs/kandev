@@ -82,7 +82,13 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-26-user-managed-agent-runtime-updates | [User-Managed Agent Runtime Updates](2026-07-26-user-managed-agent-runtime-updates.md) | accepted | backend, frontend, protocol | 2026-07-26 |
 | 2026-07-26-single-session-model-switching | [Single-Session Model Switching](2026-07-26-single-session-model-switching.md) | accepted (amended 2026-07-27) | workflow, infra | 2026-07-26 |
 | 2026-07-27-task-git-credential-policy | [Separate GitHub Automation From Task Git Credential Policy](2026-07-27-task-git-credential-policy.md) | accepted | backend, frontend, security | 2026-07-27 |
+| 2026-07-27-spa-failure-containment-and-deployment-recovery | [SPA Failure Containment and Deployment Recovery](2026-07-27-spa-failure-containment-and-deployment-recovery.md) | accepted | frontend | 2026-07-27 |
 | 2026-07-27-legacy-add-branch-live-rescan | [Preserve Live Rescan for Legacy Add Branch](2026-07-27-legacy-add-branch-live-rescan.md) | accepted | backend, protocol | 2026-07-27 |
 | 2026-07-28-visible-wip-overflow-queues | [Separate Visible Queueing From WIP Admission](2026-07-28-visible-wip-overflow-queues.md) | proposed | backend, frontend, protocol, workflow | 2026-07-28 |
 | 2026-07-28-coarse-running-busy-signal | [Restore Coarse Running Prompt Admission](2026-07-28-coarse-running-busy-signal.md) | accepted | backend, frontend, protocol | 2026-07-28 |
 | 2026-07-29-agent-stall-user-controlled-recovery | [Keep Agent Stall Recovery User Controlled](2026-07-29-agent-stall-user-controlled-recovery.md) | accepted | backend, frontend, protocol | 2026-07-29 |
+| 2026-07-29-quarantine-retention-override | [Make Quarantine Retention Overridable but Visible](2026-07-29-quarantine-retention-override.md) | accepted | backend, frontend | 2026-07-29 |
+| 2026-07-29-interactive-accent-surface-semantics | [Separate Brand Accent from Interactive Surface Fills](2026-07-29-interactive-accent-surface-semantics.md) | accepted | frontend | 2026-07-29 |
+| 2026-07-30-embedded-editor-executor-capabilities | [Derive Embedded Editor Availability from the Active Executor](2026-07-30-embedded-editor-executor-capabilities.md) | accepted | backend, frontend, protocol | 2026-07-30 |
+| 2026-07-30-session-owned-mcp-observability | [Keep MCP Attachment Evidence Session Owned](2026-07-30-session-owned-mcp-observability.md) | accepted | backend, frontend, protocol, security | 2026-07-30 |
+| 2026-07-30-runtime-task-state-before-running-event | [Publish Task State Before Running Session State](2026-07-30-runtime-task-state-before-running-event.md) | accepted | backend, frontend, protocol, workflow | 2026-07-30 |

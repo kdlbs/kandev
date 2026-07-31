@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -29,8 +29,11 @@ type LoadedExecutor = {
   config?: Record<string, string>;
 };
 
-export default function SSHExecutorPage({ params }: { params: Promise<{ executorId: string }> }) {
-  const { executorId } = use(params);
+export default function SSHExecutorPage({ executorId }: { executorId: string }) {
+  return <SSHExecutorPageContent key={executorId} executorId={executorId} />;
+}
+
+function SSHExecutorPageContent({ executorId }: { executorId: string }) {
   const { executor, loading, error, reload } = useExecutor(executorId);
 
   if (loading) {
@@ -55,22 +58,34 @@ function useExecutor(executorId: string) {
   const [executor, setExecutor] = useState<LoadedExecutor | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const requestGeneration = useRef(0);
 
   const load = useCallback(async () => {
+    const generation = ++requestGeneration.current;
+    setExecutor(null);
     setLoading(true);
     setError(null);
     try {
       const res = await fetchExecutor(executorId);
-      setExecutor(res);
+      if (generation === requestGeneration.current) {
+        setExecutor(res);
+      }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load executor");
+      if (generation === requestGeneration.current) {
+        setError(e instanceof Error ? e.message : "Failed to load executor");
+      }
     } finally {
-      setLoading(false);
+      if (generation === requestGeneration.current) {
+        setLoading(false);
+      }
     }
   }, [executorId]);
 
   useEffect(() => {
     void load();
+    return () => {
+      requestGeneration.current += 1;
+    };
   }, [load]);
 
   return { executor, loading, error, reload: load };

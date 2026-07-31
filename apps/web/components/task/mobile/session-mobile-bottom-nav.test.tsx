@@ -54,6 +54,23 @@ describe("SessionMobileBottomNav", () => {
     expect(onPanelChange).not.toHaveBeenCalled();
   });
 
+  it("describes an active connectivity warning on the Status action", () => {
+    render(
+      <SessionMobileBottomNav
+        activePanel="chat"
+        onPanelChange={vi.fn()}
+        showStatus
+        onOpenStatus={vi.fn()}
+        connectionIssueSeverity="lost"
+      />,
+    );
+
+    const status = screen.getByRole("button", {
+      name: "Connection lost for at least 10 seconds. Live updates may be stale.",
+    });
+    expect(status.getAttribute("data-connection-severity")).toBe("lost");
+  });
+
   it("does not reserve navigation space when Status is disabled", () => {
     render(
       <SessionMobileBottomNav

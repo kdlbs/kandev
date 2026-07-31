@@ -132,6 +132,7 @@ function summarizeMessages(messages: Message[]): {
 
 interface UseSessionMessagesReturn {
   isLoading: boolean;
+  isInitialMessagesLoading: boolean;
   messages: Message[];
   hasMore: boolean;
   oldestCursor: string | null;
@@ -184,7 +185,6 @@ async function fetchAndStoreMessages(
     limit: INITIAL_FETCH_LIMIT,
     sort: "desc" as const,
   };
-  debug("message.list request", requestParams);
   const response = await client.request<MessageListResponse>("message.list", requestParams, 10000);
   const fetched = [...(response.messages ?? [])].reverse();
   logFetchSummary(sessionId, fetched, response, requestParams.limit);
@@ -701,6 +701,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
 
   return {
     isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,
+    isInitialMessagesLoading: isWaitingForInitialMessages,
     messages,
     hasMore: messagesMeta.hasMore,
     oldestCursor: messagesMeta.oldestCursor,

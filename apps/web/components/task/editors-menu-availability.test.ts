@@ -24,17 +24,19 @@ describe("getAvailableTaskTopbarEditors", () => {
     editor({ id: "missing", kind: "built_in", installed: false }),
   ];
 
-  it("hides embedded VS Code when the backend host is Windows", () => {
-    expect(getAvailableTaskTopbarEditors(editors, "windows").map(({ id }) => id)).toEqual(["zed"]);
-  });
-
-  it("keeps embedded VS Code for non-Windows or unknown hosts", () => {
-    for (const hostOS of ["linux", "darwin", undefined]) {
-      expect(getAvailableTaskTopbarEditors(editors, hostOS).map(({ id }) => id)).toEqual([
-        "internal-vscode",
+  it("hides embedded VS Code when the active session does not support it", () => {
+    for (const supported of [false, undefined]) {
+      expect(getAvailableTaskTopbarEditors(editors, supported).map(({ id }) => id)).toEqual([
         "zed",
       ]);
     }
+  });
+
+  it("keeps embedded VS Code when the active session supports it", () => {
+    expect(getAvailableTaskTopbarEditors(editors, true).map(({ id }) => id)).toEqual([
+      "internal-vscode",
+      "zed",
+    ]);
   });
 });
 

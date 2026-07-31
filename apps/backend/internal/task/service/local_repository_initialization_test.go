@@ -20,7 +20,9 @@ func TestServiceInitializeLocalRepositoryCreatesCommitlessMainRepository(t *test
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	realParent := t.TempDir()
+	// canonicalTempDir, not t.TempDir: the service stores a symlink-resolved path,
+	// and on macOS TMPDIR itself sits behind /var -> /private/var.
+	realParent := canonicalTempDir(t)
 	parentLink := filepath.Join(t.TempDir(), "projects")
 	if err := os.Symlink(realParent, parentLink); err != nil {
 		t.Fatalf("Symlink parent: %v", err)
@@ -71,7 +73,7 @@ func TestServiceInitializeLocalRepositoryCreatesMissingParentDirectories(t *test
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	parent := filepath.Join(t.TempDir(), "projects", "team")
+	parent := filepath.Join(canonicalTempDir(t), "projects", "team")
 
 	created, err := svc.InitializeLocalRepository(ctx, &InitializeLocalRepositoryRequest{
 		WorkspaceID: "ws-1",
@@ -168,6 +170,40 @@ func TestOpenLocalRepositoryDirectoryDoesNotFollowSymlink(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("openLocalRepositoryDirectory followed symlink")
+	}
+}
+
+// TestInitializeGitRepositoryInitializesTheOpenDirectory pins the platform
+// contract of initializeGitRepository directly, rather than only through the
+// service happy path: whichever route it takes for this GOOS, the repository
+// must land in the directory it was handed.
+//
+// Regression test. The inherited-descriptor route used to be taken on darwin and
+// the BSDs via /dev/fd/N, where fdescfs presents a read-only synthetic entry and
+// `git init` dies with "cannot mkdir /dev/fd/3: File exists" — which made this
+// package's own happy-path tests, and "create new local repository" in the
+// product, fail on every mac.
+func TestInitializeGitRepositoryInitializesTheOpenDirectory(t *testing.T) {
+	staging := t.TempDir()
+	directory, err := openLocalRepositoryDirectory(staging)
+	if err != nil {
+		t.Fatalf("openLocalRepositoryDirectory: %v", err)
+	}
+	defer func() { _ = directory.Close() }()
+
+	if initErr := initializeGitRepository(context.Background(), staging, directory); initErr != nil {
+		t.Fatalf("initializeGitRepository: %v", initErr)
+	}
+
+	entries, err := os.ReadDir(staging)
+	if err != nil {
+		t.Fatalf("ReadDir staging: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != ".git" || !entries[0].IsDir() {
+		t.Fatalf("staging entries = %+v, want only a .git directory", entries)
+	}
+	if branch := runGitOutput(t, staging, "symbolic-ref", "--short", "HEAD"); branch != "main" {
+		t.Fatalf("unborn branch = %q, want main", branch)
 	}
 }
 

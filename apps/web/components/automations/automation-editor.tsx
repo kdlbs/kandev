@@ -5,14 +5,18 @@ import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import { toast } from "sonner";
 import { Separator } from "@kandev/ui/separator";
+import { useAppStore } from "@/components/state-provider";
+import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
 import { getAutomation, listTriggerTypes } from "@/lib/api/domains/automation-api";
 import type {
   Automation,
+  CreateAutomationRequest,
   CreateAutomationResponse,
   TriggerType,
   AutomationTrigger,
   TriggerTypeInfo,
+  UpdateAutomationRequest,
 } from "@/lib/types/automation";
 import { RunsSection } from "./runs-section";
 import {
@@ -21,8 +25,9 @@ import {
   buildCreatePayload,
   buildUpdatePayload,
   buildWebhookUrl,
-  resolveRepositoryId,
+  resolveNormalizedRepositoryIds,
 } from "./automation-payload";
+import { resolveExecutorType } from "./automation-repository-selection";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { useAutomationTriggerDrafts } from "./automation-trigger-drafts";
 import {
@@ -49,7 +54,7 @@ const defaultForm: FormState = {
   workflowStepId: "",
   agentProfileId: "",
   executorProfileId: "",
-  repositorySelection: { kind: "none" },
+  repositorySelections: [],
   prompt: DEFAULT_PROMPT,
   taskTitleTemplate: "",
   executionMode: "task",
@@ -65,9 +70,7 @@ function formFromAutomation(a: Automation): FormState {
     workflowStepId: a.workflow_step_id,
     agentProfileId: a.agent_profile_id,
     executorProfileId: a.executor_profile_id,
-    repositorySelection: a.repository_id
-      ? { kind: "registered", id: a.repository_id }
-      : { kind: "none" },
+    repositorySelections: a.repository_ids.map((id) => ({ kind: "registered" as const, id })),
     prompt: a.prompt || DEFAULT_PROMPT,
     taskTitleTemplate: a.task_title_template ?? "",
     executionMode: a.execution_mode ?? "task",
@@ -104,8 +107,12 @@ type SaveHandlerOpts = {
   workspaceId: string;
   form: FormState;
   currentId: string | null;
-  create: (payload: ReturnType<typeof buildCreatePayload>) => Promise<CreateAutomationResponse>;
-  update: (id: string, payload: ReturnType<typeof buildUpdatePayload>) => Promise<unknown>;
+  // supportsMultiRepo/isPRTrigger mirror what ConfigSection's picker
+  // actually rendered for this save — see normalizeRepositorySelections.
+  supportsMultiRepo: boolean;
+  isPRTrigger: boolean;
+  create: (payload: CreateAutomationRequest) => Promise<CreateAutomationResponse>;
+  update: (id: string, payload: UpdateAutomationRequest) => Promise<unknown>;
   setSaving: React.Dispatch<React.SetStateAction<boolean>>;
   setCurrentId: React.Dispatch<React.SetStateAction<string | null>>;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
@@ -123,42 +130,42 @@ type SaveHandlerOpts = {
 // function-length lint cap; the save flow has gotten chunky now that it
 // registers discovered repos before persisting the automation.
 function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
-  const { isNew, workspaceId, form, currentId, create, update } = opts;
+  const { isNew, workspaceId, form, currentId, create, update, supportsMultiRepo, isPRTrigger } =
+    opts;
   const { setSaving, setCurrentId, setForm, setCreatedWebhook, triggerActions, router, onSaved } =
     opts;
   return async () => {
     setSaving(true);
     try {
-      const repositoryId = await resolveRepositoryId(workspaceId, form.repositorySelection);
-      const promoteSelection = () => {
-        if (form.repositorySelection.kind === "discovered" && repositoryId) {
-          setForm((prev) => ({
-            ...prev,
-            repositorySelection: { kind: "registered", id: repositoryId },
-          }));
-        }
+      // The picker only ever *renders* repositorySelections[0] once the
+      // executor stops supporting multi-repo or a github_pr trigger is
+      // active (RepositoryPickerField in config-section.tsx) — it doesn't
+      // truncate the underlying array, so resolveNormalizedRepositoryIds
+      // re-enforces the same invariant right before persisting (see its
+      // doc comment for why a stale entry can't be skipped here).
+      const { ids: repositoryIds, selections: promotedSelections } =
+        await resolveNormalizedRepositoryIds(workspaceId, form.repositorySelections, {
+          supportsMultiRepo,
+          isPRTrigger,
+        });
+      const promoteSelections = () => {
+        setForm((prev) => ({ ...prev, repositorySelections: promotedSelections }));
       };
+      const formWithPromotedSelections = { ...form, repositorySelections: promotedSelections };
       if (isNew) {
         const a = await create(
-          buildCreatePayload(workspaceId, form, repositoryId, triggerActions.pending),
+          buildCreatePayload(workspaceId, form, repositoryIds, triggerActions.pending),
         );
-        promoteSelection();
+        promoteSelections();
         // Webhook automations need their URL + secret communicated to the
         // user; show the dialog and let its close handler do the redirect.
         // Everything else goes straight to the listings page with a toast.
         const hasWebhookTrigger = (a.triggers ?? []).some((t) => t.type === "webhook");
         if (hasWebhookTrigger && a.webhook_secret) {
-          const savedForm =
-            form.repositorySelection.kind === "discovered" && repositoryId
-              ? {
-                  ...form,
-                  repositorySelection: { kind: "registered" as const, id: repositoryId },
-                }
-              : form;
           const savedTriggers = a.triggers ?? [];
           triggerActions.loadTriggers(savedTriggers);
           triggerActions.clearPending();
-          onSaved(savedForm, savedTriggers);
+          onSaved(formWithPromotedSelections, savedTriggers);
           setCurrentId(a.id);
           setCreatedWebhook({ url: buildWebhookUrl(a.id), secret: a.webhook_secret });
         } else {
@@ -168,14 +175,10 @@ function useSaveHandler(opts: SaveHandlerOpts): () => Promise<void> {
           );
         }
       } else if (currentId) {
-        await update(currentId, buildUpdatePayload(form, repositoryId));
+        await update(currentId, buildUpdatePayload(form, repositoryIds));
         const persistedTriggers = await triggerActions.persistDrafts();
-        promoteSelection();
-        const savedForm =
-          form.repositorySelection.kind === "discovered" && repositoryId
-            ? { ...form, repositorySelection: { kind: "registered" as const, id: repositoryId } }
-            : form;
-        onSaved(savedForm, persistedTriggers);
+        promoteSelections();
+        onSaved(formWithPromotedSelections, persistedTriggers);
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -228,6 +231,17 @@ function useConditionMetadata(triggers: AutomationTrigger[], triggerTypes: Trigg
     defaultTaskTitle: activeTriggerInfo?.default_task_title ?? "",
     activeTriggerInfo,
   };
+}
+
+// useSupportsMultiRepo mirrors ConfigSection's own capability check (see
+// resolveExecutorType) so the save handler can enforce the same
+// single-repository invariant the picker renders — see
+// normalizeRepositorySelections for why this can't be skipped.
+function useSupportsMultiRepo(executorProfileId: string): boolean {
+  const executors = useAppStore((state) => state.executors.items);
+  return (
+    getMultiRepoExecutorDisabledReason(resolveExecutorType(executors, executorProfileId)) === null
+  );
 }
 
 function useAutoPromptUpdate(
@@ -323,6 +337,18 @@ function useAutomationPersistence(options: AutomationPersistenceOptions) {
   return { handleRemove };
 }
 
+function useEditorDirtyState(
+  isNew: boolean,
+  savedForm: FormState,
+  triggerActions: ReturnType<typeof useAutomationTriggerDrafts>,
+) {
+  const dirtyBaseline = isNew ? defaultForm : savedForm;
+  const triggersDirty =
+    triggerRevision(triggerActions.allTriggers) !==
+    triggerRevision(triggerActions.baselineTriggers);
+  return { dirtyBaseline, triggersDirty };
+}
+
 export function AutomationEditor({ workspaceId, automationId }: AutomationEditorProps) {
   const router = useRouter();
   const { create, update, remove } = useAutomations(workspaceId);
@@ -340,6 +366,8 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     triggerTypes,
   );
   useAutoPromptUpdate(activeTriggerInfo, conditionType, triggerTypes, setForm);
+  const supportsMultiRepo = useSupportsMultiRepo(form.executorProfileId);
+  const isPRTrigger = conditionType === "github_pr";
   useLoadAutomation({
     automationId,
     workspaceId,
@@ -363,6 +391,8 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     workspaceId,
     form,
     currentId,
+    supportsMultiRepo,
+    isPRTrigger,
     create,
     update,
     setSaving,
@@ -376,10 +406,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
     remove,
     onSaved: (nextSavedForm) => setSavedForm(nextSavedForm),
   });
-  const dirtyBaseline = isNew ? defaultForm : savedForm;
-  const triggersDirty =
-    triggerRevision(triggerActions.allTriggers) !==
-    triggerRevision(triggerActions.baselineTriggers);
+  const { dirtyBaseline, triggersDirty } = useEditorDirtyState(isNew, savedForm, triggerActions);
 
   return (
     <div className="max-w-3xl space-y-6" data-testid="automation-editor">

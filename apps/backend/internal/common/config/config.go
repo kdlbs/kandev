@@ -379,11 +379,6 @@ type FeaturesConfig struct {
 	// HTTP/WS route registration, and frontend nav/route visibility.
 	Office bool `mapstructure:"office" json:"office"`
 
-	// Plugins gates the extensible plugin system: backend service
-	// construction, HTTP/WS route registration, and frontend nav/route
-	// visibility.
-	Plugins bool `mapstructure:"plugins" json:"plugins"`
-
 	// AppStatusBar gates the global status bar on tablet/desktop and the
 	// corresponding Status drawer on phones. The snake_case mapstructure key
 	// keeps the config and KANDEV_FEATURES_APP_STATUS_BAR environment name aligned.

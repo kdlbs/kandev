@@ -512,6 +512,17 @@ function buildTaskSessionActions(set: ImmerSet) {
         syncEnvironmentMapping(draft, session.id, mergedSession.task_environment_id);
         reconcileActiveTurnForIdleSession(draft, mergedSession);
       }),
+    updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) =>
+      set((draft) => {
+        const session = draft.taskSessions.items[sessionId];
+        if (!session) return;
+        session.last_read_message_id = lastReadMessageId;
+        const sessionsByTask = draft.taskSessionsByTask.itemsByTaskId[session.task_id];
+        if (sessionsByTask) {
+          const match = sessionsByTask.find((s) => s.id === sessionId);
+          if (match) match.last_read_message_id = lastReadMessageId;
+        }
+      }),
     removeTaskSession: (taskId: string, sessionId: string) =>
       set((draft) => {
         delete draft.taskSessions.items[sessionId];

@@ -96,10 +96,20 @@ export class PanelPortalManager {
       this.version++;
       this.notify();
     } else {
-      // Panel remounted after fromJSON — update api & params
+      // Panel remounted after fromJSON — update api & params. Notify only
+      // when the api handle itself was replaced (not on every redundant
+      // acquire with the same api): consumers like usePanelActive bind an
+      // onDidActiveChange listener directly to the api instance and must
+      // learn about a swap to rebind, since the api itself carries no
+      // "I've been replaced" signal of its own.
+      const apiChanged = entry.api !== api;
       entry.api = api;
       entry.params = params;
       entry.component = component;
+      if (apiChanged) {
+        this.version++;
+        this.notify();
+      }
     }
     return entry;
   }

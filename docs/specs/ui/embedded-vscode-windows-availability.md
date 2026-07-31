@@ -1,10 +1,15 @@
 ---
-status: shipped
+status: archived
 created: 2026-07-29
 owner: Kandev
+superseded_by: embedded-vscode-executor-availability
 ---
 
 # Embedded VS Code Windows Availability
+
+> Archived on 2026-07-30. This host-wide rule is superseded by
+> [Embedded VS Code Executor Availability](embedded-vscode-executor-availability.md), which derives
+> availability from the active session's executor runtime.
 
 ## Why
 

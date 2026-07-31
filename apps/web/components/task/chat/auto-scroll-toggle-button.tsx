@@ -1,9 +1,10 @@
 "use client";
 
-import { IconArrowBarToDown, IconArrowBarToDownDashed } from "@tabler/icons-react";
+import { IconArrowBarToDown } from "@tabler/icons-react";
 
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
 import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
 
@@ -23,10 +24,17 @@ type Props = {
  * auto-scroll and catches the view up if the transcript progressed while
  * disabled. See message-list-native.tsx / message-list-virtuoso.tsx for the
  * renderer-side behavior driven by this preference.
+ *
+ * The icon renders dark green while enabled and reverts to the default
+ * muted color when disabled — the color swap alone carries the on/off
+ * signal.
  */
 export function AutoScrollToggleButton({ sessionId }: Props) {
+  const showControl = useAppStore((state) => state.userSettings.showTranscriptAutoScrollControl);
   const enabled = useTranscriptAutoScrollEnabled(sessionId);
   const setEnabled = useAppStore((state) => state.setTranscriptAutoScrollEnabled);
+
+  if (!showControl) return null;
 
   const label = enabled ? "Turn off transcript auto-scroll" : "Turn on transcript auto-scroll";
 
@@ -43,11 +51,10 @@ export function AutoScrollToggleButton({ sessionId }: Props) {
           aria-pressed={enabled}
           data-testid="auto-scroll-toggle-button"
         >
-          {enabled ? (
-            <IconArrowBarToDown className="h-3.5 w-3.5" />
-          ) : (
-            <IconArrowBarToDownDashed className="h-3.5 w-3.5" />
-          )}
+          <IconArrowBarToDown
+            className={cn("h-6 w-6", enabled && "text-green-600")}
+            data-testid="auto-scroll-toggle-icon"
+          />
         </Button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>

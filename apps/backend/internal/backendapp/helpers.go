@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -586,6 +585,9 @@ func registerRoutes(p routeParams) {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
 		p.services.Sentry.SetRepositoryLookup(repoLookup)
 	}
+	if p.services.Automation != nil {
+		p.services.Automation.Service.SetRepositoryLookup(repoLookup)
+	}
 	p.orchestratorSvc.SetWorkspaceMaterializer(handoffSvc)
 	// Phase 8 prompt enrichment — wire the office scheduler's
 	// TaskContextProvider so every run prompt rendered by the active
@@ -710,7 +712,6 @@ func webRuntimeConfig(debug bool) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:     "/api/v1",
 		WebSocketPath: "/ws",
-		HostOS:        runtime.GOOS,
 		Debug:         debug,
 	}
 }
@@ -729,12 +730,9 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 
 // bootActivePlugins populates the boot payload's Plugins list from every
 // active, UI-bundle-declaring plugin, per
-// docs/plans/plugins/PLUGIN-API.md ("Loading model"). Gated on
-// features.Plugins — separate from the /api/v1/features flag map itself,
-// this is active-bundle data the frontend still gates loading on via
-// useFeature("plugins").
+// docs/plans/plugins/PLUGIN-API.md ("Loading model").
 func bootActivePlugins(p routeParams) []webapp.ActivePluginPayload {
-	if !p.features.Plugins || p.services == nil || p.services.Plugins == nil {
+	if p.services == nil || p.services.Plugins == nil {
 		return nil
 	}
 	records := p.services.Plugins.ActiveUIPlugins()
@@ -1070,7 +1068,7 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Automation handlers (HTTP + WebSocket)")
 	}
 
-	if p.features.Plugins && p.services.Plugins != nil {
+	if p.services.Plugins != nil {
 		if p.authSvc != nil {
 			// Lets an auth-capable plugin complete OIDC/SAML SSO: it asserts a
 			// validated external identity on its webhook response and the host

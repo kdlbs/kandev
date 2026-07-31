@@ -26,6 +26,7 @@ Or invoke the binary directly: `apps/backend/bin/acpdbg <subcommand> [flags]`.
 | `list` | Enumerate registered ACP agents with their spawn command |
 | `probe <agent>` | `initialize` → `session/new` → close. Shows models, modes, auth methods. |
 | `probe --exec "<cmd> [args...]"` | Same but against an arbitrary binary not in the registry |
+| `mcp-probe <agent>` | Inject a temporary HTTP MCP sentinel into `session/new` and report delivery separately from observed initialize, `tools/list`, and tool use. |
 | `prompt <agent> --prompt "..." [--model M] [--mode M]` | Full prompt round-trip, collects text chunks from `session/update` |
 | `session-load <agent> --session-id <id> [--prompt "..."]` | Load an existing session in `--workdir`, then optionally verify it with a prompt |
 | `matrix` | Probe every registered ACP agent in parallel, write one JSONL per agent + `matrix-summary.json` |
@@ -60,6 +61,22 @@ apps/backend/bin/acpdbg session-load codex-acp \
 `session-load` sends the selected `--workdir` as the ACP `cwd` parameter. The
 JSONL wire frames are authoritative when a provider replays earlier session
 messages during load.
+
+### Probe MCP attachment
+
+```bash
+apps/backend/bin/acpdbg mcp-probe --timeout 45s auggie
+```
+
+The summary lists the agent's advertised HTTP/SSE capability and the sentinel
+milestones separately. `sentinel_delivered: true` means `session/new` accepted
+the injected configuration. `initialize_observed` and `tools_list_observed`
+are direct traffic seen by the sentinel. If the result is `unobserved`, the
+agent did not contact the temporary endpoint during the bounded probe window;
+that is not a portable failure because agents may attach lazily or use a
+different transport. Sentinel JSONL metadata includes only opaque connection
+IDs and timestamps, while ordinary raw frames remain available because this is
+an explicit developer command.
 
 ## JSONL format
 

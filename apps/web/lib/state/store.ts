@@ -160,8 +160,10 @@ export type AppState = KanbanSlice & {
   sessionTodos: (typeof defaultSessionRuntimeState)["sessionTodos"];
   agentCapabilities: (typeof defaultSessionRuntimeState)["agentCapabilities"];
   sessionModels: (typeof defaultSessionRuntimeState)["sessionModels"];
+  sessionMcpStatus: (typeof defaultSessionRuntimeState)["sessionMcpStatus"];
   promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
+  embeddedVscodeSupport: (typeof defaultSessionRuntimeState)["embeddedVscodeSupport"];
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
@@ -305,6 +307,10 @@ export type AppState = KanbanSlice & {
   upsertProcessStatus: (status: ProcessStatusEntry) => void;
   clearProcessOutput: (processId: string) => void;
   setActiveProcess: (sessionId: string, processId: string) => void;
+  setSessionMCPStatus: (
+    sessionId: string,
+    history: import("./slices/session-runtime/types").MCPAttachmentHistory,
+  ) => void;
   setPreviewOpen: (sessionId: string, open: boolean) => void;
   togglePreviewOpen: (sessionId: string) => void;
   setPreviewView: (sessionId: string, view: PreviewViewMode) => void;
@@ -314,6 +320,9 @@ export type AppState = KanbanSlice & {
   setPreviewUrlDraft: (sessionId: string, url: string) => void;
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
+  setConnectionIssueSeverity: (
+    severity: import("@/lib/types/connection").ConnectionIssueSeverity,
+  ) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
@@ -329,13 +338,11 @@ export type AppState = KanbanSlice & {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
-  openQuickChat: (
-    sessionId: string,
-    workspaceId: string,
-    agentProfileId?: string,
-    kind?: UISliceTypes.QuickChatSessionKind,
-  ) => void;
+  openQuickChat: UIA["openQuickChat"];
   addQuickChatSession: UIA["addQuickChatSession"];
+  syncQuickChatSessions: UIA["syncQuickChatSessions"];
+  upsertQuickChatSessionFromEvent: UIA["upsertQuickChatSessionFromEvent"];
+  removeQuickChatSessionsForTask: UIA["removeQuickChatSessionsForTask"];
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
@@ -379,6 +386,7 @@ export type AppState = KanbanSlice & {
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   setTaskSession: (session: TaskSession) => void;
+  updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
@@ -477,6 +485,7 @@ export type AppState = KanbanSlice & {
     patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
+  setEmbeddedVscodeSupport: (sessionId: string, supported: boolean) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   createSidebarView: UIA["createSidebarView"];
   updateSidebarDraft: UIA["updateSidebarDraft"];

@@ -15,6 +15,7 @@ import {
   clearPinnedSessionIfOverridden,
   shouldPreservePinnedSessionForTask,
 } from "@/lib/ws/handlers/agent-session";
+import { syncQuickChatFromTaskEvent } from "@/lib/ws/handlers/quick-chat";
 
 type KanbanTask = KanbanState["tasks"][number];
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
@@ -344,8 +345,12 @@ type TaskUpsertMessage = TaskCreatedMessage | TaskStateChangedMessage;
 type TaskUpsertAction = "task.created" | "task.state_changed";
 
 function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessage): void {
-  // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
-  if (message.payload.is_ephemeral) return;
+  // Ephemeral tasks never reach the Kanban board, but quick chats are shared
+  // across devices — mirror them into the tab strip before bailing out.
+  if (message.payload.is_ephemeral) {
+    syncQuickChatFromTaskEvent(store, message.payload);
+    return;
+  }
 
   // Capture the previous primary session id BEFORE the upsert so we can
   // detect a primary-session swap (e.g. workflow profile switch reusing a
@@ -415,8 +420,11 @@ function handleTaskUpsert(
   store: StoreApi<AppState>,
   message: TaskUpsertMessage,
 ): void {
-  // Skip ephemeral tasks (e.g., quick chat) - they shouldn't appear on the Kanban board
-  if (message.payload.is_ephemeral) return;
+  // See handleTaskUpdated: off the board, but still a quick-chat tab.
+  if (message.payload.is_ephemeral) {
+    syncQuickChatFromTaskEvent(store, message.payload);
+    return;
+  }
 
   const beforeState = store.getState();
   store.setState((state) =>
@@ -434,6 +442,9 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
     "task.deleted": (message) => {
       const deletedId = message.payload.task_id;
       removeRecentTask(deletedId);
+      // A quick chat closed on another device must not linger here as a tab
+      // pointing at a task the backend already deleted.
+      store.getState().removeQuickChatSessionsForTask(deletedId);
 
       const currentState = store.getState();
       const sessionIds = (currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map(

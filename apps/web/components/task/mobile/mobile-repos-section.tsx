@@ -7,6 +7,9 @@ import { useToast } from "@/components/toast-provider";
 import type { Repository, TaskSession } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
 
+const EMPTY_REPOSITORIES: Repository[] = [];
+const EMPTY_TASK_SESSIONS: TaskSession[] = [];
+
 type RepoRow = {
   taskRepositoryId: string;
   repositoryId: string;
@@ -63,10 +66,14 @@ function useTaskRepoRows(taskId: string | null, workspaceId: string | null): Rep
     return task?.repositories;
   });
   const workspaceRepos = useAppStore((s) =>
-    workspaceId ? (s.repositories.itemsByWorkspaceId[workspaceId] ?? []) : [],
+    workspaceId
+      ? (s.repositories.itemsByWorkspaceId[workspaceId] ?? EMPTY_REPOSITORIES)
+      : EMPTY_REPOSITORIES,
   );
   const taskSessions = useAppStore((s) =>
-    taskId ? (s.taskSessionsByTask.itemsByTaskId[taskId] ?? []) : [],
+    taskId
+      ? (s.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_TASK_SESSIONS)
+      : EMPTY_TASK_SESSIONS,
   );
   const primarySessionId = useAppStore((s) => {
     if (!taskId) return null;
@@ -103,8 +110,8 @@ function RepoRowItem({
         }
       }}
       data-testid={`mobile-repo-row-${row.repositoryId}`}
-      className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer select-none ${
-        isActive ? "bg-accent" : "hover:bg-accent/50"
+      className={`flex items-center gap-2 border px-2 py-2 rounded-md cursor-pointer select-none ${
+        isActive ? "border-primary/50 bg-card" : "border-transparent hover:bg-muted"
       }`}
     >
       <IconFolder className="h-4 w-4 text-muted-foreground shrink-0" />

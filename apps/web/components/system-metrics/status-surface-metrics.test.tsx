@@ -9,6 +9,7 @@ import { StatusSurfaceMetrics } from "./status-surface-metrics";
 
 const responsiveState = vi.hoisted(() => ({ isMobile: false }));
 const subscribeMock = vi.hoisted(() => vi.fn());
+const metricsTestId = "app-status-metrics";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
@@ -27,7 +28,7 @@ vi.mock("@/hooks/use-system-metrics-subscription", () => ({
   useSystemMetricsSubscription: subscribeMock,
 }));
 
-function renderMetrics(drawerOpen = false, simplified = false) {
+function renderMetrics(drawerOpen = false, simplified = false, loading = false) {
   return render(
     <StateProvider
       initialState={
@@ -39,56 +40,58 @@ function renderMetrics(drawerOpen = false, simplified = false) {
           },
           system: {
             ...defaultSystemState.system,
-            metrics: {
-              timestamp: "2026-06-23T10:00:00Z",
-              interval_seconds: 5,
-              sources: [
-                {
-                  id: "backend",
-                  label: "Host",
-                  kind: "backend",
-                  metrics: [
+            metrics: loading
+              ? null
+              : {
+                  timestamp: "2026-06-23T10:00:00Z",
+                  interval_seconds: 5,
+                  sources: [
                     {
-                      id: "cpu_percent",
-                      label: "CPU",
-                      unit: "%",
-                      value: 42,
-                      available: true,
+                      id: "backend",
+                      label: "Host",
+                      kind: "backend",
+                      metrics: [
+                        {
+                          id: "cpu_percent",
+                          label: "CPU",
+                          unit: "%",
+                          value: 42,
+                          available: true,
+                        },
+                        {
+                          id: "memory_percent",
+                          label: "Memory",
+                          unit: "%",
+                          value: 51,
+                          available: true,
+                        },
+                        {
+                          id: "disk_percent",
+                          label: "Disk",
+                          unit: "%",
+                          value: 63,
+                          available: true,
+                        },
+                        { id: "io_load", label: "Load average", value: 2.5, available: true },
+                      ],
                     },
                     {
-                      id: "memory_percent",
-                      label: "Memory",
-                      unit: "%",
-                      value: 51,
-                      available: true,
+                      id: "executor-session-1",
+                      label: "Demo executor",
+                      kind: "execution",
+                      session_id: "session-1",
+                      metrics: [
+                        {
+                          id: "memory_percent",
+                          label: "Memory",
+                          unit: "%",
+                          value: 99,
+                          available: true,
+                        },
+                      ],
                     },
-                    {
-                      id: "disk_percent",
-                      label: "Disk",
-                      unit: "%",
-                      value: 63,
-                      available: true,
-                    },
-                    { id: "io_load", label: "Load average", value: 2.5, available: true },
                   ],
                 },
-                {
-                  id: "executor-session-1",
-                  label: "Demo executor",
-                  kind: "execution",
-                  session_id: "session-1",
-                  metrics: [
-                    {
-                      id: "memory_percent",
-                      label: "Memory",
-                      unit: "%",
-                      value: 99,
-                      available: true,
-                    },
-                  ],
-                },
-              ],
-            },
           },
         } satisfies Partial<AppState>
       }
@@ -116,7 +119,7 @@ describe("StatusSurfaceMetrics", () => {
     renderMetrics();
 
     expect(subscribeMock).toHaveBeenCalledWith(true);
-    expect(screen.getByTestId("app-status-metrics")).toBeTruthy();
+    expect(screen.getByTestId(metricsTestId)).toBeTruthy();
     expect(screen.getByLabelText("CPU 42%")).toBeTruthy();
     expect(screen.getByLabelText("Memory 51%")).toBeTruthy();
     expect(screen.getByLabelText("Disk 63%")).toBeTruthy();
@@ -133,12 +136,20 @@ describe("StatusSurfaceMetrics", () => {
     expect(screen.queryByLabelText("Memory 99%")).toBeNull();
   });
 
+  it("keeps the desktop metrics item hidden while the first snapshot is loading", () => {
+    renderMetrics(false, false, true);
+
+    expect(subscribeMock).toHaveBeenCalledWith(true);
+    expect(screen.queryByTestId(metricsTestId)).toBeNull();
+    expect(screen.queryByText("Metrics unavailable")).toBeNull();
+  });
+
   it("does not subscribe or render while the phone Status drawer is closed", () => {
     responsiveState.isMobile = true;
     renderMetrics(false);
 
     expect(subscribeMock).toHaveBeenCalledWith(false);
-    expect(screen.queryByTestId("app-status-metrics")).toBeNull();
+    expect(screen.queryByTestId(metricsTestId)).toBeNull();
   });
 
   it("subscribes and renders rows when the phone Status drawer opens", () => {
@@ -150,6 +161,15 @@ describe("StatusSurfaceMetrics", () => {
     expect(metricsRow?.className).toContain("min-h-11");
     expect(metricsRow?.className).toContain("w-full");
     expect(metricsRow?.className).toContain("min-w-0");
+  });
+
+  it("keeps the phone metrics row hidden while the first snapshot is loading", () => {
+    responsiveState.isMobile = true;
+    renderMetrics(true, false, true);
+
+    expect(subscribeMock).toHaveBeenCalledWith(true);
+    expect(screen.queryByTestId(metricsTestId)).toBeNull();
+    expect(screen.queryByText("Metrics unavailable")).toBeNull();
   });
 
   it("omits the host marker and meters in simplified desktop mode", () => {

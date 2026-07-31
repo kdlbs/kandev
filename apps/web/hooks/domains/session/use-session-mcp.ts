@@ -11,8 +11,11 @@ const DEFAULT_KANDEV: string[] = ["kandev"];
  * Resolves MCP support and configured MCP server names for the current session's agent.
  * Returns whether the agent supports MCP and the list of active MCP server names.
  */
-export function useSessionMcp(agentProfileId: string | null | undefined) {
+export function useSessionMcp(agentProfileId: string | null | undefined, sessionId?: string) {
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
+  const attachmentHistory = useAppStore((state) =>
+    sessionId ? state.sessionMcpStatus.bySessionId[sessionId] : undefined,
+  );
   // Track which profileId the fetched servers belong to, so stale results are ignored
   const [fetchResult, setFetchResult] = useState<{
     profileId: string;
@@ -49,10 +52,12 @@ export function useSessionMcp(agentProfileId: string | null | undefined) {
   }, [agentProfileId, supportsMcp]);
 
   const mcpServers = useMemo(() => {
+    const observedServers = attachmentHistory?.current.servers;
+    if (observedServers?.length) return observedServers.map((server) => server.name);
     if (!supportsMcp) return EMPTY_SERVERS;
     if (fetchResult && fetchResult.profileId === agentProfileId) return fetchResult.servers;
     return DEFAULT_KANDEV;
-  }, [supportsMcp, fetchResult, agentProfileId]);
+  }, [attachmentHistory, supportsMcp, fetchResult, agentProfileId]);
 
-  return { supportsMcp, mcpServers };
+  return { supportsMcp, mcpServers, attachmentHistory };
 }

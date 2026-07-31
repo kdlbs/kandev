@@ -12,6 +12,38 @@ type SeedResult = {
   taskId: string;
 };
 
+async function mutedBackgroundColor(page: import("@playwright/test").Page): Promise<string> {
+  return page.evaluate(() => {
+    const sample = document.createElement("div");
+    sample.className = "bg-muted";
+    document.body.append(sample);
+    const color = getComputedStyle(sample).backgroundColor;
+    sample.remove();
+    return color;
+  });
+}
+
+async function foregroundColor(page: import("@playwright/test").Page): Promise<string> {
+  return page.evaluate(() => {
+    const sample = document.createElement("div");
+    sample.className = "text-foreground";
+    document.body.append(sample);
+    const color = getComputedStyle(sample).color;
+    sample.remove();
+    return color;
+  });
+}
+
+async function computedStyle(
+  locator: import("@playwright/test").Locator,
+  property: "backgroundColor" | "color",
+): Promise<string> {
+  return locator.evaluate(
+    (element, styleProperty) => getComputedStyle(element)[styleProperty],
+    property,
+  );
+}
+
 /**
  * Stand up a workspace + workflow + task that reaches the Done column
  * immediately (auto-start + on_turn_complete moves it), mirroring
@@ -214,6 +246,44 @@ test.describe("Multi-PR CI popover", () => {
     await session.prTopbarButton().click();
     await expect(testPage.getByTestId(`pr-topbar-menu-item-${OWNER}-web-42`)).toBeVisible();
     await expect(testPage.getByTestId(`pr-topbar-menu-item-${OWNER}-api-77`)).toBeVisible();
+  });
+
+  test("uses neutral hover surfaces without recoloring PR status icons", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Multi Popover Neutral States";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associateTwoPRs(apiClient, seed.taskId);
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const expectedMuted = await mutedBackgroundColor(testPage);
+    const expectedForeground = await foregroundColor(testPage);
+
+    await session.hoverPRTopbar();
+    const inactiveChip = session.prMultiPopoverTab(OWNER, "api", 77);
+    const inactiveChipIcon = inactiveChip.locator("svg");
+    const chipIconColor = await computedStyle(inactiveChipIcon, "color");
+    await inactiveChip.hover();
+    await expect.poll(() => computedStyle(inactiveChip, "backgroundColor")).toBe(expectedMuted);
+    expect(await computedStyle(inactiveChipIcon, "color")).toBe(chipIconColor);
+
+    await session.prTopbarButton().click();
+    const dropdownRow = testPage.getByTestId(`pr-topbar-menu-item-${OWNER}-web-42`);
+    const dropdownIcon = dropdownRow.locator("svg").first();
+    const dropdownSecondaryCopy = dropdownRow.getByText("Failing web PR");
+    const dropdownIconColor = await computedStyle(dropdownIcon, "color");
+    await dropdownRow.focus();
+    await expect.poll(() => computedStyle(dropdownRow, "backgroundColor")).toBe(expectedMuted);
+    await expect.poll(() => computedStyle(dropdownSecondaryCopy, "color")).toBe(expectedForeground);
+    expect(await computedStyle(dropdownIcon, "color")).toBe(dropdownIconColor);
   });
 
   test('selecting a different PR from the "+" add-panel menu opens its own tab', async ({

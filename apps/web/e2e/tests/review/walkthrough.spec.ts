@@ -344,9 +344,21 @@ test.describe("Code walkthrough", () => {
     const card = await openWalkthrough(testPage);
     await expect(session.walkthroughEditorRange()).toBeVisible({ timeout: 15_000 });
 
+    for (let step = 0; step < 3; step++) {
+      await card.getByTestId("walkthrough-next").click();
+    }
+    await expect(card.getByTestId("walkthrough-step-header")).toContainText("Step 4 / 5");
+
     await testPage.evaluate(() => window.dispatchEvent(new CustomEvent("open-review-dialog")));
     const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
+    await expect(reviewDialog.locator('[data-walkthrough-active="true"]')).toHaveCount(0);
+    const reviewProgress = reviewDialog.getByText(/^0 of \d+ files reviewed$/);
+    await expect(reviewProgress).toBeVisible({ timeout: 15_000 });
+    const initialProgress = await reviewProgress.textContent();
+    await testPage.waitForTimeout(600);
+    await expect(reviewDialog.getByTestId("review-diff-scroll")).toHaveJSProperty("scrollTop", 0);
+    await expect(reviewProgress).toHaveText(initialProgress ?? "");
     await expectWalkthroughBehindDialog(testPage, reviewDialog, [
       { locator: card, name: "walkthrough window" },
       { locator: session.walkthroughLauncher().locator(".."), name: "walkthrough launcher" },

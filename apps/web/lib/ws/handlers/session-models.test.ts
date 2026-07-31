@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { BackendMessageMap } from "@/lib/types/backend";
+import type { TaskSession } from "@/lib/types/http";
 import type { SessionModelsPayload } from "@/lib/types/session-runtime-payloads";
 import { registerSessionModelsHandlers } from "./session-models";
 
 const providerModelId = "gpt-5.6-sol";
 const reasoningOptionId = "reasoning_effort";
+const reasoningOptionName = "Reasoning Effort";
 const optionDescription = "Controls how much reasoning the model performs.";
 const valueDescription = "Faster responses with less reasoning.";
 
@@ -15,6 +17,7 @@ function makeStore(overrides: Partial<AppState> = {}) {
     activeModel: { bySessionId: {} },
     contextWindow: { bySessionId: {} },
     sessionModels: { bySessionId: {} },
+    taskSessions: { items: {} },
     setActiveModel: vi.fn(),
     ...overrides,
   } as unknown as AppState;
@@ -57,6 +60,17 @@ function makeMessage(payload: SessionModelsPayload): BackendMessageMap["session.
     action: "session.models_updated",
     payload,
   };
+}
+
+function makeTaskSession(metadata: Record<string, unknown>): TaskSession {
+  return {
+    id: "session-1",
+    task_id: "task-1",
+    state: "WAITING_FOR_INPUT",
+    metadata,
+    started_at: "2026-06-11T00:00:00.000Z",
+    updated_at: "2026-06-11T00:00:00.000Z",
+  } as TaskSession;
 }
 
 describe("session.models_updated handler", () => {
@@ -154,7 +168,7 @@ describe("session.models_updated config metadata", () => {
             {
               type: "select",
               id: reasoningOptionId,
-              name: "Reasoning Effort",
+              name: reasoningOptionName,
               description: optionDescription,
               current_value: "low",
               options: [
@@ -181,7 +195,7 @@ describe("session.models_updated config metadata", () => {
         {
           type: "select",
           id: reasoningOptionId,
-          name: "Reasoning Effort",
+          name: reasoningOptionName,
           description: optionDescription,
           currentValue: "low",
           category: undefined,
@@ -195,5 +209,117 @@ describe("session.models_updated config metadata", () => {
         },
       ],
     });
+  });
+});
+
+describe("session.models_updated persisted runtime hydration", () => {
+  it("hydrates the first provider snapshot from persisted runtime metadata", () => {
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "session-1": makeTaskSession({
+            runtime_config: {
+              model: providerModelId,
+              config_options: { [reasoningOptionId]: "medium" },
+            },
+            runtime_config_overrides: {
+              config_options: { [reasoningOptionId]: "high" },
+            },
+            acp_config_baseline: {
+              model: providerModelId,
+              [reasoningOptionId]: "medium",
+            },
+          }),
+        },
+      },
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload(providerModelId, {
+          config_options: [
+            {
+              type: "select",
+              id: reasoningOptionId,
+              name: reasoningOptionName,
+              current_value: "medium",
+              options: [
+                { value: "medium", name: "Medium" },
+                { value: "high", name: "High" },
+              ],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(store.getState().sessionModels.bySessionId["session-1"]).toMatchObject({
+      currentModelId: providerModelId,
+      configBaseline: {
+        model: providerModelId,
+        [reasoningOptionId]: "medium",
+      },
+      configOptions: [expect.objectContaining({ id: reasoningOptionId, currentValue: "high" })],
+    });
+  });
+});
+
+describe("session.models_updated live updates", () => {
+  it("trusts later provider snapshots over persisted runtime metadata", () => {
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "session-1": makeTaskSession({
+            runtime_config: { config_options: { [reasoningOptionId]: "high" } },
+          }),
+        },
+      },
+      sessionModels: {
+        bySessionId: {
+          "session-1": {
+            currentModelId: providerModelId,
+            models: [],
+            configOptions: [],
+          },
+        },
+      } as AppState["sessionModels"],
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload(providerModelId, {
+          config_options: [
+            {
+              type: "select",
+              id: reasoningOptionId,
+              name: reasoningOptionName,
+              current_value: "high",
+              options: [{ value: "high", name: "High" }],
+            },
+          ],
+        }),
+      ),
+    );
+    handler(
+      makeMessage(
+        makePayload(providerModelId, {
+          config_options: [
+            {
+              type: "select",
+              id: reasoningOptionId,
+              name: reasoningOptionName,
+              current_value: "low",
+              options: [{ value: "low", name: "Low" }],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(
+      store.getState().sessionModels.bySessionId["session-1"].configOptions[0]?.currentValue,
+    ).toBe("low");
   });
 });

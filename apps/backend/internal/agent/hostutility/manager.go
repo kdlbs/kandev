@@ -624,6 +624,7 @@ func buildProbeRequest(
 			Command:   probeCommand.Args(),
 			ModelFlag: cfg.ModelFlag.Args(),
 			WorkDir:   inst.workDir,
+			Env:       agents.RuntimeEnvFor(ia),
 			StripEnv:  agents.StripEnvFor(ia),
 		},
 	}

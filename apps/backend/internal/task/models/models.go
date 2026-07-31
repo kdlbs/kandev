@@ -145,6 +145,10 @@ const SessionMetaKeyACPConfigBaseline = "acp_config_baseline"
 // reconnection. It is display metadata and is not replayed to the provider.
 const SessionMetaKeyACPModelState = "acp_model_state"
 
+// SessionMetaKeyMCPAttachmentState records bounded, safe evidence about MCP
+// attachment for this task session and its immediate prior attempts.
+const SessionMetaKeyMCPAttachmentState = "mcp_attachment_state"
+
 // SessionMetaKeyGitCredentialSnapshot records the non-secret Git credential
 // routing contract that successfully launched or resumed a session.
 const SessionMetaKeyGitCredentialSnapshot = "git_credential_snapshot"
@@ -945,6 +949,13 @@ type TaskSession struct {
 	IsPrimary     bool         `json:"is_primary"`              // Whether this is the primary session for the task
 	IsPassthrough bool         `json:"is_passthrough"`          // Whether this session uses passthrough (PTY) mode
 	ReviewStatus  ReviewStatus `json:"review_status,omitempty"` // zero value = no review needed
+	// LastReadMessageID is the id of the newest message the frontend has
+	// marked as read for this session — the Slack-style "read cursor" used
+	// to position the unread ("New") divider in the transcript. Advanced to
+	// the latest message id whenever the session becomes the visible chat
+	// panel; the frontend snapshots the PRIOR value at that moment to draw
+	// the divider before overwriting it.
+	LastReadMessageID string `json:"last_read_message_id,omitempty"`
 }
 
 // ToAPI converts internal TaskSession to API type
@@ -1006,6 +1017,9 @@ func (s *TaskSession) ToAPI() map[string]interface{} {
 	// chat. Omit when blank so kanban responses look unchanged.
 	if s.AgentProfileID != "" {
 		result["agent_profile_id"] = s.AgentProfileID
+	}
+	if s.LastReadMessageID != "" {
+		result["last_read_message_id"] = s.LastReadMessageID
 	}
 	return result
 }

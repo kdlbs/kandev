@@ -141,6 +141,123 @@ func TestRenameTaskSession(t *testing.T) {
 	}
 }
 
+// TestUpdateTaskSessionLastReadMessageID verifies the read-cursor setter
+// rejects a missing session, persists the message id (round-tripping through
+// both GetTaskSession and ListTaskSessions, which scan via the single-row and
+// multi-row helpers respectively), that ToAPI omits an empty cursor, and that
+// the cursor never regresses when a stale/out-of-order messageID is applied
+// after a newer one already landed.
+func TestUpdateTaskSessionLastReadMessageID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "missing-session", "msg-1"); !errors.Is(err, models.ErrTaskSessionNotFound) {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID error = %v, want ErrTaskSessionNotFound", err)
+	}
+
+	seedForMsgTest(t, repo, "task-read", "session-read", "turn-read")
+	now := time.Now().UTC()
+	insertAgentMsg(t, repo, "msg-1", "session-read", "turn-read", "user", "hi", now)
+	insertAgentMsg(t, repo, "msg-2", "session-read", "turn-read", "agent", "hello", now.Add(time.Second))
+
+	session, err := repo.GetTaskSession(ctx, "session-read")
+	if err != nil {
+		t.Fatalf("GetTaskSession before mark-read: %v", err)
+	}
+	if _, ok := session.ToAPI()["last_read_message_id"]; ok {
+		t.Fatalf("ToAPI() should omit last_read_message_id when empty")
+	}
+
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-read", "msg-1"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, "session-read")
+	if err != nil {
+		t.Fatalf("GetTaskSession after mark-read: %v", err)
+	}
+	if session.LastReadMessageID != "msg-1" {
+		t.Fatalf("session.LastReadMessageID = %q, want %q", session.LastReadMessageID, "msg-1")
+	}
+	if got := session.ToAPI()["last_read_message_id"]; got != "msg-1" {
+		t.Fatalf(`ToAPI()["last_read_message_id"] = %v, want "msg-1"`, got)
+	}
+
+	// Round-trips through the multi-row scan path (ListTaskSessions) too.
+	sessions, err := repo.ListTaskSessions(ctx, "task-read")
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(sessions) != 1 || sessions[0].LastReadMessageID != "msg-1" {
+		t.Fatalf("ListTaskSessions did not carry LastReadMessageID: %#v", sessions)
+	}
+
+	// Advancing to a newer message overwrites the cursor.
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-read", "msg-2"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID advance: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, "session-read")
+	if err != nil {
+		t.Fatalf("GetTaskSession after advance: %v", err)
+	}
+	if session.LastReadMessageID != "msg-2" {
+		t.Fatalf("session.LastReadMessageID = %q, want %q", session.LastReadMessageID, "msg-2")
+	}
+
+	// A delayed/retried request for the older message (out-of-order arrival)
+	// must not regress the cursor — it's a silent no-op, not an error.
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-read", "msg-1"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID stale update: %v", err)
+	}
+	session, err = repo.GetTaskSession(ctx, "session-read")
+	if err != nil {
+		t.Fatalf("GetTaskSession after stale update: %v", err)
+	}
+	if session.LastReadMessageID != "msg-2" {
+		t.Fatalf("session.LastReadMessageID = %q, want unchanged %q after stale update", session.LastReadMessageID, "msg-2")
+	}
+}
+
+// TestUpdateTaskSessionLastReadMessageIDTiebreaksEqualTimestampsByID verifies
+// the monotonic guard's deterministic tiebreaker: when two messages share the
+// exact same created_at (e.g. a burst of messages persisted in the same
+// instant), ordering falls back to comparing message id, and a "stale" id in
+// that ordering is still rejected rather than silently accepted just because
+// the timestamps tie.
+func TestUpdateTaskSessionLastReadMessageIDTiebreaksEqualTimestampsByID(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+
+	seedForMsgTest(t, repo, "task-tie", "session-tie", "turn-tie")
+	sameInstant := time.Now().UTC()
+	insertAgentMsg(t, repo, "msg-a", "session-tie", "turn-tie", "user", "a", sameInstant)
+	insertAgentMsg(t, repo, "msg-b", "session-tie", "turn-tie", "agent", "b", sameInstant)
+
+	// "msg-b" > "msg-a" lexically, so it's the tiebreak winner at this
+	// shared timestamp — advancing to it must succeed.
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-tie", "msg-b"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID to tiebreak winner: %v", err)
+	}
+
+	// Falling back to the tiebreak loser at the same timestamp must be
+	// rejected as stale, exactly like a strictly-older timestamp would be.
+	if err := repo.UpdateTaskSessionLastReadMessageID(ctx, "session-tie", "msg-a"); err != nil {
+		t.Fatalf("UpdateTaskSessionLastReadMessageID stale tiebreak: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session-tie")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.LastReadMessageID != "msg-b" {
+		t.Fatalf("session.LastReadMessageID = %q, want unchanged %q after stale tiebreak", session.LastReadMessageID, "msg-b")
+	}
+}
+
+// TestTaskSessionNotFoundErrorsAreTyped verifies that GetTaskSession,
+// UpdateTaskSession, UpdateTaskSessionState, and UpdateTaskSessionBaseCommit
+// all return ErrTaskSessionNotFound for a missing session, that
+// GetTaskSessionByTaskAndAgent translates not-found to (nil, nil), and that
+// GetPrimarySessionByTaskID returns ErrNoPrimarySession, while operations on
+// an existing session succeed.
 func TestTaskSessionNotFoundErrorsAreTyped(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

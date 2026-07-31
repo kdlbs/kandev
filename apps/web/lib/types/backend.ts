@@ -1,6 +1,5 @@
 import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
 import type { TaskNoteDeletedEventPayload, TaskNoteEventPayload } from "./task-note-events";
-import type { RunEventAppendedPayload } from "./run-events";
 
 export type BackendMessageType = keyof BackendMessageMap;
 
@@ -8,9 +7,10 @@ export type { BackendMessage } from "./backend-message";
 import type { BackendMessage } from "./backend-message";
 import type { OfficeBackendMessageMap } from "./office-events";
 export type { OfficeEventType, OfficeEventPayload } from "./office-events";
+import type { RunEventAppendedPayload } from "./run-events";
+export type { RunEventAppendedPayload } from "./run-events";
 
 import type {
-  AvailableAgent,
   ForegroundActivity,
   SavedLayout,
   SidebarViewApi,
@@ -23,7 +23,6 @@ import type {
   TaskSessionState,
   StepEvents,
   TaskState,
-  ToolStatus,
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
@@ -35,6 +34,7 @@ import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
   SessionModelsPayload,
+  SessionMCPStatusPayload,
   SessionPromptUsagePayload,
   SessionTodosPayload,
 } from "./session-runtime-payloads";
@@ -73,6 +73,7 @@ export type KanbanUpdatePayload = {
 
 export type TaskEventPayload = {
   task_id: string;
+  workspace_id?: string;
   workflow_id: string;
   old_workflow_id?: string | null;
   workflow_step_id: string;
@@ -105,58 +106,31 @@ export type TaskEventPayload = {
   archived_at?: string | null;
   updated_at?: string;
   is_ephemeral: boolean;
+  /** Task origin (e.g. "manual", "automation_run"). */
+  origin?: string;
   parent_id?: string | null;
   metadata?: Record<string, unknown> | null;
   /** Deletion reason on task.deleted (e.g. "pr_approved_by_user"). Absent otherwise. */
   reason?: string;
 };
 
-export type AgentUpdatePayload = {
-  agentId: string;
-  status: "idle" | "running" | "error";
-  message?: string;
-};
-
-export type AgentAvailableUpdatedPayload = {
-  agents: AvailableAgent[];
-  tools?: ToolStatus[];
-};
-
-export type AgentInstallJobPayload = {
-  job_id: string;
-  agent_name: string;
-  status: "queued" | "running" | "succeeded" | "failed";
-  output?: string;
-  error?: string;
-  exit_code?: number;
-  started_at: string;
-  finished_at?: string;
-};
-
-export type AgentInstallOutputPayload = {
-  job_id: string;
-  agent_name: string;
-  chunk: string;
-};
-
-export type AgentUpdateJobPayload = {
-  job_id: string;
-  agent_name: string;
-  status: "queued" | "resolving" | "updating" | "refreshing" | "succeeded" | "failed";
-  current_version?: string;
-  target_version?: string;
-  output?: string;
-  error?: string;
-  refresh_error?: string;
-  started_at: string;
-  finished_at?: string;
-};
-
-export type AgentUpdateOutputPayload = {
-  job_id: string;
-  agent_name: string;
-  chunk: string;
-};
+// Agent lifecycle payloads (extracted to reduce file size)
+import type {
+  AgentUpdatePayload,
+  AgentAvailableUpdatedPayload,
+  AgentInstallJobPayload,
+  AgentInstallOutputPayload,
+  AgentUpdateJobPayload,
+  AgentUpdateOutputPayload,
+} from "./agent-payloads";
+export type {
+  AgentUpdatePayload,
+  AgentAvailableUpdatedPayload,
+  AgentInstallJobPayload,
+  AgentInstallOutputPayload,
+  AgentUpdateJobPayload,
+  AgentUpdateOutputPayload,
+} from "./agent-payloads";
 
 export type TerminalOutputPayload = {
   terminalId: string;
@@ -405,8 +379,13 @@ export type UserSettingsUpdatedPayload = {
   default_editor_id?: string;
   enable_preview_on_click?: boolean;
   chat_submit_key?: string;
+  show_anchored_prompt_bar?: boolean;
+  show_scroll_to_last_prompt?: boolean;
+  show_scroll_to_start?: boolean;
+  show_transcript_auto_scroll_control?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
+  unread_divider?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -488,6 +467,7 @@ export {
   type SessionModelInfoPayload,
   type ConfigOptionPayload,
   type SessionModelsPayload,
+  type SessionMCPStatusPayload,
   type SessionInfoPayload,
   type SessionTodosPayload,
 } from "./session-runtime-payloads";
@@ -603,6 +583,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
       AgentCapabilitiesPayload
     >;
     "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
+    "session.mcp_status_updated": BackendMessage<
+      "session.mcp_status_updated",
+      SessionMCPStatusPayload
+    >;
     "session.info_updated": BackendMessage<"session.info_updated", SessionInfoPayload>;
     "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
     "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
@@ -657,9 +641,6 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     >;
     "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
   };
-
-// Run event types (extracted to reduce file size)
-export * from "./run-events";
 
 // Workspace file types (extracted to reduce file size)
 export * from "./workspace-files";

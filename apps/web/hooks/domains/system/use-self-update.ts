@@ -63,7 +63,7 @@ function clearPersisted(): void {
 
 type UseSelfUpdateArgs = {
   latestVersion: string | undefined;
-  /** Called once the version flip is confirmed, to refresh the updates view. */
+  /** Called once the target version is confirmed and persisted progress is cleared. */
   onComplete?: () => void;
 };
 
@@ -91,6 +91,7 @@ export function useSelfUpdate({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const hydrated = useRef(false);
+  const completionFired = useRef(false);
 
   const fail = useCallback((message: string) => {
     setErrorMessage(message);
@@ -100,6 +101,7 @@ export function useSelfUpdate({
 
   const start = useCallback(async () => {
     if (!latestVersion) return;
+    completionFired.current = false;
     setErrorMessage(null);
     setTargetVersion(latestVersion);
     setPhase("starting");
@@ -114,6 +116,7 @@ export function useSelfUpdate({
   }, [latestVersion, fail]);
 
   const dismiss = useCallback(() => {
+    completionFired.current = false;
     setPhase("idle");
     setErrorMessage(null);
     setJobId(null);
@@ -161,7 +164,8 @@ export function useSelfUpdate({
       try {
         const info = await fetchSystemInfo({ cache: "no-store" });
         if (cancelled) return;
-        if (info.version === targetVersion) {
+        if (info.version === targetVersion && !completionFired.current) {
+          completionFired.current = true;
           setPhase("done");
           clearPersisted();
           onComplete?.();

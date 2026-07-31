@@ -85,7 +85,13 @@ async function hoverUntilGutterSlotAppears(testPage: Page) {
     const container = document.querySelector("diffs-container");
     const shadow = container?.shadowRoot;
     if (!shadow) throw new Error("diffs-container shadow root missing");
-    const line = shadow.querySelector<HTMLElement>("[data-line]");
+    const lines = Array.from(shadow.querySelectorAll<HTMLElement>("[data-line]"));
+    const line =
+      lines.find((candidate) => candidate.textContent?.includes("HUNK_TOP")) ??
+      lines.find((candidate) => {
+        const bounds = candidate.getBoundingClientRect();
+        return bounds.width > 0 && bounds.height > 0;
+      });
     if (!line) throw new Error("no [data-line] found to hover");
     const r = line.getBoundingClientRect();
     const y = r.top + r.height / 2;
@@ -99,20 +105,28 @@ async function hoverUntilGutterSlotAppears(testPage: Page) {
 
   for (const point of points) {
     await testPage.mouse.move(point.x, point.y);
-    const appeared = await testPage
-      .waitForFunction(
-        () =>
-          Boolean(
-            document
-              .querySelector("diffs-container")
-              ?.shadowRoot?.querySelector("[data-gutter-utility-slot]"),
-          ),
-        null,
-        { timeout: 1_500 },
-      )
-      .then(() => true)
-      .catch(() => false);
-    if (appeared) return;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const geometry = await testPage.evaluate(() => {
+        const container = document.querySelector("diffs-container");
+        const slotWrapper = container?.shadowRoot?.querySelector<HTMLElement>(
+          "[data-gutter-utility-slot]",
+        );
+        if (!slotWrapper) return null;
+        const numberCell = slotWrapper.parentElement;
+        const slottedLight = document.querySelector<HTMLElement>('[slot="gutter-utility-slot"]');
+        const button = slottedLight?.firstElementChild as HTMLElement | null;
+        if (!numberCell || !button) return null;
+        const buttonRect = button.getBoundingClientRect();
+        const cellRect = numberCell.getBoundingClientRect();
+        return {
+          marginRight: parseFloat(getComputedStyle(button).marginRight),
+          buttonRight: buttonRect.right,
+          cellRight: cellRect.right,
+        };
+      });
+      if (geometry) return geometry;
+      await testPage.waitForTimeout(50);
+    }
   }
 
   throw new Error("gutter-utility-slot did not appear after hover");
@@ -215,29 +229,10 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     // calc(1ch - 1lh) on our slotted button — same trick pierre uses on its
     // built-in [data-utility-button] — to push it outside the cell into the
     // code area. Verify the button's right edge ends up past the cell's right.
-    await hoverUntilGutterSlotAppears(testPage);
-
-    const geometry = await testPage.evaluate(() => {
-      const container = document.querySelector("diffs-container")!;
-      const shadow = container.shadowRoot!;
-      const slotWrapper = shadow.querySelector<HTMLElement>("[data-gutter-utility-slot]");
-      if (!slotWrapper) throw new Error("gutter-utility-slot did not appear after hover");
-      const numberCell = slotWrapper.parentElement!;
-      // The slot wrapper is appended INTO numberCell; our React-rendered button
-      // is projected through the named <slot>. Its computed marginRight must
-      // resolve to a negative px value for the extrusion to work.
-      const slottedLight = document.querySelector<HTMLElement>('[slot="gutter-utility-slot"]');
-      if (!slottedLight) throw new Error("light-DOM [slot=gutter-utility-slot] not found");
-      const button = slottedLight.firstElementChild as HTMLElement | null;
-      if (!button) throw new Error("no button rendered inside slot");
-      const buttonRect = button.getBoundingClientRect();
-      const cellRect = numberCell.getBoundingClientRect();
-      return {
-        marginRight: parseFloat(getComputedStyle(button).marginRight),
-        buttonRight: buttonRect.right,
-        cellRight: cellRect.right,
-      };
-    });
+    // Capture the geometry in the same browser evaluation that observes the
+    // ephemeral hover slot; a git-status render can replace the shadow tree
+    // immediately after the slot appears.
+    const geometry = await hoverUntilGutterSlotAppears(testPage);
 
     await testPage.screenshot({ path: "test-results/diff-hover-button-extrusion.png" });
     expect(geometry.marginRight).toBeLessThan(0);

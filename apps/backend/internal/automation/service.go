@@ -23,6 +23,21 @@ import (
 // backendapp's taskDeleterAdapter for the production wiring).
 var ErrTaskNotFound = errors.New("automation: task not found for cleanup")
 
+// ErrRepositoryNotInWorkspace is returned when a submitted repository_ids
+// entry doesn't resolve to a repository belonging to the automation's
+// workspace (including a nonexistent repository ID).
+var ErrRepositoryNotInWorkspace = errors.New("automation: repository does not belong to this workspace")
+
+// ErrDuplicateRepositoryID is returned when repository_ids contains the
+// same ID more than once.
+var ErrDuplicateRepositoryID = errors.New("automation: duplicate repository_ids entry")
+
+// ErrRepositoryLookupUnavailable is returned when repository_ids is
+// non-empty but no RepositoryLookup has been wired via
+// SetRepositoryLookup. Fails closed rather than skipping validation,
+// because this check guards cross-workspace repository access.
+var ErrRepositoryLookupUnavailable = errors.New("automation: repository validation is not available")
+
 // TaskDeleter deletes a task and cleans up its resources.
 // Satisfied by *taskservice.Service; injected to avoid a cyclic import.
 // Implementations should return errors wrapping ErrTaskNotFound when the
@@ -37,6 +52,11 @@ type Service struct {
 	eventBus    bus.EventBus
 	logger      *logger.Logger
 	taskDeleter TaskDeleter // optional; nil-safe
+
+	// repoLookup validates repository_ids on create/update — every ID must
+	// resolve to a repository belonging to the automation's workspace. Nil
+	// = validation skipped (not yet wired at startup, or an isolated test).
+	repoLookup RepositoryLookup
 
 	// authorizeWorkspace gates automation access by workspace ownership
 	// (opt-in auth). Nil = unscoped (internal schedulers/pollers, auth
@@ -77,6 +97,15 @@ func (s *Service) SetTaskDeleter(d TaskDeleter) {
 // identity (internal callers).
 func (s *Service) SetWorkspaceAuthorizer(fn func(ctx context.Context, workspaceID string) error) {
 	s.authorizeWorkspace = fn
+}
+
+// SetRepositoryLookup wires the repository ownership validator for
+// repository_ids on create/update. This is a security control (prevents a
+// crafted request attaching another workspace's repository), so an unset
+// lookup fails closed for any non-empty repository_ids list rather than
+// silently skipping validation — see validateRepositoryIDs.
+func (s *Service) SetRepositoryLookup(lookup RepositoryLookup) {
+	s.repoLookup = lookup
 }
 
 func (s *Service) authorizeWs(ctx context.Context, workspaceID string) error {
@@ -142,12 +171,15 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		WorkflowStepID:    req.WorkflowStepID,
 		AgentProfileID:    req.AgentProfileID,
 		ExecutorProfileID: req.ExecutorProfileID,
-		RepositoryID:      req.RepositoryID,
+		RepositoryIDs:     req.RepositoryIDs,
 		Prompt:            req.Prompt,
 		TaskTitleTemplate: req.TaskTitleTemplate,
 		ExecutionMode:     mode,
 		Enabled:           true,
 		MaxConcurrentRuns: maxRuns,
+	}
+	if err := s.validateRepositoryIDs(ctx, req.WorkspaceID, req.RepositoryIDs); err != nil {
+		return nil, err
 	}
 	if err := s.store.CreateAutomation(ctx, a); err != nil {
 		return nil, fmt.Errorf("create automation: %w", err)
@@ -193,10 +225,49 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if err := s.authorizeAutomation(ctx, id); err != nil {
 		return nil, err
 	}
+	if req.RepositoryIDs != nil {
+		existing, err := s.store.GetAutomation(ctx, id)
+		if err != nil {
+			return nil, err
+		}
+		if existing == nil {
+			return nil, fmt.Errorf("automation not found: %s", id)
+		}
+		if err := s.validateRepositoryIDs(ctx, existing.WorkspaceID, req.RepositoryIDs); err != nil {
+			return nil, err
+		}
+	}
 	if err := s.store.UpdateAutomation(ctx, id, req); err != nil {
 		return nil, err
 	}
 	return s.store.GetAutomation(ctx, id)
+}
+
+// validateRepositoryIDs rejects a duplicate entry, or any ID that isn't a
+// repository belonging to workspaceID. An empty list always passes. A
+// non-empty list with no RepositoryLookup wired fails closed
+// (ErrRepositoryLookupUnavailable) rather than silently skipping the check —
+// this validates cross-workspace access, so "unconfigured" must not mean
+// "unchecked".
+func (s *Service) validateRepositoryIDs(ctx context.Context, workspaceID string, repositoryIDs []string) error {
+	if len(repositoryIDs) == 0 {
+		return nil
+	}
+	if s.repoLookup == nil {
+		return ErrRepositoryLookupUnavailable
+	}
+	seen := make(map[string]bool, len(repositoryIDs))
+	for _, id := range repositoryIDs {
+		if seen[id] {
+			return fmt.Errorf("%w: %s", ErrDuplicateRepositoryID, id)
+		}
+		seen[id] = true
+		repoWorkspaceID, _, ok := s.repoLookup.GetRepository(ctx, id)
+		if !ok || repoWorkspaceID != workspaceID {
+			return fmt.Errorf("%w: %s", ErrRepositoryNotInWorkspace, id)
+		}
+	}
+	return nil
 }
 
 // DeleteAutomation removes an automation.

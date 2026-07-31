@@ -35,47 +35,52 @@ type Service struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID                 *string
-	KanbanViewMode              *string
-	WorkflowFilterID            *string
-	RepositoryIDs               *[]string
-	TasksListSort               *string
-	TasksListGroup              *string
-	TasksListShowDetails        *bool
-	InitialSetupComplete        *bool
-	PreferredShell              *string
-	DefaultEditorID             *string
-	EnablePreviewOnClick        *bool
-	ChatSubmitKey               *string
-	ReviewAutoMarkOnScroll      *bool
-	ConfirmTaskArchive          *bool
-	MCPTaskAgentProfileDefault  *string
-	ShowReleaseNotification     *bool
-	ReleaseNotesLastSeenVersion *string
-	LspAutoStartLanguages       *[]string
-	LspAutoInstallLanguages     *[]string
-	LspServerConfigs            *map[string]map[string]interface{}
-	SavedLayouts                *[]models.SavedLayout
-	SidebarViews                *[]models.SidebarView
-	SidebarActiveViewID         *string
-	SidebarDraft                **models.SidebarViewDraft
-	SidebarTaskPrefs            *models.SidebarTaskPrefs
-	TaskCreateLastUsed          *models.TaskCreateLastUsed
-	JiraSavedViews              **json.RawMessage
-	JiraTaskPresets             **json.RawMessage
-	GitHubSavedPresets          **json.RawMessage
-	GitHubDefaultQueryPresets   **json.RawMessage
-	GitLabSavedPresets          **json.RawMessage
-	DefaultUtilityAgentID       *string
-	DefaultUtilityModel         *string
-	KeyboardShortcuts           *map[string]interface{}
-	TerminalLinkBehavior        *string
-	TerminalFontFamily          *string
-	TerminalFontSize            *int
-	ChangesPanelLayout          *string
-	SystemMetricsDisplay        *SystemMetricsDisplaySettingsPatch
-	AppStatusBarOrder           *models.AppStatusBarOrder
-	VoiceMode                   *models.VoiceModeSettings
+	WorkspaceID                     *string
+	KanbanViewMode                  *string
+	WorkflowFilterID                *string
+	RepositoryIDs                   *[]string
+	TasksListSort                   *string
+	TasksListGroup                  *string
+	TasksListShowDetails            *bool
+	InitialSetupComplete            *bool
+	PreferredShell                  *string
+	DefaultEditorID                 *string
+	EnablePreviewOnClick            *bool
+	ChatSubmitKey                   *string
+	ReviewAutoMarkOnScroll          *bool
+	ConfirmTaskArchive              *bool
+	UnreadDivider                   *bool
+	MCPTaskAgentProfileDefault      *string
+	ShowAnchoredPromptBar           *bool
+	ShowScrollToLastPrompt          *bool
+	ShowScrollToStart               *bool
+	ShowTranscriptAutoScrollControl *bool
+	ShowReleaseNotification         *bool
+	ReleaseNotesLastSeenVersion     *string
+	LspAutoStartLanguages           *[]string
+	LspAutoInstallLanguages         *[]string
+	LspServerConfigs                *map[string]map[string]interface{}
+	SavedLayouts                    *[]models.SavedLayout
+	SidebarViews                    *[]models.SidebarView
+	SidebarActiveViewID             *string
+	SidebarDraft                    **models.SidebarViewDraft
+	SidebarTaskPrefs                *models.SidebarTaskPrefs
+	TaskCreateLastUsed              *models.TaskCreateLastUsed
+	JiraSavedViews                  **json.RawMessage
+	JiraTaskPresets                 **json.RawMessage
+	GitHubSavedPresets              **json.RawMessage
+	GitHubDefaultQueryPresets       **json.RawMessage
+	GitLabSavedPresets              **json.RawMessage
+	DefaultUtilityAgentID           *string
+	DefaultUtilityModel             *string
+	KeyboardShortcuts               *map[string]interface{}
+	TerminalLinkBehavior            *string
+	TerminalFontFamily              *string
+	TerminalFontSize                *int
+	ChangesPanelLayout              *string
+	SystemMetricsDisplay            *SystemMetricsDisplaySettingsPatch
+	AppStatusBarOrder               *models.AppStatusBarOrder
+	VoiceMode                       *models.VoiceModeSettings
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -192,6 +197,33 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
+		return err
+	}
+	if err := applyTaskActionPreferences(settings, req); err != nil {
+		return err
+	}
+	applyUtilityPreferences(settings, req)
+	if err := applyKeyboardShortcuts(settings, req.KeyboardShortcuts); err != nil {
+		return err
+	}
+	if err := applyTerminalLinkBehavior(settings, req.TerminalLinkBehavior); err != nil {
+		return err
+	}
+	if err := applyChangesPanelLayout(settings, req.ChangesPanelLayout); err != nil {
+		return err
+	}
+	applySystemMetricsDisplay(settings, req.SystemMetricsDisplay)
+	if req.AppStatusBarOrder != nil {
+		settings.AppStatusBarOrder = *req.AppStatusBarOrder
+	}
+	if err := applyTerminalFontPreferences(settings, req); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.WorkspaceID != nil {
 		settings.WorkspaceID = *req.WorkspaceID
 	}
@@ -222,18 +254,41 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if req.EnablePreviewOnClick != nil {
 		settings.EnablePreviewOnClick = *req.EnablePreviewOnClick
 	}
+	return nil
+}
+
+func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *req.ReviewAutoMarkOnScroll
 	}
 	if req.ConfirmTaskArchive != nil {
 		settings.ConfirmTaskArchive = *req.ConfirmTaskArchive
 	}
+	if req.UnreadDivider != nil {
+		settings.UnreadDivider = *req.UnreadDivider
+	}
 	if err := applyMCPTaskAgentProfileDefault(settings, req.MCPTaskAgentProfileDefault); err != nil {
 		return err
+	}
+	if req.ShowAnchoredPromptBar != nil {
+		settings.ShowAnchoredPromptBar = *req.ShowAnchoredPromptBar
+	}
+	if req.ShowScrollToLastPrompt != nil {
+		settings.ShowScrollToLastPrompt = *req.ShowScrollToLastPrompt
+	}
+	if req.ShowScrollToStart != nil {
+		settings.ShowScrollToStart = *req.ShowScrollToStart
+	}
+	if req.ShowTranscriptAutoScrollControl != nil {
+		settings.ShowTranscriptAutoScrollControl = *req.ShowTranscriptAutoScrollControl
 	}
 	if req.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *req.ShowReleaseNotification
 	}
+	return nil
+}
+
+func applyUtilityPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) {
 	if req.ReleaseNotesLastSeenVersion != nil {
 		settings.ReleaseNotesLastSeenVersion = *req.ReleaseNotesLastSeenVersion
 	}
@@ -243,39 +298,43 @@ func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRe
 	if req.DefaultUtilityModel != nil {
 		settings.DefaultUtilityModel = strings.TrimSpace(*req.DefaultUtilityModel)
 	}
-	if req.KeyboardShortcuts != nil {
-		if err := validateKeyboardShortcuts(*req.KeyboardShortcuts); err != nil {
-			return err
-		}
-		settings.KeyboardShortcuts = *req.KeyboardShortcuts
+}
+
+func applyKeyboardShortcuts(settings *models.UserSettings, value *map[string]interface{}) error {
+	if value == nil {
+		return nil
 	}
-	if err := applyTerminalLinkBehavior(settings, req.TerminalLinkBehavior); err != nil {
+	if err := validateKeyboardShortcuts(*value); err != nil {
 		return err
 	}
-	if err := applyChangesPanelLayout(settings, req.ChangesPanelLayout); err != nil {
-		return err
+	settings.KeyboardShortcuts = *value
+	return nil
+}
+
+func applySystemMetricsDisplay(settings *models.UserSettings, value *SystemMetricsDisplaySettingsPatch) {
+	if value == nil {
+		return
 	}
-	if req.SystemMetricsDisplay != nil {
-		if req.SystemMetricsDisplay.ShowInTopbar != nil {
-			settings.SystemMetricsDisplay.ShowInTopbar = *req.SystemMetricsDisplay.ShowInTopbar
-		}
-		if req.SystemMetricsDisplay.Simplified != nil {
-			settings.SystemMetricsDisplay.Simplified = *req.SystemMetricsDisplay.Simplified
-		}
+	if value.ShowInTopbar != nil {
+		settings.SystemMetricsDisplay.ShowInTopbar = *value.ShowInTopbar
 	}
-	if req.AppStatusBarOrder != nil {
-		settings.AppStatusBarOrder = *req.AppStatusBarOrder
+	if value.Simplified != nil {
+		settings.SystemMetricsDisplay.Simplified = *value.Simplified
 	}
+}
+
+func applyTerminalFontPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
 	if req.TerminalFontFamily != nil {
 		settings.TerminalFontFamily = strings.TrimSpace(*req.TerminalFontFamily)
 	}
-	if req.TerminalFontSize != nil {
-		v := *req.TerminalFontSize
-		if v != 0 && (v < 8 || v > 24) {
-			return errors.New("terminal_font_size must be 0 (default) or between 8 and 24")
-		}
-		settings.TerminalFontSize = v
+	if req.TerminalFontSize == nil {
+		return nil
 	}
+	v := *req.TerminalFontSize
+	if v != 0 && (v < 8 || v > 24) {
+		return errors.New("terminal_font_size must be 0 (default) or between 8 and 24")
+	}
+	settings.TerminalFontSize = v
 	return nil
 }
 
@@ -586,49 +645,54 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		return
 	}
 	data := map[string]interface{}{
-		"user_id":                         settings.UserID,
-		"workspace_id":                    settings.WorkspaceID,
-		"kanban_view_mode":                settings.KanbanViewMode,
-		"workflow_filter_id":              settings.WorkflowFilterID,
-		"repository_ids":                  settings.RepositoryIDs,
-		"tasks_list_sort":                 settings.TasksListSort,
-		"tasks_list_group":                settings.TasksListGroup,
-		"tasks_list_show_details":         settings.TasksListShowDetails,
-		"initial_setup_complete":          settings.InitialSetupComplete,
-		"preferred_shell":                 settings.PreferredShell,
-		"default_editor_id":               settings.DefaultEditorID,
-		"enable_preview_on_click":         settings.EnablePreviewOnClick,
-		"chat_submit_key":                 settings.ChatSubmitKey,
-		"review_auto_mark_on_scroll":      settings.ReviewAutoMarkOnScroll,
-		"confirm_task_archive":            settings.ConfirmTaskArchive,
-		"mcp_task_agent_profile_default":  models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
-		"show_release_notification":       settings.ShowReleaseNotification,
-		"release_notes_last_seen_version": settings.ReleaseNotesLastSeenVersion,
-		"lsp_auto_start_languages":        settings.LspAutoStartLanguages,
-		"lsp_auto_install_languages":      settings.LspAutoInstallLanguages,
-		"lsp_server_configs":              settings.LspServerConfigs,
-		"saved_layouts":                   settings.SavedLayouts,
-		"sidebar_views":                   settings.SidebarViews,
-		"sidebar_active_view_id":          settings.SidebarActiveViewID,
-		"sidebar_draft":                   settings.SidebarDraft,
-		"sidebar_task_prefs":              settings.SidebarTaskPrefs,
-		"task_create_last_used":           settings.TaskCreateLastUsed,
-		"jira_saved_views":                settings.JiraSavedViews,
-		"jira_task_presets":               settings.JiraTaskPresets,
-		"github_saved_presets":            settings.GitHubSavedPresets,
-		"github_default_query_presets":    settings.GitHubDefaultQueryPresets,
-		"gitlab_saved_presets":            settings.GitLabSavedPresets,
-		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
-		"default_utility_model":           settings.DefaultUtilityModel,
-		"keyboard_shortcuts":              settings.KeyboardShortcuts,
-		"terminal_link_behavior":          settings.TerminalLinkBehavior,
-		"terminal_font_family":            settings.TerminalFontFamily,
-		"terminal_font_size":              settings.TerminalFontSize,
-		"changes_panel_layout":            settings.ChangesPanelLayout,
-		"system_metrics_display":          settings.SystemMetricsDisplay,
-		"app_status_bar_order":            settings.AppStatusBarOrder,
-		"voice_mode":                      settings.VoiceMode,
-		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
+		"user_id":                             settings.UserID,
+		"workspace_id":                        settings.WorkspaceID,
+		"kanban_view_mode":                    settings.KanbanViewMode,
+		"workflow_filter_id":                  settings.WorkflowFilterID,
+		"repository_ids":                      settings.RepositoryIDs,
+		"tasks_list_sort":                     settings.TasksListSort,
+		"tasks_list_group":                    settings.TasksListGroup,
+		"tasks_list_show_details":             settings.TasksListShowDetails,
+		"initial_setup_complete":              settings.InitialSetupComplete,
+		"preferred_shell":                     settings.PreferredShell,
+		"default_editor_id":                   settings.DefaultEditorID,
+		"enable_preview_on_click":             settings.EnablePreviewOnClick,
+		"chat_submit_key":                     settings.ChatSubmitKey,
+		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
+		"confirm_task_archive":                settings.ConfirmTaskArchive,
+		"unread_divider":                      settings.UnreadDivider,
+		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
+		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
+		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
+		"show_scroll_to_start":                settings.ShowScrollToStart,
+		"show_transcript_auto_scroll_control": settings.ShowTranscriptAutoScrollControl,
+		"show_release_notification":           settings.ShowReleaseNotification,
+		"release_notes_last_seen_version":     settings.ReleaseNotesLastSeenVersion,
+		"lsp_auto_start_languages":            settings.LspAutoStartLanguages,
+		"lsp_auto_install_languages":          settings.LspAutoInstallLanguages,
+		"lsp_server_configs":                  settings.LspServerConfigs,
+		"saved_layouts":                       settings.SavedLayouts,
+		"sidebar_views":                       settings.SidebarViews,
+		"sidebar_active_view_id":              settings.SidebarActiveViewID,
+		"sidebar_draft":                       settings.SidebarDraft,
+		"sidebar_task_prefs":                  settings.SidebarTaskPrefs,
+		"task_create_last_used":               settings.TaskCreateLastUsed,
+		"jira_saved_views":                    settings.JiraSavedViews,
+		"jira_task_presets":                   settings.JiraTaskPresets,
+		"github_saved_presets":                settings.GitHubSavedPresets,
+		"github_default_query_presets":        settings.GitHubDefaultQueryPresets,
+		"gitlab_saved_presets":                settings.GitLabSavedPresets,
+		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
+		"default_utility_model":               settings.DefaultUtilityModel,
+		"keyboard_shortcuts":                  settings.KeyboardShortcuts,
+		"terminal_link_behavior":              settings.TerminalLinkBehavior,
+		"terminal_font_family":                settings.TerminalFontFamily,
+		"terminal_font_size":                  settings.TerminalFontSize,
+		"changes_panel_layout":                settings.ChangesPanelLayout,
+		"system_metrics_display":              settings.SystemMetricsDisplay,
+		"app_status_bar_order":                settings.AppStatusBarOrder,
+		"voice_mode":                          settings.VoiceMode,
+		"updated_at":                          settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))

@@ -82,10 +82,19 @@ test.describe("System Updates page", () => {
     await expect.poll(() => applyCalled).toBe(true);
   });
 
-  test("apply locks the button and shows progress until the version flips", async ({
-    testPage,
-  }) => {
+  test("apply waits for the target version and then reloads the document", async ({ testPage }) => {
     test.setTimeout(30_000);
+    const browserIssues: string[] = [];
+    testPage.on("pageerror", (error) => browserIssues.push(`pageerror: ${error.message}`));
+    testPage.on("console", (message) => {
+      const text = message.text();
+      if (
+        message.type() === "error" ||
+        /maximum update depth|result of getSnapshot should be cached/i.test(text)
+      ) {
+        browserIssues.push(`console ${message.type()}: ${text}`);
+      }
+    });
 
     await testPage.route("**/api/v1/system/updates/check", (route) => {
       void route.fulfill({
@@ -127,14 +136,19 @@ test.describe("System Updates page", () => {
         }),
       });
     });
-    // The version poll is the "did it land" signal: report the target version so
-    // the flow reaches "done".
+    let reportTargetVersion = false;
+    let markOldVersionObserved = () => {};
+    const oldVersionObserved = new Promise<void>((resolve) => {
+      markOldVersionObserved = resolve;
+    });
     await testPage.route("**/api/v1/system/info", (route) => {
+      const version = reportTargetVersion ? "v1.0.1" : "v1.0.0";
+      if (!reportTargetVersion) markOldVersionObserved();
       void route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          version: "v1.0.1",
+          version,
           commit: "abc",
           build_time: new Date().toISOString(),
           go_version: "go1.26",
@@ -142,6 +156,17 @@ test.describe("System Updates page", () => {
           arch: "arm64",
         }),
       });
+    });
+
+    let documentRequests = 0;
+    testPage.on("request", (request) => {
+      if (
+        request.isNavigationRequest() &&
+        request.frame() === testPage.mainFrame() &&
+        new URL(request.url()).pathname === "/settings/system/updates"
+      ) {
+        documentRequests += 1;
+      }
     });
 
     await testPage.goto("/settings/system/updates");
@@ -153,8 +178,22 @@ test.describe("System Updates page", () => {
     await expect(progress).toBeVisible({ timeout: 10_000 });
     // The button must not be re-triggerable while/after the update runs.
     await expect(testPage.getByTestId("system-updates-apply")).toHaveCount(0);
-    await expect(progress).toHaveAttribute("data-phase", "done", { timeout: 10_000 });
-    await expect(progress).toContainText("Updated to v1.0.1");
+    await oldVersionObserved;
+    expect(documentRequests).toBe(1);
+    await expect(progress).toHaveAttribute("data-phase", /installing|restarting/);
+
+    const reloadedDocument = testPage.waitForRequest(
+      (request) =>
+        request.isNavigationRequest() &&
+        request.frame() === testPage.mainFrame() &&
+        new URL(request.url()).pathname === "/settings/system/updates",
+    );
+    reportTargetVersion = true;
+    await reloadedDocument;
+    await testPage.waitForLoadState("domcontentloaded");
+    await expect(testPage.getByTestId("system-page-title")).toHaveText("Updates");
+    expect(documentRequests).toBe(2);
+    expect(browserIssues).toEqual([]);
   });
 
   test("mobile keeps Apply update hidden for non-service installs", async ({ testPage }) => {

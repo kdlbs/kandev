@@ -248,6 +248,37 @@ describe("mapUserSettingsResponse", () => {
   });
 });
 
+describe("mapUserSettingsResponse unread divider", () => {
+  it("defaults the preference to enabled and preserves an explicit disable", () => {
+    const fallback = mapUserSettingsResponse(null) as { unreadDivider?: boolean };
+    const disabled = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        unread_divider: false,
+        updated_at: UPDATED_AT,
+      } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
+    }) as { unreadDivider?: boolean };
+
+    expect(fallback.unreadDivider).toBe(true);
+    expect(disabled.unreadDivider).toBe(false);
+  });
+});
+
+describe("transcript navigation settings", () => {
+  it("uses the requested defaults when settings are unavailable", () => {
+    const settings = mapUserSettingsResponse(null);
+
+    expect(settings).toMatchObject({
+      showAnchoredPromptBar: false,
+      showScrollToLastPrompt: true,
+      showScrollToStart: false,
+      showTranscriptAutoScrollControl: true,
+    });
+  });
+});
+
 describe("parseChangesPanelLayout", () => {
   it('returns "tree" for "tree"', () => {
     expect(parseChangesPanelLayout("tree")).toBe("tree");

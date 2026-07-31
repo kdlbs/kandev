@@ -217,6 +217,15 @@ export type SessionSliceActions = {
   /** Source adoption is an authoritative idle boundary for the listed sessions. */
   reconcileWorkspaceSourcesAdopted: (sessionIds: string[]) => void;
   setTaskSession: (session: TaskSession) => void;
+  /**
+   * Narrowly updates only a session's Slack-style read cursor
+   * (last_read_message_id) — never the full session object. Used for the
+   * mark-read HTTP response, whose full-session snapshot is frozen at
+   * write time and can otherwise clobber a newer WS session.state_changed
+   * update that arrives while the request is still in flight. No-ops if
+   * the session isn't in the store (never creates a bare session record).
+   */
+  updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;
