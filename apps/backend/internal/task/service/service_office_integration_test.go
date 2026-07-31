@@ -22,6 +22,15 @@ import (
 // the task service is exercised against the real schema.
 func createOfficeIntegrationService(t *testing.T) *Service {
 	t.Helper()
+	svc, _ := createOfficeIntegrationServiceWithDB(t)
+	return svc
+}
+
+// createOfficeIntegrationServiceWithDB is createOfficeIntegrationService for
+// tests that also need raw DB access (e.g. to backdate timestamps that the
+// service stamps itself).
+func createOfficeIntegrationServiceWithDB(t *testing.T) (*Service, *sqlx.DB) {
+	t.Helper()
 	tmpDir := t.TempDir()
 	dbConn, err := db.OpenSQLite(filepath.Join(tmpDir, "test.db"))
 	if err != nil {
@@ -45,7 +54,7 @@ func createOfficeIntegrationService(t *testing.T) *Service {
 	log, _ := logger.NewLogger(logger.LoggingConfig{
 		Level: "error", Format: "json", OutputPath: "stdout",
 	})
-	return NewService(Repos{
+	svc := NewService(Repos{
 		Workspaces:       repo,
 		Tasks:            repo,
 		TaskRepos:        repo,
@@ -60,6 +69,7 @@ func createOfficeIntegrationService(t *testing.T) *Service {
 		TaskEnvironments: repo,
 		Reviews:          repo,
 	}, NewMockEventBus(), log, RepositoryDiscoveryConfig{})
+	return svc, sqlxDB
 }
 
 // TestIntegration_CreateTask_OnboardingShape pins the regression that

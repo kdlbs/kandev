@@ -36,8 +36,9 @@ export function StatusSurfaceMetrics({
   useSystemMetricsSubscription(shouldSubscribe);
 
   if (!enabled || (isMobile && !drawerOpen)) return null;
+  if (!snapshot) return null;
 
-  const host = snapshot?.sources.find((source) => source.kind === "backend");
+  const host = snapshot.sources.find((source) => source.kind === "backend");
   if (presentation === "mobile-drawer") {
     return (
       <section

@@ -6,6 +6,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { startQuickChat, type QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
+import { persistQuickChatRename } from "@/lib/quick-chat/rename";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 
 const noop = () => {};
@@ -40,6 +41,20 @@ function useQuickChatStore(workspaceId: string) {
 }
 
 type QuickChatStore = ReturnType<typeof useQuickChatStore>;
+
+/**
+ * Resolves a tab's backing task. The tab carries `taskId` on every path that
+ * introduces it, but sessions restored by older clients only exist in
+ * `taskSessions`. Both the rename and the close flow must agree here: a missed
+ * task id silently downgrades a rename to device-local and skips the backend
+ * delete, leaving an orphaned ephemeral task.
+ */
+function resolveTaskId(store: QuickChatStore, sessionId: string): string | undefined {
+  return (
+    store.sessions.find((session) => session.sessionId === sessionId)?.taskId ??
+    store.taskSessions[sessionId]?.task_id
+  );
+}
 
 function useWorkspaceQuickChat(store: QuickChatStore) {
   const sessions = store.sessions;
@@ -116,7 +131,7 @@ export function useAgentSelection(workspaceId: string, store: QuickChatStore) {
         if (setupSessionId && isQuickChatSetupSessionId(setupSessionId)) {
           store.closeQuickChatSession(setupSessionId);
         }
-        store.openQuickChat(result.sessionId, workspaceId, agentId);
+        store.openQuickChat(result.sessionId, workspaceId, agentId, "chat", result.taskId);
         store.renameQuickChatSession(result.sessionId, result.name);
       } catch (error) {
         if (latestRequestId.current !== requestId) return;
@@ -155,7 +170,7 @@ function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () 
     if (!sessionToClose) return;
     const sessionId = sessionToClose;
     setSessionToClose(null);
-    const taskId = store.taskSessions[sessionId]?.task_id;
+    const taskId = resolveTaskId(store, sessionId);
     if (!taskId) {
       store.closeQuickChatSession(sessionId);
       return;
@@ -176,6 +191,7 @@ function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () 
 }
 
 export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = noop) {
+  const { toast } = useToast();
   const store = useQuickChatStore(workspaceId);
   const { sessions, activeSession } = useWorkspaceQuickChat(store);
   const [setupKey, setSetupKey] = useState(0);
@@ -241,9 +257,18 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
   const handleRename = useCallback(
     (sessionId: string, name: string) => {
       if (!sessionId) return;
+      // Show the new label immediately, then save it to the backing task so
+      // the user's other devices pick it up over the task.updated event.
       store.renameQuickChatSession(sessionId, name);
+      persistQuickChatRename(sessionId, resolveTaskId(store, sessionId), name).catch(() => {
+        toast({
+          title: "Rename saved on this device only",
+          description: "We could not sync the new name to your other devices.",
+          variant: "error",
+        });
+      });
     },
-    [store],
+    [store, toast],
   );
 
   return {

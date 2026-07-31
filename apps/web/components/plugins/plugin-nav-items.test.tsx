@@ -5,7 +5,6 @@ import { pluginRegistry } from "@/lib/plugins/registry";
 import { PluginNavItems } from "./plugin-nav-items";
 
 let pathname = "/";
-let pluginsEnabled = true;
 const HELLO_PATH = "/plugins/hello";
 
 function cleanupPlugins(...pluginIds: string[]) {
@@ -14,10 +13,6 @@ function cleanupPlugins(...pluginIds: string[]) {
 
 vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => pathname,
-}));
-
-vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => pluginsEnabled,
 }));
 
 function renderNavItems(collapsed = false) {
@@ -33,7 +28,6 @@ describe("PluginNavItems", () => {
     cleanup();
     cleanupPlugins("plugin-a", "plugin-b");
     pathname = "/";
-    pluginsEnabled = true;
     window.history.pushState({}, "", "/");
   });
 
@@ -64,17 +58,6 @@ describe("PluginNavItems", () => {
     renderNavItems();
 
     expect(screen.queryByTestId("plugin-nav-item-settings-item")).toBeNull();
-  });
-
-  it("renders nothing when the plugins feature flag is off, even with a registered nav item", () => {
-    pluginsEnabled = false;
-    pluginRegistry
-      .forPlugin("plugin-a")
-      .registerNavItem({ id: "hello", label: "Hello", path: HELLO_PATH });
-
-    const { container } = renderNavItems();
-
-    expect(container.innerHTML).toBe("");
   });
 
   it("renders the named curated icon, falling back to the puzzle glyph", () => {

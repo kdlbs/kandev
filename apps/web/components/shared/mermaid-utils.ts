@@ -37,8 +37,21 @@ export function getElementContentWidth(element: HTMLElement): number {
   return Math.max(0, element.clientWidth - padding);
 }
 
-export function emitMermaidRenderError(message: string): void {
-  document.dispatchEvent(new CustomEvent(MERMAID_ERROR_EVENT, { detail: { message } }));
+export function emitMermaidRenderError(message: string, taskId?: string | null): void {
+  document.dispatchEvent(new CustomEvent(MERMAID_ERROR_EVENT, { detail: { message, taskId } }));
+}
+
+export function reportMermaidRenderFailure(
+  error: Error,
+  originalCode: string,
+  normalizedCode: string,
+): void {
+  const normalizedSection =
+    normalizedCode === originalCode ? "" : `\n\nNormalized diagram:\n${normalizedCode}`;
+
+  console.error(
+    `[mermaid] Failed to render diagram\nError: ${error.message}\n\nOriginal diagram:\n${originalCode}${normalizedSection}`,
+  );
 }
 
 /** Read intrinsic width/height from an SVG element's viewBox or attributes. */
@@ -71,6 +84,50 @@ const SPECIAL_CHARS_RE = /[$#&/\\<>{}]/;
  * `(...)` stadium nodes.
  */
 const BRACKET_TRIGGER_RE = /[$#&/\\<>{}()]/;
+
+const SEQUENCE_DIAGRAM_RE = /^\s*sequenceDiagram\b/;
+const SEQUENCE_MESSAGE_RE = /^(\s*.+?(?:<<-->>|<<->>|-->>|->>|--x|-x|--\)|-\)|-->|->).+?:)(.*)$/;
+const ENTITY_ESCAPE_RE = /^(?:#\d+|&[A-Za-z][A-Za-z0-9]+);/;
+const SEQUENCE_STATEMENT_RE =
+  /^\s*(?:[A-Za-z_][\w-]*\s*(?:<<-->>|<<->>|-->>|->>|--x|-x|--\)|-\)|-->|->)|(?:participant|actor)\s+[A-Za-z_][\w-]*(?:\s+as\s+[^;\r\n]+)?(?=\s*(?:;|$))|(?:activate|deactivate|destroy)\s+[A-Za-z_][\w-]*(?=\s*(?:;|$))|create\s+(?:participant|actor)\s+[A-Za-z_][\w-]*(?:\s+as\s+[^;\r\n]+)?(?=\s*(?:;|$))|autonumber(?:\s+\d+(?:\s+\d+)?)?(?=\s*(?:;|$))|end(?=\s*(?:;|$)))/;
+
+function escapeMessageSemicolons(message: string): string {
+  let result = "";
+  let index = 0;
+
+  while (index < message.length) {
+    const entity = message.slice(index).match(ENTITY_ESCAPE_RE);
+    if (entity) {
+      result += entity[0];
+      index += entity[0].length;
+      continue;
+    }
+
+    if (message[index] === ";") {
+      result += SEQUENCE_STATEMENT_RE.test(message.slice(index + 1)) ? ";" : "#59;";
+    } else {
+      result += message[index];
+    }
+    index++;
+  }
+
+  return result;
+}
+
+function escapeSequenceMessageSemicolons(code: string): string {
+  let isSequenceDiagram = false;
+
+  return code
+    .split(/(\r?\n)/)
+    .map((part) => {
+      if (SEQUENCE_DIAGRAM_RE.test(part)) isSequenceDiagram = true;
+      if (!isSequenceDiagram) return part;
+      return part.replace(SEQUENCE_MESSAGE_RE, (_match, prefix, message) => {
+        return `${prefix}${escapeMessageSemicolons(message)}`;
+      });
+    })
+    .join("");
+}
 
 /**
  * Index ranges of every top-level `"..."` span (start = opening `"`, end = closing `"`).
@@ -108,6 +165,8 @@ const inAnyRange = (offset: number, ranges: Array<[number, number]>): boolean =>
  * inject nested quotes into pre-quoted content.
  */
 export function sanitizeMermaidCode(code: string): string {
+  code = escapeSequenceMessageSemicolons(code);
+
   // Quote node labels: [text] or [[text]] etc. Match brackets that aren't already quoted.
   let quoted = findQuotedRanges(code);
   let result = code.replace(/(\[+)([^\]\n"]+?)(\]+)/g, (match, open, text, close, offset) => {

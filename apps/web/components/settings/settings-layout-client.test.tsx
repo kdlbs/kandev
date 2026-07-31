@@ -133,5 +133,8 @@ describe("SettingsLayoutClient integrations actions", () => {
     expect(screen.getByTestId("settings-scroll-container").className).toContain(
       "safe-area-inset-bottom",
     );
+    expect(screen.getByTestId("settings-scroll-container").className).toContain(
+      "app-status-bar-height",
+    );
   });
 });

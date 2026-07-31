@@ -1,4 +1,8 @@
 import { expect, test } from "../../fixtures/test-base";
+import {
+  metricsUnavailableWasRendered,
+  observeMetricsUnavailable,
+} from "./metrics-loading-observer";
 
 type SystemMetricsDisplay = {
   show_in_topbar: boolean;
@@ -39,6 +43,7 @@ test.describe("Mobile resource metrics display", () => {
     await testPage.reload();
     await expect(simplified).toHaveAttribute("aria-checked", "true");
 
+    await observeMetricsUnavailable(testPage);
     await testPage.goto("/");
     await testPage.getByRole("button", { name: "Open menu" }).click();
     await testPage.getByTestId("mobile-home-status-button").click();
@@ -46,6 +51,7 @@ test.describe("Mobile resource metrics display", () => {
     const drawer = testPage.getByTestId("app-status-drawer");
     const metrics = drawer.getByTestId("app-status-metrics");
     await expect(metrics.getByLabel(/^CPU /)).toBeVisible();
+    expect(await metricsUnavailableWasRendered(testPage)).toBe(false);
     await expect(metrics.getByLabel("Host metrics")).toHaveCount(0);
     await expect(metrics.getByTestId("system-metric-meter")).toHaveCount(0);
 

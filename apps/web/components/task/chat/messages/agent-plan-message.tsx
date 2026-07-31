@@ -21,11 +21,13 @@ function parsePlanContent(text: string): { title: string; body: string } {
 function PlanMarkdownBody({
   text,
   className,
+  taskId,
   worktreePath,
   onOpenFile,
 }: {
   text: string;
   className?: string;
+  taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 }) {
@@ -33,7 +35,12 @@ function PlanMarkdownBody({
     <div
       className={`markdown-body max-w-none text-sm [&>*]:my-2 [&>p]:my-2 [&>ul]:my-2 [&>ol]:my-2 ${className ?? ""}`}
     >
-      <MemoizedMarkdown content={text} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+      <MemoizedMarkdown
+        content={text}
+        taskId={taskId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+      />
     </div>
   );
 }
@@ -87,6 +94,7 @@ export const AgentPlanMessage = memo(function AgentPlanMessage({
               <PlanMarkdownBody
                 text={body}
                 className="text-foreground/80 [&_strong]:text-foreground"
+                taskId={comment.task_id}
                 worktreePath={worktreePath}
                 onOpenFile={onOpenFile}
               />
@@ -100,7 +108,12 @@ export const AgentPlanMessage = memo(function AgentPlanMessage({
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
           </DialogHeader>
-          <PlanMarkdownBody text={body} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+          <PlanMarkdownBody
+            text={body}
+            taskId={comment.task_id}
+            worktreePath={worktreePath}
+            onOpenFile={onOpenFile}
+          />
         </DialogContent>
       </Dialog>
     </>

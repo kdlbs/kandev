@@ -25,6 +25,8 @@ import { ReviewMarkdownDiffPreviewContent } from "./review-markdown-diff-preview
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import { useActiveTaskPR } from "@/hooks/domains/github/use-task-pr";
 
+const SCROLL_KEYS = new Set(["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", " "]);
+
 type ReviewDiffListProps = {
   files: ReviewFile[];
   reviewedFiles: Set<string>;
@@ -32,6 +34,7 @@ type ReviewDiffListProps = {
   sessionId: string;
   autoMarkOnScroll: boolean;
   wordWrap: boolean;
+  enableWalkthroughAnnotations: boolean;
   selectedFile?: string | null;
   onToggleReviewed: (path: string, reviewed: boolean) => void;
   onDiscard: (path: string) => void;
@@ -47,6 +50,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   sessionId,
   autoMarkOnScroll,
   wordWrap,
+  enableWalkthroughAnnotations,
   selectedFile,
   onToggleReviewed,
   onDiscard,
@@ -55,6 +59,16 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const suppressAutoMarkRef = useRef(false);
+  const allowAutoMark = useCallback(() => {
+    suppressAutoMarkRef.current = false;
+  }, []);
+  const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget) suppressAutoMarkRef.current = false;
+  }, []);
+  const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (SCROLL_KEYS.has(event.key)) suppressAutoMarkRef.current = false;
+  }, []);
   // Resolve base branches once per list (not per row) — the value is identical
   // for every file. Only a single-repo task has an unambiguous fallback; with
   // multiple repos a committed file lacking `repository_name` must NOT borrow
@@ -77,7 +91,15 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   const groups = useMemo(() => groupByRepositoryName(files, (f) => f.repository_name), [files]);
   const showRepoHeaders = groups.length > 1 || (groups[0]?.repositoryName ?? "") !== "";
   return (
-    <div ref={scrollContainerRef} className="overflow-y-auto h-full">
+    <div
+      ref={scrollContainerRef}
+      data-testid="review-diff-scroll"
+      className="overflow-y-auto h-full"
+      onWheelCapture={allowAutoMark}
+      onTouchMoveCapture={allowAutoMark}
+      onPointerDownCapture={handlePointerDown}
+      onKeyDownCapture={handleKeyDown}
+    >
       {groups.map((group) => (
         <div
           key={group.repositoryName || "__no_repo__"}
@@ -99,6 +121,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 sessionId={sessionId}
                 autoMarkOnScroll={autoMarkOnScroll}
                 wordWrap={wordWrap}
+                enableWalkthroughAnnotations={enableWalkthroughAnnotations}
                 isSelected={selectedFile === key}
                 forceLoad={
                   selectedIndex >= 0 &&
@@ -110,6 +133,7 @@ export const ReviewDiffList = memo(function ReviewDiffList({
                 onPreviewMarkdown={onPreviewMarkdown}
                 sectionRef={fileRefs.get(key)}
                 scrollContainer={scrollContainerRef}
+                suppressAutoMark={suppressAutoMarkRef}
                 externalLinkContext={{
                   baseBranchByRepo,
                   fallbackBaseBranch,
@@ -140,6 +164,7 @@ type FileDiffSectionProps = {
   sessionId: string;
   autoMarkOnScroll: boolean;
   wordWrap: boolean;
+  enableWalkthroughAnnotations: boolean;
   isSelected?: boolean;
   forceLoad?: boolean;
   onToggleReviewed: (key: string, reviewed: boolean) => void;
@@ -148,6 +173,7 @@ type FileDiffSectionProps = {
   onPreviewMarkdown?: (filePath: string, repo?: string) => void;
   sectionRef?: React.RefObject<HTMLDivElement | null>;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
+  suppressAutoMark: React.RefObject<boolean>;
   /** Per-repo base branches + single-repo fallback, resolved once by the list
    *  and shared across rows so diff expansion can fetch the correct old side. */
   externalLinkContext: ReviewExternalLinkContext;
@@ -182,6 +208,7 @@ type AutoMarkArgs = {
   fileKey: string;
   onToggleReviewed: (key: string, reviewed: boolean) => void;
   scrollContainer: React.RefObject<HTMLDivElement | null>;
+  suppressAutoMark: React.RefObject<boolean>;
 };
 
 function useAutoMarkOnScroll({
@@ -191,6 +218,7 @@ function useAutoMarkOnScroll({
   fileKey,
   onToggleReviewed,
   scrollContainer,
+  suppressAutoMark,
 }: AutoMarkArgs) {
   const scrollSentinelRef = useRef<HTMLDivElement | null>(null);
   const autoMarkedRef = useRef(false);
@@ -207,6 +235,7 @@ function useAutoMarkOnScroll({
         if (
           !entry.isIntersecting &&
           entry.boundingClientRect.top < root.getBoundingClientRect().top &&
+          !suppressAutoMark.current &&
           !autoMarkedRef.current
         ) {
           autoMarkedRef.current = true;
@@ -218,7 +247,15 @@ function useAutoMarkOnScroll({
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [autoMarkOnScroll, fileKey, isReviewed, isStale, onToggleReviewed, scrollContainer]);
+  }, [
+    autoMarkOnScroll,
+    fileKey,
+    isReviewed,
+    isStale,
+    onToggleReviewed,
+    scrollContainer,
+    suppressAutoMark,
+  ]);
   return scrollSentinelRef;
 }
 
@@ -284,9 +321,11 @@ function useScrollIntoViewOnSelect(
   isSelected: boolean | undefined,
   sectionRef: React.RefObject<HTMLDivElement | null> | undefined,
   setCollapsed: React.Dispatch<React.SetStateAction<boolean>>,
+  suppressAutoMark: React.RefObject<boolean>,
 ) {
   useEffect(() => {
     if (isSelected) {
+      suppressAutoMark.current = true;
       setCollapsed(false);
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
@@ -294,7 +333,7 @@ function useScrollIntoViewOnSelect(
         });
       });
     }
-  }, [isSelected, sectionRef, setCollapsed]);
+  }, [isSelected, sectionRef, setCollapsed, suppressAutoMark]);
 }
 
 /**
@@ -352,6 +391,7 @@ function renderDiffContent(opts: {
   file: ReviewFile;
   sessionId: string;
   wordWrap: boolean;
+  enableWalkthroughAnnotations: boolean;
   expandUnchanged: boolean;
   enableExpansion: boolean;
   baseRef: string;
@@ -364,6 +404,7 @@ function renderDiffContent(opts: {
     file,
     sessionId,
     wordWrap,
+    enableWalkthroughAnnotations,
     expandUnchanged,
     enableExpansion,
     baseRef,
@@ -382,6 +423,7 @@ function renderDiffContent(opts: {
             status={file.status}
             enableComments
             enableAcceptReject
+            enableWalkthroughAnnotations={enableWalkthroughAnnotations}
             onRevertBlock={onRevertBlock}
             onCommentRun={onCommentRun}
             sessionId={sessionId}
@@ -460,6 +502,34 @@ function getMarkdownPreviewToggle({
   return () => onPreviewMarkdown(file.path, file.repository_name);
 }
 
+type FileDiffActionsArgs = Pick<
+  FileDiffSectionProps,
+  "file" | "fileKey" | "sessionId" | "onToggleReviewed" | "onDiscard"
+>;
+
+function useFileDiffActions({
+  file,
+  fileKey,
+  sessionId,
+  onToggleReviewed,
+  onDiscard,
+}: FileDiffActionsArgs) {
+  const handleCheckboxChange = useCallback(
+    (checked: boolean | "indeterminate") => {
+      onToggleReviewed(fileKey, checked === true);
+    },
+    [fileKey, onToggleReviewed],
+  );
+  const handleDiscard = useCallback(() => onDiscard(fileKey), [fileKey, onDiscard]);
+  const handleRevertBlock = useCallback(
+    (filePath: string, info: RevertBlockInfo) =>
+      revertBlock(sessionId, filePath, info, file.repository_name),
+    [sessionId, file.repository_name],
+  );
+  const handleCommentRun = useCommentRunHandler(sessionId);
+  return { handleCheckboxChange, handleDiscard, handleRevertBlock, handleCommentRun };
+}
+
 function FileDiffSection({
   file,
   fileKey,
@@ -468,6 +538,7 @@ function FileDiffSection({
   sessionId,
   autoMarkOnScroll,
   wordWrap,
+  enableWalkthroughAnnotations,
   isSelected,
   forceLoad,
   onToggleReviewed,
@@ -476,6 +547,7 @@ function FileDiffSection({
   onPreviewMarkdown,
   sectionRef,
   scrollContainer,
+  suppressAutoMark,
   externalLinkContext,
 }: FileDiffSectionProps) {
   const controls = useFileDiffDisplayControls(wordWrap);
@@ -484,7 +556,7 @@ function FileDiffSection({
   const { isVisible, sentinelRef } = useLazyVisible(scrollContainer);
   // Force load when visible via intersection observer, or forceLoad is true
   const shouldRenderContent = isVisible || !!forceLoad;
-  useScrollIntoViewOnSelect(isSelected, sectionRef, controls.setCollapsed);
+  useScrollIntoViewOnSelect(isSelected, sectionRef, controls.setCollapsed, suppressAutoMark);
   // Auto-mark sends the composite key (matches the dialog's reviewed-set
   // shape) so cross-repo same-named files don't all get marked when one
   // scrolls past.
@@ -495,25 +567,10 @@ function FileDiffSection({
     fileKey,
     onToggleReviewed,
     scrollContainer,
+    suppressAutoMark,
   });
-  const handleCheckboxChange = useCallback(
-    (checked: boolean | "indeterminate") => {
-      onToggleReviewed(fileKey, checked === true);
-    },
-    [fileKey, onToggleReviewed],
-  );
-  const handleDiscard = useCallback(() => {
-    onDiscard(fileKey);
-  }, [fileKey, onDiscard]);
-
-  const handleRevertBlock = useCallback(
-    (filePath: string, info: RevertBlockInfo) =>
-      revertBlock(sessionId, filePath, info, file.repository_name),
-    [sessionId, file.repository_name],
-  );
-
-  const handleCommentRun = useCommentRunHandler(sessionId);
-
+  const { handleCheckboxChange, handleDiscard, handleRevertBlock, handleCommentRun } =
+    useFileDiffActions({ file, fileKey, sessionId, onToggleReviewed, onDiscard });
   const { enableExpansion, baseRef } = resolveDiffExpansion(
     file,
     externalLinkContext.baseBranchByRepo,
@@ -557,6 +614,7 @@ function FileDiffSection({
             file,
             sessionId,
             wordWrap: controls.effectiveWordWrap,
+            enableWalkthroughAnnotations,
             expandUnchanged: controls.expandUnchanged,
             enableExpansion,
             baseRef,

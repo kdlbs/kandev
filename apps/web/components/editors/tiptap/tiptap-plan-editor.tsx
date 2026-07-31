@@ -43,6 +43,7 @@ export type TextSelection = {
 };
 
 type TipTapPlanEditorProps = {
+  taskId: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
@@ -99,10 +100,11 @@ function buildEditorExtensions(
   placeholder: string,
   slashExtension: ReturnType<typeof createPlanSlashExtension>,
   onOrphanedComments: (ids: string[]) => void,
+  taskId: string | null,
 ) {
   return [
     StarterKit.configure({ codeBlock: false }),
-    createCodeBlockWithMermaid(lowlight),
+    createCodeBlockWithMermaid(lowlight, taskId),
     Markdown.configure({ html: true, transformPastedText: true, transformCopiedText: true }),
     Placeholder.configure({ placeholder }),
     Link.configure({ openOnClick: false }),
@@ -327,8 +329,8 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
 
   /* eslint-disable react-hooks/refs -- stableOrphanHandler reads ref for deferred access, not during render */
   const extensions = useMemo(
-    () => buildEditorExtensions(placeholder, slash.extension, stableOrphanHandler),
-    [placeholder, slash.extension, stableOrphanHandler],
+    () => buildEditorExtensions(placeholder, slash.extension, stableOrphanHandler, props.taskId),
+    [placeholder, props.taskId, slash.extension, stableOrphanHandler],
   );
   /* eslint-enable react-hooks/refs */
 

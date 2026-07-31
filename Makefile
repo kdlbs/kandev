@@ -293,6 +293,16 @@ start-windows:
 	@echo Starting server...
 	@"$(subst /,\,$(BACKEND_DIR)/bin/kandev.exe)" start $(if $(filter 1 true yes,$(VERBOSE)),--verbose,) $(if $(filter 1 true yes,$(DEBUG)),--debug,)
 
+# Windows-native counterparts of start-verbose / start-debug. Same cmd.exe
+# constraints as start-windows.
+.PHONY: start-windows-verbose
+start-windows-verbose:
+	@$(MAKE) start-windows VERBOSE=1
+
+.PHONY: start-windows-debug
+start-windows-debug:
+	@$(MAKE) start-windows DEBUG=1
+
 #
 # Service
 #

@@ -27,4 +27,15 @@ describe("formatBytes", () => {
     expect(formatBytes(1024 * 1024 * 1024)).toBe("1.0 GB");
     expect(formatBytes(1024 ** 4)).toBe("1.0 TB");
   });
+
+  it("clamps to TB above the largest unit", () => {
+    expect(formatBytes(1024 ** 5)).toBe("1024.0 TB");
+    expect(formatBytes(1024 ** 6)).toBe("1048576.0 TB");
+  });
+
+  it("returns '-' for non-finite input", () => {
+    expect(formatBytes(NaN)).toBe("-");
+    expect(formatBytes(Infinity)).toBe("-");
+    expect(formatBytes(-Infinity)).toBe("-");
+  });
 });

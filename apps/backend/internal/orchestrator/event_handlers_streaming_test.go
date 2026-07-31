@@ -33,6 +33,84 @@ type recordedEvent struct {
 	event   *bus.Event
 }
 
+// taskServiceStateRepository exercises runtime task-state reconciliation
+// through the same task-service publication path used in production.
+type taskServiceStateRepository struct {
+	repo    *sqliterepo.Repository
+	service *taskservice.Service
+}
+
+func newTaskServiceStateRepository(
+	repo *sqliterepo.Repository,
+	eventBus bus.EventBus,
+) *taskServiceStateRepository {
+	service := taskservice.NewService(taskservice.Repos{
+		Workspaces:       repo,
+		Tasks:            repo,
+		TaskRepos:        repo,
+		Workflows:        repo,
+		Messages:         repo,
+		Turns:            repo,
+		Sessions:         repo,
+		GitSnapshots:     repo,
+		RepoEntities:     repo,
+		Executors:        repo,
+		Environments:     repo,
+		TaskEnvironments: repo,
+		Reviews:          repo,
+	}, eventBus, testLogger(), taskservice.RepositoryDiscoveryConfig{})
+	return &taskServiceStateRepository{repo: repo, service: service}
+}
+
+func (r *taskServiceStateRepository) GetTask(ctx context.Context, taskID string) (*v1.Task, error) {
+	task, err := r.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return task.ToAPI(), nil
+}
+
+func (r *taskServiceStateRepository) UpdateTaskState(
+	ctx context.Context,
+	taskID string,
+	state v1.TaskState,
+) error {
+	_, err := r.service.UpdateTaskState(ctx, taskID, state)
+	return err
+}
+
+func (r *taskServiceStateRepository) UpdateTaskStateIfCurrentIn(
+	ctx context.Context,
+	taskID string,
+	state v1.TaskState,
+	allowed []v1.TaskState,
+) (bool, error) {
+	return r.service.UpdateTaskStateIfCurrentIn(ctx, taskID, state, allowed)
+}
+
+func (r *taskServiceStateRepository) UpdateTaskStateIfNotArchived(
+	ctx context.Context,
+	taskID string,
+	state v1.TaskState,
+) (bool, error) {
+	return r.service.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+}
+
+func (r *taskServiceStateRepository) UpdateTaskStateIfSessionState(
+	ctx context.Context,
+	taskID, sessionID string,
+	expectedSessionState models.TaskSessionState,
+	state v1.TaskState,
+) (bool, error) {
+	return r.service.UpdateTaskStateIfSessionState(
+		ctx,
+		taskID,
+		sessionID,
+		expectedSessionState,
+		state,
+	)
+}
+
 type recordingClarificationCanceller struct {
 	sessions []string
 }
@@ -1852,6 +1930,37 @@ func TestSetSessionWaitingForInput_NoRedundantTaskWrites(t *testing.T) {
 // TestSetSessionRunning_WritesOnTransition guards against an over-eager dedup
 // regression: when the session was NOT already RUNNING, the task state write
 // MUST still happen.
+func TestSetSessionRunning_PublishesTaskStateBeforeRunningSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskState(ctx, "t1", v1.TaskStateReview))
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	))
+
+	eventBus := &recordingEventBus{}
+	taskRepo := newTaskServiceStateRepository(repo, eventBus)
+	svc := &Service{
+		logger:   testLogger(),
+		eventBus: eventBus,
+		repo:     repo,
+		taskRepo: taskRepo,
+	}
+
+	svc.setSessionRunning(ctx, "t1", "s1")
+
+	task, err := repo.GetTask(ctx, "t1")
+	require.NoError(t, err)
+	require.Equal(t, v1.TaskStateInProgress, task.State)
+	require.Len(t, eventBus.events, 2)
+	require.Equal(t, events.TaskStateChanged, eventBus.events[0].subject)
+	require.Equal(t, events.TaskSessionStateChanged, eventBus.events[1].subject)
+}
+
 func TestSetSessionRunning_WritesOnTransition(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

@@ -21,22 +21,17 @@ func TestDefinitionsIncludeOfficeExperimentalMetadata(t *testing.T) {
 	}
 }
 
-func TestDefinitionsIncludePluginsExperimentalMetadata(t *testing.T) {
-	def, ok := DefinitionByKey("features.plugins")
-	if !ok {
-		t.Fatal("features.plugins definition missing")
+// TestDefinitionsExcludePlugins pins the graduation of the plugin system out
+// of the feature-flag tier: plugins ship in the base product, so no toggle may
+// reappear in Settings > System > Feature Toggles.
+func TestDefinitionsExcludePlugins(t *testing.T) {
+	if _, ok := DefinitionByKey("features.plugins"); ok {
+		t.Fatal("features.plugins definition present; plugins are a base feature and must not be toggleable")
 	}
-	if def.EnvVar != "KANDEV_FEATURES_PLUGINS" {
-		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_PLUGINS", def.EnvVar)
-	}
-	if def.Stability != StabilityExperimental {
-		t.Fatalf("Stability = %q, want %q", def.Stability, StabilityExperimental)
-	}
-	if def.RiskDescription == "" {
-		t.Fatal("RiskDescription empty")
-	}
-	if !def.RestartRequired {
-		t.Fatal("RestartRequired = false, want true")
+	for _, def := range Definitions() {
+		if def.EnvVar == "KANDEV_FEATURES_PLUGINS" {
+			t.Fatalf("definition %q still binds KANDEV_FEATURES_PLUGINS", def.Key)
+		}
 	}
 }
 

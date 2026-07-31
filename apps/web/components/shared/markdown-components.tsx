@@ -57,6 +57,7 @@ export type MarkdownFileLinkContextValue = {
 };
 
 export const MarkdownFileLinkContext = createContext<MarkdownFileLinkContextValue>({});
+export const MarkdownTaskContext = createContext<string | null>(null);
 
 function isBlockCode(rawContent: string, hasLanguage: boolean): boolean {
   return hasLanguage || rawContent.includes("\n");
@@ -206,6 +207,22 @@ function MarkdownLink(props: MarkdownLinkProps) {
   return <MarkdownFallbackLink {...props} />;
 }
 
+function MarkdownCode({ className, children }: MarkdownCodeProps) {
+  const taskId = useContext(MarkdownTaskContext);
+  const rawContent = getTextContent(children);
+  const content = rawContent.replace(/\n$/, "");
+  const lang = className?.replace("language-", "") ?? null;
+  const hasLanguage = className?.startsWith("language-") ?? false;
+  const isBlock = isBlockCode(rawContent, hasLanguage);
+  if (isBlock && isMermaidContent(lang, content)) {
+    return <MermaidBlock code={content} taskId={taskId} />;
+  }
+  if (isBlock) {
+    return <CodeBlock className={className}>{content}</CodeBlock>;
+  }
+  return <InlineCode>{content}</InlineCode>;
+}
+
 /**
  * Shared markdown component overrides for ReactMarkdown.
  * Element styles (headings, lists, inline code, etc.) are handled by
@@ -213,20 +230,7 @@ function MarkdownLink(props: MarkdownLinkProps) {
  * (code routing, link target, table overflow wrapper) remain here.
  */
 export const markdownComponents = {
-  code: ({ className, children }: MarkdownCodeProps) => {
-    const rawContent = getTextContent(children);
-    const content = rawContent.replace(/\n$/, "");
-    const lang = className?.replace("language-", "") ?? null;
-    const hasLanguage = className?.startsWith("language-") ?? false;
-    const isBlock = isBlockCode(rawContent, hasLanguage);
-    if (isBlock && isMermaidContent(lang, content)) {
-      return <MermaidBlock code={content} />;
-    }
-    if (isBlock) {
-      return <CodeBlock className={className}>{content}</CodeBlock>;
-    }
-    return <InlineCode>{content}</InlineCode>;
-  },
+  code: MarkdownCode,
   a: MarkdownLink,
   table: ({ children }: { children?: ReactNode }) => (
     <div className="overflow-x-auto">

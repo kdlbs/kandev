@@ -61,6 +61,7 @@ function ReviewDialogDiffContent({
           sessionId={sessionId}
           autoMarkOnScroll={state.autoMarkOnScroll}
           wordWrap={state.wordWrap}
+          enableWalkthroughAnnotations={false}
           onToggleReviewed={state.handleToggleReviewed}
           onDiscard={state.handleDiscard}
           onOpenFile={onOpenFile}

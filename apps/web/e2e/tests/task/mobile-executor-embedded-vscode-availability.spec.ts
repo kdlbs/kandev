@@ -1,7 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
-import { rewriteBackendHostOS } from "../../helpers/boot-payload";
 import { SessionPage } from "../../pages/session-page";
 
 async function seedTask(
@@ -16,7 +15,7 @@ async function seedTask(
 ) {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
-    "Mobile host platform editor availability",
+    "Mobile executor editor availability",
     seedData.agentProfileId,
     {
       description: "/e2e:simple-message",
@@ -30,13 +29,12 @@ async function seedTask(
   await session.waitForLoad();
 }
 
-test("Windows host keeps the intentional mobile topbar without desktop editor controls", async ({
+test("executor capability keeps the intentional mobile topbar without desktop editor controls", async ({
   testPage,
   apiClient,
   seedData,
   prCapture,
 }) => {
-  await rewriteBackendHostOS(testPage, "windows");
   await seedTask(testPage, apiClient, seedData);
 
   await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible();
@@ -46,7 +44,7 @@ test("Windows host keeps the intentional mobile topbar without desktop editor co
     scroll: document.documentElement.scrollWidth,
   }));
   expect(width.scroll).toBeLessThanOrEqual(width.client + 1);
-  await prCapture.screenshot("windows-host-editor-menu-mobile", {
-    caption: "Mobile task topbar remains compact on a Windows Kandev host",
+  await prCapture.screenshot("executor-editor-menu-mobile", {
+    caption: "Mobile task topbar remains compact for every executor capability",
   });
 });

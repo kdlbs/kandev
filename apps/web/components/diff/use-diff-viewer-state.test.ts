@@ -115,11 +115,13 @@ describe("buildHunkAnnotations", () => {
   });
 });
 
+const WALKTHROUGH_PATH = "apps/web/main.ts";
+
 describe("buildWalkthroughSelectedLines", () => {
   it("returns the active walkthrough line range for a matching file", () => {
     expect(
       buildWalkthroughSelectedLines(
-        { path: "apps/web/main.ts", repository_name: "frontend" },
+        { path: WALKTHROUGH_PATH, repository_name: "frontend" },
         { file: "main.ts", repo: "frontend", line: 10, line_end: 12, text: "explain" },
       ),
     ).toEqual({ side: "additions", start: 10, end: 12 });
@@ -128,7 +130,7 @@ describe("buildWalkthroughSelectedLines", () => {
   it("returns null for mismatched repos", () => {
     expect(
       buildWalkthroughSelectedLines(
-        { path: "apps/web/main.ts", repository_name: "backend" },
+        { path: WALKTHROUGH_PATH, repository_name: "backend" },
         { file: "main.ts", repo: "frontend", line: 10, text: "explain" },
       ),
     ).toBeNull();
@@ -137,9 +139,19 @@ describe("buildWalkthroughSelectedLines", () => {
   it("defaults line_end to line when the walkthrough step has no line_end", () => {
     expect(
       buildWalkthroughSelectedLines(
-        { path: "apps/web/main.ts", repository_name: "frontend" },
+        { path: WALKTHROUGH_PATH, repository_name: "frontend" },
         { file: "main.ts", repo: "frontend", line: 15, text: "see this" },
       ),
     ).toEqual({ side: "additions", start: 15, end: 15 });
+  });
+
+  it("returns null when walkthrough annotations are disabled", () => {
+    expect(
+      buildWalkthroughSelectedLines(
+        { path: WALKTHROUGH_PATH, repository_name: "frontend" },
+        { file: "main.ts", repo: "frontend", line: 15, text: "see this" },
+        false,
+      ),
+    ).toBeNull();
   });
 });

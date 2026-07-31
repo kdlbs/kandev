@@ -199,6 +199,9 @@ export const test = backendFixture.extend<
       // saveUserSettings; without this reset it would leak into unrelated
       // tests running later in the same worker.
       show_anchored_prompt_bar: false,
+      show_scroll_to_last_prompt: true,
+      show_scroll_to_start: false,
+      show_transcript_auto_scroll_control: true,
     });
     const context = await browser.newContext({
       baseURL: backend.frontendUrl,
@@ -288,6 +291,9 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     saved_layouts: [],
     kanban_view_mode: "",
     show_anchored_prompt_bar: false,
+    show_scroll_to_last_prompt: true,
+    show_scroll_to_start: false,
+    show_transcript_auto_scroll_control: true,
     task_create_last_used: {
       repository_id: seedData.repositoryId,
       branch: "main",

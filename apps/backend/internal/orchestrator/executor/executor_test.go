@@ -415,6 +415,50 @@ func TestLaunchPreparedSession_Success(t *testing.T) {
 	}
 }
 
+func TestLaunchPreparedSession_PersistsResolvedExecutorID(t *testing.T) {
+	repo := newMockRepository()
+	now := time.Now().UTC()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID:             "session-123",
+		TaskID:         "task-123",
+		AgentProfileID: "profile-123",
+		ExecutorID:     models.ExecutorIDLocal,
+		State:          models.TaskSessionStateCreated,
+		StartedAt:      now,
+		UpdatedAt:      now,
+	}
+	repo.executors[models.ExecutorIDLocalDocker] = &models.Executor{
+		ID:     models.ExecutorIDLocalDocker,
+		Type:   models.ExecutorTypeLocalDocker,
+		Status: models.ExecutorStatusActive,
+	}
+
+	executor := newTestExecutor(t, &mockAgentManager{
+		launchAgentFunc: func(context.Context, *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return &LaunchAgentResponse{AgentExecutionID: "exec-123", Status: v1.AgentStatusStarting}, nil
+		},
+	}, repo)
+
+	_, err := executor.LaunchPreparedSession(context.Background(), &v1.Task{
+		ID:          "task-123",
+		WorkspaceID: "workspace-123",
+	}, "session-123", LaunchOptions{
+		AgentProfileID: "profile-123",
+		ExecutorID:     models.ExecutorIDLocalDocker,
+	})
+	if err != nil {
+		t.Fatalf("LaunchPreparedSession failed: %v", err)
+	}
+
+	stored, err := repo.GetTaskSession(context.Background(), "session-123")
+	if err != nil {
+		t.Fatalf("GetTaskSession failed: %v", err)
+	}
+	if stored.ExecutorID != models.ExecutorIDLocalDocker {
+		t.Fatalf("ExecutorID = %q, want %q", stored.ExecutorID, models.ExecutorIDLocalDocker)
+	}
+}
+
 func TestLaunchPreparedSession_AbortsWhenStartingPersistenceFails(t *testing.T) {
 	repo := newMockRepository()
 	session := &models.TaskSession{

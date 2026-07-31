@@ -1,8 +1,16 @@
 import { expect, type Page } from "@playwright/test";
 import { test, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+const CREATE_PLAN_SCRIPT = [
+  'e2e:thinking("creating plan")',
+  "e2e:delay(100)",
+  'e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"## Focus regression\\n\\nKeep Agent selected","title":"Focus plan"})',
+  "e2e:delay(100)",
+  'e2e:message("focus regression agent")',
+].join("\n");
 
 async function createFinishedTaskWithSession(
   apiClient: ApiClient,
@@ -104,6 +112,161 @@ async function dockviewDefaultTree(page: Page, sessionId: string) {
       rightColumnPreserved,
     };
   }, sessionId);
+}
+
+function focusSplitLayout() {
+  return {
+    grid: {
+      root: {
+        type: "branch",
+        size: 700,
+        data: [
+          {
+            type: "leaf",
+            size: 900,
+            data: {
+              id: "group-center",
+              views: ["chat", "plan"],
+              activeView: "chat",
+            },
+          },
+          {
+            type: "branch",
+            size: 360,
+            data: [
+              {
+                type: "leaf",
+                size: 420,
+                data: {
+                  id: "group-right-top",
+                  views: ["files", "changes"],
+                  activeView: "files",
+                },
+              },
+              {
+                type: "leaf",
+                size: 280,
+                data: {
+                  id: "group-right-bottom",
+                  views: ["terminal-default"],
+                  activeView: "terminal-default",
+                },
+              },
+            ],
+          },
+        ],
+      },
+      height: 700,
+      width: 1260,
+      orientation: "HORIZONTAL",
+    },
+    panels: {
+      chat: { id: "chat", contentComponent: "chat", title: "Agent" },
+      plan: {
+        id: "plan",
+        contentComponent: "plan",
+        tabComponent: "planTab",
+        title: "Plan",
+      },
+      files: { id: "files", contentComponent: "files", title: "Files" },
+      changes: {
+        id: "changes",
+        contentComponent: "changes",
+        tabComponent: "changesTab",
+        title: "Changes",
+      },
+      "terminal-default": {
+        id: "terminal-default",
+        contentComponent: "terminal",
+        tabComponent: "terminalTab",
+        title: "Terminal",
+      },
+    },
+    activeGroup: "group-right-top",
+  };
+}
+
+async function triggerFocusSplitReconciliation(page: Page, taskId: string, sessionId: string) {
+  await page.evaluate(
+    ({ currentTaskId, currentSessionId }) => {
+      type Panel = {
+        id: string;
+        group: { id: string };
+        api: { close: () => void; setActive: () => void };
+      };
+      type StoreState = {
+        taskSessionsByTask: { itemsByTaskId: Record<string, unknown[]> };
+      };
+      type TestWindow = Window & {
+        __KANDEV_E2E_STORE__?: {
+          getState: () => StoreState;
+          setState: (updater: (state: StoreState) => void) => void;
+        };
+        __dockviewApi__?: {
+          addPanel: (options: object) => Panel;
+          getPanel: (id: string) => Panel | null;
+        };
+        __focusTestSessions__?: unknown[];
+      };
+      const win = window as TestWindow;
+      const api = win.__dockviewApi__;
+      const store = win.__KANDEV_E2E_STORE__;
+      if (!api || !store) throw new Error("Dockview or E2E store bridge missing");
+
+      const sessionPanel = api.getPanel(`session:${currentSessionId}`);
+      const centerGroupId = sessionPanel?.group.id ?? api.getPanel("plan")?.group.id;
+      if (!centerGroupId) throw new Error("Center group missing");
+      const chatPanel =
+        api.getPanel("chat") ??
+        api.addPanel({
+          id: "chat",
+          component: "chat",
+          title: "Agent",
+          position: { referenceGroup: centerGroupId, index: 0 },
+          inactive: true,
+        });
+      const filesPanel = api.getPanel("files");
+      if (!filesPanel) throw new Error("Files panel missing");
+
+      chatPanel.api.setActive();
+      filesPanel.api.setActive();
+      sessionPanel?.api.close();
+
+      const sessions = store.getState().taskSessionsByTask.itemsByTaskId[currentTaskId];
+      if (!sessions?.length) throw new Error("Task session list missing");
+      win.__focusTestSessions__ = sessions;
+      store.setState((state) => {
+        state.taskSessionsByTask.itemsByTaskId[currentTaskId] = [];
+      });
+    },
+    { currentTaskId: taskId, currentSessionId: sessionId },
+  );
+
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+  );
+
+  await page.evaluate((currentTaskId) => {
+    type StoreState = {
+      taskSessionsByTask: { itemsByTaskId: Record<string, unknown[]> };
+    };
+    type TestWindow = Window & {
+      __KANDEV_E2E_STORE__?: {
+        setState: (updater: (state: StoreState) => void) => void;
+      };
+      __focusTestSessions__?: unknown[];
+    };
+    const win = window as TestWindow;
+    const store = win.__KANDEV_E2E_STORE__;
+    const sessions = win.__focusTestSessions__;
+    if (!store || !sessions) throw new Error("Focus test session snapshot missing");
+    store.setState((state) => {
+      state.taskSessionsByTask.itemsByTaskId[currentTaskId] = sessions;
+    });
+  }, taskId);
 }
 
 test.describe("saved Dockview layouts", () => {
@@ -252,5 +415,72 @@ test.describe("saved Dockview layouts", () => {
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.task.id));
     await expect(testPage.getByText("target task current")).toBeVisible();
     await expect(testPage.getByText("source task only")).not.toBeVisible();
+  });
+
+  test("preserves Agent selection while Files owns global focus", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { task, sessionId } = await createFinishedTaskWithSession(
+      apiClient,
+      seedData,
+      "Dockview focus preservation",
+      '/e2e:message("focus regression agent")',
+    );
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    const environmentId = sessions[0]?.task_environment_id;
+    if (!environmentId) throw new Error("Task environment id missing");
+
+    await testPage.addInitScript(
+      ({ envId, layout }) => {
+        window.sessionStorage.setItem(
+          `kandev.dockview.env-layout-v3.${envId}`,
+          JSON.stringify(layout),
+        );
+      },
+      { envId: environmentId, layout: focusSplitLayout() },
+    );
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await expect(testPage.getByTestId("dockview-task-layout")).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId(`session-tab-${sessionId}`)).toBeVisible({
+      timeout: 15_000,
+    });
+    await session.clickSessionChatTab();
+    await session.waitForLoad();
+    await session.sendMessage(CREATE_PLAN_SCRIPT);
+    await expect(session.idleInput()).toBeVisible({ timeout: 45_000 });
+    await expect.poll(async () => (await apiClient.getTaskPlan(task.id))?.created_by).toBe("agent");
+
+    const planTab = testPage.locator(".dv-tab", {
+      has: testPage.locator(".dv-default-tab:has-text('Plan')"),
+    });
+    await expect(planTab).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByTestId("plan-tab-indicator")).toBeVisible({ timeout: 15_000 });
+
+    await triggerFocusSplitReconciliation(testPage, task.id, sessionId);
+
+    const sessionTab = testPage.locator(".dv-tab", {
+      has: testPage.getByTestId(`session-tab-${sessionId}`),
+    });
+    await expect(sessionTab).toHaveClass(/dv-active-tab/);
+    await expect(planTab).not.toHaveClass(/dv-active-tab/);
+    await expect(testPage.getByTestId("plan-tab-indicator")).toBeVisible();
+    await expect
+      .poll(() =>
+        testPage.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __dockviewApi__?: { activePanel?: { id: string }; panels: Array<{ id: string }> };
+              }
+            ).__dockviewApi__?.activePanel?.id ?? null,
+        ),
+      )
+      .toBe("files");
+    expect(
+      (await dockviewPanelIds(testPage)).filter((id) => id === `session:${sessionId}`),
+    ).toHaveLength(1);
   });
 });

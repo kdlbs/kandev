@@ -86,7 +86,7 @@ describe("Quick Chat workspace isolation", () => {
   });
 });
 
-describe("renameQuickChatSession local persistence", () => {
+describe("renameQuickChatSession", () => {
   beforeEach(() => {
     window.localStorage.clear();
   });
@@ -98,18 +98,21 @@ describe("renameQuickChatSession local persistence", () => {
     expect(findSession(store)?.name).toBe("My renamed chat");
   });
 
-  it("persists the rename to localStorage so it survives reload", () => {
+  // The name now lives on the backing task title (see persistQuickChatRename).
+  // Writing it to localStorage here too would let a stale local entry override
+  // a rename made on another device — the divergence this whole flow fixes.
+  it("does not pin the name in localStorage", () => {
     const store = makeStore();
     store.getState().openQuickChat(SESSION_ID, WORKSPACE_ID);
     store.getState().renameQuickChatSession(SESSION_ID, "Persisted name");
-    expect(getStoredQuickChatNames()).toEqual({ [SESSION_ID]: "Persisted name" });
+    expect(getStoredQuickChatNames()).toEqual({});
   });
 
-  it("does not write to storage when the session does not exist in state", () => {
+  it("ignores a session that does not exist in state", () => {
     const store = makeStore();
     expect(() =>
       store.getState().renameQuickChatSession("ghost-session", "Whatever"),
     ).not.toThrow();
-    expect(getStoredQuickChatNames()).toEqual({});
+    expect(findSession(store)).toBeUndefined();
   });
 });

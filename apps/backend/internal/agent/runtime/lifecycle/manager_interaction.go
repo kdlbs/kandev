@@ -405,6 +405,44 @@ func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *A
 		zap.String("mode", mode))
 }
 
+// reapplySessionModelAfterReset re-applies the effective model to a freshly
+// initialized ACP session so a context reset does not replace the task's model
+// with the provider default advertised by the new session.
+func (m *Manager) reapplySessionModelAfterReset(
+	ctx context.Context,
+	execution *AgentExecution,
+	newSessionID, modelID string,
+) {
+	if execution.agentctl == nil || modelID == "" {
+		return
+	}
+	if err := execution.agentctl.SetModel(ctx, modelID); err != nil {
+		m.logger.Warn("failed to re-apply session model after context reset",
+			zap.String("execution_id", execution.ID),
+			zap.String("model", modelID),
+			zap.Error(err))
+		return
+	}
+	m.logger.Info("re-applied session model after context reset",
+		zap.String("execution_id", execution.ID),
+		zap.String("session_id", execution.SessionID),
+		zap.String("new_acp_session_id", newSessionID),
+		zap.String("model", modelID))
+}
+
+func (m *Manager) effectiveSessionModelForReset(ctx context.Context, execution *AgentExecution) string {
+	modelFallback := ""
+	if previous := execution.GetModelState(); previous != nil {
+		modelFallback = previous.CurrentModelID
+	}
+	if modelFallback == "" {
+		profileModel, _, _ := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
+		modelFallback = profileModel
+	}
+	model, _, _ := m.effectiveSessionRuntimeConfig(ctx, execution, modelFallback, "", nil)
+	return model
+}
+
 // ResetAgentContext resets the agent's conversation context. For ACP agents that support
 // session reset, this creates a new session on the existing connection (fast, no process restart).
 // For all other agents, this falls back to RestartAgentProcess (full subprocess restart).
@@ -423,10 +461,11 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 
-	// Capture the active session mode before the reset so it can be re-applied to
-	// the fresh ACP session (issue #1183). The agent's new session starts at its
-	// default mode, so without this the user's chosen mode is lost.
+	// Capture active session state before the reset. The fresh ACP session starts
+	// at provider defaults, so asynchronous model/mode events from it must not
+	// replace the task's effective pre-reset configuration.
 	prevMode := execution.GetModeState()
+	effectiveModel := m.effectiveSessionModelForReset(ctx, execution)
 
 	// Resolve agent config and MCP servers for session reset
 	agentConfig, err := m.getAgentConfigForExecution(execution)
@@ -467,7 +506,9 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 		}
 	})
 
-	// Restore the user's session permission mode onto the fresh ACP session.
+	// Restore the task's effective model and the user's session permission mode
+	// onto the fresh ACP session.
+	m.reapplySessionModelAfterReset(ctx, execution, newSessionID, effectiveModel)
 	m.reapplySessionModeAfterReset(ctx, execution, newSessionID, prevMode)
 
 	m.logger.Info("agent context reset via session (no process restart)",

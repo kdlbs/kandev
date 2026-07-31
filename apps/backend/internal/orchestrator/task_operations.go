@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/constants"
+	"github.com/kandev/kandev/internal/editors/capabilities"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -2161,6 +2163,7 @@ func (s *Service) populateExecutorStatusInfo(ctx context.Context, session *model
 	resp.ExecutorType = string(execModel.Type)
 	resp.ExecutorName = execModel.Name
 	resp.IsRemoteExecutor = models.IsRemoteExecutorType(execModel.Type)
+	resp.Capabilities.EmbeddedVscode = capabilities.SupportsEmbeddedVscode(execModel.Type, runtime.GOOS)
 }
 
 func (s *Service) applyRemoteRuntimeStatus(ctx context.Context, sessionID string, resp *dto.TaskSessionStatusResponse) {

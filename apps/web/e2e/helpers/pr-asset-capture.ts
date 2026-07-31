@@ -86,14 +86,23 @@ export class PrAssetCapture {
     }
   }
 
-  async screenshot(name: string, opts?: { caption?: string; fullPage?: boolean }): Promise<void> {
+  /**
+   * Captures one asset. `opts.page` overrides the constructor page so a single
+   * capture instance can shoot several clients in one test (a cross-device spec
+   * drives two). Using a second instance instead would not work: flush() clears
+   * this spec's existing manifest entries, so the last flush would win.
+   */
+  async screenshot(
+    name: string,
+    opts?: { caption?: string; fullPage?: boolean; page?: Page },
+  ): Promise<void> {
     if (!this.enabled) return;
 
     const safeName = sanitizeName(name);
     const fileName = `${this.testSlug}--${safeName}.png`;
     const filePath = path.join(this.outputDir, fileName);
 
-    await this.page.screenshot({
+    await (opts?.page ?? this.page).screenshot({
       path: filePath,
       fullPage: opts?.fullPage ?? false,
     });
