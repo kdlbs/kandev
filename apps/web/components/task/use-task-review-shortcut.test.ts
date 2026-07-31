@@ -105,6 +105,26 @@ describe("useTaskReviewShortcut held selection", () => {
     keyup("Control");
     expect(onOpenTarget).toHaveBeenCalledWith(targets[1]);
   });
+
+  it("uses Control when it opened a ctrlOrCmd shortcut on macOS", () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(navigator, "platform");
+    Object.defineProperty(navigator, "platform", { configurable: true, value: "MacIntel" });
+
+    try {
+      const onOpenTarget = vi.fn();
+      const { result } = useShortcut(targets, defaultShortcut, onOpenTarget);
+
+      invokeShortcut(result.current.handleShortcut, "g", { ctrlKey: true, shiftKey: true });
+      invokeShortcut(result.current.handleShortcut, "g", { ctrlKey: true });
+      expect(result.current.selectedIndex).toBe(1);
+
+      keyup("Control");
+      expect(onOpenTarget).toHaveBeenCalledWith(targets[1]);
+    } finally {
+      if (platformDescriptor) Object.defineProperty(navigator, "platform", platformDescriptor);
+      else delete (navigator as { platform?: string }).platform;
+    }
+  });
 });
 
 describe("useTaskReviewShortcut cancellation", () => {

@@ -35,6 +35,23 @@ export function isCycleShortcutEvent(event: KeyboardEvent, shortcut: KeyboardSho
   return matchesShortcut(event, shortcut);
 }
 
+/**
+ * Make ctrlOrCmd's hold modifier match the key that opened this interaction.
+ * Browsers accept either Control or Meta for ctrlOrCmd, including off-platform
+ * variants such as Control on macOS.
+ */
+export function snapshotHeldShortcut(
+  event: KeyboardEvent,
+  shortcut: KeyboardShortcut,
+): KeyboardShortcut {
+  if (!shortcut.modifiers?.ctrlOrCmd || event.ctrlKey === event.metaKey) return shortcut;
+  const { ctrlOrCmd: _ctrlOrCmd, ...modifiers } = shortcut.modifiers;
+  return {
+    ...shortcut,
+    modifiers: { ...modifiers, ...(event.ctrlKey ? { ctrl: true } : { cmd: true }) },
+  };
+}
+
 function isHoldModifierPressed(event: KeyboardEvent, modifier: HoldModifier): boolean {
   if (modifier === MODIFIER_KEYS.CMD) return event.metaKey;
   if (modifier === MODIFIER_KEYS.CTRL) return event.ctrlKey;

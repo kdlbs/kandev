@@ -7,6 +7,7 @@ import {
   isCommitReleaseEvent,
   isCycleShortcutEvent,
   isHeldCycleKeyEvent,
+  snapshotHeldShortcut,
 } from "./recent-task-switcher-keys";
 import type { TaskReviewTarget } from "./task-pr-open";
 
@@ -234,7 +235,7 @@ export function useTaskReviewShortcut({
       const activeShortcut = shortcutRef.current;
       if (!openRef.current) {
         if (!isCycleShortcutEvent(event, activeShortcut)) return;
-        activeShortcutRef.current = activeShortcut;
+        activeShortcutRef.current = snapshotHeldShortcut(event, activeShortcut);
         commitOnReleaseRef.current = hasHoldModifier(activeShortcut);
         cancelledRef.current = false;
         openRef.current = true;
