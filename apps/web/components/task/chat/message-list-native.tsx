@@ -9,17 +9,20 @@ import { useSessionTurn } from "@/hooks/domains/session/use-session-turn";
 import { MessageListFooter } from "./message-list-footer";
 import { useNativeScrollManagement } from "./message-list-native-scroll";
 import { useTranscriptAutoScrollEnabled } from "./use-transcript-auto-scroll-enabled";
+import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
   type MessageListProps,
   type MessageListHandle,
   type LastPromptEdge,
   MessageListStatus,
   MessageItem,
+  UnreadDivider,
   getItemKey,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
   getLastTurnGroupId,
   getStreamingAgentMessageId,
+  canReassertDividerScroll,
   resolveLastPromptEdge,
   isElementFullyVisible,
 } from "./message-list-shared";
@@ -80,6 +83,7 @@ type MessageRowProps = {
   activeTurnId: string | null;
   streamingMessageId: string | null;
   onScrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
+  dividerBeforeItemKey?: string | null;
 };
 
 /** One transcript row, keyed and DOM-id'd by `getItemKey` so the scroll
@@ -96,10 +100,16 @@ function MessageRow({
   activeTurnId,
   streamingMessageId,
   onScrollToMessage,
+  dividerBeforeItemKey,
 }: MessageRowProps) {
   const key = getItemKey(item);
   return (
-    <div id={`msg-${key}`} className="pb-2" style={{ overflowAnchor: "none" }}>
+    <div
+      id={`msg-${key}`}
+      className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] sm:scroll-mt-0"
+      style={{ overflowAnchor: "none" }}
+    >
+      {dividerBeforeItemKey === key && <UnreadDivider />}
       <MessageItem
         item={item}
         sessionId={sessionId}
@@ -141,7 +151,109 @@ type NativeMessageListBodyProps = {
   streamingMessageId: string | null;
   onScrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
   autoScrollEnabled: boolean;
+  dividerBeforeItemKey?: string | null;
 };
+
+/**
+ * Scroll to bottom on initial load — or, if this visit's Slack-style "New"
+ * boundary lands on a currently-loaded item, straight to the divider
+ * instead (mirrors Slack drawing the line where you left off rather than
+ * always jumping to the newest message).
+ *
+ * - dividerBeforeItemKey is derived from usePanelActive (Dockview's
+ *   active-tab signal), backed by useSyncExternalStore, which only
+ *   resolves true on a render *after* this component's own mount — so on
+ *   the very first run here it's still null even for a session that does
+ *   have an unread divider.
+ * - The initial messages fetch can itself arrive in more than one wave
+ *   (e.g. a WebSocket-delivered backfill continuing after this
+ *   component's first commit, unrelated to user-triggered pagination),
+ *   which can also retroactively shift where useScrollPositionOnPrepend
+ *   lands the scroll. Rather than trying to classify every wave as
+ *   "prepend" or "append" up front, the correction below keeps
+ *   re-asserting the divider's position on every relevant change, bounded
+ *   by BOTH of: the reader hasn't started scrolling yet (isUserScrolling
+ *   — wheel/touchstart/keydown, since a plain 'scroll' event can't tell
+ *   user intent apart from our own programmatic writes), AND still being
+ *   within a short settling window since mount (isWithinSettlingWindow).
+ *   The window exists so a live message arriving long after the visit has
+ *   genuinely settled — with no wheel/touch/key event to catch, e.g. a
+ *   scrollbar drag — can never re-trigger a correction; once either gate
+ *   trips, it's the user's scroll position to own, same as Slack never
+ *   re-snapping you to the unread line once you've started reading.
+ * - didScrollToDivider and didInitialScroll are separate latches so the
+ *   bottom-fallback firing first (before dividerBeforeItemKey resolves)
+ *   doesn't block the divider correction from still applying once it
+ *   does. Embedded, always-invisible previews (isVisible hardcoded false,
+ *   see TaskChatPanel) never resolve a divider, so they keep the
+ *   original, unconditional scroll-to-bottom-on-mount behavior untouched.
+ */
+function useScrollToDividerOrBottom(
+  scrollRef: React.RefObject<HTMLDivElement | null>,
+  itemCount: number,
+  dividerBeforeItemKey: string | null | undefined,
+) {
+  const isUserScrollingRef = useRef(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const markUserScrolling = () => {
+      isUserScrollingRef.current = true;
+    };
+    el.addEventListener("wheel", markUserScrolling, { passive: true });
+    el.addEventListener("touchstart", markUserScrolling, { passive: true });
+    el.addEventListener("keydown", markUserScrolling);
+    return () => {
+      el.removeEventListener("wheel", markUserScrolling);
+      el.removeEventListener("touchstart", markUserScrolling);
+      el.removeEventListener("keydown", markUserScrolling);
+    };
+  }, [scrollRef]);
+
+  // Bounds how long the divider correction below can keep re-asserting
+  // itself after mount, independent of user interaction: a scrollbar drag
+  // (no wheel/touch/key event) or a live message arriving long after the
+  // visit has settled must never be able to re-trigger it. 4s comfortably
+  // covers the slowest observed multi-wave initial load (WS backfill
+  // continuing after the REST fetch) without lingering into the range
+  // where the user has plausibly started reading and scrolling normally.
+  const mountedAtRef = useRef<number | null>(null);
+  if (mountedAtRef.current === null) mountedAtRef.current = Date.now();
+  const isWithinSettlingWindow = () => Date.now() - (mountedAtRef.current ?? 0) < 4000;
+
+  const didInitialScroll = useRef(false);
+  const didScrollToDivider = useRef(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || itemCount === 0) return;
+    const canReassertDivider = canReassertDividerScroll({
+      hasDividerTarget: Boolean(dividerBeforeItemKey),
+      didScrollToDivider: didScrollToDivider.current,
+      isUserScrolling: isUserScrollingRef.current,
+      isWithinSettlingWindow: isWithinSettlingWindow(),
+    });
+    if (canReassertDivider) {
+      if (useDockviewStore.getState().pendingChatScrollTop === null) {
+        const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
+        if (dividerEl) {
+          dividerEl.scrollIntoView({ block: "start" });
+          didScrollToDivider.current = true;
+          didInitialScroll.current = true;
+          return;
+        }
+      }
+    }
+    if (didInitialScroll.current) return;
+    // If a layout rebuild scroll restore is pending, skip initial scroll
+    // (the restore handler will set the correct position)
+    if (useDockviewStore.getState().pendingChatScrollTop !== null) {
+      didInitialScroll.current = true;
+      return;
+    }
+    el.scrollTop = el.scrollHeight;
+    didInitialScroll.current = true;
+  }, [itemCount, dividerBeforeItemKey]);
+}
 
 /** Sentinel, status/footer, and transcript rows — everything below the
  * (optional) anchored prompt bar inside the scroll container. */
@@ -169,6 +281,7 @@ function NativeMessageListBody({
   streamingMessageId,
   onScrollToMessage,
   autoScrollEnabled,
+  dividerBeforeItemKey,
 }: NativeMessageListBodyProps) {
   return (
     <div className="p-4">
@@ -199,6 +312,7 @@ function NativeMessageListBody({
           activeTurnId={activeTurnId}
           streamingMessageId={streamingMessageId}
           onScrollToMessage={onScrollToMessage}
+          dividerBeforeItemKey={dividerBeforeItemKey}
         />
       ))}
 
@@ -246,6 +360,7 @@ export const NativeMessageList = memo(
       firstMessageId,
       onFirstMessageHiddenChange,
       stickyPromptBar,
+      dividerBeforeItemKey,
     }: MessageListProps,
     ref,
   ) {
@@ -274,6 +389,7 @@ export const NativeMessageList = memo(
       isLoadingMore,
       loadMore,
     });
+    useScrollToDividerOrBottom(scrollRef, items.length, dividerBeforeItemKey);
     useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
       handleScrollToMessage,
     ]);
@@ -317,6 +433,7 @@ export const NativeMessageList = memo(
           streamingMessageId={streamingMessageId}
           onScrollToMessage={handleScrollToMessage}
           autoScrollEnabled={autoScrollEnabled}
+          dividerBeforeItemKey={dividerBeforeItemKey}
         />
       </SessionPanelContent>
     );

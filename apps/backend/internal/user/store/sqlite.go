@@ -457,6 +457,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"chat_submit_key":                     settings.ChatSubmitKey,
 		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                settings.ConfirmTaskArchive,
+		"unread_divider":                      settings.UnreadDivider,
 		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
@@ -580,6 +581,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ShowReleaseNotification = true
 		settings.ReviewAutoMarkOnScroll = true
 		settings.ConfirmTaskArchive = true
+		settings.UnreadDivider = true
 		settings.MCPTaskAgentProfileDefault = models.MCPTaskAgentProfileDefaultCurrentTask
 		settings.ShowAnchoredPromptBar = false
 		settings.ShowScrollToLastPrompt = true
@@ -612,6 +614,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ChatSubmitKey                   string                              `json:"chat_submit_key"`
 		ReviewAutoMarkOnScroll          *bool                               `json:"review_auto_mark_on_scroll"`
 		ConfirmTaskArchive              *bool                               `json:"confirm_task_archive"`
+		UnreadDivider                   *bool                               `json:"unread_divider"`
 		MCPTaskAgentProfileDefault      string                              `json:"mcp_task_agent_profile_default"`
 		ShowAnchoredPromptBar           *bool                               `json:"show_anchored_prompt_bar"`
 		ShowScrollToLastPrompt          *bool                               `json:"show_scroll_to_last_prompt"`
@@ -674,6 +677,11 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ConfirmTaskArchive = *payload.ConfirmTaskArchive
 	} else {
 		settings.ConfirmTaskArchive = true
+	}
+	if payload.UnreadDivider != nil {
+		settings.UnreadDivider = *payload.UnreadDivider
+	} else {
+		settings.UnreadDivider = true
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowAnchoredPromptBar != nil {

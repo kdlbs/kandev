@@ -165,10 +165,14 @@ test.describe("File editor auto-update on file change", () => {
 
     // Open the file in the file editor via the Files tree.
     await session.clickTab("Files");
-    await expect(session.files).toBeVisible({ timeout: 10_000 });
-    const fileRow = session.files.getByText("diff_update_test.txt");
+    const filesPanel = testPage.locator('[data-testid="files-panel"]:visible').first();
+    await expect(filesPanel).toBeVisible({ timeout: 10_000 });
+    const fileRow = filesPanel.getByRole("treeitem", {
+      name: "diff_update_test.txt",
+      exact: true,
+    });
     await expect(fileRow).toBeVisible({ timeout: 10_000 });
-    await fileRow.click();
+    await fileRow.dispatchEvent("click");
 
     // The editor tab should appear in dockview.
     const editorTab = testPage.locator(".dv-default-tab", { hasText: "diff_update_test.txt" });
@@ -217,12 +221,12 @@ test.describe("File editor auto-update on file change", () => {
     await expect(diffsContainer).toBeVisible({ timeout: 15_000 });
     await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
 
-    // Also open the file editor for the same file via the Files tree.
-    await session.clickTab("Files");
-    await expect(session.files).toBeVisible({ timeout: 5_000 });
-    const fileRow = session.files.getByText("diff_update_test.txt");
-    await expect(fileRow).toBeVisible({ timeout: 10_000 });
-    await fileRow.click();
+    // Open the editor from the already-loaded diff. A late git-status update is
+    // allowed to focus Changes, so routing through the Files tab would race that
+    // intentional focus transition instead of testing editor refresh behavior.
+    const editFile = testPage.getByRole("button", { name: "Edit", exact: true });
+    await expect(editFile).toBeVisible();
+    await editFile.click();
     const editorTab = testPage.locator(".dv-default-tab[type='file-editor']", {
       hasText: "diff_update_test.txt",
     });

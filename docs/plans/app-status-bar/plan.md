@@ -7,14 +7,14 @@ spec: docs/specs/ui/app-status-bar.md
 
 ## Outcome
 
-Ship one app-owned status surface: 24 px in-flow bar on desktop/tablet, native Status drawer on phone. It shows only connection plus existing opted-in host/active-executor metrics, exposes live plugin regions without changing chat-local status UI, and lets users preserve a full-bar item order.
+Ship one app-owned status surface: 24 px in-flow bar in the non-phone route-content column, native Status drawer on phone. It shows only connection plus existing opted-in host/active-executor metrics, exposes live plugin regions without changing chat-local status UI, and lets users preserve a full-bar item order.
 
 ## Fixed decisions
 
 - Slots: `app-status-bar-left`, `app-status-bar-right`; exact props live in [spec](../../specs/ui/app-status-bar.md#plugin-slots) and [plugin API](../plugins/PLUGIN-API.md#app-status-bar-slots).
 - One responsive presentation mounts at once. Desktop=`full`, tablet=`compact`, drawer=`full`.
 - Metrics subscribe only when legacy `showInTopbar` preference permits: desktop/tablet while bar mounted, phone only while drawer open.
-- Shell uses an in-flow footer. `--app-status-bar-height` offsets audited desktop fixed overlays only.
+- Shell places the full-height sidebar beside a route/status column whose in-flow footer starts at the sidebar layout edge. `--app-status-bar-height` offsets audited desktop fixed overlays only.
 - Orca is conceptual reference only. Ship pinned MIT attribution; do not transplant its component or add data providers.
 - `app-status-bar-left` and `app-status-bar-right` choose default sides only. Cmd/Ctrl plus mouse drag may move an opaque host item across the full bar; no keyboard-arrow or touch reorder interaction is added.
 - Portable order lives only in backend-owned user settings as `app_status_bar_order.left_item_ids/right_item_ids`. Phone renders left then right vertically.
@@ -32,6 +32,7 @@ Ship one app-owned status surface: 24 px in-flow bar on desktop/tablet, native S
 | 6 | [10](task-10-portable-item-order.md), [11](task-11-stable-status-item-identities.md) | User-settings round trip and deterministic opaque item identities. |
 | 7 | [12](task-12-reorder-interaction-and-alignment.md) | Full-bar modifier drag, aligned content, and mirrored phone order. |
 | 8 | [13](task-13-reorder-docs-e2e-verification.md) | Public contract, desktop/mobile persistence E2E, review, and full verification. |
+| 9 | [14](task-14-sidebar-aligned-status-bar.md) | Sidebar and status-bar geometry agree in expanded, collapsed, resized, and sidebar-hidden layouts. |
 
 ## Dependency graph
 
@@ -45,13 +46,15 @@ Ship one app-owned status surface: 24 px in-flow bar on desktop/tablet, native S
 10 portable order ─┐
                    ├─> 12 reorder + alignment ─> 13 docs/E2E/verify
 11 stable items ───┘
+
+13 shipped surface ──> 14 sidebar-aligned status bar
 ```
 
 ## File / test map
 
 - **Plugin contract:** typed status props, stable owned registrations, owner-aware error boundaries, typed left/right wrapper, unit tests.
 - **First-party surface:** connection item; status metrics presentation; app bar/drawer/provider; remove `TopbarMetrics` mounts and update settings copy.
-- **Shell and geometry:** app/legacy shells, shell-owned route heights, audited fixed controls, explicit z-index and CSS variable offsets.
+- **Shell and geometry:** full-height sidebar beside the route/status column, shell-owned route heights, audited fixed controls, explicit z-index and CSS variable offsets.
 - **Mobile:** native Status actions in Home, task, Settings, PageTopbar, Office; no second footer.
 - **Proof:** fixture plugin hot enable/disable desktop test; `mobile-status-drawer.spec.ts`; layout/overlay assertions; licenses-page test.
 - **Records:** public plugin/operations/features docs, resource-metrics decision amendment, MIT notice generation.
@@ -89,6 +92,7 @@ cd apps/web && pnpm e2e:run tests/layout/app-status-bar.spec.ts tests/plugins/mo
 - Slot registration IDs created from a process counter do not survive re-enable/restart: derive a separate deterministic ordering identity from plugin/slot/ordinal and keep error-boundary identity behavior covered.
 - Pointer dragging can steal plugin clicks: wait for horizontal movement beyond a threshold before starting reorder, and suppress only the click produced by a completed drag.
 - Disabled plugins and hidden metrics can disappear from active rendering: retain their opaque IDs in the saved arrays and reconcile active items without rewriting missing entries.
+- Sidebar collapse deliberately snaps its layout reservation while the visual panel animates over content. Align the bar to the shared layout edge without changing that established animation contract or duplicating sidebar-width calculations.
 
 ## Tasks
 
@@ -107,3 +111,4 @@ cd apps/web && pnpm e2e:run tests/layout/app-status-bar.spec.ts tests/plugins/mo
 | 11 | done | 6 | [Stable status item identities](task-11-stable-status-item-identities.md) |
 | 12 | done | 7 | [Reorder interaction and alignment](task-12-reorder-interaction-and-alignment.md) |
 | 13 | done | 8 | [Reorder docs, E2E, and verification](task-13-reorder-docs-e2e-verification.md) |
+| 14 | done | 9 | [Sidebar-aligned status bar](task-14-sidebar-aligned-status-bar.md) |

@@ -132,6 +132,7 @@ function summarizeMessages(messages: Message[]): {
 
 interface UseSessionMessagesReturn {
   isLoading: boolean;
+  isInitialMessagesLoading: boolean;
   messages: Message[];
   hasMore: boolean;
   oldestCursor: string | null;
@@ -700,6 +701,7 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
 
   return {
     isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,
+    isInitialMessagesLoading: isWaitingForInitialMessages,
     messages,
     hasMore: messagesMeta.hasMore,
     oldestCursor: messagesMeta.oldestCursor,

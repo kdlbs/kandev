@@ -436,15 +436,19 @@ test.describe("Seed protection", () => {
     // it and previously surfaced the entry as a manageable card in the
     // settings list. Verify the new hidden entry never appears as a card.
     const hiddenName = "Improve Kandev";
+    const visibleName = `Hidden filter sentinel ${Date.now()}`;
+    const visibleWorkflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      visibleName,
+      "simple",
+    );
 
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
-    // The seeded visible workflow is rendered before the leak attempt.
-    await expect
-      .poll(async () => (await page.findWorkflowCard("E2E Workflow")).isVisible())
-      .toBe(true);
-    const visibleCard = await page.findWorkflowCard("E2E Workflow");
+    // Establish a visible control in this test instead of depending on a seed
+    // that an earlier restart test may still be restoring.
+    const visibleCard = page.workflowCard(visibleWorkflow.id);
     await expect(visibleCard).toBeVisible();
     const baselineCount = await testPage.locator('[data-testid^="workflow-card-"]').count();
 

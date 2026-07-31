@@ -125,7 +125,10 @@ test.describe("Sidebar workspace mode navigation", () => {
     officeApi,
     officeSeed,
   }) => {
-    await officeApi.listSkills(officeSeed.workspaceId);
+    const initial = (await officeApi.listSkills(officeSeed.workspaceId)) as {
+      skills?: Array<{ is_system?: boolean }>;
+    };
+    const initialUserSkillCount = (initial.skills ?? []).filter((skill) => !skill.is_system).length;
     await testPage.goto("/office");
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
 
@@ -144,7 +147,7 @@ test.describe("Sidebar workspace mode navigation", () => {
     await expect(testPage.getByText("Agents Enabled")).toBeVisible({ timeout: 10_000 });
 
     await expect(skillsNavLink).toBeVisible();
-    const badge = skillsNavLink.getByText("1");
+    const badge = skillsNavLink.getByText(String(initialUserSkillCount + 1), { exact: true });
     await expect(badge).toBeVisible();
     await expect(badge).toHaveClass(/bg-muted/);
     await expect(badge).toHaveClass(/text-muted-foreground/);

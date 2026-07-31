@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -69,6 +70,35 @@ func TestPublishMCPAttachmentAttemptCarriesBackendOwnedIdentity(t *testing.T) {
 	}
 	if got := event.MCPAttachmentAttempt; got.TaskID != "task-1" || got.ExecutionID != "execution-1" {
 		t.Fatalf("attempt identity = %+v", got)
+	}
+}
+
+func TestForwardUpdatesUsesItsGenerationStopChannel(t *testing.T) {
+	stopCh := make(chan struct{})
+	m := &Manager{
+		adapter:   newStubAdapter(),
+		updatesCh: make(chan adapter.AgentEvent, 1),
+		stopCh:    stopCh,
+		logger:    newTestLogger(t),
+	}
+	m.wg.Add(1)
+	go m.forwardUpdates(m.adapter, stopCh)
+
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+
+	m.stopCh = make(chan struct{})
+	close(stopCh)
+
+	select {
+	case <-done:
+	case <-time.After(100 * time.Millisecond):
+		close(m.stopCh)
+		<-done
+		t.Fatal("forwardUpdates did not stop with its original lifecycle channel")
 	}
 }
 

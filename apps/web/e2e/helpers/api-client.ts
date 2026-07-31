@@ -1720,6 +1720,28 @@ export class ApiClient {
     return this.request("GET", `/api/v1/task-sessions/${sessionId}/turns`);
   }
 
+  async getTaskSession(sessionId: string): Promise<{
+    session: { id: string; last_read_message_id?: string };
+  }> {
+    return this.request("GET", `/api/v1/task-sessions/${sessionId}`);
+  }
+
+  /**
+   * Force-sets the session's read cursor directly, bypassing the production
+   * mark-read endpoint's forward-only (monotonic) guard. Used by e2e specs
+   * that need to seed "the user last read up through an earlier message"
+   * deterministically — rewinding through the real endpoint would now be
+   * rejected as a stale/out-of-order update.
+   */
+  async forceSetSessionReadCursor(
+    sessionId: string,
+    messageId: string,
+  ): Promise<{ id: string; last_read_message_id: string }> {
+    return this.request("PATCH", `/api/v1/e2e/task-sessions/${sessionId}/read-cursor`, {
+      message_id: messageId,
+    });
+  }
+
   async listTasks(
     workspaceId: string,
   ): Promise<{ tasks: Array<{ id: string; title: string; workflow_step_id?: string }> }> {

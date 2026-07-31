@@ -583,6 +583,9 @@ func registerRoutes(p routeParams) {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
 		p.services.Sentry.SetRepositoryLookup(repoLookup)
 	}
+	if p.services.Automation != nil {
+		p.services.Automation.Service.SetRepositoryLookup(repoLookup)
+	}
 	p.orchestratorSvc.SetWorkspaceMaterializer(handoffSvc)
 	// Phase 8 prompt enrichment — wire the office scheduler's
 	// TaskContextProvider so every run prompt rendered by the active

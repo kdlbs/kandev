@@ -130,7 +130,6 @@ func TestApplyStatesToConfigSetsClaudeBackgroundPromptHandoff(t *testing.T) {
 		t.Fatal("ApplyStatesToConfig did not set Features.ClaudeBackgroundPromptHandoff = true")
 	}
 }
-
 func TestApplyStatesToConfigMarksImpliedDebugEnvAsApplied(t *testing.T) {
 	for _, name := range []string{
 		"KANDEV_DEBUG_PPROF_ENABLED",

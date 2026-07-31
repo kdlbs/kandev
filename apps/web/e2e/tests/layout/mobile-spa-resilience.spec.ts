@@ -205,6 +205,13 @@ test.describe("Mobile SPA resilience", () => {
       }
     };
     const failSession = async (route: Route) => {
+      // Fail the route loader's optional hydration request once. The mounted
+      // session reconciler is expected to retry authoritatively, and that
+      // recovery request must be allowed through.
+      if (sessionFailures > 0) {
+        await route.continue();
+        return;
+      }
       sessionFailures += 1;
       sessionObserved.resolve();
       await releaseFailures.promise;

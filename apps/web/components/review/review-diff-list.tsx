@@ -59,7 +59,11 @@ export const ReviewDiffList = memo(function ReviewDiffList({
   fileRefs,
 }: ReviewDiffListProps) {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
-  const suppressAutoMarkRef = useRef(false);
+  // Opening the dialog and restoring a selected file can move the scroll
+  // container before the selected-file effect runs. Start suppressed so those
+  // initial layout movements can never count as user review activity; genuine
+  // wheel, touch, pointer, or keyboard input releases the guard below.
+  const suppressAutoMarkRef = useRef(true);
   const allowAutoMark = useCallback(() => {
     suppressAutoMarkRef.current = false;
   }, []);

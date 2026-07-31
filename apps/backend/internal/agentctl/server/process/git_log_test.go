@@ -14,7 +14,7 @@ import (
 // filtered.
 func TestGetLog_NoBaseReturnsFullGraph(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 
 	log := newTestLogger(t)
 	ctx := context.Background()
@@ -57,7 +57,7 @@ func TestGetLog_NoBaseReturnsFullGraph(t *testing.T) {
 // the underlying git scenario.
 func TestGetLog_StaleLocalBranchScenario(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 
 	log := newTestLogger(t)
 	ctx := context.Background()
@@ -132,7 +132,7 @@ func TestGetLog_StaleLocalBranchScenario(t *testing.T) {
 // confuses users expecting "what this branch did".
 func TestGetLog_FirstParentSkipsMergedInCommits(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 
 	log := newTestLogger(t)
 	ctx := context.Background()
@@ -217,5 +217,64 @@ func TestGetLog_FirstParentSkipsMergedInCommits(t *testing.T) {
 		}
 		t.Errorf("expected exactly 3 commits with --first-parent, got %d:\n%s",
 			len(result.Commits), strings.Join(shas, "\n"))
+	}
+}
+
+// TestIsAncestor covers the exit-code contract of GitOperator.IsAncestor:
+// a true ancestor returns true, a diverged sibling returns false, an equal
+// SHA returns true (git treats a commit as its own ancestor), an unknown SHA
+// is a genuine error, and empty inputs short-circuit to (false, nil).
+func TestIsAncestor(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	log := newTestLogger(t)
+	ctx := context.Background()
+
+	// base -> a on main; a side branch diverges at base.
+	base := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+	writeFile(t, repoDir, "a.txt", "a\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "chore: a")
+	mainA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	runGit(t, repoDir, "checkout", "-b", "side", base)
+	writeFile(t, repoDir, "side.txt", "side\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "chore: side")
+	sideCommit := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+
+	tests := []struct {
+		name       string
+		ancestor   string
+		descendant string
+		want       bool
+		wantErr    bool
+	}{
+		{name: "true ancestor", ancestor: base, descendant: mainA, want: true},
+		{name: "diverged sibling", ancestor: mainA, descendant: sideCommit, want: false},
+		{name: "equal SHA is ancestor of itself", ancestor: mainA, descendant: mainA, want: true},
+		{name: "empty ancestor short-circuits", ancestor: "", descendant: mainA, want: false},
+		{name: "empty descendant short-circuits", ancestor: base, descendant: "", want: false},
+		{name: "unknown SHA errors", ancestor: base, descendant: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef", want: false, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := gitOp.IsAncestor(ctx, tc.ancestor, tc.descendant)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil (result %v)", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("IsAncestor(%s, %s) = %v, want %v", tc.ancestor, tc.descendant, got, tc.want)
+			}
+		})
 	}
 }

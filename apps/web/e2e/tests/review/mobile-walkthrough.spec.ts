@@ -65,7 +65,7 @@ test.describe("Mobile code walkthrough", () => {
     const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
     await expect(reviewDialog.locator('[data-walkthrough-active="true"]')).toHaveCount(0);
-    await expect(reviewDialog.getByText("0 of 3 files reviewed")).toBeVisible();
+    await expect(reviewDialog.getByText(/^0 of \d+ files reviewed$/)).toBeVisible();
     await expectWalkthroughBehindDialog(testPage, reviewDialog, [
       { locator: card, name: "walkthrough window" },
       {

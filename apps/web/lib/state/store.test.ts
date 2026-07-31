@@ -59,4 +59,10 @@ describe("createAppStore", () => {
       "task-2": "acme/widget/2",
     });
   });
+
+  it("starts with no connection issue severity", () => {
+    const store = createAppStore();
+
+    expect((store.getState().connection as { issueSeverity?: string }).issueSeverity).toBe("none");
+  });
 });

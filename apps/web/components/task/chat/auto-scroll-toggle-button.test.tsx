@@ -49,6 +49,13 @@ describe("AutoScrollToggleButton", () => {
     expect(button.getAttribute("aria-label")).toMatch(/turn off/i);
   });
 
+  it("shows the icon in dark green, maximized to fill its box, when enabled", () => {
+    renderButton("session-a");
+    const icon = screen.getByTestId("auto-scroll-toggle-icon");
+    expect(icon.getAttribute("class")).toMatch(/text-green-600/);
+    expect(icon.getAttribute("class")).toMatch(/h-6 w-6/);
+  });
+
   it("clicking while enabled disables auto-scroll for the session", () => {
     renderButton("session-a");
     fireEvent.click(getButton());
@@ -61,6 +68,13 @@ describe("AutoScrollToggleButton", () => {
     const button = getButton();
     expect(button.getAttribute("aria-pressed")).toBe("false");
     expect(button.getAttribute("aria-label")).toMatch(/turn on/i);
+  });
+
+  it("shows the icon with no color when disabled", () => {
+    enabledBySessionId = { "session-a": false };
+    renderButton("session-a");
+    const icon = screen.getByTestId("auto-scroll-toggle-icon");
+    expect(icon.getAttribute("class")).not.toMatch(/text-green-600/);
   });
 
   it("clicking while disabled re-enables auto-scroll for the session", () => {

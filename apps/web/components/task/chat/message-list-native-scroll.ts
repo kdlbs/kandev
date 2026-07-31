@@ -13,6 +13,7 @@ import {
   resolveNativeInitialScrollTop,
   createFrameCoalescer,
 } from "./transcript-auto-scroll";
+import { scheduleClampedScrollRestore } from "./clamped-scroll-restore";
 
 /**
  * Continuously captures scroll state via scroll listener.
@@ -393,6 +394,20 @@ function useScrollToMessage(runGuardedScroll: (performScroll: () => void) => voi
  * enabled, or the last captured offset for this session when disabled (see
  * `resolveNativeInitialScrollTop`). Skips while a dockview layout-rebuild
  * restore is pending — that separate mechanism owns the position instead.
+ *
+ * When restoring a concrete saved offset (auto-scroll disabled), the first
+ * write can be clamped short: on a dockview remount the container's content is
+ * still laying out, so `scrollHeight - clientHeight` momentarily sits below
+ * the target and the browser caps the write. The content grows to full height
+ * a frame or two later, so the offset is re-applied across a bounded run of
+ * animation frames until it lands (or the budget runs out). That re-apply loop
+ * is deliberately NOT torn down on unmount: dockview detaches (rather than
+ * destroys) the panel's DOM as it finalizes the layout, so the component that
+ * seeded the restore unmounts while its scroll element stays on screen — the
+ * loop keeps a direct reference to that element and self-terminates once the
+ * offset lands, reaches its frame budget, or the element leaves the document.
+ * The enabled "scroll to bottom" path needs no retry and settles in a single
+ * write.
  */
 function useInitialScrollPosition(
   scrollRef: React.RefObject<HTMLDivElement | null>,
@@ -419,15 +434,30 @@ function useInitialScrollPosition(
       savedScrollTop,
       scrollHeight: el.scrollHeight,
     });
-    if (scrollTop !== null) {
-      el.scrollTop = scrollTop;
+    didInitialScroll.current = true;
+    if (scrollTop === null) return;
+
+    const syncNearBottom = () => {
       isNearBottomRef.current = !hasTranscriptProgressedPastView({
         scrollTop,
         scrollHeight: el.scrollHeight,
         clientHeight: el.clientHeight,
       });
-    }
-    didInitialScroll.current = true;
+    };
+
+    el.scrollTop = scrollTop;
+    syncNearBottom();
+
+    // Only a concrete disabled-restore offset can be clamped by a not-yet-
+    // settled layout; the enabled bottom target lands in one write, and a
+    // write that already reached its target needs no follow-up.
+    if (enabled || scrollTop <= 0 || el.scrollTop >= scrollTop - 1) return;
+
+    scheduleClampedScrollRestore({
+      element: el,
+      targetScrollTop: scrollTop,
+      onApply: syncNearBottom,
+    });
   }, [itemCount, sessionId, enabled, isNearBottomRef, storeApi]);
 }
 

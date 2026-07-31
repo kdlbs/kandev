@@ -7,6 +7,7 @@ import { registerWsHandlers } from "@/lib/ws/router";
 import type { AppState } from "@/lib/state/store";
 import { setWebSocketClient } from "@/lib/ws/connection";
 import { createDebugLogger } from "@/lib/debug/log";
+import { ConnectionIssueMonitor } from "@/lib/ws/connection-issue-monitor";
 
 const debug = createDebugLogger("ws:connection");
 
@@ -15,9 +16,13 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
 
   useEffect(() => {
     debug("WS hook mounting", { url });
+    const connectionIssueMonitor = new ConnectionIssueMonitor((severity) => {
+      store.getState().setConnectionIssueSeverity(severity);
+    });
     const client = new WebSocketClient(
       url,
       (status) => {
+        connectionIssueMonitor.onStatusChange(status);
         const setConnectionStatus = store.getState().setConnectionStatus;
         debug("status transition", { status, timestamp: new Date().toISOString() });
         // WS client and ConnectionState share one ConnectionStatus vocabulary,
@@ -47,6 +52,7 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
+      connectionIssueMonitor.dispose();
       client.disconnect();
       setWebSocketClient(null);
     };

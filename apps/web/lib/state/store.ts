@@ -317,6 +317,9 @@ export type AppState = KanbanSlice & {
   setPreviewUrlDraft: (sessionId: string, url: string) => void;
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
+  setConnectionIssueSeverity: (
+    severity: import("@/lib/types/connection").ConnectionIssueSeverity,
+  ) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
@@ -380,6 +383,7 @@ export type AppState = KanbanSlice & {
   ) => void;
   setMessagesLoading: (sessionId: string, loading: boolean) => void;
   setTaskSession: (session: TaskSession) => void;
+  updateSessionReadCursor: (sessionId: string, lastReadMessageId: string) => void;
   removeTaskSession: (taskId: string, sessionId: string) => void;
   setTaskSessionsForTask: (taskId: string, sessions: TaskSession[]) => void;
   upsertTaskSessionFromEvent: (taskId: string, session: TaskSession) => void;

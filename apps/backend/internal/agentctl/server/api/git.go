@@ -747,6 +747,16 @@ func (s *Server) runGitLogForRepo(
 					zap.Error(err))
 			}
 		}
+		// Re-anchor a stale stored base (merged/deleted stacked parent, rebase)
+		// to the live integration merge-base so the panel counts only the
+		// branch's own commits. Only fires when the target has no live upstream
+		// ref, so a live non-default target (e.g. origin/develop) keeps its own
+		// authoritative merge-base. No-op when the base is already current.
+		baseCommit = gitOp.CorrectStaleComparisonBase(
+			c.Request.Context(),
+			baseCommit,
+			req.TargetBranch,
+		)
 	}
 
 	return gitOp.GetLog(c.Request.Context(), baseCommit, limit)
@@ -958,6 +968,12 @@ func (s *Server) runGitCumulativeDiffForRepo(
 		default:
 			base = mb
 		}
+		// Mirror the commits panel: re-anchor a stale stored base (merged/
+		// deleted stacked parent, rebase) to the live integration merge-base so
+		// the diff excludes changes that already landed on the integration
+		// branch. Only fires when the target has no live upstream ref. No-op
+		// when the base is already current.
+		base = gitOp.CorrectStaleComparisonBase(c.Request.Context(), base, targetBranch)
 	}
 	result, err := gitOp.GetCumulativeDiff(c.Request.Context(), base)
 	if err != nil {
@@ -1024,12 +1040,27 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 // resolvePerRepoBase returns the comparison anchor owned by the repository's
 // workspace tracker. Multi-repo tasks share no single base commit across
 // repos, and each tracker carries that repository's configured task base.
+//
+// The single-repo path re-anchors a stale stored base from req.TargetBranch,
+// but the multi-repo fan-out clears TargetBranch, so it must apply the shared
+// comparison policy here using the tracker's resolved base branch.
+// Without this, a repo whose base branch is a merged/deleted stacked parent
+// lingering only as a local ref keeps inflating the commit count and diff.
 func (s *Server) resolvePerRepoBase(c *gin.Context, repo string) string {
 	tracker, err := s.procMgr.GetWorkspaceTrackerFor(repo)
 	if err != nil {
 		return ""
 	}
-	return tracker.ResolveBaseCommit(c.Request.Context())
+	ctx := c.Request.Context()
+	base, baseBranch := tracker.ResolveBaseAnchor(ctx)
+	if base == "" || baseBranch == "" {
+		return base
+	}
+	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
+	if gitOpErr != nil {
+		return base
+	}
+	return gitOp.CorrectStaleComparisonBase(ctx, base, baseBranch)
 }
 
 // mergeCumulativeFiles copies per-repo files into the merged map under a

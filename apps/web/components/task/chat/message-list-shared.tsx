@@ -31,6 +31,9 @@ export type MessageListProps = {
   sessionState?: TaskSessionState;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
+  /** Render item key (see getItemKey) the unread "New" divider should
+   *  appear immediately before; null/undefined renders no divider. */
+  dividerBeforeItemKey?: string | null;
   /** Id of the most recent user-sent message, when known. Drives the
    * scroll-to-last-prompt button (always active) and the anchored-bar
    * affordance (opt-in, desktop only). */
@@ -232,6 +235,34 @@ export function getConversationLoadingState(params: {
   };
 }
 
+/**
+ * Decides whether message-list-native's initial divider-scroll effect may
+ * (re-)apply `scrollIntoView` on the divider this render, versus leaving
+ * whatever position the reader (or a prior correction) already settled on.
+ *
+ * True on the very first successful application (didScrollToDivider is
+ * false) regardless of the other two gates — that first placement must
+ * always happen once a divider target exists. After that, a re-assertion
+ * (e.g. the transcript's initial data arriving in more than one wave, which
+ * can shift where the divider actually lands) is only allowed while BOTH
+ * the reader hasn't interacted yet (isUserScrolling — wheel, touch, or a
+ * key press) AND the visit is still within its short settling window since
+ * mount. Either gate tripping freezes the position for good: a live
+ * message arriving well after the visit has genuinely settled — with no
+ * interaction event to catch, e.g. a scrollbar drag — must never yank the
+ * reader back to the divider.
+ */
+export function canReassertDividerScroll(params: {
+  hasDividerTarget: boolean;
+  didScrollToDivider: boolean;
+  isUserScrolling: boolean;
+  isWithinSettlingWindow: boolean;
+}): boolean {
+  if (!params.hasDividerTarget) return false;
+  if (!params.didScrollToDivider) return true;
+  return !params.isUserScrolling && params.isWithinSettlingWindow;
+}
+
 // The chat banner stays visible until the user explicitly dismisses it, even
 // after the agent resumes — so the user can read the full error message at
 // their own pace. The sidebar icon, by contrast, also auto-hides once the
@@ -292,6 +323,27 @@ export function LastAgentErrorNotice({
           <IconX className="h-3.5 w-3.5" aria-hidden="true" />
         </button>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Slack-style unread-messages divider: a red rule with a "New" label,
+ * positioned by the caller immediately before the first unread render item
+ * (see hooks/use-processed-messages.ts's findUnreadDividerItemId).
+ */
+export function UnreadDivider() {
+  return (
+    <div
+      data-testid="unread-divider"
+      role="separator"
+      aria-label="New messages"
+      className="relative my-3 flex items-center"
+    >
+      <div className="h-px flex-1 bg-destructive" />
+      <span className="ml-2 shrink-0 text-[10px] font-semibold uppercase tracking-wide text-destructive">
+        New
+      </span>
     </div>
   );
 }

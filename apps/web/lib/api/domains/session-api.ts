@@ -2,6 +2,7 @@ import { fetchJson, type ApiRequestOptions } from "../client";
 import type {
   TaskSessionsResponse,
   TaskSessionResponse,
+  MarkSessionReadResponse,
   ListMessagesResponse,
   ListTurnsResponse,
 } from "@/lib/types/http";
@@ -82,6 +83,30 @@ export async function dismissLastAgentError(
       init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ stamp }) },
     },
   );
+}
+
+/**
+ * Advances the session's Slack-style read cursor to messageId. Called when a
+ * session becomes the visible chat panel — the caller must snapshot the
+ * session's PRIOR last_read_message_id (to position the unread divider)
+ * before invoking this. The response is intentionally narrow (just the
+ * updated cursor, not a full session) — apply it with a narrow store update
+ * (e.g. updateSessionReadCursor), never a full-session merge, so it can't
+ * clobber a newer field written by a concurrent WebSocket update.
+ */
+export async function markSessionRead(
+  taskSessionId: string,
+  messageId: string,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<MarkSessionReadResponse>(`/api/v1/task-sessions/${taskSessionId}/mark-read`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify({ message_id: messageId }),
+    },
+  });
 }
 
 export async function listTaskSessionMessages(

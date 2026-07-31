@@ -2984,6 +2984,129 @@ func setupTestTurn(t *testing.T, repo *sqliterepo.Repository, sessionID, taskID,
 	return turn.ID
 }
 
+// TestService_MarkSessionRead verifies MarkSessionRead advances the session's
+// read cursor when messageID is a real message belonging to sessionID, and
+// round-trips through GetTaskSession.
+func TestService_MarkSessionRead(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-123")
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "msg-1", TaskSessionID: sessionID, TaskID: "task-123", TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "hello",
+	}); err != nil {
+		t.Fatalf("seed message: %v", err)
+	}
+
+	session, err := svc.MarkSessionRead(ctx, sessionID, "msg-1")
+	if err != nil {
+		t.Fatalf("MarkSessionRead: %v", err)
+	}
+	if session.LastReadMessageID != "msg-1" {
+		t.Fatalf("session.LastReadMessageID = %q, want %q", session.LastReadMessageID, "msg-1")
+	}
+
+	reloaded, err := svc.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if reloaded.LastReadMessageID != "msg-1" {
+		t.Fatalf("reloaded LastReadMessageID = %q, want %q", reloaded.LastReadMessageID, "msg-1")
+	}
+}
+
+// TestService_MarkSessionReadRejectsCrossSessionMessage verifies a message
+// belonging to a different session is rejected rather than silently
+// persisted as the cursor.
+func TestService_MarkSessionReadRejectsCrossSessionMessage(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-other", TaskID: "task-123"}); err != nil {
+		t.Fatalf("seed other session: %v", err)
+	}
+	turnID := setupTestTurn(t, repo, "session-other", "task-123", "turn-other")
+	if err := repo.CreateMessage(ctx, &models.Message{
+		ID: "msg-other", TaskSessionID: "session-other", TaskID: "task-123", TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "from another session",
+	}); err != nil {
+		t.Fatalf("seed message: %v", err)
+	}
+
+	_, markErr := svc.MarkSessionRead(ctx, sessionID, "msg-other")
+	if !errors.Is(markErr, ErrInvalidMarkSessionRead) {
+		t.Fatalf("MarkSessionRead error = %v, want ErrInvalidMarkSessionRead", markErr)
+	}
+
+	session, err := svc.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.LastReadMessageID != "" {
+		t.Fatalf("LastReadMessageID = %q, want unchanged empty cursor", session.LastReadMessageID)
+	}
+}
+
+// TestService_MarkSessionReadRejectsUnknownMessage verifies a nonexistent
+// (e.g. frontend-synthetic) message id is rejected without touching the
+// session's cursor.
+func TestService_MarkSessionReadRejectsUnknownMessage(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	_, err := svc.MarkSessionRead(ctx, sessionID, "task-description")
+	if !errors.Is(err, ErrInvalidMarkSessionRead) {
+		t.Fatalf("MarkSessionRead error = %v, want ErrInvalidMarkSessionRead", err)
+	}
+
+	session, err := svc.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.LastReadMessageID != "" {
+		t.Fatalf("LastReadMessageID = %q, want unchanged empty cursor", session.LastReadMessageID)
+	}
+}
+
+// TestService_MarkSessionReadRejectsEmptyIDs verifies MarkSessionRead
+// validates both ids up front, before touching the repository, and leaves
+// no cursor mutation behind.
+func TestService_MarkSessionReadRejectsEmptyIDs(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+
+	tests := []struct {
+		name      string
+		sessionID string
+		messageID string
+	}{
+		{name: "empty session id", sessionID: "", messageID: "msg-1"},
+		{name: "empty message id", sessionID: sessionID, messageID: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := svc.MarkSessionRead(ctx, tc.sessionID, tc.messageID); err == nil {
+				t.Fatal("expected MarkSessionRead to reject the request")
+			}
+		})
+	}
+
+	session, err := svc.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if session.LastReadMessageID != "" {
+		t.Fatalf("LastReadMessageID = %q, want unchanged empty cursor", session.LastReadMessageID)
+	}
+}
+
 func TestService_CreateMessage(t *testing.T) {
 	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()

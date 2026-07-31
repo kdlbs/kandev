@@ -332,59 +332,21 @@ export const backendFixture = base.extend<object, { backend: BackendContext }>({
         // shim reads it on every invocation and sleeps the matching duration.
         // When the file is absent the shim is a transparent passthrough, so
         // other tests in the same worker are unaffected.
+        //
+        // The shim logic lives in `git-shim.mjs` (Node) so it behaves the same
+        // on macOS, Linux, and Windows and never depends on the developer's
+        // login shell (bash/zsh/fish) or a POSIX `sh`. Only a tiny launcher is
+        // generated here to hand control to Node: an extensionless `git`
+        // shebang file on POSIX, and a `git.cmd` on Windows (extensionless
+        // files aren't executable via PATHEXT there).
         const shimDir = path.join(tmpDir, "bin");
-        const shimPath = path.join(shimDir, "git");
+        const shimScript = path.join(__dirname, "git-shim.mjs");
         const shimDelayFile = path.join(tmpDir, "git-delay-ms");
         const shimGitLabPushFile = path.join(tmpDir, "gitlab-push-remote");
         const shimGitLabPushRecordFile = path.join(tmpDir, "gitlab-push-record");
         const originalPath = process.env.PATH ?? "";
         fs.mkdirSync(shimDir, { recursive: true });
-        fs.writeFileSync(
-          shimPath,
-          `#!/bin/sh
-# The worktree manager invokes Git with -c core.longpaths=true. Inspect the
-# subcommand in a subshell so skipping its option/value pair does not change
-# the original arguments passed through to the real Git binary below.
-git_subcommand=$(
-  while [ "$#" -gt 0 ]; do
-    case "$1" in
-      -c)
-        shift
-        [ "$#" -gt 0 ] && shift
-        ;;
-      *)
-        printf '%s\\n' "$1"
-        exit 0
-        ;;
-    esac
-  done
-)
-if [ -f "$KANDEV_E2E_GIT_DELAY_FILE" ] && { [ "$git_subcommand" = "fetch" ] || [ "$git_subcommand" = "pull" ]; }; then
-  delay_ms=$(cat "$KANDEV_E2E_GIT_DELAY_FILE" 2>/dev/null)
-  case "$delay_ms" in
-    ''|*[!0-9]*) ;;
-    *)
-      if [ "$delay_ms" -gt 0 ]; then
-        sleep_secs=$((delay_ms / 1000))
-        [ "$sleep_secs" -lt 1 ] && sleep_secs=1
-        sleep "$sleep_secs"
-      fi
-      ;;
-  esac
-fi
-if [ "$git_subcommand" = "push" ] && [ -f "$KANDEV_E2E_GITLAB_PUSH_FILE" ]; then
-  expected_remote=$(cat "$KANDEV_E2E_GITLAB_PUSH_FILE" 2>/dev/null)
-  actual_remote=$(PATH="$KANDEV_E2E_ORIGINAL_PATH" git config --get remote.origin.url 2>/dev/null)
-  if [ -n "$expected_remote" ] && [ "$actual_remote" = "$expected_remote" ]; then
-    printf '%s\n' "$*" > "$KANDEV_E2E_GITLAB_PUSH_RECORD_FILE"
-    exit 0
-  fi
-fi
-export PATH="$KANDEV_E2E_ORIGINAL_PATH"
-exec git "$@"
-`,
-          { mode: 0o755 },
-        );
+        writeGitShimLauncher(shimDir, shimScript);
 
         // Opt-in: Docker E2E project or KANDEV_E2E_DOCKER=1 enables real
         // container execution. Default is off so the regular suite stays fast
@@ -399,7 +361,9 @@ exec git "$@"
           // the `mock-agent` binary via PATH. In production that dir is the
           // same as the running kandev binary's dir, but e2e spawns via an
           // absolute path and doesn't inherit that location.
-          PATH: `${shimDir}:${path.join(BACKEND_DIR, "bin")}:${originalPath}`,
+          PATH: [shimDir, path.join(BACKEND_DIR, "bin"), originalPath]
+            .filter(Boolean)
+            .join(path.delimiter),
           KANDEV_E2E_ORIGINAL_PATH: originalPath,
           KANDEV_E2E_GIT_DELAY_FILE: shimDelayFile,
           KANDEV_E2E_GITLAB_PUSH_FILE: shimGitLabPushFile,
@@ -508,9 +472,33 @@ exec git "$@"
   ],
 });
 
+/**
+ * Write a small launcher named `git` (POSIX) or `git.cmd` (Windows) into
+ * `shimDir` that hands control to the Node `git-shim.mjs`. Kept minimal and
+ * platform-specific because the interesting logic lives in the .mjs; this only
+ * bridges a PATH `git` lookup to `node git-shim.mjs "$@"`. `process.execPath`
+ * is the Node binary already running the E2E suite, so no separate Node install
+ * is assumed on PATH.
+ */
+function writeGitShimLauncher(shimDir: string, shimScript: string): void {
+  const node = process.execPath;
+  if (process.platform === "win32") {
+    // %* forwards all args verbatim; extensionless files aren't executable via
+    // PATHEXT on Windows, so a .cmd wrapper is required for exec.Command("git").
+    const launcher = `@echo off\r\n"${node}" "${shimScript}" %*\r\n`;
+    fs.writeFileSync(path.join(shimDir, "git.cmd"), launcher);
+    return;
+  }
+  // POSIX: an extensionless `git` shebang launcher. `#!/bin/sh` is only the
+  // launcher interpreter (guaranteed present on macOS/Linux) — the shim body is
+  // Node, so the developer's login shell (bash/zsh/fish) is irrelevant.
+  const launcher = `#!/bin/sh\nexec "${node}" "${shimScript}" "$@"\n`;
+  fs.writeFileSync(path.join(shimDir, "git"), launcher, { mode: 0o755 });
+}
+
 /** Strip GH_TOKEN / GITHUB_TOKEN so the mock client is used. */
 // Sanitize the inherited environment before handing it to the e2e backend.
-// Two classes of vars must not leak through the `...process.env` spread:
+// Three classes of vars must not leak through the `...process.env` spread:
 //   - GitHub tokens — tests must hit the mock GitHub, never a real token.
 //   - KANDEV_FEATURES_* flags — these are profile-managed (profiles.yaml `e2e:`
 //     column turns them on). When the suite is launched from inside a kandev
@@ -520,12 +508,16 @@ exec git "$@"
 //     in the test backend → /api/v1/office/* 404s. Dropping the whole
 //     KANDEV_FEATURES_* namespace lets the e2e profile govern feature flags so
 //     the suite always exercises them, regardless of where it's launched.
+//   - PATH casing aliases — Windows commonly inherits `Path`; retaining it
+//     beside the fixture's new `PATH` makes child-process lookup order
+//     ambiguous. The caller restores one canonical PATH after sanitizing.
 function sanitizeInheritedEnv(env: Record<string, string>): Record<string, string> {
   const cleaned = { ...env };
   delete cleaned.GH_TOKEN;
   delete cleaned.GITHUB_TOKEN;
   for (const key of Object.keys(cleaned)) {
     if (key.startsWith("KANDEV_FEATURES_")) delete cleaned[key];
+    if (key.toUpperCase() === "PATH") delete cleaned[key];
   }
   return cleaned;
 }

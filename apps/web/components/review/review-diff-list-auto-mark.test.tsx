@@ -144,6 +144,37 @@ afterEach(() => {
 });
 
 describe("ReviewDiffList auto-mark", () => {
+  it("ignores initial layout movement until the user scrolls", () => {
+    const entry = file("a.ts");
+    const onToggleReviewed = vi.fn();
+    const view = render(
+      <TooltipProvider>
+        <ReviewDiffList
+          files={[entry]}
+          reviewedFiles={new Set()}
+          staleFiles={new Set()}
+          sessionId="session-1"
+          autoMarkOnScroll
+          wordWrap={false}
+          enableWalkthroughAnnotations={false}
+          onToggleReviewed={onToggleReviewed}
+          onDiscard={() => undefined}
+          fileRefs={new Map([[entry.path, createRef<HTMLDivElement>()]])}
+        />
+      </TooltipProvider>,
+    );
+    const scrollRoot = view.container.firstElementChild as HTMLElement;
+    const autoMarkObserver = observerRecords.find((record) => record.options?.threshold === 0);
+    expect(autoMarkObserver).toBeDefined();
+
+    firePassedTop(autoMarkObserver!, autoMarkObserver!.targets[0]);
+    expect(onToggleReviewed).not.toHaveBeenCalled();
+
+    fireEvent.wheel(scrollRoot);
+    firePassedTop(autoMarkObserver!, autoMarkObserver!.targets[0]);
+    expect(onToggleReviewed).toHaveBeenCalledWith("a.ts", true);
+  });
+
   it("ignores a programmatic file jump, then resumes on manual scroll input", () => {
     const files = [file("a.ts"), file("b.ts")];
     const onToggleReviewed = vi.fn();

@@ -74,10 +74,12 @@ vi.mock("@/lib/api/domains/session-api", () => ({
 import {
   MessageItem,
   MessageListStatus,
+  UnreadDivider,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
   getItemKey,
   getStreamingAgentMessageId,
+  canReassertDividerScroll,
   getLastUserMessageId,
   getFirstUserMessageId,
   isElementFullyVisible,
@@ -99,6 +101,66 @@ describe("getEffectiveActiveTurnId", () => {
 
   it("ignores a stale active turn after the session settles", () => {
     expect(getEffectiveActiveTurnId("turn-stale", false)).toBeNull();
+  });
+});
+
+describe("canReassertDividerScroll", () => {
+  it("never applies without a divider target", () => {
+    expect(
+      canReassertDividerScroll({
+        hasDividerTarget: false,
+        didScrollToDivider: false,
+        isUserScrolling: false,
+        isWithinSettlingWindow: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("always applies the first time, regardless of the other gates", () => {
+    expect(
+      canReassertDividerScroll({
+        hasDividerTarget: true,
+        didScrollToDivider: false,
+        isUserScrolling: true,
+        isWithinSettlingWindow: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("re-asserts while still settling and the reader hasn't scrolled", () => {
+    expect(
+      canReassertDividerScroll({
+        hasDividerTarget: true,
+        didScrollToDivider: true,
+        isUserScrolling: false,
+        isWithinSettlingWindow: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("stops re-asserting once the reader has scrolled, even mid-settling-window", () => {
+    expect(
+      canReassertDividerScroll({
+        hasDividerTarget: true,
+        didScrollToDivider: true,
+        isUserScrolling: true,
+        isWithinSettlingWindow: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("stops re-asserting once the settling window elapses, even without any interaction", () => {
+    // Covers a scrollbar drag or a live message arriving long after the
+    // visit settled — neither fires wheel/touchstart/keydown, so the
+    // settling window is the only thing bounding this case.
+    expect(
+      canReassertDividerScroll({
+        hasDividerTarget: true,
+        didScrollToDivider: true,
+        isUserScrolling: false,
+        isWithinSettlingWindow: false,
+      }),
+    ).toBe(false);
   });
 });
 
@@ -576,5 +638,15 @@ describe("MessageListStatus", () => {
 
     expect(screen.queryByTestId("conversation-loading-state")).not.toBeNull();
     expect(screen.queryByText("Loading conversation...")).not.toBeNull();
+  });
+});
+
+describe("UnreadDivider", () => {
+  it("renders a labeled separator marking new messages", () => {
+    render(<UnreadDivider />);
+
+    const divider = screen.getByTestId("unread-divider");
+    expect(divider.getAttribute("role")).toBe("separator");
+    expect(screen.getByText("New")).not.toBeNull();
   });
 });

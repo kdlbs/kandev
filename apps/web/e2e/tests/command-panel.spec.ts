@@ -1,6 +1,7 @@
 import { test, expect } from "../fixtures/test-base";
 import { KanbanPage } from "../pages/kanban-page";
 import { SessionPage } from "../pages/session-page";
+import { waitForSessionDone } from "../helpers/session";
 
 type CommandAliasExpectation = {
   query: string;
@@ -127,6 +128,13 @@ test.describe("Command Panel", () => {
         repository_ids: [seedData.repositoryId],
         executor_profile_id: seedData.worktreeExecutorProfileId,
       },
+    );
+    if (!task.session_id) throw new Error("Command alias task did not start a session");
+    await waitForSessionDone(
+      apiClient,
+      task.id,
+      task.session_id,
+      "command alias task session did not become ready",
     );
 
     await testPage.goto(`/t/${task.id}`);

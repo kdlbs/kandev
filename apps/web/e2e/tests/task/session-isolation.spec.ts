@@ -98,12 +98,18 @@ test.describe("Session isolation", () => {
     // 4. Create second task AFTER first agent completes to avoid concurrent
     //    git operations on the same repo (both agents do git checkout during
     //    environment preparation, causing index.lock conflicts).
+    //    Task B uses `multi-turn` (a single quick text emission) rather than a
+    //    permission-gated scenario. The isolation assertion below only needs
+    //    task B's response to differ from task A's SIMPLE_MOCK_RESPONSE — it
+    //    never checks any tool/edit output — and a permission-gated turn (e.g.
+    //    read-and-edit) can leave the backend session stuck in RUNNING when its
+    //    terminal transition races, so the composer never goes idle here.
     const taskB = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
       "Second Task B",
       seedData.agentProfileId,
       {
-        description: "/e2e:read-and-edit",
+        description: "/e2e:multi-turn",
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
         repository_ids: [seedData.repositoryId],

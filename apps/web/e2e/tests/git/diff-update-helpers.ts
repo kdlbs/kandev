@@ -41,6 +41,7 @@ async function seedTaskWithScenario(
   await expect(session.chat.getByText(options.completionText, { exact: false })).toBeVisible({
     timeout: 45_000,
   });
+  await session.waitForChatIdle();
 
   return { session, sessionId: task.session_id };
 }

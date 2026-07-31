@@ -75,7 +75,6 @@ func TestDefinitionsIncludeClaudeBackgroundPromptHandoffMetadata(t *testing.T) {
 		t.Fatal("Mutable = false, want true")
 	}
 }
-
 func TestDefinitionsExposeSingleUserFacingDebugToggle(t *testing.T) {
 	def, ok := DefinitionByKey("debug.devMode")
 	if !ok {

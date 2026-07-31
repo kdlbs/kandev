@@ -141,7 +141,7 @@ export function ThenSection({
     "workflowStepId",
     "agentProfileId",
     "executorProfileId",
-    "repositorySelection",
+    "repositorySelections",
     "executionMode",
   ];
   const isDirty = dirtyFields.some((field) => isAutomationFieldDirty(form, savedForm, field));
@@ -183,7 +183,7 @@ export function ThenSection({
           workflowStepId={form.workflowStepId}
           agentProfileId={form.agentProfileId}
           executorProfileId={form.executorProfileId}
-          repositorySelection={form.repositorySelection}
+          repositorySelections={form.repositorySelections}
           executionMode={form.executionMode}
           conditionType={conditionType}
           dirtyFields={{
@@ -192,7 +192,7 @@ export function ThenSection({
             workflowStepId: isAutomationFieldDirty(form, savedForm, "workflowStepId"),
             agentProfileId: isAutomationFieldDirty(form, savedForm, "agentProfileId"),
             executorProfileId: isAutomationFieldDirty(form, savedForm, "executorProfileId"),
-            repositorySelection: isAutomationFieldDirty(form, savedForm, "repositorySelection"),
+            repositorySelections: isAutomationFieldDirty(form, savedForm, "repositorySelections"),
           }}
           onWorkflowChange={(value) => {
             updateField("workflowId", value);
@@ -201,7 +201,7 @@ export function ThenSection({
           onStepChange={(value) => updateField("workflowStepId", value)}
           onAgentProfileChange={(value) => updateField("agentProfileId", value)}
           onExecutorProfileChange={(value) => updateField("executorProfileId", value)}
-          onRepositoryChange={(value) => updateField("repositorySelection", value)}
+          onRepositoriesChange={(value) => updateField("repositorySelections", value)}
           onExecutionModeChange={(value) => updateField("executionMode", value)}
         />
       </div>

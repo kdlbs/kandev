@@ -51,6 +51,13 @@ const mocks = vi.hoisted(() => {
           agent_profile_id: "profile-1",
           agent_profile_snapshot: {},
         },
+        "session-pending": {
+          agent_profile_id: "profile-pending",
+          agent_profile_snapshot: {
+            model: "gpt-5.6-sol",
+            config_options: { reasoning_effort: "high" },
+          },
+        },
       },
     },
     setActiveModel: vi.fn(),
@@ -128,6 +135,16 @@ describe("task selector trigger styling", () => {
 
     expect(mocks.storeSelections).toContain(mocks.appState.sessionModels.bySessionId["session-1"]);
     expect(mocks.storeSelections).not.toContain(mocks.appState.sessionModels.bySessionId);
+  });
+
+  it("waits for dynamic session config before rendering a partial label", () => {
+    render(
+      <TooltipProvider>
+        <ModelSelector sessionId="session-pending" />
+      </TooltipProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Session model settings" })).toBeNull();
   });
 
   it("forwards custom trigger classes to the mode selector trigger", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { connectionStatusDetails } from "./connection-status-item";
+import { connectionIssueDetails, connectionStatusDetails } from "./connection-status-item";
 
 describe("connectionStatusDetails", () => {
   it.each([
@@ -22,5 +22,22 @@ describe("connectionStatusDetails", () => {
       dotClass: "bg-success",
       animate: false,
     });
+  });
+
+  it.each([
+    [
+      "unstable",
+      "Connection unstable",
+      "Connection unstable. Reconnecting to Kandev.",
+      "bg-amber-500",
+    ],
+    [
+      "lost",
+      "Connection lost",
+      "Connection lost for at least 10 seconds. Live updates may be stale.",
+      "bg-destructive",
+    ],
+  ] as const)("maps %s to a problem-only warning", (severity, label, description, dotClass) => {
+    expect(connectionIssueDetails(severity)).toMatchObject({ label, description, dotClass });
   });
 });

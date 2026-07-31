@@ -31,6 +31,129 @@ func (f *fakeTaskDeleter) DeleteTask(_ context.Context, id string) error {
 	return nil
 }
 
+// fakeRepositoryLookup implements RepositoryLookup for tests: repos maps
+// repository ID -> workspace ID it belongs to.
+type fakeRepositoryLookup struct {
+	repos map[string]string
+}
+
+func (f *fakeRepositoryLookup) GetRepository(_ context.Context, id string) (string, string, bool) {
+	ws, ok := f.repos[id]
+	if !ok {
+		return "", "", false
+	}
+	return ws, "main", true
+}
+
+func TestCreateAutomation_RepositoryIDsRequireLookup(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	_, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		Name: "x", WorkspaceID: "ws-a", WorkflowID: "wf", WorkflowStepID: "s",
+		RepositoryIDs: []string{"repo-1"},
+	})
+	if !errors.Is(err, ErrRepositoryLookupUnavailable) {
+		t.Fatalf("expected ErrRepositoryLookupUnavailable, got %v", err)
+	}
+
+	// No repository_ids at all still succeeds without a lookup wired.
+	if _, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		Name: "y", WorkspaceID: "ws-a", WorkflowID: "wf", WorkflowStepID: "s",
+	}); err != nil {
+		t.Fatalf("expected success with no repository_ids, got %v", err)
+	}
+}
+
+func TestCreateAutomation_RejectsForeignRepositoryID(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetRepositoryLookup(&fakeRepositoryLookup{repos: map[string]string{
+		"repo-a": "ws-a",
+		"repo-b": "ws-other",
+	}})
+	ctx := context.Background()
+
+	_, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		Name: "x", WorkspaceID: "ws-a", WorkflowID: "wf", WorkflowStepID: "s",
+		RepositoryIDs: []string{"repo-a", "repo-b"},
+	})
+	if !errors.Is(err, ErrRepositoryNotInWorkspace) {
+		t.Fatalf("expected ErrRepositoryNotInWorkspace, got %v", err)
+	}
+
+	_, err = svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		Name: "y", WorkspaceID: "ws-a", WorkflowID: "wf", WorkflowStepID: "s",
+		RepositoryIDs: []string{"repo-does-not-exist"},
+	})
+	if !errors.Is(err, ErrRepositoryNotInWorkspace) {
+		t.Fatalf("expected ErrRepositoryNotInWorkspace for unknown repo, got %v", err)
+	}
+}
+
+func TestCreateAutomation_RejectsDuplicateRepositoryID(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetRepositoryLookup(&fakeRepositoryLookup{repos: map[string]string{"repo-a": "ws-a"}})
+	ctx := context.Background()
+
+	_, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		Name: "x", WorkspaceID: "ws-a", WorkflowID: "wf", WorkflowStepID: "s",
+		RepositoryIDs: []string{"repo-a", "repo-a"},
+	})
+	if !errors.Is(err, ErrDuplicateRepositoryID) {
+		t.Fatalf("expected ErrDuplicateRepositoryID, got %v", err)
+	}
+}
+
+func TestCreateAutomation_AcceptsValidRepositoryIDs(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetRepositoryLookup(&fakeRepositoryLookup{repos: map[string]string{
+		"repo-a": "ws-a",
+		"repo-b": "ws-a",
+	}})
+	ctx := context.Background()
+
+	a, err := svc.CreateAutomation(ctx, &CreateAutomationRequest{
+		Name: "x", WorkspaceID: "ws-a", WorkflowID: "wf", WorkflowStepID: "s",
+		RepositoryIDs: []string{"repo-a", "repo-b"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(a.RepositoryIDs) != 2 || a.RepositoryIDs[0] != "repo-a" || a.RepositoryIDs[1] != "repo-b" {
+		t.Fatalf("expected repository_ids [repo-a repo-b], got %v", a.RepositoryIDs)
+	}
+}
+
+func TestUpdateAutomation_RejectsForeignRepositoryID(t *testing.T) {
+	svc := newTestService(t)
+	svc.SetRepositoryLookup(&fakeRepositoryLookup{repos: map[string]string{
+		"repo-a": "ws-a",
+		"repo-b": "ws-other",
+	}})
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-a", Name: "A", WorkflowID: "wf", WorkflowStepID: "s", Enabled: true}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{RepositoryIDs: []string{"repo-b"}})
+	if !errors.Is(err, ErrRepositoryNotInWorkspace) {
+		t.Fatalf("expected ErrRepositoryNotInWorkspace, got %v", err)
+	}
+
+	// A valid repo from the automation's own workspace succeeds.
+	if _, err := svc.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{RepositoryIDs: []string{"repo-a"}}); err != nil {
+		t.Fatalf("unexpected error updating with a valid repo: %v", err)
+	}
+
+	// Updates that don't touch repository_ids never consult the lookup.
+	newName := "Renamed"
+	if _, err := svc.UpdateAutomation(ctx, a.ID, &UpdateAutomationRequest{Name: &newName}); err != nil {
+		t.Fatalf("unexpected error on unrelated update: %v", err)
+	}
+}
+
 func TestService_DeleteRun_CallsTaskDeleter(t *testing.T) {
 	svc := newTestService(t)
 	deleter := &fakeTaskDeleter{}

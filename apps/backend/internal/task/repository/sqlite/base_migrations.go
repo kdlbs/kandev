@@ -193,6 +193,12 @@ func (r *Repository) runMigrations() error {
 	// repo hasn't run yet.
 	r.ensureRunnerProjectionTables()
 
+	// Slack-style unread divider: the read cursor a session advances to the
+	// latest message id whenever it becomes the visible chat panel. The
+	// frontend snapshots the prior value before the advance to position the
+	// "New" divider (see models.TaskSession.LastReadMessageID).
+	r.migrate.Apply("task_sessions.last_read_message_id", `ALTER TABLE task_sessions ADD COLUMN last_read_message_id TEXT DEFAULT ''`)
+
 	return nil
 }
 

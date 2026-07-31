@@ -25,7 +25,7 @@ export type Automation = {
   workflow_step_id: string;
   agent_profile_id: string;
   executor_profile_id: string;
-  repository_id: string;
+  repository_ids: string[];
   prompt: string;
   task_title_template: string;
   execution_mode: ExecutionMode;
@@ -122,7 +122,7 @@ export type CreateAutomationRequest = {
   workflow_step_id: string;
   agent_profile_id: string;
   executor_profile_id: string;
-  repository_id?: string;
+  repository_ids?: string[];
   prompt?: string;
   task_title_template?: string;
   execution_mode?: ExecutionMode;
@@ -141,7 +141,7 @@ export type UpdateAutomationRequest = {
   workflow_step_id?: string;
   agent_profile_id?: string;
   executor_profile_id?: string;
-  repository_id?: string;
+  repository_ids?: string[];
   prompt?: string;
   task_title_template?: string;
   execution_mode?: ExecutionMode;

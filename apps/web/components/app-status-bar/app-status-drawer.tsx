@@ -14,6 +14,7 @@ type AppStatusDrawerProps = {
   activeSessionId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  connectionOnly?: boolean;
 };
 
 export function AppStatusDrawer({
@@ -23,12 +24,13 @@ export function AppStatusDrawer({
   activeSessionId,
   open,
   onOpenChange,
+  connectionOnly = false,
 }: AppStatusDrawerProps) {
   const context = useMemo(
     () => ({ pathname, activeWorkspaceId, activeTaskId, activeSessionId }),
     [pathname, activeWorkspaceId, activeTaskId, activeSessionId],
   );
-  const activeItems = useAppStatusItems(context);
+  const activeItems = useAppStatusItems(context, { connectionOnly });
   const { projected } = useAppStatusBarOrder(activeItems);
   const orderedItems = [...projected.left, ...projected.right];
   let drawerHeight = "h-[min(32rem,calc(100dvh-16px-env(safe-area-inset-bottom,0px)))]";

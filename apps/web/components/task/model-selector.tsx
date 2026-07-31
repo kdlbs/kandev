@@ -33,6 +33,44 @@ type ModelSelectorProps = {
   triggerClassName?: string;
 };
 
+function configValueKeys(value: unknown): string[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  return Object.entries(value)
+    .filter((entry): entry is [string, string] => typeof entry[1] === "string" && !!entry[1])
+    .map(([key]) => key);
+}
+
+function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
+  if (!session) return [];
+  const keys = new Set(configValueKeys(session.agent_profile_snapshot?.config_options));
+  for (const agent of agents) {
+    const profile = agent.profiles.find((item) => item.id === session.agent_profile_id);
+    for (const key of Object.keys(profile?.configOptions ?? {})) keys.add(key);
+  }
+  for (const value of [
+    session.metadata?.runtime_config,
+    session.metadata?.runtime_config_overrides,
+  ]) {
+    if (!value || typeof value !== "object") continue;
+    for (const key of configValueKeys((value as Record<string, unknown>).config_options)) {
+      keys.add(key);
+    }
+  }
+  return [...keys];
+}
+
+function hasCompleteDynamicConfig(
+  session: TaskSession | null,
+  sessionModelsData: SessionModelsEntry | undefined,
+  agents: Agent[],
+): boolean {
+  const required = requiredConfigKeys(session, agents);
+  if (required.length === 0) return true;
+  if (!sessionModelsData) return false;
+  const available = new Set(sessionModelsData.configOptions.map((option) => option.id));
+  return required.every((key) => available.has(key));
+}
+
 function resolveSessionState(
   sessionId: string | null,
   taskSessions: Record<string, TaskSession>,
@@ -299,6 +337,7 @@ function useModelSelectorState(sessionId: string | null) {
     modelOptions,
     configOptions,
     configBaseline: sessionModelsData?.configBaseline,
+    configHydrated: hasCompleteDynamicConfig(session, sessionModelsData, settingsAgents as Agent[]),
     handleModelChange,
     handleConfigChange,
   };
@@ -313,6 +352,7 @@ export const ModelSelector = memo(function ModelSelector({
     modelOptions,
     configOptions,
     configBaseline,
+    configHydrated,
     handleModelChange,
     handleConfigChange,
   } = useModelSelectorState(sessionId);
@@ -334,7 +374,7 @@ export const ModelSelector = memo(function ModelSelector({
     [sessionId, handleConfigChange],
   );
 
-  if (!sessionId || (!currentModel && !modelConfig)) return null;
+  if (!sessionId || !configHydrated || (!currentModel && !modelConfig)) return null;
 
   return (
     <ModelConfigSelector

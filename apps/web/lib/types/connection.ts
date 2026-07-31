@@ -13,3 +13,5 @@ export type ConnectionStatus =
   | "connected"
   | "error"
   | "reconnecting";
+
+export type ConnectionIssueSeverity = "none" | "unstable" | "lost";

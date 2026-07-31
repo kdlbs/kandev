@@ -36,6 +36,7 @@ import {
   type LastPromptEdge,
   MessageListStatus,
   MessageItem,
+  UnreadDivider,
   getItemKey,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
@@ -165,6 +166,7 @@ type RenderItemArgs = {
   activeTurnId: string | null;
   streamingMessageId: string | null;
   onScrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
+  dividerBeforeItemKey?: string | null;
 };
 
 /** Renders one transcript row for a given (rebased) Virtuoso item index. */
@@ -184,6 +186,7 @@ function useVirtuosoRenderItem(args: RenderItemArgs) {
     lastPromptMessageId,
     firstMessageId,
     onScrollToMessage,
+    dividerBeforeItemKey,
   } = args;
   return useCallback(
     (index: number) => {
@@ -205,6 +208,7 @@ function useVirtuosoRenderItem(args: RenderItemArgs) {
           data-last-prompt-row={isLastPromptRow || undefined}
           data-first-message-row={isFirstMessageRow || undefined}
         >
+          {dividerBeforeItemKey === getItemKey(item) && <UnreadDivider />}
           <MessageItem
             item={item}
             sessionId={sessionId}
@@ -236,8 +240,41 @@ function useVirtuosoRenderItem(args: RenderItemArgs) {
       lastPromptMessageId,
       firstMessageId,
       onScrollToMessage,
+      dividerBeforeItemKey,
     ],
   );
+}
+
+/**
+ * Corrects the initial scroll position to this visit's Slack-style unread
+ * divider (see findUnreadDividerItemId) once it resolves, mirroring Slack
+ * drawing the line where you left off instead of always landing on the
+ * newest message.
+ *
+ * Deliberately NOT done via Virtuoso's own `initialTopMostItemIndex` prop
+ * (which only takes effect on Virtuoso's first render): dividerBeforeItemKey
+ * is derived from usePanelActive (Dockview's active-tab signal), which is
+ * backed by useSyncExternalStore and typically only resolves true one
+ * render *after* this component's own mount — so on Virtuoso's actual first
+ * render it's still null even for a session that does have an unread
+ * divider, and a value frozen at that first render could never be
+ * corrected. Scrolling here imperatively, gated on a change to
+ * dividerBeforeItemKey rather than mount, catches it whenever it resolves.
+ */
+function useScrollToDividerOnceResolved(
+  virtuosoRef: React.RefObject<VirtuosoHandle | null>,
+  items: RenderItem[],
+  firstItemIndex: number,
+  dividerBeforeItemKey: string | null | undefined,
+) {
+  const didScrollRef = useRef(false);
+  useEffect(() => {
+    if (didScrollRef.current || !dividerBeforeItemKey) return;
+    const dividerIndex = items.findIndex((item) => getItemKey(item) === dividerBeforeItemKey);
+    if (dividerIndex < 0) return;
+    virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + dividerIndex, align: "start" });
+    didScrollRef.current = true;
+  }, [virtuosoRef, items, firstItemIndex, dividerBeforeItemKey]);
 }
 
 function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
@@ -249,12 +286,13 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
     childrenByParentToolCallId,
     taskId,
   } = props;
-  const { worktreePath, onOpenFile, lastTurnGroupId, activeTurnId } = props;
+  const { worktreePath, onOpenFile, lastTurnGroupId, activeTurnId, dividerBeforeItemKey } = props;
   const { hasMore, isLoadingMore, loadMore } = props;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const itemCount = items.length;
   const streamingMessageId = getStreamingAgentMessageId(messages);
   const firstItemIndex = useStableFirstItemIndex(items);
+  useScrollToDividerOnceResolved(virtuosoRef, items, firstItemIndex, dividerBeforeItemKey);
   const { isLocked, runLocked } = useProgrammaticScrollLock(props.scrollParent);
 
   const loadCooldownRef = useRef(false);
@@ -330,6 +368,7 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
     lastPromptMessageId: props.lastPromptMessageId,
     firstMessageId: props.firstMessageId,
     onScrollToMessage: handleScrollToMessage,
+    dividerBeforeItemKey,
   });
 
   return {

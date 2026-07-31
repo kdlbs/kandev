@@ -30,6 +30,8 @@ import { SessionSearchHits } from "@/components/task/chat/session-search-hits";
 import { usePanelSearch } from "@/hooks/use-panel-search";
 import { useSessionSearch } from "@/hooks/domains/session/use-session-search";
 import { useLazyLoadMessages } from "@/hooks/use-lazy-load-messages";
+import { findUnreadDividerItemId, lastRenderedMessageId } from "@/lib/session-unread-divider";
+import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
 import { useAppStore } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
@@ -53,6 +55,25 @@ function useClarificationKey(agentMessageCount: number) {
   }, [agentMessageCount]);
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
   return { clarificationKey, handleClarificationResolved };
+}
+
+function useUnreadDividerBeforeItemKey(
+  sessionId: string | null,
+  isVisible: boolean,
+  groupedItems: Parameters<typeof lastRenderedMessageId>[0],
+  isInitialMessagesLoading: boolean,
+) {
+  const latestMessageId = useMemo(() => lastRenderedMessageId(groupedItems), [groupedItems]);
+  const dividerAnchor = useSessionReadTracking(
+    sessionId,
+    isVisible,
+    latestMessageId,
+    isInitialMessagesLoading,
+  );
+  return useMemo(
+    () => findUnreadDividerItemId(groupedItems, dividerAnchor),
+    [groupedItems, dividerAnchor],
+  );
 }
 
 function SessionSearchOverlay({
@@ -154,9 +175,18 @@ type TaskChatPanelProps = {
   onOpenFileAtLine?: (filePath: string) => void;
   /** Hide the sessions dropdown (session tabs in dockview replace it) */
   hideSessionsDropdown?: boolean;
+  /**
+   * Whether this panel is the one actually on screen — gates the
+   * Slack-style unread-divider read tracking (see
+   * chat/use-session-read-tracking.ts). Dockview-hosted callers must pass
+   * real tab-activation state (see hooks/use-panel-active.ts); other hosts
+   * (mobile, quick chat, kanban preview) default to true since mounting
+   * already implies visibility for them.
+   */
+  isVisible?: boolean;
 };
 
-// eslint-disable-next-line max-lines-per-function -- composes many sub-panels; each concern already factored into its own hook
+// eslint-disable-next-line complexity, max-lines-per-function -- composes many sub-panels; each concern already factored into its own hook
 export const TaskChatPanel = memo(function TaskChatPanel({
   onSend,
   sessionId = null,
@@ -166,6 +196,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   onRequestChangesTooltipDismiss,
   onOpenFileAtLine,
   hideSessionsDropdown,
+  isVisible = true,
 }: TaskChatPanelProps) {
   const isArchived = useIsTaskArchived();
   const chatInputRef = useRef<ChatInputContainerHandle>(null);
@@ -184,6 +215,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     taskId,
     isWorking,
     messagesLoading,
+    isInitialMessagesLoading,
     groupedItems,
     allMessages,
     footerActionMessages,
@@ -193,6 +225,12 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
+  const dividerBeforeItemKey = useUnreadDividerBeforeItemKey(
+    resolvedSessionId,
+    isVisible,
+    groupedItems,
+    isInitialMessagesLoading,
+  );
   const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef);
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);
   const {
@@ -326,6 +364,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           sessionState={session?.state}
           worktreePath={session?.worktree_path}
           onOpenFile={onOpenFile}
+          dividerBeforeItemKey={dividerBeforeItemKey}
           lastPromptMessageId={lastPromptMessageId}
           onLastPromptEdgeChange={setLastPromptEdge}
           firstMessageId={firstMessageId}

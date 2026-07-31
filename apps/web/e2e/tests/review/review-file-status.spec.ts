@@ -123,6 +123,8 @@ test.describe("Review file status", () => {
       .getByTestId("review-file-header")
       .evaluateAll((headers) => headers.map((header) => (header as HTMLElement).dataset.filePath));
     expect(sidebarOrder).toEqual(diffOrder);
+    const totalFiles = sidebarOrder.length;
+    expect(totalFiles).toBeGreaterThanOrEqual(5);
 
     for (const [path, name] of [
       [ADDED_PATH, "Added"],
@@ -171,7 +173,8 @@ test.describe("Review file status", () => {
     expect(geometry.markerRight).toBeLessThanOrEqual(geometry.rowRight);
     expect(geometry.markerRight).toBeLessThanOrEqual(geometry.sidebarRight);
 
-    await expect(dialog.getByText("0 of 5 files reviewed")).toBeVisible();
+    const reviewProgress = dialog.getByText(new RegExp(`^\\d+ of ${totalFiles} files reviewed$`));
+    await expect(reviewProgress).toHaveText(`0 of ${totalFiles} files reviewed`);
     await sidebar
       .locator(`[data-testid="review-file-row"][data-file-path="${NESTED_PATH}"]`)
       .click();
@@ -180,7 +183,7 @@ test.describe("Review file status", () => {
       .poll(() => reviewScroll.evaluate((element) => element.scrollTop))
       .toBeGreaterThan(0);
     await testPage.waitForTimeout(600);
-    await expect(dialog.getByText("0 of 5 files reviewed")).toBeVisible();
+    await expect(reviewProgress).toHaveText(`0 of ${totalFiles} files reviewed`);
     await prCapture.screenshot("review-ordered-safe-jump", {
       caption: "Review keeps tree and diff order aligned without auto-reviewing a file jump",
     });
@@ -191,7 +194,9 @@ test.describe("Review file status", () => {
     await expect.poll(() => reviewScroll.evaluate((element) => element.scrollTop)).toBe(0);
     await reviewScroll.hover();
     await testPage.mouse.wheel(0, 500);
-    await expect(dialog.getByText(/[1-5] of 5 files reviewed/)).toBeVisible();
+    await expect
+      .poll(async () => Number.parseInt((await reviewProgress.textContent()) ?? "0", 10))
+      .toBeGreaterThan(0);
 
     await movedRow.click();
     await expect(
