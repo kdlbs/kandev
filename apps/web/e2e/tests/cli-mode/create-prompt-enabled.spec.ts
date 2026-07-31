@@ -14,6 +14,12 @@ import { KanbanPage } from "../../pages/kanban-page";
 useRegularMode();
 
 test.describe("CLI mode: create-task dialog prompt", () => {
+  test.afterEach(async ({ apiClient, seedData }) => {
+    await apiClient.updateAgentProfile(seedData.agentProfileId, {
+      cli_passthrough: false,
+    });
+  });
+
   test("prompt textarea is enabled, no 'prompt ignored' warning, and submit works", async ({
     testPage,
     apiClient,
