@@ -129,7 +129,7 @@ type MobilePanelAreaProps = {
   onSelectReviewPR: ReturnType<typeof useReviewPRSelection>["selectPR"];
 };
 
-export // eslint-disable-next-line max-lines-per-function -- mobile panel composition remains explicit per surface.
+export // eslint-disable-next-line max-lines-per-function, complexity -- mobile panel composition remains explicit per surface.
 function MobilePanelArea({
   currentMobilePanel,
   activeTaskId,
