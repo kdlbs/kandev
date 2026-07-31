@@ -112,8 +112,10 @@ function useConnectionSettingsDraft({
   useEffect(() => {
     if (!open) return;
     setToken("");
-    setTaskMode(taskAccess.mode);
     setSaving(false);
+  }, [open, workspaceId]);
+  useEffect(() => {
+    if (open) setTaskMode(taskAccess.mode);
   }, [open, taskAccess.mode, workspaceId]);
   const currentMethod = methodForStatus(status);
   const taskDirty = taskMode !== taskAccess.mode;

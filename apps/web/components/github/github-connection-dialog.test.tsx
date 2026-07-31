@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/toast-provider";
@@ -15,6 +16,7 @@ const mocks = vi.hoisted(() => ({
 const changeConnectionLabel = "Change connection";
 const registrationDisplayName = "Work automation";
 const githubAppLabel = "GitHub App";
+const saveChangesLabel = "Save changes";
 const WORKSPACE_ID = "workspace-1";
 const DESKTOP_CONNECTION_TEST_ID = "github-connection-desktop";
 const taskAccess: TaskGitCredentialsState = {
@@ -118,6 +120,24 @@ function view(workspaceId = WORKSPACE_ID, currentTaskAccess = taskAccess) {
   );
 }
 
+function PartialSaveHarness() {
+  const [mode, setMode] = useState<TaskGitCredentialsState["mode"]>("managed");
+  const save = vi.fn(async (nextMode: TaskGitCredentialsState["mode"]) => {
+    setMode(nextMode);
+    return true;
+  });
+  return (
+    <ToastProvider>
+      <GitHubConnectionDialog
+        status={status}
+        workspaceId={WORKSPACE_ID}
+        onSaved={vi.fn()}
+        taskAccess={{ mode, loading: false, error: false, save }}
+      />
+    </ToastProvider>
+  );
+}
+
 beforeEach(() => {
   mocks.mobile = false;
   mocks.registrations = [registration];
@@ -141,8 +161,8 @@ describe("GitHubConnectionDialog task access", () => {
 
     expect(screen.queryByRole("button", { name: "Connect token" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Save task access" })).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Save changes" })).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    expect(screen.getAllByRole("button", { name: saveChangesLabel })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
 
     await waitFor(() =>
       expect(mocks.setConnection).toHaveBeenCalledWith(WORKSPACE_ID, {
@@ -165,11 +185,27 @@ describe("GitHubConnectionDialog task access", () => {
       .querySelector('[role="radio"]')!;
     fireEvent.click(executor);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
 
     await waitFor(() => expect(save).toHaveBeenCalledWith("executor"));
     expect(screen.queryByText("GitHub access settings saved")).toBeNull();
     expect(dialog.getAttribute("data-state")).toBe("open");
+  });
+
+  it("preserves a failed PAT draft when task access saves successfully", async () => {
+    mocks.setConnection.mockRejectedValue(new Error("Token rejected"));
+    render(<PartialSaveHarness />);
+    fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
+    const token = screen.getByLabelText("Personal access token") as HTMLInputElement;
+    fireEvent.change(token, { target: { value: "ghp_retry_me" } });
+    fireEvent.click(
+      screen.getByTestId("github-task-access-option-executor").querySelector('[role="radio"]')!,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: saveChangesLabel }));
+
+    await screen.findByText(/Some settings were saved/);
+    expect(token.value).toBe("ghp_retry_me");
   });
 });
 afterEach(() => cleanup());

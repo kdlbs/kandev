@@ -117,29 +117,24 @@ component and E2E results, docs validation, files changed, risks, and task/plan 
 
 ## Verification results
 
-- `pnpm exec vitest run components/github` — passed (32 files, 288 tests). The focused dialog
-  tests prove one action can save PAT and task-access drafts together, and the CLI-form test proves
-  the preferred account becomes the draft without a separate **Use account** action.
-- `pnpm run typecheck` and focused ESLint for every changed frontend/E2E file — passed.
-- A fresh `pnpm run build:vite` production build — passed.
-- Chromium E2E for `configures task Git access from the workspace connection dialog` — passed
-  after deliberate RED failures first proved the old 638px width and separate **Use account**
-  action. It now verifies the wider dialog, credential-helper tooltip, typography parity, one
-  **Save changes** action, combined CLI/task persistence, and reopen state.
-- Both mobile GitHub settings E2E files — passed (4 tests), including the nested credential-helper
-  help Drawer, 44px controls, one scroll owner, combined persistence, and safe parent-Drawer
-  behavior.
+- `pnpm exec vitest run components/github` — passed (32 files, 289 tests). The focused dialog
+  tests prove one action can save PAT and task-access drafts together and preserve a failed PAT
+  draft after a partial save; that regression first failed RED with an empty token. The CLI-form
+  test proves the preferred account becomes the draft without a separate **Use account** action.
 - `pnpm --filter @kandev/web test -- --run components/github/github-status.test.tsx` — passed
   (3 tests) after a deliberate RED failure proved PAT/CLI still rendered the redundant personal
   identity section.
-- `pnpm --filter @kandev/web test -- --run components/github/github-connection-dialog.test.tsx` —
-  passed (6 tests).
-- `pnpm --filter @kandev/web lint` and `pnpm run typecheck` — passed.
-- Chromium E2E for `configures task Git access from the workspace connection dialog` — passed after
-  deliberate RED failures for the missing summary and missing API-limit control; it now covers the
-  identity, task-access, and rate-limit tooltips.
-- `mobile-chrome` E2E for `configures task Git access in the connection drawer` — passed, including
-  single-scroll, 44px-control, no-overflow, identity/task help, and the API-limit Drawer assertions.
+- `pnpm run typecheck`, focused ESLint for every changed frontend/E2E file, and the earlier full
+  web lint — passed.
+- A fresh `pnpm run build:vite` production build — passed.
+- Chromium E2E for `configures task Git access from the workspace connection dialog` — passed
+  after deliberate RED failures proved the missing summary/API-limit controls, old 638px width,
+  and separate **Use account** action. It now verifies the identity, task-access and rate-limit
+  tooltips, wider dialog, typography parity, one **Save changes** action, combined CLI/task
+  persistence, and reopen state.
+- Both mobile GitHub settings E2E files — passed (4 tests), including the nested credential-helper
+  and API-limit Drawers, 44px controls, one scroll owner, no overflow, combined persistence, and
+  safe parent-Drawer behavior.
 - `node --test scripts/validate-public-docs.test.mjs` and
   `node scripts/validate-public-docs.mjs` — passed (58 tests; 41 published docs pages).
 - `git diff --check` — passed.

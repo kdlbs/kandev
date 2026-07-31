@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { fetchGitHubCLIAccounts } from "@/lib/api/domains/github-api";
@@ -49,6 +49,8 @@ export function GitHubCLIForm({
   const [selected, setSelected] = useState("");
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const onAccountChangeRef = useRef(onAccountChange);
+  onAccountChangeRef.current = onAccountChange;
 
   useEffect(() => {
     let current = true;
@@ -56,7 +58,7 @@ export function GitHubCLIForm({
     setSelected("");
     setLoadError(null);
     setLoading(true);
-    onAccountChange(null);
+    onAccountChangeRef.current(null);
     fetchGitHubCLIAccounts(workspaceId, { cache: "no-store" })
       .then((items) => {
         if (!current) return;
@@ -76,7 +78,7 @@ export function GitHubCLIForm({
     return () => {
       current = false;
     };
-  }, [onAccountChange, workspaceId]);
+  }, [workspaceId]);
 
   const account = useMemo(() => {
     const [host, login] = selected.split("\n");
@@ -84,8 +86,8 @@ export function GitHubCLIForm({
   }, [accounts, selected]);
 
   useEffect(() => {
-    onAccountChange(account ?? null);
-  }, [account, onAccountChange]);
+    onAccountChangeRef.current(account ?? null);
+  }, [account]);
 
   return (
     <div className="space-y-3">
