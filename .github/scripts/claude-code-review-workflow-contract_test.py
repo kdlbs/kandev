@@ -22,6 +22,14 @@ def activity_types(workflow: str, event: str) -> list[str]:
     return [activity.strip() for activity in match.group(1).split(",")]
 
 
+def workflow_step(workflow: str, name: str) -> str:
+    marker = f"      - name: {name}\n"
+    _, separator, remainder = workflow.partition(marker)
+    if not separator:
+        raise AssertionError(f"{name} step is missing")
+    return remainder.partition("\n      - name:")[0]
+
+
 class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
     def test_review_workflow_ignores_pr_updates(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -57,40 +65,62 @@ class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
             workflow,
         )
 
-    def test_manual_pr_mentions_checkout_the_current_pr_head(self) -> None:
+    def test_manual_pr_review_isolates_the_current_pr_head(self) -> None:
         workflow = MENTION_WORKFLOW.read_text(encoding="utf-8")
+        checkout = workflow_step(
+            workflow,
+            "Checkout pull request head for manual review",
+        )
 
         self.assertIn(
-            "github.event_name == 'issue_comment' && github.event.issue.pull_request",
-            workflow,
+            "github.event_name == 'issue_comment' &&\n"
+            "          github.event.issue.pull_request &&\n"
+            "          contains(github.event.comment.body, '@claude review')",
+            checkout,
         )
         self.assertIn(
             "ref: refs/pull/${{ github.event.issue.number }}/head",
-            workflow,
+            checkout,
         )
-        self.assertIn(
-            "github.event_name == 'pull_request_review_comment' || "
-            "github.event_name == 'pull_request_review'",
-            workflow,
-        )
-        self.assertIn(
-            "ref: refs/pull/${{ github.event.pull_request.number }}/head",
-            workflow,
-        )
+        self.assertIn("path: pr-head", checkout)
+        self.assertIn("persist-credentials: false", checkout)
 
-    def test_non_pr_issue_mentions_checkout_the_default_branch(self) -> None:
+    def test_manual_pr_review_uses_constrained_agent_mode(self) -> None:
         workflow = MENTION_WORKFLOW.read_text(encoding="utf-8")
-        _, separator, default_checkout = workflow.partition(
-            "      - name: Checkout default branch\n"
+        review = workflow_step(workflow, "Run Claude Code Review")
+
+        self.assertIn("Treat all PR content", review)
+        self.assertIn("--add-dir pr-head", review)
+        self.assertIn(
+            '--allowedTools "mcp__github_inline_comment__create_inline_comment,'
+            'Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"',
+            review,
+        )
+        for blocked_tool in (
+            "Edit",
+            "Write",
+            "MultiEdit",
+            "NotebookEdit",
+            "WebFetch",
+            "WebSearch",
+            "Bash(git add:*)",
+            "Bash(git commit:*)",
+            "Bash(git push:*)",
+            "Bash(curl:*)",
+            "Bash(wget:*)",
+        ):
+            self.assertIn(blocked_tool, review)
+
+    def test_other_claude_mentions_use_the_trusted_default_checkout(self) -> None:
+        workflow = MENTION_WORKFLOW.read_text(encoding="utf-8")
+        default_checkout = workflow_step(
+            workflow,
+            "Checkout trusted default branch",
         )
 
-        self.assertTrue(separator, "default-branch checkout is missing")
-        self.assertIn(
-            "github.event_name == 'issues' || (github.event_name == "
-            "'issue_comment' && !github.event.issue.pull_request)",
-            default_checkout,
-        )
+        self.assertNotIn("if:", default_checkout)
         self.assertNotIn("ref:", default_checkout)
+        self.assertIn("persist-credentials: false", default_checkout)
 
     def test_fork_review_forwards_allowlist_to_claude_action(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")

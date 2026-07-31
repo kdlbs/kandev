@@ -178,6 +178,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [public-share-links](public-share-links/spec.md) | draft |
 | [ssh-executor](ssh-executor/spec.md) | draft |
 | [cli-mode-parity](cli-mode-parity/spec.md) | draft |
+| [claude-fork-review-allowlist](claude-fork-review-allowlist/spec.md) | building |
 | [workflow-settings-autosave](workflow-settings-autosave/spec.md) | archived; superseded by settings-manual-save |
 | [mobile-quick-chat-topbar](mobile-quick-chat-topbar/spec.md) | building |
 | [native-code-review](native-code-review/spec.md) | building |
