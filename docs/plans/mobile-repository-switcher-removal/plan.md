@@ -74,3 +74,5 @@ cd apps/web && pnpm lint
 - REVIEW VERIFICATION: `go test ./internal/office/testharness` and full `pnpm lint` both pass.
 - REVIEW 3 RED: a focused session-slice test showed that a partial live-session upsert left an already-loaded task session list marked authoritative (`true`, expected `false`).
 - REVIEW 3 GREEN: an unknown live-session upsert now invalidates the task list for API hydration, while updates to known sessions remain cached. Focused slice/hook/picker tests (`39 passed`), typecheck, full lint, production build, and the live-seeded mobile Playwright scenario (`1 passed`) pass.
+- REVIEW 4 RED: a focused hook test showed a failed stale-list hydration replaced the existing and partial live session rows with an empty list.
+- REVIEW 4 GREEN: non-forced hydration failures now preserve the current store snapshot and mark it loaded, avoiding immediate retry loops while reconnect/foreground refresh retains a recovery path. Focused slice/hook/picker tests (`40 passed`), typecheck, full lint, production build, and the live-seeded mobile Playwright scenario (`1 passed`) pass.

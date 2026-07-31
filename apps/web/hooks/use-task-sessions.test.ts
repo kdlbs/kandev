@@ -20,9 +20,13 @@ type MockTaskSessionsState = {
 
 let mockState: MockTaskSessionsState;
 
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: MockTaskSessionsState) => unknown) => selector(mockState),
-}));
+vi.mock("@/components/state-provider", () => {
+  const getState = () => mockState;
+  return {
+    useAppStore: (selector: (state: MockTaskSessionsState) => unknown) => selector(mockState),
+    useAppStoreApi: () => ({ getState }),
+  };
+});
 
 vi.mock("@/lib/api", () => apiMock);
 
@@ -103,6 +107,25 @@ describe("useTaskSessions", () => {
       }),
     );
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [session("sess-1")]);
+  });
+
+  it("preserves live session rows when stale-list hydration fails", async () => {
+    const error = new Error("service unavailable");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const liveSessions = [session("existing"), session("live-upsert")];
+    mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = liveSessions;
+    mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = false;
+    apiMock.listTaskSessions.mockRejectedValueOnce(error);
+
+    renderHook(() => useTaskSessions(TASK_ID));
+
+    await waitFor(() =>
+      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(TASK_ID, {
+        cache: "no-store",
+      }),
+    );
+    expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, liveSessions);
+    expect(consoleError).toHaveBeenCalledWith("Failed to load task sessions:", error);
   });
 });
 

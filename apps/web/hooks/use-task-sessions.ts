@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { listTaskSessions } from "@/lib/api";
 import type { TaskSession } from "@/lib/types/http";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
@@ -7,6 +7,7 @@ import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 const EMPTY_SESSIONS: TaskSession[] = [];
 
 export function useTaskSessions(taskId: string | null) {
+  const getStoreState = useAppStoreApi().getState;
   const sessions = useAppStore((state) =>
     taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS) : EMPTY_SESSIONS,
   );
@@ -42,7 +43,11 @@ export function useTaskSessions(taskId: string | null) {
         setTaskSessionsForTask(taskId, sessions);
       } catch (error) {
         console.error("Failed to load task sessions:", error);
-        if (!force) setTaskSessionsForTask(taskId, []);
+        if (!force) {
+          const currentSessions =
+            getStoreState().taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS;
+          setTaskSessionsForTask(taskId, currentSessions);
+        }
       } finally {
         setTaskSessionsLoading(taskId, false);
         if (force && !pendingForcedReloadRef.current) {
@@ -51,7 +56,7 @@ export function useTaskSessions(taskId: string | null) {
         }
       }
     },
-    [isLoaded, isLoading, setTaskSessionsForTask, setTaskSessionsLoading, taskId],
+    [getStoreState, isLoaded, isLoading, setTaskSessionsForTask, setTaskSessionsLoading, taskId],
   );
 
   useEffect(() => {
