@@ -37,10 +37,10 @@ func TestGetOrCreateSpriteRetriesTransientGet(t *testing.T) {
 		}
 		_, _ = w.Write([]byte(`{"name":"kandev-pr-2115","status":"created"}`))
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := sprites.New("token", sprites.WithBaseURL(server.URL))
-	defer func() { _ = client.Close() }()
+	t.Cleanup(func() { _ = client.Close() })
 
 	sprite, err := getOrCreateSprite(t.Context(), client, "kandev-pr-2115")
 	if err != nil {
@@ -73,10 +73,10 @@ func TestGetOrCreateSpriteReconcilesTransientCreateFailure(t *testing.T) {
 			t.Errorf("unexpected %s request", r.Method)
 		}
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := sprites.New("token", sprites.WithBaseURL(server.URL))
-	defer func() { _ = client.Close() }()
+	t.Cleanup(func() { _ = client.Close() })
 
 	sprite, err := getOrCreateSprite(t.Context(), client, "kandev-pr-2115")
 	if err != nil {
@@ -99,10 +99,10 @@ func TestGetOrCreateSpriteDoesNotRetryPermanentErrors(t *testing.T) {
 		getCalls++
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := sprites.New("token", sprites.WithBaseURL(server.URL))
-	defer func() { _ = client.Close() }()
+	t.Cleanup(func() { _ = client.Close() })
 
 	_, err := getOrCreateSprite(t.Context(), client, "kandev-pr-2115")
 	if err == nil {
@@ -119,10 +119,10 @@ func TestGetOrCreateSpriteReturnsFinalTransientErrorAfterRetryBudget(t *testing.
 		getCalls++
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	client := sprites.New("token", sprites.WithBaseURL(server.URL))
-	defer func() { _ = client.Close() }()
+	t.Cleanup(func() { _ = client.Close() })
 
 	_, err := getOrCreateSprite(t.Context(), client, "kandev-pr-2115")
 	if err == nil {
