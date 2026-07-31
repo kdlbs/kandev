@@ -15,7 +15,6 @@ import {
   computeUncommittedStats,
   useMobileGitActions,
 } from "./session-mobile-top-bar-git-controls";
-import { MobileRepoPill } from "./mobile-repo-pill";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
 
@@ -236,7 +235,6 @@ function MobileTopBarActions({
 }: MobileTopBarActionsProps) {
   return (
     <div className="flex items-center gap-1" data-testid="mobile-topbar-actions">
-      <MobileRepoPill taskId={taskId ?? null} workspaceId={workspaceId ?? null} />
       <MRTopbarButton compact mobile />
       {!isArchived && (
         <TaskTopBarPluginActions
