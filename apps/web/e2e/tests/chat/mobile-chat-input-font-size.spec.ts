@@ -1,8 +1,5 @@
-import { type Page } from "@playwright/test";
-import { test, expect, type SeedData } from "../../fixtures/test-base";
-import { SessionPage } from "../../pages/session-page";
-import type { ApiClient } from "../../helpers/api-client";
-import type { CreateTaskResponse } from "../../../lib/types/http";
+import { test, expect } from "../../fixtures/test-base";
+import { composerEditor, createReadyTask, openTaskChat } from "./chat-input-font-size-helpers";
 
 // Runs on the mobile-chrome Playwright project (Pixel 5 emulation, touch →
 // any-pointer: coarse). The composer's Tailwind class is a flat `text-sm`, so
@@ -10,31 +7,6 @@ import type { CreateTaskResponse } from "../../../lib/types/http";
 // to stop iOS Safari auto-zooming on focus. This guards that dependency —
 // mobile-zoom.spec.ts covers plain form controls, this covers the
 // contenteditable TipTap editor.
-async function createReadyTask(
-  apiClient: ApiClient,
-  seedData: SeedData,
-): Promise<CreateTaskResponse> {
-  return apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    "Mobile Chat Input Font Size",
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-}
-
-async function openTaskChat(page: Page, taskId: string): Promise<SessionPage> {
-  await page.goto(`/t/${taskId}`);
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 30_000 });
-  return session;
-}
-
 test.describe("Mobile chat input font size", () => {
   test("composer renders at >= 16px to prevent iOS focus-zoom", async ({
     testPage,
@@ -42,7 +14,7 @@ test.describe("Mobile chat input font size", () => {
     seedData,
     prCapture,
   }) => {
-    const task = await createReadyTask(apiClient, seedData);
+    const task = await createReadyTask(apiClient, seedData, "Mobile Chat Input Font Size");
     await openTaskChat(testPage, task.id);
 
     // Guard: the 16px rule is gated on `@media (any-pointer: coarse)`. Assert
@@ -51,7 +23,7 @@ test.describe("Mobile chat input font size", () => {
     const coarse = await testPage.evaluate(() => matchMedia("(any-pointer: coarse)").matches);
     expect(coarse).toBe(true);
 
-    const editor = testPage.locator(".tiptap.ProseMirror:visible").first();
+    const editor = composerEditor(testPage);
     await expect(editor).toBeVisible();
     await editor.tap();
 

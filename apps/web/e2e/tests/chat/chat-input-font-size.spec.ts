@@ -1,8 +1,5 @@
-import { type Page } from "@playwright/test";
-import { test, expect, type SeedData } from "../../fixtures/test-base";
-import { SessionPage } from "../../pages/session-page";
-import type { ApiClient } from "../../helpers/api-client";
-import type { CreateTaskResponse } from "../../../lib/types/http";
+import { test, expect } from "../../fixtures/test-base";
+import { composerEditor, createReadyTask, openTaskChat } from "./chat-input-font-size-helpers";
 
 /** Widths on both sides of Tailwind's `lg` (1024px) breakpoint. The composer
  *  used to carry `text-base … lg:text-sm`, so dragging a desktop window under
@@ -13,31 +10,6 @@ const WIDTHS = [1440, 1100, 900, 700] as const;
  *  compare across widths. */
 const SAMPLE_PROMPT = "The quick brown fox jumps over the lazy dog";
 
-async function createReadyTask(
-  apiClient: ApiClient,
-  seedData: SeedData,
-): Promise<CreateTaskResponse> {
-  return apiClient.createTaskWithAgent(
-    seedData.workspaceId,
-    "Chat Input Font Size",
-    seedData.agentProfileId,
-    {
-      description: "/e2e:simple-message",
-      workflow_id: seedData.workflowId,
-      workflow_step_id: seedData.startStepId,
-      repository_ids: [seedData.repositoryId],
-    },
-  );
-}
-
-async function openTaskChat(page: Page, taskId: string): Promise<SessionPage> {
-  await page.goto(`/t/${taskId}`);
-  const session = new SessionPage(page);
-  await session.waitForLoad();
-  await session.waitForChatIdle({ timeout: 30_000 });
-  return session;
-}
-
 test.describe("Chat input font size", () => {
   test("stays constant while the desktop window is resized", async ({
     testPage,
@@ -45,12 +17,10 @@ test.describe("Chat input font size", () => {
     seedData,
     prCapture,
   }) => {
-    const task = await createReadyTask(apiClient, seedData);
+    const task = await createReadyTask(apiClient, seedData, "Chat Input Font Size");
     await openTaskChat(testPage, task.id);
 
-    // Multiple TipTap instances can be mounted in dockview layouts; scope to
-    // the first visible one.
-    const editor = testPage.locator(".tiptap.ProseMirror:visible").first();
+    const editor = composerEditor(testPage);
     await expect(editor).toBeVisible();
 
     // Desktop Chrome exposes a fine pointer, so the globals.css 16px

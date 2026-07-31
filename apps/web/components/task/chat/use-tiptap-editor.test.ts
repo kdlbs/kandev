@@ -14,12 +14,15 @@ describe("TIPTAP_EDITOR_TEXT_SIZE_CLASS", () => {
     expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toContain("text-base");
   });
 
-  it("carries no responsive text-size variant, so resizing cannot change the font", () => {
+  it("carries no variant-prefixed text utility, so resizing cannot change the font", () => {
     // The touch 16px floor lives in the `any-pointer: coarse` rule in
     // globals.css; a width breakpoint here would resize the composer text when
-    // a desktop window is dragged narrow.
-    const responsiveTextSize = /\b(sm|md|lg|xl|2xl|max-\w+):text-/;
-    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toMatch(responsiveTextSize);
+    // a desktop window is dragged narrow. Reject *any* `<variant>:text-*`
+    // rather than a list of named breakpoints — an arbitrary variant such as
+    // `min-[1024px]:text-lg` or `max-[900px]:text-base` is just as
+    // viewport-dependent and would slip past an enumerated pattern.
+    const variantTextUtility = /(?:^|\s)\S+:text-\S+/;
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toMatch(variantTextUtility);
   });
 });
 
