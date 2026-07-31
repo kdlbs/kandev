@@ -133,7 +133,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [mermaid-rendering](ui/mermaid-rendering.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
-| [app-status-bar](ui/app-status-bar.md) | draft |
+| [app-status-bar](ui/app-status-bar.md) | building |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 | [adaptive-kanban](ui/adaptive-kanban.md) | shipped |
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
