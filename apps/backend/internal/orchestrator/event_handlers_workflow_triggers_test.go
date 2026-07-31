@@ -766,6 +766,72 @@ func TestProcessOnEnterPassthrough(t *testing.T) {
 func TestProcessOnEnterResetAgentContext(t *testing.T) {
 	ctx := context.Background()
 
+	t.Run("successful reset clears persisted context-window usage", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{
+			"context_window": map[string]interface{}{"size": int64(200000), "used": int64(190000)},
+		}
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("failed to seed context window: %v", err)
+		}
+		if err := repo.UpdateSessionMetadata(ctx, session.ID, session.Metadata); err != nil {
+			t.Fatalf("failed to persist context window metadata: %v", err)
+		}
+		initial, _ := repo.GetTaskSession(ctx, "s1")
+		if initial.Metadata["context_window"] == nil {
+			t.Fatal("precondition: context_window was not persisted")
+		}
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-reset")
+
+		svc := createTestServiceWithAgent(
+			repo,
+			newMockStepGetter(),
+			newMockTaskRepo(),
+			&mockAgentManager{repoForExecutionLookup: repo},
+		)
+		if !svc.resetAgentContext(ctx, "t1", session, "test") {
+			t.Fatal("expected reset to succeed")
+		}
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.Metadata["context_window"] != nil {
+			t.Fatal("expected successful reset to clear context_window")
+		}
+	})
+
+	t.Run("failed reset retains persisted context-window usage", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "step1")
+		session, _ := repo.GetTaskSession(ctx, "s1")
+		session.Metadata = map[string]interface{}{
+			"context_window": map[string]interface{}{"size": int64(200000), "used": int64(190000)},
+		}
+		if err := repo.UpdateTaskSession(ctx, session); err != nil {
+			t.Fatalf("failed to seed context window: %v", err)
+		}
+		if err := repo.UpdateSessionMetadata(ctx, session.ID, session.Metadata); err != nil {
+			t.Fatalf("failed to persist context window metadata: %v", err)
+		}
+		seedExecutorRunning(t, repo, session.ID, session.TaskID, "exec-reset")
+
+		svc := createTestServiceWithAgent(
+			repo,
+			newMockStepGetter(),
+			newMockTaskRepo(),
+			&mockAgentManager{repoForExecutionLookup: repo, restartProcessErr: errors.New("restart failed")},
+		)
+		if svc.resetAgentContext(ctx, "t1", session, "test") {
+			t.Fatal("expected reset to fail")
+		}
+
+		updated, _ := repo.GetTaskSession(ctx, "s1")
+		if updated.Metadata["context_window"] == nil {
+			t.Fatal("expected failed reset to retain context_window")
+		}
+	})
+
 	t.Run("reset_agent_context calls RestartAgentProcess", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")

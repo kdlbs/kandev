@@ -29,6 +29,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setSessionAgentctlStatus: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
+    clearContextWindow: vi.fn(),
     clearLegacyGitStatusEntry: vi.fn(),
     bumpSessionCommitsRefetch: vi.fn(),
     bumpWorkspaceFilesRefresh: vi.fn(),
@@ -315,6 +316,54 @@ describe("session.state_changed context window provenance", () => {
       "s-1",
       expect.objectContaining({ source: "acp" }),
     );
+  });
+
+  it("clears the cached reading when a full session snapshot explicitly clears it", () => {
+    const clearContextWindow = vi.fn();
+    const store = makeStore({ clearContextWindow });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        session_metadata: { context_window: null },
+      }),
+    );
+
+    expect(clearContextWindow).toHaveBeenCalledWith("s-1");
+  });
+
+  it("clears the cached reading when a partial metadata patch explicitly clears it", () => {
+    const clearContextWindow = vi.fn();
+    const store = makeStore({ clearContextWindow });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: { context_window: null },
+      }),
+    );
+
+    expect(clearContextWindow).toHaveBeenCalledWith("s-1");
+  });
+
+  it("does not clear usage for unrelated metadata patches", () => {
+    const clearContextWindow = vi.fn();
+    const store = makeStore({ clearContextWindow });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: { plan_mode: true },
+      }),
+    );
+
+    expect(clearContextWindow).not.toHaveBeenCalled();
   });
 });
 
