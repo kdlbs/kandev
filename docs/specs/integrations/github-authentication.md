@@ -424,8 +424,8 @@ registration and never creates a global default.
 ## UX And Mobile Contract
 
 - Workspace GitHub settings lead with the active automation identity and a **Change connection**
-  command. The method chooser uses a menu/list with PAT, GitHub CLI, and GitHub App descriptions,
-  not a segmented tab control.
+  command. The method chooser presents GitHub CLI first, followed by PAT and GitHub App, with
+  descriptions rather than a segmented tab control.
 - Method descriptions state where the credential is stored/resolved and how managed tasks receive
   it. The same access group shows a compact **Task access** summary and the **Change GitHub
   connection** dialog visibly explains and edits **Managed workspace credentials** and **Inherit
@@ -439,7 +439,11 @@ registration and never creates a global default.
 - One **Save changes** submission persists every changed local draft in the dialog: a PAT or named
   CLI workspace connection and the task Git access policy. It reports success only after all
   changed drafts save, keeps failed drafts available for retry, and never implies that one setting
-  silently determines the other. App create/import/install remain separate workflow actions.
+  silently determines the other. The action stays visible in a fixed bottom row while the content
+  above owns scrolling; a bottom fade cues additional content. App create/import/install remain
+  separate workflow actions.
+- Task Git access options use compact spacing while retaining their full descriptions and minimum
+  touch targets.
 - GitHub App selection first explains when to use it and the sharing/isolation trade-off, then lists
   known registrations and actions to **Add existing App** or **Create new App**.
 - The import guide provides copyable callback, setup, and webhook URLs; required permissions/events;

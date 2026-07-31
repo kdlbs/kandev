@@ -67,6 +67,7 @@ export function GitHubTaskAccessForm({
         value={value}
         onValueChange={(nextValue) => onChange(nextValue as TaskGitCredentialsMode)}
         disabled={taskAccess.loading || taskAccess.error || disabled}
+        className="gap-2"
       >
         <label
           className="flex min-h-11 cursor-pointer items-start gap-3 rounded-md border p-3"
@@ -82,7 +83,7 @@ export function GitHubTaskAccessForm({
           </span>
         </label>
         <label
-          className="mt-3 flex min-h-11 cursor-pointer items-start gap-3 rounded-md border p-3"
+          className="flex min-h-11 cursor-pointer items-start gap-3 rounded-md border p-3"
           data-testid="github-task-access-option-executor"
         >
           <RadioGroupItem value="executor" className="mt-0.5" />

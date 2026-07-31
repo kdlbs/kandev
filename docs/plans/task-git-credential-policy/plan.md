@@ -128,12 +128,14 @@ Confirmed root causes:
   tasks receive it; the task policy controls live below the method controls in the same bounded
   dialog/drawer. Remove the standalone Task Git credentials section from the settings page.
 - Replace the PAT, CLI, and task-policy submission buttons with one dialog-level **Save changes**
-  action that persists every changed local draft. App create/import/install remain workflow actions
+  action in a fixed bottom row that persists every changed local draft. Keep one scrolling content
+  region above it, add a bottom fade as an overflow cue, place the GitHub CLI card first, and use
+  compact spacing between task-access options. App create/import/install remain workflow actions
   because they navigate through GitHub instead of saving a local credential draft.
 - Update `github-status.tsx` so the Workspace GitHub access summary shows the current task access
   mode beside the automation identity and refreshes after a successful dialog submission.
 - Desktop retains a bounded but wider dialog. Mobile retains the existing full-height Drawer, one
-  internal scroll owner, safe-area padding, 44px controls, and no horizontal overflow.
+  internal scroll owner, a safe-area-aware fixed footer, 44px controls, and no horizontal overflow.
 
 ### Changes branch credential disclosure
 

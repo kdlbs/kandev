@@ -126,6 +126,25 @@ test.describe("GitHub workspace settings", () => {
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();
     expect(dialogBox!.width).toBeGreaterThanOrEqual(800);
+    const methodGroup = dialog.getByRole("radiogroup", { name: "Connection method" });
+    await expect(methodGroup.getByRole("radio").first()).toHaveAttribute("id", "github-method-cli");
+    const scrollBody = dialog.getByTestId("github-connection-scroll");
+    const scrollFade = dialog.getByTestId("github-connection-scroll-fade");
+    const footer = dialog.getByTestId("github-connection-footer");
+    const fixedSaveButton = footer.getByRole("button", { name: "Save changes" });
+    await expect(fixedSaveButton).toBeVisible();
+    const [scrollBox, fadeBox, footerBox, initialSaveBox] = await Promise.all([
+      scrollBody.boundingBox(),
+      scrollFade.boundingBox(),
+      footer.boundingBox(),
+      fixedSaveButton.boundingBox(),
+    ]);
+    expect(scrollBox).not.toBeNull();
+    expect(fadeBox).not.toBeNull();
+    expect(footerBox).not.toBeNull();
+    expect(initialSaveBox).not.toBeNull();
+    expect(fadeBox!.y + fadeBox!.height).toBeCloseTo(scrollBox!.y + scrollBox!.height, 1);
+    expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
     await dialog.getByRole("radio", { name: /^GitHub CLI account/ }).click();
     await expect(dialog.getByRole("combobox", { name: "GitHub CLI account" })).toContainText(
       "workspace-cli",
@@ -153,6 +172,15 @@ test.describe("GitHub workspace settings", () => {
       managedDescription.evaluate((element) => getComputedStyle(element).fontSize),
     ]);
     expect(managedFontSize).toBe(cliFontSize);
+    const managedOption = dialog.getByTestId("github-task-access-option-managed");
+    const executorOption = dialog.getByTestId("github-task-access-option-executor");
+    const [managedBox, executorBox] = await Promise.all([
+      managedOption.boundingBox(),
+      executorOption.boundingBox(),
+    ]);
+    expect(managedBox).not.toBeNull();
+    expect(executorBox).not.toBeNull();
+    expect(executorBox!.y - (managedBox!.y + managedBox!.height)).toBeLessThanOrEqual(9);
     await dialog.getByRole("radio", { name: "Inherit executor Git credentials" }).click();
     await testPage.waitForTimeout(300);
     await prCapture.screenshot("desktop-task-git-access-dialog", {
@@ -161,6 +189,12 @@ test.describe("GitHub workspace settings", () => {
     await expect(dialog.getByRole("button", { name: "Save task access" })).toHaveCount(0);
     const saveButton = dialog.getByRole("button", { name: "Save changes" });
     await expect(saveButton).toHaveCount(1);
+    const beforeScrollSaveBox = await fixedSaveButton.boundingBox();
+    expect(beforeScrollSaveBox).not.toBeNull();
+    await scrollBody.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+    const scrolledSaveBox = await fixedSaveButton.boundingBox();
+    expect(scrolledSaveBox).not.toBeNull();
+    expect(scrolledSaveBox!.y).toBeCloseTo(beforeScrollSaveBox!.y, 1);
     await saveButton.click();
     await expect(testPage.getByText("GitHub access settings saved")).toBeVisible({
       timeout: 10_000,

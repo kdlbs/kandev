@@ -63,6 +63,27 @@ test.describe("GitHub workspace settings on mobile", () => {
 
     await automation.getByRole("button", { name: "Change connection" }).tap();
     const drawer = testPage.getByTestId("github-connection-mobile");
+    const drawerBox = await drawer.boundingBox();
+    const scrollBody = drawer.getByTestId("github-connection-scroll");
+    const scrollFade = drawer.getByTestId("github-connection-scroll-fade");
+    const footer = drawer.getByTestId("github-connection-footer");
+    const fixedSaveButton = footer.getByRole("button", { name: "Save changes" });
+    await expect(fixedSaveButton).toBeVisible();
+    const [scrollBox, fadeBox, footerBox, initialSaveBox] = await Promise.all([
+      scrollBody.boundingBox(),
+      scrollFade.boundingBox(),
+      footer.boundingBox(),
+      fixedSaveButton.boundingBox(),
+    ]);
+    expect(drawerBox).not.toBeNull();
+    expect(scrollBox).not.toBeNull();
+    expect(fadeBox).not.toBeNull();
+    expect(footerBox).not.toBeNull();
+    expect(initialSaveBox).not.toBeNull();
+    expect(fadeBox!.y + fadeBox!.height).toBeCloseTo(scrollBox!.y + scrollBox!.height, 1);
+    expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
+    const methodGroup = drawer.getByRole("radiogroup", { name: "Connection method" });
+    await expect(methodGroup.getByRole("radio").first()).toHaveAttribute("id", "github-method-cli");
     await drawer.getByRole("radio", { name: /^GitHub CLI account/ }).tap();
     await expect(drawer.getByRole("combobox", { name: "GitHub CLI account" })).toContainText(
       "mobile-cli",
@@ -92,6 +113,21 @@ test.describe("GitHub workspace settings on mobile", () => {
     expect(saveButtonBox).not.toBeNull();
     expect(optionBox!.height).toBeGreaterThanOrEqual(44);
     expect(saveButtonBox!.height).toBeGreaterThanOrEqual(44);
+
+    const managedOption = drawer.getByTestId("github-task-access-option-managed");
+    const [managedBox, compactExecutorBox] = await Promise.all([
+      managedOption.boundingBox(),
+      executorOption.boundingBox(),
+    ]);
+    expect(managedBox).not.toBeNull();
+    expect(compactExecutorBox).not.toBeNull();
+    expect(compactExecutorBox!.y - (managedBox!.y + managedBox!.height)).toBeLessThanOrEqual(9);
+    const beforeScrollSaveBox = await fixedSaveButton.boundingBox();
+    expect(beforeScrollSaveBox).not.toBeNull();
+    await scrollBody.evaluate((element) => element.scrollTo(0, element.scrollHeight));
+    const scrolledSaveBox = await fixedSaveButton.boundingBox();
+    expect(scrolledSaveBox).not.toBeNull();
+    expect(scrolledSaveBox!.y).toBeCloseTo(beforeScrollSaveBox!.y, 1);
 
     await executorOption.tap();
     await prCapture.screenshot("mobile-task-git-access-drawer", {

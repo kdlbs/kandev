@@ -81,6 +81,7 @@ export function GitHubConnectionDialog({
       onSaved={onSaved}
       onComplete={() => setOpen(false)}
       taskAccess={taskAccess}
+      isMobile={isMobile}
     />
   );
 
@@ -96,9 +97,7 @@ export function GitHubConnectionDialog({
             <DrawerTitle>{connected ? "Change GitHub connection" : "Connect GitHub"}</DrawerTitle>
             <DrawerDescription>{description}</DrawerDescription>
           </DrawerHeader>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] pt-4">
-            {body}
-          </div>
+          {body}
         </DrawerContent>
       </Drawer>
     );
@@ -115,7 +114,7 @@ export function GitHubConnectionDialog({
           <DialogTitle>{connected ? "Change GitHub connection" : "Connect GitHub"}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1">{body}</div>
+        {body}
       </DialogContent>
     </Dialog>
   );

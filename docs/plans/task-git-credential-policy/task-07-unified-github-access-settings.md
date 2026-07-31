@@ -24,12 +24,13 @@ spec: "../../specs/integrations/github-authentication.md"
 - Change GitHub connection contains the managed/executor task-access controls and one **Save
   changes** action for PAT/CLI and task-access drafts; success refreshes the summary, failure
   preserves unsaved drafts, closing without saving restores persisted values, and neither setting
-  silently determines the other. App create/import/install remain workflow actions.
+  silently determines the other. The action remains visible in a fixed bottom row while one
+  content region scrolls behind a bottom fade. App create/import/install remain workflow actions.
 - Task Git access includes responsive supplementary help that accurately explains the injected Git
   credential helper, scoped broker lease, `gh` shim, executor inheritance, and launch/resume timing.
   Option descriptions match the dialog's explanatory typography.
 - The desktop dialog is widened so the method cards and descriptions are readable without cramped
-  columns.
+  columns. GitHub CLI is the first method card, and the task-access option gap is compact.
 - Desktop and mobile preserve the same capability. The phone flow uses the existing full-height
   Drawer with one scroll owner, safe-area clearance, touch-reachable controls, and no horizontal
   overflow. Public GitHub integration docs point users to the new location.
@@ -87,18 +88,20 @@ flow and should land together.
   including its fixed header, single `min-h-0` scroll body, and safe-area bottom padding. Reuse the
   responsive help-control pattern from `RepositoryScopeHelp` for fine-pointer tooltips and
   coarse-pointer Drawers.
-- **Hierarchy and action:** workspace automation method first, task access second, then one **Save
-  changes** action. PAT/CLI and task access no longer compete with separate submission buttons.
-  App create/import/install remain explicit external workflow actions.
+- **Hierarchy and action:** GitHub CLI is the first workspace method, followed by PAT and App;
+  task access comes second. One **Save changes** action stays fixed in the bottom row while content
+  scrolls above a gradient cue. PAT/CLI and task access no longer compete with separate submission
+  buttons. App create/import/install remain explicit external workflow actions.
 - **Surface rationale:** both choices are infrequent workspace-level GitHub configuration, so one
   bounded dialog/full-height phone Drawer is more appropriate than a second page section or stacked
   overlay.
-- **Shared versus responsive behavior:** share connection/task drafts, validation, persistence, and
-  labels; only the existing Dialog/Drawer shell differs by viewport. Help has the same content on
-  every viewport, with 44px touch targets on mobile.
-- **Proof:** desktop and `mobile-chrome` E2E select a named CLI account and executor mode, press the
-  single save action, observe both persisted values, reopen to prove persistence, and assert the
-  mobile single-scroll/no-overflow geometry.
+- **Shared versus responsive behavior:** share connection/task drafts, validation, persistence,
+  footer, fade, and labels; only the existing Dialog/Drawer shell padding differs by viewport.
+  The footer clears the mobile safe area. Help has the same content on every viewport, with 44px
+  touch targets on mobile.
+- **Proof:** desktop and `mobile-chrome` E2E prove CLI-first order, compact task-option spacing,
+  fixed footer geometry before and after content scrolling, and the fade position; they then select
+  a named CLI account and executor mode, save, and reopen to prove persistence.
 
 ## Risks
 
@@ -129,12 +132,15 @@ component and E2E results, docs validation, files changed, risks, and task/plan 
 - A fresh `pnpm run build:vite` production build — passed.
 - Chromium E2E for `configures task Git access from the workspace connection dialog` — passed
   after deliberate RED failures proved the missing summary/API-limit controls, old 638px width,
-  and separate **Use account** action. It now verifies the identity, task-access and rate-limit
-  tooltips, wider dialog, typography parity, one **Save changes** action, combined CLI/task
-  persistence, and reopen state.
+  separate **Use account** action, and PAT-first card order. It now verifies the identity,
+  task-access and rate-limit tooltips, wider dialog, CLI-first order, typography parity, compact
+  task-option spacing, a fixed footer and aligned fade before/after scrolling, one **Save changes**
+  action, combined CLI/task persistence, and reopen state.
 - Both mobile GitHub settings E2E files — passed (4 tests), including the nested credential-helper
   and API-limit Drawers, 44px controls, one scroll owner, no overflow, combined persistence, and
-  safe parent-Drawer behavior.
+  safe parent-Drawer behavior. The focused production-build rerun first failed RED because no fixed
+  footer existed, then passed with the safe-area footer, fade, CLI-first order, compact option gap,
+  and unchanged footer position after scrolling.
 - `node --test scripts/validate-public-docs.test.mjs` and
   `node scripts/validate-public-docs.mjs` — passed (58 tests; 41 published docs pages).
 - `git diff --check` — passed.

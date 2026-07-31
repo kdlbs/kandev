@@ -15,6 +15,7 @@ import type {
   GitHubStatus,
   TaskGitCredentialsMode,
 } from "@/lib/types/github";
+import { cn } from "@/lib/utils";
 import { GitHubAppConnectionPanel } from "./github-app-connection-panel";
 import { GitHubAuthMethodList, type GitHubAutomationMethod } from "./github-auth-method-list";
 import { GitHubCLIForm } from "./github-cli-form";
@@ -91,6 +92,7 @@ type SettingsFormProps = {
   onSaved: () => void;
   onComplete: () => void;
   taskAccess: TaskGitCredentialsState;
+  isMobile: boolean;
 };
 
 function useConnectionSettingsDraft({
@@ -195,7 +197,7 @@ function useConnectionSettingsDraft({
 }
 
 export function GitHubConnectionSettingsForm(props: SettingsFormProps) {
-  const { method, workspaceId, onMethodChange, taskAccess } = props;
+  const { method, workspaceId, onMethodChange, taskAccess, isMobile } = props;
   const {
     token,
     setToken,
@@ -209,48 +211,73 @@ export function GitHubConnectionSettingsForm(props: SettingsFormProps) {
   } = useConnectionSettingsDraft(props);
 
   return (
-    <div className="space-y-5">
-      <GitHubAuthMethodList value={method} onChange={onMethodChange} />
-      <div className="border-t pt-5">
-        {method === "pat" && (
-          <GitHubPATForm
-            workspaceId={workspaceId}
-            value={token}
-            onChange={setToken}
-            disabled={saving}
-          />
-        )}
-        {method === "cli" && (
-          <GitHubCLIForm
-            workspaceId={workspaceId}
-            onAccountChange={setCLIAccount}
-            disabled={saving}
-          />
-        )}
-        {method === "app" && <GitHubAppConnectionPanel workspaceId={workspaceId} />}
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          data-testid="github-connection-scroll"
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto overscroll-contain pb-8",
+            isMobile ? "px-4 pt-4" : "pr-1",
+          )}
+        >
+          <div className="space-y-5">
+            <GitHubAuthMethodList value={method} onChange={onMethodChange} />
+            <div className="border-t pt-5">
+              {method === "pat" && (
+                <GitHubPATForm
+                  workspaceId={workspaceId}
+                  value={token}
+                  onChange={setToken}
+                  disabled={saving}
+                />
+              )}
+              {method === "cli" && (
+                <GitHubCLIForm
+                  workspaceId={workspaceId}
+                  onAccountChange={setCLIAccount}
+                  disabled={saving}
+                />
+              )}
+              {method === "app" && <GitHubAppConnectionPanel workspaceId={workspaceId} />}
+            </div>
+            <GitHubTaskAccessForm
+              taskAccess={taskAccess}
+              value={taskMode}
+              onChange={setTaskMode}
+              disabled={saving}
+            />
+            {methodNeedsWorkflow && (
+              <p className="text-xs leading-5 text-muted-foreground">
+                Install a GitHub App above to change the workspace connection. Task access can be
+                saved after the installation finishes.
+              </p>
+            )}
+          </div>
+        </div>
+        <div
+          data-testid="github-connection-scroll-fade"
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-background via-background/80 to-transparent"
+        />
       </div>
-      <GitHubTaskAccessForm
-        taskAccess={taskAccess}
-        value={taskMode}
-        onChange={setTaskMode}
-        disabled={saving}
-      />
-      {methodNeedsWorkflow && (
-        <p className="text-xs leading-5 text-muted-foreground">
-          Install a GitHub App above to change the workspace connection. Task access can be saved
-          after the installation finishes.
-        </p>
-      )}
-      <Button
-        type="button"
-        disabled={!canSave}
-        onClick={save}
-        className="h-11 cursor-pointer"
-        data-dialog-default-action
+      <div
+        data-testid="github-connection-footer"
+        className={cn(
+          "flex shrink-0 justify-end border-t bg-background pt-3",
+          isMobile ? "px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]" : "pb-0",
+        )}
       >
-        {saving && <Spinner className="mr-2 h-4 w-4" />}
-        {saving ? "Saving changes…" : "Save changes"}
-      </Button>
+        <Button
+          type="button"
+          disabled={!canSave}
+          onClick={save}
+          className="h-11 w-full cursor-pointer sm:w-auto"
+          data-dialog-default-action
+        >
+          {saving && <Spinner className="mr-2 h-4 w-4" />}
+          {saving ? "Saving changes…" : "Save changes"}
+        </Button>
+      </div>
     </div>
   );
 }
