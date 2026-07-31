@@ -342,6 +342,51 @@ func TestResumeSession_RollsBackStartingWhenLaunchFails(t *testing.T) {
 	}
 }
 
+func TestResumeSession_RestoresCredentialSnapshotWhenLaunchFails(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	attachManagedGitHubRepositoryForResume(t, repo)
+	repo.sessions["sess-1"].State = models.TaskSessionStateFailed
+	oldSnapshot := models.GitCredentialSnapshot{
+		Version:   1,
+		Source:    "executor",
+		Transport: "executor_selected",
+	}
+	repo.sessions["sess-1"].Metadata = map[string]interface{}{
+		models.SessionMetaKeyGitCredentialSnapshot: oldSnapshot,
+	}
+
+	launchErr := errors.New("credential broker rejected launch")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *LaunchAgentRequest) (*LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	issuer := &resumeCredentialStateIssuer{repo: repo}
+	exec := newTestExecutor(t, agentMgr, repo)
+	exec.SetGitHubCredentialBroker(issuer, "http://localhost:8080/api/github/credentials/resolve")
+
+	if _, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true); !errors.Is(err, launchErr) {
+		t.Fatalf("ResumeSession error = %v, want %v", err, launchErr)
+	}
+
+	current := repo.sessions["sess-1"]
+	if current.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state after failed launch = %s, want FAILED", current.State)
+	}
+	value, ok := current.Metadata[models.SessionMetaKeyGitCredentialSnapshot]
+	if !ok {
+		t.Fatal("credential snapshot missing after failed launch")
+	}
+	got, ok := value.(models.GitCredentialSnapshot)
+	if !ok {
+		t.Fatalf("credential snapshot type = %T, want models.GitCredentialSnapshot", value)
+	}
+	if got.Source != oldSnapshot.Source || got.Transport != oldSnapshot.Transport {
+		t.Fatalf("credential snapshot after failed launch = %#v, want %#v", got, oldSnapshot)
+	}
+}
+
 func TestRollbackResumeStateAfterFailure_SkipsTransitionAfterConcurrentStateChange(t *testing.T) {
 	repo := newMockRepository()
 	setupLiveResumeTestFixture(repo)
@@ -366,6 +411,7 @@ func TestRollbackResumeStateAfterFailure_SkipsTransitionAfterConcurrentStateChan
 		"sess-1",
 		models.TaskSessionStateFailed,
 		errors.New("launch failed"),
+		nil,
 	)
 	if got := repo.sessions["sess-1"].State; got != models.TaskSessionStateCancelled {
 		t.Fatalf("session state = %s, want %s", got, models.TaskSessionStateCancelled)

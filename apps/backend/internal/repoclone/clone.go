@@ -343,7 +343,11 @@ func (c *Cloner) SetOriginURL(ctx context.Context, repositoryPath, originURL str
 	mu.Lock()
 	defer mu.Unlock()
 
-	cmd := exec.CommandContext(ctx, "git", "-C", repositoryPath, "remote", "get-url", "origin")
+	// `git remote get-url` expands url.*.insteadOf rules before returning the
+	// value. Compare the value stored in the local config instead so a common
+	// HTTPS-to-SSH rewrite does not turn an already-canonical origin into a
+	// needless config write on every launch/resume.
+	cmd := exec.CommandContext(ctx, "git", "-C", repositoryPath, "config", "--local", "--get", "remote.origin.url")
 	configureGitCommand(cmd, nil)
 	currentOutput, err := subproc.RunGitCombinedOutput(ctx, cmd)
 	if err != nil {

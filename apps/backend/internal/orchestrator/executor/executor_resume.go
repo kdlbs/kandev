@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
@@ -70,6 +71,47 @@ type repoInfo struct {
 	WorktreeBranchTemplate string
 	PullBeforeWorktree     bool
 	Repository             *models.Repository
+}
+
+// resumeCredentialSnapshotBackup holds the non-secret routing metadata that
+// was persisted before a resume attempt. A failed launch must restore this
+// value so the session never advertises credentials that did not successfully
+// start an agent.
+type resumeCredentialSnapshotBackup struct {
+	value   interface{}
+	present bool
+}
+
+func captureResumeCredentialSnapshot(session *models.TaskSession) resumeCredentialSnapshotBackup {
+	if session == nil || session.Metadata == nil {
+		return resumeCredentialSnapshotBackup{}
+	}
+	value, present := session.Metadata[models.SessionMetaKeyGitCredentialSnapshot]
+	return resumeCredentialSnapshotBackup{value: value, present: present}
+}
+
+func resumeCredentialSnapshotChanged(session *models.TaskSession, backup resumeCredentialSnapshotBackup) bool {
+	if session == nil || session.Metadata == nil {
+		return backup.present
+	}
+	value, present := session.Metadata[models.SessionMetaKeyGitCredentialSnapshot]
+	if present != backup.present {
+		return true
+	}
+	if !present {
+		return false
+	}
+	return !reflect.DeepEqual(value, backup.value)
+}
+
+func resumeCredentialSnapshotBackupIfPersisted(
+	persisted bool,
+	backup resumeCredentialSnapshotBackup,
+) *resumeCredentialSnapshotBackup {
+	if !persisted {
+		return nil
+	}
+	return &backup
 }
 
 // resolveAllRepoInfo returns the resolved repository info for every repository
@@ -451,6 +493,7 @@ func (e *Executor) persistWorktreeAssociation(ctx context.Context, taskID string
 func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSession, startAgent bool) (*TaskExecution, error) {
 	if session != nil {
 		resumeSnapshot := *session
+		resumeSnapshot.Metadata = cloneMetadata(session.Metadata)
 		session = &resumeSnapshot
 	}
 	task, unlock, err := e.validateAndLockResume(ctx, session)
@@ -460,6 +503,7 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	defer unlock()
 
 	resumeInitialState := session.State
+	previousCredentialSnapshot := captureResumeCredentialSnapshot(session)
 	wasTerminalResume := isTerminalSessionState(resumeInitialState)
 	// Force-cleanup any stale in-memory execution / agentctl state for terminal-state
 	// sessions. Their agent process is dead by definition, so "already running" signals
@@ -489,10 +533,11 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	)
 	if err != nil {
 		if resumeStatePersisted {
-			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err)
+			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err, nil)
 		}
 		return nil, err
 	}
+	credentialSnapshotPersisted := false
 	if startAgent {
 		// Credential setup records the non-secret routing snapshot after the
 		// lease issuer has observed STARTING. Persist that metadata with the
@@ -500,10 +545,11 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 		// transition cannot be overwritten by a stale resume.
 		if err := e.persistSessionFullRowIfCurrentState(ctx, session, models.TaskSessionStateStarting); err != nil {
 			if resumeStatePersisted {
-				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err)
+				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err, nil)
 			}
 			return nil, err
 		}
+		credentialSnapshotPersisted = resumeCredentialSnapshotChanged(session, previousCredentialSnapshot)
 	}
 
 	e.logger.Debug("resuming agent session",
@@ -530,7 +576,10 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 				zap.String("task_id", task.ID),
 				zap.String("session_id", session.ID))
 			if startAgent {
-				e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err)
+				e.rollbackResumeStateAfterFailure(
+					ctx, task.ID, session.ID, resumeInitialState, err,
+					resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+				)
 			}
 			return nil, ErrExecutionAlreadyRunning
 		}
@@ -546,7 +595,10 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	}
 	if err != nil {
 		if startAgent {
-			e.rollbackResumeStateAfterFailure(ctx, task.ID, session.ID, resumeInitialState, err)
+			e.rollbackResumeStateAfterFailure(
+				ctx, task.ID, session.ID, resumeInitialState, err,
+				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot),
+			)
 		}
 		e.logger.Error("failed to relaunch agent for session",
 			zap.String("task_id", task.ID),
@@ -600,10 +652,60 @@ func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSessio
 	return execution, nil
 }
 
+// restoreResumeCredentialSnapshotIfStarting restores the prior non-secret Git
+// credential routing metadata only while the session is still STARTING. The
+// state guard ensures a concurrent terminal transition cannot be overwritten by
+// a stale resume rollback.
+func (e *Executor) restoreResumeCredentialSnapshotIfStarting(
+	ctx context.Context,
+	sessionID string,
+	backup *resumeCredentialSnapshotBackup,
+) {
+	if backup == nil {
+		return
+	}
+	current, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || current == nil || current.State != models.TaskSessionStateStarting {
+		return
+	}
+	if !resumeCredentialSnapshotChanged(current, *backup) {
+		return
+	}
+
+	metadata := cloneMetadata(current.Metadata)
+	if backup.present {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[models.SessionMetaKeyGitCredentialSnapshot] = backup.value
+	} else {
+		delete(metadata, models.SessionMetaKeyGitCredentialSnapshot)
+	}
+	current.Metadata = metadata
+	changed, err := e.repo.UpdateTaskSessionIfCurrentState(ctx, current, models.TaskSessionStateStarting)
+	if err != nil {
+		e.logger.Warn("failed to restore Git credential snapshot after resume failure",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	if !changed {
+		e.logger.Debug("skipped Git credential snapshot rollback after session state changed",
+			zap.String("session_id", sessionID))
+	}
+}
+
 // rollbackResumeStateAfterFailure restores the state observed before a resume
 // attempt only while the session is still STARTING. A concurrent terminal
 // transition wins and is left untouched by transitionSessionState.
-func (e *Executor) rollbackResumeStateAfterFailure(ctx context.Context, taskID, sessionID string, priorState models.TaskSessionState, resumeErr error) {
+func (e *Executor) rollbackResumeStateAfterFailure(
+	ctx context.Context,
+	taskID, sessionID string,
+	priorState models.TaskSessionState,
+	resumeErr error,
+	credentialSnapshot *resumeCredentialSnapshotBackup,
+) {
+	e.restoreResumeCredentialSnapshotIfStarting(ctx, sessionID, credentialSnapshot)
 	if e.onSessionStateTransition != nil {
 		current, err := e.repo.GetTaskSession(ctx, sessionID)
 		if err != nil || current == nil || current.State != models.TaskSessionStateStarting {

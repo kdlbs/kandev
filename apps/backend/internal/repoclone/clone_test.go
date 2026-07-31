@@ -99,6 +99,30 @@ func TestSetOriginURLSkipsWriteWhenOriginAlreadyMatches(t *testing.T) {
 	}
 }
 
+func TestSetOriginURLComparesStoredOriginBeforeInsteadOfExpansion(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPath := t.TempDir()
+	runGit(t, repoPath, "init", "--quiet")
+	const origin = "https://github.com/acme/widgets.git"
+	runGit(t, repoPath, "remote", "add", "origin", origin)
+	runGit(t, repoPath, "config", "--local", "url.git@github.com:.insteadOf", "https://github.com/")
+	if got := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin")); got != "git@github.com:acme/widgets.git" {
+		t.Fatalf("expanded origin = %q, want SSH URL", got)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, ".git", "config.lock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(filepath.Join(repoPath, ".git", "config.lock")) })
+
+	cloner := NewCloner(Config{}, ProtocolHTTPS, t.TempDir(), logger.Default())
+	if err := cloner.SetOriginURL(context.Background(), repoPath, origin); err != nil {
+		t.Fatalf("SetOriginURL() with insteadOf rewrite = %v, want no-op success", err)
+	}
+}
+
 func TestSetOriginURLIncludesBoundedGitDiagnostic(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

@@ -51,7 +51,7 @@ curl --fail http://127.0.0.1:43127/health
 
 ### System service
 
-The native installer does not create or change ownership of the system service home. Create it for the account that will run the service before installing. The following invocation through `sudo` makes that account the invoking user:
+The native installer does not create or change ownership of the system service home. Create it for the account that will run the service before installing. Select that account explicitly with `--run-as`:
 
 ```bash
 KANDEV_BIN="$(command -v kandev)"
@@ -60,7 +60,7 @@ sudo "$KANDEV_BIN" service install --system --run-as "$USER"
 sudo "$KANDEV_BIN" service status --system
 ```
 
-Apply the same ownership rule to a custom `--home-dir`. Root access is also required to write the system unit/plist and control the system service manager. If installation is run from a root login, rather than via `sudo` from the intended account, the service runs as root; prefer an explicit, non-root service account.
+Apply the same ownership rule to a custom `--home-dir`. Root access is also required to write the system unit/plist and control the system service manager. A root login must pass an explicit non-root account when that is the intended service identity.
 
 The installer preserves the account from an existing Kandev-managed systemd unit or launchd plist
 when you reinstall after an upgrade. It does not infer a new account from the shell that happens
