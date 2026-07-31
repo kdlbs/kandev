@@ -61,7 +61,7 @@ const debugSwitch = createDebugLogger("dockview:store-switch");
 const debugSave = createDebugLogger("dockview:save");
 const debugWidths = createDebugLogger("dockview:widths");
 
-const RIGHT_PANEL_IDS = new Set(["changes", "files", "pr-detail", TERMINAL_DEFAULT_ID]);
+const RIGHT_PANEL_IDS = new Set(["changes", "files", TERMINAL_DEFAULT_ID]);
 
 // Re-export types and constants used by other modules
 export type { BuiltInPreset } from "./layout-manager";
@@ -445,12 +445,34 @@ function applyLayoutAndSet(
   return ids;
 }
 
+function isRightColumn(column: LayoutState["columns"][number]): boolean {
+  return (
+    column.id === "right" ||
+    column.groups.some((group) => group.id === RIGHT_TOP_GROUP || group.id === RIGHT_BOTTOM_GROUP)
+  );
+}
+
+function columnHasRightPanel(column: LayoutState["columns"][number]): boolean {
+  const includesLayoutOwnedPRDetails = isRightColumn(column);
+  return column.groups.some((group) =>
+    group.panels.some(
+      (panel) =>
+        RIGHT_PANEL_IDS.has(panel.id) || (includesLayoutOwnedPRDetails && panel.id === "pr-detail"),
+    ),
+  );
+}
+
 function removeRightPanelTabs(state: LayoutState): LayoutState {
   const columns = state.columns
     .map((col) => {
+      const includesLayoutOwnedPRDetails = isRightColumn(col);
       const groups = col.groups
         .map((group) => {
-          const panels = group.panels.filter((panel) => !RIGHT_PANEL_IDS.has(panel.id));
+          const panels = group.panels.filter(
+            (panel) =>
+              !RIGHT_PANEL_IDS.has(panel.id) &&
+              !(includesLayoutOwnedPRDetails && panel.id === "pr-detail"),
+          );
           if (panels.length === group.panels.length) return group;
           const activePanel = panels.some((panel) => panel.id === group.activePanel)
             ? group.activePanel
@@ -482,9 +504,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       if (rightPanelsVisible) {
         const current = fromDockviewApi(api);
         const withoutRight: LayoutState = {
-          columns: current.columns.filter(
-            (c) => !c.groups.some((g) => g.panels.some((p) => RIGHT_PANEL_IDS.has(p.id))),
-          ),
+          columns: current.columns.filter((column) => !columnHasRightPanel(column)),
         };
         set({ isRestoringLayout: true, rightPanelsVisible: false });
         applyLayoutAndSet(api, withoutRight, liveWidths, set);
