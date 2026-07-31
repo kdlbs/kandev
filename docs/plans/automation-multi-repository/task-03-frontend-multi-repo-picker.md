@@ -45,9 +45,10 @@ spec: "../../specs/office/automations-settings.md"
    `repository_ids: string[]` on `Automation`; same rename on
    `CreateAutomationRequest`/`UpdateAutomationRequest`.
 2. **`config-section.tsx`**:
-   - `RepositorySelection`: drop the `{kind:"none"}` variant from the
-     exported type (only `registered`/`discovered` remain; "no repository"
-     is now represented by an empty array at the `FormState` level).
+   - `RepositorySelection` keeps its existing `{kind:"none"}` variant —
+     still needed by the single-picker fallback branch below — but the
+     repeatable multi-row picker (see the new file below) never produces
+     one; each row is always fully resolved the moment it's added.
    - `ConfigSectionProps`: `repositorySelection` → `repositorySelections:
      RepositorySelection[]`; `onRepositoryChange` → `onRepositoriesChange:
      (selections: RepositorySelection[]) => void`;
@@ -69,14 +70,15 @@ spec: "../../specs/office/automations-settings.md"
      - compatible → render new `AutomationRepositoryRows` (new file, see
        below).
      - incompatible (single-repo executor, or a `github_pr` trigger) → keep
-       today's single `SelectField`, bound to `repositorySelections[0]`,
-       with a `"__none__"` sentinel mapping to an empty array (reuse
-       existing `REPO_NONE_OPTION_ID`/`selectionToOptionId`/
-       `pickSelectionFromOptionId`, adjusted to return `null` instead of
-       `{kind:"none"}`). For `github_pr` specifically, additionally disable
-       the dropdown and show helper text ("PR triggers always use the PR's
-       own repository.") — the PR's own repository always wins regardless
-       of what's selected, so the picker is informational only.
+       today's single `SelectField`, bound to `repositorySelections[0] ??
+       {kind:"none"}`, with a `"__none__"` sentinel mapping to an empty
+       array (reuse existing `REPO_NONE_OPTION_ID`/`selectionToOptionId`/
+       `pickSelectionFromOptionId` unchanged — it still returns
+       `{kind:"none"}` for the sentinel/unresolvable case). For `github_pr`
+       specifically, additionally disable the dropdown and show helper text
+       ("PR triggers always use the PR's own repository.") — the PR's own
+       repository always wins regardless of what's selected, so the picker
+       is informational only.
 3. **New file** `apps/web/components/automations/automation-repository-rows.tsx`:
    - Props: `repositorySelections: RepositorySelection[]`, `repositories:
      Repository[]`, `discoveredRepos: LocalRepository[]`, `onChange:
