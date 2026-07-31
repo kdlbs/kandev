@@ -63,5 +63,18 @@ cd apps && pnpm --filter @kandev/web test -- lib/api/client.test.ts components/g
 
 ## Output Contract
 
-Report the RED failure, files changed, final focused test result, remaining risks, and update this
-task plus `plan.md` to `done` in the same conversation.
+Verification record:
+
+- RED: before the challenge gate, the focused provider-401 test failed because
+  `onUnauthorized` was invoked for an unchallenged 401.
+- Changed files: `apps/web/lib/api/client.ts`,
+  `apps/web/lib/api/client.test.ts`, and
+  `apps/web/components/github/github-connection-dialog.test.tsx`.
+- Final focused result: 14 tests passed; the managed provider-auth E2E spec passed all 5
+  scenarios; web typecheck and changed-file lint passed.
+- Follow-up review fix: `apps/backend/internal/backendapp/middleware.go` now exposes
+  `WWW-Authenticate` to split-origin browsers, with a regression test in
+  `apps/backend/internal/backendapp/middleware_test.go`.
+- Remaining risk: session redirect classification depends on the backend emitting the
+  `WWW-Authenticate: Bearer` challenge; same-origin and split-origin paths now both preserve
+  that signal.

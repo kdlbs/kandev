@@ -31,6 +31,32 @@ func TestCORSMiddlewareEchoesOriginForCredentialedRequests(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareExposesAuthenticationChallengeHeader(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(corsMiddleware())
+	router.GET("/protected", func(c *gin.Context) {
+		c.Header("WWW-Authenticate", "Bearer")
+		c.Status(http.StatusUnauthorized)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Host = "localhost:38429"
+	req.Header.Set("Origin", "http://localhost:37429")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if got := rec.Header().Get("WWW-Authenticate"); got != "Bearer" {
+		t.Fatalf("WWW-Authenticate = %q, want Bearer", got)
+	}
+	if got := rec.Header().Get("Access-Control-Expose-Headers"); !strings.Contains(got, "WWW-Authenticate") {
+		t.Fatalf("Access-Control-Expose-Headers = %q, want WWW-Authenticate", got)
+	}
+}
+
 func TestCORSMiddlewareAllowsInterimSettingsInterlockHeader(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
