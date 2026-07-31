@@ -9,6 +9,10 @@ import type { CreateTaskResponse } from "../../../lib/types/http";
  *  1024px grew the prompt text from 14px to 16px. */
 const WIDTHS = [1440, 1100, 900, 700] as const;
 
+/** Typed into the composer purely so the screenshots show real glyphs to
+ *  compare across widths. */
+const SAMPLE_PROMPT = "The quick brown fox jumps over the lazy dog";
+
 async function createReadyTask(
   apiClient: ApiClient,
   seedData: SeedData,
@@ -39,6 +43,7 @@ test.describe("Chat input font size", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const task = await createReadyTask(apiClient, seedData);
     await openTaskChat(testPage, task.id);
@@ -69,5 +74,24 @@ test.describe("Chat input font size", () => {
 
     expect(sizes).toEqual(sizes.map(() => sizes[0]));
     expect(sizes[0]).toBeCloseTo(14, 1);
+
+    // Capture the wide/narrow pair for the PR description (only when
+    // CAPTURE_PR_ASSETS=true). The same prompt text is typed once and shot at
+    // both widths so the two images can be compared directly.
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    await expect(editor).toBeVisible();
+    await editor.click();
+    await editor.pressSequentially(SAMPLE_PROMPT);
+    await expect(editor).toContainText(SAMPLE_PROMPT);
+    await prCapture.screenshot("composer-1440px", {
+      caption: "Composer at 1440px (above the lg breakpoint) — prompt text at 14px",
+    });
+
+    await testPage.setViewportSize({ width: 900, height: 900 });
+    await expect(editor).toBeVisible();
+    await expect(editor).toContainText(SAMPLE_PROMPT);
+    await prCapture.screenshot("composer-900px", {
+      caption: "Composer at 900px (below the lg breakpoint) — prompt text still 14px, was 16px",
+    });
   });
 });

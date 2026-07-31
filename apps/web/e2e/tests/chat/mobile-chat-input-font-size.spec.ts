@@ -40,6 +40,7 @@ test.describe("Mobile chat input font size", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const task = await createReadyTask(apiClient, seedData);
     await openTaskChat(testPage, task.id);
@@ -56,5 +57,10 @@ test.describe("Mobile chat input font size", () => {
 
     const fontSize = await editor.evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
     expect(fontSize).toBeGreaterThanOrEqual(16);
+
+    await editor.pressSequentially("The quick brown fox jumps over the lazy dog");
+    await prCapture.screenshot("mobile-composer", {
+      caption: "Touch composer keeps the 16px iOS focus-zoom floor from the coarse-pointer rule",
+    });
   });
 });
