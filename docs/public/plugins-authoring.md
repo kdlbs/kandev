@@ -337,6 +337,8 @@ interface NavItem {
   icon?: string;
   // "main" (default): top-level sidebar entry. "integrations": renders inside
   // the sidebar's Integrations section alongside first-party integration links.
+  // Both also render in the phone menu sheet, so plugin pages stay reachable
+  // when the desktop sidebar is hidden.
   // "settings" is accepted by the type but not rendered by any sidebar section
   // today — for a settings page use registerSettingsRoute instead.
   section?: "main" | "settings" | "integrations";

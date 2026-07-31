@@ -19,6 +19,7 @@ import {
 } from "@tabler/icons-react";
 import { AppSidebarWorkspacePicker } from "@/components/app-sidebar/app-sidebar-workspace-picker";
 import { MobileIntegrationsSection } from "@/components/integrations/integrations-menu";
+import { MobilePluginNavSection } from "@/components/plugins/mobile-plugin-nav-section";
 import { TaskSearchInput } from "./task-search-input";
 import {
   MobileTasksListOptions,
@@ -449,6 +450,7 @@ function MobileMenuContent({
         showPipeline={showPipeline}
       />
       <MobileDisplayOptions {...displayOptions} />
+      <MobilePluginNavSection onNavigate={() => onOpenChange(false)} />
       <MobileIntegrationsSection onNavigate={() => onOpenChange(false)} />
       <MobileUtilityActions
         showHealthIndicator={showHealthIndicator}
