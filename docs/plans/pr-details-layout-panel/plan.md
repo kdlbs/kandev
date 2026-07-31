@@ -32,7 +32,7 @@ No backend schema, user-settings field, endpoint, or ADR is required. `users.set
 ### Register PR Details as reusable layout content
 
 - In `apps/web/lib/state/layout-manager/constants.ts`, add `pr-detail` to `REUSABLE_PANEL_IDS` and rename its registry title to `PR Details`. Keep `mr-detail` supported for legacy/keyed runtime layouts, but do not make it reusable.
-- In `apps/web/lib/state/layout-manager/presets.ts`, append `pr-detail` after Files and Changes in `RIGHT_TOP_GROUP` for `defaultLayout()`. Keep Files first so it stays initially selected. Add `pr-detail` to `compactLayout()` because compact desktop has one tab group.
+- In `apps/web/lib/state/layout-manager/presets.ts`, add `pr-detail` after Chat in `CENTER_GROUP` for `defaultLayout()`. Keep Chat active by default, and keep `RIGHT_TOP_GROUP` limited to Files and Changes. Add `pr-detail` to `compactLayout()` because compact desktop has one tab group.
 - Update the built-in Default description in `apps/web/lib/layout/layout-profiles.ts` and let its existing reusable-panel validation accept canonical `pr-detail` while rejecting keyed review IDs.
 - Register a side-effect-free `pr-detail` placeholder in `apps/web/components/settings/layouts/layout-editor.tsx`; the editor's existing reusable-panel catalog then exposes **PR Details** for add, move, split, remove, keyboard, and touch actions.
 
