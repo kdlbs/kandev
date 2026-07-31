@@ -8,7 +8,12 @@ import {
   IconGitBranch,
   IconGitPullRequest,
 } from "@tabler/icons-react";
-import { DropdownMenuItem } from "@kandev/ui/dropdown-menu";
+import {
+  DropdownMenuItem,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+} from "@kandev/ui/dropdown-menu";
 import { prPanelLabel, prIdentitySlug, prTaskKey } from "@/components/github/pr-utils";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { useAppStore } from "@/components/state-provider";
@@ -19,7 +24,7 @@ import { RepositoryScriptsMenuItems } from "./repository-scripts-menu";
 import { SessionReopenMenuItems } from "./session-reopen-menu";
 import { TerminalReopenMenuItems } from "./terminal-reopen-menu";
 
-type AddPanelMenuState = {
+export type AddPanelMenuState = {
   taskId: string | null;
   isPassthrough: boolean;
   hasChanges: boolean;
@@ -40,6 +45,55 @@ type AddPanelMenuItemsProps = {
 
 export const MENU_ICON_CLASS = "h-3.5 w-3.5 mr-1.5 shrink-0";
 export const MENU_ITEM_CLASS = "cursor-pointer text-xs";
+
+const PR_SUBMENU_TEST_ID = "add-panel-pr-submenu";
+
+/**
+ * Linked GitHub PR entries for the dockview "+" menu. A single PR renders as
+ * one inline row; multiple PRs collapse behind a "Pull requests" sub-menu so
+ * tasks with up to ten linked PRs don't stretch the main menu too tall.
+ */
+function PRPanelMenuItems({ prs, onOpenPR }: { prs: TaskPR[]; onOpenPR: (pr: TaskPR) => void }) {
+  if (prs.length === 0) return null;
+  if (prs.length === 1) {
+    const pr = prs[0];
+    return (
+      <DropdownMenuItem
+        onClick={() => onOpenPR(pr)}
+        className={MENU_ITEM_CLASS}
+        data-testid={`add-panel-pr-item-${prIdentitySlug(pr)}`}
+      >
+        <IconGitPullRequest className={MENU_ICON_CLASS} />
+        {prPanelLabel(pr.pr_number)}
+      </DropdownMenuItem>
+    );
+  }
+  return (
+    <DropdownMenuSub>
+      <DropdownMenuSubTrigger
+        className={MENU_ITEM_CLASS}
+        data-testid={PR_SUBMENU_TEST_ID}
+        data-pr-count={prs.length}
+      >
+        <IconGitPullRequest className={MENU_ICON_CLASS} />
+        Pull requests
+      </DropdownMenuSubTrigger>
+      <DropdownMenuSubContent className="max-h-[min(24rem,60vh)] w-52 overflow-y-auto">
+        {prs.map((pr) => (
+          <DropdownMenuItem
+            key={pr.id}
+            onClick={() => onOpenPR(pr)}
+            className={MENU_ITEM_CLASS}
+            data-testid={`add-panel-pr-item-${prIdentitySlug(pr)}`}
+          >
+            <IconGitPullRequest className={MENU_ICON_CLASS} />
+            {`${prPanelLabel(pr.pr_number)} — ${pr.repo}`}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuSubContent>
+    </DropdownMenuSub>
+  );
+}
 
 export function AddPanelMenuItems({
   groupId,
@@ -97,19 +151,10 @@ export function AddPanelMenuItems({
           Files
         </DropdownMenuItem>
       )}
-      {state.prs.map((pr) => (
-        <DropdownMenuItem
-          key={pr.id}
-          onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
-          className={MENU_ITEM_CLASS}
-          data-testid={`add-panel-pr-item-${prIdentitySlug(pr)}`}
-        >
-          <IconGitPullRequest className={MENU_ICON_CLASS} />
-          {state.prs.length > 1
-            ? `${prPanelLabel(pr.pr_number)} — ${pr.repo}`
-            : prPanelLabel(pr.pr_number)}
-        </DropdownMenuItem>
-      ))}
+      <PRPanelMenuItems
+        prs={state.prs}
+        onOpenPR={(pr) => addPRPanel(prTaskKey(pr), activeSessionId)}
+      />
       {state.mrs.map((mr) => (
         <DropdownMenuItem
           key={mr.id}

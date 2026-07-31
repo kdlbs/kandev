@@ -306,11 +306,13 @@ test.describe("Multi-PR CI popover", () => {
     // Auto-shown panel defaults to the primary/first-associated PR (web#42).
     await expect(session.prDetailTab()).toHaveCount(1, { timeout: 15_000 });
 
-    // Regression: selecting the OTHER PR from the "+" add-panel menu must
-    // open a second, distinct tab instead of repurposing the auto-shown one.
-    // (Dedup when re-selecting the same PR is covered by the
-    // runAutoPRPanelEffect / addPRPanel unit tests.)
+    // Regression: with multiple linked PRs the "+" add-panel menu collapses
+    // the PR rows behind a "Pull requests" submenu. Selecting the OTHER PR
+    // from inside it must open a second, distinct tab instead of repurposing
+    // the auto-shown one. (Dedup when re-selecting the same PR is covered by
+    // the runAutoPRPanelEffect / addPRPanel unit tests.)
     await session.addPanelButton().click();
+    await testPage.getByTestId("add-panel-pr-submenu").click();
     await testPage.getByTestId(`add-panel-pr-item-${OWNER}-api-77`).click();
     await expect(session.prDetailTab()).toHaveCount(2, { timeout: 15_000 });
   });
