@@ -27,6 +27,8 @@ spec: "../../specs/ui/mobile-task-navigation.md"
 6. **REVIEW REFACTOR:** rerun focused component, backend harness, typecheck, and production mobile E2E checks.
 7. **REVIEW 2 RED:** remove the workflow-task repository snapshot from the focused component fixture and confirm repository labels disappear.
 8. **REVIEW 2 GREEN:** derive repository labels from loaded session bindings and the repository store, then rerun focused component, typecheck, lint, and production mobile E2E checks.
+9. **REVIEW 3 RED:** introduce a partial session event into an already-loaded task session list and confirm the list incorrectly remains authoritative.
+10. **REVIEW 3 GREEN:** invalidate the loaded list only for unknown live sessions so `useTaskSessions` hydrates their full rows, then verify known-session events do not trigger reloads.
 
 ## Verification
 
@@ -86,4 +88,5 @@ Report RED and GREEN evidence, files deleted/changed, exact command results, rem
 - **Review remediation:** repository-aware picker tests failed first on the missing label. The retained picker now shows canonical repository slugs when loaded sessions span repositories, and selecting the secondary-repository row updates the active pill. The focused component suite passed (`8 passed`), the E2E seed-route repository test passed, and the production cross-repository mobile scenario passed (`1 passed`).
 - **Review remediation 2:** removing the optional workflow-task repository snapshot reproduced the missing labels. Label derivation now uses required loaded session bindings plus the repository store; the focused component suite (`8 passed`), web typecheck, web lint, and production cross-repository mobile scenario (`1 passed`) passed.
 - **Recorded commands:** `cd apps/backend && go test ./internal/office/testharness` passed; `cd apps/web && pnpm lint` passed.
+- **Review remediation 3:** a partial live-session upsert now marks an already-loaded per-task list stale so the existing hook fetches authoritative repository fields; events for known sessions keep the list loaded. Focused slice/hook/picker tests (`39 passed`), typecheck, full lint, production build, and a page-live secondary-session mobile E2E (`1 passed`) passed.
 - **Remaining risks:** none known within scoped phone task workbench; repository selection elsewhere is unchanged.

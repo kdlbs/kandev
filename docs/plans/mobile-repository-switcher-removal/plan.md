@@ -40,7 +40,7 @@ No production backend, API, persistence, desktop Dockview, or tablet changes are
 - **Scenario:** **GIVEN** a multi-repository task whose optional repository or session hydration fails, **WHEN** the phone task view opens, **THEN** no repository switcher is rendered, the session picker remains visible, and the task view stays usable without horizontal overflow.
 - **File:** `apps/web/e2e/tests/layout/mobile-spa-resilience.spec.ts`.
 - **What to verify:** replace repository-picker interaction assertions with absence of `mobile-repo-pill`, visibility of `mobile-sessions-pill`, a non-empty root, no unexpected browser errors, and no document horizontal overflow.
-- **Repository-aware session scenario:** seed two sessions on different repositories, select the secondary-repository session through `MobileSessionsPicker`, and verify the row labels, active pill, selected row, and horizontal-overflow contract in `apps/web/e2e/tests/session/mobile-multi-repository-session-picker.spec.ts`.
+- **Repository-aware session scenario:** open a task with its primary session, seed a secondary-repository session while the page and WebSocket are live, select it through `MobileSessionsPicker`, and verify API hydration, row labels, active pill, selected row, and the horizontal-overflow contract in `apps/web/e2e/tests/session/mobile-multi-repository-session-picker.spec.ts`.
 
 ## Implementation
 
@@ -72,3 +72,5 @@ cd apps/web && pnpm lint
 - REVIEW 2 RED: removing the workflow-task repository snapshot from the focused component fixture reproduced the missing repository labels.
 - REVIEW 2 GREEN: repository labels now derive from required loaded session bindings plus the repository store, independent of optional workflow hydration. The focused component suite (`8 passed`), web typecheck, web lint, and production mobile Playwright scenario (`1 passed`) pass.
 - REVIEW VERIFICATION: `go test ./internal/office/testharness` and full `pnpm lint` both pass.
+- REVIEW 3 RED: a focused session-slice test showed that a partial live-session upsert left an already-loaded task session list marked authoritative (`true`, expected `false`).
+- REVIEW 3 GREEN: an unknown live-session upsert now invalidates the task list for API hydration, while updates to known sessions remain cached. Focused slice/hook/picker tests (`39 passed`), typecheck, full lint, production build, and the live-seeded mobile Playwright scenario (`1 passed`) pass.

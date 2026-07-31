@@ -526,6 +526,12 @@ function buildTaskSessionActions(set: ImmerSet) {
     ) =>
       set((draft) => {
         const existing = draft.taskSessions.items[session.id];
+        if (!existing && draft.taskSessionsByTask.loadedByTaskId[taskId]) {
+          // State events intentionally carry partial session rows. When one
+          // introduces a new session, let useTaskSessions hydrate fields such
+          // as repository_id instead of treating the old list as authoritative.
+          draft.taskSessionsByTask.loadedByTaskId[taskId] = false;
+        }
         const merged = existing ? mergeTaskSession(existing, session) : session;
         draft.taskSessions.items[session.id] = merged;
         const list = draft.taskSessionsByTask.itemsByTaskId[taskId];

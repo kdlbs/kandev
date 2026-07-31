@@ -38,6 +38,17 @@ test.describe("mobile: multi-repository session picker", () => {
       },
     );
     if (!task.session_id) throw new Error("multi-repository task has no primary session");
+
+    const websocketConnected = testPage.waitForEvent("websocket");
+    await testPage.goto(`/t/${task.id}`);
+    await websocketConnected;
+
+    const layout = testPage.locator("[data-testid='mobile-task-layout']:visible");
+    const pill = layout.getByTestId("mobile-sessions-pill");
+    await expect(layout).toHaveCount(1);
+    await expect(pill).toHaveAccessibleName(/^Active session: .+\. Tap to switch\.$/);
+    await expect(pill).not.toHaveAccessibleName(/Repository:/);
+
     const secondarySession = await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
       sessionId: `mobile-secondary-${task.id}`,
@@ -45,11 +56,6 @@ test.describe("mobile: multi-repository session picker", () => {
       startedAt: "2026-01-01T00:01:00Z",
     });
 
-    await testPage.goto(`/t/${task.id}`);
-
-    const layout = testPage.locator("[data-testid='mobile-task-layout']:visible");
-    const pill = layout.getByTestId("mobile-sessions-pill");
-    await expect(layout).toHaveCount(1);
     await expect(pill).toHaveAccessibleName(/Repository: E2E Repo/);
     await expect(pill).toContainText("E2E Repo");
 

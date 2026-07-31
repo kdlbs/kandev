@@ -219,9 +219,9 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
 }
 
 /** Upsert the session in the per-task sessions list from a WS event.
- *  Uses `upsertTaskSessionFromEvent` so the per-task list is not marked as
- *  fully loaded — partial event payloads must not gate the API hydration that
- *  fills in fields like agent_profile_id / repository_id / worktree_path. */
+ *  Uses `upsertTaskSessionFromEvent` so a new partial row invalidates any
+ *  previously loaded list, allowing API hydration to fill fields like
+ *  agent_profile_id / repository_id / worktree_path. */
 function upsertTaskSessionList(
   store: StoreApi<AppState>,
   taskId: TaskId,
