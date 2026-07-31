@@ -1,4 +1,3 @@
-import { type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 
@@ -14,12 +13,11 @@ async function expectStatusBarAfterSidebar(page: Page) {
   ]);
   if (!barBox || !sidebarBox) throw new Error("app shell geometry unavailable");
 
+  expect(Math.abs(sidebarBox.x)).toBeLessThanOrEqual(PIXEL_TOLERANCE);
   expect(Math.abs(barBox.x - (sidebarBox.x + sidebarBox.width))).toBeLessThanOrEqual(
     PIXEL_TOLERANCE,
   );
-  expect(Math.abs(barBox.width + sidebarBox.width - viewport.width)).toBeLessThanOrEqual(
-    PIXEL_TOLERANCE,
-  );
+  expect(Math.abs(barBox.x + barBox.width - viewport.width)).toBeLessThanOrEqual(PIXEL_TOLERANCE);
   expect(Math.abs(sidebarBox.y + sidebarBox.height - viewport.height)).toBeLessThanOrEqual(
     PIXEL_TOLERANCE,
   );
