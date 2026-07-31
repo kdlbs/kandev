@@ -237,4 +237,42 @@ describe("useSessionResumption", () => {
     await waitFor(() => expect(mockSetTaskSession).toHaveBeenCalled());
     expect(mockSetTaskSession).toHaveBeenCalledWith(expect.objectContaining({ updated_at: "" }));
   });
+
+  it("refreshes the status and embedded editor capability after a successful resume", async () => {
+    mockRequest
+      .mockResolvedValueOnce({
+        session_id: "s1",
+        task_id: "t1",
+        state: "WAITING_FOR_INPUT",
+        is_agent_running: false,
+        is_resumable: true,
+        needs_resume: true,
+        capabilities: { embedded_vscode: false },
+      })
+      .mockResolvedValueOnce({
+        success: true,
+        task_id: "t1",
+        session_id: "s1",
+        state: "STARTING",
+      })
+      .mockResolvedValueOnce({
+        session_id: "s1",
+        task_id: "t1",
+        state: "STARTING",
+        is_agent_running: true,
+        is_resumable: false,
+        needs_resume: false,
+        capabilities: { embedded_vscode: true },
+      });
+
+    const { result } = renderHook(() => useSessionResumption("t1", "s1"));
+
+    await waitFor(() => {
+      expect(result.current.sessionStatus?.capabilities?.embedded_vscode).toBe(true);
+    });
+    expect(mockRequest).toHaveBeenLastCalledWith("task.session.status", {
+      task_id: "t1",
+      session_id: "s1",
+    });
+  });
 });

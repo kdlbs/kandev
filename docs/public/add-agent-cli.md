@@ -120,6 +120,8 @@ An MCP strategy must:
 - clean temporary or project files on normal and failed exits;
 - avoid logging tokens, headers, or generated configuration.
 
+When investigating a structured agent's MCP behavior, run `acpdbg mcp-probe <agent>`. It injects a temporary HTTP sentinel in `session/new` and reports delivery, initialize, and `tools/list` separately. A sentinel that is not contacted during the bounded probe window is **unobserved**, not proof that the agent cannot use MCP. New passthrough strategies must report an unavailable or explicit materialization failure rather than silently omitting MCP configuration.
+
 ### Add assets and registration
 
 Optional logos live at:

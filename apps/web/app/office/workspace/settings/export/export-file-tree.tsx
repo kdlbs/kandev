@@ -119,8 +119,8 @@ function ExportTreeRow({ row, isActive, checkState, onClick, onToggleCheck }: Ex
   return (
     <div
       className={cn(
-        "flex items-center gap-1.5 px-2 py-1 text-sm cursor-pointer hover:bg-accent/50",
-        isActive && "bg-accent",
+        "flex items-center gap-1.5 border border-transparent px-2 py-1 text-sm cursor-pointer",
+        isActive ? "border-primary/50 bg-card" : "hover:bg-muted",
       )}
       style={{ paddingLeft: `${row.depth * 16 + 8}px` }}
       onClick={onClick}

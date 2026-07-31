@@ -250,6 +250,45 @@ export type SessionModelsState = {
   >;
 };
 
+export type MCPAttachmentStatus =
+  | "unknown"
+  | "delivered"
+  | "connected"
+  | "active"
+  | "failed"
+  | "filtered"
+  | "unavailable";
+
+export type MCPAttachmentServer = {
+  name: string;
+  source?: "kandev" | "profile";
+  transport?: string;
+  target?: string;
+  status: MCPAttachmentStatus;
+  reason_code?: string;
+  summary?: string;
+  connection_id?: string;
+  tool_count?: number;
+};
+
+export type MCPAttachmentHistory = {
+  version: number;
+  current: {
+    attachment_attempt_id: string;
+    started_at: string;
+    updated_at?: string;
+    servers?: MCPAttachmentServer[];
+  };
+  previous?: Array<{
+    attachment_attempt_id: string;
+    started_at: string;
+    updated_at?: string;
+    servers?: MCPAttachmentServer[];
+  }>;
+};
+
+export type SessionMCPStatusState = { bySessionId: Record<string, MCPAttachmentHistory> };
+
 export type PromptUsageState = {
   bySessionId: Record<string, PromptUsageEntry>;
 };
@@ -338,6 +377,16 @@ export type SessionPollModeState = {
   bySessionId: Record<string, SessionPollMode>;
 };
 
+/**
+ * Whether each session's executor can run the embedded code-server. Resolved
+ * from the session status by the task page and published here so panels that
+ * offer editors — the Files tree context menu — can honour the same capability
+ * as the task top bar.
+ */
+export type EmbeddedVscodeSupportState = {
+  bySessionId: Record<string, boolean>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
@@ -352,11 +401,13 @@ export type SessionRuntimeSliceState = {
   sessionMode: SessionModeState;
   agentCapabilities: AgentCapabilitiesState;
   sessionModels: SessionModelsState;
+  sessionMcpStatus: SessionMCPStatusState;
   promptUsage: PromptUsageState;
   sessionTodos: SessionTodosState;
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
   sessionPollMode: SessionPollModeState;
+  embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
 };
 
@@ -414,6 +465,7 @@ export type SessionRuntimeSliceActions = {
       configBaseline?: Record<string, string>;
     },
   ) => void;
+  setSessionMCPStatus: (sessionId: string, history: MCPAttachmentHistory) => void;
   // Prompt usage actions
   setPromptUsage: (sessionId: string, usage: PromptUsageEntry) => void;
   // Session todos actions
@@ -432,6 +484,7 @@ export type SessionRuntimeSliceActions = {
     patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
+  setEmbeddedVscodeSupport: (sessionId: string, supported: boolean) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

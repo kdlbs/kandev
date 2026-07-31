@@ -24,6 +24,8 @@ interface FileDiffViewerProps {
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   enableAcceptReject?: boolean;
+  /** Render and navigate to the active task walkthrough inside this diff. */
+  enableWalkthroughAnnotations?: boolean;
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => void;
   wordWrap?: boolean;
   /** Enable diff expansion (show expand up/down buttons at hunk separators) */
@@ -70,6 +72,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
   onPreviewMarkdown,
   onRevert,
   enableAcceptReject,
+  enableWalkthroughAnnotations,
   onRevertBlock,
   wordWrap,
   enableExpansion,
@@ -102,6 +105,7 @@ export const FileDiffViewer = memo(function FileDiffViewer({
       onPreviewMarkdown={onPreviewMarkdown}
       onRevert={onRevert}
       enableAcceptReject={enableAcceptReject}
+      enableWalkthroughAnnotations={enableWalkthroughAnnotations}
       onRevertBlock={onRevertBlock}
       wordWrap={wordWrap}
       enableExpansion={enableExpansion}

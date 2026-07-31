@@ -1,7 +1,7 @@
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
 import { migrateView } from "../slices/ui/ui-slice";
-import { getStoredQuickChatNames } from "@/lib/local-storage";
+import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
 /**
@@ -234,11 +234,7 @@ export function hydrateUI(draft: Draft<AppState>, state: HydrationState): void {
       // Local renames live in localStorage and override the SSR-provided name
       // (which derives from the backend task title). Apply on every hydration
       // so a renamed chat keeps its local name across reloads and tab switches.
-      const storedNames = getStoredQuickChatNames();
-      draft.quickChat.sessions = state.quickChat.sessions.map((s) => {
-        const local = storedNames[s.sessionId];
-        return { ...s, kind: s.kind ?? "chat", ...(local ? { name: local } : {}) };
-      });
+      draft.quickChat.sessions = applyStoredQuickChatNames(state.quickChat.sessions);
       // Validate activeSessionId exists in sessions after merge
       if (
         draft.quickChat.activeSessionId &&

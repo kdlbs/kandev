@@ -1,3 +1,5 @@
+import { cn } from "@/lib/utils";
+
 export type ContextMenuState = {
   x: number;
   y: number;
@@ -21,7 +23,7 @@ interface DiffViewerContextMenuProps {
 const menuCls =
   "fixed z-50 min-w-32 rounded-lg border bg-popover text-popover-foreground shadow-md ring-1 ring-foreground/10 p-1";
 const itemCls =
-  "flex w-full cursor-default select-none items-center gap-2 rounded-md px-2 py-1 text-xs outline-hidden focus:bg-accent focus:text-accent-foreground hover:bg-accent hover:text-accent-foreground";
+  "flex w-full cursor-pointer select-none items-center gap-2 rounded-md px-2 py-1 text-xs outline-hidden focus:bg-muted focus:text-foreground hover:bg-muted hover:text-foreground";
 const separatorCls = "bg-border/50 -mx-1 my-1 h-px";
 
 export function DiffViewerContextMenu({
@@ -58,7 +60,10 @@ export function DiffViewerContextMenu({
           <div className={separatorCls} />
           <button
             role="menuitem"
-            className={`${itemCls} text-destructive focus:text-destructive`}
+            className={cn(
+              itemCls,
+              "text-destructive focus:bg-destructive/10 focus:text-destructive hover:bg-destructive/10 hover:text-destructive",
+            )}
             onClick={() => {
               onRevert(filePath);
               onClose();

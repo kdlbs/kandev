@@ -141,6 +141,8 @@ type UseDiffViewerStateOpts = {
   data: FileDiffData;
   enableComments: boolean;
   enableAcceptReject: boolean;
+  /** Render and navigate to the active task walkthrough inside this diff. */
+  enableWalkthroughAnnotations?: boolean;
   sessionId?: string;
   onCommentAdd?: (comment: DiffComment) => void;
   onCommentDelete?: (commentId: string) => void;
@@ -164,8 +166,9 @@ type UseDiffViewerStateOpts = {
 export function buildWalkthroughSelectedLines(
   file: WalkthroughTargetFile,
   step: WalkthroughStep | null | undefined,
+  enabled = true,
 ): SelectedLineRange | null {
-  if (!step || !walkthroughStepMatchesFile(file, step)) return null;
+  if (!enabled || !step || !walkthroughStepMatchesFile(file, step)) return null;
   return {
     side: "additions",
     start: step.line,
@@ -176,17 +179,18 @@ export function buildWalkthroughSelectedLines(
 function useWalkthroughSelection(
   filePath: string,
   repo: string | undefined,
+  enabled: boolean,
 ): {
   annotation: DiffLineAnnotation<AnnotationMetadata> | null;
   selectedLines: SelectedLineRange | null;
 } {
-  const activeTaskId = useOptionalAppStore((s) => s.tasks.activeTaskId, null);
+  const activeTaskId = useOptionalAppStore((s) => (enabled ? s.tasks.activeTaskId : null), null);
   const walkthrough = useOptionalAppStore(
-    (s) => (activeTaskId ? s.walkthroughs.byTaskId[activeTaskId] : null),
+    (s) => (enabled && activeTaskId ? s.walkthroughs.byTaskId[activeTaskId] : null),
     null,
   );
   const activeStep = useOptionalAppStore(
-    (s) => (activeTaskId ? (s.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0),
+    (s) => (enabled && activeTaskId ? (s.walkthroughs.activeStepByTaskId[activeTaskId] ?? 0) : 0),
     0,
   );
   return useMemo(() => {
@@ -194,6 +198,7 @@ function useWalkthroughSelection(
     const selectedLines = buildWalkthroughSelectedLines(
       { path: filePath, repository_name: repo },
       step,
+      enabled,
     );
     if (!selectedLines) return { annotation: null, selectedLines: null };
     return {
@@ -204,7 +209,7 @@ function useWalkthroughSelection(
       },
       selectedLines,
     };
-  }, [walkthrough, activeStep, filePath, repo]);
+  }, [walkthrough, activeStep, filePath, repo, enabled]);
 }
 
 function useDiffViewerAnnotations({
@@ -217,12 +222,14 @@ function useDiffViewerAnnotations({
   filePath,
   repo,
   diff,
+  enableWalkthroughAnnotations,
   changeLineMapRef,
   revertInfoRef,
 }: BuildAnnotationsOpts & {
   filePath: string;
   repo?: string;
   diff?: string;
+  enableWalkthroughAnnotations: boolean;
   changeLineMapRef: RefObject<Map<string, string>>;
   revertInfoRef: RefObject<Map<string, RevertBlockInfo>>;
 }) {
@@ -246,7 +253,7 @@ function useDiffViewerAnnotations({
     ],
   );
 
-  const walkthrough = useWalkthroughSelection(filePath, repo);
+  const walkthrough = useWalkthroughSelection(filePath, repo, enableWalkthroughAnnotations);
   const reviewFindings = useReviewFindingAnnotations({ filePath, repo, diff });
   const withWalkthrough = useMemo(() => {
     const combined = [...annotations, ...reviewFindings.annotations];
@@ -415,6 +422,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     data,
     enableComments,
     enableAcceptReject,
+    enableWalkthroughAnnotations = true,
     sessionId,
     onCommentAdd,
     onCommentDelete,
@@ -465,6 +473,7 @@ export function useDiffViewerState(opts: UseDiffViewerStateOpts) {
     filePath: data.filePath,
     repo,
     diff: data.diff,
+    enableWalkthroughAnnotations,
     changeLineMapRef,
     revertInfoRef,
   });

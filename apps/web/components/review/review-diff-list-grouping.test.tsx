@@ -78,6 +78,7 @@ const baseProps = {
   sessionId: "sess",
   autoMarkOnScroll: false,
   wordWrap: false,
+  enableWalkthroughAnnotations: true,
   selectedFile: null,
   onToggleReviewed: () => undefined,
   onDiscard: () => undefined,

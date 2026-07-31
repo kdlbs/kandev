@@ -332,8 +332,9 @@ func compilePattern(pattern string) *regexp.Regexp {
 	// Replace escaped \* with regex for single token (anything except .)
 	escaped = strings.ReplaceAll(escaped, `\*`, `[^.]+`)
 
-	// Replace escaped \> with regex for remaining tokens (anything)
-	escaped = strings.ReplaceAll(escaped, `\>`, `.+`)
+	// regexp.QuoteMeta does not escape > because it has no special meaning in
+	// regular expressions. Replace it directly with a multi-token matcher.
+	escaped = strings.ReplaceAll(escaped, `>`, `.+`)
 
 	// Anchor the pattern
 	escaped = "^" + escaped + "$"

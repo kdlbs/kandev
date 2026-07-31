@@ -26,7 +26,7 @@ export function SubIssuesRow({ task }: SubIssuesRowProps) {
               <li key={child.id}>
                 <Link
                   href={`/office/tasks/${child.id}`}
-                  className="flex items-center gap-1.5 hover:bg-accent/50 rounded px-1.5 py-0.5 cursor-pointer text-xs"
+                  className="flex items-center gap-1.5 hover:bg-muted/50 rounded px-1.5 py-0.5 cursor-pointer text-xs"
                 >
                   <StatusIcon status={child.status} className="h-3 w-3 shrink-0" />
                   <span className="font-mono text-[10px] text-muted-foreground shrink-0">

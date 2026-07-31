@@ -110,8 +110,8 @@ function RepoRowItem({
         }
       }}
       data-testid={`mobile-repo-row-${row.repositoryId}`}
-      className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer select-none ${
-        isActive ? "bg-accent" : "hover:bg-accent/50"
+      className={`flex items-center gap-2 border px-2 py-2 rounded-md cursor-pointer select-none ${
+        isActive ? "border-primary/50 bg-card" : "border-transparent hover:bg-muted"
       }`}
     >
       <IconFolder className="h-4 w-4 text-muted-foreground shrink-0" />

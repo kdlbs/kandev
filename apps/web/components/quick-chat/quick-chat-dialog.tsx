@@ -102,7 +102,7 @@ export const QuickChatPickerDialog = memo(function QuickChatPickerDialog({
       });
       onOpenChange(false);
       // Open the quick chat modal with the new session
-      openQuickChat(response.session_id, workspaceId);
+      openQuickChat(response.session_id, workspaceId, undefined, "chat", response.task_id);
     } catch (error) {
       toast({
         title: "Failed to start quick chat",

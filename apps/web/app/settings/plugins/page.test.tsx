@@ -79,11 +79,6 @@ vi.mock("@/components/theme/app-theme", () => ({
   useTheme: () => ({ resolvedTheme: "light" }),
 }));
 
-let featureEnabled = true;
-vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: () => featureEnabled,
-}));
-
 let storeState: Record<string, unknown> = {};
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: Record<string, unknown>) => unknown) => selector(storeState),
@@ -160,18 +155,16 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
-  featureEnabled = true;
   storeState = {};
 });
 
 describe("PluginsSettingsPage", () => {
-  it("renders nothing when the plugins feature flag is off", () => {
-    featureEnabled = false;
+  it("renders the plugins settings surface unconditionally — plugins ship unflagged", () => {
     setStoreState([]);
 
     const { container } = render(<PluginsSettingsPage />);
 
-    expect(container.firstChild).toBeNull();
+    expect(container.firstChild).not.toBeNull();
   });
 
   it("shows an empty state when there are no plugins", () => {

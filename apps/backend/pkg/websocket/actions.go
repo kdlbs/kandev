@@ -216,6 +216,7 @@ const (
 	ActionSessionModeChanged          = "session.mode_changed"
 	ActionSessionAgentCapabilities    = "session.agent_capabilities"
 	ActionSessionModelsUpdated        = "session.models_updated"
+	ActionSessionMCPStatusUpdated     = "session.mcp_status_updated"
 	ActionSessionInfoUpdated          = "session.info_updated"
 	ActionSessionSetMode              = "session.set_mode"
 	ActionSessionTodosUpdated         = "session.todos_updated"

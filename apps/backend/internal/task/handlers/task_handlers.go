@@ -150,8 +150,10 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
 
-	// Quick chat endpoint - creates ephemeral task with prepared session
+	// Quick chat endpoints - create ephemeral task with prepared session, and
+	// resync the tab strip so clients that missed WS events converge.
 	api.POST("/workspaces/:id/quick-chat", h.httpStartQuickChat)
+	api.GET("/workspaces/:id/quick-chats", h.httpListQuickChatSessions)
 
 	// Config chat endpoint - creates ephemeral task with config-mode MCP tools
 	api.POST("/workspaces/:id/config-chat", h.httpStartConfigChat)

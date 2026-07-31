@@ -37,8 +37,8 @@ function ToggleButton({ icon: Icon, isActive, onClick, title, accent }: ToggleBu
       title={title}
       className={cn(
         "p-1.5 rounded cursor-pointer transition-colors",
-        accent ? "text-white bg-accent hover:bg-accent/80" : "hover:bg-muted/80",
-        isActive && "bg-muted text-primary",
+        accent ? "bg-primary text-primary-foreground hover:bg-primary/90" : "hover:bg-muted/80",
+        isActive && "bg-muted text-primary ring-1 ring-inset ring-primary/50",
       )}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}

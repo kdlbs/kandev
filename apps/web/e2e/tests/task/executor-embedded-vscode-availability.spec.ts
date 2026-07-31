@@ -1,7 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { routeSessionEmbeddedVscodeCapability } from "../../helpers/session-capabilities";
 import type { Page } from "@playwright/test";
-import { rewriteBackendHostOS } from "../../helpers/boot-payload";
 import { SessionPage } from "../../pages/session-page";
 
 async function createHostedEditor(apiClient: ApiClient): Promise<void> {
@@ -26,7 +26,7 @@ async function seedTaskAndOpenEditorMenu(
 ) {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
-    "Host platform editor availability",
+    "Executor editor availability",
     seedData.agentProfileId,
     {
       description: "/e2e:simple-message",
@@ -42,32 +42,32 @@ async function seedTaskAndOpenEditorMenu(
   await page.getByTestId("editors-menu-list").click();
 }
 
-test.describe("host platform controls embedded VS Code availability", () => {
-  test("hides embedded VS Code for a Windows backend and keeps custom editors", async ({
+test.describe("executor capability controls embedded VS Code availability", () => {
+  test("hides embedded VS Code for an unsupported session and keeps custom editors", async ({
     testPage,
     apiClient,
     seedData,
     prCapture,
   }) => {
+    await routeSessionEmbeddedVscodeCapability(testPage, false);
     await createHostedEditor(apiClient);
-    await rewriteBackendHostOS(testPage, "windows");
 
     await seedTaskAndOpenEditorMenu(testPage, apiClient, seedData);
 
     const menu = testPage.getByRole("menu");
     await expect(menu.getByRole("menuitem", { name: "Hosted Preview" })).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "VS Code (Embedded)" })).toHaveCount(0);
-    await prCapture.screenshot("windows-host-editor-menu-desktop", {
-      caption: "Windows-hosted Kandev editor menu with embedded VS Code unavailable",
+    await prCapture.screenshot("unsupported-executor-editor-menu-desktop", {
+      caption: "Unsupported session hides embedded VS Code while custom editors remain available",
     });
   });
 
-  test("ignores a Windows browser platform when the backend host is Linux", async ({
+  test("shows embedded VS Code for a supported session despite a Windows browser", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    await createHostedEditor(apiClient);
+    await routeSessionEmbeddedVscodeCapability(testPage, true);
     await testPage.addInitScript(() => {
       Object.defineProperty(Navigator.prototype, "platform", {
         configurable: true,

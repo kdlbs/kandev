@@ -47,6 +47,7 @@ export function buildStateOverrides(m: DefaultState) {
     sessionTodos: m.sessionTodos,
     agentCapabilities: m.agentCapabilities,
     sessionModels: m.sessionModels,
+    sessionMcpStatus: m.sessionMcpStatus,
     promptUsage: m.promptUsage,
     sessionPollMode: m.sessionPollMode,
     githubStatus: m.githubStatus,

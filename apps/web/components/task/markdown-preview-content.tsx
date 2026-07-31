@@ -19,7 +19,11 @@ import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconCode, IconMessagePlus } from "@tabler/icons-react";
-import { remarkPlugins, markdownComponents } from "@/components/shared/markdown-components";
+import {
+  MarkdownTaskContext,
+  remarkPlugins,
+  markdownComponents,
+} from "@/components/shared/markdown-components";
 import { cn, toRelativePath } from "@/lib/utils";
 import { PanelHeaderBarSplit } from "@/components/task/panel-primitives";
 import { EditorCommentPopover } from "@/components/task/editor-comment-popover";
@@ -326,15 +330,23 @@ function MarkdownPreviewCommentOverlays({
   );
 }
 
-export function MarkdownPreviewRenderer({ content }: { content: string }) {
+export function MarkdownPreviewRenderer({
+  content,
+  taskId,
+}: {
+  content: string;
+  taskId?: string | null;
+}) {
   return (
-    <ReactMarkdown
-      remarkPlugins={remarkPlugins}
-      rehypePlugins={[rehypeRaw, [rehypeSanitize, defaultSchema]]}
-      components={markdownPreviewComponents}
-    >
-      {content}
-    </ReactMarkdown>
+    <MarkdownTaskContext.Provider value={taskId ?? null}>
+      <ReactMarkdown
+        remarkPlugins={remarkPlugins}
+        rehypePlugins={[rehypeRaw, [rehypeSanitize, defaultSchema]]}
+        components={markdownPreviewComponents}
+      >
+        {content}
+      </ReactMarkdown>
+    </MarkdownTaskContext.Provider>
   );
 }
 
@@ -405,7 +417,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
       <div ref={scrollRef} className="flex-1 overflow-auto p-6">
         <div ref={rootRef} className="markdown-body max-w-3xl" tabIndex={commentsEnabled ? 0 : -1}>
           <PreviewCommentContext.Provider value={previewCommentContextValue}>
-            <MarkdownPreviewRenderer content={content} />
+            <MarkdownPreviewRenderer content={content} taskId={taskId} />
           </PreviewCommentContext.Provider>
         </div>
       </div>

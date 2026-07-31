@@ -12,7 +12,8 @@ test.afterEach(async ({ apiClient }) => {
   await apiClient.saveUserSettings({
     show_anchored_prompt_bar: false,
     show_scroll_to_last_prompt: true,
-    show_scroll_to_start: true,
+    show_scroll_to_start: false,
+    show_transcript_auto_scroll_control: true,
   });
 });
 

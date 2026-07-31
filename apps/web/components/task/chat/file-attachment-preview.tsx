@@ -3,7 +3,8 @@
 import { memo } from "react";
 import { IconFile, IconX } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
-import { formatBytes, type FileAttachment } from "./file-attachment";
+import { formatBytes } from "@/lib/utils/format-bytes";
+import { type FileAttachment } from "./file-attachment";
 
 type FileAttachmentPreviewProps = {
   attachments: FileAttachment[];

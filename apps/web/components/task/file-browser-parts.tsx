@@ -123,10 +123,8 @@ function getTreeNodeRowClass(
   isDropTarget: boolean,
 ) {
   return cn(
-    "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
-    isSelected
-      ? "bg-accent text-accent-foreground hover:bg-accent/80 [&_span]:text-accent-foreground"
-      : "hover:bg-muted",
+    "group flex w-full items-center gap-1 border border-transparent px-2 py-0.5 text-left text-sm cursor-pointer",
+    isSelected ? "border-primary/50 bg-card text-foreground hover:bg-muted/70" : "hover:bg-muted",
     isActive && !isSelected && "bg-muted",
     isActiveFolder && !isSelected && "bg-muted/50",
     isDragging && isSelected && "opacity-50",

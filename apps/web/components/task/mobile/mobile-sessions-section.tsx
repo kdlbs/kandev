@@ -292,8 +292,8 @@ function SessionRowItem({
           }
         }}
         data-testid={`mobile-session-row-${row.id}`}
-        className={`flex items-center gap-2 px-2 py-2 rounded-md cursor-pointer select-none ${
-          isActive ? "bg-accent" : "hover:bg-accent/50"
+        className={`flex items-center gap-2 border px-2 py-2 rounded-md cursor-pointer select-none ${
+          isActive ? "border-primary/50 bg-card" : "border-transparent hover:bg-muted"
         }`}
       >
         {row.isPrimary && showBadges && (

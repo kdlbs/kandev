@@ -22,14 +22,11 @@ func TestApplyProfile_DefaultsToProd(t *testing.T) {
 		t.Errorf("env = %q, want %q (no selector env vars set)", env, EnvProd)
 	}
 	// Prod writes each registered feature flag with its safe shipped default.
-	if count != 5 {
-		t.Errorf("ApplyProfile wrote %d vars in prod; want 5", count)
+	if count != 4 {
+		t.Errorf("ApplyProfile wrote %d vars in prod; want 4", count)
 	}
 	if v := os.Getenv("KANDEV_FEATURES_OFFICE"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_OFFICE = %q after prod ApplyProfile; want %q", v, "false")
-	}
-	if v := os.Getenv("KANDEV_FEATURES_PLUGINS"); v != "false" {
-		t.Errorf("KANDEV_FEATURES_PLUGINS = %q after prod ApplyProfile; want %q", v, "false")
 	}
 	if v := os.Getenv("KANDEV_FEATURES_APP_STATUS_BAR"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_APP_STATUS_BAR = %q after prod ApplyProfile; want %q", v, "false")
@@ -62,9 +59,6 @@ func TestApplyProfile_DevUsesDevelopmentDefaults(t *testing.T) {
 	}
 	if v := os.Getenv("KANDEV_FEATURES_OFFICE"); v != "true" {
 		t.Errorf("KANDEV_FEATURES_OFFICE = %q in dev; want %q", v, "true")
-	}
-	if v := os.Getenv("KANDEV_FEATURES_PLUGINS"); v != "true" {
-		t.Errorf("KANDEV_FEATURES_PLUGINS = %q in dev; want %q", v, "true")
 	}
 	if v := os.Getenv("KANDEV_FEATURES_APP_STATUS_BAR"); v != "false" {
 		t.Errorf("KANDEV_FEATURES_APP_STATUS_BAR = %q in dev; want %q", v, "false")
@@ -169,9 +163,6 @@ func TestFeatureFlagDefaults_LowercasesShortName(t *testing.T) {
 	if _, ok := defaults["office"]; !ok {
 		t.Errorf("FeatureFlagDefaults missing %q key; got %#v", "office", defaults)
 	}
-	if _, ok := defaults["plugins"]; !ok {
-		t.Errorf("FeatureFlagDefaults missing %q key; got %#v", "plugins", defaults)
-	}
 	if _, ok := defaults["app_status_bar"]; !ok {
 		t.Errorf("FeatureFlagDefaults missing %q key; got %#v", "app_status_bar", defaults)
 	}
@@ -214,7 +205,6 @@ func TestProfilesYAML_ContainsRequiredSections(t *testing.T) {
 		"mocks:",
 		"debug:",
 		"KANDEV_FEATURES_OFFICE:",
-		"KANDEV_FEATURES_PLUGINS:",
 		"KANDEV_FEATURES_APP_STATUS_BAR:",
 		"KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF:",
 	} {

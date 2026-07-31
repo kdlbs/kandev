@@ -551,6 +551,33 @@ func TestNormalizeShellToolResultStripsLeadingCommandEchoWithRootWorkDir(t *test
 	require.Equal(t, "hello\n", payload.ShellExec().Output.Stdout)
 }
 
+// TestNormalizeShellToolResultStripsLeadingCommandEchoWithWorkDirResolvedPathMultilineCommand
+// is a regression for a report that PR #1975's workDir fallback still
+// leaves the echo in the output: the fallback only ever compared stdout's
+// FIRST line against "$ "+command (see cutLines). A command that itself
+// contains an embedded newline (e.g. a multi-line script or commit message
+// passed as a single tool-call argument) is echoed across as many lines as
+// it spans, not just one, so a single-line comparison can never match and
+// the entire multi-line echo (with the resolved absolute path) leaks into
+// the persisted Output.
+func TestNormalizeShellToolResultStripsLeadingCommandEchoWithWorkDirResolvedPathMultilineCommand(t *testing.T) {
+	t.Parallel()
+
+	command := "echo start\ncat notes.txt"
+	workDir := "/repo"
+	resolvedCommand := "echo start\ncat /repo/notes.txt"
+
+	normalizer := NewNormalizer("")
+	payload := normalizer.NormalizeToolCall("execute", map[string]any{
+		"kind":      "execute",
+		"raw_input": map[string]any{"command": command, "cwd": workDir},
+	})
+
+	normalizer.NormalizeToolResult(payload, "$ "+resolvedCommand+"\nstart\nhello\n")
+
+	require.Equal(t, "start\nhello\n", payload.ShellExec().Output.Stdout)
+}
+
 func TestNormalizeShellToolUpdateStripsLeadingCommandEchoFromLiveOutput(t *testing.T) {
 	t.Parallel()
 

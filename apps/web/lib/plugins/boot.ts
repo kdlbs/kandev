@@ -21,18 +21,15 @@ function readResolvedTheme(win: Window = window): "light" | "dark" {
  * Installs `window.registerKandevPlugin` and loads every plugin in
  * `bootPayload.plugins`, building each one's `PluginHostApi` from `storeApi`.
  *
- * No-op when `feature` (the `plugins` feature flag) is off, or when the boot
- * payload carries no plugins. Idempotent per `storeApi` instance — repeated
- * calls (re-renders, StrictMode double-invoke, HMR remounts of the calling
- * component) never re-install the global or re-import a bundle for a store
- * that has already booted.
+ * No-op when the boot payload carries no plugins. Idempotent per `storeApi`
+ * instance — repeated calls (re-renders, StrictMode double-invoke, HMR
+ * remounts of the calling component) never re-install the global or re-import
+ * a bundle for a store that has already booted.
  */
 export function bootPlugins(
   bootPayload: Pick<BootPayload, "plugins">,
   storeApi: StoreApi<AppState>,
-  feature: boolean,
 ): void {
-  if (!feature) return;
   if (!bootPayload.plugins || bootPayload.plugins.length === 0) return;
   if (bootedStores.has(storeApi)) return;
   bootedStores.add(storeApi);

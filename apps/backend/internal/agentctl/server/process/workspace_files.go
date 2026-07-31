@@ -876,6 +876,19 @@ type fileSearchCandidate struct {
 	repositoryName string
 }
 
+const (
+	// fileSearchDefaultLimit applies when the caller passes a non-positive limit.
+	fileSearchDefaultLimit = 20
+	// fileSearchMaxLimit caps the caller-supplied limit before it is used to
+	// pre-allocate the result slice. The limit reaches this code straight from
+	// the `limit` query parameter of GET /api/v1/workspace/search, so without a
+	// ceiling a request like `?limit=2000000000` makes the process reserve
+	// gigabytes for a result set that can never exceed the number of tracked
+	// files. Mirrors the clamp validateContentSearch already applies to
+	// content search.
+	fileSearchMaxLimit = 200
+)
+
 // GetFileContentAtRef returns the content of a file at a specific git ref (branch, commit, HEAD, etc).
 // If the file is not valid UTF-8, it is base64-encoded and isBinary is true.
 func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath string, ref string) (string, int64, bool, error) {
@@ -1007,7 +1020,10 @@ func searchFileCandidates(
 		return []types.FileSearchResult{}
 	}
 	if limit <= 0 {
-		limit = 20
+		limit = fileSearchDefaultLimit
+	}
+	if limit > fileSearchMaxLimit {
+		limit = fileSearchMaxLimit
 	}
 
 	query = strings.ToLower(query)

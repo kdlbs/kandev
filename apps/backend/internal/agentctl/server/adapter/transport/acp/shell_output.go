@@ -85,24 +85,28 @@ func stripCommandEcho(command, workDir, stdout string, commitExactMatch bool) st
 // that resolve a relative file-path argument in the command to an absolute
 // (workDir-joined) one before actually invoking the real terminal, while the
 // tool call's reported "command" field - the same text the chat header
-// renders - keeps the original relative form. The captured echo line then no
-// longer matches literally. Retry against just the first echoed line with
-// the workDir prefix collapsed back out, so real output later in stdout
-// (which may legitimately contain workDir-prefixed paths of its own) is
-// never touched.
+// renders - keeps the original relative form. The captured echo then no
+// longer matches literally. Retry against exactly as many leading echoed
+// lines as the command itself spans - a command can carry an embedded
+// newline (e.g. a multi-line script or commit message passed as a single
+// tool-call argument), and a real terminal echoes that verbatim across
+// multiple lines, not just the first - with the workDir prefix collapsed
+// back out, so real output later in stdout (which may legitimately contain
+// workDir-prefixed paths of its own) is never touched.
 func stripCommandEchoWithWorkDir(command, workDir, stdout string, commitExactMatch bool) string {
 	if workDir == "" {
 		return stdout
 	}
+	echoLines := strings.Count(command, "\n") + 1
+	chunk, remainder, hasMore := cutLines(stdout, echoLines)
 	// workDir's trailing slashes are collapsed to exactly one first: a
 	// provider can report cwd already "/"-terminated (e.g. "/repo/"), and
 	// the root directory "/" is inherently "/"-terminated. Appending "/"
 	// unconditionally would search for a doubled separator ("/repo//" or
 	// "//") that the actually-joined path never contains, silently
 	// declining to strip a real echo.
-	firstLine, remainder, hasMore := cutFirstLine(stdout)
 	workDirPrefix := strings.TrimRight(workDir, "/") + "/"
-	if strings.ReplaceAll(firstLine, workDirPrefix, "") != "$ "+command {
+	if strings.ReplaceAll(chunk, workDirPrefix, "") != "$ "+command {
 		return stdout
 	}
 	if !hasMore {
@@ -124,14 +128,24 @@ func finishCommandEchoStrip(rest, stdout string, commitExactMatch bool) string {
 	return strings.TrimPrefix(rest, "\n")
 }
 
-// cutFirstLine splits s at its first newline, reporting whether one was
-// found. The returned line excludes both the newline and any preceding "\r".
-func cutFirstLine(s string) (line, remainder string, hasMore bool) {
-	idx := strings.IndexByte(s, '\n')
-	if idx < 0 {
-		return s, "", false
+// cutLines splits s at its Nth newline (n >= 1), reporting whether that many
+// newlines were found. The returned chunk joins the first n lines with "\n"
+// (matching how a multi-line command's literal newlines read back once
+// echoed), stripping any "\r" that precedes each newline within it. When s
+// contains fewer than n newlines, chunk is the whole of s and hasMore is
+// false - the echo (or its trailing lines) may still be in flight.
+func cutLines(s string, n int) (chunk, remainder string, hasMore bool) {
+	rest := s
+	for i := 0; i < n; i++ {
+		idx := strings.IndexByte(rest, '\n')
+		if idx < 0 {
+			return s, "", false
+		}
+		rest = rest[idx+1:]
 	}
-	return strings.TrimSuffix(s[:idx], "\r"), s[idx+1:], true
+	chunk = strings.TrimSuffix(s[:len(s)-len(rest)-1], "\r")
+	chunk = strings.ReplaceAll(chunk, "\r\n", "\n")
+	return chunk, rest, true
 }
 
 // NormalizeShellToolUpdate merges live and final ACP shell result fields into

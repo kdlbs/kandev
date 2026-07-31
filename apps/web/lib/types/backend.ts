@@ -6,6 +6,8 @@ export type { BackendMessage } from "./backend-message";
 import type { BackendMessage } from "./backend-message";
 import type { OfficeBackendMessageMap } from "./office-events";
 export type { OfficeEventType, OfficeEventPayload } from "./office-events";
+import type { RunEventAppendedPayload } from "./run-events";
+export type { RunEventAppendedPayload } from "./run-events";
 
 import type {
   AvailableAgent,
@@ -33,6 +35,7 @@ import type {
   AgentCapabilitiesPayload,
   SessionInfoPayload,
   SessionModelsPayload,
+  SessionMCPStatusPayload,
   SessionPromptUsagePayload,
   SessionTodosPayload,
 } from "./session-runtime-payloads";
@@ -71,6 +74,7 @@ export type KanbanUpdatePayload = {
 
 export type TaskEventPayload = {
   task_id: string;
+  workspace_id?: string;
   workflow_id: string;
   old_workflow_id?: string | null;
   workflow_step_id: string;
@@ -103,6 +107,8 @@ export type TaskEventPayload = {
   archived_at?: string | null;
   updated_at?: string;
   is_ephemeral: boolean;
+  /** Task origin (e.g. "manual", "automation_run"). */
+  origin?: string;
   parent_id?: string | null;
   metadata?: Record<string, unknown> | null;
   /** Deletion reason on task.deleted (e.g. "pr_approved_by_user"). Absent otherwise. */
@@ -406,6 +412,7 @@ export type UserSettingsUpdatedPayload = {
   show_anchored_prompt_bar?: boolean;
   show_scroll_to_last_prompt?: boolean;
   show_scroll_to_start?: boolean;
+  show_transcript_auto_scroll_control?: boolean;
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
@@ -489,6 +496,7 @@ export {
   type SessionModelInfoPayload,
   type ConfigOptionPayload,
   type SessionModelsPayload,
+  type SessionMCPStatusPayload,
   type SessionInfoPayload,
   type SessionTodosPayload,
 } from "./session-runtime-payloads";
@@ -601,6 +609,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
       AgentCapabilitiesPayload
     >;
     "session.models_updated": BackendMessage<"session.models_updated", SessionModelsPayload>;
+    "session.mcp_status_updated": BackendMessage<
+      "session.mcp_status_updated",
+      SessionMCPStatusPayload
+    >;
     "session.info_updated": BackendMessage<"session.info_updated", SessionInfoPayload>;
     "session.todos_updated": BackendMessage<"session.todos_updated", SessionTodosPayload>;
     "session.prompt_usage": BackendMessage<"session.prompt_usage", SessionPromptUsagePayload>;
@@ -655,18 +667,6 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     >;
     "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
   };
-
-// The WS gateway forwards run events verbatim: id at top level, row under `event`.
-export type RunEventAppendedPayload = {
-  run_id: string;
-  event: {
-    seq: number;
-    event_type: string;
-    level: string;
-    payload: string;
-    created_at: string;
-  };
-};
 
 // Workspace file types (extracted to reduce file size)
 export * from "./workspace-files";

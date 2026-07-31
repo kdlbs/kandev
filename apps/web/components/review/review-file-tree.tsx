@@ -187,8 +187,8 @@ function ReviewFileRow({
       data-file-path={file.path}
       data-repository-name={file.repository_name}
       className={cn(
-        "flex items-center gap-1.5 px-2 py-1 cursor-pointer transition-colors group",
-        isSelected ? "bg-accent/50" : "hover:bg-muted/50",
+        "flex items-center gap-1.5 border border-transparent px-2 py-1 cursor-pointer transition-colors group",
+        isSelected ? "border-primary/50 bg-card" : "hover:bg-muted/50",
       )}
       style={{ paddingLeft: `${row.depth * 12 + 8}px` }}
       onClick={() => onSelectFile(key)}

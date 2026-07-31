@@ -52,7 +52,7 @@ export function SubtaskStepper({ items, activeHold }: SubtaskStepperProps) {
                 </div>
                 <Link
                   href={`/office/tasks/${child.id}`}
-                  className={`flex items-center gap-2 px-4 py-2.5 text-sm rounded-md hover:bg-accent/50 transition-colors${isBlocked ? " opacity-60" : ""}`}
+                  className={`flex cursor-pointer items-center gap-2 rounded-md px-4 py-2.5 text-sm transition-colors hover:bg-muted/50${isBlocked ? " opacity-60" : ""}`}
                 >
                   <StatusIcon status={child.status} className="h-3.5 w-3.5 shrink-0" />
                   <span className="text-xs text-muted-foreground font-mono shrink-0">

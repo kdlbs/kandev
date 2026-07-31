@@ -73,6 +73,11 @@ const (
 	// methods (from ACP initialize); the client picks one and replays the
 	// authenticate → session/new round-trip.
 	EventTypeAuthRequired = "auth_required"
+
+	// EventTypeMCPAttachment carries safe, session-scoped evidence about MCP
+	// configuration delivery and observed use. It deliberately excludes raw
+	// protocol frames, tool payloads, credentials, and full endpoints.
+	EventTypeMCPAttachment = "mcp_attachment"
 )
 
 // AgentEventDataPromptHandoff marks a generation-bearing foreground-idle event
@@ -165,6 +170,14 @@ type AgentEvent struct {
 
 	// Error contains error message when Type is "error".
 	Error string `json:"error,omitempty"`
+
+	// MCPAttachment contains one safe observation from the MCP attachment
+	// lifecycle when Type is EventTypeMCPAttachment.
+	MCPAttachment *MCPAttachmentEvidence `json:"mcp_attachment,omitempty"`
+
+	// MCPAttachmentAttempt starts a new backend-owned evidence timeline. It is
+	// present only on the first EventTypeMCPAttachment event for an attempt.
+	MCPAttachmentAttempt *MCPAttachmentAttempt `json:"mcp_attachment_attempt,omitempty"`
 
 	// --- Permission request fields (for "permission_request" type) ---
 

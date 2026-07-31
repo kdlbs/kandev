@@ -88,7 +88,6 @@ vi.mock("@/hooks/use-workflows", () => ({
 const storeState = {
   features: {
     office: false,
-    plugins: false,
   },
   appSidebar: {
     collapsed: false,

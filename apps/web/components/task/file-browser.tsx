@@ -34,6 +34,7 @@ import {
   fetchAndOpenFile,
 } from "./file-browser-hooks";
 import { resolveFileBrowserPaths } from "./file-browser-path";
+import { FileTreeEditorProvider } from "./file-tree-editor-menu";
 import { getVisiblePaths, moveNodesInTree, computeMoveTargets } from "./file-tree-utils";
 
 type FileBrowserHeaderProps = {
@@ -585,39 +586,41 @@ export function FileBrowser({
   });
   const { openFolder, copied, copyPath, search, treeState, fullPath, displayPath } = data;
   return (
-    <div
-      className="flex flex-col h-full"
-      ref={containerRef}
-      tabIndex={-1}
-      onMouseDown={handleClickOutside}
-    >
-      <FileBrowserHeader
-        treeLoaded={Boolean(treeState.tree && treeState.loadState === "loaded")}
-        search={search}
-        displayPath={displayPath}
-        fullPath={fullPath}
-        copied={copied}
-        expandedPathsSize={treeState.expandedPaths.size}
-        onCopyPath={copyPath}
-        onStartCreate={onCreateFile ? handlers.handleStartCreate : undefined}
-        onOpenFolder={openFolder}
-        onCollapseAll={treeState.collapseAll}
-        showCreateButton={Boolean(onCreateFile)}
-        onAddSources={onAddSources}
-        addSourcesButtonRef={addSourcesButtonRef}
-        addSourcesDisabledReason={addSourcesDisabledReason}
-      />
-      <FileBrowserTreeContent
-        scrollAreaRef={scrollAreaRef}
-        data={data}
-        handlers={handlers}
-        multiSelect={multiSelect}
-        dnd={dnd}
-        activeFilePath={activeFilePath}
-        onDeleteFile={onDeleteFile}
-        onRenameFile={onRenameFile}
-        onDownloadFile={onDownloadFile}
-      />
-    </div>
+    <FileTreeEditorProvider sessionId={sessionId} treeRootName={treeState.tree?.name}>
+      <div
+        className="flex flex-col h-full"
+        ref={containerRef}
+        tabIndex={-1}
+        onMouseDown={handleClickOutside}
+      >
+        <FileBrowserHeader
+          treeLoaded={Boolean(treeState.tree && treeState.loadState === "loaded")}
+          search={search}
+          displayPath={displayPath}
+          fullPath={fullPath}
+          copied={copied}
+          expandedPathsSize={treeState.expandedPaths.size}
+          onCopyPath={copyPath}
+          onStartCreate={onCreateFile ? handlers.handleStartCreate : undefined}
+          onOpenFolder={openFolder}
+          onCollapseAll={treeState.collapseAll}
+          showCreateButton={Boolean(onCreateFile)}
+          onAddSources={onAddSources}
+          addSourcesButtonRef={addSourcesButtonRef}
+          addSourcesDisabledReason={addSourcesDisabledReason}
+        />
+        <FileBrowserTreeContent
+          scrollAreaRef={scrollAreaRef}
+          data={data}
+          handlers={handlers}
+          multiSelect={multiSelect}
+          dnd={dnd}
+          activeFilePath={activeFilePath}
+          onDeleteFile={onDeleteFile}
+          onRenameFile={onRenameFile}
+          onDownloadFile={onDownloadFile}
+        />
+      </div>
+    </FileTreeEditorProvider>
   );
 }

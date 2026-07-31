@@ -19,7 +19,11 @@ const appState = vi.hoisted(() => ({
 }));
 
 vi.mock("@/components/shared/mermaid-block", () => ({
-  MermaidBlock: ({ code }: { code: string }) => <div data-kind="mermaid">{code}</div>,
+  MermaidBlock: ({ code, taskId }: { code: string; taskId?: string | null }) => (
+    <div data-kind="mermaid" data-task-id={taskId ?? undefined}>
+      {code}
+    </div>
+  ),
 }));
 
 vi.mock("@/components/task/chat/messages/code-block", () => ({
@@ -42,13 +46,28 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof appState.value) => unknown) => selector(appState.value),
 }));
 
-import { markdownComponents, normalizeMarkdown, remarkPlugins } from "./markdown-components";
+import {
+  MarkdownTaskContext,
+  markdownComponents,
+  normalizeMarkdown,
+  remarkPlugins,
+} from "./markdown-components";
 
 function renderMarkdown(source: string): string {
   return renderToStaticMarkup(
     <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
       {source}
     </ReactMarkdown>,
+  );
+}
+
+function renderTaskMarkdown(source: string, taskId: string): string {
+  return renderToStaticMarkup(
+    <MarkdownTaskContext.Provider value={taskId}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+        {source}
+      </ReactMarkdown>
+    </MarkdownTaskContext.Provider>,
   );
 }
 
@@ -60,17 +79,19 @@ function Markdown({ children }: { children: string }) {
   );
 }
 
+function resetMarkdownComponentTestState() {
+  cleanup();
+  openFile.mockClear();
+  appState.value.tasks.activeSessionId = "session-1";
+  appState.value.taskSessions.items = {
+    "session-1": {
+      worktree_path: "/root/.kandev/tasks/example/kandev",
+    },
+  };
+}
+
 describe("markdownComponents", () => {
-  afterEach(() => {
-    cleanup();
-    openFile.mockClear();
-    appState.value.tasks.activeSessionId = "session-1";
-    appState.value.taskSessions.items = {
-      "session-1": {
-        worktree_path: "/root/.kandev/tasks/example/kandev",
-      },
-    };
-  });
+  afterEach(resetMarkdownComponentTestState);
 
   it("keeps mermaid keywords in inline code as inline code", () => {
     const html = renderMarkdown("Metadata comes from `kanban`, `kanbanMulti`, repositories.");
@@ -85,6 +106,12 @@ describe("markdownComponents", () => {
 
     expect(html).toContain('data-kind="mermaid"');
     expect(html).toContain("graph LR");
+  });
+
+  it("passes the owning task to a fenced Mermaid block", () => {
+    const html = renderTaskMarkdown("```mermaid\ngraph LR\nA-->B\n```", "task-a");
+
+    expect(html).toContain('data-task-id="task-a"');
   });
 
   it("renders non-mermaid fenced code as a code block", () => {

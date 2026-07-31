@@ -152,7 +152,7 @@ function SelectionCommentTrigger({
         title="Comment (Cmd+Shift+C)"
         aria-label="Comment on selection"
         data-testid="agent-message-comment-trigger"
-        className="flex cursor-pointer items-center justify-center rounded bg-accent text-white transition-transform duration-150 ease-out hover:bg-accent/80 active:scale-[0.96]"
+        className="flex cursor-pointer items-center justify-center rounded bg-primary text-primary-foreground transition-transform duration-150 ease-out hover:bg-primary/90 active:scale-[0.96]"
         style={{ width: size, height: size }}
         onMouseDown={(event) => event.preventDefault()}
         onClick={onOpen}

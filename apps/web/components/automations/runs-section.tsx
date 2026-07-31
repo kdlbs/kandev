@@ -20,7 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { IconChevronDown, IconChevronUp, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { useAutomationRuns } from "@/hooks/domains/settings/use-automation-runs";
 import type { AutomationRun, ExecutionMode, RunStatus } from "@/lib/types/automation";
-import { formatRelativeTime } from "./format-utils";
+import { formatRelativeTime } from "@/lib/utils";
 
 type RunsSectionProps = {
   automationId: string | null;

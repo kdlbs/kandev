@@ -14,6 +14,7 @@ vi.mock("react-markdown", () => ({
 // Stub the component overrides so the test stays light (no shiki / mermaid).
 vi.mock("@/components/shared/markdown-components", () => ({
   MarkdownFileLinkContext: createContext({}),
+  MarkdownTaskContext: createContext(null),
   markdownComponents: {},
   remarkPlugins: [],
 }));

@@ -129,7 +129,7 @@ test.describe("Mobile Status drawer", () => {
       workflow_step_id: seedData.startStepId,
     });
     await testPage.goto(`/t/${task.id}`);
-    await testPage.getByRole("button", { name: "Status" }).click();
+    await testPage.getByRole("button", { name: "Status", exact: true }).click();
     await expect(testPage.locator("#hello-status-left")).toContainText(`mobile-drawer ${task.id}`);
     await testPage.keyboard.press("Escape");
 

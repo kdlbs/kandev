@@ -60,6 +60,34 @@ describe("ReviewFileTree status markers", () => {
   });
 });
 
+describe("ReviewFileTree ordering", () => {
+  it("preserves review-list order across root files and directories", () => {
+    const files = [file({ path: "a-root.ts" }), file({ path: "z-dir/nested.ts" })];
+
+    renderTree(files);
+
+    const renderedPaths = screen
+      .getAllByTestId("review-file-row")
+      .map((row) => row.dataset.filePath);
+    expect(renderedPaths).toEqual(files.map((entry) => entry.path));
+  });
+
+  it("preserves review-list order when a directory is interleaved with a root file", () => {
+    const files = [
+      file({ path: "src/a.ts" }),
+      file({ path: "README.md" }),
+      file({ path: "src/b.ts" }),
+    ];
+
+    renderTree(files);
+
+    const renderedPaths = screen
+      .getAllByTestId("review-file-row")
+      .map((row) => row.dataset.filePath);
+    expect(renderedPaths).toEqual(files.map((entry) => entry.path));
+  });
+});
+
 describe("ReviewFileTree", () => {
   it("renders one row per file", () => {
     renderTree([file({ path: "src/a.ts" }), file({ path: "src/b.ts" })]);

@@ -96,7 +96,7 @@ export function StatusPicker({ task }: StatusPickerProps) {
           aria-haspopup="listbox"
           aria-expanded={open}
           data-testid="status-picker-trigger"
-          className="inline-flex items-center gap-1.5 cursor-pointer rounded px-2 py-1 hover:bg-accent/50 ml-auto"
+          className="inline-flex items-center gap-1.5 cursor-pointer rounded px-2 py-1 hover:bg-muted ml-auto"
         >
           <StatusIcon status={current} className="h-3.5 w-3.5" />
           <span>{STATUS_LABELS[current] ?? task.status}</span>
@@ -112,8 +112,8 @@ export function StatusPicker({ task }: StatusPickerProps) {
             aria-selected={current === opt.value}
             data-testid={`status-picker-option-${opt.value}`}
             className={cn(
-              "flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm cursor-pointer hover:bg-accent",
-              current === opt.value && "bg-accent/40",
+              "flex w-full items-center gap-2 rounded border border-transparent px-2 py-1.5 text-sm cursor-pointer hover:bg-muted",
+              current === opt.value && "border-primary/50 bg-card",
             )}
             onClick={() => handleSelect(opt.value)}
           >

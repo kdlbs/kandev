@@ -153,6 +153,10 @@ jobs:
           # enough for the action to post review comments. Author will be
           # github-actions[bot] on this path.
           github_token: ${{ secrets.GITHUB_TOKEN }}
+          # The job gate above approves this fork author through either the
+          # repository allowlist or a maintainer's safe-to-review label. Pass
+          # that approved actor through Claude's independent permission gate.
+          allowed_non_write_users: ${{ github.event.pull_request.user.login }}
           track_progress: ${{ github.event.action != 'labeled' }}
           allowed_bots: "*"
           prompt: |
