@@ -146,7 +146,7 @@
         "apps/backend/internal/mcp/handlers/task_note_test.go",
         "apps/web/hooks/domains/session/use-task-note.test.ts"
       ],
-      "mcpTools": ["get_task_note_kandev", "update_task_note_kandev"]
+      "mcpTools": ["update_task_note_kandev"]
     },
     {
       "id": "developer-workbench-and-git",
