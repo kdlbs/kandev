@@ -179,6 +179,7 @@ describe("applyChangesPanelAutoFocusState fallback session keys", () => {
       previousMarkers,
       pendingEnvKeys,
       isRestoringLayout: false,
+      isMaximized: false,
       activate: () => {
         activateCalls += 1;
         return "activated";
@@ -207,6 +208,7 @@ describe("applyChangesPanelAutoFocusState fallback session keys", () => {
       previousMarkers,
       pendingEnvKeys,
       isRestoringLayout: false,
+      isMaximized: false,
       activate: () => {
         activateCalls += 1;
         return "activated";
@@ -241,6 +243,7 @@ describe("applyChangesPanelAutoFocusState returning environments", () => {
       previousMarkers,
       pendingEnvKeys,
       isRestoringLayout: false,
+      isMaximized: false,
       activate: () => {
         activateCalls += 1;
         return "activated";
@@ -249,6 +252,64 @@ describe("applyChangesPanelAutoFocusState returning environments", () => {
 
     expect(activateCalls).toBe(1);
     expect(pendingEnvKeys.size).toBe(0);
+  });
+
+  it("keeps pending changes while maximized and activates them after exit", () => {
+    const previousMarkers = {
+      envB: { count: 1, fingerprint: "b1" },
+    };
+    const pendingEnvKeys = new Set(["envB"]);
+    let activateCalls = 0;
+    const baseArgs = {
+      signalsByEnv: {
+        envB: signal(1, "b1"),
+      },
+      activeEnvKey: "envB",
+      previousActiveEnvKey: "envA",
+      environmentIdBySessionId: {},
+      previousMarkers,
+      pendingEnvKeys,
+      isRestoringLayout: false,
+    };
+
+    applyChangesPanelAutoFocusState({
+      ...baseArgs,
+      isMaximized: true,
+      activate: () => {
+        activateCalls += 1;
+        return "no-panel" as const;
+      },
+    });
+    const whileMaximized = {
+      activateCalls,
+      pendingEnvKeys: [...pendingEnvKeys],
+    };
+
+    applyChangesPanelAutoFocusState({
+      ...baseArgs,
+      isMaximized: false,
+      activate: () => {
+        activateCalls += 1;
+        return "activated" as const;
+      },
+    });
+
+    expect({
+      whileMaximized,
+      afterExit: {
+        activateCalls,
+        pendingEnvKeys: [...pendingEnvKeys],
+      },
+    }).toEqual({
+      whileMaximized: {
+        activateCalls: 1,
+        pendingEnvKeys: ["envB"],
+      },
+      afterExit: {
+        activateCalls: 2,
+        pendingEnvKeys: [],
+      },
+    });
   });
 });
 
@@ -269,6 +330,7 @@ describe("applyChangesPanelAutoFocusState", () => {
       previousMarkers,
       pendingEnvKeys,
       isRestoringLayout: false,
+      isMaximized: false,
       activate: () => {
         activateCalls += 1;
         return "activated";
@@ -287,6 +349,7 @@ describe("applyChangesPanelAutoFocusState", () => {
       previousMarkers,
       pendingEnvKeys,
       isRestoringLayout: false,
+      isMaximized: false,
       activate: () => {
         activateCalls += 1;
         return "activated";
@@ -308,6 +371,7 @@ describe("applyChangesPanelAutoFocusState", () => {
       previousMarkers,
       pendingEnvKeys,
       isRestoringLayout: true,
+      isMaximized: false,
       activate: () => {
         activateCalls += 1;
         return "activated";
@@ -327,6 +391,7 @@ describe("applyChangesPanelAutoFocusState", () => {
       previousMarkers,
       pendingEnvKeys,
       isRestoringLayout: false,
+      isMaximized: false,
       activate: () => {
         activateCalls += 1;
         return "activated";
@@ -479,6 +544,7 @@ describe("applyChangesPanelAutoFocusState restore races", () => {
       previousMarkers,
       pendingEnvKeys,
       isRestoringLayout: false,
+      isMaximized: false,
       getIsRestoringLayout: () => restoring,
       activate: () => {
         restoring = true;

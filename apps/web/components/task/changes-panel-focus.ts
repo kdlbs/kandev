@@ -252,6 +252,8 @@ export function applyChangesPanelAutoFocusState(args: {
   pendingEnvKeys: Set<string>;
   isRestoringLayout: boolean;
   getIsRestoringLayout?: () => boolean;
+  isMaximized: boolean;
+  getIsMaximized?: () => boolean;
   activate: () => ActivateChangesPanelResult;
 }): string | null {
   const {
@@ -263,6 +265,8 @@ export function applyChangesPanelAutoFocusState(args: {
     pendingEnvKeys,
     isRestoringLayout,
     getIsRestoringLayout,
+    isMaximized,
+    getIsMaximized,
     activate,
   } = args;
 
@@ -285,12 +289,13 @@ export function applyChangesPanelAutoFocusState(args: {
   });
 
   const isCurrentlyRestoringLayout = () => isRestoringLayout || getIsRestoringLayout?.() === true;
+  const isCurrentlyMaximized = () => isMaximized || getIsMaximized?.() === true;
 
   if (activeEnvKey && !isCurrentlyRestoringLayout() && pendingEnvKeys.has(activeEnvKey)) {
     const result = activate();
     if (
       shouldClearPendingChangesFocus(result) &&
-      !(result === "no-panel" && isCurrentlyRestoringLayout())
+      !(result === "no-panel" && (isCurrentlyRestoringLayout() || isCurrentlyMaximized()))
     ) {
       pendingEnvKeys.delete(activeEnvKey);
     }
@@ -302,6 +307,7 @@ export function applyChangesPanelAutoFocusState(args: {
 export function useChangesPanelAutoFocus(activeEnvKey: string | null) {
   const api = useDockviewStore((s) => s.api);
   const isRestoringLayout = useDockviewStore((s) => s.isRestoringLayout);
+  const isMaximized = useDockviewStore((s) => s.preMaximizeLayout !== null);
   const signalsByEnv = useAppStore(useShallow(selectChangesSignalByEnvironment));
   const environmentIdBySessionId = useAppStore((state) => state.environmentIdBySessionId);
   const previousMarkersRef = useRef<Record<string, ChangesMarker>>({});
@@ -318,7 +324,9 @@ export function useChangesPanelAutoFocus(activeEnvKey: string | null) {
       pendingEnvKeys: pendingEnvKeysRef.current,
       isRestoringLayout,
       getIsRestoringLayout: () => useDockviewStore.getState().isRestoringLayout,
+      isMaximized,
+      getIsMaximized: () => useDockviewStore.getState().preMaximizeLayout !== null,
       activate: () => activateChangesPanel(api),
     });
-  }, [signalsByEnv, activeEnvKey, api, isRestoringLayout, environmentIdBySessionId]);
+  }, [signalsByEnv, activeEnvKey, api, isRestoringLayout, isMaximized, environmentIdBySessionId]);
 }

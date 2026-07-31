@@ -60,7 +60,21 @@ Execution is sequential in the primary conversation. There are no parallel-safe 
 
 - RED unit: the saved-layout regression failed with `expected 0 to be 1`; the other 14 tests passed.
 - RED E2E: Changes remained `dv-inactive-tab` after returning to the saved task.
-- GREEN unit: `components/task/changes-panel-focus.test.ts` — 15 tests passed.
+- GREEN unit: `components/task/changes-panel-focus.test.ts` — 16 tests passed after the
+  maximized-layout review regression was added.
 - Typecheck: `pnpm run typecheck` from `apps/web` — passed.
 - GREEN E2E: focused Chromium production-build scenario — 1 test passed in 1.9s.
-- Mobile: no mobile test was added because `useChangesPanelAutoFocus` is mounted only by `DockviewDesktopLayout`; mobile and tablet use separate task layouts and received no state or presentation changes.
+- Desktop PR capture:
+  `rtk pnpm e2e:run tests/layout/pr-capture.spec.ts -- --project=chromium` — temporary
+  synthetic capture scenario passed and produced the 1280×720 desktop screenshot.
+- Mobile PR capture:
+  `rtk pnpm e2e:run tests/layout/mobile-pr-capture.spec.ts -- --project=mobile-chrome` —
+  temporary synthetic Pixel 5 capture scenario passed. The capture specs were removed after
+  producing the ignored PR assets.
+- PNG compression:
+  `rtk pnpm dlx pngquant-bin@9.0.0 --quality 65-90 --ext .png --force web/.pr-assets/*.png`
+  — passed before both screenshots were embedded in PR #2091.
+- Whitespace: `git diff --check` — passed.
+- Mobile: no product E2E regression was added because `useChangesPanelAutoFocus` is mounted
+  only by `DockviewDesktopLayout`; mobile and tablet use separate task layouts and received no
+  state or presentation changes.

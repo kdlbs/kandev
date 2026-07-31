@@ -76,7 +76,18 @@ Report the state-transition change, files changed, RED and GREEN command results
 - Preserved inactive-change detection, first-observation baselining, restore deferral, missing-panel handling, and Agent-group blocking.
 - Updated the unit scenario and browser regression to require Changes activation on return.
 - RED unit failed with zero activation calls; RED E2E observed `dv-inactive-tab`.
-- GREEN unit passed all 15 tests.
+- GREEN unit passed all 16 tests, including the maximized-layout review regression.
 - Direct web typecheck passed.
 - GREEN managed E2E passed the focused Chromium production-build scenario in 1.9s.
-- No mobile test was required because the affected hook is desktop-Dockview-only and no mobile/tablet behavior changed.
+- Desktop screenshot capture passed with
+  `rtk pnpm e2e:run tests/layout/pr-capture.spec.ts -- --project=chromium` and produced the
+  synthetic 1280×720 PR asset.
+- Mobile screenshot capture passed with
+  `rtk pnpm e2e:run tests/layout/mobile-pr-capture.spec.ts -- --project=mobile-chrome` and
+  produced the synthetic Pixel 5 PR asset; both temporary capture specs were then removed.
+- PNG compression passed with
+  `rtk pnpm dlx pngquant-bin@9.0.0 --quality 65-90 --ext .png --force web/.pr-assets/*.png`,
+  and both assets were embedded in PR #2091.
+- `git diff --check` passed.
+- No mobile product regression test was required because the affected hook is
+  desktop-Dockview-only and no mobile/tablet behavior changed.
