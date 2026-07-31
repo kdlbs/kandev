@@ -54,12 +54,18 @@ describe("MobilePluginNavSection", () => {
     expect(screen.getByTestId("mobile-plugin-nav-item-explicit")).not.toBeNull();
   });
 
-  it("omits integrations-section items, which MobileIntegrationsSection owns", () => {
+  it("omits non-main sections: integrations belongs to MobileIntegrationsSection, and settings is rendered nowhere", () => {
     pluginRegistry.forPlugin("plugin-a").registerNavItem({
       id: "tracker",
       label: "Tracker",
       path: "/plugins/tracker",
       section: "integrations",
+    });
+    pluginRegistry.forPlugin("plugin-b").registerNavItem({
+      id: "prefs",
+      label: "Prefs",
+      path: "/settings/plugins/plugin-b",
+      section: "settings",
     });
 
     const { container } = renderSection();

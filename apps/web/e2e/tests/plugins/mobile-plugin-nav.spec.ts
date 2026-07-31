@@ -91,6 +91,14 @@ test.describe("Mobile plugin navigation", () => {
     // Tapping the item also dismisses the sheet.
     await expect(testPage.getByTestId("mobile-plugin-nav-section")).toBeHidden();
 
+    // A plugin route with default chrome brings no nav of its own, and the
+    // sidebar that normally owns Home is hidden below md — so the topbar must
+    // carry a phone escape route or the user is stranded here.
+    const home = testPage.getByTestId("topbar-phone-home");
+    await expect(home).toBeVisible();
+    await home.click();
+    await expect(testPage).toHaveURL(/\/$/);
+
     // Desktop parity reference: the same item in the always-visible sidebar.
     const desktop = await openDesktopClient(browser, backend.frontendUrl, backend.port);
     await desktop.page.goto("/");
