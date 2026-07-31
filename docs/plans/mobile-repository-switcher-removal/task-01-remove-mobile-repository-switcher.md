@@ -14,7 +14,7 @@ spec: "../../specs/ui/mobile-task-navigation.md"
 
 - A multi-repository task never renders the repository pill or repository picker in the phone task workbench.
 - The existing mobile session pill remains visible and continues to own active-session and repository-context changes.
-- Multi-repository session rows and the active-session pill identify the bound repository so same-label sessions are distinguishable; selecting a row updates the active repository context.
+- When loaded sessions span repositories, the session rows and active-session pill identify the bound repository so same-label sessions are distinguishable; selecting a row updates the active repository context without depending on optional workflow hydration.
 - Optional repository/session hydration failures leave the phone task view non-empty, free of unexpected browser errors, and without document horizontal overflow; desktop, tablet, and other repository flows remain unchanged.
 
 ## TDD Sequence
@@ -23,8 +23,10 @@ spec: "../../specs/ui/mobile-task-navigation.md"
 2. **GREEN:** remove the top-bar `MobileRepoPill` render and delete its now-unreferenced picker components and component test.
 3. **REFACTOR:** remove dangling imports/references only, then rerun the focused browser scenario and typecheck.
 4. **REVIEW RED:** add component and mobile E2E coverage for two repository-bound sessions and confirm both fail because the retained picker omits repository identity.
-5. **REVIEW GREEN:** add repository slugs to the retained picker only for multi-repository tasks and extend the E2E seed route to persist a session repository binding.
+5. **REVIEW GREEN:** add repository slugs to the retained picker when sessions span repositories and extend the E2E seed route to persist a session repository binding.
 6. **REVIEW REFACTOR:** rerun focused component, backend harness, typecheck, and production mobile E2E checks.
+7. **REVIEW 2 RED:** remove the workflow-task repository snapshot from the focused component fixture and confirm repository labels disappear.
+8. **REVIEW 2 GREEN:** derive repository labels from loaded session bindings and the repository store, then rerun focused component, typecheck, lint, and production mobile E2E checks.
 
 ## Verification
 
@@ -79,5 +81,6 @@ Report RED and GREEN evidence, files deleted/changed, exact command results, rem
 - **GREEN:** removing `MobileRepoPill` from `session-mobile-top-bar.tsx` made the focused phone scenario pass.
 - **REFACTOR:** deleted `mobile-repo-pill.tsx`, `mobile-repos-section.tsx`, and `mobile-repos-section.test.tsx`; no remaining source or mobile E2E interaction references exist.
 - **Verification:** `cd apps/web && pnpm run typecheck` passed. Final change-aware `pnpm e2e:run --project mobile-chrome -- tests/layout/mobile-spa-resilience.spec.ts --grep "keeps a multi-repository task usable without a mobile repository switcher when optional hydration fails" --workers=1` rebuilt production assets and passed (`1 passed`).
-- **Review remediation:** repository-aware picker tests failed first on the missing label. The retained picker now shows canonical repository slugs only for multi-repository tasks, and selecting the secondary-repository row updates the active pill. The focused component suite passed (`8 passed`), the E2E seed-route repository test passed, and the production cross-repository mobile scenario passed (`1 passed`).
+- **Review remediation:** repository-aware picker tests failed first on the missing label. The retained picker now shows canonical repository slugs when loaded sessions span repositories, and selecting the secondary-repository row updates the active pill. The focused component suite passed (`8 passed`), the E2E seed-route repository test passed, and the production cross-repository mobile scenario passed (`1 passed`).
+- **Review remediation 2:** removing the optional workflow-task repository snapshot reproduced the missing labels. Label derivation now uses required loaded session bindings plus the repository store; the focused component suite (`8 passed`), web typecheck, web lint, and production cross-repository mobile scenario (`1 passed`) passed.
 - **Remaining risks:** none known within scoped phone task workbench; repository selection elsewhere is unchanged.

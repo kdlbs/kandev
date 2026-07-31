@@ -2,16 +2,13 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MobileSessionsPicker } from "./mobile-sessions-section";
-import type { AgentProfileOption, KanbanState } from "@/lib/state/slices";
+import type { AgentProfileOption } from "@/lib/state/slices";
 import { repositoryId, type Repository, type TaskSession } from "@/lib/types/http";
-
-type TaskRepository = NonNullable<KanbanState["tasks"][number]["repositories"]>[number];
 
 const mocks = vi.hoisted(() => ({
   activeSessionId: "session-a" as string | null,
   sessions: [] as TaskSession[],
   agentProfiles: [] as AgentProfileOption[],
-  taskRepositories: [] as TaskRepository[],
   repositoriesByWorkspaceId: {} as Record<string, Repository[]>,
   messagesBySession: {} as Record<string, unknown[]>,
   setActiveSession: vi.fn(),
@@ -26,15 +23,7 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       tasks: { activeSessionId: mocks.activeSessionId },
       agentProfiles: { items: mocks.agentProfiles },
-      kanban: {
-        tasks: [
-          {
-            id: "task-1",
-            primarySessionId: "session-a",
-            repositories: mocks.taskRepositories,
-          },
-        ],
-      },
+      kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
       repositories: { itemsByWorkspaceId: mocks.repositoriesByWorkspaceId },
       messages: { bySession: mocks.messagesBySession },
       setActiveSession: mocks.setActiveSession,
@@ -129,7 +118,6 @@ beforeEach(() => {
     profile("profile-a", "Alpha", "claude"),
     profile("profile-b", "Beta", "codex"),
   ];
-  mocks.taskRepositories = [];
   mocks.repositoriesByWorkspaceId = {};
   mocks.messagesBySession = {};
   mocks.setActiveSession.mockReset();
@@ -161,7 +149,7 @@ describe("MobileSessionsPicker selection", () => {
     expect(within(pill).getByTestId("agent-logo-codex")).toBeTruthy();
   });
 
-  it("disambiguates same-agent sessions by repository and switches the selected context", () => {
+  it("disambiguates repository-bound sessions without a workflow task snapshot", () => {
     mocks.sessions = [
       session(SESSION_A, "profile-a", START_TIME, {
         repository_id: repositoryId("repository-a"),
@@ -171,20 +159,6 @@ describe("MobileSessionsPicker selection", () => {
       }),
     ];
     mocks.agentProfiles = [profile("profile-a", "Alpha", "claude")];
-    mocks.taskRepositories = [
-      {
-        id: "task-repository-a",
-        repository_id: "repository-a",
-        base_branch: "main",
-        position: 0,
-      },
-      {
-        id: "task-repository-b",
-        repository_id: "repository-b",
-        base_branch: "main",
-        position: 1,
-      },
-    ];
     mocks.repositoriesByWorkspaceId = {
       "workspace-1": [repository("repository-a", "Frontend"), repository("repository-b", "API")],
     };

@@ -16,7 +16,7 @@ Remove the repository pill and picker from the phone task workbench because the 
 
 - `apps/web/components/task/mobile/session-mobile-top-bar.tsx`: stop rendering `MobileRepoPill` in `MobileTopBarActions`. Keep task, plugin, remote-executor, Git, approval, and task-switcher actions unchanged.
 - Delete `apps/web/components/task/mobile/mobile-repo-pill.tsx`, `apps/web/components/task/mobile/mobile-repos-section.tsx`, and `apps/web/components/task/mobile/mobile-repos-section.test.tsx` after confirming they have no remaining consumers.
-- Keep `MobileSessionsPicker` in `apps/web/components/task/mobile/mobile-sessions-section.tsx` as the mobile entry point for changing sessions and therefore repository context. For multi-repository tasks, include the bound repository slug in each session row and in the active-session pill; leave single-repository presentation unchanged.
+- Keep `MobileSessionsPicker` in `apps/web/components/task/mobile/mobile-sessions-section.tsx` as the mobile entry point for changing sessions and therefore repository context. When loaded sessions span repositories, include the bound repository slug in each session row and in the active-session pill; leave single-repository presentation unchanged. Derive that distinction from required session data rather than the optional workflow snapshot.
 
 No production backend, API, persistence, desktop Dockview, or tablet changes are required. The E2E-only session seed route accepts `repository_id` so Playwright can model sessions bound to different repositories.
 
@@ -67,3 +67,5 @@ cd apps/web && pnpm run typecheck
 - REFACTOR: deleted the orphaned repository picker components and component test; web typecheck passed, then the final production rebuild and focused Playwright scenario passed (`1 passed`).
 - REVIEW RED: Codex identified that same-label sessions on different repositories were indistinguishable; the focused component test and production mobile E2E both failed on the missing repository-aware pill label.
 - REVIEW GREEN: multi-repository session rows and the active pill now include the canonical repository slug, the E2E-only seed route preserves `repository_id`, and the focused component suite (`8 passed`) plus cross-repository mobile Playwright scenario (`1 passed`) pass.
+- REVIEW 2 RED: removing the workflow-task repository snapshot from the focused component fixture reproduced the missing repository labels.
+- REVIEW 2 GREEN: repository labels now derive from required loaded session bindings plus the repository store, independent of optional workflow hydration. The focused component suite (`8 passed`), web typecheck, web lint, and production mobile Playwright scenario (`1 passed`) pass.

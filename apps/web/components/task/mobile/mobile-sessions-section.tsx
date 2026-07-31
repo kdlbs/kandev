@@ -367,11 +367,6 @@ function SessionRowItem({
 
 function useSessionRows(taskId: string | null) {
   const agentProfiles = useAppStore((s) => s.agentProfiles.items);
-  const taskRepositories = useAppStore((s) => {
-    if (!taskId) return undefined;
-    const task = s.kanban.tasks.find((t: { id: string }) => t.id === taskId);
-    return task?.repositories;
-  });
   const repositoriesByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const primarySessionId = useAppStore((s) => {
     if (!taskId) return null;
@@ -380,16 +375,18 @@ function useSessionRows(taskId: string | null) {
   });
   const { sessions, isLoading } = useTaskSessions(taskId);
   const repositoryLabelsById = useMemo(() => {
-    if (!taskRepositories || taskRepositories.length <= 1) return new Map<string, string>();
-    const taskRepositoryIds = new Set(taskRepositories.map((repo) => repo.repository_id));
+    const sessionRepositoryIds = new Set(
+      sessions.flatMap((session) => (session.repository_id ? [session.repository_id] : [])),
+    );
+    if (sessionRepositoryIds.size <= 1) return new Map<string, string>();
     const labels = new Map<string, string>();
     for (const repository of Object.values(repositoriesByWorkspace).flat()) {
-      if (taskRepositoryIds.has(repository.id)) {
+      if (sessionRepositoryIds.has(repository.id)) {
         labels.set(repository.id, repositorySlug(repository));
       }
     }
     return labels;
-  }, [repositoriesByWorkspace, taskRepositories]);
+  }, [repositoriesByWorkspace, sessions]);
   const rows = useMemo(
     () => buildSessionRows(sessions, agentProfiles, primarySessionId, repositoryLabelsById),
     [sessions, agentProfiles, primarySessionId, repositoryLabelsById],

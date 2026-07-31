@@ -26,7 +26,7 @@ Mobile users need the same task controls as desktop without relying on long pres
 - Editing a task from a mobile context menu exposes its title even after work has started. The existing lock on a started task's prompt remains unchanged.
 - The mobile Home menu and Dockview task switcher open as inset, card-style bottom surfaces with internal vertical scrolling and safe-area spacing, rather than edge-to-edge side sheets.
 - Switching tasks from the mobile task switcher keeps the workbench usable while destination details hydrate. Transient placeholder data must not crash mobile chrome, and a remembered panel that is unavailable for the destination falls back to Chat.
-- Mobile Dockview does not expose a repository switcher. The existing session picker owns active-session changes; choosing a session also changes repository context when that session belongs to another repository. For multi-repository tasks, the active-session pill and session rows identify each session's repository so otherwise-identical sessions remain distinguishable.
+- Mobile Dockview does not expose a repository switcher. The existing session picker owns active-session changes; choosing a session also changes repository context when that session belongs to another repository. When loaded sessions span repositories, the active-session pill and session rows identify each session's repository so otherwise-identical sessions remain distinguishable, even if optional workflow hydration is unavailable.
 - The active-session control at the top of mobile Dockview shows the active agent's icon beside its session label.
 - Desktop and tablet Kanban, context menus, drag/drop, and workflow filtering retain their existing behavior.
 
