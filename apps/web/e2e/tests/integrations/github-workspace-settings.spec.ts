@@ -79,6 +79,9 @@ test.describe("GitHub workspace settings", () => {
       source: "legacy_shared",
       status: "active",
     });
+    await apiClient.mockGitHubSetCLIAccounts([
+      { host: "github.com", login: "workspace-cli", active: true, state: "active" },
+    ]);
     await stubGitHubRateLimits(testPage, seedData.workspaceId);
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
     const automation = testPage.getByTestId("github-workspace-automation");
@@ -120,14 +123,46 @@ test.describe("GitHub workspace settings", () => {
 
     await automation.getByRole("button", { name: "Change connection" }).click();
     const dialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });
+    const dialogBox = await dialog.boundingBox();
+    expect(dialogBox).not.toBeNull();
+    expect(dialogBox!.width).toBeGreaterThanOrEqual(800);
+    await dialog.getByRole("radio", { name: /^GitHub CLI account/ }).click();
+    await expect(dialog.getByRole("combobox", { name: "GitHub CLI account" })).toContainText(
+      "workspace-cli",
+    );
+    await expect(dialog.getByRole("button", { name: "Use account" })).toHaveCount(0);
     await expect(dialog.getByRole("heading", { name: "Task Git access" })).toBeVisible();
+    const taskHelp = dialog.getByRole("button", {
+      name: "Explain how managed task credentials work",
+    });
+    await taskHelp.hover();
+    await expect(
+      testPage.getByRole("tooltip", {
+        name: /agentctl as Git's credential helper/,
+      }),
+    ).toBeVisible();
+    const cliDescription = dialog.getByText(
+      "Choose the exact account. Kandev does not silently follow the CLI's active-account change.",
+      { exact: true },
+    );
+    const managedDescription = dialog.getByText(
+      /Kandev brokers the workspace PAT, named GitHub CLI account, or App identity/,
+    );
+    const [cliFontSize, managedFontSize] = await Promise.all([
+      cliDescription.evaluate((element) => getComputedStyle(element).fontSize),
+      managedDescription.evaluate((element) => getComputedStyle(element).fontSize),
+    ]);
+    expect(managedFontSize).toBe(cliFontSize);
     await dialog.getByRole("radio", { name: "Inherit executor Git credentials" }).click();
     await testPage.waitForTimeout(300);
     await prCapture.screenshot("desktop-task-git-access-dialog", {
       caption: "Task Git access is configured alongside the workspace connection",
     });
-    await dialog.getByRole("button", { name: "Save task access" }).click();
-    await expect(testPage.getByText("Task Git access saved")).toBeVisible({
+    await expect(dialog.getByRole("button", { name: "Save task access" })).toHaveCount(0);
+    const saveButton = dialog.getByRole("button", { name: "Save changes" });
+    await expect(saveButton).toHaveCount(1);
+    await saveButton.click();
+    await expect(testPage.getByText("GitHub access settings saved")).toBeVisible({
       timeout: 10_000,
     });
     await expect(dialog).not.toBeVisible();
@@ -141,13 +176,26 @@ test.describe("GitHub workspace settings", () => {
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ task_git_credentials_mode: "executor" });
+    const statusResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/github/status?workspace_id=${seedData.workspaceId}`,
+    );
+    expect(await statusResponse.json()).toMatchObject({
+      automation: { source: "gh_cli", login: "workspace-cli" },
+    });
 
     await automation.getByRole("button", { name: "Change connection" }).click();
+    const reopenedDialog = testPage.getByRole("dialog", { name: "Change GitHub connection" });
     await expect(
-      testPage
-        .getByRole("dialog", { name: "Change GitHub connection" })
-        .getByRole("radio", { name: "Inherit executor Git credentials" }),
+      reopenedDialog.getByRole("radio", { name: "Inherit executor Git credentials" }),
     ).toBeChecked();
+    await expect(reopenedDialog.locator("#github-method-cli")).toHaveAttribute(
+      "data-state",
+      "checked",
+    );
+    await expect(
+      reopenedDialog.getByRole("combobox", { name: "GitHub CLI account" }),
+    ).toContainText("workspace-cli");
   });
 
   test("repository scope is saved per workspace and filters the GitHub PR list", async ({

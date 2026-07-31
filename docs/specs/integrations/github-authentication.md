@@ -1,7 +1,7 @@
 ---
 status: draft
 created: 2026-07-19
-amended: 2026-07-30
+amended: 2026-07-31
 owner: Kandev
 ---
 
@@ -55,6 +55,10 @@ automation under different GitHub Apps without operating separate Kandev deploym
   choices; the existing **Change GitHub connection** dialog contains the full controls for the
   automation method and task routing policy. The task policy remains independent in behavior and
   persistence even though the related choices share one configuration surface.
+- The connection dialog has one **Save changes** action for local PAT or named CLI connection
+  drafts and task Git access. Method-specific **Connect token**, **Use account**, and **Save task
+  access** actions are not shown. GitHub App create, import, and install remain explicit workflow
+  actions because they leave Kandev for GitHub rather than saving a local connection draft.
 - For Kandev-managed GitHub checkouts used by Local and Worktree tasks, the selected task policy
   also controls the persisted `origin` transport. Managed routing uses canonical GitHub HTTPS.
   Executor inheritance uses the host's detected `gh` clone protocol, including SSH, and reconciles
@@ -428,9 +432,14 @@ registration and never creates a global default.
   executor Git credentials**, including local/Worktree versus remote behavior and explicit
   profile-token precedence. The page does not repeat those controls in a standalone settings
   section.
-- Changing task access is an explicit dialog submission with its own success/error feedback. It
-  does not implicitly replace the workspace automation connection, and changing the automation
-  method does not silently change the task policy.
+- The Task Git access heading exposes supplementary help that explains the managed Git credential
+  helper, repository-scoped broker lease redemption, broker-aware `gh` shim, executor inheritance,
+  and when a changed policy takes effect. The visible option descriptions remain plain-language
+  decision guidance and use the same explanatory typography as the rest of the dialog.
+- One **Save changes** submission persists every changed local draft in the dialog: a PAT or named
+  CLI workspace connection and the task Git access policy. It reports success only after all
+  changed drafts save, keeps failed drafts available for retry, and never implies that one setting
+  silently determines the other. App create/import/install remain separate workflow actions.
 - GitHub App selection first explains when to use it and the sharing/isolation trade-off, then lists
   known registrations and actions to **Add existing App** or **Create new App**.
 - The import guide provides copyable callback, setup, and webhook URLs; required permissions/events;
@@ -452,6 +461,9 @@ registration and never creates a global default.
   uses a single-column sheet/page, one scroll owner, safe-area padding, 44px targets, no fixed footer,
   and no horizontal overflow. External GitHub navigation is deliberate and returns to the same
   workspace settings route.
+- The desktop connection dialog is wide enough for the three method cards and explanatory content
+  without cramped columns. Mobile keeps the existing full-height single-column drawer; its one
+  **Save changes** action remains inside the scroll owner and is at least 44px tall.
 - The Changes panel branch disclosure includes the active session's launch-time Git credential
   snapshot. Desktop supports hover and keyboard focus; coarse-pointer/mobile users open the same
   information in a 44px-target drawer. Unknown inherited/profile actors are explicitly labeled
@@ -503,9 +515,16 @@ registration and never creates a global default.
 - **GIVEN** a workspace status with GitHub rate-limit snapshots, **WHEN** the user hovers, focuses,
   or taps **Show GitHub API limits**, **THEN** the disclosure shows the remaining and total API,
   GraphQL query, and Search quotas with reset timing for that workspace connection.
-- **GIVEN** either task access mode, **WHEN** the user opens Change GitHub connection and submits
-  the other mode, **THEN** the dialog persists that policy, reports the result, and the page summary
-  reflects the saved mode without changing the selected automation identity.
+- **GIVEN** a PAT or named CLI connection draft and a changed task access mode, **WHEN** the user
+  presses the dialog's single **Save changes** action, **THEN** both drafts are persisted, the dialog
+  closes only after both succeed, and reopening shows the selected account and task mode.
+- **GIVEN** a changed task access mode but no PAT or CLI connection change, **WHEN** the user presses
+  **Save changes**, **THEN** only the task policy is persisted and the selected automation identity
+  remains unchanged.
+- **GIVEN** managed task access, **WHEN** the user hovers, focuses, or taps the Task Git access help,
+  **THEN** it explains that Git calls Kandev's `agentctl` credential helper for attached GitHub
+  HTTPS repositories, the helper redeems a scoped broker lease on demand, `gh` uses a broker-aware
+  shim, and credentials are not written into the repository.
 - **GIVEN** the host `gh` clone protocol is SSH and a Kandev-managed GitHub checkout currently has
   an HTTPS `origin`, **WHEN** the workspace selects executor inheritance and launches a Local or
   Worktree task, **THEN** Kandev changes that managed checkout's `origin` to the canonical SSH URL

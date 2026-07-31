@@ -9,6 +9,7 @@ import { GitHubConnectionDialog } from "./github-connection-dialog";
 const mocks = vi.hoisted(() => ({
   mobile: false,
   registrations: [] as GitHubAppRegistrationCatalogItem[],
+  setConnection: vi.fn(),
 }));
 
 const changeConnectionLabel = "Change connection";
@@ -53,10 +54,9 @@ vi.mock("./github-app-import-form", () => ({
   ),
 }));
 
-vi.mock("./github-pat-form", () => ({
-  GitHubPATForm: ({ onSaved }: { onSaved: () => void }) => (
-    <button onClick={onSaved}>Save connection</button>
-  ),
+vi.mock("@/lib/api/domains/github-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/domains/github-api")>()),
+  setGitHubWorkspaceConnection: mocks.setConnection,
 }));
 
 const status: GitHubStatus = {
@@ -121,22 +121,38 @@ function view(workspaceId = WORKSPACE_ID, currentTaskAccess = taskAccess) {
 beforeEach(() => {
   mocks.mobile = false;
   mocks.registrations = [registration];
+  mocks.setConnection.mockReset();
+  mocks.setConnection.mockResolvedValue(status.automation);
 });
 
 describe("GitHubConnectionDialog task access", () => {
-  it("keeps an unsaved task access choice open when saving the connection", async () => {
-    view(WORKSPACE_ID, { ...taskAccess, save: vi.fn() });
+  it("saves connection and task access drafts with one action", async () => {
+    const save = vi.fn().mockResolvedValue(true);
+    const rendered = view(WORKSPACE_ID, { ...taskAccess, save });
     fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
     const dialog = await screen.findByTestId(DESKTOP_CONNECTION_TEST_ID);
     const executor = screen
       .getByTestId("github-task-access-option-executor")
       .querySelector('[role="radio"]')!;
     fireEvent.click(executor);
+    fireEvent.change(screen.getByLabelText("Personal access token"), {
+      target: { value: "ghp_replacement" },
+    });
 
-    fireEvent.click(screen.getByRole("button", { name: "Save connection" }));
+    expect(screen.queryByRole("button", { name: "Connect token" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save task access" })).toBeNull();
+    expect(screen.getAllByRole("button", { name: "Save changes" })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    expect(dialog.getAttribute("data-state")).toBe("open");
-    expect(executor.getAttribute("aria-checked")).toBe("true");
+    await waitFor(() =>
+      expect(mocks.setConnection).toHaveBeenCalledWith(WORKSPACE_ID, {
+        source: "pat",
+        token: "ghp_replacement",
+      }),
+    );
+    expect(save).toHaveBeenCalledWith("executor");
+    await waitFor(() => expect(dialog.getAttribute("data-state")).toBe("closed"));
+    expect(rendered.baseElement.textContent).toContain("GitHub access settings saved");
   });
 
   it("does not report a discarded task access save as successful", async () => {
@@ -144,11 +160,15 @@ describe("GitHubConnectionDialog task access", () => {
     view(WORKSPACE_ID, { ...taskAccess, save });
     fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
     const dialog = await screen.findByTestId(DESKTOP_CONNECTION_TEST_ID);
+    const executor = screen
+      .getByTestId("github-task-access-option-executor")
+      .querySelector('[role="radio"]')!;
+    fireEvent.click(executor);
 
-    fireEvent.click(screen.getByRole("button", { name: "Save task access" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
 
-    await waitFor(() => expect(save).toHaveBeenCalledWith("managed"));
-    expect(screen.queryByText("Task Git access saved")).toBeNull();
+    await waitFor(() => expect(save).toHaveBeenCalledWith("executor"));
+    expect(screen.queryByText("GitHub access settings saved")).toBeNull();
     expect(dialog.getAttribute("data-state")).toBe("open");
   });
 });

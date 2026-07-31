@@ -117,18 +117,23 @@ Confirmed root causes:
   `apps/web/lib/types/github.ts`.
 - Refactor `apps/web/components/github/github-task-credentials-section.tsx` from a standalone
   settings section into reusable task-access summary and dialog controls with two explicit choices:
-  **Managed workspace credentials** and **Inherit executor Git credentials**. The dialog submission
-  owns its draft, explicit save, failure feedback, and saved baseline.
+  **Managed workspace credentials** and **Inherit executor Git credentials**. The dialog owns the
+  draft, failure feedback, and saved baseline.
 - Visible copy must explain local/Worktree host behavior, remote executor behavior, profile-token
-  precedence, and when each choice applies.
+  precedence, and when each choice applies. Supplementary responsive help explains the injected
+  `agentctl` Git credential helper, scoped broker lease, broker-aware `gh` shim, and launch/resume
+  timing without exposing credentials.
 - Update `github-auth-method-list.tsx`, `github-connection-dialog.tsx`, and `github-settings.tsx`
   so PAT, named CLI, and App cards state where their credential is stored/resolved and how managed
   tasks receive it; the task policy controls live below the method controls in the same bounded
   dialog/drawer. Remove the standalone Task Git credentials section from the settings page.
+- Replace the PAT, CLI, and task-policy submission buttons with one dialog-level **Save changes**
+  action that persists every changed local draft. App create/import/install remain workflow actions
+  because they navigate through GitHub instead of saving a local credential draft.
 - Update `github-status.tsx` so the Workspace GitHub access summary shows the current task access
   mode beside the automation identity and refreshes after a successful dialog submission.
-- Desktop retains the bounded dialog. Mobile retains the existing full-height Drawer, one internal
-  scroll owner, safe-area padding, 44px controls, and no horizontal overflow.
+- Desktop retains a bounded but wider dialog. Mobile retains the existing full-height Drawer, one
+  internal scroll owner, safe-area padding, 44px controls, and no horizontal overflow.
 
 ### Changes branch credential disclosure
 
@@ -286,5 +291,5 @@ opportunities only and do not authorize subagents.
 - Agentctl tool-directory activation must be per instance so executor inheritance and explicit
   profile-token overrides do not accidentally invoke the broker shim.
 - Workspace connection and task policy remain separate persistence operations inside one dialog.
-  The UI must label each submission clearly, must not imply atomicity, and must not discard a
-  failed or unsaved task-policy draft when unrelated connection controls rerender.
+  The single submission must report complete success only when every changed operation succeeds,
+  refresh any partial success, and preserve failed or unsaved drafts for retry.

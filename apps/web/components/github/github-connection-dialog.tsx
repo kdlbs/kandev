@@ -22,11 +22,8 @@ import {
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { TaskGitCredentialsState } from "@/hooks/domains/github/use-task-git-credentials";
 import type { GitHubStatus } from "@/lib/types/github";
-import { GitHubAuthMethodList, type GitHubAutomationMethod } from "./github-auth-method-list";
-import { GitHubAppConnectionPanel } from "./github-app-connection-panel";
-import { GitHubCLIForm } from "./github-cli-form";
-import { GitHubPATForm } from "./github-pat-form";
-import { GitHubTaskAccessForm } from "./github-task-credentials-section";
+import type { GitHubAutomationMethod } from "./github-auth-method-list";
+import { GitHubConnectionSettingsForm } from "./github-connection-settings-form";
 
 function methodForStatus(status: GitHubStatus): GitHubAutomationMethod {
   if (status.automation?.source === "github_app_installation") return "app";
@@ -36,47 +33,6 @@ function methodForStatus(status: GitHubStatus): GitHubAutomationMethod {
 
 const description =
   "This workspace uses one credential for repository sync, watches, background jobs, and managed agent GitHub access. Executor profile credentials can still take precedence.";
-
-function ConnectionBody({
-  method,
-  workspaceId,
-  open,
-  onMethodChange,
-  onConnectionSaved,
-  onTaskAccessSaved,
-  onTaskAccessDirtyChange,
-  taskAccess,
-}: {
-  method: GitHubAutomationMethod;
-  workspaceId: string;
-  open: boolean;
-  onMethodChange: (method: GitHubAutomationMethod) => void;
-  onConnectionSaved: () => void;
-  onTaskAccessSaved: () => void;
-  onTaskAccessDirtyChange: (dirty: boolean) => void;
-  taskAccess: TaskGitCredentialsState;
-}) {
-  return (
-    <div className="space-y-5">
-      <GitHubAuthMethodList value={method} onChange={onMethodChange} />
-      <div className="border-t pt-5">
-        {method === "pat" && (
-          <GitHubPATForm workspaceId={workspaceId} onSaved={onConnectionSaved} />
-        )}
-        {method === "cli" && (
-          <GitHubCLIForm workspaceId={workspaceId} onSaved={onConnectionSaved} />
-        )}
-        {method === "app" && <GitHubAppConnectionPanel workspaceId={workspaceId} />}
-      </div>
-      <GitHubTaskAccessForm
-        open={open}
-        taskAccess={taskAccess}
-        onSaved={onTaskAccessSaved}
-        onDraftChange={onTaskAccessDirtyChange}
-      />
-    </div>
-  );
-}
 
 export function GitHubConnectionDialog({
   status,
@@ -91,7 +47,6 @@ export function GitHubConnectionDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<GitHubAutomationMethod>(() => methodForStatus(status));
-  const [taskAccessDirty, setTaskAccessDirty] = useState(false);
   const { isMobile } = useResponsiveBreakpoint();
   const connected = Boolean(status.automation);
 
@@ -101,22 +56,11 @@ export function GitHubConnectionDialog({
 
   useEffect(() => {
     setOpen(false);
-    setTaskAccessDirty(false);
   }, [workspaceId]);
 
-  const connectionSaved = useCallback(() => {
-    onSaved();
-    if (!taskAccessDirty) setOpen(false);
-  }, [onSaved, taskAccessDirty]);
-  const taskAccessSaved = useCallback(() => {
-    onSaved();
-    setTaskAccessDirty(false);
-    setOpen(false);
-  }, [onSaved]);
   const openChange = useCallback(
     (next: boolean) => {
       if (next) setMethod(methodForStatus(status));
-      if (!next) setTaskAccessDirty(false);
       setOpen(next);
     },
     [status],
@@ -128,14 +72,14 @@ export function GitHubConnectionDialog({
     </Button>
   );
   const body = (
-    <ConnectionBody
+    <GitHubConnectionSettingsForm
+      status={status}
       method={method}
       workspaceId={workspaceId}
       open={open}
       onMethodChange={setMethod}
-      onConnectionSaved={connectionSaved}
-      onTaskAccessSaved={taskAccessSaved}
-      onTaskAccessDirtyChange={setTaskAccessDirty}
+      onSaved={onSaved}
+      onComplete={() => setOpen(false)}
       taskAccess={taskAccess}
     />
   );
@@ -165,7 +109,7 @@ export function GitHubConnectionDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent
         data-testid="github-connection-desktop"
-        className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-2xl"
+        className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-4xl"
       >
         <DialogHeader className="shrink-0">
           <DialogTitle>{connected ? "Change GitHub connection" : "Connect GitHub"}</DialogTitle>

@@ -12,6 +12,9 @@ test.describe("GitHub workspace settings on mobile", () => {
       source: "legacy_shared",
       status: "active",
     });
+    await apiClient.mockGitHubSetCLIAccounts([
+      { host: "github.com", login: "mobile-cli", active: true, state: "active" },
+    ]);
     await stubGitHubRateLimits(testPage, seedData.workspaceId);
     await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
     const automation = testPage.getByTestId("github-workspace-automation");
@@ -60,10 +63,27 @@ test.describe("GitHub workspace settings on mobile", () => {
 
     await automation.getByRole("button", { name: "Change connection" }).tap();
     const drawer = testPage.getByTestId("github-connection-mobile");
+    await drawer.getByRole("radio", { name: /^GitHub CLI account/ }).tap();
+    await expect(drawer.getByRole("combobox", { name: "GitHub CLI account" })).toContainText(
+      "mobile-cli",
+    );
+    await expect(drawer.getByRole("button", { name: "Use account" })).toHaveCount(0);
     await expect(drawer.getByRole("heading", { name: "Task Git access" })).toBeVisible();
     await expect(drawer.locator(".overflow-y-auto")).toHaveCount(1);
+    const taskHelp = drawer.getByRole("button", {
+      name: "Explain how managed task credentials work",
+    });
+    const taskHelpBox = await taskHelp.boundingBox();
+    expect(taskHelpBox?.height).toBeGreaterThanOrEqual(44);
+    await taskHelp.tap();
+    await expect(
+      testPage.getByRole("dialog", { name: "How managed task credentials work" }),
+    ).toContainText("agentctl as Git's credential helper");
+    await testPage.keyboard.press("Escape");
+    await expect(drawer).toBeVisible();
     const executorOption = drawer.getByTestId("github-task-access-option-executor");
-    const saveButton = drawer.getByRole("button", { name: "Save task access" });
+    await expect(drawer.getByRole("button", { name: "Save task access" })).toHaveCount(0);
+    const saveButton = drawer.getByRole("button", { name: "Save changes" });
     const [optionBox, saveButtonBox] = await Promise.all([
       executorOption.boundingBox(),
       saveButton.boundingBox(),
@@ -78,7 +98,7 @@ test.describe("GitHub workspace settings on mobile", () => {
       caption: "Task Git access is configured in the mobile connection drawer",
     });
     await saveButton.tap();
-    await expect(testPage.getByText("Task Git access saved")).toBeVisible({
+    await expect(testPage.getByText("GitHub access settings saved")).toBeVisible({
       timeout: 10_000,
     });
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
@@ -90,6 +110,13 @@ test.describe("GitHub workspace settings on mobile", () => {
       `/api/v1/github/workspace-settings?workspace_id=${seedData.workspaceId}`,
     );
     expect(await response.json()).toMatchObject({ task_git_credentials_mode: "executor" });
+    const statusResponse = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/github/status?workspace_id=${seedData.workspaceId}`,
+    );
+    expect(await statusResponse.json()).toMatchObject({
+      automation: { source: "gh_cli", login: "mobile-cli" },
+    });
   });
 
   test("explains repository scope below issue watches without requiring hover", async ({

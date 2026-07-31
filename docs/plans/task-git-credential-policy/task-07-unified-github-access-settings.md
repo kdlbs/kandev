@@ -21,10 +21,15 @@ spec: "../../specs/integrations/github-authentication.md"
   hover/keyboard focus and an equivalent 44px-target Drawer interaction on touch devices.
 - The connection status restores the workspace-scoped GitHub API, GraphQL query, and Search quota
   disclosure through the same tooltip/Drawer pattern when snapshots are available.
-- Change GitHub connection contains the managed/executor task-access controls and an explicit
-  dialog submission; success refreshes the summary, failure preserves the draft, closing without
-  saving restores the persisted mode, and neither task-policy changes nor connection changes
-  silently mutate the other setting.
+- Change GitHub connection contains the managed/executor task-access controls and one **Save
+  changes** action for PAT/CLI and task-access drafts; success refreshes the summary, failure
+  preserves unsaved drafts, closing without saving restores persisted values, and neither setting
+  silently determines the other. App create/import/install remain workflow actions.
+- Task Git access includes responsive supplementary help that accurately explains the injected Git
+  credential helper, scoped broker lease, `gh` shim, executor inheritance, and launch/resume timing.
+  Option descriptions match the dialog's explanatory typography.
+- The desktop dialog is widened so the method cards and descriptions are readable without cramped
+  columns.
 - Desktop and mobile preserve the same capability. The phone flow uses the existing full-height
   Drawer with one scroll owner, safe-area clearance, touch-reachable controls, and no horizontal
   overflow. Public GitHub integration docs point users to the new location.
@@ -82,22 +87,24 @@ flow and should land together.
   including its fixed header, single `min-h-0` scroll body, and safe-area bottom padding. Reuse the
   responsive help-control pattern from `RepositoryScopeHelp` for fine-pointer tooltips and
   coarse-pointer Drawers.
-- **Hierarchy and action:** workspace automation method first, task access second; the task section
-  has a clearly labeled explicit submission and does not compete with connection-method actions.
+- **Hierarchy and action:** workspace automation method first, task access second, then one **Save
+  changes** action. PAT/CLI and task access no longer compete with separate submission buttons.
+  App create/import/install remain explicit external workflow actions.
 - **Surface rationale:** both choices are infrequent workspace-level GitHub configuration, so one
   bounded dialog/full-height phone Drawer is more appropriate than a second page section or stacked
   overlay.
-- **Shared versus responsive behavior:** share task-mode state, validation, persistence, and labels;
-  only the existing Dialog/Drawer shell differs by viewport. Summary help has the same title and
-  description on every viewport, with 44px touch targets on mobile.
-- **Proof:** desktop and `mobile-chrome` E2E save executor mode through the dialog, observe the
-  compact summary, reopen to prove persistence, and assert the mobile single-scroll/no-overflow
-  geometry.
+- **Shared versus responsive behavior:** share connection/task drafts, validation, persistence, and
+  labels; only the existing Dialog/Drawer shell differs by viewport. Help has the same content on
+  every viewport, with 44px touch targets on mobile.
+- **Proof:** desktop and `mobile-chrome` E2E select a named CLI account and executor mode, press the
+  single save action, observe both persisted values, reopen to prove persistence, and assert the
+  mobile single-scroll/no-overflow geometry.
 
 ## Risks
 
-- The dialog contains independent workspace-connection and task-policy submissions. Labels and
-  callbacks must not imply one atomic save or close/discard the other draft unexpectedly.
+- The backend contracts remain independent, so one dialog submission may encounter a partial
+  failure. Refresh persisted successes, keep failed drafts available for retry, and never report
+  complete success unless every changed draft succeeds.
 - Workspace settings are also read by repository-scope controls. Use partial updates and avoid
   introducing a competing whole-resource draft owner.
 - App installation may navigate away from Kandev. The task-policy draft must remain explicitly
@@ -110,6 +117,18 @@ component and E2E results, docs validation, files changed, risks, and task/plan 
 
 ## Verification results
 
+- `pnpm exec vitest run components/github` — passed (32 files, 288 tests). The focused dialog
+  tests prove one action can save PAT and task-access drafts together, and the CLI-form test proves
+  the preferred account becomes the draft without a separate **Use account** action.
+- `pnpm run typecheck` and focused ESLint for every changed frontend/E2E file — passed.
+- A fresh `pnpm run build:vite` production build — passed.
+- Chromium E2E for `configures task Git access from the workspace connection dialog` — passed
+  after deliberate RED failures first proved the old 638px width and separate **Use account**
+  action. It now verifies the wider dialog, credential-helper tooltip, typography parity, one
+  **Save changes** action, combined CLI/task persistence, and reopen state.
+- Both mobile GitHub settings E2E files — passed (4 tests), including the nested credential-helper
+  help Drawer, 44px controls, one scroll owner, combined persistence, and safe parent-Drawer
+  behavior.
 - `pnpm --filter @kandev/web test -- --run components/github/github-status.test.tsx` — passed
   (3 tests) after a deliberate RED failure proved PAT/CLI still rendered the redundant personal
   identity section.

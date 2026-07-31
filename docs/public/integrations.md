@@ -99,10 +99,18 @@ both the workspace automation connection and **Task Git access**. The page keeps
 of the saved task access mode. Task Git access controls how GitHub HTTPS and `gh` authenticate
 *inside newly launched task processes*:
 
+For PAT or GitHub CLI connections, choose the connection and task-access settings first, then
+select **Save changes** once. GitHub App creation, import, and installation remain separate
+GitHub workflows. The help control beside **Task Git access** explains the effective credential
+path on desktop hover or focus and in a touch-accessible drawer on mobile.
+
 - **Managed workspace credentials** (the default) uses the selected workspace PAT, named GitHub
-  CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. The task
-  receives neither the stored PAT nor an App private key. An executor-profile `GH_TOKEN` or
-  `GITHUB_TOKEN` deliberately takes precedence for that task.
+  CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. Kandev
+  configures `agentctl` as Git's credential helper so an attached repository can redeem its
+  matching lease on demand; the returned credential is not written to the repository or Git
+  configuration. A separate broker-aware shim handles `gh`. The task receives neither the stored
+  PAT nor an App private key. An executor-profile `GH_TOKEN` or `GITHUB_TOKEN` deliberately takes
+  precedence for that task.
 - **Inherit executor Git credentials** does not install Kandev's broker helper or `gh` shim. Local
   and Worktree tasks use credentials already visible to the host Git process (including SSH).
   Docker, SSH, and cloud tasks use only credentials intentionally configured in that executor.
