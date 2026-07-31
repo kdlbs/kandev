@@ -125,11 +125,12 @@ func (h *MessageHandlers) registerWS(dispatcher *ws.Dispatcher) {
 }
 
 type listMessagesParams struct {
-	before    string
-	after     string
-	sort      string
-	limit     int
-	paginated bool
+	before     string
+	after      string
+	sort       string
+	limit      int
+	paginated  bool
+	authorType string
 }
 
 func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesParams, bool) {
@@ -137,12 +138,17 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 	after := c.Query("after")
 	sort := strings.ToLower(strings.TrimSpace(c.Query("sort")))
 	limitProvided := strings.TrimSpace(c.Query("limit")) != ""
+	authorType := strings.ToLower(strings.TrimSpace(c.Query("author_type")))
 	if before != "" && after != "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "only one of before or after can be set"})
 		return listMessagesParams{}, false
 	}
 	if sort != "" && sort != "asc" && sort != "desc" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "sort must be asc or desc"})
+		return listMessagesParams{}, false
+	}
+	if authorType != "" && authorType != string(models.MessageAuthorUser) && authorType != string(models.MessageAuthorAgent) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "author_type must be user or agent"})
 		return listMessagesParams{}, false
 	}
 	limit := 0
@@ -152,11 +158,12 @@ func (h *MessageHandlers) parseListMessageParams(c *gin.Context) (listMessagesPa
 		}
 	}
 	return listMessagesParams{
-		before:    before,
-		after:     after,
-		sort:      sort,
-		limit:     limit,
-		paginated: limitProvided || before != "" || after != "" || sort != "",
+		before:     before,
+		after:      after,
+		sort:       sort,
+		limit:      limit,
+		paginated:  limitProvided || before != "" || after != "" || sort != "" || authorType != "",
+		authorType: authorType,
 	}, true
 }
 
@@ -187,6 +194,7 @@ func (h *MessageHandlers) fetchMessagesPaginated(
 		Before:        params.before,
 		After:         params.after,
 		Sort:          params.sort,
+		AuthorType:    params.authorType,
 	})
 	if err != nil {
 		return dto.ListMessagesResponse{}, err

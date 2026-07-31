@@ -201,6 +201,68 @@ func TestSQLiteRepository_ListMessagesPagination(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ListMessagesPaginatedAuthorTypeFilter(t *testing.T) {
+	repo, cleanup := createTestSQLiteRepo(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	workflow := &models.Workflow{ID: "wf-auth", Name: "Test Workflow"}
+	_ = repo.CreateWorkflow(ctx, workflow)
+	task := &models.Task{ID: "task-auth", WorkflowID: "wf-auth", WorkflowStepID: "step-auth", Title: "Test Task"}
+	_ = repo.CreateTask(ctx, task)
+	sessionID := setupSQLiteTestSession(ctx, repo, task.ID, "session-auth")
+	turnID := setupSQLiteTestTurn(ctx, repo, sessionID, task.ID, "turn-auth")
+
+	baseTime := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID: "user-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorUser, Content: "User 1", CreatedAt: baseTime.Add(-3 * time.Minute),
+	})
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID: "agent-1", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorAgent, Content: "Agent 1", CreatedAt: baseTime.Add(-2 * time.Minute),
+	})
+	_ = repo.CreateMessage(ctx, &models.Message{
+		ID: "user-2", TaskSessionID: sessionID, TaskID: task.ID, TurnID: turnID,
+		AuthorType: models.MessageAuthorUser, Content: "User 2", CreatedAt: baseTime.Add(-1 * time.Minute),
+	})
+
+	userOnly, _, err := repo.ListMessagesPaginated(ctx, sessionID, models.ListMessagesOptions{
+		Limit:      10,
+		Sort:       "desc",
+		AuthorType: string(models.MessageAuthorUser),
+	})
+	if err != nil {
+		t.Fatalf("filter user: %v", err)
+	}
+	if len(userOnly) != 2 {
+		t.Fatalf("expected 2 user messages, got %d", len(userOnly))
+	}
+	if userOnly[0].ID != "user-2" || userOnly[1].ID != "user-1" {
+		t.Errorf("expected newest-first user messages, got [%s, %s]", userOnly[0].ID, userOnly[1].ID)
+	}
+
+	agentOnly, _, err := repo.ListMessagesPaginated(ctx, sessionID, models.ListMessagesOptions{
+		Limit:      10,
+		Sort:       "desc",
+		AuthorType: string(models.MessageAuthorAgent),
+	})
+	if err != nil {
+		t.Fatalf("filter agent: %v", err)
+	}
+	if len(agentOnly) != 1 || agentOnly[0].ID != "agent-1" {
+		t.Errorf("expected only agent-1, got %d messages", len(agentOnly))
+	}
+
+	unfiltered, _, err := repo.ListMessagesPaginated(ctx, sessionID, models.ListMessagesOptions{Limit: 10, Sort: "desc"})
+	if err != nil {
+		t.Fatalf("unfiltered: %v", err)
+	}
+	if len(unfiltered) != 3 {
+		t.Errorf("expected all 3 messages unfiltered, got %d", len(unfiltered))
+	}
+}
+
 func TestSQLiteRepository_MessageWithRequestsInput(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
 	defer cleanup()

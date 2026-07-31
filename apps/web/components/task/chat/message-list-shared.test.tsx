@@ -85,8 +85,8 @@ import {
   isElementFullyVisible,
   resolveLastPromptControls,
   resolveLastPromptEdge,
+  resolveEffectiveLastPromptEdge,
   shouldAutoScrollToBottom,
-  shouldLoadMoreForTranscriptTarget,
 } from "./message-list-shared";
 
 const item: RenderItem = { type: "message", message: { id: "m1" } as Message };
@@ -437,19 +437,44 @@ describe("getFirstUserMessageId", () => {
   });
 });
 
-describe("shouldLoadMoreForTranscriptTarget", () => {
-  const message = (id: string, author_type: "user" | "agent") => ({ id, author_type }) as Message;
+describe("resolveEffectiveLastPromptEdge", () => {
+  const base = {
+    trackedEdge: "visible" as const,
+    lastPromptMessageId: "prompt-1",
+    lastPromptRendered: true,
+    hasMore: false,
+  };
 
-  it("keeps loading older pages when the latest loaded page has no user prompt", () => {
-    expect(
-      shouldLoadMoreForTranscriptTarget("last_prompt", [message("reply", "agent")], true),
-    ).toBe(true);
+  it("uses the tracked edge once the prompt is mounted", () => {
+    expect(resolveEffectiveLastPromptEdge({ ...base, trackedEdge: "above" })).toBe("above");
+    expect(resolveEffectiveLastPromptEdge({ ...base, trackedEdge: "below" })).toBe("below");
+    expect(resolveEffectiveLastPromptEdge(base)).toBe("visible");
   });
 
-  it("keeps loading for scroll-to-start until pagination reaches the real first prompt", () => {
+  it("reports above for a resolved-but-unmounted prompt while older pages remain", () => {
+    // Regression: the loaded window holds the newest messages, so a resolved
+    // last prompt that is not mounted is deterministically above the viewport.
+    // The renderer would report "visible" (no target row) and wrongly suppress
+    // both affordances.
     expect(
-      shouldLoadMoreForTranscriptTarget("start", [message("loaded-prompt", "user")], true),
-    ).toBe(true);
+      resolveEffectiveLastPromptEdge({ ...base, lastPromptRendered: false, hasMore: true }),
+    ).toBe("above");
+  });
+
+  it("falls back to the tracked edge when no older pages remain", () => {
+    expect(
+      resolveEffectiveLastPromptEdge({ ...base, lastPromptRendered: false, hasMore: false }),
+    ).toBe("visible");
+  });
+
+  it("uses the tracked edge when no last prompt is resolved", () => {
+    expect(
+      resolveEffectiveLastPromptEdge({
+        ...base,
+        lastPromptMessageId: null,
+        trackedEdge: "visible",
+      }),
+    ).toBe("visible");
   });
 });
 

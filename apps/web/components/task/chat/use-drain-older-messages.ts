@@ -16,11 +16,10 @@ const MAX_DRAIN_BATCHES = 50;
  *
  * Step-driven, not an imperative loop: each batch only fires once `isLoading`
  * (from `useLazyLoadMessages`, reactive) is confirmed false, so this never
- * races a concurrent caller sharing the same session (e.g. the transcript's
- * own last-prompt preload effect) — it waits for that fetch to actually
- * finish and re-reads the resulting `hasMore` instead of guessing from an
- * ambiguous "0 fetched" return that could mean either genuine exhaustion or
- * a no-op against someone else's in-flight request.
+ * races a concurrent caller sharing the same session — it waits for that
+ * fetch to actually finish and re-reads the resulting `hasMore` instead of
+ * guessing from an ambiguous "0 fetched" return that could mean either
+ * genuine exhaustion or a no-op against someone else's in-flight request.
  */
 export function useDrainOlderMessages(sessionId: string | null, active: boolean) {
   const { loadMore, hasMore, isLoading } = useLazyLoadMessages(sessionId);

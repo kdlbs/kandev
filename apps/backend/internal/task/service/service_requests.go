@@ -244,6 +244,9 @@ type ListMessagesRequest struct {
 	Before        string
 	After         string
 	Sort          string
+	// AuthorType narrows the result to messages with exactly this author
+	// type ("user" or "agent"). Empty means unfiltered.
+	AuthorType string
 }
 
 // CreateRepositoryScriptRequest contains the data for creating a repository script

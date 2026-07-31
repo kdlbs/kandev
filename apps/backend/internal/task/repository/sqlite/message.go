@@ -237,6 +237,10 @@ func buildListMessagesQuery(sessionID string, opts models.ListMessagesOptions, c
 		SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content, requests_input, type, metadata, created_at, updated_at
 		FROM task_session_messages WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
+	if opts.AuthorType != "" {
+		query += " AND author_type = ?"
+		args = append(args, opts.AuthorType)
+	}
 	if cursor != nil {
 		if opts.Before != "" {
 			query += " AND (created_at < ? OR (created_at = ? AND id < ?))"
