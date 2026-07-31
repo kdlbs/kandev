@@ -17,6 +17,8 @@ import (
 const (
 	DefaultUserID    = "default-user"
 	DefaultUserEmail = "default@kandev.local"
+
+	defaultChangesPanelLayout = "tree"
 )
 
 type sqliteRepository struct {
@@ -567,35 +569,44 @@ func mergeVoiceModeDefaults(stored *storedVoiceMode) models.VoiceModeSettings {
 	return out
 }
 
+func defaultUserSettings(userID string) *models.UserSettings {
+	return &models.UserSettings{
+		UserID:                          userID,
+		StartupPage:                     models.StartupPageTaskOverview,
+		RepositoryIDs:                   []string{},
+		TasksListSort:                   models.TasksListSortDefault,
+		TasksListGroup:                  models.TasksListGroupDefault,
+		ReviewAutoMarkOnScroll:          true,
+		ConfirmTaskArchive:              true,
+		UnreadDivider:                   false,
+		MCPTaskAgentProfileDefault:      models.MCPTaskAgentProfileDefaultCurrentTask,
+		ShowAnchoredPromptBar:           false,
+		ShowScrollToLastPrompt:          true,
+		ShowScrollToStart:               false,
+		ShowTranscriptAutoScrollControl: false,
+		ShowReleaseNotification:         true,
+		LspAutoStartLanguages:           []string{},
+		LspAutoInstallLanguages:         []string{},
+		LspServerConfigs:                map[string]map[string]interface{}{},
+		SavedLayouts:                    []models.SavedLayout{},
+		ChatSubmitKey:                   "cmd_enter",
+		KeyboardShortcuts:               map[string]interface{}{},
+		TerminalLinkBehavior:            "new_tab",
+		ChangesPanelLayout:              defaultChangesPanelLayout,
+		SidebarViews:                    []models.SidebarView{},
+		SidebarTaskPrefs:                normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
+		AppStatusBarOrder:               normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
+		VoiceMode:                       defaultVoiceModeSettings(),
+	}
+}
+
 func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID string) (*models.UserSettings, error) {
-	settings := &models.UserSettings{}
+	settings := defaultUserSettings(userID)
 	var settingsRaw string
 	if err := scanner.Scan(&settingsRaw, &settings.UpdatedAt); err != nil {
 		return nil, err
 	}
-	settings.UserID = userID
 	if settingsRaw == "" || settingsRaw == "{}" {
-		settings.RepositoryIDs = []string{}
-		settings.TasksListSort = models.TasksListSortDefault
-		settings.TasksListGroup = models.TasksListGroupDefault
-		settings.ShowReleaseNotification = true
-		settings.ReviewAutoMarkOnScroll = true
-		settings.ConfirmTaskArchive = true
-		settings.UnreadDivider = true
-		settings.MCPTaskAgentProfileDefault = models.MCPTaskAgentProfileDefaultCurrentTask
-		settings.ShowAnchoredPromptBar = false
-		settings.ShowScrollToLastPrompt = true
-		settings.ShowScrollToStart = false
-		settings.ShowTranscriptAutoScrollControl = true
-		settings.ChatSubmitKey = "cmd_enter"
-		settings.KeyboardShortcuts = map[string]interface{}{}
-		settings.TerminalLinkBehavior = "new_tab"
-		settings.ChangesPanelLayout = "tree"
-		settings.StartupPage = models.StartupPageTaskOverview
-		settings.SidebarViews = []models.SidebarView{}
-		settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{})
-		settings.AppStatusBarOrder = normalizeAppStatusBarOrder(models.AppStatusBarOrder{})
-		settings.VoiceMode = defaultVoiceModeSettings()
 		return settings, nil
 	}
 	var payload struct {
@@ -655,6 +666,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.StartupPage = models.NormalizeStartupPage(payload.StartupPage)
 	settings.WorkflowFilterID = payload.WorkflowFilterID
 	settings.RepositoryIDs = payload.RepositoryIDs
+	if settings.RepositoryIDs == nil {
+		settings.RepositoryIDs = []string{}
+	}
 	settings.TasksListSort = models.NormalizeTasksListSort(payload.TasksListSort)
 	settings.TasksListGroup = models.NormalizeTasksListGroup(payload.TasksListGroup)
 	settings.TasksListShowDetails = payload.TasksListShowDetails
@@ -662,52 +676,33 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.PreferredShell = payload.PreferredShell
 	settings.DefaultEditorID = payload.DefaultEditorID
 	settings.EnablePreviewOnClick = payload.EnablePreviewOnClick
-	settings.ChatSubmitKey = payload.ChatSubmitKey
-	// Default to "cmd_enter" if empty
-	if settings.ChatSubmitKey == "" {
-		settings.ChatSubmitKey = "cmd_enter"
+	if payload.ChatSubmitKey != "" {
+		settings.ChatSubmitKey = payload.ChatSubmitKey
 	}
-	// Default to true when not set
 	if payload.ReviewAutoMarkOnScroll != nil {
 		settings.ReviewAutoMarkOnScroll = *payload.ReviewAutoMarkOnScroll
-	} else {
-		settings.ReviewAutoMarkOnScroll = true
 	}
 	if payload.ConfirmTaskArchive != nil {
 		settings.ConfirmTaskArchive = *payload.ConfirmTaskArchive
-	} else {
-		settings.ConfirmTaskArchive = true
 	}
 	if payload.UnreadDivider != nil {
 		settings.UnreadDivider = *payload.UnreadDivider
-	} else {
-		settings.UnreadDivider = true
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowAnchoredPromptBar != nil {
 		settings.ShowAnchoredPromptBar = *payload.ShowAnchoredPromptBar
-	} else {
-		settings.ShowAnchoredPromptBar = false
 	}
 	if payload.ShowScrollToLastPrompt != nil {
 		settings.ShowScrollToLastPrompt = *payload.ShowScrollToLastPrompt
-	} else {
-		settings.ShowScrollToLastPrompt = true
 	}
 	if payload.ShowScrollToStart != nil {
 		settings.ShowScrollToStart = *payload.ShowScrollToStart
-	} else {
-		settings.ShowScrollToStart = false
 	}
 	if payload.ShowTranscriptAutoScrollControl != nil {
 		settings.ShowTranscriptAutoScrollControl = *payload.ShowTranscriptAutoScrollControl
-	} else {
-		settings.ShowTranscriptAutoScrollControl = true
 	}
 	if payload.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *payload.ShowReleaseNotification
-	} else {
-		settings.ShowReleaseNotification = true
 	}
 	settings.ReleaseNotesLastSeenVersion = payload.ReleaseNotesLastSeenVersion
 	settings.LspAutoStartLanguages = payload.LspAutoStartLanguages
@@ -719,6 +714,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.LspAutoInstallLanguages = []string{}
 	}
 	settings.LspServerConfigs = payload.LspServerConfigs
+	if settings.LspServerConfigs == nil {
+		settings.LspServerConfigs = map[string]map[string]interface{}{}
+	}
 	settings.SavedLayouts = payload.SavedLayouts
 	if settings.SavedLayouts == nil {
 		settings.SavedLayouts = []models.SavedLayout{}
@@ -755,7 +753,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if payload.ChangesPanelLayout == "flat" {
 		settings.ChangesPanelLayout = "flat"
 	} else {
-		settings.ChangesPanelLayout = "tree"
+		settings.ChangesPanelLayout = defaultChangesPanelLayout
 	}
 	return settings, nil
 }

@@ -35,6 +35,46 @@ export function isCycleShortcutEvent(event: KeyboardEvent, shortcut: KeyboardSho
   return matchesShortcut(event, shortcut);
 }
 
+/**
+ * Make ctrlOrCmd's hold modifier match the key that opened this interaction.
+ * Browsers accept either Control or Meta for ctrlOrCmd, including off-platform
+ * variants such as Control on macOS.
+ */
+export function snapshotHeldShortcut(
+  event: KeyboardEvent,
+  shortcut: KeyboardShortcut,
+): KeyboardShortcut {
+  if (!shortcut.modifiers?.ctrlOrCmd || event.ctrlKey === event.metaKey) return shortcut;
+  const { ctrlOrCmd: _ctrlOrCmd, ...modifiers } = shortcut.modifiers;
+  return {
+    ...shortcut,
+    modifiers: { ...modifiers, ...(event.ctrlKey ? { ctrl: true } : { cmd: true }) },
+  };
+}
+
+function isHoldModifierPressed(event: KeyboardEvent, modifier: HoldModifier): boolean {
+  if (modifier === MODIFIER_KEYS.CMD) return event.metaKey;
+  if (modifier === MODIFIER_KEYS.CTRL) return event.ctrlKey;
+  if (modifier === MODIFIER_KEYS.ALT) return event.altKey;
+  return event.shiftKey;
+}
+
+/**
+ * Match a deliberate switcher continuation key press. Once a picker is open,
+ * its primary hold modifier is sufficient; secondary modifiers may be released.
+ */
+export function isHeldCycleKeyEvent(
+  event: KeyboardEvent,
+  shortcut: KeyboardShortcut,
+  platform?: Platform,
+): boolean {
+  if (event.repeat || event.key.toLowerCase() !== shortcut.key.toLowerCase()) return false;
+  const holdModifier = getHoldModifier(shortcut, platform);
+  return holdModifier
+    ? isHoldModifierPressed(event, holdModifier)
+    : matchesShortcut(event, shortcut);
+}
+
 export function isCommitReleaseEvent(
   event: KeyboardEvent,
   shortcut: KeyboardShortcut,

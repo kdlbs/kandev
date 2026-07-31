@@ -150,6 +150,14 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		stripEnv:           []string{"ACP_BACKEND"},
 		sessionDirTemplate: "{home}/.local/share/devin",
 	}},
+	{func() Agent { return NewHermesACP() }, acpAgentSpec{
+		id: "hermes-acp", displayName: "Hermes", detectBinaries: []string{"hermes"},
+		expectedArgv:       []string{"hermes", "acp"},
+		inferenceArgv:      []string{"hermes", "acp"},
+		passthroughArgv:    []string{"hermes"},
+		installViaNpm:      false,
+		sessionDirTemplate: "{home}/.hermes",
+	}},
 }
 
 func TestNewACPAgents_IDAndDisplay(t *testing.T) {

@@ -20,11 +20,13 @@ aren't otherwise obvious from the UI alone.
 ## What
 
 - Each user can enable or disable the divider from **Settings > General > Task
-  Actions > Unread Messages**. It defaults **on** and takes effect immediately:
+  Actions > Unread Messages**. It defaults **off** and takes effect immediately:
   when disabled, the frontend does not compute or render a divider, the message
   list performs its normal scroll behavior, and `useSessionReadTracking` does
   not dispatch `POST /task-sessions/:id/mark-read`; existing
   `last_read_message_id` values remain stored for a future re-enable.
+  Missing portable-setting values are resolved at the backend boundary and
+  mapped consistently across frontend delivery paths per [ADR 0041](../../decisions/0041-backend-owned-portable-user-settings.md).
 - Each `task_sessions` row carries one `last_read_message_id` column — the
   ID of the newest message the session has "seen." This is **session-global,
   not per-user or per-device**: kandev tasks do not currently model multiple
@@ -122,6 +124,12 @@ aren't otherwise obvious from the UI alone.
 - **GIVEN** a brand-new session with no messages yet, **WHEN** the chat
   panel renders, **THEN** no mark-read request is issued for the synthetic
   task-description placeholder.
+- **GIVEN** a user with no stored `unread_divider` preference, **WHEN** the
+  user opens a transcript, **THEN** the New divider is disabled and the
+  session read cursor is not advanced by the divider tracking behavior.
+- **GIVEN** a user with an explicit stored `unread_divider: true` preference,
+  **WHEN** the user opens a transcript, **THEN** the New divider behavior
+  remains enabled.
 
 ## Out of scope
 

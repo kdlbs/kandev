@@ -19,12 +19,23 @@ export function resolveTaskPROpenAction(prs: TaskPR[]): TaskPROpenAction {
 
 export type TaskReviewOpenAction =
   | { kind: "none" }
-  | { kind: "open"; url: string }
-  | { kind: "pick" };
+  | { kind: "open"; url: string; target: TaskReviewTarget }
+  | { kind: "pick"; targets: TaskReviewTarget[] };
+
+export type TaskReviewTarget =
+  | { type: "pr"; key: string; url: string; review: TaskPR }
+  | { type: "mr"; key: string; url: string; review: TaskMR };
+
+export function buildTaskReviewTargets(prs: TaskPR[], mrs: TaskMR[]): TaskReviewTarget[] {
+  return [
+    ...prs.map((pr) => ({ type: "pr" as const, key: `pr:${pr.id}`, url: pr.pr_url, review: pr })),
+    ...mrs.map((mr) => ({ type: "mr" as const, key: `mr:${mr.id}`, url: mr.mr_url, review: mr })),
+  ];
+}
 
 export function resolveTaskReviewOpenAction(prs: TaskPR[], mrs: TaskMR[]): TaskReviewOpenAction {
-  const urls = [...prs.map((pr) => pr.pr_url), ...mrs.map((mr) => mr.mr_url)];
-  if (urls.length === 0) return { kind: "none" };
-  if (urls.length === 1) return { kind: "open", url: urls[0] };
-  return { kind: "pick" };
+  const targets = buildTaskReviewTargets(prs, mrs);
+  if (targets.length === 0) return { kind: "none" };
+  if (targets.length === 1) return { kind: "open", url: targets[0].url, target: targets[0] };
+  return { kind: "pick", targets };
 }

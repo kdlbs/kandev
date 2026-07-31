@@ -790,6 +790,7 @@ var allowedProbeCommands = map[string]string{
 	"cursor-agent":  "cursor-agent",
 	"devin":         "devin",
 	"grok":          "grok",
+	"hermes":        "hermes",
 	"kimi":          "kimi",
 	"kiro-cli-chat": "kiro-cli-chat",
 	"mock-agent":    "mock-agent",
@@ -813,6 +814,10 @@ func resolveProbeCommand(name string) string {
 func sanitizeEnvForAgent(cfg *InferenceConfigDTO) []string {
 	env := os.Environ()
 	if cfg != nil {
+		for key, value := range cfg.Env {
+			env = RemoveEnvEntry(env, key)
+			env = append(env, key+"="+value)
+		}
 		for _, key := range cfg.StripEnv {
 			env = RemoveEnvEntry(env, key)
 		}

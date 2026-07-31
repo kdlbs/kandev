@@ -5,20 +5,9 @@ import { useAppStore } from "@/components/state-provider";
 import { useEditors } from "@/hooks/domains/settings/use-editors";
 import { createEditor, deleteEditor, updateEditor, updateUserSettings } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
-import { parseTasksListGroup, parseTasksListSort } from "@/lib/tasks/tasks-list-options";
 import type { EditorOption } from "@/lib/types/http";
 import { type ComboboxOption } from "@/components/combobox";
-import {
-  parseChangesPanelLayout,
-  parseAppStatusBarOrder,
-  parseSystemMetricsDisplay,
-  parseTerminalLinkBehavior,
-  taskCreateLastUsedHasValue,
-  parseVoiceMode,
-  parseMCPTaskAgentProfileDefault,
-  parseStartupPage,
-} from "@/lib/ssr/user-settings";
-import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
+import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import {
   type EditorFormState,
   buildConfig,
@@ -218,126 +207,13 @@ function buildSettingsPayload(
   };
 }
 
-function mapEditorSettingsFields(
-  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
-) {
-  return {
-    ...mapTasksListSettingsFields(s),
-    ...mapEditorBehaviorFields(s),
-    ...mapEditorLspFields(s),
-    ...mapEditorSidebarFields(s),
-    ...mapEditorSyncedLocalFields(s),
-    loaded: true as const,
-  };
-}
-
-function mapTasksListSettingsFields(
-  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
-) {
-  return {
-    tasksListSort: parseTasksListSort(s.tasks_list_sort),
-    tasksListGroup: parseTasksListGroup(s.tasks_list_group),
-    tasksListShowDetails: s.tasks_list_show_details ?? false,
-  };
-}
-
-function mapEditorBehaviorFields(
-  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
-) {
-  return {
-    chatSubmitKey: s.chat_submit_key ?? "cmd_enter",
-    reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
-    confirmTaskArchive: s.confirm_task_archive ?? true,
-    unreadDivider: s.unread_divider ?? true,
-    mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(s.mcp_task_agent_profile_default),
-    showAnchoredPromptBar: s.show_anchored_prompt_bar ?? false,
-    showScrollToLastPrompt: s.show_scroll_to_last_prompt ?? true,
-    showScrollToStart: s.show_scroll_to_start ?? false,
-    showTranscriptAutoScrollControl: s.show_transcript_auto_scroll_control ?? true,
-    showReleaseNotification: s.show_release_notification ?? true,
-    releaseNotesLastSeenVersion: (s.release_notes_last_seen_version as string) || null,
-    savedLayouts: s.saved_layouts ?? [],
-  };
-}
-
-function mapEditorLspFields(s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>) {
-  return {
-    lspAutoStartLanguages: s.lsp_auto_start_languages ?? [],
-    lspAutoInstallLanguages: s.lsp_auto_install_languages ?? [],
-    lspServerConfigs: s.lsp_server_configs ?? {},
-  };
-}
-
-function mapEditorSidebarFields(
-  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
-) {
-  return {
-    sidebarViews: (s.sidebar_views ?? []).map(fromApiSidebarView),
-    sidebarActiveViewId: s.sidebar_active_view_id || null,
-    sidebarDraft: s.sidebar_draft ? fromApiSidebarDraft(s.sidebar_draft) : null,
-    sidebarTaskPrefs: {
-      pinnedTaskIds: s.sidebar_task_prefs?.pinned_task_ids ?? [],
-      orderedTaskIds: s.sidebar_task_prefs?.ordered_task_ids ?? [],
-      subtaskOrderByParentId: s.sidebar_task_prefs?.subtask_order_by_parent_id ?? {},
-    },
-  };
-}
-
-function mapEditorSyncedLocalFields(
-  s: NonNullable<NonNullable<UpdateUserSettingsResponse>["settings"]>,
-) {
-  return {
-    taskCreateLastUsed: {
-      repositoryId: s.task_create_last_used?.repository_id || null,
-      branch: s.task_create_last_used?.branch || null,
-      agentProfileId: s.task_create_last_used?.agent_profile_id || null,
-      executorProfileId: s.task_create_last_used?.executor_profile_id || null,
-      synced: taskCreateLastUsedHasValue(s.task_create_last_used),
-    },
-    jiraSavedViews: s.jira_saved_views,
-    jiraTaskPresets: s.jira_task_presets,
-    githubSavedPresets: s.github_saved_presets,
-    githubDefaultQueryPresets: s.github_default_query_presets,
-    gitlabSavedPresets: s.gitlab_saved_presets,
-  };
-}
-
-function buildUserSettingsFromResponse(
-  s: NonNullable<UpdateUserSettingsResponse>["settings"],
-  shellOptions: Array<{ value: string; label: string }> | null | undefined,
-) {
-  if (!s) return null;
-  return {
-    workspaceId: s.workspace_id || null,
-    workflowId: s.workflow_filter_id || null,
-    kanbanViewMode: s.kanban_view_mode || null,
-    startupPage: parseStartupPage(s.startup_page),
-    repositoryIds: s.repository_ids ?? [],
-    preferredShell: s.preferred_shell || null,
-    shellOptions: shellOptions ?? [],
-    defaultEditorId: s.default_editor_id || null,
-    enablePreviewOnClick: s.enable_preview_on_click ?? false,
-    defaultUtilityAgentId: s.default_utility_agent_id || null,
-    keyboardShortcuts: s.keyboard_shortcuts ?? {},
-    terminalLinkBehavior: parseTerminalLinkBehavior(s.terminal_link_behavior),
-    terminalFontFamily: s.terminal_font_family || null,
-    terminalFontSize: s.terminal_font_size || null,
-    changesPanelLayout: parseChangesPanelLayout(s.changes_panel_layout),
-    systemMetricsDisplay: parseSystemMetricsDisplay(s.system_metrics_display),
-    appStatusBarOrder: parseAppStatusBarOrder(s.app_status_bar_order),
-    voiceMode: parseVoiceMode(s.voice_mode),
-    ...mapEditorSettingsFields(s),
-  };
-}
-
 function applySettingsResponseToStore(
   response: UpdateUserSettingsResponse,
-  shellOptions: Array<{ value: string; label: string }> | null | undefined,
+  current: UserSettingsState,
   setUserSettings: SetUserSettingsFn,
 ) {
   if (!response?.settings) return;
-  const settings = buildUserSettingsFromResponse(response.settings, shellOptions);
-  if (settings) setUserSettings(settings);
+  setUserSettings(mapUserSettingsResponse(response, current));
 }
 
 export function useApplyEditors(state: EditorsSettingsState) {
@@ -444,7 +320,7 @@ export function useSaveRequest(state: EditorsSettingsState) {
     setBaselineLspAutoStart([...lspAutoStartLanguages]);
     setBaselineLspAutoInstall([...lspAutoInstallLanguages]);
     setBaselineLspConfigStrings({ ...lspConfigStrings });
-    applySettingsResponseToStore(response, currentUserSettings.shellOptions, setUserSettings);
+    applySettingsResponseToStore(response, currentUserSettings, setUserSettings);
   });
 }
 

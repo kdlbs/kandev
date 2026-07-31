@@ -1,6 +1,6 @@
 import type { StateCreator } from "zustand";
-import { DEFAULT_TASKS_LIST_GROUP, DEFAULT_TASKS_LIST_SORT } from "@/lib/tasks/tasks-list-options";
-import { DEFAULT_VOICE_MODE_STATE, type SettingsSlice, type SettingsSliceState } from "./types";
+import { createDefaultUserSettings } from "@/lib/ssr/user-settings";
+import type { SettingsSlice, SettingsSliceState } from "./types";
 
 export const defaultSettingsState: SettingsSliceState = {
   executors: { items: [] },
@@ -22,61 +22,7 @@ export const defaultSettingsState: SettingsSliceState = {
     loading: false,
   },
   settingsData: { executorsLoaded: false, agentsLoaded: false },
-  userSettings: {
-    workspaceId: null,
-    kanbanViewMode: null,
-    startupPage: "task_overview",
-    workflowId: null,
-    repositoryIds: [],
-    tasksListSort: DEFAULT_TASKS_LIST_SORT,
-    tasksListGroup: DEFAULT_TASKS_LIST_GROUP,
-    tasksListShowDetails: false,
-    preferredShell: null,
-    shellOptions: [],
-    defaultEditorId: null,
-    enablePreviewOnClick: false,
-    terminalLinkBehavior: "new_tab",
-    chatSubmitKey: "cmd_enter",
-    reviewAutoMarkOnScroll: true,
-    confirmTaskArchive: true,
-    unreadDivider: true,
-    mcpTaskAgentProfileDefault: "current_task",
-    showAnchoredPromptBar: false,
-    showScrollToLastPrompt: true,
-    showScrollToStart: false,
-    showTranscriptAutoScrollControl: true,
-    showReleaseNotification: true,
-    releaseNotesLastSeenVersion: null,
-    lspAutoStartLanguages: [],
-    lspAutoInstallLanguages: [],
-    lspServerConfigs: {},
-    savedLayouts: [],
-    sidebarViews: [],
-    sidebarActiveViewId: null,
-    sidebarDraft: null,
-    sidebarTaskPrefs: { pinnedTaskIds: [], orderedTaskIds: [], subtaskOrderByParentId: {} },
-    taskCreateLastUsed: {
-      repositoryId: null,
-      branch: null,
-      agentProfileId: null,
-      executorProfileId: null,
-      synced: false,
-    },
-    jiraSavedViews: undefined,
-    jiraTaskPresets: undefined,
-    githubSavedPresets: undefined,
-    githubDefaultQueryPresets: undefined,
-    gitlabSavedPresets: undefined,
-    defaultUtilityAgentId: null,
-    keyboardShortcuts: {},
-    terminalFontFamily: null,
-    terminalFontSize: null,
-    changesPanelLayout: "tree",
-    systemMetricsDisplay: { showInTopbar: false, simplified: false },
-    appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
-    voiceMode: { ...DEFAULT_VOICE_MODE_STATE },
-    loaded: false,
-  },
+  userSettings: createDefaultUserSettings(),
 };
 
 type ImmerSet = Parameters<
