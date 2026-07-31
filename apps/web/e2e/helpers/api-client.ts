@@ -996,6 +996,7 @@ export class ApiClient {
       state: TaskSessionState;
       sessionId?: string;
       agentProfileId?: string;
+      repositoryId?: string;
       startedAt?: string;
       completedAt?: string;
       commandCount?: number;
@@ -1008,6 +1009,7 @@ export class ApiClient {
     };
     if (opts.sessionId !== undefined) body.session_id = opts.sessionId;
     if (opts.agentProfileId !== undefined) body.agent_profile_id = opts.agentProfileId;
+    if (opts.repositoryId !== undefined) body.repository_id = opts.repositoryId;
     if (opts.startedAt !== undefined) body.started_at = opts.startedAt;
     if (opts.completedAt !== undefined) body.completed_at = opts.completedAt;
     if (opts.commandCount !== undefined) body.command_count = opts.commandCount;

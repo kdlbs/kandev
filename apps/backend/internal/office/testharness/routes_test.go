@@ -257,6 +257,37 @@ func TestSeedTaskSessionUsesRequestedSessionID(t *testing.T) {
 	}
 }
 
+func TestSeedTaskSessionUsesRequestedRepositoryID(t *testing.T) {
+	repo, sqlxDB := newTestRepo(t)
+	taskID := uuid.New().String()
+	seedTask(t, sqlxDB, taskID)
+	r := newRouter(t, repo, nil)
+
+	body := mustJSON(t, map[string]interface{}{
+		"task_id":       taskID,
+		"state":         "WAITING_FOR_INPUT",
+		"repository_id": "repository-secondary",
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/_test/task-sessions", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp seedTaskSessionResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	session, err := repo.GetTaskSession(context.Background(), resp.SessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.RepositoryID != "repository-secondary" {
+		t.Fatalf("repository_id = %q, want repository-secondary", session.RepositoryID)
+	}
+}
+
 func TestSeedTaskSessionTerminalRequiresCompletedAt(t *testing.T) {
 	repo, sqlxDB := newTestRepo(t)
 	taskID := uuid.New().String()
