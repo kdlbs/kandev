@@ -87,7 +87,20 @@ Model, mode, command, and configuration choices are probed from the locally inst
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.
 
-**Settings > Agents** shows **Subscription Usage** only when a supported host agent is signed in through a subscription plan. The current section covers Codex and Claude Code, reports the provider's plan and rate-limit windows, and can be refreshed on demand. It is an operational signal from the installed CLI, not a billing ledger or a guarantee that the next request will be accepted; provider availability, account policy, and concurrent usage still apply.
+Subscription usage is not shown on **Settings > Agents**, which is the page for
+installing host CLIs and configuring their profiles. When [Office mode](feature-status.md)
+is enabled, open **Office > Agents** and select an Office agent to see its
+**Subscription Quota** on the overview; the Office dashboard also summarizes
+the highest utilization across subscription agents. These cards appear only
+for supported subscription agents with provider credentials.
+
+For account-wide provider usage across supported providers, install the
+[Provider Usage plugin](https://github.com/kdlbs/kandev-plugin-provider-usage).
+It adds a provider pill to the session top bar and can add a compact display to
+the global status bar. Configure it under **Settings > Plugins > Provider
+Usage**. These usage surfaces are operational signals, not a billing ledger or
+a guarantee that the next request will be accepted; provider availability,
+account policy, and concurrent usage still apply.
 
 ### CLI flags
 

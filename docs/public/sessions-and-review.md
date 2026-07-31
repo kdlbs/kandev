@@ -108,7 +108,15 @@ All panels for a task point at the same task environment. In a multi-repository 
 
 Structured shell-command activity keeps the command, working directory, status, and output size in the chat row. Expand **Output** to fetch the transcript; Kandev continues refreshing an open, running command and stops when it reaches a terminal state. The disclosure separates standard output and errors, reports truncation and the exit code when known, and offers **Retry** when the transcript request fails. Historical command transcripts are loaded only when opened, which keeps long conversations responsive without discarding the stored output.
 
-The ring in the chat-input toolbar shows the active session's context-window use when the agent reports a trustworthy window size. Open it to see used and total tokens. For a supported Codex or Claude Code subscription session, the same popover also fetches the account plan and rate-limit windows; opening it again requests fresh provider data, subject to a short server-side refresh clamp. Kandev hides the ring instead of presenting impossible data when reported use exceeds the reported window, and agents without usage support show no subscription rows.
+The ring in the chat-input toolbar shows the active session's context-window use
+when the agent reports a trustworthy window size. Open it to see used and total
+tokens. This popover does not show provider subscription plans or rate-limit
+windows. For account-wide provider usage, install the [Provider Usage
+plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a
+provider pill to the session top bar and can add a compact display to the global
+status bar; configure it under **Settings > Plugins > Provider Usage**. Kandev
+hides the context ring instead of presenting impossible data when reported use
+exceeds the reported window.
 
 ## Inspect changes
 
