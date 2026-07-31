@@ -43,13 +43,6 @@ features:
     dev:  "true"
     e2e:  "true"
 
-  # Plugins (extensible plugin system). Off in prod until the feature
-  # is user-ready; on in dev/e2e so contributors and tests exercise it.
-  KANDEV_FEATURES_PLUGINS:
-    prod: "false"
-    dev:  "true"
-    e2e:  "true"
-
   # App status bar. Off until a user opts in; on only in e2e so browser tests
   # continuously exercise the global surface without changing user defaults.
   KANDEV_FEATURES_APP_STATUS_BAR:

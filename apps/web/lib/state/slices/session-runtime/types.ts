@@ -377,6 +377,16 @@ export type SessionPollModeState = {
   bySessionId: Record<string, SessionPollMode>;
 };
 
+/**
+ * Whether each session's executor can run the embedded code-server. Resolved
+ * from the session status by the task page and published here so panels that
+ * offer editors — the Files tree context menu — can honour the same capability
+ * as the task top bar.
+ */
+export type EmbeddedVscodeSupportState = {
+  bySessionId: Record<string, boolean>;
+};
+
 export type SessionRuntimeSliceState = {
   terminal: TerminalState;
   shell: ShellState;
@@ -397,6 +407,7 @@ export type SessionRuntimeSliceState = {
   userShells: UserShellsState;
   prepareProgress: PrepareProgressState;
   sessionPollMode: SessionPollModeState;
+  embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
 };
 
@@ -473,6 +484,7 @@ export type SessionRuntimeSliceActions = {
     patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
+  setEmbeddedVscodeSupport: (sessionId: string, supported: boolean) => void;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

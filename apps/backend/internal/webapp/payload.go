@@ -15,10 +15,9 @@ type BootPayload struct {
 	// accidental-mutation interlock. It is not an authentication credential.
 	InterimSettingsInterlockToken string `json:"interimSettingsInterlockToken,omitempty"`
 	// Plugins lists every active, UI-bundle-declaring plugin, per
-	// docs/plans/plugins/PLUGIN-API.md ("Loading model"). Populated
-	// only when the plugins feature flag is on; the flag itself is not
-	// carried here (see /api/v1/features) — this is purely active-bundle
-	// data the frontend still gates loading on via useFeature("plugins").
+	// docs/plans/plugins/PLUGIN-API.md ("Loading model"). Empty when the
+	// plugin service failed to initialize or nothing active declares a
+	// bundle; the frontend boots whatever it finds here unconditionally.
 	Plugins []ActivePluginPayload `json:"plugins,omitempty"`
 }
 

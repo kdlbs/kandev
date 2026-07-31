@@ -6,6 +6,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
+import { persistQuickChatRename } from "@/lib/quick-chat/rename";
 import {
   agentProfileId as toAgentProfileId,
   sessionId as toSessionId,
@@ -84,11 +85,30 @@ function registerStartedSession({
   });
   if (openInQuickChat) {
     store.closeQuickChatSession(getQuickChatSetupSessionId(workspaceId, "config"));
-    store.openQuickChat(response.session_id, workspaceId, agentProfileId, "config");
+    store.openQuickChat(
+      response.session_id,
+      workspaceId,
+      agentProfileId,
+      "config",
+      response.task_id,
+    );
   } else {
-    store.addQuickChatSession(response.session_id, workspaceId, agentProfileId, "config");
+    store.addQuickChatSession(
+      response.session_id,
+      workspaceId,
+      agentProfileId,
+      "config",
+      response.task_id,
+    );
   }
-  store.renameQuickChatSession(response.session_id, prompt.slice(0, 40) || "Config Chat");
+  // The config-chat endpoint has no title field, so name the tab from the
+  // opening prompt and save it to the task — otherwise the label would live
+  // only in this browser and be lost on the next resync.
+  const derivedName = prompt.slice(0, 40) || "Config Chat";
+  store.renameQuickChatSession(response.session_id, derivedName);
+  void persistQuickChatRename(response.session_id, response.task_id, derivedName).catch(
+    () => undefined,
+  );
   if (!isPassthrough) store.setQuickChatInitialPrompt(response.session_id, prompt);
 }
 

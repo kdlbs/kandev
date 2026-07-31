@@ -1645,6 +1645,51 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 	})
 }
 
+// httpQuickChatSession is one restorable quick-chat tab.
+type httpQuickChatSession struct {
+	SessionID      string `json:"session_id"`
+	TaskID         string `json:"task_id"`
+	WorkspaceID    string `json:"workspace_id"`
+	Kind           string `json:"kind"`
+	Name           string `json:"name,omitempty"`
+	AgentProfileID string `json:"agent_profile_id,omitempty"`
+}
+
+// httpListQuickChatSessionsResponse mirrors the quick-chat slice of the boot
+// payload so a running client can resync its tab strip without a full reload.
+type httpListQuickChatSessionsResponse struct {
+	Sessions     []httpQuickChatSession `json:"sessions"`
+	TaskSessions []dto.TaskSessionDTO   `json:"task_sessions"`
+}
+
+// httpListQuickChatSessions returns the workspace's restorable quick-chat tabs.
+// Quick chats are created and closed from any device, so clients poll this on
+// (re)connect to converge on the server's list instead of drifting apart.
+func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
+	workspaceID := c.Param("id")
+	items, err := h.service.ListQuickChatSessions(c.Request.Context(), workspaceID)
+	if err != nil {
+		handleNotFound(c, h.logger, err, "workspace not found")
+		return
+	}
+	response := httpListQuickChatSessionsResponse{
+		Sessions:     make([]httpQuickChatSession, 0, len(items)),
+		TaskSessions: make([]dto.TaskSessionDTO, 0, len(items)),
+	}
+	for _, item := range items {
+		response.Sessions = append(response.Sessions, httpQuickChatSession{
+			SessionID:      item.SessionID,
+			TaskID:         item.TaskID,
+			WorkspaceID:    item.WorkspaceID,
+			Kind:           item.Kind,
+			Name:           item.Name,
+			AgentProfileID: item.AgentProfileID,
+		})
+		response.TaskSessions = append(response.TaskSessions, dto.FromTaskSession(item.Session))
+	}
+	c.JSON(http.StatusOK, response)
+}
+
 // httpStartConfigChatRequest is the request body for starting a config chat session.
 type httpStartConfigChatRequest struct {
 	AgentProfileID string `json:"agent_profile_id,omitempty"`

@@ -6,6 +6,7 @@ import type {
   ListRepositoryScriptsResponse,
   Workspace,
   Repository,
+  TaskSession,
 } from "@/lib/types/http";
 
 // Workspace operations
@@ -150,18 +151,32 @@ export async function startQuickChat(
   });
 }
 
+export type QuickChatSessionResponse = {
+  session_id: string;
+  task_id: string;
+  workspace_id: string;
+  kind: "chat" | "config";
+  name?: string;
+  agent_profile_id?: string;
+};
+
+export type ListQuickChatSessionsResponse = {
+  sessions: QuickChatSessionResponse[];
+  task_sessions: TaskSession[];
+};
+
+/**
+ * Lists the workspace's restorable quick-chat tabs.
+ *
+ * Quick chats are created and closed from any device, so this is the same list
+ * the Go boot payload embeds — clients re-read it on (re)connect to converge on
+ * the server's tabs instead of drifting apart.
+ */
 export async function listQuickChatSessions(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{
-    tasks: Array<{
-      id: string;
-      title: string;
-      workspace_id: string;
-      primary_session_id?: string | null;
-      metadata?: Record<string, unknown> | null;
-      origin?: string | null;
-      updated_at?: string;
-    }>;
-  }>(`/api/v1/workspaces/${workspaceId}/tasks?only_ephemeral=true&exclude_config=true`, options);
+  return fetchJson<ListQuickChatSessionsResponse>(
+    `/api/v1/workspaces/${workspaceId}/quick-chats`,
+    options,
+  );
 }
 
 // Config Chat operations

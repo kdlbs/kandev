@@ -2,7 +2,6 @@
 
 import { useEffect } from "react";
 import { useAppStoreApi } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { bootPlugins } from "./boot";
 import type { ActivePlugin } from "./types";
 
@@ -19,11 +18,10 @@ type PluginBootBridgeProps = {
  */
 export function PluginBootBridge({ plugins }: PluginBootBridgeProps) {
   const store = useAppStoreApi();
-  const pluginsEnabled = useFeature("plugins");
 
   useEffect(() => {
-    bootPlugins({ plugins }, store, pluginsEnabled);
-  }, [plugins, store, pluginsEnabled]);
+    bootPlugins({ plugins }, store);
+  }, [plugins, store]);
 
   return null;
 }

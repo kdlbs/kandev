@@ -69,6 +69,28 @@ describe("useOpenSessionInEditor", () => {
     expect(mockOpenSessionInEditor).not.toHaveBeenCalled();
   });
 
+  it("gotos the file in the embedded editor when a file path is returned", async () => {
+    mockOpenSessionInEditor.mockResolvedValueOnce({
+      url: "internal://vscode?goto=apps/web/app.ts",
+    });
+    const { result } = renderHook(() => useOpenSessionInEditor("session-1"));
+
+    await result.current.open({ editorId: "editor-1", filePath: "apps/web/app.ts" });
+
+    expect(mockOpenInternalVscode).toHaveBeenCalled();
+    expect(mockOpenFileInVscode).toHaveBeenCalledWith("session-1", "apps/web/app.ts", 0, 0);
+  });
+
+  it("skips the embedded-editor goto for a folder, which has nothing to open", async () => {
+    mockOpenSessionInEditor.mockResolvedValueOnce({ url: "internal://vscode?goto=apps/web" });
+    const { result } = renderHook(() => useOpenSessionInEditor("session-1"));
+
+    await result.current.open({ editorId: "editor-1", filePath: "apps/web", isDirectory: true });
+
+    expect(mockOpenInternalVscode).toHaveBeenCalled();
+    expect(mockOpenFileInVscode).not.toHaveBeenCalled();
+  });
+
   it("reports editor API failures instead of leaving the button silently idle", async () => {
     mockOpenSessionInEditor.mockRejectedValueOnce(new Error("workspace path not found"));
     const { result } = renderHook(() => useOpenSessionInEditor("session-1"));

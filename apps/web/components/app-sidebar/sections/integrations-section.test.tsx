@@ -41,7 +41,6 @@ vi.mock("@/components/integrations/integrations-menu", () => ({
 }));
 
 const pluginsMock = vi.hoisted(() => ({
-  enabled: true,
   navItems: [] as Array<{
     id: string;
     label: string;
@@ -49,10 +48,6 @@ const pluginsMock = vi.hoisted(() => ({
     icon?: string;
     section?: string;
   }>,
-}));
-
-vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: (flag: string) => flag === "plugins" && pluginsMock.enabled,
 }));
 
 vi.mock("@/lib/plugins/registry", () => ({
@@ -90,7 +85,6 @@ describe("IntegrationsSection", () => {
       { id: "github", label: "GitHub", href: "/github" },
       { id: "jira", label: "Jira", href: "/jira" },
     ]);
-    pluginsMock.enabled = true;
     pluginsMock.navItems = [];
   });
 
@@ -187,11 +181,10 @@ describe("IntegrationsSection", () => {
     expect(container.querySelector(".shrink-0.mr-1")).toBeNull();
   });
 
-  it("hides plugin items (and an otherwise empty section) when the plugins feature is off", () => {
+  it("hides the section entirely when neither first-party links nor plugin items exist", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
     linksMock.mockReturnValue([]);
-    pluginsMock.enabled = false;
-    pluginsMock.navItems = [costPerModelItem];
+    pluginsMock.navItems = [];
 
     const { container } = renderSection();
 

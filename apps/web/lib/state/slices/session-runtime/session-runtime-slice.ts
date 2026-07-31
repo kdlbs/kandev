@@ -216,6 +216,7 @@ function purgePerSessionRuntime(state: SessionRuntimeSliceState, sessionId: stri
   delete state.sessionTodos.bySessionId[sessionId];
   delete state.prepareProgress.bySessionId[sessionId];
   delete state.sessionPollMode.bySessionId[sessionId];
+  delete state.embeddedVscodeSupport.bySessionId[sessionId];
 }
 
 /** Process status + output for every process owned by the session. */
@@ -282,6 +283,7 @@ export const defaultSessionRuntimeState: SessionRuntimeSliceState = {
   userShells: { byEnvironmentId: {}, loading: {}, loaded: {} },
   prepareProgress: { bySessionId: {} },
   sessionPollMode: { bySessionId: {} },
+  embeddedVscodeSupport: { bySessionId: {} },
   workspaceFilesRefresh: { bySessionId: {} },
 };
 
@@ -591,6 +593,10 @@ export const createSessionRuntimeSlice: StateCreator<
   setSessionModels: (sessionId, data) =>
     set((draft) => {
       draft.sessionModels.bySessionId[sessionId] = data;
+    }),
+  setEmbeddedVscodeSupport: (sessionId, supported) =>
+    set((draft) => {
+      draft.embeddedVscodeSupport.bySessionId[sessionId] = supported;
     }),
   setSessionMCPStatus: (sessionId, history) =>
     set((draft) => {

@@ -17,7 +17,6 @@ const useGitHubStatusMock = vi.hoisted(() => vi.fn());
 const useGitLabAvailableMock = vi.hoisted(() => vi.fn());
 const useJiraAvailableMock = vi.hoisted(() => vi.fn());
 const useLinearAvailableMock = vi.hoisted(() => vi.fn());
-const useFeatureMock = vi.hoisted(() => vi.fn());
 const activeWorkspaceRef = vi.hoisted(() => ({
   id: null as string | null,
   items: [] as Array<{ id: string }>,
@@ -37,10 +36,6 @@ vi.mock("@/hooks/domains/jira/use-jira-availability", () => ({
 
 vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
   useLinearAvailable: useLinearAvailableMock,
-}));
-
-vi.mock("@/hooks/domains/features/use-feature", () => ({
-  useFeature: useFeatureMock,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -263,7 +258,6 @@ describe("MobileIntegrationsSection", () => {
   }
 
   it("renders a touch row for each configured first-party link and closes the sheet on click", () => {
-    useFeatureMock.mockReturnValue(false);
     mockAvailability({ githubReady: true, jiraAvailable: false, linearAvailable: true });
 
     const { onNavigate } = renderMobileSection();
@@ -278,7 +272,6 @@ describe("MobileIntegrationsSection", () => {
   });
 
   it("renders plugin nav items targeting the integrations section, gated on the plugins flag", () => {
-    useFeatureMock.mockImplementation((flag: string) => flag === "plugins");
     mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
     registerHelloIntegrationItem();
     registerNavItem("plugin-b", {
@@ -297,19 +290,7 @@ describe("MobileIntegrationsSection", () => {
     expect(screen.queryByTestId("plugin-nav-item-main-item")).toBeNull();
   });
 
-  it("hides plugin nav items when the plugins feature flag is off", () => {
-    useFeatureMock.mockReturnValue(false);
-    mockAvailability({ githubReady: true, jiraAvailable: false, linearAvailable: false });
-    registerHelloIntegrationItem();
-
-    renderMobileSection();
-
-    expect(screen.getByRole("link", { name: "GitHub" })).toBeTruthy();
-    expect(screen.queryByTestId("plugin-nav-item-hello")).toBeNull();
-  });
-
   it("renders when only plugin items exist and no first-party links are configured", () => {
-    useFeatureMock.mockImplementation((flag: string) => flag === "plugins");
     mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
     registerHelloIntegrationItem();
 
@@ -320,7 +301,6 @@ describe("MobileIntegrationsSection", () => {
   });
 
   it("renders nothing when there are no links and no plugin items", () => {
-    useFeatureMock.mockImplementation((flag: string) => flag === "plugins");
     mockAvailability({ githubReady: false, jiraAvailable: false, linearAvailable: false });
 
     const { container } = renderMobileSection();

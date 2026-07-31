@@ -74,6 +74,7 @@ export type KanbanUpdatePayload = {
 
 export type TaskEventPayload = {
   task_id: string;
+  workspace_id?: string;
   workflow_id: string;
   old_workflow_id?: string | null;
   workflow_step_id: string;
@@ -106,6 +107,8 @@ export type TaskEventPayload = {
   archived_at?: string | null;
   updated_at?: string;
   is_ephemeral: boolean;
+  /** Task origin (e.g. "manual", "automation_run"). */
+  origin?: string;
   parent_id?: string | null;
   metadata?: Record<string, unknown> | null;
   /** Deletion reason on task.deleted (e.g. "pr_approved_by_user"). Absent otherwise. */

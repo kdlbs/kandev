@@ -160,6 +160,7 @@ export type AppState = KanbanSlice & {
   sessionMcpStatus: (typeof defaultSessionRuntimeState)["sessionMcpStatus"];
   promptUsage: (typeof defaultSessionRuntimeState)["promptUsage"];
   sessionPollMode: (typeof defaultSessionRuntimeState)["sessionPollMode"];
+  embeddedVscodeSupport: (typeof defaultSessionRuntimeState)["embeddedVscodeSupport"];
 
   // GitHub slice
   githubStatus: (typeof defaultGitHubState)["githubStatus"];
@@ -334,13 +335,11 @@ export type AppState = KanbanSlice & {
   setSystemHealth: (response: SystemHealthResponse) => void;
   setSystemHealthLoading: (loading: boolean) => void;
   invalidateSystemHealth: () => void;
-  openQuickChat: (
-    sessionId: string,
-    workspaceId: string,
-    agentProfileId?: string,
-    kind?: UISliceTypes.QuickChatSessionKind,
-  ) => void;
+  openQuickChat: UIA["openQuickChat"];
   addQuickChatSession: UIA["addQuickChatSession"];
+  syncQuickChatSessions: UIA["syncQuickChatSessions"];
+  upsertQuickChatSessionFromEvent: UIA["upsertQuickChatSessionFromEvent"];
+  removeQuickChatSessionsForTask: UIA["removeQuickChatSessionsForTask"];
   closeQuickChat: () => void;
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
@@ -477,6 +476,7 @@ export type AppState = KanbanSlice & {
     patch: Partial<Omit<UserShellInfo, "terminalId">>,
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
+  setEmbeddedVscodeSupport: (sessionId: string, supported: boolean) => void;
   /* prettier-ignore */ setSidebarActiveView: UIA["setSidebarActiveView"];
   createSidebarView: UIA["createSidebarView"];
   updateSidebarDraft: UIA["updateSidebarDraft"];
