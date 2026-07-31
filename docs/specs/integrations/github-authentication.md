@@ -457,6 +457,10 @@ registration and never creates a global default.
   human identity; the page does not render a redundant identity section or a fake selector.
 - The workspace identity and task-access summary lines expose concise help through a tooltip on
   hover or keyboard focus and the same explanation in a 44px-target drawer on touch devices.
+- Refreshing an already loaded workspace GitHub status keeps the current identity, task-access
+  summary, and actions visible while the request is in flight. The refresh control alone shows
+  progress and prevents duplicate activation. A workspace whose status has not loaded yet still
+  shows the initial connection-status placeholder and never inherits another workspace's data.
 - When rate-limit snapshots are available, the connection status row exposes a **Show GitHub API
   limits** icon. Its desktop tooltip and touch drawer show remaining and total API requests,
   GraphQL query points, Search requests, and reset timing. Exhausted buckets explain that
@@ -475,6 +479,12 @@ registration and never creates a global default.
 
 ## Scenarios
 
+- **GIVEN** a workspace GitHub status is visible, **WHEN** the user refreshes it and the status
+  request is still pending, **THEN** the existing workspace content remains visible and usable
+  while the refresh control is busy, on both desktop and mobile.
+- **GIVEN** the user navigates to a workspace with no loaded GitHub status, **WHEN** its initial
+  status request is pending, **THEN** the UI shows the connection-status placeholder and no status
+  from the previous workspace.
 - **GIVEN** two workspaces, **WHEN** each selects a different App registration and installation,
   **THEN** status, tokens, webhooks, repositories, actors, and revocation remain isolated.
 - **GIVEN** two workspaces intentionally reuse one registration, **WHEN** each installs it into a

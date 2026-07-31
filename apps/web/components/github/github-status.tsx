@@ -189,6 +189,7 @@ function AutomationActions({
   status,
   workspaceId,
   busy,
+  refreshing,
   onDisconnect,
   onRefresh,
   taskAccess,
@@ -196,6 +197,7 @@ function AutomationActions({
   status: GitHubStatus;
   workspaceId: string;
   busy: boolean;
+  refreshing: boolean;
   onDisconnect: () => void;
   onRefresh: () => void;
   taskAccess: TaskGitCredentialsState;
@@ -213,10 +215,12 @@ function AutomationActions({
         variant="outline"
         size="icon"
         onClick={onRefresh}
+        disabled={refreshing}
+        aria-busy={refreshing}
         className="h-11 w-11 cursor-pointer"
         aria-label="Refresh GitHub connection"
       >
-        <IconRefresh className="h-4 w-4" />
+        <IconRefresh className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
       </Button>
       {status.automation && (
         <Button
@@ -254,7 +258,7 @@ export function GitHubAutomationSettings({ workspaceId }: { workspaceId: string 
       setBusy(false);
     }
   }, [refresh, toast, workspaceId]);
-  if (!loaded || loading || !status) return <LoadingStatus />;
+  if (!loaded || !status) return <LoadingStatus />;
   const activeRegistrationId =
     status.app_registration?.id ?? status.automation?.app_registration_id;
   const activeApp = appRegistrations.registrations.find((item) => item.id === activeRegistrationId);
@@ -268,6 +272,7 @@ export function GitHubAutomationSettings({ workspaceId }: { workspaceId: string 
         status={status}
         workspaceId={workspaceId}
         busy={busy}
+        refreshing={loading}
         onDisconnect={disconnect}
         onRefresh={refresh}
         taskAccess={taskAccess}
@@ -346,10 +351,10 @@ function PersonalIdentityActions({
 }
 
 export function GitHubPersonalSettings({ workspaceId }: { workspaceId: string }) {
-  const { status, loaded, loading, refresh } = useGitHubStatus(workspaceId);
+  const { status, loaded, refresh } = useGitHubStatus(workspaceId);
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
-  if (!loaded || loading || !status) return null;
+  if (!loaded || !status) return null;
   const view = personalIdentityView(status);
   const appAutomation = status.automation?.source === "github_app_installation";
   if (!status.automation) return null;
