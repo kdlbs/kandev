@@ -37,7 +37,7 @@ var (
 	ErrWorkspaceCredentialUnavailable = errors.New("workspace Git credential is unavailable")
 	ErrRepositoryOwnershipMismatch    = errors.New("managed repository ownership mismatch")
 	gitURLUserInfoPattern             = regexp.MustCompile(`(?i)(https?://)[^/\s@]+@`)
-	gitCredentialPattern              = regexp.MustCompile(`(?i)\b(password|token|secret|authorization)(\s*[:=]\s*)[^\s]+`)
+	gitCredentialPattern              = regexp.MustCompile(`(?i)\b(password|token|secret|authorization)(\s*[:=]\s*)[^\r\n]+`)
 )
 
 // Config holds configuration for the repository cloner.

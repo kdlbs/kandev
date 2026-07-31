@@ -165,7 +165,7 @@ func TestSetOriginURLClassifiesDubiousOwnership(t *testing.T) {
 }
 
 func TestRedactCloneOutputRedactsCredentialsAndBoundsOutput(t *testing.T) {
-	output := "fatal: https://alice:secret@example.com/acme/widgets.git password=another-secret " + strings.Repeat("x", maxGitDiagnosticBytes+100)
+	output := "fatal: https://alice:secret@example.com/acme/widgets.git password=another-secret Authorization: Bearer synthetic-secret " + strings.Repeat("x", maxGitDiagnosticBytes+100)
 	redacted := redactCloneOutput(output, "another-secret")
 	if strings.Contains(redacted, "secret") || strings.Contains(redacted, "another-secret") {
 		t.Fatalf("redactCloneOutput() leaked credential: %q", redacted)

@@ -1,12 +1,14 @@
 package launcher
 
 import (
+	"errors"
 	"os"
 	"os/user"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseServiceArgsAcceptsSystemRunAs(t *testing.T) {
@@ -160,6 +162,149 @@ func TestInstallSystemdRejectsManagedHomeOwnerMismatchBeforeWrite(t *testing.T) 
 		t.Fatalf("service manager commands = %d, want none after preflight failure", managerCalls)
 	}
 	definition, err := os.ReadFile(unitPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(definition) != original {
+		t.Fatalf("service definition changed after owner mismatch:\n%s", definition)
+	}
+}
+
+func TestInstallLaunchdPreservesExistingManagedUser(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("system service identity is unsupported on Windows")
+	}
+	originalExecutablePath := executablePath
+	originalExecuteServiceCommand := executeServiceCommand
+	originalLaunchctlCommand := launchctlCommand
+	originalLaunchctlSleep := launchctlSleep
+	originalServicePrintln := servicePrintln
+	originalLookup := lookupNativeServiceOwner
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		executeServiceCommand = originalExecuteServiceCommand
+		launchctlCommand = originalLaunchctlCommand
+		launchctlSleep = originalLaunchctlSleep
+		servicePrintln = originalServicePrintln
+		lookupNativeServiceOwner = originalLookup
+	})
+
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentUID, currentGID, err := lookupNativeServiceOwner(current.Username)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tmp := t.TempDir()
+	homeDir := filepath.Join(tmp, "home")
+	if err := os.Mkdir(homeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	plistPath := filepath.Join(tmp, "com.kdlbs.kandev.plist")
+	original := "<!-- managed by kandev -->\n<plist><dict><key>UserName</key><string>alice</string></dict></plist>\n"
+	if err := os.WriteFile(plistPath, []byte(original), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	lookupNativeServiceOwner = func(string) (int, int, error) { return currentUID, currentGID, nil }
+	executablePath = func() (string, error) { return "/opt/kandev/bin/kandev", nil }
+	executeServiceCommand = func(string, ...string) error { return nil }
+	launchctlCommand = func(args ...string) error {
+		if len(args) > 0 && args[0] == "print" {
+			return errors.New("not loaded")
+		}
+		return nil
+	}
+	launchctlSleep = func(time.Duration) {}
+	servicePrintln = func(string) {}
+
+	if code := installLaunchd(
+		serviceArgs{Action: actionInstall, System: true, HomeDir: homeDir, NoBootStart: true},
+		BuildInfo{Version: "test"}, plistPath, "system/com.kdlbs.kandev", "system",
+	); code != 0 {
+		t.Fatalf("installLaunchd() = %d, want 0", code)
+	}
+
+	plist, err := os.ReadFile(plistPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(plist), "<key>UserName</key>\n  <string>alice</string>") {
+		t.Fatalf("reinstalled plist lost preserved service user:\n%s", plist)
+	}
+}
+
+func TestInstallLaunchdRejectsManagedHomeOwnerMismatchBeforeWrite(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("system service identity is unsupported on Windows")
+	}
+	originalExecutablePath := executablePath
+	originalExecuteServiceCommand := executeServiceCommand
+	originalLaunchctlCommand := launchctlCommand
+	originalLaunchctlSleep := launchctlSleep
+	originalServicePrintln := servicePrintln
+	originalLookup := lookupNativeServiceOwner
+	t.Cleanup(func() {
+		executablePath = originalExecutablePath
+		executeServiceCommand = originalExecuteServiceCommand
+		launchctlCommand = originalLaunchctlCommand
+		launchctlSleep = originalLaunchctlSleep
+		servicePrintln = originalServicePrintln
+		lookupNativeServiceOwner = originalLookup
+	})
+
+	current, err := user.Current()
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentUID, _, err := lookupNativeServiceOwner(current.Username)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mismatchUID := currentUID + 1
+	if mismatchUID == currentUID {
+		mismatchUID++
+	}
+
+	tmp := t.TempDir()
+	homeDir := filepath.Join(tmp, "home")
+	if err := os.Mkdir(homeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	plistPath := filepath.Join(tmp, "com.kdlbs.kandev.plist")
+	original := "<!-- managed by kandev -->\n<plist><dict><key>UserName</key><string>alice</string></dict></plist>\n"
+	if err := os.WriteFile(plistPath, []byte(original), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	lookupNativeServiceOwner = func(string) (int, int, error) { return mismatchUID, 5678, nil }
+	executablePath = func() (string, error) { return "/opt/kandev/bin/kandev", nil }
+	servicePrintln = func(string) {}
+	var managerCalls, launchctlCalls int
+	executeServiceCommand = func(string, ...string) error {
+		managerCalls++
+		return nil
+	}
+	launchctlCommand = func(...string) error {
+		launchctlCalls++
+		return nil
+	}
+	launchctlSleep = func(time.Duration) {}
+
+	code := installLaunchd(
+		serviceArgs{Action: actionInstall, System: true, HomeDir: homeDir, NoBootStart: true},
+		BuildInfo{Version: "test"}, plistPath, "system/com.kdlbs.kandev", "system",
+	)
+	if code == 0 {
+		t.Fatal("installLaunchd() = 0, want owner mismatch failure")
+	}
+	if managerCalls != 0 || launchctlCalls != 0 {
+		t.Fatalf("service commands = manager:%d launchctl:%d, want none after preflight failure", managerCalls, launchctlCalls)
+	}
+	definition, err := os.ReadFile(plistPath)
 	if err != nil {
 		t.Fatal(err)
 	}

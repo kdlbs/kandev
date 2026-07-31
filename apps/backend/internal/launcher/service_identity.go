@@ -45,6 +45,17 @@ func resolveSystemServiceUser(args serviceArgs, servicePath, manager string) (st
 	)
 }
 
+func resolveAndValidateSystemIdentity(args serviceArgs, servicePath, manager, homeDir string) (string, error) {
+	systemUser, err := resolveSystemServiceUser(args, servicePath, manager)
+	if err != nil {
+		return "", err
+	}
+	if err := validateSystemServiceHomeOwner(homeDir, systemUser); err != nil {
+		return "", err
+	}
+	return systemUser, nil
+}
+
 func validateSystemServiceUser(userName string) error {
 	trimmed := strings.TrimSpace(userName)
 	if trimmed == "" || trimmed != userName || strings.ContainsAny(userName, " \t\r\n") {
@@ -176,7 +187,7 @@ func validateSystemServiceHomeOwner(homeDir, userName string) error {
 	if err != nil {
 		return fmt.Errorf("resolve owner for system service home %q: %w", homeDir, err)
 	}
-	actualUID, err := nativePathOwnerUID(homeDir)
+	actualUID, err := nativeFileOwnerUID(info)
 	if err != nil {
 		return fmt.Errorf("inspect owner of system service home %q: %w", homeDir, err)
 	}

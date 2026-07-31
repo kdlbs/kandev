@@ -59,7 +59,11 @@ Sequential after behavior tasks.
 - Updated `docs/public/run-as-a-service.md`, `docs/public/cli.md`, and
   `docs/public/integrations.md` with identity preservation, `--run-as`, ownership preflight, and
   dubious-ownership recovery guidance.
-- Public-doc validation passed 58 structural tests and validated 41 published pages.
+- `node --test scripts/validate-public-docs.test.mjs` passed all 58 structural tests.
+- `node scripts/validate-public-docs.mjs` validated all 41 published pages.
+- Final backend verification passed: `cd apps/backend && make test` and `cd apps/backend && make lint`.
+- Operator migration caveat: existing homes with an owner mismatch require explicit operator
+  reconciliation before reinstall; Kandev does not auto-chown or add Git trust exceptions.
 
 ## Output Contract
 

@@ -62,11 +62,15 @@ unless the user explicitly authorizes delegation.
 - RED: `TestParseServiceArgsAcceptsSystemRunAs`, `TestInstallSystemdPreservesExistingManagedUser`,
   and `TestInstallSystemdRejectsManagedHomeOwnerMismatchBeforeWrite` failed before the identity
   resolver and owner preflight existed.
-- GREEN: targeted identity tests passed 5 cases; `go test ./internal/launcher -count=1` passed 114
-  tests.
-- The root-controlled systemd/launchd definition is now authoritative on reinstall. First installs
-  from a root login require explicit `--run-as`, and system homes must already exist, be real
-  directories, and have the selected account's UID.
+- GREEN: `cd apps/backend && go test ./internal/launcher -run 'Test.*(RunAs|ServiceUser|SystemServiceIdentity|SystemHomeOwner|InstallSystemd|InstallLaunchd)' -count=1` passed 33 cases; `cd apps/backend && go test ./internal/launcher -count=1` passed 116 tests.
+- Identity precedence is explicit `--run-as`, an existing Kandev-managed systemd/launchd definition,
+  non-root `SUDO_USER` on first install, then an actionable error requiring explicit selection.
+  Root is selected only by `--run-as root` on a first root-shell install.
+- The service-definition trust check accepts only a non-symlink regular definition containing the
+  Kandev managed marker; service-owned install metadata is not an authority for identity.
+- Owner preflight reads the system home before any service-definition write or service-manager
+  command and rejects UID mismatches. Windows does not support native system-service ownership
+  validation; identity tests skip there.
 
 ## Output Contract
 

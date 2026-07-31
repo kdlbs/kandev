@@ -8,10 +8,9 @@ import (
 	"syscall"
 )
 
-func nativePathOwnerUID(path string) (int, error) {
-	info, err := os.Lstat(path)
-	if err != nil {
-		return 0, err
+func nativeFileOwnerUID(info os.FileInfo) (int, error) {
+	if info == nil {
+		return 0, fmt.Errorf("filesystem metadata is nil")
 	}
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {

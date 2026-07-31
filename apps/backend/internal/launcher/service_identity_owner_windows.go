@@ -2,8 +2,11 @@
 
 package launcher
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
-func nativePathOwnerUID(string) (int, error) {
+func nativeFileOwnerUID(os.FileInfo) (int, error) {
 	return 0, fmt.Errorf("system service home ownership is unsupported on windows")
 }

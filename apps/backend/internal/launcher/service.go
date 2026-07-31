@@ -253,12 +253,8 @@ func installSystemd(args serviceArgs, build BuildInfo, unitPath string) int {
 	homeDir := serviceHomeDir(args)
 	logDir := filepath.Join(homeDir, "logs")
 	bundleDir := serviceBundleDir(self)
-	systemUser, err := resolveSystemServiceUser(args, unitPath, nativeServiceManagerSystemd)
+	systemUser, err := resolveAndValidateSystemIdentity(args, unitPath, nativeServiceManagerSystemd, homeDir)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
-		return 1
-	}
-	if err := validateSystemServiceHomeOwner(homeDir, systemUser); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}
@@ -370,12 +366,8 @@ func installLaunchd(args serviceArgs, build BuildInfo, plistPath, target, domain
 	homeDir := serviceHomeDir(args)
 	logDir := filepath.Join(homeDir, "logs")
 	bundleDir := serviceBundleDir(self)
-	systemUser, err := resolveSystemServiceUser(args, plistPath, nativeServiceManagerLaunchd)
+	systemUser, err := resolveAndValidateSystemIdentity(args, plistPath, nativeServiceManagerLaunchd, homeDir)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
-		return 1
-	}
-	if err := validateSystemServiceHomeOwner(homeDir, systemUser); err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}

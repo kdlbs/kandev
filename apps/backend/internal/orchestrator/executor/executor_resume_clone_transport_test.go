@@ -217,8 +217,16 @@ func TestBuildResumeRequestPreparesEachAttachedRepositoryOnce(t *testing.T) {
 	if _, _, _, _, _, err := executor.buildResumeRequest(context.Background(), &v1.Task{ID: "task-1", WorkspaceID: "workspace-1", Title: "resume"}, session, true); err != nil {
 		t.Fatalf("buildResumeRequest() error = %v", err)
 	}
-	if cloner.setOriginCalls != 2 {
-		t.Fatalf("origin reconciliation calls = %d, want one per attached repository", cloner.setOriginCalls)
+	for _, repositoryPath := range []string{repoPathOne, repoPathTwo} {
+		calls := 0
+		for _, preparedPath := range cloner.setOriginPaths {
+			if preparedPath == repositoryPath {
+				calls++
+			}
+		}
+		if calls != 1 {
+			t.Fatalf("origin reconciliation calls for %q = %d, want one", repositoryPath, calls)
+		}
 	}
 }
 
@@ -239,7 +247,7 @@ type cloneTransportTestCloner struct {
 	cloneURL       string
 	returnPath     string
 	setOriginErr   error
-	setOriginCalls int
+	setOriginPaths []string
 }
 
 func (c *cloneTransportTestCloner) EnsureWorkspaceClonedForProvider(
@@ -251,7 +259,7 @@ func (c *cloneTransportTestCloner) EnsureWorkspaceClonedForProvider(
 func (c *cloneTransportTestCloner) ShouldRecloneForWorkspace(string, string) bool { return false }
 
 func (c *cloneTransportTestCloner) SetOriginURL(ctx context.Context, repositoryPath, originURL string) error {
-	c.setOriginCalls++
+	c.setOriginPaths = append(c.setOriginPaths, repositoryPath)
 	if c.setOriginErr != nil {
 		return c.setOriginErr
 	}

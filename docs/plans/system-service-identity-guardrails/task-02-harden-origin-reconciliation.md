@@ -57,10 +57,10 @@ unless the user explicitly authorizes delegation.
 
 - RED: the matching-origin and diagnostic tests failed before the origin inspection/no-op and
   diagnostic classifier existed; the ownership case could only report a bare exit status.
-- GREEN: focused origin/redaction tests passed 6 cases; `go test ./internal/repoclone -count=1`
-  passed 47 tests.
+- GREEN: `cd apps/backend && go test ./internal/repoclone -run 'Test.*(SetOriginURL|RepositoryGitError|RedactGitDiagnostic|RedactCloneOutput)' -count=1` passed 7 cases; `cd apps/backend && go test ./internal/repoclone -count=1` passed 48 tests.
 - `SetOriginURL` now serializes read/compare/write, skips a matching origin, classifies dubious
-  ownership with `errors.Is`, and bounds/redacts Git output.
+  ownership with `errors.Is`, and bounds/redacts Git output, including complete multi-token
+  `Authorization` values.
 
 ## Output Contract
 

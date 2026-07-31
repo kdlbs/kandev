@@ -141,12 +141,23 @@ tasks so public wording matches the implemented CLI and errors.
 Run task-focused RED/GREEN commands first, then:
 
 ```bash
-cd apps/backend && go test ./internal/launcher ./internal/repoclone ./internal/orchestrator/executor -count=1
-make -C apps/backend test
-make -C apps/backend lint
+set -euo pipefail
+(
+  cd apps/backend
+  go test ./internal/launcher ./internal/repoclone ./internal/orchestrator/executor -count=1
+  make test
+  make lint
+)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 ```
+
+## Recorded Results
+
+- Backend focused tests: `cd apps/backend && go test ./internal/launcher ./internal/repoclone ./internal/orchestrator/executor -count=1` passed.
+- Backend verification: `cd apps/backend && make test` and `cd apps/backend && make lint` passed.
+- Public documentation: `node --test scripts/validate-public-docs.test.mjs` passed 58 tests; `node scripts/validate-public-docs.mjs` validated 41 published pages.
+- Operator migration caveat: an existing system home owned by a different account must be reconciled explicitly before reinstall; Kandev does not recursively chown it or add Git trust exceptions.
 
 No browser E2E is planned because the change adds no UI state or interaction. Existing backend
 error propagation displays the improved sanitized message in the current session error surface.
