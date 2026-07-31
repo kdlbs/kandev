@@ -411,6 +411,12 @@ post-signature processing failures produce `failing`; a later valid successful d
   `github_app_registration_in_use` with a non-secret binding count.
 - Changing workspace auth while a flow is open makes the stale callback fail without reverting the
   newer connection.
+- A PAT replacement is validated against GitHub before it replaces the current workspace
+  connection. An invalid PAT leaves the previous connection unchanged, keeps the submitted draft
+  available for correction, and shows the validation error in the connection dialog.
+- If a previously valid GitHub credential expires or is revoked, My GitHub stays on the current
+  route and renders a reconnect/loading error instead of treating GitHub's 401 as an expired Kandev
+  login session.
 
 ## Persistence Guarantees
 
@@ -522,6 +528,12 @@ registration and never creates a global default.
 - **GIVEN** a PAT or named CLI connection draft and a changed task access mode, **WHEN** the user
   presses the dialog's single **Save changes** action, **THEN** both drafts are persisted, the dialog
   closes only after both succeed, and reopening shows the selected account and task mode.
+- **GIVEN** a user enters an invalid replacement PAT, **WHEN** GitHub rejects it during **Save
+  changes**, **THEN** the dialog remains open, the submitted PAT remains available for correction,
+  an error is shown, and the previously active workspace connection is unchanged.
+- **GIVEN** a configured PAT has expired or been revoked, **WHEN** the user opens My GitHub and the
+  provider data request returns 401, **THEN** the page remains on `/github`, shows an authentication
+  loading error, and does not navigate to the Kandev login screen.
 - **GIVEN** a changed task access mode but no PAT or CLI connection change, **WHEN** the user presses
   **Save changes**, **THEN** only the task policy is persisted and the selected automation identity
   remains unchanged.
