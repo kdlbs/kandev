@@ -372,7 +372,6 @@ const (
 	ActionMCPGetTaskPlan                = "mcp.get_task_plan"
 	ActionMCPUpdateTaskPlan             = "mcp.update_task_plan"
 	ActionMCPDeleteTaskPlan             = "mcp.delete_task_plan"
-	ActionMCPGetTaskNote                = "mcp.get_task_note"
 	ActionMCPUpdateTaskNote             = "mcp.update_task_note"
 	ActionMCPShowWalkthrough            = "mcp.show_walkthrough"
 	ActionMCPGetWalkthrough             = "mcp.get_walkthrough"

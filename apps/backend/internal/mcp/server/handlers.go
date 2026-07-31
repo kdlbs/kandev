@@ -829,10 +829,6 @@ func (s *Server) updateTaskPlanHandler() server.ToolHandlerFunc {
 	}
 }
 
-func (s *Server) getTaskNoteHandler() server.ToolHandlerFunc {
-	return s.getTaskTextToolHandler(ws.ActionMCPGetTaskNote, "No notes exist for this task yet.")
-}
-
 func (s *Server) updateTaskNoteHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID, err := s.resolveTaskID(req)

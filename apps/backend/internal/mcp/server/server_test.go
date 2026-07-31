@@ -113,7 +113,9 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_task_plan_kandev")
 	assert.Contains(t, tools, "update_task_plan_kandev")
 	assert.Contains(t, tools, "delete_task_plan_kandev")
-	assert.Contains(t, tools, "get_task_note_kandev")
+	// Notes are a private, user-owned scratchpad: the agent gets no read tool.
+	// The write tool exists only for the explicit "Enhance note with AI" action.
+	assert.NotContains(t, tools, "get_task_note_kandev")
 	assert.Contains(t, tools, "update_task_note_kandev")
 
 	// Task mode should have interaction tools
@@ -286,7 +288,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "publish_review_findings_kandev", "native code-review publishing must be registered in task mode")
 	assert.Contains(t, tools, "spawn_session_kandev", "spawn_session must be registered in task mode")
 	assert.Contains(t, tools, "add_workspace_sources_kandev")
-	assert.Equal(t, 33, len(tools))
+	assert.Equal(t, 32, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskOnlyAndDiscoverable(t *testing.T) {
@@ -353,7 +355,9 @@ func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_task_plan_kandev")
 	assert.Contains(t, tools, "update_task_plan_kandev")
 	assert.Contains(t, tools, "delete_task_plan_kandev")
-	assert.Contains(t, tools, "get_task_note_kandev")
+	// Notes are a private, user-owned scratchpad: the agent gets no read tool.
+	// The write tool exists only for the explicit "Enhance note with AI" action.
+	assert.NotContains(t, tools, "get_task_note_kandev")
 	assert.Contains(t, tools, "update_task_note_kandev")
 
 	// Office mode should have interaction tools
@@ -397,7 +401,7 @@ func TestServerModeOffice_ToolCount(t *testing.T) {
 	// 4 plan + 2 note + 1 interaction + 1 related-tasks + 3 task-documents = 11
 	// (delegate_task_kandev retired in favour of `agentctl kandev task create …`).
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev is kanban-task-only; office mode advances tasks via its own approval surface")
-	assert.Equal(t, 11, len(tools))
+	assert.Equal(t, 10, len(tools))
 }
 
 func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
@@ -414,8 +418,9 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 	// delegate_task_kandev was retired from ModeOffice (now lives in
 	// the agentctl CLI as `agentctl kandev task create --parent …`).
 	assert.NotContains(t, tools, "delegate_task_kandev")
-	// 4 plan + 2 note + 1 related-tasks + 3 task-documents = 10 (no ask_user_question, no delegate)
-	assert.Equal(t, 10, len(tools))
+	// 4 plan + 1 note (write-only) + 1 related-tasks + 3 task-documents = 9
+	// (no ask_user_question, no delegate)
+	assert.Equal(t, 9, len(tools))
 }
 
 func TestServerModeConstants(t *testing.T) {

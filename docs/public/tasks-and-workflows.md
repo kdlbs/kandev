@@ -18,7 +18,7 @@ A task is the unit of work. A workflow is the ordered process that task follows.
 | Task repository | A repository, base branch, and optional checkout branch attached to a task. A task can have more than one.             |
 | Session         | One agent conversation attached to a task. Several sessions can share the same task environment.                       |
 | Plan            | The task's single editable Markdown plan, with version history. Consecutive writes can be coalesced into one revision. |
-| Notes           | The task's single user-owned Markdown scratchpad, with no version history. Agents may read it freely but only write to it when explicitly asked. |
+| Notes           | Your own private Markdown scratchpad on a task, with no version history. Each user has their own notes, and agents cannot read them. |
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
 
@@ -293,11 +293,13 @@ Revision history is not an immutable record of every autosave. Consecutive write
 
 ## Use task notes
 
-Notes are a separate, user-owned Markdown scratchpad for a task — reminders, requirements, or handoff context that should not live in the shared plan or be rewritten by an agent turn.
+Notes are a private, per-user Markdown scratchpad for a task — reminders, requirements, or context that should not live in the shared plan or be rewritten by an agent turn.
+
+Notes are yours alone. When authentication is enabled, each user keeps their own notes on a task and never sees another user's; with authentication off, the single user has one set of notes per task. Agents have no way to read your notes — there is no read tool — so anything you want an agent to act on has to be said to it directly.
 
 1. In the task workbench, select **Add panel (+) → Notes**.
 2. Write and edit notes directly; the panel autosaves as you type.
-3. Select **Enhance note with AI** to ask the task's active agent to rewrite and polish the current note in place. This is the explicit request agents are prompted to require before writing to notes at all — otherwise they only read notes, never edit them, even via MCP.
+3. Select **Enhance note with AI** to ask the task's agent to rewrite and polish the current note in place. This hands the agent your note text as part of the request — it is the only way an agent sees note content, and the only time one is allowed to write notes back.
 4. From the kanban board, open a card's **⋯** menu and choose **Edit → Edit notes** to view or edit the note in a dialog without opening the task.
 
 Notes have no revision history: an AI enhancement overwrites the note directly, so review the result (or use editor undo) before navigating away.

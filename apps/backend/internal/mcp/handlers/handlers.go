@@ -325,7 +325,6 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPGetTaskPlan, h.handleGetTaskPlan)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPlan, h.handleUpdateTaskPlan)
 	d.RegisterFunc(ws.ActionMCPDeleteTaskPlan, h.handleDeleteTaskPlan)
-	d.RegisterFunc(ws.ActionMCPGetTaskNote, h.handleGetTaskNote)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskNote, h.handleUpdateTaskNote)
 	d.RegisterFunc(ws.ActionMCPShowWalkthrough, h.handleShowWalkthrough)
 	d.RegisterFunc(ws.ActionMCPGetWalkthrough, h.handleGetWalkthrough)
@@ -3313,11 +3312,6 @@ func (h *Handlers) handleDeleteTaskPlan(ctx context.Context, msg *ws.Message) (*
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
-}
-
-// handleGetTaskNote retrieves a task note.
-func (h *Handlers) handleGetTaskNote(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	return handleGetTaskArtifact(ctx, msg, h.noteService.GetNote, dto.TaskNoteFromModel, "Failed to get task note")
 }
 
 func handleGetTaskArtifact[T any, D any](

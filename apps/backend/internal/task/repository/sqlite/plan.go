@@ -17,7 +17,10 @@ const revisionSelectCols = `id, task_id, revision_number, title, content, author
 
 // authorKindAgent matches the task_plan_revisions.author_kind column DEFAULT
 // and is the fallback for unknown values when persisting plan history rows.
-const authorKindAgent = "agent"
+const (
+	authorKindAgent = "agent"
+	authorKindUser  = "user"
+)
 
 const planSelectCols = `id, task_id, title, content, created_by, created_at, updated_at, implementation_started_at, implementation_started_session_id, implementation_started_by`
 

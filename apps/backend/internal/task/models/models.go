@@ -1425,8 +1425,11 @@ type TaskPlanRevision struct {
 // agent may read it freely but should only write it when the user explicitly
 // asks (e.g. via the "Enhance note with AI" action).
 type TaskNote struct {
-	ID        string    `json:"id"`
-	TaskID    string    `json:"task_id"`
+	ID     string `json:"id"`
+	TaskID string `json:"task_id"`
+	// UserID owns the note. Notes are per-user: under enabled auth each user
+	// keeps their own note on a task. "" is the unscoped/auth-disabled owner.
+	UserID    string    `json:"user_id"`
 	Content   string    `json:"content"`
 	UpdatedBy string    `json:"updated_by"` // "agent" or "user"
 	CreatedAt time.Time `json:"created_at"`

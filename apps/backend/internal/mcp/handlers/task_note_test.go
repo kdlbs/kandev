@@ -26,20 +26,6 @@ func seedMCPTaskNoteTask(t *testing.T, repo interface {
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "ws-note", WorkflowID: "wf-note", Title: "Task", State: v1.TaskStateCreated, Priority: "medium", CreatedAt: now, UpdatedAt: now}))
 }
 
-func TestHandleGetTaskNote_MissingReturnsEmptyObject(t *testing.T) {
-	svc, repo := newTestTaskService(t)
-	noteService := service.NewNoteService(repo, nil, testLogger(t))
-	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
-	h.SetNoteService(noteService)
-	seedMCPTaskNoteTask(t, repo, "task-1")
-
-	resp, err := h.handleGetTaskNote(context.Background(), makeWSMessage(t, ws.ActionMCPGetTaskNote, map[string]interface{}{"task_id": "task-1"}))
-	require.NoError(t, err)
-	if string(resp.Payload) != "{}" {
-		t.Fatalf("expected empty object payload, got %s", string(resp.Payload))
-	}
-}
-
 func TestHandleUpdateTaskNote_ForwardsAgentDefault(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	noteService := service.NewNoteService(repo, nil, testLogger(t))

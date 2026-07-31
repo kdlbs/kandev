@@ -100,6 +100,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTaskEnvironmentReposAllowMultiBranch(); err != nil {
 		return err
 	}
+	if err := r.migrateTaskNotesPerUser(); err != nil {
+		return err
+	}
 	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflows.agent_profile_id", `ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
@@ -485,6 +488,36 @@ func (r *Repository) migrateSessionsRemoveAgentExecutionID() error {
 		`CREATE INDEX IF NOT EXISTS idx_task_sessions_task_id ON task_sessions(task_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_sessions_state ON task_sessions(state)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_sessions_task_state ON task_sessions(task_id, state)`,
+	})
+}
+
+// migrateTaskNotesPerUser re-keys task_notes from one note per task to one note
+// per (task, user). Notes are user-owned scratchpads, so under enabled auth two
+// users must be able to keep independent notes on the same task.
+//
+// The old shape declared `task_id TEXT NOT NULL UNIQUE`, an inline constraint
+// backed by an implicit autoindex that cannot be dropped in place — hence a
+// table rebuild rather than an ADD COLUMN. Pre-existing rows carry user_id ”
+// (the unscoped/auth-disabled owner), which is exactly what the single-user
+// path resolves to, so their notes stay visible.
+func (r *Repository) migrateTaskNotesPerUser() error {
+	return r.recreateTableNamed("task_notes.recreate_per_user", "task_notes", "task_id TEXT NOT NULL UNIQUE", []string{
+		`CREATE TABLE task_notes_new (
+			id TEXT PRIMARY KEY,
+			task_id TEXT NOT NULL,
+			user_id TEXT NOT NULL DEFAULT '',
+			content TEXT NOT NULL DEFAULT '',
+			updated_by TEXT NOT NULL DEFAULT 'user',
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			UNIQUE(task_id, user_id),
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`,
+		`INSERT INTO task_notes_new (id, task_id, user_id, content, updated_by, created_at, updated_at)
+			SELECT id, task_id, '', content, updated_by, created_at, updated_at FROM task_notes`,
+		`DROP TABLE task_notes`,
+		`ALTER TABLE task_notes_new RENAME TO task_notes`,
+		`CREATE INDEX IF NOT EXISTS idx_task_notes_task_id ON task_notes(task_id)`,
 	})
 }
 

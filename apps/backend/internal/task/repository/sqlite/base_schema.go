@@ -421,11 +421,13 @@ func (r *Repository) initNotesSchema() error {
 	_, err := r.db.Exec(`
 	CREATE TABLE IF NOT EXISTS task_notes (
 		id TEXT PRIMARY KEY,
-		task_id TEXT NOT NULL UNIQUE,
+		task_id TEXT NOT NULL,
+		user_id TEXT NOT NULL DEFAULT '',
 		content TEXT NOT NULL DEFAULT '',
 		updated_by TEXT NOT NULL DEFAULT 'user',
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
+		UNIQUE(task_id, user_id),
 		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_task_notes_task_id ON task_notes(task_id);
@@ -486,7 +488,7 @@ func (r *Repository) backfillInitialPlanRevisions() error {
 	for _, x := range pending {
 		authorKind := x.createdBy
 		// Match CreateTaskPlan (plan.go) and the task_plan_revisions column DEFAULT 'agent'.
-		if authorKind != "user" && authorKind != authorKindAgent {
+		if authorKind != authorKindUser && authorKind != authorKindAgent {
 			authorKind = authorKindAgent
 		}
 		_, err := r.db.Exec(r.db.Rebind(`

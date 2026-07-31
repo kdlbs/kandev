@@ -884,21 +884,6 @@ func TestGetTaskPlan_FallsBackToBoundTask(t *testing.T) {
 	assert.Equal(t, "task-A", payload["task_id"])
 }
 
-func TestGetTaskNote_ExplicitTaskIDForwardedNotBound(t *testing.T) {
-	backend := &testBackend{response: map[string]interface{}{"content": "B's notes"}}
-	s := newTaskModeServer(t, backend, "task-A")
-
-	result := callTool(t, s, "get_task_note_kandev", map[string]interface{}{
-		"task_id": "task-B",
-	})
-
-	assert.False(t, result.IsError)
-	assert.Equal(t, ws.ActionMCPGetTaskNote, backend.lastAction)
-	payload, ok := backend.lastPayload.(map[string]string)
-	require.True(t, ok)
-	assert.Equal(t, "task-B", payload["task_id"])
-}
-
 func TestUpdateTaskNote_ExplicitTaskIDForwardedNotBound(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{"id": "note-1"}}
 	s := newTaskModeServer(t, backend, "task-A")
@@ -932,7 +917,6 @@ func TestPlanTools_DescriptionsDocumentCrossTaskBehavior(t *testing.T) {
 		"get_task_plan_kandev",
 		"update_task_plan_kandev",
 		"delete_task_plan_kandev",
-		"get_task_note_kandev",
 		"update_task_note_kandev",
 		"show_walkthrough_kandev",
 		"get_walkthrough_kandev",
@@ -960,7 +944,6 @@ func TestTaskScopedTools_TaskIDIsOptional(t *testing.T) {
 		"get_task_plan_kandev",
 		"update_task_plan_kandev",
 		"delete_task_plan_kandev",
-		"get_task_note_kandev",
 		"update_task_note_kandev",
 		"show_walkthrough_kandev",
 		"get_walkthrough_kandev",

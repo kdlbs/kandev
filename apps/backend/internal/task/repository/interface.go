@@ -424,9 +424,10 @@ type PlanRepository interface {
 	WritePlanRevision(ctx context.Context, head *models.TaskPlan, rev *models.TaskPlanRevision, coalesceLatestID *string) error
 }
 
-// NoteRepository handles task note CRUD (single row per task, no revision history).
+// NoteRepository handles task note CRUD (one row per task+user, no revision
+// history). userID is the note owner; "" is the unscoped/auth-disabled owner.
 type NoteRepository interface {
-	GetTaskNote(ctx context.Context, taskID string) (*models.TaskNote, error)
+	GetTaskNote(ctx context.Context, taskID, userID string) (*models.TaskNote, error)
 	UpsertTaskNote(ctx context.Context, note *models.TaskNote) error
-	DeleteTaskNote(ctx context.Context, taskID string) error
+	DeleteTaskNote(ctx context.Context, taskID, userID string) error
 }

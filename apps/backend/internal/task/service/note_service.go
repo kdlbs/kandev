@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -49,6 +50,20 @@ func (s *NoteService) authorize(ctx context.Context, taskID string) error {
 	return s.authorizeTask(ctx, taskID)
 }
 
+// noteOwner resolves which user's note the caller is acting on. Notes are
+// per-user, so this is the row key alongside task_id.
+//
+// A synthetic identity (auth disabled) and an absent identity (internal caller)
+// both resolve to "" — the single-user owner — which keeps pre-auth and
+// auth-disabled installs on exactly one note per task.
+func noteOwner(ctx context.Context) string {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || identity.Synthetic {
+		return ""
+	}
+	return identity.UserID
+}
+
 // GetNote returns a task's note, or nil, nil when none exists.
 func (s *NoteService) GetNote(ctx context.Context, taskID string) (*models.TaskNote, error) {
 	if taskID == "" {
@@ -57,7 +72,7 @@ func (s *NoteService) GetNote(ctx context.Context, taskID string) (*models.TaskN
 	if err := s.authorize(ctx, taskID); err != nil {
 		return nil, err
 	}
-	return s.repo.GetTaskNote(ctx, taskID)
+	return s.repo.GetTaskNote(ctx, taskID, noteOwner(ctx))
 }
 
 // UpsertNote creates or replaces a task's note.
@@ -72,12 +87,14 @@ func (s *NoteService) UpsertNote(ctx context.Context, taskID, content, updatedBy
 		updatedBy = createdByUser
 	}
 
-	existing, err := s.repo.GetTaskNote(ctx, taskID)
+	owner := noteOwner(ctx)
+	existing, err := s.repo.GetTaskNote(ctx, taskID, owner)
 	if err != nil {
 		return nil, err
 	}
 	note := &models.TaskNote{
 		TaskID:    taskID,
+		UserID:    owner,
 		Content:   content,
 		UpdatedBy: updatedBy,
 	}
@@ -89,7 +106,7 @@ func (s *NoteService) UpsertNote(ctx context.Context, taskID, content, updatedBy
 		s.logger.Error("upsert task note", zap.String("task_id", taskID), zap.Error(err))
 		return nil, err
 	}
-	saved, err := s.repo.GetTaskNote(ctx, taskID)
+	saved, err := s.repo.GetTaskNote(ctx, taskID, owner)
 	if err != nil {
 		return nil, err
 	}
@@ -105,7 +122,7 @@ func (s *NoteService) DeleteNote(ctx context.Context, taskID string) error {
 	if err := s.authorize(ctx, taskID); err != nil {
 		return err
 	}
-	if err := s.repo.DeleteTaskNote(ctx, taskID); err != nil {
+	if err := s.repo.DeleteTaskNote(ctx, taskID, noteOwner(ctx)); err != nil {
 		if errors.Is(err, repository.ErrTaskNoteNotFound) {
 			return ErrTaskNoteNotFound
 		}
@@ -143,6 +160,7 @@ func (s *NoteService) publishEvent(ctx context.Context, eventType string, note *
 		"id":           note.ID,
 		"task_id":      note.TaskID,
 		"workspace_id": workspaceID,
+		"user_id":      note.UserID,
 		"content":      note.Content,
 		"updated_by":   note.UpdatedBy,
 		"created_at":   note.CreatedAt,
@@ -158,7 +176,11 @@ func (s *NoteService) publishDeletedEvent(ctx context.Context, taskID string) {
 	if !ok {
 		return
 	}
-	payload := map[string]interface{}{"task_id": taskID, "workspace_id": workspaceID}
+	payload := map[string]interface{}{
+		"task_id":      taskID,
+		"workspace_id": workspaceID,
+		"user_id":      noteOwner(ctx),
+	}
 	if err := s.eventBus.Publish(ctx, events.TaskNoteDeleted, bus.NewEvent(events.TaskNoteDeleted, "note-service", payload)); err != nil {
 		s.logger.Error("publish task note delete event", zap.String("task_id", taskID), zap.Error(err))
 	}
