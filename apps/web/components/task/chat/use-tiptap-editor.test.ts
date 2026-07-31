@@ -9,10 +9,17 @@ import * as tiptapEditor from "./use-tiptap-editor";
 import { decideHistoryNav } from "./tiptap-editor-history";
 
 describe("TIPTAP_EDITOR_TEXT_SIZE_CLASS", () => {
-  it("keeps 16px text until the lg breakpoint", () => {
-    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("text-base");
-    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("lg:text-sm");
-    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toContain("md:text-sm");
+  it("uses one text size at every viewport width", () => {
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("text-sm");
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toContain("text-base");
+  });
+
+  it("carries no responsive text-size variant, so resizing cannot change the font", () => {
+    // The touch 16px floor lives in the `any-pointer: coarse` rule in
+    // globals.css; a width breakpoint here would resize the composer text when
+    // a desktop window is dragged narrow.
+    const responsiveTextSize = /\b(sm|md|lg|xl|2xl|max-\w+):text-/;
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toMatch(responsiveTextSize);
   });
 });
 
