@@ -226,9 +226,8 @@ test.describe("Mobile SPA resilience", () => {
       releaseFailures.resolve();
       await Promise.all([repositorySettled.promise, sessionSettled.promise]);
 
-      const activeMobileTaskLayout = testPage
-        .locator("[data-testid='mobile-task-layout']:visible")
-        .first();
+      const activeMobileTaskLayout = testPage.locator("[data-testid='mobile-task-layout']:visible");
+      await expect(activeMobileTaskLayout).toHaveCount(1);
       await expect(activeMobileTaskLayout.getByTestId("mobile-sessions-pill")).toBeVisible();
       await expect(activeMobileTaskLayout.getByTestId("mobile-repo-pill")).toHaveCount(0);
       await expect(testPage.locator("#root")).not.toBeEmpty();
