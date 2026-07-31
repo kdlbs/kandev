@@ -92,6 +92,7 @@ test.describe("Code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await testPage.setViewportSize({ width: 1366, height: 900 });
     const session = await seedWalkthroughChangesTask(testPage, apiClient, seedData);
@@ -117,6 +118,9 @@ test.describe("Code walkthrough", () => {
       .toBe(350);
     await expect(label).toBeVisible();
     await expectContainedInPanel(session.changes, request);
+    await prCapture.screenshot("desktop-changes-walkthrough", {
+      caption: "Walkthrough stays fully visible in the Changes toolbar",
+    });
   });
 
   test("Changes-panel request asks the agent to walk through current changes", async ({

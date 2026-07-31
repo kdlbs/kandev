@@ -82,6 +82,7 @@ test.describe("Mobile code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-setup", "changes ready");
 
@@ -105,6 +106,9 @@ test.describe("Mobile code walkthrough", () => {
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
+    await prCapture.screenshot("mobile-changes-walkthrough", {
+      caption: "Mobile Changes keeps the Walkthrough action within the viewport",
+    });
     await request.click();
 
     await testPage.getByRole("button", { name: "Chat" }).click();
