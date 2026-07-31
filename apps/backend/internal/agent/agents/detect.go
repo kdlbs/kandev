@@ -19,6 +19,26 @@ func WithCommand(name string) DetectOption {
 	}
 }
 
+// WithCommandCheck checks that a command is on PATH and that its
+// non-interactive capability check exits successfully. A failed check means
+// the optional capability is unavailable; a cancelled context remains an
+// actual discovery error.
+func WithCommandCheck(name string, args ...string) DetectOption {
+	return func(ctx context.Context) (bool, string, error) {
+		path, err := exec.LookPath(name)
+		if err != nil {
+			return false, "", nil
+		}
+		if err := exec.CommandContext(ctx, path, args...).Run(); err != nil {
+			if ctx.Err() != nil {
+				return false, "", ctx.Err()
+			}
+			return false, "", nil
+		}
+		return true, path, nil
+	}
+}
+
 // WithNpxRunnable reports the agent as runnable via `npx -y <pkg>` whenever
 // npx is on PATH. MatchedPath is tagged "npx <pkg>" so the settings page
 // renders "Detected at npx <pkg>", giving users an honest hint that the

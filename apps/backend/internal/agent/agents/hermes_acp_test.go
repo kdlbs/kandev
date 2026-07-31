@@ -2,7 +2,10 @@ package agents
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +13,22 @@ import (
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/pkg/agent"
 )
+
+const hermesACPCheckHelperEnv = "KANDEV_TEST_HERMES_ACP_CHECK"
+
+func TestMain(m *testing.M) {
+	switch os.Getenv(hermesACPCheckHelperEnv) {
+	case "available":
+		if slices.Equal(os.Args[1:], []string{"acp", "--check"}) {
+			os.Exit(0)
+		}
+		os.Exit(1)
+	case "unavailable":
+		os.Exit(1)
+	default:
+		os.Exit(m.Run())
+	}
+}
 
 func TestHermesACP_IDAndDisplay(t *testing.T) {
 	a := NewHermesACP()
@@ -52,7 +71,37 @@ func TestHermesACP_AllCommandSurfaces(t *testing.T) {
 	if !ok {
 		t.Fatal("HermesACP must implement PassthroughAgent")
 	}
-	assertArgvEqual(t, "PassthroughCmd", pa.PassthroughConfig().PassthroughCmd.Args(), []string{"hermes"})
+	assertArgvEqual(t, "PassthroughCmd", pa.PassthroughConfig().PassthroughCmd.Args(), []string{"hermes", "chat"})
+}
+
+func TestHermesACP_PassthroughPreservesModelAndSessions(t *testing.T) {
+	a := NewHermesACP()
+
+	for _, tc := range []struct {
+		name string
+		opts PassthroughOptions
+		want []string
+	}{
+		{
+			name: "model",
+			opts: PassthroughOptions{Model: "nous/hermes-4"},
+			want: []string{"hermes", "chat", "--model", "nous/hermes-4"},
+		},
+		{
+			name: "last session",
+			opts: PassthroughOptions{Resume: true},
+			want: []string{"hermes", "chat", "--continue"},
+		},
+		{
+			name: "specific session",
+			opts: PassthroughOptions{SessionID: "session-123"},
+			want: []string{"hermes", "chat", "--resume", "session-123"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			assertArgvEqual(t, "BuildPassthroughCommand", a.BuildPassthroughCommand(tc.opts).Args(), tc.want)
+		})
+	}
 }
 
 // TestHermesACP_SkipsGlobalMCPStartup pins the host-owned MCP marker. Kandev
@@ -97,6 +146,49 @@ func TestHermesACP_DetectionRequiresGlobalBinary(t *testing.T) {
 	if result.Available {
 		t.Error("Available=true without hermes on PATH; discovery must not imply install")
 	}
+}
+
+func TestHermesACP_DetectionRequiresACPCheck(t *testing.T) {
+	installHermesACPCheckHelper(t)
+
+	t.Run("available when acp check succeeds", func(t *testing.T) {
+		t.Setenv(hermesACPCheckHelperEnv, "available")
+
+		result, err := NewHermesACP().IsInstalled(context.Background())
+		if err != nil {
+			t.Fatalf("IsInstalled error: %v", err)
+		}
+		if !result.Available {
+			t.Fatal("Available=false when hermes acp --check succeeds")
+		}
+	})
+
+	t.Run("unavailable when acp check fails", func(t *testing.T) {
+		t.Setenv(hermesACPCheckHelperEnv, "unavailable")
+
+		result, err := NewHermesACP().IsInstalled(context.Background())
+		if err != nil {
+			t.Fatalf("IsInstalled error: %v", err)
+		}
+		if result.Available {
+			t.Fatal("Available=true when hermes acp --check fails")
+		}
+	})
+}
+
+func installHermesACPCheckHelper(t *testing.T) {
+	t.Helper()
+
+	filename := hermesBin
+	if runtime.GOOS == "windows" {
+		filename += ".exe"
+	}
+
+	path := filepath.Join(t.TempDir(), filename)
+	if err := os.Link(os.Args[0], path); err != nil {
+		t.Fatalf("link test helper binary: %v", err)
+	}
+	t.Setenv("PATH", filepath.Dir(path)+string(os.PathListSeparator)+os.Getenv("PATH"))
 }
 
 func TestHermesACP_LogosNonEmpty(t *testing.T) {
