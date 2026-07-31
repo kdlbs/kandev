@@ -223,11 +223,11 @@ export function useTaskReviewShortcut({
     (event: KeyboardEvent) => {
       if (event.repeat) return;
       const reviewTargets = targetsRef.current;
-      if (reviewTargets.length === 0) {
+      if (!openRef.current && reviewTargets.length === 0) {
         onNoTargetsRef.current();
         return;
       }
-      if (reviewTargets.length === 1) {
+      if (!openRef.current && reviewTargets.length === 1) {
         onOpenTargetRef.current(reviewTargets[0]);
         return;
       }

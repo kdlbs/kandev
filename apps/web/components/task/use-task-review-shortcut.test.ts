@@ -215,4 +215,30 @@ describe("useTaskReviewShortcut binding variants", () => {
 
     expect(onOpenTarget).toHaveBeenCalledWith(targets[0]);
   });
+
+  it("does not open directly when targets shrink while the picker is held open", () => {
+    const onOpenTarget = vi.fn();
+    const { result, rerender } = renderHook(
+      ({ reviewTargets }) =>
+        useTaskReviewShortcut({
+          targets: reviewTargets,
+          shortcut: controlShortcut,
+          onNoTargets: vi.fn(),
+          onOpenTarget,
+        }),
+      { initialProps: { reviewTargets: targets } },
+    );
+
+    invokeShortcut(result.current.handleShortcut);
+    rerender({ reviewTargets: [targets[0]] });
+
+    invokeShortcut(result.current.handleShortcut, "g", { ctrlKey: true });
+    expect(result.current.pickerOpen).toBe(true);
+    expect(onOpenTarget).not.toHaveBeenCalled();
+
+    keyup("Control");
+    expect(onOpenTarget).toHaveBeenCalledOnce();
+    expect(onOpenTarget).toHaveBeenCalledWith(targets[0]);
+    expect(result.current.pickerOpen).toBe(false);
+  });
 });
