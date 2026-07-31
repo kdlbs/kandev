@@ -25,7 +25,22 @@ jobs:
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
-      - name: Checkout repository
+      - name: Checkout pull request head from issue comment
+        if: github.event_name == 'issue_comment' && github.event.issue.pull_request
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: refs/pull/${{ github.event.issue.number }}/head
+          fetch-depth: 1
+
+      - name: Checkout pull request head from review event
+        if: github.event_name == 'pull_request_review_comment' || github.event_name == 'pull_request_review'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/head
+          fetch-depth: 1
+
+      - name: Checkout default branch
+        if: github.event_name == 'issues' || (github.event_name == 'issue_comment' && !github.event.issue.pull_request)
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 1
@@ -47,4 +62,3 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
           # claude_args: '--allowed-tools Bash(gh pr:*)'
-

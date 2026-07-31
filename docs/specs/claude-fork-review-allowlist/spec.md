@@ -16,7 +16,8 @@ Trusted fork contributors listed in the repository's Claude review allowlist sho
 - `CLAUDE_REVIEW_ALLOWLIST` remains a JSON array for safe use in GitHub Actions expressions.
 - The Claude action receives the already job-authorized pull request author through its `allowed_non_write_users` input.
 - A maintainer may apply `safe-to-review` to request the initial review of an untrusted fork pull request.
-- Pushes, ready-for-review transitions, and reopenings do not automatically start another Claude review. A maintainer can request a later review through the existing Claude mention workflow, for example by commenting `@claude review` on the pull request.
+- Pushes, ready-for-review transitions, and reopenings do not automatically start another Claude review. A maintainer can request a later review through the existing Claude mention workflow, for example by commenting `@claude review` on the pull request. That requested review operates on the current pull request head, including files newly added by the pull request.
+- The generic Claude mention workflow keeps checking out the default branch for issue-only requests; a pull request mention is the only path that needs a pull request head checkout.
 - The same-repository review path remains unchanged except for the open-only trigger policy.
 - Empty, malformed, or non-matching allowlists continue to fail closed at the workflow job gate.
 
@@ -27,6 +28,8 @@ Trusted fork contributors listed in the repository's Claude review allowlist sho
 - **GIVEN** a fork contributor is absent from `CLAUDE_REVIEW_ALLOWLIST`, **WHEN** they open or update their pull request without `safe-to-review`, **THEN** the fork review job does not run.
 - **GIVEN** a maintainer applies `safe-to-review` to a fork pull request, **WHEN** the labeled event runs, **THEN** the existing maintainer-approved review path remains available.
 - **GIVEN** a maintainer wants another review round, **WHEN** they comment `@claude review` on the pull request, **THEN** the existing Claude mention workflow recognizes the `@claude` mention and starts the requested review.
+- **GIVEN** a pull request adds a file after its initial review, **WHEN** a maintainer comments `@claude review`, **THEN** Claude can read and review that added file rather than ending without a review because the file is absent from the default-branch checkout.
+- **GIVEN** a user mentions `@claude` on an issue that is not a pull request, **WHEN** the generic Claude mention workflow runs, **THEN** it continues to use the default-branch checkout.
 
 ## Out of scope
 

@@ -57,6 +57,41 @@ class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
             workflow,
         )
 
+    def test_manual_pr_mentions_checkout_the_current_pr_head(self) -> None:
+        workflow = MENTION_WORKFLOW.read_text(encoding="utf-8")
+
+        self.assertIn(
+            "github.event_name == 'issue_comment' && github.event.issue.pull_request",
+            workflow,
+        )
+        self.assertIn(
+            "ref: refs/pull/${{ github.event.issue.number }}/head",
+            workflow,
+        )
+        self.assertIn(
+            "github.event_name == 'pull_request_review_comment' || "
+            "github.event_name == 'pull_request_review'",
+            workflow,
+        )
+        self.assertIn(
+            "ref: refs/pull/${{ github.event.pull_request.number }}/head",
+            workflow,
+        )
+
+    def test_non_pr_issue_mentions_checkout_the_default_branch(self) -> None:
+        workflow = MENTION_WORKFLOW.read_text(encoding="utf-8")
+        _, separator, default_checkout = workflow.partition(
+            "      - name: Checkout default branch\n"
+        )
+
+        self.assertTrue(separator, "default-branch checkout is missing")
+        self.assertIn(
+            "github.event_name == 'issues' || (github.event_name == "
+            "'issue_comment' && !github.event.issue.pull_request)",
+            default_checkout,
+        )
+        self.assertNotIn("ref:", default_checkout)
+
     def test_fork_review_forwards_allowlist_to_claude_action(self) -> None:
         workflow = WORKFLOW.read_text(encoding="utf-8")
         _, separator, fork_job = workflow.partition("  claude-review-fork:")
