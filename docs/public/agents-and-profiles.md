@@ -36,7 +36,9 @@ release.
 Select the update icon to deliberately check npm and refresh the managed
 runtime on the Kandev host. Before anything changes, the update dialog shows
 the current and upstream target versions, the exact command Kandev will run,
-and how the update affects sessions. Select **Approve update** to start it.
+and how the update affects sessions. When the reported current and target
+versions match, the dialog shows the version once as **Up to date** and keeps
+**Approve update** disabled. Otherwise, select **Approve update** to start it.
 The dialog streams progress and stdout/stderr until the update finishes; those
 details do not appear on the agent card and are cleared when you restart the
 page. After the package update, Kandev automatically starts a fresh ACP

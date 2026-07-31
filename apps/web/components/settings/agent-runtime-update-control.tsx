@@ -94,6 +94,34 @@ type UpdateBodyProps = {
   onRetryPreview: () => void;
 };
 
+function RuntimeVersionSummary({
+  preview,
+  job,
+}: {
+  preview: AgentUpdatePreview;
+  job?: AgentUpdateJob;
+}) {
+  const currentVersion = job?.current_version || preview.current_version || "Unknown";
+  const targetVersion = job?.target_version || preview.target_version;
+  const versionsMatch = Boolean(
+    currentVersion && targetVersion && currentVersion === targetVersion,
+  );
+
+  return (
+    <div className="space-y-1">
+      <p className="font-medium">Runtime version</p>
+      <p className="break-words font-mono text-sm">
+        {versionsMatch ? currentVersion : `${currentVersion} → ${targetVersion}`}
+      </p>
+      {versionsMatch && (
+        <p className="text-sm text-muted-foreground" role="status">
+          Up to date
+        </p>
+      )}
+    </div>
+  );
+}
+
 function UpdateBody({
   agentName,
   preview,
@@ -143,14 +171,7 @@ function UpdateBody({
       )}
       {preview && (
         <>
-          <div className="space-y-1">
-            <p className="font-medium">Runtime version</p>
-            <p className="break-words font-mono text-sm">
-              {(job?.current_version || preview.current_version || "Unknown") +
-                " → " +
-                (job?.target_version || preview.target_version)}
-            </p>
-          </div>
+          <RuntimeVersionSummary preview={preview} job={job} />
           <div className="space-y-1 text-muted-foreground">
             <p>
               This updates the managed runtime on this Kandev host, then refreshes its models and
@@ -220,8 +241,10 @@ function canApproveUpdate({
   starting: boolean;
   installInFlight: boolean;
 }) {
+  const currentVersion = preview?.current_version;
+  const targetVersion = preview?.target_version;
   return (
-    Boolean(preview?.current_version) &&
+    Boolean(currentVersion && targetVersion && currentVersion !== targetVersion) &&
     !previewError &&
     !loading &&
     !updateInFlight &&
