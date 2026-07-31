@@ -61,7 +61,7 @@ const debugSwitch = createDebugLogger("dockview:store-switch");
 const debugSave = createDebugLogger("dockview:save");
 const debugWidths = createDebugLogger("dockview:widths");
 
-const RIGHT_PANEL_IDS = new Set(["changes", "files", TERMINAL_DEFAULT_ID]);
+const RIGHT_PANEL_IDS = new Set(["changes", "files", "pr-detail", TERMINAL_DEFAULT_ID]);
 
 // Re-export types and constants used by other modules
 export type { BuiltInPreset } from "./layout-manager";
@@ -483,8 +483,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
         const current = fromDockviewApi(api);
         const withoutRight: LayoutState = {
           columns: current.columns.filter(
-            (c) =>
-              !c.groups.some((g) => g.panels.some((p) => p.id === "files" || p.id === "changes")),
+            (c) => !c.groups.some((g) => g.panels.some((p) => RIGHT_PANEL_IDS.has(p.id))),
           ),
         };
         set({ isRestoringLayout: true, rightPanelsVisible: false });

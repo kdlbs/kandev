@@ -79,7 +79,7 @@ vi.mock("./layout-manager", async (importOriginal) => {
 
 import { removeEnvMaximizeState, setEnvLayout } from "@/lib/local-storage";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
-import { applyLayout } from "./layout-manager";
+import { applyLayout, fromDockviewApi } from "./layout-manager";
 
 function makeApi(snapshot: object = { columns: [] }): DockviewApi {
   return {
@@ -354,6 +354,41 @@ describe("resetLayout — effective default persistence", () => {
     expect(removeEnvMaximizeState).toHaveBeenCalledWith("env-reset");
     await flushRaf();
     expect(setEnvLayout).toHaveBeenCalledWith("env-reset", expect.any(Object));
+  });
+});
+
+describe("toggleRightPanels", () => {
+  beforeEach(resetStoreForIntegration);
+
+  it("removes a PR Details-only right column when hiding right panels", async () => {
+    const api = makeStoreApi();
+    vi.mocked(fromDockviewApi).mockReturnValue({
+      columns: [
+        {
+          id: "center",
+          groups: [
+            { id: "group-center", panels: [{ id: "chat", component: "chat", title: "Agent" }] },
+          ],
+        },
+        {
+          id: "right",
+          pinned: true,
+          groups: [
+            {
+              id: "group-right-top",
+              panels: [{ id: "pr-detail", component: "pr-detail", title: "PR Details" }],
+            },
+          ],
+        },
+      ],
+    });
+    useDockviewStore.setState({ api, rightPanelsVisible: true, defaultPreset: "default" });
+
+    useDockviewStore.getState().toggleRightPanels();
+
+    const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
+    expect(appliedState?.columns.map((column) => column.id)).toEqual(["center"]);
+    await flushRaf();
   });
 });
 

@@ -228,6 +228,33 @@ describe("performEnvSwitch", () => {
   });
 });
 
+describe("performEnvSwitch layout-owned review panel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("keeps layout-owned PR Details during a fresh fast switch", () => {
+    vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+    const close = vi.fn();
+    const prDetails = {
+      id: "pr-detail",
+      api: { component: "pr-detail", close },
+      group: { id: RIGHT_TOP_GROUP_ID, panels: [] },
+    };
+    const params = makeParams({
+      api: {
+        ...makeMockApi(),
+        panels: [prDetails],
+        groups: [prDetails.group],
+      } as unknown as EnvSwitchParams["api"],
+    });
+
+    performEnvSwitch(params);
+
+    expect(close).not.toHaveBeenCalled();
+  });
+});
+
 describe("performEnvSwitch fast-path group survival", () => {
   beforeEach(() => {
     vi.clearAllMocks();

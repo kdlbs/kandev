@@ -146,7 +146,9 @@ export type EnvSwitchParams = {
 
 /** Close non-session env-scoped panels before the new env's panels are restored. */
 function removeEphemeralPanels(api: DockviewApi): void {
-  const toRemove = api.panels.filter((p) => EPHEMERAL_COMPONENTS.has(p.api.component));
+  const toRemove = api.panels.filter(
+    (p) => p.id !== "pr-detail" && EPHEMERAL_COMPONENTS.has(p.api.component),
+  );
   for (const p of toRemove) {
     try {
       p.api.close();
