@@ -226,8 +226,11 @@ test.describe("Mobile SPA resilience", () => {
       releaseFailures.resolve();
       await Promise.all([repositorySettled.promise, sessionSettled.promise]);
 
-      await expect(testPage.getByTestId("mobile-sessions-pill")).toBeVisible();
-      await expect(testPage.getByTestId("mobile-repo-pill")).toHaveCount(0);
+      const activeMobileTaskLayout = testPage
+        .locator("[data-testid='mobile-task-layout']:visible")
+        .first();
+      await expect(activeMobileTaskLayout.getByTestId("mobile-sessions-pill")).toBeVisible();
+      await expect(activeMobileTaskLayout.getByTestId("mobile-repo-pill")).toHaveCount(0);
       await expect(testPage.locator("#root")).not.toBeEmpty();
       await assertNoDocumentHorizontalOverflow(
         testPage,

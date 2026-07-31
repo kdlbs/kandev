@@ -16,14 +16,14 @@ Remove the repository pill and picker from the phone task workbench because the 
 
 - `apps/web/components/task/mobile/session-mobile-top-bar.tsx`: stop rendering `MobileRepoPill` in `MobileTopBarActions`. Keep task, plugin, remote-executor, Git, approval, and task-switcher actions unchanged.
 - Delete `apps/web/components/task/mobile/mobile-repo-pill.tsx`, `apps/web/components/task/mobile/mobile-repos-section.tsx`, and `apps/web/components/task/mobile/mobile-repos-section.test.tsx` after confirming they have no remaining consumers.
-- Keep `MobileSessionsPicker` in `apps/web/components/task/mobile/session-mobile-layout.tsx` unchanged. It remains the mobile entry point for changing sessions and therefore repository context.
+- Keep `MobileSessionsPicker` in `apps/web/components/task/mobile/mobile-sessions-section.tsx` unchanged. It remains the mobile entry point for changing sessions and therefore repository context.
 
 No backend, API, persistence, desktop Dockview, or tablet changes are required.
 
 ## Mobile Design Contract
 
 - **Desktop outcome and mobile entry:** desktop and tablet repository/session interactions remain unchanged. Phone users enter the task workbench normally and change runtime context through the existing session pill above Chat.
-- **Nearest shipped exemplar:** `MobileSessionsPicker` in `session-mobile-layout.tsx` already uses `MobilePillButton` plus `MobilePickerSheet` for the actionable session hierarchy.
+- **Nearest shipped exemplar:** `MobileSessionsPicker` in `mobile-sessions-section.tsx` already uses `MobilePillButton` plus `MobilePickerSheet` for the actionable session hierarchy.
 - **Hierarchy and primary action:** task identity and task-level actions stay in the fixed top bar; active-session selection stays with Chat. Repository identity is not promoted as a separate action.
 - **Presentation and rationale:** no replacement drawer or navigation is added. Repository choice is not an independent mobile action in this surface, and the former picker only redirected to a representative session.
 - **Scroll, viewport, safe area, and touch:** existing `h-dvh` workbench, fixed top bar, internal panel scrolling, bottom navigation, and safe-area behavior remain unchanged. Removing the pill reduces top-bar crowding.
