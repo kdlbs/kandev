@@ -4,9 +4,10 @@ import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { markPRPanelOffered, wasPRPanelOffered } from "@/lib/local-storage";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { RIGHT_TOP_GROUP } from "@/lib/state/layout-manager";
+import { resolvePRPanelTargetGroup } from "@/lib/state/pr-panel-placement";
 import type { AppState } from "@/lib/state/store";
 import type { TaskMR } from "@/lib/types/gitlab";
-import { resolvePRPanelTargetGroup } from "./dockview-session-tabs";
 
 export function resolveAutoMRPanelAction(params: {
   hasMR: boolean;
@@ -90,7 +91,12 @@ function applyAutoMRPanel(expected: AutoMRPanelIdentity, app: AppState) {
       component: "mr-detail",
       title: "Merge Request",
       position: {
-        referenceGroup: resolvePRPanelTargetGroup(api, expected.sessionId, dockview.centerGroupId),
+        referenceGroup: resolvePRPanelTargetGroup(api, {
+          activeSessionId: expected.sessionId,
+          centerGroupId: dockview.centerGroupId,
+          rightTopGroupId: RIGHT_TOP_GROUP,
+          placement: "agent",
+        }),
       },
       inactive: true,
       params: { mrKey: key },

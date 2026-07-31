@@ -170,20 +170,6 @@ export function shouldAutoAddPRPanel(params: {
   return "add";
 }
 
-/** Agent-adjacent target retained for GitLab MR placement. */
-export function resolvePRPanelTargetGroup(
-  api: DockviewApi,
-  sessionId: string,
-  centerGroupId: string,
-): string {
-  return resolveConfiguredPRPanelTargetGroup(api, {
-    activeSessionId: sessionId,
-    centerGroupId,
-    rightTopGroupId: RIGHT_TOP_GROUP,
-    placement: "agent",
-  });
-}
-
 /**
  * Derive the auto-PR-panel decision inputs from one task's live PR list.
  *
