@@ -10,12 +10,12 @@ owner: cfl
 
 Navigating back into a task session that kept running in the background
 previously dropped the reader at the bottom of the transcript with no
-indication of what was new. A "New" divider can identify that visit-start
-boundary, but must not remain after the reader's current, visible transcript
-has been acknowledged. This spec documents the persisted cursor this feature
-is built on, since it's new product state whose scope (global vs. per-user)
-and edge-case behavior (first visit and initial scroll) aren't otherwise
-obvious from the UI alone.
+indication of what was new. A "New" divider identifies that pre-existing
+unread boundary, but it must never first emerge solely because messages arrive
+after the session is already visible. This spec documents the persisted cursor
+this feature is built on, since it's new product state whose scope (global vs.
+per-user) and edge-case behavior (first visit, pagination, initial scroll)
+aren't otherwise obvious from the UI alone.
 
 ## What
 
@@ -37,24 +37,47 @@ obvious from the UI alone.
   `POST /task-sessions/:id/mark-read` with the newest currently-rendered
   message id, and the backend persists it via
   `UpdateTaskSessionLastReadMessageID` (monotonic — see below).
-- The divider is a **pending visit-start marker**, not a frozen marker for
-  the whole visit. On a transition from hidden/inactive to the active,
-  visible chat panel, the hook captures the persisted cursor before this
-  visit's live advance can touch it. It may render before the first unread
-  message only until the visible transcript has been acknowledged.
-- When the `mark-read` request for the newest visible message succeeds, the
-  hook clears the captured marker immediately. New messages arriving while
-  the chat panel remains visible are acknowledged live and never create or
-  move a divider. Leaving and returning (or switching sessions and back)
-  captures a fresh marker from the cursor that was persisted while away.
+- The divider's position is decided once per **visit** (a transition from
+  hidden/inactive to the active, visible chat panel), not on every render:
+  the hook captures the cursor's value at the instant the session becomes
+  visible (before this visit's live-advance can touch it) and freezes it as
+  the anchor. Re-rendering while still visible never moves the divider;
+  leaving and returning (or switching sessions and back) captures a fresh
+  anchor from whatever the cursor advanced to since.
+- A visit that opens at the current transcript tail is **divider-ineligible**:
+  if the captured cursor equals the newest initially-rendered message, the
+  hook discards the anchor for that visible visit. Messages subsequently
+  rendered while the panel remains visible must not make a "New" divider
+  appear. The live cursor still advances normally.
 - **First visit**: a session with no persisted cursor (`last_read_message_id`
   is empty) has no divider — there's nothing to distinguish as "already
   read." The first visit begins live-advancing the cursor as normal.
-- **Initial scroll**: while a visit-start marker is pending, the message list
-  may scroll it into view (`block: "start"`) when it is currently loaded but
-  outside the initial viewport. Once the visible transcript is acknowledged
-  and the marker clears, normal scroll behavior resumes. A pending explicit
-  layout scroll restoration (`pendingChatScrollTop`) always wins.
+- **Initial scroll**: on visit start, if the divider falls on a
+  currently-loaded message that's outside the initial viewport, the message
+  list scrolls to bring it into view (`block: "start"`) instead of the
+  default scroll-to-bottom. This is a one-time positioning decision from
+  the reader's perspective: the transcript's initial data can itself
+  arrive in more than one wave (e.g. a WebSocket-delivered backfill
+  continuing after the first paint), which can shift where the divider
+  actually lands — so the correction re-asserts itself across such
+  changes rather than freezing on a possibly-incomplete first render. It
+  stops permanently the moment either of two things happens, whichever
+  comes first: the reader scrolls (wheel, touch, or a key press), or a
+  short (4s) settling window since mount elapses — bounding how long a
+  live message arriving well after the visit has genuinely settled (with
+  no interaction event to catch, e.g. a scrollbar drag) could otherwise
+  re-trigger it. It does not fight a pending explicit layout scroll
+  restoration (`pendingChatScrollTop`), which always wins when set.
+- **Pagination**: `findUnreadDividerItemId` looks for the divider's anchor
+  message among the *currently loaded* render items. If the anchor is older
+  than everything loaded so far (paginated out), the whole loaded window is
+  treated as unread and the divider renders before the first loaded item —
+  matching Slack's behavior of showing the marker at the top of what's
+  visible rather than requiring a full backward fetch before showing
+  anything. The synthetic frontend-only `task-description` placeholder
+  (rendered for a session with zero real messages yet) is never a valid
+  anchor or divider boundary — it doesn't exist in the backend messages
+  table.
 
 ## Persistence guarantees
 
@@ -85,13 +108,13 @@ obvious from the UI alone.
 ## Scenarios
 
 - **GIVEN** a session with messages read before a rewound cursor, **WHEN**
-  the user navigates away and back, **THEN** the divider may identify the
-  first message added since that cursor while the initial acknowledgment is
-  pending, and disappears as soon as the newest visible message is marked
-  read — it must not remain while the session is actively in view.
-- **GIVEN** new messages arrive while the session is already the visible chat
-  panel, **THEN** live mark-read advances the cursor without rendering or
-  moving a divider.
+  the user navigates away and back, **THEN** the divider appears before the
+  first message added since the frozen anchor, and clears (no anchor) on
+  the *next* visit after that.
+- **GIVEN** a session opens with its persisted cursor at the newest rendered
+  message, **WHEN** the user sends a new prompt or an agent message arrives
+  while the session remains visible, **THEN** no "New" divider appears before
+  that new message.
 - **GIVEN** two overlapping mark-read requests for the same session where
   the response for an older message resolves after a newer one, **WHEN**
   both complete, **THEN** the persisted cursor reflects the newer message,
