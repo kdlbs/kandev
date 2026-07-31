@@ -44,9 +44,11 @@ test("docs preview build uses an authenticated read-only token", async () => {
   const validate = extractJob(workflow, "validate");
   const testStep = extractStep(validate, "Test public docs validator");
 
-  assert.match(preview, /permissions:\n      contents: read\n/);
-  assert.doesNotMatch(preview, /issues: write/);
-  assert.doesNotMatch(preview, /pull-requests: write/);
+  assert.match(
+    preview,
+    /permissions:\n      contents: read\n\n    steps:/,
+    "preview job permissions must be limited to contents: read",
+  );
   assert.match(build, new RegExp(`GITHUB_TOKEN: ${tokenExpression}`));
   assert.doesNotMatch(
     preview.replace(build, ""),
@@ -60,9 +62,14 @@ test("docs preview build uses an authenticated read-only token", async () => {
 
 test("preview comment publication is isolated from pull request content", async () => {
   const workflow = await fs.readFile(workflowPath, "utf8");
+  const preview = extractJob(workflow, "preview");
   const publication = extractJob(workflow, "publish-preview-link");
   const publishStep = extractStep(publication, "Publish docs preview link");
 
+  assert.match(
+    preview,
+    /outputs:\n      enabled: \$\{\{ steps\.cloudflare\.outputs\.enabled \}\}\n      deployment_url: \$\{\{ steps\.deploy\.outputs\.deployment-url \}\}\n      alias_url: \$\{\{ steps\.deploy\.outputs\.pages-deployment-alias-url \}\}/,
+  );
   assert.match(publication, /needs: preview/);
   assert.match(
     publication,
