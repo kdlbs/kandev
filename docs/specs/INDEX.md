@@ -140,6 +140,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
 | [task-surface-refresh](ui/task-surface-refresh.md) | draft |
 | [walkthrough-navigation-layout](walkthrough-navigation-layout/spec.md) | shipped |
+| [changes-walkthrough-toolbar-width](changes-walkthrough-toolbar-width/spec.md) | draft |
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
