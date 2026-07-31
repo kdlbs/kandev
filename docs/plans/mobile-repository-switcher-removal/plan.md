@@ -57,7 +57,9 @@ No production backend, API, persistence, desktop Dockview, or tablet changes are
 cd apps/web && pnpm e2e:run --project mobile-chrome -- tests/layout/mobile-spa-resilience.spec.ts --grep "keeps a multi-repository task usable without a mobile repository switcher when optional hydration fails" --workers=1
 cd apps/web && pnpm e2e:run tests/session/mobile-multi-repository-session-picker.spec.ts -- --project=mobile-chrome
 cd apps && pnpm --filter @kandev/web test -- --run components/task/mobile/mobile-sessions-section.test.tsx
+cd apps/backend && go test ./internal/office/testharness
 cd apps/web && pnpm run typecheck
+cd apps/web && pnpm lint
 ```
 
 ## Results
@@ -69,3 +71,4 @@ cd apps/web && pnpm run typecheck
 - REVIEW GREEN: multi-repository session rows and the active pill now include the canonical repository slug, the E2E-only seed route preserves `repository_id`, and the focused component suite (`8 passed`) plus cross-repository mobile Playwright scenario (`1 passed`) pass.
 - REVIEW 2 RED: removing the workflow-task repository snapshot from the focused component fixture reproduced the missing repository labels.
 - REVIEW 2 GREEN: repository labels now derive from required loaded session bindings plus the repository store, independent of optional workflow hydration. The focused component suite (`8 passed`), web typecheck, web lint, and production mobile Playwright scenario (`1 passed`) pass.
+- REVIEW VERIFICATION: `go test ./internal/office/testharness` and full `pnpm lint` both pass.

@@ -34,7 +34,9 @@ spec: "../../specs/ui/mobile-task-navigation.md"
 cd apps/web && pnpm e2e:run --project mobile-chrome -- tests/layout/mobile-spa-resilience.spec.ts --grep "keeps a multi-repository task usable without a mobile repository switcher when optional hydration fails" --workers=1
 cd apps/web && pnpm e2e:run tests/session/mobile-multi-repository-session-picker.spec.ts -- --project=mobile-chrome
 cd apps && pnpm --filter @kandev/web test -- --run components/task/mobile/mobile-sessions-section.test.tsx
+cd apps/backend && go test ./internal/office/testharness
 cd apps/web && pnpm run typecheck
+cd apps/web && pnpm lint
 ```
 
 ## Files Likely Touched
@@ -83,4 +85,5 @@ Report RED and GREEN evidence, files deleted/changed, exact command results, rem
 - **Verification:** `cd apps/web && pnpm run typecheck` passed. Final change-aware `pnpm e2e:run --project mobile-chrome -- tests/layout/mobile-spa-resilience.spec.ts --grep "keeps a multi-repository task usable without a mobile repository switcher when optional hydration fails" --workers=1` rebuilt production assets and passed (`1 passed`).
 - **Review remediation:** repository-aware picker tests failed first on the missing label. The retained picker now shows canonical repository slugs when loaded sessions span repositories, and selecting the secondary-repository row updates the active pill. The focused component suite passed (`8 passed`), the E2E seed-route repository test passed, and the production cross-repository mobile scenario passed (`1 passed`).
 - **Review remediation 2:** removing the optional workflow-task repository snapshot reproduced the missing labels. Label derivation now uses required loaded session bindings plus the repository store; the focused component suite (`8 passed`), web typecheck, web lint, and production cross-repository mobile scenario (`1 passed`) passed.
+- **Recorded commands:** `cd apps/backend && go test ./internal/office/testharness` passed; `cd apps/web && pnpm lint` passed.
 - **Remaining risks:** none known within scoped phone task workbench; repository selection elsewhere is unchanged.
