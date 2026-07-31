@@ -89,6 +89,10 @@ func NewRunner(ctx context.Context, jsonlPath string, cfg RunConfig) (*Runner, e
 		workdir = wd
 		tmpDir = wd
 	}
+	// Keep the resolved directory in the runner configuration as well as on the
+	// child command. ACP session/new and session/load use r.cfg.Workdir, so
+	// leaving this empty would make wire-level probes differ from the child cwd.
+	cfg.Workdir = workdir
 
 	// Record start meta before spawning so the file always has something
 	// useful even if exec fails.

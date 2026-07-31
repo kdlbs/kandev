@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSubmitMessage } from "./chat-input-area";
+import { buildSubmitMessage, shouldRenderChatStatusBar } from "./chat-input-area";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 
 const messageComment: AgentMessageComment = {
@@ -33,5 +33,19 @@ describe("buildSubmitMessage agent message comments", () => {
     expect(result).toContain("### Agent Message Comments");
     expect(result).toContain("> answer");
     expect(result).toContain("Continue from here.");
+  });
+});
+
+describe("shouldRenderChatStatusBar", () => {
+  it("removes empty taskless status chrome when its auto-scroll control is hidden", () => {
+    expect(
+      shouldRenderChatStatusBar({
+        hasTask: false,
+        hasTodos: false,
+        hasQueueChip: false,
+        showRightControls: false,
+        showProceed: false,
+      }),
+    ).toBe(false);
   });
 });

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ToastProvider } from "@/components/toast-provider";
 import { MAX_FILES, MAX_TOTAL_SIZE, processFile } from "@/components/task/chat/file-attachment";
+import { formatBytes } from "@/lib/utils/format-bytes";
 import { TaskFormInputs } from "./task-create-dialog-selectors";
 import type { TaskFormInputsHandle } from "./task-create-dialog-types";
 
@@ -292,7 +293,7 @@ describe("TaskFormInputs attachment feedback", () => {
     const warning = await screen.findByTestId(TOAST_MESSAGE_TEST_ID);
     expect(warning.textContent).toContain("Attachment limit reached");
     expect(warning.textContent).toContain(
-      `Attachments can total up to ${MAX_TOTAL_SIZE / 1024 / 1024} MB.`,
+      `Attachments can total up to ${formatBytes(MAX_TOTAL_SIZE)}.`,
     );
   });
 
@@ -312,7 +313,7 @@ describe("TaskFormInputs attachment feedback", () => {
     const warning = await screen.findByTestId(TOAST_MESSAGE_TEST_ID);
     expect(warning.textContent).toContain("Attachment is too large");
     expect(warning.textContent).toContain(
-      "copied-image.png is 14 MB. The maximum file size is 10 MB.",
+      "copied-image.png is 14.0 MB. The maximum file size is 10.0 MB.",
     );
   });
 

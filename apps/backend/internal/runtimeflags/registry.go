@@ -15,20 +15,6 @@ var definitions = []RuntimeFlagDefinition{
 		Mutable:         true,
 	},
 	{
-		Key:         featurePluginsKey,
-		EnvVar:      envFeaturesPlugins,
-		Kind:        KindFeature,
-		Label:       "Plugins",
-		Description: "Enables the extensible plugin system and related settings.",
-		Stability:   StabilityExperimental,
-		RiskLevel:   RiskMedium,
-		RiskDescription: "Plugins are still evolving. Loaded plugin code runs with backend " +
-			"privileges, and behavior may change between releases and should be reviewed " +
-			"before relying on it.",
-		RestartRequired: true,
-		Mutable:         true,
-	},
-	{
 		Key:         featureAppStatusBarKey,
 		EnvVar:      envFeaturesAppStatusBar,
 		Kind:        KindFeature,

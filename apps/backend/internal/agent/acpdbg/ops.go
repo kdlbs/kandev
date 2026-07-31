@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 )
 
 // IsAuthErrorMessage is a coarse substring heuristic mirroring
@@ -36,6 +37,17 @@ type ProbeResult struct {
 	Modes           []string
 	CurrentModeID   string
 	SessionID       string
+	MCPHTTP         bool
+	MCPSSE          bool
+}
+
+// MCPProbeResult describes what was delivered to an agent separately from
+// what the injected sentinel observed. An unobserved sentinel is normal for
+// agents which defer MCP connections or do not support the supplied transport.
+type MCPProbeResult struct {
+	ProbeResult
+	Delivered bool
+	Sentinel  MCPSentinelSummary
 }
 
 // Probe runs the minimum ACP handshake: initialize → session/new → close.
@@ -54,6 +66,40 @@ func Probe(ctx context.Context, r *Runner) (*ProbeResult, error) {
 	}
 
 	return buildProbeResult(initResp, newResp), nil
+}
+
+// MCPProbe runs initialize and injects a short-lived HTTP sentinel into
+// session/new. The caller's timeout bounds both ACP delivery and observation.
+func MCPProbe(ctx context.Context, r *Runner) (*MCPProbeResult, error) {
+	initResp, err := sendInitialize(ctx, r)
+	if err != nil {
+		return nil, fmt.Errorf("initialize: %w", err)
+	}
+	sentinel := NewMCPSentinel(r.rec)
+	defer sentinel.Close()
+	newResp, err := sendSessionNewWithMCP(ctx, r, []any{map[string]any{
+		"name": "acpdbg-sentinel",
+		"type": "http",
+		"url":  sentinel.URL(),
+	}})
+	if err != nil {
+		return nil, fmt.Errorf("session/new: %w", err)
+	}
+	result := &MCPProbeResult{
+		ProbeResult: *buildProbeResult(initResp, newResp),
+		Delivered:   true,
+	}
+	// Give an asynchronously connecting agent a small, bounded opportunity to
+	// reach the sentinel without turning missing traffic into a failure.
+	wait := time.NewTimer(750 * time.Millisecond)
+	defer wait.Stop()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-wait.C:
+	}
+	result.Sentinel = sentinel.Summary()
+	return result, nil
 }
 
 // PromptOptions configures the Prompt operation.
@@ -174,9 +220,13 @@ func sendInitialize(ctx context.Context, r *Runner) (Frame, error) {
 }
 
 func sendSessionNew(ctx context.Context, r *Runner) (Frame, error) {
+	return sendSessionNewWithMCP(ctx, r, []any{})
+}
+
+func sendSessionNewWithMCP(ctx context.Context, r *Runner, mcpServers []any) (Frame, error) {
 	req, _ := r.Framer().NewRequest("session/new", map[string]any{
 		"cwd":        r.cfg.Workdir,
-		"mcpServers": []any{},
+		"mcpServers": mcpServers,
 	})
 	resp, err := r.Request(ctx, req)
 	if err != nil {
@@ -340,6 +390,12 @@ func parseInitResult(initResult map[string]any, out *ProbeResult) {
 	}
 	if methods, ok := initResult["authMethods"].([]any); ok {
 		out.AuthMethods = extractStringField(methods, "id")
+	}
+	if capabilities, ok := initResult["capabilities"].(map[string]any); ok {
+		if mcp, ok := capabilities["mcpCapabilities"].(map[string]any); ok {
+			out.MCPHTTP, _ = mcp["http"].(bool)
+			out.MCPSSE, _ = mcp["sse"].(bool)
+		}
 	}
 }
 

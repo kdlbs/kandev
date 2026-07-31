@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
 func testLogger() *logger.Logger {
@@ -15,8 +16,76 @@ func testLogger() *logger.Logger {
 	return log
 }
 
+type subscriptionRecordingEventBus struct {
+	*bus.MemoryEventBus
+	subjects []string
+}
+
+type recordingSubscription struct{}
+
+func (recordingSubscription) Unsubscribe() error { return nil }
+func (recordingSubscription) IsValid() bool      { return true }
+
+func (b *subscriptionRecordingEventBus) Subscribe(subject string, _ bus.EventHandler) (bus.Subscription, error) {
+	b.subjects = append(b.subjects, subject)
+	return recordingSubscription{}, nil
+}
+
+func TestTaskEventBroadcaster_UsesOrderedWildcardForLifecycleStates(t *testing.T) {
+	log := testLogger()
+	eventBus := &subscriptionRecordingEventBus{MemoryEventBus: bus.NewMemoryEventBus(log)}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hub := NewHub(nil, log)
+	b := RegisterTaskNotifications(ctx, eventBus, hub, log)
+
+	seenWildcard := false
+	for _, subject := range eventBus.subjects {
+		if subject == ">" {
+			seenWildcard = true
+		}
+		if subject == events.TaskStateChanged || subject == events.TaskSessionStateChanged {
+			t.Fatalf("lifecycle state subject %q must use the ordered wildcard subscription", subject)
+		}
+	}
+	if !seenWildcard {
+		t.Fatal("lifecycle state notifications must share a NATS-style wildcard subscription")
+	}
+
+	_ = b
+}
+
+func TestTaskEventBroadcaster_OrdersLifecycleStateNotifications(t *testing.T) {
+	log := testLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	hub := NewHub(nil, log)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterTaskNotifications(ctx, eventBus, hub, log)
+
+	workspaceID := "workspace-1"
+	_ = eventBus.Publish(ctx, events.TaskStateChanged, bus.NewEvent(
+		events.TaskStateChanged,
+		"test",
+		map[string]interface{}{"task_id": "task-1", "workspace_id": workspaceID, "state": "IN_PROGRESS"},
+	))
+	_ = eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+		events.TaskSessionStateChanged,
+		"test",
+		map[string]interface{}{"task_id": "task-1", "session_id": "session-1", "workspace_id": workspaceID, "new_state": "RUNNING"},
+	))
+
+	first := <-hub.broadcast
+	second := <-hub.broadcast
+	if first.Action != ws.ActionTaskStateChanged || second.Action != ws.ActionSessionStateChanged {
+		t.Fatalf("lifecycle notification order = %q, %q; want task state then session state", first.Action, second.Action)
+	}
+}
+
 // TestTaskEventBroadcaster_NoDuplicateSubscriptions verifies that
-// RegisterTaskNotifications creates exactly one subscription per event type.
+// RegisterTaskNotifications creates one subscription per routed subject (with
+// lifecycle state events intentionally sharing one ordered wildcard).
 //
 // The old code had a second subscription system (subscribeEventBusHandlers in
 // cmd/kandev/helpers.go) that subscribed to the same four events, causing
@@ -33,13 +102,12 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 
 	b := RegisterTaskNotifications(ctx, eventBus, hub, log)
 
-	// Count how many b.subscribe() calls are in RegisterTaskNotifications.
-	// Each call creates exactly one subscription. If any event is subscribed
-	// twice, this count will increase and the test will fail.
+	// Count how many subscriptions RegisterTaskNotifications creates. If any
+	// event is subscribed twice, this count will increase and the test will fail.
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 61
+	const wantSubscriptions = 60
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)

@@ -16,7 +16,6 @@ export type BootRoute = {
 export type BootRuntime = {
   apiPrefix?: string;
   webSocketPath?: string;
-  hostOS?: string;
   debug?: boolean;
 };
 
@@ -80,10 +79,6 @@ export function readInterimSettingsInterlockToken(): string | undefined {
   return readBootPayload(window).interimSettingsInterlockToken;
 }
 
-export function readBackendHostOS(win: Window = window): string | undefined {
-  return readBootPayload(win).runtime?.hostOS;
-}
-
 function readPlugins(value: unknown[]): ActivePlugin[] {
   return value.filter(isRecord).flatMap((entry) => {
     const plugin = readPlugin(entry);
@@ -138,7 +133,6 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
   return {
     apiPrefix: readString(value.apiPrefix),
     webSocketPath: readString(value.webSocketPath),
-    hostOS: readString(value.hostOS),
     debug: value.debug === true ? true : undefined,
   };
 }

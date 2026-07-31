@@ -17,6 +17,7 @@ import {
   sanitizeMermaidCode,
   cleanupMermaidOrphans,
   emitMermaidRenderError,
+  reportMermaidRenderFailure,
 } from "@/components/shared/mermaid-utils";
 
 /**
@@ -116,7 +117,10 @@ class MermaidNodeView implements NodeView {
   private showingCode = false;
   private latestRenderId: string | null = null;
 
-  constructor(node: PmNode) {
+  constructor(
+    node: PmNode,
+    private readonly taskId?: string | null,
+  ) {
     this.node = node;
 
     // Root container
@@ -256,12 +260,13 @@ class MermaidNodeView implements NodeView {
       .catch((err: Error) => {
         cleanupMermaidOrphans(id);
         if (id !== this.latestRenderId) return;
+        reportMermaidRenderFailure(err, code, sanitizedCode);
         this.svgContainer.innerHTML = "";
         const pre = document.createElement("pre");
         pre.className = "mermaid-error";
         pre.textContent = `Error rendering diagram: ${err.message}`;
         this.svgContainer.appendChild(pre);
-        emitMermaidRenderError(err.message);
+        emitMermaidRenderError(err.message, this.taskId);
       });
   }
 
@@ -317,12 +322,12 @@ class DefaultCodeBlockView implements NodeView {
  * Pass the lowlight instance as you normally would to CodeBlockLowlight.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createCodeBlockWithMermaid(lowlight: any) {
+export function createCodeBlockWithMermaid(lowlight: any, taskId?: string | null) {
   return CodeBlockLowlight.configure({ lowlight }).extend({
     addNodeView() {
       return ({ node }: { node: PmNode }) => {
         if (isMermaidContent(node.attrs.language, node.textContent)) {
-          return new MermaidNodeView(node);
+          return new MermaidNodeView(node, taskId);
         }
         return new DefaultCodeBlockView(node);
       };

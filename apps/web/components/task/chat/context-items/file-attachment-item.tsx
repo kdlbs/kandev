@@ -2,7 +2,7 @@
 
 import { memo } from "react";
 import type { FileAttachmentContextItem } from "@/lib/types/context";
-import { formatBytes } from "../file-attachment";
+import { formatBytes } from "@/lib/utils/format-bytes";
 import { ContextChip } from "./context-chip";
 
 export const FileAttachmentItem = memo(function FileAttachmentItem({

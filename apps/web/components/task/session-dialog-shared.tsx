@@ -14,9 +14,9 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconGitBranch, IconPaperclip } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
+import { formatBytes } from "@/lib/utils/format-bytes";
 import {
   processFile,
-  formatBytes,
   MAX_FILES,
   MAX_TOTAL_SIZE,
   type FileAttachment,

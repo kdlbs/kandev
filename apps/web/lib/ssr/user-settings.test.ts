@@ -187,14 +187,6 @@ describe("mapUserSettingsResponse", () => {
     expect(mapUserSettingsResponse(null).confirmTaskArchive).toBe(true);
   });
 
-  it("enables every transcript navigation control when settings are unavailable", () => {
-    const settings = mapUserSettingsResponse(null);
-
-    expect(settings.showAnchoredPromptBar).toBe(true);
-    expect(settings.showScrollToLastPrompt).toBe(true);
-    expect(settings.showScrollToStart).toBe(true);
-  });
-
   it("preserves an explicitly disabled archive confirmation preference", () => {
     const result = mapUserSettingsResponse({
       settings: {
@@ -271,6 +263,19 @@ describe("mapUserSettingsResponse unread divider", () => {
 
     expect(fallback.unreadDivider).toBe(true);
     expect(disabled.unreadDivider).toBe(false);
+  });
+});
+
+describe("transcript navigation settings", () => {
+  it("uses the requested defaults when settings are unavailable", () => {
+    const settings = mapUserSettingsResponse(null);
+
+    expect(settings).toMatchObject({
+      showAnchoredPromptBar: false,
+      showScrollToLastPrompt: true,
+      showScrollToStart: false,
+      showTranscriptAutoScrollControl: true,
+    });
   });
 });
 

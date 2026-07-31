@@ -27,6 +27,8 @@ interface DiffViewerResolverProps {
   onPreviewMarkdown?: (filePath: string) => void;
   onRevert?: (filePath: string) => void;
   enableAcceptReject?: boolean;
+  /** Render and navigate to the active task walkthrough (Pierre diffs only). */
+  enableWalkthroughAnnotations?: boolean;
   onRevertBlock?: (filePath: string, info: RevertBlockInfo) => void;
   wordWrap?: boolean;
   editable?: boolean;
@@ -58,6 +60,7 @@ export const DiffViewerResolved = memo(function DiffViewerResolved(props: DiffVi
       enableComments,
       baseRef,
       enableExpansion,
+      enableWalkthroughAnnotations,
       expandUnchanged,
       onToggleExpandUnchanged,
       onPreviewMarkdown,

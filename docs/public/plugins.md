@@ -16,10 +16,10 @@ For building a plugin, see [Authoring a plugin](plugins-authoring.md). For the
 manifest schema, see [Plugin manifest reference](plugins-manifest.md).
 
 Plugins are an operator-level, instance-wide capability — there is no
-per-user plugin access. They are gated behind the `plugins` feature flag
-(**Settings > System > Feature Toggles**), off by default in production
-builds and on by default in dev/e2e builds. Enabling the flag requires a
-backend restart and surfaces **Settings > Plugins** in the sidebar.
+per-user plugin access. They ship in the base product with no feature flag to
+turn on: **Settings > Plugins** is always available in the sidebar. Because
+loaded plugin code runs with backend privileges, install only plugins you
+trust — see [Security posture](#security-posture).
 
 ## How it works
 

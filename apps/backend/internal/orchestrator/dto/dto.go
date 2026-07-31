@@ -29,6 +29,13 @@ type QueueResponse struct {
 	Total int             `json:"total"`
 }
 
+// TaskSessionCapabilities describes the launch features supported by the
+// current session executor. It is backend-owned so clients never infer runtime
+// support from an executor name or browser platform.
+type TaskSessionCapabilities struct {
+	EmbeddedVscode bool `json:"embedded_vscode"`
+}
+
 // TaskSessionStatusResponse is the response for task.session.status
 type TaskSessionStatusResponse struct {
 	// Session metadata
@@ -49,16 +56,17 @@ type TaskSessionStatusResponse struct {
 	ACPSessionID string `json:"acp_session_id,omitempty"`
 
 	// Executor/runtime info
-	ExecutorID       string               `json:"executor_id,omitempty"`
-	ExecutorType     string               `json:"executor_type,omitempty"`
-	ExecutorName     string               `json:"executor_name,omitempty"`
-	Runtime          agentruntime.Runtime `json:"runtime,omitempty"`
-	IsRemoteExecutor bool                 `json:"is_remote_executor"`
-	RemoteState      string               `json:"remote_state,omitempty"`
-	RemoteName       string               `json:"remote_name,omitempty"`
-	RemoteCreatedAt  string               `json:"remote_created_at,omitempty"`
-	RemoteCheckedAt  string               `json:"remote_checked_at,omitempty"`
-	RemoteStatusErr  string               `json:"remote_status_error,omitempty"`
+	ExecutorID       string                  `json:"executor_id,omitempty"`
+	ExecutorType     string                  `json:"executor_type,omitempty"`
+	ExecutorName     string                  `json:"executor_name,omitempty"`
+	Runtime          agentruntime.Runtime    `json:"runtime,omitempty"`
+	IsRemoteExecutor bool                    `json:"is_remote_executor"`
+	Capabilities     TaskSessionCapabilities `json:"capabilities"`
+	RemoteState      string                  `json:"remote_state,omitempty"`
+	RemoteName       string                  `json:"remote_name,omitempty"`
+	RemoteCreatedAt  string                  `json:"remote_created_at,omitempty"`
+	RemoteCheckedAt  string                  `json:"remote_checked_at,omitempty"`
+	RemoteStatusErr  string                  `json:"remote_status_error,omitempty"`
 
 	// Worktree info
 	WorktreePath   *string `json:"worktree_path,omitempty"`

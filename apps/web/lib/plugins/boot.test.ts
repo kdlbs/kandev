@@ -31,24 +31,17 @@ describe("bootPlugins", () => {
 
   afterEach(() => vi.restoreAllMocks());
 
-  it("does nothing when the plugins feature flag is off", () => {
-    bootPlugins({ plugins: [plugin("a")] }, fakeStore(), false);
-
-    expect(hostMocks.installPluginGlobal).not.toHaveBeenCalled();
-    expect(hostMocks.loadPlugins).not.toHaveBeenCalled();
-  });
-
   it("does nothing when the boot payload has no plugins", () => {
-    bootPlugins({ plugins: [] }, fakeStore(), true);
-    bootPlugins({}, fakeStore(), true);
+    bootPlugins({ plugins: [] }, fakeStore());
+    bootPlugins({}, fakeStore());
 
     expect(hostMocks.installPluginGlobal).not.toHaveBeenCalled();
     expect(hostMocks.loadPlugins).not.toHaveBeenCalled();
   });
 
-  it("installs the global and loads boot payload plugins once enabled", () => {
+  it("installs the global and loads boot payload plugins", () => {
     const store = fakeStore();
-    bootPlugins({ plugins: [plugin("a")] }, store, true);
+    bootPlugins({ plugins: [plugin("a")] }, store);
 
     expect(hostMocks.installPluginGlobal).toHaveBeenCalledTimes(1);
     expect(hostMocks.loadPlugins).toHaveBeenCalledTimes(1);
@@ -59,9 +52,9 @@ describe("bootPlugins", () => {
     const store = fakeStore();
     const payload = { plugins: [plugin("a")] };
 
-    bootPlugins(payload, store, true);
-    bootPlugins(payload, store, true);
-    bootPlugins(payload, store, true);
+    bootPlugins(payload, store);
+    bootPlugins(payload, store);
+    bootPlugins(payload, store);
 
     expect(hostMocks.installPluginGlobal).toHaveBeenCalledTimes(1);
     expect(hostMocks.loadPlugins).toHaveBeenCalledTimes(1);
@@ -70,8 +63,8 @@ describe("bootPlugins", () => {
   it("boots independently for distinct store instances", () => {
     const payload = { plugins: [plugin("a")] };
 
-    bootPlugins(payload, fakeStore(), true);
-    bootPlugins(payload, fakeStore(), true);
+    bootPlugins(payload, fakeStore());
+    bootPlugins(payload, fakeStore());
 
     expect(hostMocks.loadPlugins).toHaveBeenCalledTimes(2);
   });

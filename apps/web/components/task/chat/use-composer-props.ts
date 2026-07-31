@@ -64,6 +64,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     planModeEnabled,
     planModeAvailable: panelState.planModeAvailable,
     mcpServers: panelState.mcpServers,
+    mcpAttachmentHistory: panelState.mcpAttachmentHistory,
     onPlanModeChange: panelState.handlePlanModeChange,
     isAgentBusy,
     isStarting: panelState.isStarting,

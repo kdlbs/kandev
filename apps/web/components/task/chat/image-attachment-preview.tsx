@@ -3,6 +3,7 @@
 import { memo } from "react";
 import { IconX } from "@tabler/icons-react";
 import { cn, generateUUID } from "@/lib/utils";
+import { formatBytes } from "@/lib/utils/format-bytes";
 
 export type ImageAttachment = {
   id: string;
@@ -21,14 +22,6 @@ export const SUPPORTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "i
 export const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10MB per image
 export const MAX_TOTAL_SIZE = 20 * 1024 * 1024; // 20MB total
 export const MAX_IMAGES = 10;
-
-export function formatBytes(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
-}
 
 type ImageAttachmentPreviewProps = {
   attachments: ImageAttachment[];

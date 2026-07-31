@@ -89,6 +89,7 @@ describe("useConfigChat unified launch", () => {
       WORKSPACE_ID,
       CONFIG_PROFILE_ID,
       "config",
+      TASK_ID,
     );
     expect(renameQuickChatSession).toHaveBeenCalledWith(SESSION_ID, PROMPT);
     expect(setQuickChatInitialPrompt).toHaveBeenCalledWith(SESSION_ID, PROMPT);
@@ -106,6 +107,7 @@ describe("useConfigChat unified launch", () => {
       WORKSPACE_ID,
       CONFIG_PROFILE_ID,
       "config",
+      TASK_ID,
     );
     expect(openQuickChat).not.toHaveBeenCalled();
     expect(setQuickChatInitialPrompt).toHaveBeenCalledWith(SESSION_ID, PROMPT);

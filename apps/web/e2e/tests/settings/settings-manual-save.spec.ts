@@ -109,6 +109,45 @@ test.describe("Settings manual save", () => {
     }
   });
 
+  test("persists transcript navigation choices only when Save changes is pressed", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    const initial = await apiClient.getUserSettings();
+    const initialAutoScrollControl = initial.settings.show_transcript_auto_scroll_control;
+
+    try {
+      await testPage.goto("/settings/general/task-actions");
+      const autoScrollControl = testPage.getByRole("switch", {
+        name: "Show transcript auto-scroll control",
+      });
+      await expect(autoScrollControl).toBeChecked();
+      await autoScrollControl.click();
+
+      await prCapture.screenshot("transcript-navigation-draft", {
+        caption: "Transcript Navigation settings with the Save action visible",
+      });
+
+      expect((await apiClient.getUserSettings()).settings.show_transcript_auto_scroll_control).toBe(
+        true,
+      );
+      const floatingSave = testPage.getByTestId("settings-floating-save");
+      await floatingSave.getByRole("button", { name: "Save changes" }).click();
+      await expect(floatingSave).not.toBeVisible({ timeout: 15_000 });
+      expect((await apiClient.getUserSettings()).settings.show_transcript_auto_scroll_control).toBe(
+        false,
+      );
+
+      await testPage.reload();
+      await expect(autoScrollControl).not.toBeChecked();
+    } finally {
+      await apiClient.saveUserSettings({
+        show_transcript_auto_scroll_control: initialAutoScrollControl,
+      });
+    }
+  });
+
   test("loads seeded semantic events and persists one independently selected event", async ({
     testPage,
     apiClient,

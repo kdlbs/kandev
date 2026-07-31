@@ -116,7 +116,6 @@ The launcher starts `agentctl`, performs a one-time nonce handshake, and supplie
 | `office.jwtSigningKey` | `KANDEV_OFFICE_JWTSIGNINGKEY` | random per start | HMAC key for Office agent-runtime JWTs. Set a stable secret when Office tasks must survive restarts. |
 | `voice.openAIApiKey` | `KANDEV_VOICE_OPENAI_API_KEY` | empty | Server-side transcription fallback when browser speech recognition is unavailable. Empty disables the fallback and its endpoint returns unavailable. |
 | `features.office` | `KANDEV_FEATURES_OFFICE` | `false` in production | Experimental Office UI, routes, services, and automation. |
-| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | `false` in production | Extensible plugin system: install/manage plugins, spawn plugin backends, and load native UI bundles. Loaded plugin code runs with backend privileges. |
 | `features.app_status_bar` | `KANDEV_FEATURES_APP_STATUS_BAR` | `false` in production | Opt-in global connection/host-metrics/plugin surface: bottom bar on tablet/desktop and Status drawer on phones. |
 | `features.claude_background_prompt_handoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | `false` | High-risk experiment that lets Claude Code accept a new prompt after its foreground yields while adapter-attested background work remains active. Other providers keep the coarse busy gate. |
 
@@ -293,7 +292,6 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | Key | Environment lock | Production default | Effect |
 |---|---|---|---|
 | `features.office` | `KANDEV_FEATURES_OFFICE` | off | Experimental autonomous-agent Office surfaces and automation. |
-| `features.plugins` | `KANDEV_FEATURES_PLUGINS` | off | Extensible plugin system: install/manage plugins and load their backends and native UI bundles. |
 | `features.appStatusBar` | `KANDEV_FEATURES_APP_STATUS_BAR` | off | Global status bar on tablet/desktop and Status drawer entry on phones. Enabling changes visibility only. |
 | `features.claudeBackgroundPromptHandoff` | `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF` | off | High-risk Claude Code experiment that exposes recognized background-only activity and admits a successor prompt. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` (also locked by explicit legacy/debug-message vars) | off | High-risk diagnostic endpoints and ACP frame logging. |

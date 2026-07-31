@@ -23,7 +23,8 @@ func (r *openEditorRepository) GetEditorByID(_ context.Context, editorID string)
 }
 
 type openEditorTaskRepository struct {
-	session *taskmodels.TaskSession
+	session  *taskmodels.TaskSession
+	executor *taskmodels.Executor
 }
 
 func (r *openEditorTaskRepository) GetTaskSession(_ context.Context, _ string) (*taskmodels.TaskSession, error) {
@@ -32,6 +33,10 @@ func (r *openEditorTaskRepository) GetTaskSession(_ context.Context, _ string) (
 
 func (r *openEditorTaskRepository) GetRepository(_ context.Context, _ string) (*taskmodels.Repository, error) {
 	return nil, nil
+}
+
+func (r *openEditorTaskRepository) GetExecutor(_ context.Context, _ string) (*taskmodels.Executor, error) {
+	return r.executor, nil
 }
 
 type openEditorUserSettings struct {
@@ -54,7 +59,10 @@ func TestOpenEditor_InternalVscodeWithoutWorkspace(t *testing.T) {
 			Kind:    editorKindInternalVscode,
 			Enabled: true,
 		}},
-		&openEditorTaskRepository{session: &taskmodels.TaskSession{ID: "session-1"}},
+		&openEditorTaskRepository{
+			session:  &taskmodels.TaskSession{ID: "session-1", ExecutorID: "executor-1"},
+			executor: &taskmodels.Executor{ID: "executor-1", Type: taskmodels.ExecutorTypeLocalDocker},
+		},
 		&openEditorUserSettings{defaultEditorID: editorID},
 	)
 
@@ -88,6 +96,32 @@ func TestOpenEditor_InternalVscodeRejectsMissingSession(t *testing.T) {
 	})
 	if err != ErrWorkspaceNotFound {
 		t.Fatalf("OpenEditor() error = %v, want ErrWorkspaceNotFound", err)
+	}
+}
+
+func TestOpenEditor_InternalVscodeRejectsUnsupportedExecutor(t *testing.T) {
+	const editorID = "embedded-vscode"
+	svc := NewService(
+		&openEditorRepository{editor: &editormodels.Editor{
+			ID:      editorID,
+			Kind:    editorKindInternalVscode,
+			Enabled: true,
+		}},
+		&openEditorTaskRepository{
+			session:  &taskmodels.TaskSession{ID: "session-1", ExecutorID: "executor-1"},
+			executor: &taskmodels.Executor{ID: "executor-1", Type: taskmodels.ExecutorTypeMockRemote},
+		},
+		&openEditorUserSettings{defaultEditorID: editorID},
+	)
+
+	for _, input := range []OpenEditorInput{
+		{SessionID: "session-1"},
+		{SessionID: "session-1", EditorID: editorID, FilePath: "main.go"},
+	} {
+		_, err := svc.OpenEditor(context.Background(), input)
+		if err != ErrEditorUnavailable {
+			t.Fatalf("OpenEditor(%+v) error = %v, want ErrEditorUnavailable", input, err)
+		}
 	}
 }
 

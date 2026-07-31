@@ -29,6 +29,7 @@ test -x apps/backend/bin/acpdbg || make -C apps/backend build-acpdbg
 acpdbg list                                            # enumerate registered ACP agents
 acpdbg probe <agent>                                   # initialize + session/new + close
 acpdbg probe --exec "<cmd> [args...]"                  # probe an arbitrary binary not in the registry
+acpdbg mcp-probe <agent>                                # inject a temporary MCP sentinel into session/new
 acpdbg prompt --prompt "..." [--model M] [--mode M] <agent>
 acpdbg session-load --session-id <id> <agent>
 acpdbg matrix                                          # probe every ACP agent in parallel
@@ -58,6 +59,7 @@ acpdbg matrix                                          # probe every ACP agent i
 - "test a prompt against X" → `acpdbg prompt --prompt "..." X`
 - "compare all agents" / "run the matrix" → `acpdbg matrix`
 - "resume session <id>" → `acpdbg session-load --session-id <id> X`
+- "did this agent attach the injected MCP server" → `acpdbg mcp-probe X`
 - "try this random binary" → `acpdbg probe --exec "path/to/bin --acp"`
 
 ### 2. Run the command
@@ -127,6 +129,14 @@ Common failure modes:
 | Response has no `models` / `modes` fields | agent doesn't expose them over ACP | Not a bug — document the gap |
 
 Re-run with `--stderr` whenever the child exits before the handshake completes; the stderr lines land in the JSONL and usually contain the root cause.
+
+For `mcp-probe`, distinguish `sentinel_delivered` (the agent accepted the
+`session/new` configuration) from `initialize_observed` and
+`tools_list_observed` (the temporary endpoint received MCP traffic). An
+`unobserved` result is intentionally not a generic agent failure: a provider
+can attach lazily or ignore the supplied transport. Sentinel metadata has only
+opaque connection IDs and timestamps; the explicit acpdbg JSONL still contains
+raw ACP frames and must stay a developer-only artifact.
 
 ### 6. For `matrix`, read `matrix-summary.json` too
 

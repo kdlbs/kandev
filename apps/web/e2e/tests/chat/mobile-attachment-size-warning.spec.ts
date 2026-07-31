@@ -42,7 +42,9 @@ test.describe("oversized attachment feedback on mobile", () => {
     const warning = testPage
       .getByTestId("toast-message")
       .filter({ hasText: "Attachment is too large" });
-    await expect(warning).toContainText("recording.mov is 11 MB. The maximum file size is 10 MB.");
+    await expect(warning).toContainText(
+      "recording.mov is 11.0 MB. The maximum file size is 10.0 MB.",
+    );
 
     await expect
       .poll(async () => {

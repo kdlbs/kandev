@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_SCALE,
   calculateMermaidFitScale,
   getElementContentWidth,
+  reportMermaidRenderFailure,
   sanitizeMermaidCode,
 } from "./mermaid-utils";
 
@@ -42,6 +43,78 @@ describe("getElementContentWidth", () => {
 });
 
 describe("sanitizeMermaidCode", () => {
+  it("escapes a literal semicolon in the reported sequence-message prose", () => {
+    const input = [
+      "sequenceDiagram",
+      "    participant KafkaV4 as Document BusinessEvents V4",
+      "    participant Subscription as DocumentMessageSubscription",
+      "    participant Consumer as DocumentFlowNotificationConsumer",
+      "    participant State as DocumentFlowStateMachine",
+      "    participant DB as DocumentFlowDatabaseMediator / SingleStore",
+      "    participant Publisher as ContextProcessEventsPublisher",
+      "    participant KafkaV3 as Context Results V3",
+      "",
+      "    KafkaV4->>Subscription: Code=reasonCode.ToString(), Message=error.Message",
+      "    Subscription->>Consumer: SingleInputMessage<DocumentBusinessResponse>",
+      "    Consumer->>State: ProcessNextActionAsync(response)",
+      "    State->>State: Locate numeric code string; preserve message unchanged",
+      "    State->>DB: ErrorReason=reasonCode string, ErrorMessage=message",
+      "    Consumer->>Publisher: PublishDocumentActionUpdatedAsync(...)",
+      "    Publisher->>DB: Reload document actions",
+      "    DB-->>Publisher: Persisted canonical/legacy rows",
+      "    Publisher->>Publisher: Defensive rollout normalization",
+      "    Publisher->>KafkaV3: ExecutionResult.Code=reasonCode string, Reason=message",
+    ].join("\n");
+
+    expect(sanitizeMermaidCode(input)).toBe(
+      input.replace("string; preserve", "string#59; preserve"),
+    );
+  });
+
+  it("does not double-encode an existing sequence-message semicolon escape", () => {
+    const input = "sequenceDiagram\n  A->>B: Keep #59; as text";
+
+    expect(sanitizeMermaidCode(input)).toBe(input);
+  });
+
+  it("preserves a semicolon that separates inline sequence messages", () => {
+    const input = "sequenceDiagram\n  A->>B: First message; B->>A: Second message";
+
+    expect(sanitizeMermaidCode(input)).toBe(input);
+  });
+
+  it("escapes prose that starts with a sequence keyword but is not a complete statement", () => {
+    const input = "sequenceDiagram\n  A->>B: Retry; break if the server is unavailable";
+
+    expect(sanitizeMermaidCode(input)).toBe(
+      "sequenceDiagram\n  A->>B: Retry#59; break if the server is unavailable",
+    );
+  });
+
+  it("escapes prose that begins with end", () => {
+    const input = "sequenceDiagram\n  A->>B: Notify; end users receive updates";
+
+    expect(sanitizeMermaidCode(input)).toBe(
+      "sequenceDiagram\n  A->>B: Notify#59; end users receive updates",
+    );
+  });
+
+  it("preserves CRLF line endings while escaping sequence-message prose", () => {
+    const input = "sequenceDiagram\r\n  A->>B: First; second\r\n  B->>A: Done";
+
+    expect(sanitizeMermaidCode(input)).toBe(
+      "sequenceDiagram\r\n  A->>B: First#59; second\r\n  B->>A: Done",
+    );
+  });
+
+  it("leaves semicolons in non-sequence diagrams unchanged", () => {
+    const input = "flowchart TD\n  A[First; second] --> B";
+
+    expect(sanitizeMermaidCode(input)).toBe(input);
+  });
+});
+
+describe("sanitizeMermaidCode labels", () => {
   it("leaves a pre-quoted bracket label with parens inside untouched", () => {
     const input = `D --> E["router.push('/github')"]`;
     expect(sanitizeMermaidCode(input)).toBe(input);
@@ -144,5 +217,37 @@ describe("sanitizeMermaidCode", () => {
     ].join("\n");
 
     expect(sanitizeMermaidCode(input)).toBe(input);
+  });
+});
+
+describe("reportMermaidRenderFailure", () => {
+  it("logs a copyable parser error with original and normalized diagram source", () => {
+    const error = new Error("Parse error on line 2");
+    const original = "sequenceDiagram\n  A->>B: First; second";
+    const normalized = "sequenceDiagram\n  A->>B: First#59; second";
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    reportMermaidRenderFailure(error, original, normalized);
+
+    expect(consoleError).toHaveBeenCalledOnce();
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining("[mermaid] Failed to render diagram"),
+    );
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining(error.message));
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining(`Original diagram:\n${original}`),
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      expect.stringContaining(`Normalized diagram:\n${normalized}`),
+    );
+  });
+
+  it("omits the normalized source when no normalization changed it", () => {
+    const source = "sequenceDiagram\n  A->>B: Valid";
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    reportMermaidRenderFailure(new Error("Parse error"), source, source);
+
+    expect(consoleError).toHaveBeenCalledWith(expect.not.stringContaining("Normalized diagram:"));
   });
 });

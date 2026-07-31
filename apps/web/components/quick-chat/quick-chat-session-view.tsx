@@ -1,6 +1,7 @@
 "use client";
 
 import { useAppStore } from "@/components/state-provider";
+import { useEnsureTaskSession } from "@/hooks/use-ensure-task-session";
 import { PassthroughTerminal } from "@/components/task/passthrough-terminal";
 import type { QuickChatSession } from "@/lib/state/slices/ui/types";
 import { QuickChatContent } from "./quick-chat-content";
@@ -23,6 +24,9 @@ type QuickChatSessionViewProps = {
 };
 
 export function QuickChatSessionView({ session, onInitialPromptSent }: QuickChatSessionViewProps) {
+  // A tab can arrive from a task event, which carries no session payload.
+  // Fetch the row on open so such a tab is usable, not just visible.
+  useEnsureTaskSession(session.sessionId);
   const isPassthrough = useIsQuickChatPassthrough(session.sessionId);
   if (isPassthrough) {
     return (
