@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -13,10 +14,11 @@ import (
 )
 
 const (
-	spriteUploadTimeout = 10 * time.Minute // bundles can be large
-	spriteStepTimeout   = 2 * time.Minute
-	spriteUploadRetries = 3
-	spriteBackoffInit   = 700 * time.Millisecond
+	spriteUploadTimeout  = 10 * time.Minute // bundles can be large
+	spriteStepTimeout    = 2 * time.Minute
+	spriteControlRetries = 3
+	spriteUploadRetries  = 3
+	spriteBackoffInit    = 700 * time.Millisecond
 )
 
 func newSpriteClient(token string) *sprites.Client {
@@ -26,27 +28,74 @@ func newSpriteClient(token string) *sprites.Client {
 // getOrCreateSprite returns an existing sprite or creates a new one.
 // Cold/sleeping sprites wake automatically when commands are issued.
 func getOrCreateSprite(ctx context.Context, client *sprites.Client, name string) (*sprites.Sprite, error) {
-	stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
-	defer cancel()
+	var lastErr error
+	for attempt := 1; attempt <= spriteControlRetries; attempt++ {
+		stepCtx, cancel := context.WithTimeout(ctx, spriteStepTimeout)
+		sprite, err := client.GetSprite(stepCtx, name)
+		cancel()
+		if err == nil {
+			return sprite, nil
+		}
 
-	sprite, err := client.GetSprite(stepCtx, name)
-	if err == nil {
-		return sprite, nil
+		if isSpriteNotFound(err) {
+			createCtx, createCancel := context.WithTimeout(ctx, spriteStepTimeout)
+			sprite, err = client.CreateSprite(createCtx, name, nil)
+			createCancel()
+			if err == nil {
+				return sprite, nil
+			}
+			lastErr = fmt.Errorf("create sprite: %w", err)
+		} else {
+			lastErr = fmt.Errorf("get sprite: %w", err)
+		}
+
+		if !isTransientSpriteError(lastErr) || attempt == spriteControlRetries {
+			return nil, lastErr
+		}
+		if err := waitForSpriteRetry(ctx, "get/create sprite", attempt, lastErr); err != nil {
+			return nil, err
+		}
 	}
+	return nil, lastErr
+}
+
+func isSpriteNotFound(err error) bool {
 	// The SDK returns a plain fmt.Errorf("sprite not found: %s") for 404s —
 	// no typed error is available, so we check the message string.
-	if !strings.Contains(err.Error(), "not found") {
-		return nil, fmt.Errorf("get sprite: %w", err)
+	return strings.Contains(err.Error(), "not found")
+}
+
+func isTransientSpriteError(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
 	}
 
-	createCtx, createCancel := context.WithTimeout(ctx, spriteStepTimeout)
-	defer createCancel()
-
-	sprite, err = client.CreateSprite(createCtx, name, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create sprite: %w", err)
+	var networkErr net.Error
+	if errors.As(err, &networkErr) && networkErr.Timeout() {
+		return true
 	}
-	return sprite, nil
+
+	var apiErr *sprites.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode == 429 || apiErr.StatusCode >= 500
+	}
+	return false
+}
+
+func waitForSpriteRetry(ctx context.Context, operation string, attempt int, err error) error {
+	delay := spriteBackoffInit * time.Duration(1<<(attempt-1))
+	var apiErr *sprites.APIError
+	if errors.As(err, &apiErr) && apiErr.GetRetryAfterSeconds() > 0 {
+		delay = time.Duration(apiErr.GetRetryAfterSeconds()) * time.Second
+	}
+
+	fmt.Fprintf(os.Stderr, "  %s attempt %d failed (%v), retrying in %v...\n", operation, attempt, err, delay)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(delay):
+		return nil
+	}
 }
 
 // uploadBundle uploads the bundle tarball to the sprite via the Filesystem API.
