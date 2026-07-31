@@ -1,7 +1,7 @@
 ---
 id: "01-panel-responsive-walkthrough"
 title: "Make the Walkthrough action panel-responsive"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -26,7 +26,7 @@ spec: "../../specs/changes-walkthrough-toolbar-width/spec.md"
    current label follows viewport width.
 2. Add the named panel containers and replace the viewport breakpoint with the
    350px container-query boundary.
-3. Run the same focused command until both desktop and mobile scenarios pass.
+3. Run the focused desktop and mobile commands until both scenarios pass.
 4. Refactor only if the minimal class changes expose duplication or unclear
    naming; rerun the focused command after any refactor.
 
@@ -45,7 +45,8 @@ spec: "../../specs/changes-walkthrough-toolbar-width/spec.md"
 Run from `apps/web`:
 
 ```bash
-pnpm e2e:run tests/review/walkthrough.spec.ts tests/review/mobile-walkthrough.spec.ts -- --project=chromium --project=mobile-chrome --grep "adapts the Changes walkthrough label to panel width|requests a walkthrough from Changes"
+pnpm e2e:run --host --project chromium -- tests/review/walkthrough.spec.ts --grep "adapts the Changes walkthrough label to panel width" --workers=1
+pnpm e2e:run --host --no-build --project mobile-chrome -- tests/review/mobile-walkthrough.spec.ts --grep "requests a walkthrough from Changes" --workers=1
 ```
 
 The managed runner rebuilds the production Vite assets before Playwright runs.

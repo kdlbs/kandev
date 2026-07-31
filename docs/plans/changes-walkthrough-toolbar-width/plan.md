@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/changes-walkthrough-toolbar-width/spec.md
 created: 2026-07-31
-status: draft
+status: implemented
 ---
 
 # Implementation Plan: Responsive Changes Walkthrough Action
@@ -79,7 +79,7 @@ queries or rendered geometry. The behavior is covered at the browser level.
 
 ## Implementation Tasks
 
-- [ ] [Task 01: Make the Walkthrough action panel-responsive](task-01-panel-responsive-walkthrough.md)
+- [x] [Task 01: Make the Walkthrough action panel-responsive](task-01-panel-responsive-walkthrough.md)
 
 Execution is sequential in the primary conversation. No subagent delegation is
 planned or authorized.

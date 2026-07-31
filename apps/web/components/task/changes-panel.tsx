@@ -30,7 +30,7 @@ const ChangesPanel = memo(function ChangesPanel(props: ChangesPanelProps) {
   });
   if (isArchived) return <ArchivedPanelPlaceholder />;
   return (
-    <PanelRoot data-testid="changes-panel">
+    <PanelRoot className="@container/changes-panel" data-testid="changes-panel">
       <ChangesPanelHeader
         hasChanges={data.git.hasChanges}
         hasCommits={data.git.hasCommits}
