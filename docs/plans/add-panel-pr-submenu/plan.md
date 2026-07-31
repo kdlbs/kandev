@@ -117,10 +117,10 @@ Small feature — sequential, no parallel candidates.
 
 ```
 Wave 1:
-- [ ] [task-01-frontend-submenu](task-01-frontend-submenu.md)
+- [x] [task-01-frontend-submenu](task-01-frontend-submenu.md) — implemented, 6 unit tests pass, committed (91f03b6d)
 
 Wave 2:
-- [ ] [task-02-e2e](task-02-e2e.md)
+- [x] [task-02-e2e](task-02-e2e.md) — desktop spec updated (submenu open step); mobile E2E intentionally omitted (mobile layout has no "+" add-panel menu entry point). E2E not yet executed here — needs Go toolchain + `make build-backend`/`make build-web`.
 ```
 
 ## Open Questions
